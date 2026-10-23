@@ -216,6 +216,17 @@ from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
+from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
+from belief.effector_engine import EffectorRunState, EffectorTrigger
+from belief.effector_engine import advance as advance_effectors
+from belief.effector_engine import fire_trigger as fire_effector_trigger
+from belief.effector_registry import (
+    DEFAULT_SEQUENCES_DIR,
+    EffectorDef,
+    aircraft_dir_name,
+    load_registries_by_aircraft,
+)
+from belief.effector_sequences import SequenceFile, load_sequences
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import (
@@ -245,12 +256,8 @@ from belief.sight_effector import (
     GuidanceUnitState,
     write_sight_target,
 )
-from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
 from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
 from belief.sight_effector import sight_ready as guidance_unit_sight_ready
-from belief.sight_effector import start_power_up as start_guidance_unit_power_up
-from belief.sight_effector import write_observ as write_observ_switch
-from belief.sight_effector import write_weapon_safety as write_weapon_safety_switch
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
@@ -483,13 +490,24 @@ class ConsolePerceptionRunner:
     #: apply instead; see that field's own docstring.
     attack_run_state: AttackRunState | None = None
 
-    #: The 9K113 guidance unit's own state (`BL-B66`, `plans/
+    #: The 9K113 guidance unit's own *observed* state (`BL-B66`, `plans/
     #: 9k113-effectors/plan.md` Stages 2-4), carried the same way
     #: `optic_state`/`attack_run_state` are -- replaced wholesale each
-    #: poll via `replace()`, never mutated. `belief.sight_effector` is the
-    #: one module that knows this state's device/arg/command numbers;
-    #: this field only carries the value between polls.
+    #: poll via `replace()`, never mutated. `belief.sight_effector` only
+    #: carries the readback now; the *sequencing* state that used to live
+    #: here too moved to `effector_state` below (`plans/
+    #: effector-sequences/plan.md` Stage 2).
     guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
+
+    #: The effector-sequence engine's own run state (`belief.
+    #: effector_engine.EffectorRunState`, `plans/effector-sequences/
+    #: plan.md` Stage 2) -- replaces `GuidanceUnitState`'s former
+    #: `takeoff_seen`/`power_up_stage`/`next_switch_due_sim`/`observ_
+    #: commanded`/`weapon_safety_commanded` fields. Replaced wholesale
+    #: each poll via `replace()`, same discipline as every other field
+    #: here; **one construction site**, this `field(default_factory=...)`
+    #: and mission-reset's re-run `__init__`.
+    effector_state: EffectorRunState = field(default_factory=EffectorRunState)
 
     #: Petrovich's **simulated** 9K113 sight head (`[[BL-B80]]` v2,
     #: `plans/9k113-sight-pointing/plan.md`) -- carried the same way
@@ -567,9 +585,11 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `guidance_unit_state`, `sight_head`, `last_sight_look_sim`,
-        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
-        start_sequence`) resets to its declared default.
+        `guidance_unit_state`, `effector_state`, `sight_head`,
+        `last_sight_look_sim`, `attitude_history`, `optic`,
+        `_last_look_direction`, `last_mission_start_sequence`) resets to
+        its declared default (D11: a mission (re)start drops every
+        running/pending effector-sequence run with nothing carried over).
 
         **`_last_look_direction` needs an explicit line, not just the
         re-invoked `__init__`.** It is declared `field(default=None,
@@ -3038,6 +3058,94 @@ def _poll_transcripts(
         )
 
 
+def _load_effector_config() -> tuple[
+    dict[tuple[str, str, str], SequenceFile],
+    dict[str, EffectorDef],
+    bool,
+]:
+    """Loads the effector registry/sequence files for this runtime's own
+    aircraft (`belief.effector_engine.AIRCRAFT`), `plans/
+    effector-sequences/plan.md` D5. Called once at `--crew-text` startup,
+    before `_run_crew_text_poll_loop` ever runs -- `--console` has no
+    `CrewConsole` to drive a trigger from at all, so it never calls this.
+
+    Every loader underneath is itself non-fatal on bad content (`belief.
+    effector_registry.load_registry`/`belief.effector_sequences.
+    load_sequences` both collect errors rather than raise); this
+    function's own job is only to aggregate **both** loaders' error lists
+    (D5: "pulling from BOTH load_registry's and load_sequences' error
+    lists so the root cause is visible") into one unmissable console
+    banner plus a `logger.error` per finding, and tell the caller whether
+    `CrewConsole.config_error_pending` should be set.
+
+    `load_registries_by_aircraft` loads every aircraft directory under
+    `config/sequences/` (R13), not only this runtime's own -- a stray
+    second aircraft directory's bad registry cannot affect this one
+    (each is loaded fully independently), but its errors are still
+    surfaced here for visibility rather than silently dropped. The
+    registry this function *returns*, however, is only this runtime's
+    own aircraft's (`"mi-24p"`) -- a missing directory for it is its own
+    synthetic error, the same severity as an unreadable file."""
+    registries_by_aircraft = load_registries_by_aircraft()
+    own_dir = aircraft_dir_name(EFFECTOR_AIRCRAFT)
+
+    banner_lines: list[str] = []
+    for aircraft_dir_name_, (_, reg_errors) in sorted(registries_by_aircraft.items()):
+        for err in reg_errors:
+            where = f" {err.name!r}" if err.name is not None else ""
+            banner_lines.append(
+                f"registry[{aircraft_dir_name_}] ({err.scope}{where}): {err.reason}"
+            )
+    if own_dir not in registries_by_aircraft:
+        banner_lines.append(
+            f"registry[{own_dir}]: no config/sequences/{own_dir}/ directory found"
+        )
+
+    registries_only = {
+        name: registry for name, (registry, _) in registries_by_aircraft.items()
+    }
+    sequences_by_key, sequence_errors = load_sequences(
+        DEFAULT_SEQUENCES_DIR, registries_only
+    )
+    for seq_err in sequence_errors:
+        where = f":{seq_err.line}" if seq_err.line is not None else ""
+        banner_lines.append(f"sequence[{seq_err.file}{where}]: {seq_err.reason}")
+
+    if banner_lines:
+        banner = "\n".join(
+            [
+                "=" * 78,
+                (
+                    "EFFECTOR CONFIG ERROR -- one or more sequence/registry "
+                    "files failed to load."
+                ),
+                "Petrobrain will continue, but some functionality may not work.",
+                *banner_lines,
+                "=" * 78,
+            ]
+        )
+        print(banner, file=sys.stderr)
+        for line in banner_lines:
+            logger.error("effector config: %s", line)
+
+    own_registry, _ = registries_by_aircraft.get(own_dir, ({}, []))
+    # Stage 1 review follow-up: `EffectorDef.unverified` had no consumer
+    # at all -- surfaced here, once, at startup, so "this write is not
+    # confirmed against a live sortie" (e.g. `cplr_distr`) is visible
+    # without reading the curated TOML.
+    unverified_names = sorted(
+        name for name, entry in own_registry.items() if entry.unverified
+    )
+    if unverified_names:
+        logger.info(
+            "effector config: %d unverified effector(s), not confirmed "
+            "against a live sortie: %s",
+            len(unverified_names),
+            ", ".join(unverified_names),
+        )
+    return sequences_by_key, own_registry, bool(banner_lines)
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -3063,6 +3171,8 @@ def _run_crew_text_poll_loop(
     mission_memory_base: Path | None = None,
     slew_trace_path: Path | None = None,
     slew_trace_base: Path | None = None,
+    effector_sequences: Mapping[tuple[str, str, str], SequenceFile] | None = None,
+    effector_registry: Mapping[str, EffectorDef] | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -3098,7 +3208,23 @@ def _run_crew_text_poll_loop(
     (`--slew-trace`, `BL-B66` Stage 4b) are the same "this loop's own
     addition" shape as `speech_log_base` and for the same reason: the
     takeoff/power-up/OBSERV wiring this writer reads only runs here, never
-    in `--console`."""
+    in `--console`.
+
+    `effector_sequences`/`effector_registry` (`plans/effector-sequences/
+    plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
+    -- loaded once at startup, before this thread exists, and passed in
+    read-only rather than reloaded per poll or per mission (nothing about
+    them is per-mission state; D11's mission-reset is `effector_state`'s
+    own job). `None` (every existing call site that predates the engine,
+    and this function's own tests that do not exercise effector triggers)
+    is treated as "nothing loaded" -- every trigger fires into nothing,
+    same as a genuinely empty sequence directory."""
+    effector_sequences_by_key: Mapping[tuple[str, str, str], SequenceFile] = (
+        effector_sequences if effector_sequences is not None else {}
+    )
+    effector_registry_entries: Mapping[str, EffectorDef] = (
+        effector_registry if effector_registry is not None else {}
+    )
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -3273,38 +3399,24 @@ def _run_crew_text_poll_loop(
                             runner.last_ownship_state.alt_agl_m
                             <= ON_GROUND_AGL_THRESHOLD_M
                         )
-                        # The power-up sequencer fires once on the rising
-                        # edge of "was on the ground, now is not" this
-                        # mission, reusing `on_ground`'s existing signal
-                        # rather than a new telemetry field.
-                        if (
-                            was_on_ground
-                            and not crew_console.on_ground
-                            and not runner.guidance_unit_state.takeoff_seen
-                        ):
-                            runner.guidance_unit_state = start_guidance_unit_power_up(
-                                runner.guidance_unit_state, runner.last_t_sim
-                            )
-                        # Advances the sequence (a true no-op before it
-                        # has started or once it is complete) and
-                        # refreshes the readback fields from the aircraft
-                        # layer's own cockpit-switch telemetry.
-                        # `weapon_safety_observed` is carried forward with
-                        # no consumer yet, for `BL-B67` (plan §3);
-                        # `observ_observed`/`align_observed`/`ready_
-                        # observed`/`launch_perm_observed` do have
-                        # consumers now (`[[BL-B80]]` v2's `home_phase`/
-                        # `SightHead.mode` derivation, read one poll
-                        # lagged from here -- see `run_once`'s own
-                        # comments on that lag).
-                        runner.guidance_unit_state = advance_guidance_unit_power_up(
-                            runner.guidance_unit_state,
-                            runner.last_t_sim,
-                            aircraft_client,
+                        # `plans/effector-sequences/plan.md` Stage 2's own
+                        # poll-block ordering: refresh readback -> takeoff
+                        # edge fires -> transitions fire -> advance ->
+                        # ready edge -> drain_config_error. One cockpit-
+                        # switch fetch, reused for both `GuidanceUnitState`'s
+                        # own readback (lamps/booleans, unchanged consumers)
+                        # and the engine's own arg-keyed `"args"` map (R7).
+                        cockpit_switch_latest = (
+                            aircraft_client.get_cockpit_switch_state_latest()
                         )
                         runner.guidance_unit_state = refresh_cockpit_switch_readback(
                             runner.guidance_unit_state,
-                            aircraft_client.get_cockpit_switch_state_latest(),
+                            cockpit_switch_latest,
+                        )
+                        effector_readback = (
+                            cockpit_switch_latest.get("args")
+                            if cockpit_switch_latest is not None
+                            else None
                         )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
@@ -3313,28 +3425,17 @@ def _run_crew_text_poll_loop(
                         # `_handle_observ_on` reads this to gate the
                         # command (plan §3).
                         crew_console.sight_ready = is_sight_ready
-                        # Called every poll, unconditionally -- not only
-                        # while `is_sight_ready` -- so an observed unlit
-                        # poll (power-down, or no lamp reading yet) is
-                        # tracked too; otherwise a power cycle's falling
-                        # edge would never update `guidance_unit_ready_
-                        # prev_observed`, and the later rising edge would
-                        # not be recognised as one (bug fix, `plans/
-                        # 9k113-sight-pointing/plan.md` decision 2).
-                        runner.guidance_unit_state = replace(
-                            runner.guidance_unit_state,
-                            guidance_unit_ready_prev_observed=(
-                                crew_console.drain_guidance_unit_ready(
-                                    runner.last_t_sim,
-                                    ready_observed=(
-                                        runner.guidance_unit_state.ready_observed
-                                    ),
-                                    previously_observed=(
-                                        runner.guidance_unit_state.guidance_unit_ready_prev_observed
-                                    ),
-                                )
-                            ),
-                        )
+                        # D2/D4 (`plans/effector-sequences/plan.md`):
+                        # fires on **every** takeoff, no `takeoff_seen`
+                        # latch -- the takeoff sequence file's own row
+                        # conditions (R12's implicit self-check) make a
+                        # repeat takeoff or a warm air start a no-op.
+                        if was_on_ground and not crew_console.on_ground:
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.TAKEOFF,
+                                runner.last_t_sim,
+                            )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous
                         # poll's command dispatch left as a one-shot
@@ -3370,10 +3471,13 @@ def _run_crew_text_poll_loop(
                         # from the *observed* arg-886 edge instead, so it
                         # also follows DCS's own automatic OBSERV-off (a
                         # hard manoeuvre) and not only this command. This
-                        # block still drives the cockpit write and the
-                        # hands-busy suppression, which are about the
-                        # pilot's hand moving to the switch, not the
-                        # observed edge.
+                        # block still drives the hands-busy suppression,
+                        # which is about the pilot's hand moving to the
+                        # switch, not the observed edge -- the cockpit
+                        # write itself is now the engine's job
+                        # (`plans/effector-sequences/plan.md` Stage 2),
+                        # fired here and performed by `advance_effectors`
+                        # below.
                         if crew_console.observ_transition == "on":
                             runner.optic_state = replace(
                                 runner.optic_state,
@@ -3381,23 +3485,15 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
-                            # `BL-B66` Stage 3 -- the real cockpit write
-                            # (arg 886), issued exactly once per accepted
-                            # request. `_handle_observ_on` has already
-                            # gated this on `sight_ready` at command time
-                            # (plan §3), so reaching here means the
-                            # request was accepted.
-                            try:
-                                write_observ_switch(aircraft_client, on=True)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    observ_commanded=True,
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "OBSERV-on cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            # `_handle_observ_on` has already gated this
+                            # on `sight_ready` at command time (plan §3),
+                            # so reaching here means the request was
+                            # accepted.
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.OBSERV_ON,
+                                runner.last_t_sim,
+                            )
                             crew_console.observ_transition = None
                         elif crew_console.observ_transition == "off":
                             runner.optic_state = replace(
@@ -3406,51 +3502,83 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
-                            try:
-                                write_observ_switch(aircraft_client, on=False)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    observ_commanded=False,
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "OBSERV-off cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.OBSERV_OFF,
+                                runner.last_t_sim,
+                            )
                             crew_console.observ_transition = None
                         # `BL-B66` Stage 4 (plan §4/Co-moving Fields) --
-                        # the weapons safety bar (arg 673), one write, no
-                        # sequencing, same one-shot-signal shape as
-                        # `observ_transition` above. Set by
+                        # the weapons safety bar (arg 673), same one-shot-
+                        # signal shape as `observ_transition` above. Set by
                         # `_handle_weapons_armed`/`_handle_weapons_safe`
                         # or by `_handle_engage`'s own existing "any
                         # attack run start" trigger.
                         if crew_console.weapon_safety_transition == "armed":
-                            try:
-                                write_weapon_safety_switch(aircraft_client, armed=True)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    weapon_safety_commanded="armed",
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "weapons-armed cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.WEAPONS_ARM,
+                                runner.last_t_sim,
+                            )
                             crew_console.weapon_safety_transition = None
                         elif crew_console.weapon_safety_transition == "safe":
-                            try:
-                                write_weapon_safety_switch(aircraft_client, armed=False)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    weapon_safety_commanded="safe",
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "weapons-safe cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.WEAPONS_SAFE,
+                                runner.last_t_sim,
+                            )
                             crew_console.weapon_safety_transition = None
+                        # Advances every currently-running trigger by at
+                        # most one write each, in fire order (D9) --
+                        # takeoff and any of the four transitions fired
+                        # above all progress in this one call.
+                        runner.effector_state = advance_effectors(
+                            runner.effector_state,
+                            runner.last_t_sim,
+                            effector_readback,
+                            aircraft_client,
+                            effector_sequences_by_key,
+                            effector_registry_entries,
+                        )
+                        # The "Guidance unit ready" edge, after the
+                        # engine has had a chance to run this poll (plan's
+                        # own poll-block ordering) -- unaffected either
+                        # way, since `ready_observed` is a readback field
+                        # the engine never writes, but kept in the stated
+                        # order rather than silently reordered. Called
+                        # every poll, unconditionally -- not only while
+                        # `is_sight_ready` -- so an observed unlit poll
+                        # (power-down, or no lamp reading yet) is tracked
+                        # too; otherwise a power cycle's falling edge
+                        # would never update `guidance_unit_ready_prev_
+                        # observed`, and the later rising edge would not
+                        # be recognised as one (bug fix, `plans/
+                        # 9k113-sight-pointing/plan.md` decision 2).
+                        runner.guidance_unit_state = replace(
+                            runner.guidance_unit_state,
+                            guidance_unit_ready_prev_observed=(
+                                crew_console.drain_guidance_unit_ready(
+                                    runner.last_t_sim,
+                                    ready_observed=(
+                                        runner.guidance_unit_state.ready_observed
+                                    ),
+                                    previously_observed=(
+                                        runner.guidance_unit_state.guidance_unit_ready_prev_observed
+                                    ),
+                                )
+                            ),
+                        )
+                        # D5/D6 (`plans/effector-sequences/plan.md`): the
+                        # one-shot "bad sequence file" line, held until
+                        # the SPU-8 intercom gate reads open.
+                        spu8_latest = aircraft_client.get_spu8_state_latest()
+                        intercom_open = (
+                            spu8_latest is not None
+                            and spu8_latest.get("gate_open") is True
+                        )
+                        crew_console.drain_config_error(
+                            runner.last_t_sim, intercom_open=intercom_open
+                        )
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,
@@ -3534,6 +3662,7 @@ def _run_crew_text_poll_loop(
                                 runner.guidance_unit_state,
                                 runner.sight_head,
                                 sight_servo_latest,
+                                commanded_values=runner.effector_state.commanded_values,
                             )
                     # BL-8: after `run_once()` has settled this poll's
                     # belief, before `drain_events` -- Decision 3's
@@ -4578,6 +4707,15 @@ def main() -> None:
             if (args.speech_audio or args.speech_input)
             else None
         )
+        # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
+        # loaded once here, before `CrewConsole` exists, so a bad
+        # registry/sequence file can set `config_error_pending` at
+        # construction time rather than needing a second mutation after
+        # the fact. `--console` never calls this (no `CrewConsole` to
+        # drive a trigger from, and no poll loop that fires one either).
+        effector_sequences_by_key, effector_registry_entries, had_config_errors = (
+            _load_effector_config()
+        )
         crew_console = CrewConsole(
             store=crew_runner.store,
             brain_client=brain_client,
@@ -4591,6 +4729,7 @@ def main() -> None:
                 if args.speech_log is not None
                 else None
             ),
+            config_error_pending=had_config_errors,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
@@ -4620,6 +4759,8 @@ def main() -> None:
                 mission_memory_base,
                 args.slew_trace,
                 slew_trace_base,
+                effector_sequences_by_key,
+                effector_registry_entries,
             ),
             daemon=True,
         )

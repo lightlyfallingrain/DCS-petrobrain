@@ -63,6 +63,17 @@ LOST_THRESHOLD_S = 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0
 
+[belief.effector_engine]
+# How long a row with an unknown readback waits before the engine gives up on the readback ever arriving this run (D3/R12) -- long enough to survive a brief telemetry gap, short enough that a genuinely-missing feed (an old aircraft-layer predating the `args` map) does not stall a sequence indefinitely.
+# status: derived | range: 1.0 .. 30.0
+# source: belief/effector_engine.py:EFFECTOR_CONDITION_READBACK_WAIT_S
+EFFECTOR_CONDITION_READBACK_WAIT_S = 5.0
+
+# Minimum seconds between successive writes *within one trigger's own* sequence -- renamed from `belief.sight_effector.GUIDANCE_UNIT_SWITCH_DELAY_S` (D10); same value, same reasoning (the measured ~3-frame/~0.1s DCS switch-animation ramp plus margin).
+# status: derived | range: 0.5 .. 5.0
+# source: belief/effector_engine.py:EFFECTOR_SEQUENCE_STEP_DELAY_S
+EFFECTOR_SEQUENCE_STEP_DELAY_S = 1.0
+
 [belief.enrichment]
 # `landmark-words-no-names` (F7 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the area, in m^2, below which a subtype-less/`"built_up"` settlement polygon reads as "a village" rather than "a town" in speech -- the only size evidence available when `world-model`'s `SettlementInfo.subtype` isn't one of the named `city`/`town`/`village` place values.
 # status: judgement | range: 100000.0 .. 5000000.0
@@ -119,12 +130,6 @@ SIGHT_STALL_COOLDOWN_S = 132.0
 # status: judgement | range: 12.0 .. 90.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
-
-[belief.sight_effector]
-# Minimum seconds between successive 9K113 guidance-unit power-up switch writes after takeoff -- too low risks writing the next switch while DCS is still animating the previous one; 1.0 s is the default, roughly the measured per-switch animation time plus margin.
-# status: derived | range: 0.5 .. 5.0
-# source: belief/sight_effector.py:GUIDANCE_UNIT_SWITCH_DELAY_S
-GUIDANCE_UNIT_SWITCH_DELAY_S = 1.0
 
 [belief.sight_head]
 # How long the sight keeps tracking the last *seen* direction after the target drops out of the glass (left the FOV, LOS blocked, a binocular/ unaided poll, hands busy) before falling back to belief's own desired direction -- the plan's "Aim source" selection rule, `held` row.

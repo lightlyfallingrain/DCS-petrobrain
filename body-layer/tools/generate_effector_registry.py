@@ -74,7 +74,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 _BODY_LAYER_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_OUT_PATH = _BODY_LAYER_ROOT / "config" / "effectors-raw.toml"
+#: R13 (Stage 2, 2026-10-23): one raw dump per aircraft directory name
+#: (`effector_registry.aircraft_dir_name`) -- this tool still only reads
+#: the Mi-24P scripts tree (`_SCRIPTS_SUBPATH` below, unchanged), so its
+#: own default output names that one aircraft explicitly rather than
+#: generalising the input side too.
+_DEFAULT_OUT_PATH = _BODY_LAYER_ROOT / "config" / "effectors-raw" / "mi-24p.toml"
 _SCRIPTS_SUBPATH = Path("Mods") / "aircraft" / "Mi-24P" / "Cockpit" / "Scripts"
 
 #: `clickable_defs.lua`'s 22 helper signatures, confirmed live 2026-10-23

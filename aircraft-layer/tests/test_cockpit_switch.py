@@ -210,6 +210,14 @@ class TestCockpitSwitchState:
             "align_lamp": None,
             "ready_lamp": None,
             "launch_perm_lamp": None,
+            "args": {
+                "773": pytest.approx(1.0),
+                "761": pytest.approx(0.0),
+                "885": pytest.approx(1.0),
+                "955": pytest.approx(0.0),
+                "886": pytest.approx(1.0),
+                "673": pytest.approx(0.0),
+            },
         }
 
 
@@ -372,6 +380,14 @@ class TestCockpitSwitchLatestEndpoint:
             "align_lamp": None,
             "ready_lamp": None,
             "launch_perm_lamp": None,
+            "args": {
+                "773": pytest.approx(1.0),
+                "761": pytest.approx(0.0),
+                "885": pytest.approx(1.0),
+                "955": pytest.approx(0.0),
+                "886": pytest.approx(1.0),
+                "673": pytest.approx(0.0),
+            },
         }
 
 

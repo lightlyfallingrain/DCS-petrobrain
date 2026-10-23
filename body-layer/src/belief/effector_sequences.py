@@ -1,16 +1,21 @@
-"""Parses the startup-loaded sequence files (`config/sequences/*.md`) --
-`plans/effector-sequences/plan.md`, "File formats (Stages 1-2)" and D5.
+"""Parses the startup-loaded sequence files (`config/sequences/
+<aircraft-dir>/*.md`) -- `plans/effector-sequences/plan.md`, "File
+formats (Stages 1-2)", D5 and R13 (per-aircraft layout).
 
 **Pure, startup-time parsing. No engine, no poll-loop wiring** (Stage
 2's `belief.effector_engine` consumes what this returns) -- this
-module's only job is to turn a directory of markdown-table files into
-`dict[(aircraft, role, trigger), SequenceFile]`, validated against an
-already-resolved `effector_registry.EffectorDef` mapping.
+module's only job is to turn a directory of per-aircraft markdown-table
+files into `dict[(aircraft, role, trigger), SequenceFile]`, each
+validated against its *own* aircraft directory's already-resolved
+`effector_registry.EffectorDef` mapping (R13: "a sequence file resolves
+effectors only against its own aircraft's registry").
 
 **A bad file is never fatal** (D5): each file is validated alone and a
 bad one is dropped with every error collected (not just the first);
 every other file still loads. `load_sequences` never raises on bad
-*content*.
+*content*. **Each aircraft directory is independent (R13)**: a bad
+registry (or a missing one -- no subdirectory loaded for it) only drops
+the sequences that live under that one directory.
 
 Two tables per file (plan): a 2-column header table naming exactly
 `aircraft` / `petrovich-role` / `run-on-trigger` (the key for duplicate
@@ -41,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-from belief.effector_registry import EffectorDef
+from belief.effector_registry import EffectorDef, aircraft_dir_name
 
 #: The trigger names a sequence file's `run-on-trigger` header cell may
 #: name, this cut (plan decision 2, explore-notes decision 2: "yes,
@@ -373,29 +378,67 @@ def _load_one_file(
 
 
 def load_sequences(
-    sequences_dir: Path, registry: Mapping[str, EffectorDef]
+    sequences_dir: Path,
+    registries: Mapping[str, Mapping[str, EffectorDef]],
 ) -> tuple[dict[tuple[str, str, str], SequenceFile], list[SequenceError]]:
     """Returns `(sequences_by_key, errors)`, keyed by
     `(aircraft, petrovich_role, trigger)` -- the plan's "key for
-    duplicate detection (not the filename)". `switch-reference.md` (the
-    generated human-readable control list, not a sequence file) is
-    skipped by extension-and-name rather than by content sniffing. Every
-    `*.md` file is read regardless of load order (sorted, for
-    determinism); a duplicate key across two or more files drops every
-    file sharing it, with one error per dropped file (plan: "both files
-    rejected -- neither silently wins")."""
+    duplicate detection (not the filename)".
+
+    `sequences_dir` holds one subdirectory per aircraft (R13), e.g.
+    `config/sequences/mi-24p/`; `registries` is `effector_registry.
+    load_registries_by_aircraft`'s own return shape, keyed by that same
+    directory name. A sequence file is validated against *only* its own
+    aircraft directory's registry -- if that directory has no entry in
+    `registries` at all (its registry failed to load, or was never
+    loaded), every file under it fails its own "unknown effector" check
+    against an empty mapping, the same cascade `effector_registry.
+    load_registry`'s own docstring describes for a single bad file.
+
+    `switch-reference.md` (the generated human-readable control list,
+    not a sequence file) is skipped by extension-and-name rather than by
+    content sniffing. Every `*.md` file is read regardless of load order
+    (subdirectories and files both sorted, for determinism); a duplicate
+    `(aircraft, role, trigger)` key across two or more files -- whether
+    in the same aircraft directory or, in principle, two different ones
+    whose headers happen to agree -- drops every file sharing it, with
+    one error per dropped file (plan: "both files rejected -- neither
+    silently wins"). A file whose own `aircraft` header does not map
+    (via `aircraft_dir_name`) to the directory it was actually found in
+    is its own, separate file error (R13) -- it is never silently
+    resolved against the directory it happens to sit in, nor against the
+    directory its header names."""
     errors: list[SequenceError] = []
     parsed: list[tuple[Path, SequenceFile]] = []
 
-    for path in sorted(sequences_dir.glob("*.md")):
-        if path.name == "switch-reference.md":
-            continue
-        file_errors, sequence_file = _load_one_file(path, registry)
-        if file_errors:
-            errors.extend(file_errors)
-            continue
-        assert sequence_file is not None
-        parsed.append((path, sequence_file))
+    if not sequences_dir.is_dir():
+        return {}, errors
+
+    for aircraft_dir in sorted(p for p in sequences_dir.iterdir() if p.is_dir()):
+        registry = registries.get(aircraft_dir.name, {})
+        for path in sorted(aircraft_dir.glob("*.md")):
+            if path.name == "switch-reference.md":
+                continue
+            file_errors, sequence_file = _load_one_file(path, registry)
+            if file_errors:
+                errors.extend(file_errors)
+                continue
+            assert sequence_file is not None
+            expected_dir = aircraft_dir_name(sequence_file.aircraft)
+            if expected_dir != aircraft_dir.name:
+                errors.append(
+                    SequenceError(
+                        file=path.name,
+                        line=None,
+                        reason=(
+                            f"aircraft {sequence_file.aircraft!r} maps to "
+                            f"directory {expected_dir!r}, but this file is "
+                            f"under {aircraft_dir.name!r}"
+                        ),
+                    )
+                )
+                continue
+            parsed.append((path, sequence_file))
 
     by_key: dict[tuple[str, str, str], list[tuple[Path, SequenceFile]]] = defaultdict(
         list

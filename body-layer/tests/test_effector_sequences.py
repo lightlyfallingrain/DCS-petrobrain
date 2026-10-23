@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from belief.effector_registry import (
-    DEFAULT_CURATED_PATH,
-    DEFAULT_RAW_DUMP_PATH,
+    DEFAULT_RAW_DUMP_DIR,
+    DEFAULT_SEQUENCES_DIR,
     EffectorDef,
     load_registry,
 )
@@ -24,6 +24,9 @@ from belief.effector_sequences import (
     WaitRow,
     load_sequences,
 )
+
+_DEFAULT_CURATED_PATH = DEFAULT_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
+_DEFAULT_RAW_DUMP_PATH = DEFAULT_RAW_DUMP_DIR / "mi-24p.toml"
 
 _REGISTRY_FIXTURE = {
     "missile_power": EffectorDef(
@@ -46,9 +49,16 @@ _REGISTRY_FIXTURE = {
 
 
 def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
+
+#: R13 (per-aircraft layout): every test below writes its fixture
+#: file(s) under `tmp_path / "mi-24p"` (the `aircraft = "Mi-24P"` header
+#: lower-cased) and passes `_REGISTRIES`, not a bare registry, to
+#: `load_sequences` -- `tmp_path` itself plays the role of `sequences_dir`.
+_REGISTRIES = {"mi-24p": _REGISTRY_FIXTURE}
 
 _TAKEOFF_HEADER = (
     "| file-param | for |\n"
@@ -62,7 +72,7 @@ _DATA_HEADER = "| condition | effector | value | petrovich-says | comment |\n| -
 
 def test_good_file_loads(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER
         + "\n"
         + _DATA_HEADER
@@ -70,7 +80,7 @@ def test_good_file_loads(tmp_path: Path) -> None:
         + "| | observ | on | | OBSERV |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert errors == []
     key = ("Mi-24P", "copilot", "takeoff")
@@ -97,7 +107,7 @@ def test_good_file_loads(tmp_path: Path) -> None:
 
 def test_wait_row_parses(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER
         + "\n"
         + _DATA_HEADER
@@ -105,7 +115,7 @@ def test_wait_row_parses(tmp_path: Path) -> None:
         + "| | observ | on | | OBSERV |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert errors == []
     key = ("Mi-24P", "copilot", "takeoff")
@@ -114,14 +124,14 @@ def test_wait_row_parses(tmp_path: Path) -> None:
 
 def test_wait_row_with_nonblank_cell_is_malformed(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER
         + "\n"
         + _DATA_HEADER
         + "| wait_s(2.5) | observ | on | | pause |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -130,14 +140,14 @@ def test_wait_row_with_nonblank_cell_is_malformed(tmp_path: Path) -> None:
 
 def test_unknown_effector_drops_the_file(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER
         + "\n"
         + _DATA_HEADER
         + "| | nonexistent_effector | on | | x |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -146,11 +156,11 @@ def test_unknown_effector_drops_the_file(tmp_path: Path) -> None:
 
 def test_unknown_value_drops_the_file(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | sideways | | x |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -159,11 +169,11 @@ def test_unknown_value_drops_the_file(tmp_path: Path) -> None:
 
 def test_unknown_effector_in_condition_drops_the_file(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| ghost = on | observ | on | | x |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -172,11 +182,11 @@ def test_unknown_effector_in_condition_drops_the_file(tmp_path: Path) -> None:
 
 def test_unknown_trigger_drops_the_file(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER.replace("takeoff", "mission-start") + "\n" + _DATA_HEADER,
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -185,9 +195,9 @@ def test_unknown_trigger_drops_the_file(tmp_path: Path) -> None:
 
 def test_malformed_row_wrong_cell_count_drops_the_file(tmp_path: Path) -> None:
     text = _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | on | extra |\n"
-    _write(tmp_path / "t.md", text)
+    _write(tmp_path / "mi-24p" / "t.md", text)
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -196,11 +206,11 @@ def test_malformed_row_wrong_cell_count_drops_the_file(tmp_path: Path) -> None:
 
 def test_say_only_row_is_reserved_and_rejected(tmp_path: Path) -> None:
     _write(
-        tmp_path / "t.md",
+        tmp_path / "mi-24p" / "t.md",
         _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | | | Guidance unit ready. | x |\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
@@ -211,10 +221,10 @@ def test_say_only_row_is_reserved_and_rejected(tmp_path: Path) -> None:
 
 def test_duplicate_trigger_rejects_both_files(tmp_path: Path) -> None:
     body = "\n" + _DATA_HEADER + "| | observ | on | | x |\n"
-    _write(tmp_path / "a.md", _TAKEOFF_HEADER + body)
-    _write(tmp_path / "b.md", _TAKEOFF_HEADER + body)
+    _write(tmp_path / "mi-24p" / "a.md", _TAKEOFF_HEADER + body)
+    _write(tmp_path / "mi-24p" / "b.md", _TAKEOFF_HEADER + body)
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 2
@@ -225,12 +235,12 @@ def test_duplicate_trigger_rejects_both_files(tmp_path: Path) -> None:
 
 
 def test_unreadable_file_is_collected_not_raised(tmp_path: Path) -> None:
-    good = tmp_path / "good.md"
+    good = tmp_path / "mi-24p" / "good.md"
     _write(good, _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | on | | x |\n")
-    bad = tmp_path / "bad.md"
+    bad = tmp_path / "mi-24p" / "bad.md"
     _write(bad, "not a table at all, no pipes here")
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     key = ("Mi-24P", "copilot", "takeoff")
     assert set(sequences) == {key}
@@ -240,32 +250,90 @@ def test_unreadable_file_is_collected_not_raised(tmp_path: Path) -> None:
 
 def test_switch_reference_file_is_skipped(tmp_path: Path) -> None:
     _write(
-        tmp_path / "switch-reference.md",
+        tmp_path / "mi-24p" / "switch-reference.md",
         "not a sequence file, just a reference table\n",
     )
 
-    sequences, errors = load_sequences(tmp_path, _REGISTRY_FIXTURE)
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert errors == []
 
 
+# --- per-aircraft layout (R13) ----------------------------------------------
+
+
+def test_aircraft_header_not_matching_its_own_directory_is_a_file_error(
+    tmp_path: Path,
+) -> None:
+    """A file under `mi-8/` whose header still says `aircraft = Mi-24P`
+    is never silently resolved against either directory -- it is its
+    own file error (R13)."""
+    _write(
+        tmp_path / "mi-8" / "t.md",
+        _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | on | | x |\n",
+    )
+
+    # A registry is loaded for "mi-8" too, so the row itself resolves
+    # cleanly -- this isolates the aircraft/directory mismatch check
+    # from the "unknown effector" check that would otherwise fire first.
+    sequences, errors = load_sequences(
+        tmp_path, {**_REGISTRIES, "mi-8": _REGISTRY_FIXTURE}
+    )
+
+    assert sequences == {}
+    assert len(errors) == 1
+    assert errors[0].file == "t.md"
+    assert "maps to directory 'mi-24p'" in errors[0].reason
+    assert "under 'mi-8'" in errors[0].reason
+
+
+def test_bad_registry_in_one_aircraft_directory_does_not_affect_another(
+    tmp_path: Path,
+) -> None:
+    """R13: "each aircraft directory is independent" -- a sequence file
+    under a directory with no loaded registry (simulating a registry
+    that failed to load) fails its own "unknown effector" check, while a
+    sibling aircraft directory with a good registry still loads."""
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | on | | x |\n",
+    )
+    other_header = _TAKEOFF_HEADER.replace("Mi-24P", "Mi-8")
+    _write(
+        tmp_path / "mi-8" / "t.md",
+        other_header + "\n" + _DATA_HEADER + "| | observ | on | | x |\n",
+    )
+
+    # No registry at all loaded for "mi-8" -- as if its own registry had
+    # failed to load entirely (D5's cascade).
+    sequences, errors = load_sequences(tmp_path, {"mi-24p": _REGISTRY_FIXTURE})
+
+    assert set(sequences) == {("Mi-24P", "copilot", "takeoff")}
+    assert len(errors) == 1
+    assert errors[0].file == "t.md"
+    assert "unknown effector 'observ'" in errors[0].reason
+
+
 # --- round-trip of each shipped sequence file -------------------------------
 
-_SEQUENCES_DIR = Path(__file__).resolve().parent.parent / "config" / "sequences"
+#: R13: the real, committed per-aircraft layout. `load_sequences` takes
+#: the *parent* of the aircraft directories (`DEFAULT_SEQUENCES_DIR`),
+#: not the `mi-24p/` directory itself.
+_REAL_SEQUENCES_PARENT_DIR = DEFAULT_SEQUENCES_DIR
 
 
 @pytest.fixture(scope="module")
-def real_registry() -> dict[str, object]:
-    registry, errors = load_registry(DEFAULT_RAW_DUMP_PATH, DEFAULT_CURATED_PATH)
+def real_registries() -> dict[str, dict[str, object]]:
+    registry, errors = load_registry(_DEFAULT_RAW_DUMP_PATH, _DEFAULT_CURATED_PATH)
     assert errors == []
-    return registry
+    return {"mi-24p": registry}
 
 
 def test_every_shipped_sequence_file_round_trips(
-    real_registry: dict[str, object],
+    real_registries: dict[str, dict[str, object]],
 ) -> None:
-    sequences, errors = load_sequences(_SEQUENCES_DIR, real_registry)
+    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
 
     assert errors == []
     assert set(sequences) == {
@@ -278,9 +346,13 @@ def test_every_shipped_sequence_file_round_trips(
 
 
 def test_takeoff_file_reproduces_todays_switch_order(
-    real_registry: dict[str, object],
+    real_registries: dict[str, dict[str, object]],
 ) -> None:
-    sequences, errors = load_sequences(_SEQUENCES_DIR, real_registry)
+    """R12 (2026-10-23 user correction): the shipped takeoff file no
+    longer carries an explicit `!= on` self-condition on any row -- the
+    engine's own implicit self-check (Stage 2) is what makes a re-run or
+    a warm start a no-op now, not a `condition` cell this loader parses."""
+    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
     assert errors == []
     rows = sequences[("Mi-24P", "copilot", "takeoff")].rows
 
@@ -293,14 +365,14 @@ def test_takeoff_file_reproduces_todays_switch_order(
     for row in rows:
         assert isinstance(row, SwitchRow)
         assert row.value == "on"
-        assert row.condition == Condition(effector=row.effector, op="!=", value="on")
+        assert row.condition is None
         assert row.petrovich_says == ""
 
 
 def test_observ_and_weapons_files_are_single_unconditional_rows(
-    real_registry: dict[str, object],
+    real_registries: dict[str, dict[str, object]],
 ) -> None:
-    sequences, errors = load_sequences(_SEQUENCES_DIR, real_registry)
+    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
     assert errors == []
 
     observ_on = sequences[("Mi-24P", "copilot", "observ-on")].rows

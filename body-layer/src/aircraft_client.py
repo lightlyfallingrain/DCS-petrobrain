@@ -116,6 +116,14 @@ and `Export.lua`'s own servo converts internally; `belief.sight_effector.
 write_sight_target` is still the one caller above this client, just a
 pure pass-through now rather than a conversion site.
 
+`get_spu8_state_latest` (`plans/effector-sequences/plan.md` D6, BL-B90
+Stage 2) is this seam's `GET /spu8/state` counterpart to `get_cockpit_
+switch_state_latest` -- same "not an error" empty-cache posture. Its one
+caller is `CrewConsole.drain_config_error` via `logger.py`'s poll loop,
+reading `gate_open` to decide whether the intercom is up before speaking
+the one-shot "bad sequence file" error line (D6: *"once the intercom is
+up"*).
+
 `get_sight_servo_latest` is this seam's read side for the same feed --
 `Export.lua`'s per-frame DCS-slave servo status (mode, setpoint, the
 mark-derived body direction when valid, error, stall flag), a *second*
@@ -267,6 +275,23 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /cockpit_switch/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_spu8_state_latest(self) -> dict[str, Any] | None:
+        """`GET /spu8/state` -> the most recent SPU-8 intercom-panel
+        reading as a dict (see `aircraft-layer/src/schema/spu8.py`'s
+        `Spu8Sample.to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "net1", "ics_power", "vol", "net1_on", "ics_power_on",
+        "gate_open"}`), or `None` if nothing has been received yet --
+        same "not an error" posture as `get_cockpit_switch_state_latest`
+        (`plans/effector-sequences/plan.md` D6)."""
+        result = self._get_json("/spu8/state")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /spu8/state, got {type(result).__name__}"
             )
         return result
 

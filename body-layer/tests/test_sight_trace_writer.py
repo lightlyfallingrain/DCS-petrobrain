@@ -73,16 +73,33 @@ class TestFieldSelection:
     def test_observ_commanded_and_observed_are_carried_through(
         self, tmp_path: Path
     ) -> None:
+        """`observ_commanded` moved off `GuidanceUnitState` onto the
+        engine's own `EffectorRunState.commanded_values` (`plans/
+        effector-sequences/plan.md` Stage 2, "What moves, what stays")."""
         writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        guidance_unit_state = GuidanceUnitState(
-            observ_commanded=True, observ_observed=False
+        guidance_unit_state = GuidanceUnitState(observ_observed=False)
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            guidance_unit_state,
+            SightHead(),
+            commanded_values={"observ": "on"},
         )
-        writer.write_poll(1.0, OpticState(), guidance_unit_state, SightHead())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
         assert row["observ_commanded"] is True
         assert row["observ_observed"] is False
+
+    def test_observ_commanded_defaults_to_false_when_none_given(
+        self, tmp_path: Path
+    ) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), SightHead())
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["observ_commanded"] is False
 
     def test_head_fields_carried_through(self, tmp_path: Path) -> None:
         writer = SightTraceWriter(tmp_path / "slew.jsonl")

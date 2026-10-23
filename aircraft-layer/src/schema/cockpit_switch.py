@@ -46,6 +46,17 @@ every v2 sample carries `None` for both.
 underlying arg is thresholded in `Export.lua` itself, unlike the six
 switch args' raw-plus-decided split), `bool | None`, same "absent means
 no reading yet" contract as `sight_az`/`sight_elev`.
+
+**`to_api_dict`'s `"args"` map (`plans/effector-sequences/plan.md` R7,
+BL-B90 Stage 2)**: `{"773": <raw missl_pw>, "761": <raw cplr_distr>,
+"885": <raw sight_pw>, "955": <raw scho_pw>, "886": <raw observe>,
+"673": <raw weap_safe>}` -- the same six raw values already on this
+class, re-keyed by their DCS arg number as a string, so body-layer's
+effector engine can look a curated registry entry's own `arg` number up
+generically instead of this schema hard-coding six named fields for it
+to read. Purely a derived view of data this class already carries --
+nothing new is read from `Export.lua`, and the six named fields/
+properties above are unchanged for every existing reader.
 """
 
 from __future__ import annotations
@@ -214,9 +225,11 @@ class CockpitSwitchState:
         """What `GET /cockpit_switch/latest` answers with. The six raw
         values and the six decided booleans -- same "raw plus decided"
         shape as `Spu8Sample.to_api_dict` -- plus `sight_az`/`sight_elev`
-        (`None` always, as of `[[BL-B80]]` v2) and the three real lamps
+        (`None` always, as of `[[BL-B80]]` v2), the three real lamps
         (`align_lamp`/`ready_lamp`/`launch_perm_lamp`, `None` when the
-        sending `Export.lua` predates v2)."""
+        sending `Export.lua` predates v2), and `"args"` (the same six raw
+        values re-keyed by DCS arg number -- see the module docstring's
+        own `"args"` section)."""
         return {
             "t": self.dcs_model_time_s,
             "received_wall_clock_s": self.received_wall_clock_s,
@@ -237,4 +250,12 @@ class CockpitSwitchState:
             "align_lamp": self.align_lamp,
             "ready_lamp": self.ready_lamp,
             "launch_perm_lamp": self.launch_perm_lamp,
+            "args": {
+                "773": self.missl_pw,
+                "761": self.cplr_distr,
+                "885": self.sight_pw,
+                "955": self.scho_pw,
+                "886": self.observe,
+                "673": self.weap_safe,
+            },
         }

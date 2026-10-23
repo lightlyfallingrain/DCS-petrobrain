@@ -1024,6 +1024,18 @@ BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
 #: twice (voice, text, overlay) hears exactly the same words each time.
 WORLD_MODEL_NOT_LOADED_REFUSAL: Final[str] = "system error, world model not loaded"
 
+#: `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 -- the one-
+#: shot spoken line for "at least one effector sequence/registry file
+#: failed to load at startup," held until the SPU-8 intercom gate reads
+#: open (`drain_config_error`). Same "verbatim user wording" posture as
+#: `WORLD_MODEL_NOT_LOADED_REFUSAL`; the console banner (`logger.py`'s
+#: startup) is the primary channel for the actual file/reason detail --
+#: this line is only the pilot-facing heads-up that something is wrong.
+CONFIG_ERROR_LINE: Final[str] = (
+    "System error, bad sequence file, see the logs. Petrobrain will "
+    "continue, but some functionality may not work."
+)
+
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
 #: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
 #: way `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s `F10CommandQueue`
@@ -1360,6 +1372,18 @@ class CrewConsole:
     #: assumption to refuse OBSERV-on under.
     sight_ready: bool = field(default=False, repr=False)
 
+    #: `plans/effector-sequences/plan.md` D5/D6 -- set at startup (by
+    #: `logger.py`'s config-loading step) when at least one effector
+    #: registry/sequence file failed to load; drained by `drain_config_
+    #: error` the first poll the SPU-8 intercom gate reads open. **Not**
+    #: in `reset_for_new_mission`'s preserved-field list below in the
+    #: sense of being passed through *unconditionally* -- it is passed
+    #: through deliberately (D6: "a mission restart does not clear it")
+    #: since it describes this *process*'s own startup state, not
+    #: per-mission state, the opposite default from every other field
+    #: this class resets on a mission (re)start.
+    config_error_pending: bool = field(default=False, repr=False)
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
@@ -1375,7 +1399,10 @@ class CrewConsole:
         mission restart is an open product question (see the plan's
         "Decisions Requiring User Input"); until decided, this preserves it
         (the conservative default: don't change behaviour the pilot
-        explicitly asked for). Everything else (`scheduler`, `_pending_
+        explicitly asked for). **`config_error_pending` is also preserved**
+        (`plans/effector-sequences/plan.md` D6: "a mission restart does not
+        clear it") -- it describes this process's own startup state, not
+        per-mission state. Everything else (`scheduler`, `_pending_
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
@@ -1401,6 +1428,7 @@ class CrewConsole:
             speech_client=self.speech_client,
             speech_log_sink=self.speech_log_sink,
             silenced=self.silenced,
+            config_error_pending=self.config_error_pending,
         )
 
     def _refusal_response(
@@ -1536,6 +1564,30 @@ class CrewConsole:
         if previously_observed is False and ready_observed is True:
             self._print(["Guidance unit ready."], now_sim)
         return ready_observed
+
+    def drain_config_error(self, now_sim: float, *, intercom_open: bool) -> None:
+        """Speaks `CONFIG_ERROR_LINE` exactly once per process, the first
+        poll `self.config_error_pending and intercom_open and not self.
+        silenced` (`plans/effector-sequences/plan.md` D5/D6). Called every
+        poll, unconditionally, same shape as `drain_guidance_unit_ready`
+        above -- the flag only ever gets set once, at startup, so there is
+        no "re-arm" case to track across polls the way the lamp edge needs.
+
+        `intercom_open` is the caller's own `GET /spu8/state` `gate_open is
+        True` reading -- `None` (no SPU-8 sample yet, or an `Export.lua`
+        predating that feed) must never open the gate, the console banner
+        at startup is this line's fallback channel. Silenced defers
+        (D6 doesn't say "lost if silenced") -- the flag stays set and this
+        method tries again next poll, same posture `silenced`'s own field
+        docstring describes for every other spoken line."""
+        if not self.config_error_pending:
+            return
+        if not intercom_open:
+            return
+        if self.silenced:
+            return
+        self._print([CONFIG_ERROR_LINE], now_sim)
+        self.config_error_pending = False
 
     def _speak_or_defer(
         self,

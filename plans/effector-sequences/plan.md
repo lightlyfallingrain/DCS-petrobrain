@@ -17,14 +17,16 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R1 | Stage 4 "remove `GuidanceUnitState`" | **`GuidanceUnitState` stays, slimmed to readback only** (lamps + observed switches). Its sequencing fields move into the engine. | BL-B80's `SightHead`, `home_phase` derivation and `sight_ready()` read it |
 | R2 | `sight_ready` refreshed from `is_complete(TAKEOFF)` | **`sight_ready` stays `sight_effector.sight_ready(state)` = the real 960 lamp** | BL-B80 v2 replaced "sequence done" with the lamp |
 | R3 | "Guidance unit ready" in the takeoff file's `petrovich-says` | **Stays hard-coded, on a true observed 960 off→on edge**, with a named seam for a future `guidance-unit-ready` trigger | User: *"For now it can be hard coded, but it should really be it's own trigger"* |
-| R4 | Takeoff one-shot per mission | **Every takeoff**; the file's row conditions skip what is already on | User: *"per takeoff, the sequence file will then deal with it not being the first takeoff"* |
-| R5 | Row conditions read **commanded** state (old D3) | **Conditions read the observed cockpit readback** | Commanded state cannot know a hot start, an air start, or a switch the pilot moved by hand — the very cases R4 makes the file handle |
+| R4 | Takeoff one-shot per mission | **Every takeoff**; the engine's own implicit self-check (R12) skips what is already on — not, as first shipped, an explicit `!= on` row condition | User: *"per takeoff, the sequence file will then deal with it not being the first takeoff"*; narrowed by R12, 2026-10-23 |
+| R5 | Row conditions read **commanded** state (old D3) | **Conditions (explicit and implicit) read the observed cockpit readback** | Commanded state cannot know a hot start, an air start, or a switch the pilot moved by hand — the very cases R4 makes the file handle |
 | R6 | Bad file → refuse to start (explore decision 6, old D2/D3) | **Bad file → log, ignore that file, console banner, one intercom line once the intercom is up** | User decision 3, 2026-10-23 |
 | R7 | Stage 3 = generic watched-args readback, needed for parity | **Not needed for *reading* this cut's six switches**: BL-B80's existing per-frame `cockpit_switch` feed already carries all six. Stage 2 adds an arg-keyed view of the existing feed (aircraft-layer Python only, no `Export.lua` change). **Superseded again, 2026-10-23** (explore-notes, "Readback rate and scope"): the user does not want switch positions riding BL-B80's per-frame push at all, regardless of parity — "we'll be reading a lot of args eventually... for switch positions the normal lower frequency poll is enough... query a set of switches when they are needed, not everything... at DCS export level if possible." So the generic low-rate/on-demand readback move is **BL-B90's own last stage** (renumbered Stage 4 below), in scope for this milestone, not a deferred/backlog item — it just runs after Stage 3's card, per the user's "let's say BL-B90 last step." | Measured from the code: `push_cockpit_switch_state` reads 773/761/885/955/886/673 + 898/960/962. User direction, 2026-10-23 (quoted in full in explore-notes' "Readback rate and scope"). |
 | R8 | Global vs per-trigger queue open | **Per trigger** | User decision 1 |
 | R9 | No acceptance card | **Own short re-flight card** (Stage 3, `/test-card`) | User decision 4 |
 | R10 | Stage 0 placement "Implementer's call" | **Settled**: `body-layer/tools/generate_effector_registry.py`, full spec below | User: build the generator next |
 | R11 | Curated registry + sequence files at `body-layer/config/effectors.toml` / `body-layer/config/effector-sequences/*.md` | **`body-layer/config/sequences/`** — `effectors.toml`, `*.md` sequence files, and the generated `switch-reference.md` all live there; the raw dump stays at `body-layer/config/effectors-raw.toml` | User, 2026-10-23: first "sequence files ... go to body-layer/sequences/", then corrected mid-Stage-1 to "body-layer/config/sequences is better" |
+| R12 | Takeoff rows carry an explicit `<effector> != on` self-condition (D3/R5) | **The engine itself skips a switch row whose effector's OBSERVED readback already equals the row's target value** — no write, no step delay, no speech — for *every* trigger, not only takeoff; the takeoff file's self-conditions are removed as redundant. If that readback is still unknown after `EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (an absolute-value write is harmless if the switch was already there) — this is the opposite of an explicit `condition` cell's unknown-timeout, which *skips* (D3, unchanged). Explicit `condition` cells are reserved for genuine cross-switch dependencies, which no shipped file needs this cut. | User, 2026-10-23, verbatim: *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that switch is already in set position, so no action. I'll use the conditions for real this-depends-on-some-other-condition cases."* Reversible (main loop's own call on the unknown-timeout writing rather than skipping) — flagged in `implementation.md`. |
+| R13 | One flat registry + sequences directory, a device/cmd/arg collision drops *both* entries (D5) | **Per-aircraft layout**: `config/sequences/<aircraft-dir>/effectors.toml`, `.../switch-reference.md`, `.../copilot-<trigger>.md` (the `mi-24p-` filename prefix drops now the directory carries it); the raw dump moves to `config/effectors-raw/<aircraft-dir>.toml`. `<aircraft-dir>` is a sequence file's own `aircraft` header value, lower-cased (`Mi-24P` → `mi-24p`) — stated once, in `effector_registry.aircraft_dir_name`, and never re-derived elsewhere. The loader loads one registry per aircraft directory; a sequence file resolves effectors only against its own aircraft's registry, and an `aircraft` header that does not map to the directory it was found in is a file error (D5-collected, not fatal); each aircraft directory is independent — a bad registry in one disables only that aircraft's sequences, never another's. **Collision rule also changes**: the *first* curated entry (TOML file order) to claim a `(device, cmd, arg)` triple wins; every later one is rejected with a non-fatal error naming the triple and the winner — not "drop both" (superseded, see below). | User, 2026-10-23, verbatim: *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at this time, better to be ready now."* Shape (directory names, filename-prefix drop) is the main loop's own reversible choice, logged in `implementation.md`. |
 
 Superseded text that a later reader needs is kept in "Superseded (2026-10-21 text)" at the end,
 not deleted.
@@ -262,6 +264,11 @@ question for 0a, since 0a has already run:
 
 ### Output — `body-layer/config/effectors-raw.toml`
 
+**Path moved during Stage 2 (R13)**: the real committed dump now lives at
+`body-layer/config/effectors-raw/mi-24p.toml`, and `generate_effector_registry.py`'s own
+`--write` default output changed to match. Everything below this heading is otherwise unchanged
+from how Stage 0 built it.
+
 Hand-rendered TOML (stdlib cannot write TOML; same as `generate_defaults.py`), sorted by element
 name so a regeneration diffs cleanly. **Schema below corrected to what Stage 0b actually ships**
 (`seat`/`seat_explicit` always resolved, not a `"default"` placeholder; `device_name` its own
@@ -348,7 +355,9 @@ root `CLAUDE.md`'s batch rule — one each, after 0b).
 
 ## File formats (Stages 1–2)
 
-**Curated registry — `body-layer/config/sequences/effectors.toml`.** Hand-written, small. Each entry: a
+**Curated registry — `body-layer/config/sequences/<aircraft-dir>/effectors.toml`** (R13, per
+aircraft; `<aircraft-dir>` = the sequence files' own `aircraft` header value lower-cased, e.g.
+`mi-24p`). Hand-written, small. Each entry: a
 friendly name, `source_element` (join key into the raw dump), optional `index` (which entry of a
 multi-action element's lists, default 0), named `values`. **Never repeats device/cmd/arg.**
 
@@ -379,7 +388,7 @@ source_element = "<ED name for arg 673>"
 values = { armed = 1.0, safe = 0.0 }
 ```
 
-**Sequence files — `body-layer/config/sequences/*.md`.** Two tables per file:
+**Sequence files — `body-layer/config/sequences/<aircraft-dir>/*.md`** (R13). Two tables per file:
 
 1. Header (`file-param | for`) with exactly `aircraft`, `petrovich-role`, `run-on-trigger` — the
    key for duplicate detection (not the filename).
@@ -393,7 +402,8 @@ values = { armed = 1.0, safe = 0.0 }
    - **say-only row** (effector blank, `petrovich-says` set) is **reserved, rejected this cut**
      with the message "say-only rows arrive with the guidance-unit-ready trigger" (seam, D7).
 
-Takeoff, as it ships (R4 — a second takeoff, or a warm air start, skips every row):
+Takeoff, as it ships (R4/R12 — a second takeoff, or a warm air start, skips every row via the
+engine's own implicit self-check, not an explicit `condition` cell):
 
 ```markdown
 | file-param | for |
@@ -404,10 +414,10 @@ Takeoff, as it ships (R4 — a second takeoff, or a warm air start, skips every 
 
 | condition | effector | value | petrovich-says | comment |
 | --- | --- | --- | --- | --- |
-| missile_power != on | missile_power | on | | MISSILE POWER |
-| cplr_distr != on | cplr_distr | on | | CPLR DISTR -- unverified, see registry |
-| sight_power != on | sight_power | on | | Sight Power (GUID.UNIT POWER) |
-| scho_pwr_b1 != on | scho_pwr_b1 | on | | SHCHO PWR B1 |
+| | missile_power | on | | MISSILE POWER |
+| | cplr_distr | on | | CPLR DISTR -- unverified, see registry |
+| | sight_power | on | | Sight Power (GUID.UNIT POWER) |
+| | scho_pwr_b1 | on | | SHCHO PWR B1 |
 ```
 
 OBSERV on/off and weapons arm/safe: one unconditional row each (parity with today).
@@ -433,7 +443,15 @@ existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown
   default 5.0, lo 1.0, hi 30.0), then skips with a WARNING naming the effector and arg. Never
   "unknown → true": a row like `observ = on → weapon_safety armed` must not fire on missing data.
   In the poll block, readback is refreshed **before** the engine advances (today it is after), so
-  a row reached this poll sees this poll's sample.
+  a row reached this poll sees this poll's sample. **R12 adds a second, implicit check that runs
+  on every switch row regardless of whether it carries an explicit `condition`**: if the row's own
+  effector is already observed at the row's target value, the row is skipped (no write, no delay,
+  no speech) — the same readback-wait as above, but the *opposite* outcome on timeout: an
+  implicit self-check that is still unknown after `EFFECTOR_CONDITION_READBACK_WAIT_S` **writes**
+  rather than skips (the write is an absolute set, harmless if the switch was already there),
+  whereas an explicit `condition`'s timeout still skips. An explicit `condition` cell, when
+  present, is evaluated first; only once it is satisfied (or absent) does the implicit self-check
+  run.
 - **D4 — Re-runs never re-speak.** Speech comes only from a row that actually wrote. The takeoff
   file has no `petrovich-says` at all this cut; "Guidance unit ready" is hard-coded on the 960
   **edge** (prior observed `False` → `True`), so a second takeoff with the unit already up says
@@ -495,7 +513,7 @@ existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown
 
 | Concern | Today | After |
 |---|---|---|
-| Which switches, order, values | `_POWER_UP_SWITCHES` + two single writes in `sight_effector.py` | `config/effectors-raw.toml` + `config/sequences/effectors.toml` + `config/sequences/*.md` |
+| Which switches, order, values | `_POWER_UP_SWITCHES` + two single writes in `sight_effector.py` | `config/effectors-raw/mi-24p.toml` + `config/sequences/mi-24p/effectors.toml` + `config/sequences/mi-24p/*.md` (R13) |
 | Sequencing state: `takeoff_seen`, `power_up_stage`, `next_switch_due_sim` | `GuidanceUnitState` | **deleted** / `EffectorRunState` |
 | `observ_commanded`, `weapon_safety_commanded` | `GuidanceUnitState` | `EffectorRunState.commanded_values` (written on a successful write). `sight_trace_writer`'s `observ_commanded` column keeps its name and meaning, sourced from there (`None` → `False`, today's default) — Flight A's triage reads it |
 | `observ_observed`, `weapon_safety_observed`, `align_observed`, `ready_observed`, `launch_perm_observed` | `GuidanceUnitState` | **stay** on `GuidanceUnitState` (renaming it is churn with no gain; it is the guidance unit's observed state). `refresh_readback` unchanged |
@@ -527,7 +545,8 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
 | `EffectorRunState.runs[T]` (running cursor: row index, `next_due_sim`, `waiting_since_sim`) | internal | `fire_trigger(T)` while idle | cursor at row 0, due now; same poll's `advance` may execute it |
 | `EffectorRunState.pending[T]` | internal | `fire_trigger(T)` while running | `True`; a second fire leaves it `True` and logs (D1) |
 | `runs[T]` / `pending[T]` | internal | last row of `T` done | if `pending[T]`: new cursor at row 0, `pending[T] = False`; else `runs[T] = None` |
-| `runs[T]` | internal | row reached, condition effector readback `None` | cursor unchanged, `waiting_since_sim` set once; after `EFFECTOR_CONDITION_READBACK_WAIT_S` the row is skipped (D3) |
+| `runs[T]` | internal | row reached, explicit condition's effector readback `None` | cursor unchanged, waiting-since set once; after `EFFECTOR_CONDITION_READBACK_WAIT_S` the row is **skipped** (D3) |
+| `runs[T]` | internal | row reached, implicit self-check's own readback `None` (R12) | cursor unchanged, waiting-since set once; after `EFFECTOR_CONDITION_READBACK_WAIT_S` the row **writes** (opposite of the explicit-condition timeout above) |
 | `commanded_values[E]` | internal | successful write of `E` | equals that row's value name; failed write leaves it unchanged (D9) |
 | `GuidanceUnitState.*_observed` | **external** (`cockpit_switch` feed) | any sample | refreshed **before** `advance` this poll (D3); `None` leaves prior value (unchanged posture) |
 | `crew_console.on_ground` | **external** (AGL) | True→False | `fire_trigger(TAKEOFF)` called exactly once this poll; no latch (D2) |
@@ -553,7 +572,7 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
   `source_element`, returns `(registry, errors)`; never raises on bad content (D5).
 - `body-layer/src/belief/effector_sequences.py` (new) — parses `*.md`, returns
   `(sequences_by_key, errors)`.
-- `body-layer/config/sequences/effectors.toml`, `body-layer/config/sequences/mi-24p-copilot-{takeoff,observ-on,observ-off,weapons-arm,weapons-safe}.md` (new).
+- `body-layer/config/sequences/mi-24p/effectors.toml`, `body-layer/config/sequences/mi-24p/copilot-{takeoff,observ-on,observ-off,weapons-arm,weapons-safe}.md` (R13 per-aircraft layout, moved from a flat `config/sequences/` during Stage 2).
 
 **Stage 2 (engine + wiring)**
 - `body-layer/src/belief/effector_engine.py` (new) — `EffectorTrigger` (TAKEOFF, OBSERV_ON,

@@ -535,3 +535,238 @@ reserved a schema extension for. `effector_registry.py` therefore only ever read
 by `index` (default 0) and never needed to special-case a second command slot — worth knowing if
 a later registry entry (e.g. a Mi-8 or a pilot-role control) ever does hit one of those two
 shapes.
+
+## Stage 2 — engine, wiring, error surfacing, 2026-10-23
+
+Branch `feature/effector-sequences`, built on top of `056b76b5` (Stage 1 review approval) plus
+`main`'s `fix/guidance-ready-edge` merged in first (coordinator-directed; see merge commit
+"Merge main into feature/effector-sequences: guidance-ready edge fix"). Three mid-task design
+corrections arrived from the coordinator and are folded in below rather than narrated separately:
+R12 (the implicit self-check replacing the takeoff file's `!= on` conditions), R13 (per-aircraft
+`config/sequences/<dir>/` layout, first-wins collision), and the `get_spu8_state_latest` wiring.
+
+### Files Changed
+
+- `body-layer/src/belief/effector_engine.py` (new) — `EffectorTrigger`, `EffectorRunState`,
+  `fire_trigger`, `advance`, `EFFECTOR_SEQUENCE_STEP_DELAY_S` (D10 rename of `GUIDANCE_UNIT_
+  SWITCH_DELAY_S`), `EFFECTOR_CONDITION_READBACK_WAIT_S` (new tunable, D3). Implements D1
+  (per-trigger queue), D3/R12 (explicit-condition vs. implicit-self-check, opposite timeout
+  outcomes), D4 (re-runs never re-speak — unaffected, "Guidance unit ready" stays in
+  `crew_console`), D8 (wait rows), D9 (fire-order write blocking across triggers within one poll).
+- `body-layer/src/belief/sight_effector.py` — rewritten: deleted `_POWER_UP_SWITCHES`, the three
+  device-id constants, `GUIDANCE_UNIT_SWITCH_DELAY_S`, `start_power_up`, `advance_power_up`,
+  `write_observ`, `write_weapon_safety`, and `GuidanceUnitState`'s `takeoff_seen`/`power_up_stage`/
+  `next_switch_due_sim`/`observ_commanded`/`weapon_safety_commanded` fields. Kept: the readback
+  fields, `sight_ready`, `refresh_readback`, `write_sight_target`.
+- `body-layer/src/belief/crew_console.py` — `CONFIG_ERROR_LINE` constant, `config_error_pending`
+  field (preserved across `reset_for_new_mission`, D6), `drain_config_error` (same shape as
+  `drain_guidance_unit_ready`).
+- `body-layer/src/aircraft_client.py` — `get_spu8_state_latest()` (`GET /spu8/state`).
+- `body-layer/src/logger.py` — `_load_effector_config()` (new: loads the registry/sequences,
+  aggregates both loaders' errors into one console banner + `logger.error` per finding, logs
+  `EffectorDef.unverified` names once at `INFO`); `ConsolePerceptionRunner.effector_state`
+  (`EffectorRunState`, one construction site); the poll block rewritten per the plan's own
+  ordering (refresh readback → takeoff edge fires → transitions fire → `advance` → ready edge →
+  `drain_config_error`); `_run_crew_text_poll_loop` gained `effector_sequences`/`effector_registry`
+  parameters (loaded once in `main()`, passed through, `None`-tolerant); `main()`'s `--crew-text`
+  branch calls `_load_effector_config()` before constructing `CrewConsole`.
+- `body-layer/src/sight_trace_writer.py` — `write_poll`/`_row` gained `commanded_values:
+  Mapping[str, str] | None = None`; `observ_commanded` now reads `(commanded_values or {}).get(
+  "observ") == "on"` instead of `GuidanceUnitState.observ_commanded` (removed).
+- `aircraft-layer/src/schema/cockpit_switch.py` — `to_api_dict()` gained `"args"`: the same six raw
+  switch values re-keyed by DCS arg number as a string (R7). No `Export.lua` change — purely a
+  derived view of data the schema already carries.
+- Per-aircraft layout move (R13, `git mv`): `config/effectors-raw.toml` →
+  `config/effectors-raw/mi-24p.toml`; `config/sequences/effectors.toml` →
+  `config/sequences/mi-24p/effectors.toml`; `config/sequences/switch-reference.md` →
+  `config/sequences/mi-24p/switch-reference.md`; `config/sequences/mi-24p-copilot-<trigger>.md` →
+  `config/sequences/mi-24p/copilot-<trigger>.md` (filename prefix dropped, directory carries it).
+  `body-layer/src/belief/effector_registry.py` gained `aircraft_dir_name` (the one place the
+  `aircraft` header value lower-cases to a directory name) and `load_registries_by_aircraft`;
+  `load_registry`'s collision rule changed from "drop both" to "first (TOML file order) wins,
+  reject the rest" (R13). `body-layer/src/belief/effector_sequences.py`'s `load_sequences` now
+  takes `sequences_dir`'s *parent* plus `registries: Mapping[str, Mapping[str, EffectorDef]]`
+  keyed by aircraft directory, and treats an `aircraft` header that does not map to its own
+  directory as a file error.
+- `body-layer/tools/generate_effector_registry.py` — `_DEFAULT_OUT_PATH` → `config/effectors-raw/
+  mi-24p.toml`. `body-layer/tools/render_switch_reference.py` — its three path constants moved
+  under `config/sequences/mi-24p/`.
+- `body-layer/config/sequences/mi-24p/copilot-takeoff.md` — the four rows' `!= on` conditions
+  removed (R12); no other sequence file needed a content change (OBSERV/weapons rows were already
+  unconditional).
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`): the two
+  new `belief.effector_engine.*` keys, `GUIDANCE_UNIT_SWITCH_DELAY_S` gone.
+- `plans/effector-sequences/plan.md` — R12 (implicit self-check), R13 (per-aircraft layout,
+  first-wins collision) rows added; the file-format worked example, D2/D3/R4/R5 text, and every
+  path reference updated to match.
+
+### Tests Added
+
+- `body-layer/tests/test_effector_engine.py` (new, 15 tests) — pure-function coverage of the
+  engine against hand-built `SequenceFile`/`EffectorDef` fixtures (no markdown parsing, no
+  wiring): `fire_trigger`'s idle/pending/no-op/independent-queue transitions (D1); cold takeoff
+  writes four switches in order with `EFFECTOR_SEQUENCE_STEP_DELAY_S` spacing; R12's implicit
+  self-check — all-already-on writes nothing, one-switch-off-among-four writes exactly one,
+  unknown readback waits then writes on timeout; an explicit `condition`'s *opposite* timeout
+  outcome (skip, not write) and its immediate-skip-on-known-false case; D8 wait rows overriding
+  the gap for one transition; D9's own worked example (`test_d9_failed_on_then_off_ends_off`) —
+  fire ON then OFF, a failing client blocks both, then both land in fire order once it clears,
+  ending "off"; the pending-restart same-poll-execution case; a trigger with no loaded sequence
+  firing into nothing.
+- `body-layer/tests/test_logger.py` — six existing poll-loop tests reworked (not merely patched to
+  compile) for the API change: `test_takeoff_runs_the_guidance_unit_power_up_sequence_through_
+  the_real_poll_loop` now seeds a known-off `"args"` readback so the cold-takeoff spacing test is
+  real rather than relying on the unknown-timeout path; `test_guidance_unit_ready_is_silent_on_a_
+  warm_air_start_through_the_real_poll_loop` and the power-cycle test now seed all-on readback and
+  the former asserts zero writes; `test_second_takeoff_in_the_same_mission_does_not_rerun_the_
+  power_up` rewritten to actually exercise R4/R12 (D2's removed `takeoff_seen` latch meant this
+  test previously proved nothing once the fields it inspected were gone) — drives both the
+  airborne-first-sample edge and a real land/takeoff edge, asserts zero writes across both;
+  `test_observ_and_weapons_safety_write_through_the_real_poll_loop` seeds/updates readback between
+  commands so each self-check sees a real mismatch rather than stalling on sim-time that the
+  test's own polling loops never advance; `test_slew_trace_is_written_from_the_real_poll_loop`
+  likewise. New: `test_load_effector_config_round_trips_the_real_committed_files`,
+  `test_load_effector_config_logs_the_unverified_effector` (Stage 1 review follow-up — confirms
+  `cplr_distr`'s `unverified` flag is no longer a dead field),
+  `test_load_effector_config_aggregates_errors_from_both_loaders` (D5's own "pulling from BOTH
+  loaders' error lists"),
+  `test_load_effector_config_missing_own_aircraft_directory_is_an_error`,
+  `test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once_through_the_real_
+  poll_loop` (drives the real loop: intercom closed → no speech; intercom open but silenced → no
+  speech; unsilenced → speaks exactly once), `test_config_error_pending_survives_a_mission_
+  restart` (unit-level companion to the generic preserve-set check below).
+- `body-layer/tests/test_mission_start_reset.py` — `config_error_pending` added to
+  `_CREW_CONSOLE_PRESERVE`, so the file's own generic "every non-preserved field resets, every
+  preserved field survives" sweep now also covers this field (D6).
+- `body-layer/tests/test_sight_effector.py` — rewritten: every test for the deleted sequencing
+  functions removed; the readback/`sight_ready`/`write_sight_target`/construction-site tests kept
+  unchanged (they test code that did not move).
+- `body-layer/tests/test_sight_trace_writer.py` — `test_observ_commanded_and_observed_are_carried_
+  through` updated to pass `commanded_values={"observ": "on"}` instead of constructing a
+  `GuidanceUnitState` with the removed field; new
+  `test_observ_commanded_defaults_to_false_when_none_given`.
+- `body-layer/tests/test_effector_registry.py` — `test_colliding_device_cmd_arg_drops_both_
+  entries` renamed/rewritten to `test_colliding_device_cmd_arg_first_wins` (R13); new
+  `test_aircraft_dir_name_lower_cases_only`,
+  `test_load_registries_by_aircraft_discovers_the_real_mi24p_directory`,
+  `test_load_registries_by_aircraft_isolates_a_bad_aircraft_directory`,
+  `test_load_registries_by_aircraft_missing_sequences_dir_is_empty`.
+- `body-layer/tests/test_effector_sequences.py` — every existing test's fixture path updated to
+  the per-aircraft directory shape (`tmp_path / "mi-24p" / ...` + a `_REGISTRIES` dict keyed by
+  directory, R13); `test_takeoff_file_reproduces_todays_switch_order`'s condition assertion
+  changed to `row.condition is None` (R12); new
+  `test_aircraft_header_not_matching_its_own_directory_is_a_file_error`,
+  `test_bad_registry_in_one_aircraft_directory_does_not_affect_another`.
+- `aircraft-layer/tests/test_cockpit_switch.py` — both `to_api_dict()` assertion dicts gained the
+  `"args"` key.
+- `body-layer/tests/test_aircraft_client.py` — `test_get_spu8_state_latest_returns_parsed_dict`,
+  `test_get_spu8_state_latest_raises_on_unreachable_host`.
+- `body-layer/tests/test_render_switch_reference.py` — docstring/message text updated to the new
+  paths; the test itself is path-independent (shells out to the tool), unchanged mechanically.
+
+### Design choices not spelled out verbatim in the plan
+
+- **D9's "fire order" is tracked as a dedicated `EffectorRunState.fire_order` tuple**, not derived
+  from dict-iteration order of `runs`. `fire_trigger` appends (de-duplicating any prior entry) the
+  trigger it just started running; `advance` filters it down to currently-running triggers each
+  call. This was necessary because Python's dict preserves *insertion* order, and `runs` entries
+  get removed and re-added across a trigger's own run/pending/complete/restart cycle in ways that
+  would otherwise scramble the original fire order.
+- **"One write per trigger per poll" falls out of the due-time gate, not an explicit `break`.**
+  After a successful write, the cursor's `next_due_sim` is set to the future
+  (`now_sim + EFFECTOR_SEQUENCE_STEP_DELAY_S`), and the loop `continue`s rather than `break`s — the
+  very next iteration's own due-time check stops further processing for that trigger this poll,
+  *except* when the write just completed the sequence and a pending re-fire restarts it with a
+  fresh cursor due immediately (D1: "same poll's advance may execute it"), which is exactly the
+  one case the plan's Co-moving Fields table says may write twice in one poll. An earlier draft
+  used an explicit `break` after every write and failed `test_pending_restart_may_execute_the_
+  same_poll` and `test_cold_takeoff_writes_four_switches_in_order_with_spacing` (the latter because
+  completion detection — removing the trigger from `runs` — never got a chance to run in the same
+  call as the final write, so the test's immediate-removal assertion failed one call early).
+- **R12's two distinct `_RunCursor` wait fields** (`condition_waiting_since_sim`,
+  `self_waiting_since_sim`) are deliberately separate rather than one shared field — an explicit
+  `condition` gate and the implicit self-check on the *same* row can each need their own
+  independent "how long have I waited" clock, and sharing one field would let the self-check's
+  timer silently inherit a stale value left over from the condition gate resolving in an earlier
+  poll. No shipped sequence file exercises both on one row this cut; this is forward-looking
+  correctness, not something a current test can observe going wrong without a synthetic fixture
+  (which `test_effector_engine.py` does build, separately, for each gate).
+- **The coordinator-directed design change (explicit condition cells reserved for genuine
+  cross-switch dependencies; implicit self-check for "is this switch already there")** changes
+  the *unknown-readback timeout's* outcome depending on which gate is waiting: an explicit
+  `condition`'s timeout **skips** (D3, unchanged); the implicit self-check's timeout **writes**
+  (R12, new) — because an absolute-value write is harmless if the switch secretly already had that
+  value, whereas skipping a cross-switch *dependency* on no information risks firing a row whose
+  precondition was never actually confirmed. This asymmetry is deliberate and tested explicitly
+  (`test_explicit_condition_unknown_readback_skips_on_timeout` vs.
+  `test_unknown_readback_waits_then_writes_on_timeout`).
+- **`_load_effector_config()` surfaces errors from *every* aircraft directory it finds**, not only
+  this runtime's own (`"mi-24p"`), even though only one aircraft exists today — R13's own text
+  ("ready to be aircraft specific... while we're only working with Mi-24P at this time") reads as
+  wanting the mechanism in place now, and a stray second directory's bad registry being silently
+  invisible in the startup banner seemed like the wrong failure mode to build in deliberately.
+- **The registry-cascade root-cause-loss tradeoff the Stage 1 review flagged as "re-verify once
+  the banner exists" is now checkable and holds**: a catastrophically bad raw-dump/curated file
+  still collapses to one `RegistryError` naming the real cause (Stage 1's own mechanism,
+  unchanged), and that one error *is* now visible first in the console banner alongside whatever
+  per-sequence "unknown effector" noise cascades from it — `test_load_effector_config_aggregates_
+  errors_from_both_loaders` exercises the aggregation path directly (with faked loader results,
+  not the real files, since manufacturing a genuinely-corrupt committed file was not attempted).
+- **`FakeConsoleAircraftClient` (test_logger.py) does not auto-synthesize `"args"` from recorded
+  writes.** Readback stays entirely test-driven (`aircraft_client.cockpit_switch_state = {...}`),
+  matching the existing convention for `ready_lamp`/`align_lamp` etc. — a test that needs a switch
+  to read differently after a write updates the dict itself between commands (see `test_observ_
+  and_weapons_safety_write_through_the_real_poll_loop`'s mid-test `args["673"] = 1.0` update).
+  Auto-synthesis would have needed a `(device, cmd) -> arg` table duplicated inside the test fake
+  and was judged not worth it for the number of call sites that actually need it.
+
+### Checks
+
+(both touched subprojects)
+
+- `body-layer/`:
+  - `ruff format --check src tests tools` — pass (180 files)
+  - `ruff check src tests tools` — pass
+  - `cd body-layer && .venv/bin/mypy src` — pass (74 source files)
+  - `cd body-layer && .venv/bin/mypy tools` — pass (9 source files)
+  - `pytest -q` (plain, no `-p no:randomly` needed — `pytest-randomly` was uninstalled from the
+    shared venv mid-task by coordinator direction) — 2549 passed, 4 xfailed; re-run twice,
+    identical. The 11 new/reworked poll-loop and `_load_effector_config` tests confirmed
+    individually by name in `-v` output (not a filtered `-k` summary count).
+- `aircraft-layer/`:
+  - `ruff format --check src tests` — pass (75 files)
+  - `ruff check src tests` — pass
+  - `cd aircraft-layer && .venv/bin/mypy src` — pass (27 source files)
+  - `pytest tests -q` — 533 passed
+
+### Pre-existing, not touched
+
+- `tests/test_aircraft_client.py:89` (`body-layer`) has a pre-existing `mypy` error (`Item "None"
+  of "list[str] | None" has no attribute "append"`, in `_make_handler`'s `triggered_searches`
+  default) — confirmed pre-existing by stashing every file this stage changed and re-running
+  `mypy` against the unmodified tip; not touched, outside this stage's scope.
+- `body-layer/tests/test_logger.py` carries 24 pre-existing `mypy` findings (fake-client structural
+  typing against `AircraftLayerClient`, a few `Non-overlapping equality check`s, two `Module
+  "logger" does not explicitly export attribute` complaints) — confirmed identical, same line
+  numbers (modulo the shift from this stage's own insertions), against the unmodified tip via the
+  same stash-and-compare method. Not touched.
+- `BL-B92` (pytest-randomly order-dependent `test_connection_reporter_*` tests) is moot for this
+  stage's own check run since the plugin was uninstalled mid-task; not re-investigated.
+
+### Comments pruned
+
+- `body-layer/src/belief/sight_effector.py` — the module was rewritten wholesale rather than
+  edited in place, since every paragraph describing the deleted power-up/OBSERV/weapons-safety
+  sequencing (the four-switch order, the device/cmd constants' provenance, `write_observ`/`write_
+  weapon_safety`'s own docstrings) was now describing code that no longer exists. ~90 lines of
+  stale "what the sequencing does" content removed; the surviving readback/`sight_ready`/`write_
+  sight_target` docstrings carry forward unchanged (they describe code that did not move).
+  `GuidanceUnitState`'s own docstring lost its `takeoff_seen`/`power_up_stage`/`observ_commanded`/
+  `weapon_safety_commanded` paragraphs for the same reason.
+- `body-layer/src/logger.py` — the two OBSERV-on/off write blocks' comments ("the real cockpit
+  write (arg 886), issued exactly once per accepted request... Raises `AircraftLayerError`...")
+  were pruned and replaced with a one-line pointer to `advance_effectors`, since the write itself
+  moved there; the surrounding hands-busy-suppression comment (still true, still this module's own
+  job) was kept. The takeoff-edge block's comment describing `advance_guidance_unit_power_up`'s
+  own readback-consumer list was replaced with D2/D4/R12's current reasoning rather than kept
+  alongside dead code.

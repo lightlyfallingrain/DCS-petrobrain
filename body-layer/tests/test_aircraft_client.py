@@ -33,6 +33,16 @@ _F10_COMMANDS_BODY = [
     {"command": "watch_nearest", "received_wall_clock_s": 999.0},
     {"command": "cancel_task", "received_wall_clock_s": 1000.0},
 ]
+_SPU8_STATE_BODY = {
+    "t": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "net1": 1.0,
+    "ics_power": 1.0,
+    "vol": 0.8,
+    "net1_on": True,
+    "ics_power_on": True,
+    "gate_open": True,
+}
 
 
 def _make_handler(
@@ -54,6 +64,8 @@ def _make_handler(
                 self._respond(200, _PETROVICH_WHEEL_BODY)
             elif self.path == "/f10_commands/poll":
                 self._respond(200, _F10_COMMANDS_BODY)
+            elif self.path == "/spu8/state":
+                self._respond(200, _SPU8_STATE_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -239,3 +251,18 @@ def test_get_f10_commands_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.get_f10_commands()
+
+
+def test_get_spu8_state_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_spu8_state_latest()
+
+    assert result == _SPU8_STATE_BODY
+
+
+def test_get_spu8_state_latest_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.get_spu8_state_latest()

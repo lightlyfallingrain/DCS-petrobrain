@@ -8,12 +8,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from belief.effector_registry import (
-    DEFAULT_CURATED_PATH,
-    DEFAULT_RAW_DUMP_PATH,
+    DEFAULT_RAW_DUMP_DIR,
+    DEFAULT_SEQUENCES_DIR,
     EffectorDef,
     RegistryError,
+    aircraft_dir_name,
+    load_registries_by_aircraft,
     load_registry,
 )
+
+_DEFAULT_CURATED_PATH = DEFAULT_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
+_DEFAULT_RAW_DUMP_PATH = DEFAULT_RAW_DUMP_DIR / "mi-24p.toml"
 
 _GOOD_RAW_DUMP = """
 [elements.MISSILE-POWER-PTR]
@@ -159,7 +164,10 @@ def test_index_out_of_range_drops_only_that_entry(tmp_path: Path) -> None:
     assert "out of range" in errors[0].reason
 
 
-def test_colliding_device_cmd_arg_drops_both_entries(tmp_path: Path) -> None:
+def test_colliding_device_cmd_arg_first_wins(tmp_path: Path) -> None:
+    """R13 (user: "keep first"), superseding Stage 1's "drop both" --
+    the entry declared earlier in the curated TOML file survives; the
+    later one is dropped and reported, naming the winner."""
     curated = _write(
         tmp_path / "curated.toml",
         _GOOD_CURATED
@@ -169,14 +177,13 @@ def test_colliding_device_cmd_arg_drops_both_entries(tmp_path: Path) -> None:
 
     registry, errors = load_registry(raw, curated)
 
-    assert "missile_power" not in registry
+    assert "missile_power" in registry
     assert "missile_power_dup" not in registry
-    assert set(registry) == {"observ", "weapon_safety"}
-    collision_names = {e.name for e in errors}
-    assert collision_names == {"missile_power", "missile_power_dup"}
-    for error in errors:
-        assert error.scope == "entry"
-        assert "collides with" in error.reason
+    assert set(registry) == {"missile_power", "observ", "weapon_safety"}
+    assert len(errors) == 1
+    assert errors[0].scope == "entry"
+    assert errors[0].name == "missile_power_dup"
+    assert "already claimed by 'missile_power'" in errors[0].reason
 
 
 def test_unreadable_raw_dump_disables_the_whole_registry(tmp_path: Path) -> None:
@@ -228,7 +235,7 @@ def test_unparsable_curated_file_disables_the_whole_registry(tmp_path: Path) -> 
 
 
 def test_round_trip_against_the_committed_registry() -> None:
-    registry, errors = load_registry(DEFAULT_RAW_DUMP_PATH, DEFAULT_CURATED_PATH)
+    registry, errors = load_registry(_DEFAULT_RAW_DUMP_PATH, _DEFAULT_CURATED_PATH)
 
     assert errors == []
     expected = {
@@ -249,3 +256,70 @@ def test_round_trip_against_the_committed_registry() -> None:
     assert registry["cplr_distr"].unverified is True
     assert registry["missile_power"].unverified is False
     assert registry["weapon_safety"].values == {"armed": 1.0, "safe": 0.0}
+
+
+# --- aircraft_dir_name / load_registries_by_aircraft (R13) ------------------
+
+
+def test_aircraft_dir_name_lower_cases_only() -> None:
+    assert aircraft_dir_name("Mi-24P") == "mi-24p"
+    assert aircraft_dir_name("MI-24P") == "mi-24p"
+    assert aircraft_dir_name("mi-24p") == "mi-24p"
+
+
+def test_load_registries_by_aircraft_discovers_the_real_mi24p_directory() -> None:
+    by_aircraft = load_registries_by_aircraft()
+
+    assert set(by_aircraft) == {"mi-24p"}
+    registry, errors = by_aircraft["mi-24p"]
+    assert errors == []
+    assert set(registry) == {
+        "missile_power",
+        "cplr_distr",
+        "sight_power",
+        "scho_pwr_b1",
+        "observ",
+        "weapon_safety",
+    }
+
+
+def test_load_registries_by_aircraft_isolates_a_bad_aircraft_directory(
+    tmp_path: Path,
+) -> None:
+    """A bad registry under one aircraft directory must not affect a
+    good registry under a second one (R13: "each aircraft directory is
+    independent")."""
+    sequences_dir = tmp_path / "sequences"
+    raw_dump_dir = tmp_path / "raw"
+    raw_dump_dir.mkdir()
+    sequences_dir.mkdir()
+
+    good_dir = sequences_dir / "good-aircraft"
+    good_dir.mkdir()
+    _write(good_dir / "effectors.toml", _GOOD_CURATED)
+    _write(raw_dump_dir / "good-aircraft.toml", _GOOD_RAW_DUMP)
+
+    bad_dir = sequences_dir / "bad-aircraft"
+    bad_dir.mkdir()
+    _write(bad_dir / "effectors.toml", "this is not [valid toml")
+    _write(raw_dump_dir / "bad-aircraft.toml", _GOOD_RAW_DUMP)
+
+    by_aircraft = load_registries_by_aircraft(sequences_dir, raw_dump_dir)
+
+    assert set(by_aircraft) == {"good-aircraft", "bad-aircraft"}
+    good_registry, good_errors = by_aircraft["good-aircraft"]
+    assert good_errors == []
+    assert set(good_registry) == {"missile_power", "observ", "weapon_safety"}
+    bad_registry, bad_errors = by_aircraft["bad-aircraft"]
+    assert bad_registry == {}
+    assert len(bad_errors) == 1
+    assert bad_errors[0].scope == "curated-file"
+
+
+def test_load_registries_by_aircraft_missing_sequences_dir_is_empty(
+    tmp_path: Path,
+) -> None:
+    by_aircraft = load_registries_by_aircraft(
+        tmp_path / "does-not-exist", tmp_path / "raw"
+    )
+    assert by_aircraft == {}

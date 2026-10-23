@@ -1,11 +1,18 @@
-"""Renders `body-layer/config/sequences/switch-reference.md`, a
+"""Renders `body-layer/config/sequences/mi-24p/switch-reference.md`, a
 human-readable reference of every Mi-24P control the generated raw dump
-(`config/effectors-raw.toml`) knows about, for someone writing or
-editing a sequence file in `config/sequences/*.md` -- user direction,
-2026-10-23 (`plans/effector-sequences/explore-notes.md`'s "File
-locations and the switch reference"): *"build a full list of switches
-that are available. Save to file so I can reference it when
+(`config/effectors-raw/mi-24p.toml`) knows about, for someone writing or
+editing a sequence file in `config/sequences/mi-24p/*.md` -- user
+direction, 2026-10-23 (`plans/effector-sequences/explore-notes.md`'s
+"File locations and the switch reference"): *"build a full list of
+switches that are available. Save to file so I can reference it when
 building/modifying sequence files."*
+
+**Per-aircraft paths (R13, Stage 2, 2026-10-23)**: still hard-coded to
+the one aircraft that exists (`"mi-24p"`), same posture as `generate_
+effector_registry.py`'s own `--scripts-dir` default -- adding a second
+aircraft directory is a path-constant change here, not a redesign,
+since this tool already takes its three paths as module constants
+rather than deriving them from a scan.
 
 Same generator convention as `tools/generate_defaults.py`: a static
 read of the two already-committed TOML files (never executes anything
@@ -21,7 +28,7 @@ gives `generate_defaults.py`.
 Usage (from `body-layer/`):
 
     python tools/render_switch_reference.py            # check only, exit 1 if stale
-    python tools/render_switch_reference.py --write    # regenerate config/sequences/switch-reference.md
+    python tools/render_switch_reference.py --write    # regenerate config/sequences/mi-24p/switch-reference.md
 """
 
 from __future__ import annotations
@@ -36,9 +43,11 @@ from pathlib import Path
 from typing import Any
 
 _BODY_LAYER_ROOT = Path(__file__).resolve().parent.parent
-_RAW_DUMP_PATH = _BODY_LAYER_ROOT / "config" / "effectors-raw.toml"
-_CURATED_PATH = _BODY_LAYER_ROOT / "config" / "sequences" / "effectors.toml"
-_OUTPUT_PATH = _BODY_LAYER_ROOT / "config" / "sequences" / "switch-reference.md"
+_RAW_DUMP_PATH = _BODY_LAYER_ROOT / "config" / "effectors-raw" / "mi-24p.toml"
+_CURATED_PATH = _BODY_LAYER_ROOT / "config" / "sequences" / "mi-24p" / "effectors.toml"
+_OUTPUT_PATH = (
+    _BODY_LAYER_ROOT / "config" / "sequences" / "mi-24p" / "switch-reference.md"
+)
 
 #: Matches the raw dump's own `# Source: ..., DCS <build>` header comment
 #: (`generate_effector_registry.py`'s own render), so this tool never
@@ -210,7 +219,7 @@ def main() -> int:
     parser.add_argument(
         "--write",
         action="store_true",
-        help="write config/sequences/switch-reference.md; without this, only check staleness",
+        help="write config/sequences/mi-24p/switch-reference.md; without this, only check staleness",
     )
     args = parser.parse_args()
 

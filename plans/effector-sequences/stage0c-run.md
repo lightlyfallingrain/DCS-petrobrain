@@ -1,5 +1,12 @@
 # Stage 0c — the real generator run, Windows DCS machine
 
+**Path moved during Stage 2, 2026-10-23 (plan.md R13)**: every `body-layer/config/
+effectors-raw.toml` mention below is the path as it stood for this Stage 0c run and is accurate
+for that run; the real dump now lives at `body-layer/config/effectors-raw/mi-24p.toml`, moved
+by `git mv` when Stage 2 switched to a per-aircraft directory layout. Not rewritten below —
+this card is a record of what was actually run and sent back, per `docs/PROCESS.md`'s "superseded,
+not deleted."
+
 Stage 0b (the generator, its fixtures, and its tests) is built and merged onto
 `feature/effector-sequences` as of `40641c973ca010605cac2c324722a47ef3f156d9`, DoD-passed
 (`plans/effector-sequences/dod-check-stage0.md`). Stage 0c is the one step that must run on the
