@@ -1,322 +1,351 @@
 # BL-B90 — configurable cockpit effector sequences
 
-Precedence: `plans/effector-sequences/explore-notes.md` (user's own words) >
-`docs/concept/configurable-cockpit-effector.md` ("concept, not final truth") >
-`body-layer/ROADMAP/BL-B90.md` > this plan's own text.
+Precedence: `plans/effector-sequences/explore-notes.md` (user's own words; its **2026-10-23**
+section outranks everything below) > `docs/concept/configurable-cockpit-effector.md` ("concept,
+not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
+
+**Revision history**
+
+- 2026-10-21, first pass `c741149e`, revised `ca8760d9` (registry = whole Mi-24P, generated from
+  ED files; sequenced after BL-B80).
+- **2026-10-23, this revision (plan only, no code)** — fitted to the code after `[[BL-B80]]` v2
+  merged (`a2ea382c`), and folds in the user's four 2026-10-23 answers. What changed, in one
+  place:
+
+| # | Was (2026-10-21) | Now (2026-10-23) | Why |
+|---|---|---|---|
+| R1 | Stage 4 "remove `GuidanceUnitState`" | **`GuidanceUnitState` stays, slimmed to readback only** (lamps + observed switches). Its sequencing fields move into the engine. | BL-B80's `SightHead`, `home_phase` derivation and `sight_ready()` read it |
+| R2 | `sight_ready` refreshed from `is_complete(TAKEOFF)` | **`sight_ready` stays `sight_effector.sight_ready(state)` = the real 960 lamp** | BL-B80 v2 replaced "sequence done" with the lamp |
+| R3 | "Guidance unit ready" in the takeoff file's `petrovich-says` | **Stays hard-coded, on a true observed 960 off→on edge**, with a named seam for a future `guidance-unit-ready` trigger | User: *"For now it can be hard coded, but it should really be it's own trigger"* |
+| R4 | Takeoff one-shot per mission | **Every takeoff**; the file's row conditions skip what is already on | User: *"per takeoff, the sequence file will then deal with it not being the first takeoff"* |
+| R5 | Row conditions read **commanded** state (old D3) | **Conditions read the observed cockpit readback** | Commanded state cannot know a hot start, an air start, or a switch the pilot moved by hand — the very cases R4 makes the file handle |
+| R6 | Bad file → refuse to start (explore decision 6, old D2/D3) | **Bad file → log, ignore that file, console banner, one intercom line once the intercom is up** | User decision 3, 2026-10-23 |
+| R7 | Stage 3 = generic watched-args readback, needed for parity | **Not needed for this cut**: BL-B80's existing per-frame `cockpit_switch` feed already carries all six switch args. Stage 3 becomes the last, deferrable stage. Stage 2 adds an arg-keyed view of the existing feed (aircraft-layer Python only, no `Export.lua` change). | Measured from the code: `push_cockpit_switch_state` reads 773/761/885/955/886/673 + 898/960/962 |
+| R8 | Global vs per-trigger queue open | **Per trigger** | User decision 1 |
+| R9 | No acceptance card | **Own short re-flight card** (Stage 3, `/test-card`) | User decision 4 |
+| R10 | Stage 0 placement "Implementer's call" | **Settled**: `body-layer/tools/generate_effector_registry.py`, full spec below | User: build the generator next |
+
+Superseded text that a later reader needs is kept in "Superseded (2026-10-21 text)" at the end,
+not deleted.
 
 ### Goal
 
-Replace BL-B66's hard-coded guidance-unit power-up / OBSERV / weapons-safety-bar switch logic
-(`body-layer/src/belief/sight_effector.py` + its `logger.py` wiring) with a named effector
-registry plus startup-loaded, markdown-table sequence files per (aircraft, role, trigger) — so
-adding or reordering a cockpit switch sequence is a data edit, not a code change — while leaving
-every gating/refusal decision (readiness, armed/safe) in code and leaving the slew loop (`BL-B80`)
-untouched.
-
-**Revised 2026-10-21, two coordinator-relayed decisions after the first pass (`c741149e`), both
-addressed below rather than left as open questions:**
-
-1. **The registry covers every Mi-24P clickable control, generated mechanically, not hand-typed
-   six at a time.** User: *"dcs-bios probably contains all the available switch/effector DCS ids.
-   We could just grab the whole list and create our own .toml file of that. Mi-24 only."* The
-   generator's *source*, decided: *"ED files is better. Use DCS-bios data as reference for what
-   they do, if DCS file does not provide info."* See "Registry scope and source" below — this is
-   no longer an open option, it is how the generator is built.
-2. **Sequencing: `BL-B90` now runs *after* `BL-B80`**, reversing `body-layer/ROADMAP/BL-B90.md`'s
-   current note ("Sequenced before BL-B80"). This is a roadmap-ordering decision, not a code
-   dependency — nothing in this plan's design needs `BL-B80` to exist first, and nothing below
-   assumes it does. This pass is plan-only; the roadmap entry's own ordering note is not edited
-   here and should be reconciled whenever `BL-B90.md`/`BL-B80.md` is next touched.
-
-### What already exists, and what this entry reuses rather than invents
-
-- **The write channel is already fully generic.** BL-B66 Stage 1's `cockpit_switch` op
-  (`Export.lua`'s `handle_cockpit_switch_command`, `aircraft_client.write_cockpit_switch`) writes
-  *any* `(device, cmd, value)` with no allow-list — user direction, 2026-10-21. **This plan needs
-  zero `Export.lua`/aircraft-layer change for the write side.** Only the *readback* side is still
-  a fixed, hard-coded set of six named fields (`CockpitSwitchState`/`push_cockpit_switch_state`),
-  and that is the one piece this plan does have to generalise (Stage 3).
-- **The replace()-only, one-construction-site discipline** `GuidanceUnitState` already follows
-  (plan `plans/9k113-effectors/plan.md`'s "Construction-site check") is reused verbatim for the new
-  `EffectorRunState`.
-- **The tuning-loader pattern** (`src/tuning.py`, lazy singleton resolved once) is the model for
-  how the registry/sequence files are loaded once per process — but see Decision 2 below for why
-  the *failure posture* is deliberately the opposite of `tuning.py`'s "never refuses to start."
-- **The one-shot external-signal shape** `observ_transition`/`weapon_safety_transition` already use
-  on `CrewConsole` (set by a handler, drained once by the poll loop) is unchanged — this plan
-  replaces what the poll loop *does* with that signal (fire a registry trigger instead of writing a
-  hard-coded switch), not the signal mechanism itself.
-- **`render_unable`/`_UNABLE_TEMPLATES`** (`belief/speech.py`) and the existing
-  `"GUIDANCE_NOT_READY"` refusal stay exactly where they are — gating is explicitly staying in code
-  (explore-notes decision 3).
-- **Query results** (`gq.sh`, `memory-search.py`): nothing beyond `explore-notes.md`, the concept
-  doc, and BL-B66/BL-B90's own roadmap entries — no undiscovered prior plan on this ground. The one
-  relevant memory hit, `reviewer`'s `project_terrain_callout_stage5_wiring_gap.md` (3rd occurrence,
-  this same feature's own predecessor entry), is the reason this plan calls out explicit
-  poll-loop-wiring tests in Stage 2/3 rather than trusting the engine's own pure-function tests —
-  see "Risks & Unknowns".
-
-No `investigator` pass is needed: this plan introduces no new DCS-internals claim.
-`GetDevice(0):get_argument_value(arg)` (the generic, device-independent read already used for
-874/876/the six switch args today) is the one read primitive Stage 3 needs, and it is already
-live and confirmed in `Export.lua`.
+Replace BL-B66's hard-coded guidance-unit power-up / OBSERV / weapons-safety-bar switch writes
+with a generated Mi-24P effector registry, a small curated registry of friendly names, and
+startup-loaded markdown-table sequence files per (aircraft, role, trigger) — so adding or
+reordering a cockpit switch sequence is a data edit — while gating/refusals, every readback BL-B80
+consumes, the "Guidance unit ready" line (this cut) and the slew/pointing loop stay in code.
 
 ---
 
-## Registry scope and source — decided, not an open option
+## What already exists, and what this entry reuses rather than invents
 
-**The registry is the full Mi-24P clickable-control surface, not just the six BL-B66 effectors.**
-Generated by a new offline tool, not hand-typed, because the source data already exists in two
-places this project knows about and has already read:
+- **The write channel is already generic.** `cockpit_switch` (`Export.lua`
+  `handle_cockpit_switch_command`, `aircraft_client.write_cockpit_switch`) writes any
+  `(device, cmd, value)`. **Zero `Export.lua` change for this cut.**
+- **The readback already exists for every switch this cut touches** (R7). `push_cockpit_switch_state`
+  reads the six switch args plus the three BL-B80 lamps every frame, sends on change, and
+  `GET /cockpit_switch/latest` serves them. `run_sight_servo` separately reads 886/898 *inside
+  Lua* every frame — that is the slew loop and is **not touched, ever**.
+- **The "is the intercom up" notion already exists**: aircraft-layer `Spu8Cache.gate_state()` /
+  `Spu8Sample.gate_open` (pilot NET-1 377 AND co-pilot ICS power 664), served as
+  `GET /spu8/state` → `"gate_open"`, fail-safe-closed when no sample yet. It is consulted by
+  `AudioPlaybackSender`, which **drops** a line played while the gate is closed — so it cannot be
+  used as a "hold until up" queue by itself. Body-layer does not read it today.
+- **The speech funnel already exists**: `CrewConsole._print` (stdout + overlay + TTS, honours
+  `silenced`). The one-shot "speak this once when a condition holds" shape already exists too:
+  `CrewConsole.drain_guidance_unit_ready(now_sim, *, ready, announced)` — caller passes booleans,
+  `CrewConsole` does not hold runner state. The new error line copies that shape exactly.
+- **A "system error" spoken-line precedent exists**: `WORLD_MODEL_NOT_LOADED_REFUSAL` ("system
+  error, world model not loaded"). The new line follows the same "System error, …" form.
+- **The generator convention exists**: `body-layer/tools/generate_defaults.py` — a dev tool under
+  `body-layer/tools/`, **static parse, never execute** ("AST, not import"), check mode by default,
+  `--write` to regenerate, committed generated file with a DO-NOT-HAND-EDIT header, tested from
+  `body-layer/tests/` by loading the tool with `importlib.util.spec_from_file_location`
+  (`test_generate_defaults_first_sentence.py`). Stage 0 copies all of this.
+- **replace()-only, one-construction-site discipline** for frozen run state, as `GuidanceUnitState`
+  already does.
+- **The one-shot external-signal shape** `observ_transition` / `weapon_safety_transition` on
+  `CrewConsole` is unchanged; the poll loop fires a trigger instead of a hard-coded write.
+- **Gating stays in code**: `_handle_observ_on`'s `sight_ready` gate and "Unable, guidance unit not
+  ready" are untouched.
 
-- **ED's own `Mods/aircraft/Mi-24P/Cockpit/Scripts/{clickabledata.lua, command_defs.lua,
-  devices.lua}`** — the same three files `aircraft-layer/research/mi24p-command-surface.md` was
-  generated from on 2026-09-11, confirmed to carry device/command/draw-argument triples for "501 of
-  the Mi-24P's clickable cockpit controls" (§7) in a small number of structured, parseable forms
-  (`default_2_position_tumb(...)`, `default_3_position_tumb(...)`, `default_axis(...)`,
-  `multiposition_switch(...)`, plus 13 known raw-table-literal elements that generator missed —
-  see "Risks" below).
-- **DCS-Skunkworks' DCS-BIOS, `Mi-24P.lua`** — a third-party community re-mapping of the same
-  control surface, read once already this session
-  (`aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-controls.md`, commit `c5b3fa2d`),
-  **GPL-3.0 licensed** (confirmed from its own `LICENSE` file), and a step behind whichever DCS
-  patch its authors last synced against.
+**Queries run** (`gq.sh`, `memory-search.py`): no prior plan on this ground beyond explore-notes,
+the concept doc and BL-B66/BL-B80. Relevant memory: the four-times-recurring "leaf tested, poll-loop
+wiring not" defect (`reviewer/project_terrain_callout_stage5_wiring_gap.md`,
+`dod/project_untested_wiring_pattern_caught_at_reviewer_not_dod.md`), and the poll-loop test recipe
+(`implementer/feedback_poll_loop_sim_time_integration_tests.md` — note its trap 2: `on_ground`
+defaults `True`, so an airborne first sample is a takeoff edge; see Risks).
 
-**Decided (user, 2026-10-21, verbatim): *"ED files is better. Use DCS-bios data as reference for
-what they do, if DCS file does not provide info."*** So:
+**No `investigator` pass.** The only DCS-internals unknowns are the exact Lua forms in ED's cockpit
+scripts, which no Mac-side role can read (the files exist only on the Windows DCS machine — see
+Stage 0). Stage 0 is designed fail-closed so the first real run reports any form it does not
+handle, and Stage 0a is a read-only recon step on that machine.
 
-- **The generator reads only ED's own three files.** It never parses, imports, or vendors any part
-  of DCS-BIOS — not as a build input, not as a committed reference copy. This keeps the registry
-  **DCS-native** (this project's standing preference — `project_dcs_native_extraction_preference`
-  memory — generalised from terrain/OSM to cockpit controls) and **patch-current by construction**:
-  regenerating against a newer installed DCS tree needs nothing from outside that tree. It also
-  avoids a live licensing question this project has not yet settled (no `LICENSE` file exists yet,
-  and the project intends to go public open source) — a GPL-3.0 dependency, even a read-only one
-  copied into the repo, is a question worth avoiding rather than deciding under time pressure here.
-- **DCS-BIOS is read by a human, by hand, for what a control *does* — never parsed by the
-  generator.** ED's own source gives device/cmd/arg and, usually, a short English label
-  (`_("Sight Power ON/OFF")`) — enough to assign a friendly name and value labels in the curated
-  layer (below) most of the time. When ED's label is missing, ambiguous, or the generator cannot
-  place a control confidently (the known raw-table-literal gap, or a label that collides between
-  seats — see "Risks"), the curated layer's author looks the same device/cmd/arg triple up in
-  DCS-BIOS's own source (already corroborated, 2026-10-21, as correct for every argument this
-  project has committed to so far) to decide what to call it and what its values mean, by reading,
-  never by generating or vendoring.
+### Finding outside this plan's scope — raise before Flight A
 
----
-
-## Affected Modules / Files
-
-**Generator tool (new — Stage 0)**
-
-- A new offline tool, run by hand against a local DCS install (Windows box, or any machine with the
-  Mi-24P module installed — not runnable from this repo's own CI/dev checkout, same "reads the
-  installed tree directly" posture as `dcs-file-investigation`/`investigator`'s own convention).
-  Parses `devices.lua` (device-name → int), `command_defs.lua` (per-device command-name → int), and
-  `clickabledata.lua` (element name → device symbol, command symbol, draw argument, English label,
-  helper-call shape), resolves the symbolic references, and emits **`config/effectors-raw.toml`** —
-  every clickable element DCS exposes for the Mi-24P (both seats), mechanically, with a header
-  comment marking it generated and never hand-edited (`config/defaults.toml`'s own convention).
-  Placement (`aircraft-layer/tools/` vs `body-layer/tools/`) is an Implementer call — it reads
-  aircraft-layer's own domain (the DCS install tree aircraft-layer's other research already reads)
-  but writes into body-layer's `config/`; either is a one-off dev tool, not a runtime import, so it
-  does not touch the module-independence boundary either way.
-- Learns from the already-documented gap rather than reproducing it: `mi24p-command-surface.md`'s
-  own "Known gap" section records that its hand-made 2026-09-11 dump missed 13 of 749 elements
-  because they are raw Lua table literals instead of one of the four `default_*`/`multiposition_
-  switch` helper-call forms. The new generator parses both the helper-call forms **and** the raw
-  table-literal form from its first version, not as a follow-up fix.
-
-**body-layer (new)**
-
-- `src/belief/effector_registry.py` — **new.** Loads and validates **both** registry files (see
-  "File formats" below for the generated/curated split and how they stay in sync): the generated
-  `config/effectors-raw.toml` (every element, keyed by ED's own element name) and the curated
-  `config/effectors.toml` (the small, hand-written set of friendly names this project's sequences
-  actually use, each resolving its device/cmd/arg by `source_element` lookup into the raw table —
-  never duplicating those numbers). Pure, no network I/O.
-- `src/belief/effector_sequences.py` — **new.** Parses `config/effector-sequences/*.md` into
-  `SequenceDef`s keyed by `(aircraft, role, EffectorTrigger)` read from each file's own header
-  table (not from the filename), validated against the loaded curated registry (unknown effector/
-  value name, unknown trigger string, malformed row, duplicate `(aircraft, role, trigger)` across
-  two files) — see "File formats" below for the exact grammar.
-- `src/belief/effector_engine.py` — **new.** The runtime: `EffectorRunState` (frozen,
-  `replace()`-only, one construction site — see Co-moving Fields), `EffectorTrigger` (the code
-  enum, five members this cut), `fire_trigger`, `advance`, `drain_say_lines`, `refresh_readback`,
-  `is_complete(trigger)`. Replaces `sight_effector.py`'s sequencing half (`GuidanceUnitState`,
-  `start_power_up`/`advance_power_up`, `sight_ready`, `write_observ`/`write_weapon_safety`) — see
-  "What moves, what stays" below for the split.
-- `config/effectors-raw.toml` — **new, committed, generated** (never hand-edited — regenerated by
-  the Stage 0 tool, typically after a DCS patch).
-- `config/effectors.toml` — **new, committed, hand-curated.** Small (starts at the six BL-B66
-  effectors, grows one sequence at a time), the file sequence authors actually look at and edit.
-- `config/effector-sequences/mi-24p-copilot-takeoff.md`,
-  `…-observ-on.md`, `…-observ-off.md`, `…-weapons-arm.md`, `…-weapons-safe.md` — **new, committed.**
-  Content reproduces BL-B66's current hard-coded behaviour exactly (same switches, same order, same
-  values, same callout) — see "Behaviour parity" below.
-
-**body-layer (changed)**
-
-- `src/logger.py` — `ConsolePerceptionRunner.guidance_unit_state: GuidanceUnitState` replaced by
-  `effector_state: EffectorRunState`; the takeoff rising-edge block, the OBSERV on/off block, and
-  the weapons-safety block (currently ~L3120–3282, see "What already exists") each shrink to a
-  `fire_trigger(...)` call plus the existing `advance`/`refresh_readback`/`drain_say_lines` calls
-  every poll; `crew_console.sight_ready` is refreshed from `effector_engine.is_complete(TAKEOFF)`
-  instead of `sight_effector.sight_ready(state)`. `_reset_mission_state` gains one new line: resend
-  `set_watch_args` after a mission (re)start (Stage 3) — flagged explicitly because nothing else in
-  the existing reset list touches aircraft-layer-side state, only in-process dataclasses.
-- `src/belief/crew_console.py` — `_handle_observ_on`'s `self.sight_ready` gate is unchanged in
-  *shape* (still a plain bool field refreshed every poll); `_handle_observ_on`/`_handle_observ_off`/
-  `_handle_weapons_armed`/`_handle_weapons_safe`/`_handle_engage` each still set the same one-shot
-  `observ_transition`/`weapon_safety_transition` fields they do today — **no change to this file's
-  public surface**, only to what the poll loop does with those signals.
-- `src/tuning.py` / `config/defaults.toml` — `GUIDANCE_UNIT_SWITCH_DELAY_S` renamed/moved to
-  `belief.effector_engine.EFFECTOR_SEQUENCE_STEP_DELAY_S` (same value `1.0`, same `lo=0.5, hi=5.0`),
-  since it now gates every sequence file's inter-row delay, not only the guidance-unit power-up —
-  regenerate `config/defaults.toml`.
-- `src/belief/sight_effector.py` — shrinks to the Stage 4b slew-telemetry half only:
-  `sight_az_raw`/`sight_elev_raw` readback + `sight_azimuth_raw_to_deg`, carried in a slimmer
-  `SightPositionState` (or kept inline on whatever replaces it — Implementer's naming call). The
-  switch-sequencing half (everything else in the file today) is deleted, not kept as dead code.
-
-**aircraft-layer (Stage 3 only)**
-
-- `dcs-export/Export.lua` — new `"watch_args"` op on the existing inbound command listener
-  (`handle_watch_args_command`): replaces a module-level `watched_args: int[]` table. New
-  `push_watched_args_state(t)`, throttled to its own slower cadence (a `last_watched_args_export_t`
-  gate, same shape as the existing 5 Hz telemetry throttle, but looser — e.g. 1 Hz), reading every
-  arg in `watched_args` via `GetDevice(0):get_argument_value(arg)` generically, change-epsilon per
-  arg (reuse `COCKPIT_SWITCH_EPSILON`'s value), sent as `{"t": ..., "args": {"<arg>": <value>, ...}}`.
-  **874/876 and `push_cockpit_switch_state` are untouched** — Stage 3 only generalises the six
-  switch args' readback, not the sight-position readback `BL-B80` needs per-frame.
-- `src/schema/watched_args.py` — **new.** `WatchedArgsState` (dual-clock provenance +
-  `values: dict[int, float]`), parse/`to_api_dict`.
-- `src/collector/cache.py` — `WatchedArgsCache` (most-recent snapshot, mirrors `TelemetryCache`'s
-  shape).
-- `src/collector/command_sender.py` — `send_watch_args(args: list[int])`.
-- `src/api/server.py` — `POST /command/watch_args` (`{"args": [...]}`), `GET /watched_args/latest`.
-- `src/schema/cockpit_switch.py` — the six named switch fields (`missl_pw`/`cplr_distr`/`sight_pw`/
-  `scho_pw`/`observe`/`weap_safe` and their `*_on` properties) are removed; `sight_az`/`sight_elev`
-  stay. Rename the class if the Implementer judges `CockpitSwitchState` misleading once it only
-  carries sight position — grep every reference first.
-
-**body-layer (Stage 3 only)**
-
-- `src/aircraft_client.py` — `set_watch_args(args: list[int]) -> None` (raises — this is a
-  structural "the watch list must be correct" write, same posture as `write_cockpit_switch`) and
-  `get_watched_args_latest() -> dict[int, float] | None` (swallow-to-`None`, every other `get_*`'s
-  posture).
-- `src/belief/effector_engine.py`'s `refresh_readback` reads this dict (keyed by arg number),
-  maps each arg back to its owning effector name via the registry, and sets `observed_values[name]`
-  (boolean-decided at `>= 0.5`, the existing switch-threshold convention) — **absence leaves the
-  prior value**, same posture `GuidanceUnitState.refresh_readback` already has today.
+**The merged BL-B80 code does not implement BL-B80's own decision 2** ("Guidance unit ready" only on
+an *observed* 960 off→on edge, silent on air starts). `logger.py` calls
+`drain_guidance_unit_ready(ready=sight_ready(state), announced=…)` and `drain_guidance_unit_ready`
+speaks whenever `ready and not announced`. On an air start the first `cockpit_switch` sample
+already has `ready_lamp: true`, so he says "Guidance unit ready" at spawn. Nothing tests the
+air-start case (`test_logger.py`'s ready test starts with the lamp unobserved). The latch is also
+once per mission, so a power-down/re-power never re-announces. **Flight A is an air start**, so
+this will be heard. The fix is small and independent (true edge: previous `ready_observed is False`
+and new `is True`; drop the `guidance_unit_ready_announced` latch), and could go on `main` before
+Flight A. If it has not landed by the time this plan reaches Stage 2, Stage 2 does it, because the
+edge detector is also R3's seam.
 
 ---
 
-## File formats
+## Registry scope and source — decided (2026-10-21, unchanged)
 
-**Registry, generated — `config/effectors-raw.toml`.** One entry per ED clickable element, keyed
-by ED's own element name (stable across regenerations in the way a draw-argument number is not,
-since the name is a Lua table key in source, not a position). Mechanical output of the Stage 0
-generator; a header comment says so and names the DCS build it was generated against (the same
-"regenerate after any DCS update" convention `mi24p-command-surface.md` already states):
+The registry is the full Mi-24P clickable-control surface, generated from ED's own
+`Mods/aircraft/Mi-24P/Cockpit/Scripts/` files. User: *"ED files is better. Use DCS-bios data as
+reference for what they do, if DCS file does not provide info."* So:
+
+- **The generator reads only ED's files.** It never parses, imports or vendors DCS-BIOS (GPL-3.0;
+  this project is CC BY-NC-SA 4.0, `LICENSE.md`, and the two cannot be combined).
+- **DCS-BIOS is read by a person, by hand,** to label a curated entry when ED's own label is
+  missing or ambiguous.
+- **No ED source is committed.** The generated TOML carries derived facts (names, numbers, ED's
+  short English hint strings), the same class of content `aircraft-layer/research/
+  mi24p-command-surface.md` §10 already commits. Test fixtures are **synthetic Lua written for this
+  project** in ED's forms, never copied excerpts.
+
+---
+
+## Stage 0 — the switch-list generator (build next; implementable as written)
+
+### Where the real files are
+
+- **Only on the Windows DCS machine.** `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` (the
+  install listing) confirms, under `Mods/aircraft/Mi-24P/Cockpit/Scripts/`: `devices.lua`,
+  `command_defs.lua`, `clickable_defs.lua`, `clickabledata.lua`, plus per-system command files
+  (`A036_commands.lua`, `Weap_syst_commands.lua`, `main_panel_commands.lua`,
+  `MiscSystems_commands.lua`, `Hydro_system_commands.lua`,
+  `FireExtinguishersInterface_commands.lua`, …) and `Macro_sequencies.lua`.
+- **Not on this Mac**: `$DCS_INSTALL_PATH` is unset here, and `win-mac-sync/from-windows/` holds
+  `elements_defs.lua` and `PKV_init.lua` but none of the four files above.
+- **Paths come only from `DCS_INSTALL_PATH` / `DCS_SAVED_GAMES_PATH`** (user direction,
+  2026-10-23), set on the Windows DCS machine, the same precondition `dcs-file-investigation` uses
+  (`${DCS_INSTALL_PATH:?not on the DCS machine}`). No step, and not the tool, ever searches for
+  the install or hard-codes a path.
+- `Macro_sequencies.lua` is presumably ED's own cold-start macro (switch sequences). Prior art worth
+  a look in Stage 0a, not a parser input.
+
+### Steps, and which machine each runs on
+
+| Step | Where | What |
+|---|---|---|
+| **0a** (recommended, not blocking 0b) | **Windows DCS machine**: a command given to the user, or relayed by the main loop when a Windows session exists | Read-only recon of the exact Lua forms. Output: a dated note `aircraft-layer/research/2026-10-2x-mi24p-clickabledata-forms.md` answering the questions in "Forms the parser must handle". Short quoted snippets are fine in research; no whole-file copies. |
+| **0b** | Mac (Implementer) | Tool, synthetic fixtures, tests. Starts from the forms the research notes already document; folds in 0a's answers when they arrive. |
+| **0c** | **Windows DCS machine** (same channel as 0a) | `--write` run against the installed tree. Returns `body-layer/config/effectors-raw.toml` and the run report. This is the real run: no Mac-side role produces the committed dump (execution-boundary rule, `feedback_full_build_execution`). |
+| **0d** | Mac | Control-point check of the returned dump (below), then commit it on `feature/effector-sequences`. A failing control point blocks Stage 1. |
+
+### Tool
+
+- **Path**: `body-layer/tools/generate_effector_registry.py`. Stdlib only (`argparse`, `re`,
+  `hashlib`, `pathlib`, `json`, `tomllib` for reading the output back in tests). Runs on any
+  Python 3.11+, Windows or WSL; nothing from body-layer's `src/` is imported (it is a file-to-file
+  transform).
+- **Static parse, never execute ED's Lua** (`generate_defaults.py`'s own principle). A small
+  tokenizer (strings incl. `[[…]]`/`[==[…]==]`, numbers, names, punctuation, `--` and `--[[ ]]`
+  comments) plus a recursive-descent reader for the Lua subset ED uses: table constructors,
+  function calls, dotted/indexed names, `_("…")`, unary minus, and the `counter()` idiom. Anything
+  outside that subset inside an `elements[…] =` statement is an **unhandled element**, never
+  guessed.
+- **CLI**:
+
+  ```
+  python tools/generate_effector_registry.py [--scripts-dir <dir>]
+         [--dcs-build <string>] [--output <path>] [--write] [--allow-unhandled]
+  ```
+
+  - **input location**: by default `$DCS_INSTALL_PATH/Mods/aircraft/Mi-24P/Cockpit/Scripts`.
+    If `DCS_INSTALL_PATH` is unset and `--scripts-dir` is not given, exit 1 with
+    "DCS_INSTALL_PATH is not set — not on the DCS machine; pass --scripts-dir to point elsewhere".
+    `--scripts-dir` overrides the variable (tests and fixtures always use it). The tool never
+    searches for an install.
+  - default (no `--write`): parse, print the report to stdout, write nothing. Exit 0 clean,
+    2 if any element is unhandled, 1 on an unreadable input.
+  - `--write`: also write the TOML (default `body-layer/config/effectors-raw.toml`, relative to
+    the tool, `--output` overrides — tests always pass `--output` into `tmp_path`). Refuses to
+    write (exit 2) if any element is unhandled, unless `--allow-unhandled`, in which case the
+    unhandled list goes into the header.
+  - `--dcs-build`: if absent and `DCS_INSTALL_PATH` is set, read the version from
+    `$DCS_INSTALL_PATH/autoupdate.cfg` (that exact file, no walking up); otherwise exit 1 with
+    "pass --dcs-build".
+- **Real-run command** (Windows DCS machine, from the repo checkout's `body-layer/`; both vars
+  already set there):
+
+  ```sh
+  : "${DCS_INSTALL_PATH:?not on the DCS machine}"
+  python tools/generate_effector_registry.py           # report only
+  python tools/generate_effector_registry.py --write   # then write config/effectors-raw.toml
+  ```
+
+### Forms the parser must handle (from the research notes; 0a confirms or corrects)
+
+1. **`devices.lua`**: `devices["NAME"] = counter()` (or `devices.NAME = counter()`), assigned by
+   order of appearance from 1 (`mi24p-command-surface.md` §2/§9). Control points: `WEAP_SYS = 6`,
+   `I9K113 = 7`, `ASP_17V = 16`, `HELPER_AI = 30`, `SPU_8 = 55`, 73 devices total in 2.9.29.
+2. **Command tables**: `<x>_commands = { Name = counter(), … }`, each table restarting at 3001
+   (§9/§10 "all restart at 3001 per device"). **How the restart is written** (a `start_command`
+   constant, a reset of a local, a fresh `counter` per table) is question Q1 for 0a; the tool
+   implements that exact form and fails closed on any other. If `command_defs.lua` pulls in the
+   per-system `*_commands.lua` files (`dofile(LockOn_Options.script_path.."X.lua")` or similar —
+   Q2), the tool follows includes **only to files inside `--scripts-dir`**, and an include it
+   cannot resolve is an error.
+3. **Helper-call elements**: `elements["NAME"] = <helper>(_("hint"), devices.X, x_commands.Y, <arg>, …)`.
+   Known helpers (§7): `default_button`, `default_2_position_tumb`, `default_3_position_tumb`,
+   `default_2_position_small_tumb`, `default_axis`, `default_animated_lever`,
+   `default_blue_cover`, `multiposition_switch`. The tool holds a table
+   `helper name → positions of (hint, device, command, arg)`; positions beyond the fourth are kept
+   verbatim as `helper_args`. An unknown helper name → unhandled, named in the report. Q3 for 0a:
+   each helper's parameter list in `clickable_defs.lua`.
+4. **Raw-table-literal elements** — the 13 the 2026-09-11 dump missed
+   (`mi24p-command-surface.md` "Known gap"; `2026-09-20-dcs-install-detection-deep-read.md`
+   finding 11): `elements["STICK-PTT-PTR"] = { class = {…}, hint = _("…"), device = devices.SPU_8,
+   action = {…, …}, arg = {738, 738}, arg_value = {1.0, 0.5}, arg_lim = {{0.0, 1.0}, {0.0, 0.5}}, … }`.
+   `action`/`arg` may be scalars or lists; lists are kept as lists. Control points: `STICK-PTT-PTR`
+   args `[738, 738]`, `OP-STICK-PTT-PTR` `[856, 856]`, both `arg_value = [1.0, 0.5]`.
+5. **Post-assignment fields**: `elements["NAME"].crew_member_access = {1}` and the same form
+   inside a literal. Absent → recorded as `seat = "default"` (DCS defaults to pilot,
+   `crew_member_access` absent = 0 per the SPU-8 recon) — never silently written as `"pilot"`.
+   `{0}` → `"pilot"`, `{1}` → `"operator"`, `{0, 1}` → `"both"`. Control point: arg 664's element
+   `crew_member_access = {1}`.
+6. **Anything else** at top level of `clickabledata.lua` (loops, locals, function definitions) is
+   **not an element**: counted and listed by line in the report as "statements ignored". Q4 for
+   0a: does any loop create or mutate elements? If so the tool must handle it before 0c.
+7. **Completeness check, fail-closed**: the number of textual `elements[` assignment heads in
+   `clickabledata.lua` must equal emitted + unhandled. 749 expected for 2.9.29.27278; a different
+   count is reported, not an error (patches add controls).
+
+### Output — `body-layer/config/effectors-raw.toml`
+
+Hand-rendered TOML (stdlib cannot write TOML; same as `generate_defaults.py`), sorted by element
+name so a regeneration diffs cleanly:
 
 ```toml
-# GENERATED — do not hand-edit. Regenerate with <generator tool path> against the installed
-# Mi-24P module. Source DCS build: <recorded at generation time>.
+# Generated by body-layer/tools/generate_effector_registry.py. DO NOT HAND-EDIT.
+# Source: Mods/aircraft/Mi-24P/Cockpit/Scripts, DCS 2.9.29.27278
+# Inputs (sha256): devices.lua <hex>, command_defs.lua <hex>, clickabledata.lua <hex>, ...
+# Elements: 749 emitted, 0 unhandled. Statements ignored: <n> (see the run report).
+# Regenerate after any DCS update: device and command numbers are positional.
 
-[elements.WEAP-SIGHT-ON-PFF-PTR]
-device = 16          # devices.ASP_17V
-cmd = 3014            # asp_commands.Power
-arg = 529
-label = "Sight Power ON/OFF"   # ED's own _() string, English, not a friendly name
-shape = "2_position_tumb"
+[elements."WEAP-SIGHT-ON-PFF-PTR"]
+device = 16
+device_name = "ASP_17V"
+cmds = [3014]
+cmd_names = ["asp_commands.Power"]
+args = [529]
+label = "Sight Power ON/OFF"     # ED's own hint string, not a friendly name
+shape = "default_2_position_tumb"
+seat = "default"
 
-[elements.OP-MISSL-PW-PTR]       # placeholder name -- the generator reads the real one
-device = 6
-cmd = 3028
-arg = 773
+[elements."STICK-PTT-PTR"]
+device = 55
+device_name = "SPU_8"
+cmds = [<n>, <n>]
+cmd_names = ["...", "..."]
+args = [738, 738]
+arg_values = [1.0, 0.5]
 label = "..."
-shape = "2_position_tumb"
-
-# ... one entry per clickable element DCS exposes for the Mi-24P, both seats (~500+)
+shape = "raw"
+seat = "default"
 ```
 
-**Registry, curated — `config/effectors.toml`.** Hand-written, small, grows one sequence at a
-time. Each entry names a friendly effector name, a `source_element` join key into the raw table
-above, and named values — **it never repeats device/cmd/arg**, so there is exactly one place those
-numbers live and nothing to keep in sync by hand:
+Lists everywhere (one shape for helper and raw elements; a consumer never branches on type).
+`helper_args` (verbatim source text of positions after the fourth) only when present.
+
+### Tests — `body-layer/tests/test_generate_effector_registry.py`
+
+Fixtures in `body-layer/tests/fixtures/effector_registry/` — **synthetic Lua**, a tiny fake module
+in ED's forms: `devices.lua` (≥ 3 devices, including one at a position that proves 1-based order),
+`command_defs.lua` (two tables, proving the per-table restart at 3001, plus one include if 0a
+confirms that form), `clickabledata.lua` covering:
+
+- one element per known helper, including `multiposition_switch` with trailing args;
+- a raw literal with list `action`/`arg`/`arg_value`/`arg_lim` (the PTT shape) and one with
+  scalars;
+- `crew_member_access` absent, `{0}`, `{1}`, and as a post-assignment;
+- `_("…")` hints containing a comma, a quote and a `--` (must not be read as a comment);
+- a `--[[ … ]]` block comment containing a fake `elements[` line (must not count);
+- a top-level `for` loop and a `local` (ignored, listed);
+- in a second fixture file set: an unknown helper, and a reference to an undefined device symbol.
+
+Assertions: exact TOML for the good set (parsed back with `tomllib`, not string-compared, plus
+one golden-text check of the header/ordering); device/command numbers equal the fixture's
+counter positions; unknown helper and undefined symbol each make check mode exit 2 and name the
+element; `--write` refuses on unhandled and succeeds with `--allow-unhandled` (list in header);
+the completeness count; include outside `--scripts-dir` is refused; `DCS_INSTALL_PATH` unset and
+no `--scripts-dir` exits 1 with the "not on the DCS machine" message (`monkeypatch.delenv`);
+`DCS_INSTALL_PATH` pointing at a fixture tree resolves the Mi-24P subpath and reads its
+`autoupdate.cfg`; `--scripts-dir` with no variable and no `--dcs-build` exits 1. Run with body-layer's normal `pytest`.
+
+### 0d control points (real dump, Mac-side, before commit)
+
+Against `mi24p-command-surface.md` §2/§10 and the live-confirmed BL-B66/BL-B80 values: devices
+6/7/16/30/55; `asp_commands.Power` = 3014 on arg 529; the six BL-B66 writes —
+`(6, 3028)` arg 773, `(16, 3015)` arg 761 (still UNVERIFIED), `(7, 3001)` arg 885, `(6, 3030)`
+arg 955, `(7, 3002)` arg 886, `(6, 3020)` arg 673 — each present as some element; 738/856 present;
+664 `seat = "operator"`. A mismatch on a DCS build newer than 2.9.29 is a finding to write up, not
+an automatic fail; a mismatch on the same build is a parser bug.
+
+**Stage 0 is its own batch** (dev tool, no runtime dependency; performance/security passes per
+root `CLAUDE.md`'s batch rule — one each, after 0b).
+
+---
+
+## File formats (Stages 1–2)
+
+**Curated registry — `body-layer/config/effectors.toml`.** Hand-written, small. Each entry: a
+friendly name, `source_element` (join key into the raw dump), optional `index` (which entry of a
+multi-action element's lists, default 0), named `values`. **Never repeats device/cmd/arg.**
 
 ```toml
 [effectors.missile_power]
-source_element = "OP-MISSL-PW-PTR"     # resolved against effectors-raw.toml at load time
+source_element = "<ED name for arg 773>"     # filled from the Stage 0 dump
 values = { on = 1.0, off = 0.0 }
 
 [effectors.cplr_distr]
-source_element = "..."                  # the real ED element name for arg 761, from the regenerated dump
+source_element = "<ED name for arg 761>"
 values = { on = 1.0, off = 0.0 }
-unverified = true   # see docs/acceptance/2026-10-17-9k113-procedures-direction.md
+unverified = true   # docs/acceptance/2026-10-17-9k113-procedures-direction.md
 
 [effectors.sight_power]
-source_element = "..."                  # NOT WEAP-SIGHT-ON-PFF-PTR/529 above -- that is the ASP-17's
-                                         # own "Sight Power", a different switch; see "Risks" on the
-                                         # element-name collision this project must not fall into
+source_element = "<ED name for arg 885>"     # NOT WEAP-SIGHT-ON-PFF-PTR/529 (the ASP-17's)
 values = { on = 1.0, off = 0.0 }
 
 [effectors.scho_pwr_b1]
-source_element = "..."
+source_element = "<ED name for arg 955>"
 values = { on = 1.0, off = 0.0 }
 
 [effectors.observ]
-source_element = "..."
+source_element = "<ED name for arg 886>"
 values = { on = 1.0, off = 0.0 }
 
 [effectors.weapon_safety]
-source_element = "..."
+source_element = "<ED name for arg 673>"
 values = { armed = 1.0, safe = 0.0 }
 ```
 
-**How the two stay in sync, and what fails loudly.** `effector_registry.py` resolves every curated
-entry's `source_element` against the *currently loaded* `effectors-raw.toml` at startup — it is a
-dictionary lookup, not a cached copy, so there is nothing for the two files to silently disagree
-about once loaded. Two concrete failure modes, both fatal at startup (same posture as sequence-file
-validation, Decision 2 below):
+**Sequence files — `body-layer/config/effector-sequences/*.md`.** Two tables per file:
 
-- **A `source_element` the curated file names does not exist in the raw dump** — the ED element was
-  renamed or removed by a patch. The error names the missing key and the curated file/line that
-  referenced it, so the fix is "find the control's new name in the fresh dump," not "guess a new
-  argument number."
-- **Two curated entries resolve to the same `(device, cmd, arg)` triple via different
-  `source_element`s** — a sign the curator mis-joined one of them (the collision risk below), not a
-  valid configuration; rejected rather than silently writing the same switch twice under two names.
-
-**What does *not* fail loudly, because it cannot be checked mechanically**: whether a
-`source_element` actually names the *right* control for what the curated entry claims it is (e.g.
-whether `sight_power` really points at the 9K113's `Sight Power`/GUID.UNIT POWER and not the
-ASP-17's own, differently-owned "Sight Power" switch). That is a one-time human judgement made when
-the curated entry is first written (cross-checked against DCS-BIOS's description where ED's own
-label is silent or ambiguous, per the decided source policy above), not something regeneration can
-verify — flagged in "Risks" rather than left implicit.
-
-**Sequence files — `config/effector-sequences/*.md`** (markdown tables, the concept's own shape,
-confirmed by explore-notes point 6 — "user accepted the registry, did not object to the markdown
-sequences"). Two tables per file, in order:
-
-1. A 2-column header table (`file-param | for`) with exactly the rows `aircraft`,
-   `petrovich-role`, `run-on-trigger` — **this header, not the filename, is the loader's key** for
-   duplicate detection.
-2. A data table, columns `condition (optional) | effector | value | petrovich-says (optional) |
-   comment (optional)`. Each row is one of:
-   - a **switch row**: `effector`/`value` name a registry entry and one of its `values` keys;
+1. Header (`file-param | for`) with exactly `aircraft`, `petrovich-role`, `run-on-trigger` — the
+   key for duplicate detection (not the filename).
+2. Data table `condition | effector | value | petrovich-says | comment`. Each row is one of:
+   - **switch row**: `effector`/`value` name a registry entry and one of its `values`.
      `condition`, if present, is `<effector> = <value>` or `<effector> != <value>`, evaluated
-     against this engine's own **commanded** state (never a DCS readback — see Decision 3), and a
-     false condition skips the row entirely (no write, no delay, falls through to the next row the
-     same poll);
-   - a **wait row**: `condition` column holds `wait_s(<n>)` and every other column is blank — sets
-     the delay before the next row to `<n>` seconds, overriding (not adding to) the default
-     inter-row delay for that one gap (Decision 4).
+     **against the observed readback at the moment the row is reached** (R5, D3). A false condition
+     skips the row: no write, no delay, **no speech**.
+   - **wait row**: `condition` = `wait_s(<n>)`, every other cell blank — the gap before the next
+     row is `<n>` s instead of the default.
+   - **say-only row** (effector blank, `petrovich-says` set) is **reserved, rejected this cut**
+     with the message "say-only rows arrive with the guidance-unit-ready trigger" (seam, D7).
 
-Example, reproducing BL-B66's current takeoff sequence exactly:
+Takeoff, as it ships (R4 — a second takeoff, or a warm air start, skips every row):
 
 ```markdown
 | file-param | for |
@@ -327,218 +356,321 @@ Example, reproducing BL-B66's current takeoff sequence exactly:
 
 | condition | effector | value | petrovich-says | comment |
 | --- | --- | --- | --- | --- |
-| | missile_power | on | | MISSILE POWER |
-| | cplr_distr | on | | CPLR DISTR -- unverified, see registry |
-| | sight_power | on | | Sight Power (GUID.UNIT POWER) |
-| | scho_pwr_b1 | on | Guidance unit ready. | SHCHO PWR B1 |
+| missile_power != on | missile_power | on | | MISSILE POWER |
+| cplr_distr != on | cplr_distr | on | | CPLR DISTR -- unverified, see registry |
+| sight_power != on | sight_power | on | | Sight Power (GUID.UNIT POWER) |
+| scho_pwr_b1 != on | scho_pwr_b1 | on | | SHCHO PWR B1 |
 ```
 
-Validation (all fatal at startup, per Decision 2): unknown effector name, unknown value name for
-that effector, unknown trigger string, a row that is neither a valid switch row nor a valid
-`wait_s(n)` row, and more than one file claiming the same `(aircraft, role, trigger)` triple — plus
-the curated-registry-level checks in "How the two stay in sync" above, which run first (a sequence
-file cannot reference an effector the registry itself failed to resolve).
+OBSERV on/off and weapons arm/safe: one unconditional row each (parity with today).
+
+**Readback value matching.** An observed raw value `r` matches named value `v` iff
+`|r − v| <` half the smallest gap between that effector's named values (two-position → the
+existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown**, never a value.
+
+---
+
+## Settled design decisions
+
+- **D1 — Queues per trigger** (user, 2026-10-23). Each trigger has at most one *running* run and
+  one *pending* run. Firing a trigger whose run is idle starts it this poll; firing while it runs
+  marks it pending; firing while already pending is a logged no-op (a re-run only re-evaluates
+  conditions, so a second pending copy adds nothing). Different triggers run independently.
+- **D2 — Takeoff fires on every takeoff** (user, 2026-10-23): on every `on_ground` True→False
+  transition, using the existing `ON_GROUND_AGL_THRESHOLD_M` signal (the concept's "bind to that
+  value"). The `takeoff_seen` latch is deleted.
+- **D3 — Conditions read observed readback; unknown waits, then skips.** *Supersedes old D3
+  (commanded state)* — reason R5. If a condition's effector has no readback yet, the row waits
+  (does not advance, does not write) up to `EFFECTOR_CONDITION_READBACK_WAIT_S` (new tunable,
+  default 5.0, lo 1.0, hi 30.0), then skips with a WARNING naming the effector and arg. Never
+  "unknown → true": a row like `observ = on → weapon_safety armed` must not fire on missing data.
+  In the poll block, readback is refreshed **before** the engine advances (today it is after), so
+  a row reached this poll sees this poll's sample.
+- **D4 — Re-runs never re-speak.** Speech comes only from a row that actually wrote. The takeoff
+  file has no `petrovich-says` at all this cut; "Guidance unit ready" is hard-coded on the 960
+  **edge** (prior observed `False` → `True`), so a second takeoff with the unit already up says
+  nothing, a power-down/re-power announces again, and an air start with the lamp already lit is
+  silent.
+- **D5 — A bad file is not fatal** (user, 2026-10-23; *supersedes explore decision 6 and old
+  D2/D3*). At load:
+  - each sequence file is validated alone; a bad one is ignored and every error is collected
+    (file, line, reason);
+  - **registry, recommended posture — same, at the finest grain that is honest**: a bad curated
+    *entry* (unresolved `source_element`, two entries resolving to the same `(device, cmd, arg)`,
+    bad `values`) drops that entry, and any sequence file using it becomes a bad file in turn;
+    a curated or raw file that cannot be read or parsed as TOML at all disables **every** sequence
+    (all depend on it). Same banner, same one audio line. *Why not fatal for the registry*: the
+    user's principle — "Petrobrain will continue, but some functionality may not work" — applies
+    exactly; a refusal here would reinstate the failure mode they just overruled, and everything
+    outside effectors (detection, callouts, voice) does not depend on the registry at all;
+  - **console**: `logger.error` per error, plus one unmissable multi-line banner on stderr at
+    startup listing every bad file and reason;
+  - **audio**: exactly one line per body-layer process, however many files are bad:
+    *"System error, bad sequence file, see the logs. Petrobrain will continue, but some
+    functionality may not work."* — held until the intercom is up (D6);
+  - a trigger with no loaded file fires into nothing (DEBUG log). The pilot's own command readback
+    (e.g. "Observ on") is unchanged — see Risks.
+- **D6 — "Once the intercom is up" = aircraft-layer's existing SPU-8 gate.** New
+  `AircraftLayerClient.get_spu8_state_latest()` (`GET /spu8/state`, swallow-to-`None` like every
+  other getter). `CrewConsole` gains `config_error_pending: bool` (set at startup from D5) and
+  `drain_config_error(now_sim, *, intercom_open: bool) -> None`, the `drain_guidance_unit_ready`
+  shape: speaks once through `_print` when `config_error_pending and intercom_open and not
+  self.silenced`, then clears the flag. `intercom_open` is `gate_open is True`; `None` (no SPU-8
+  sample, or an old `Export.lua`) never opens it — the banner already went to the console. Not
+  cleared by a mission restart (it describes the process, not the mission): `_reset_mission_state`
+  must not touch it.
+- **D7 — `guidance-unit-ready` trigger: seam now, trigger later** (user default). Seam: the
+  hard-coded announce sits on the single line that detects the 960 edge, and the trigger enum is a
+  code enum. Moving it later costs: one `EffectorTrigger` member, replacing that `_print` with
+  `fire_trigger(GUIDANCE_UNIT_READY)`, un-reserving the say-only row form, one file
+  (`| | | | Guidance unit ready. | |`) and tests — about half a day, and it carries a parity
+  question (a sequence-file line would be spoken via the engine, one poll later). **Cheap, but not
+  free, and not needed for this cut's value: recommend not in this cut.**
+- **D8 — Wait rows** override (not add to) the default gap for that one gap (unchanged from
+  2026-10-21).
+- **D9 — Write failure**: the row is retried every poll (parity with today's power-up), never
+  skipped. To keep the per-trigger queues from reordering writes to one switch: each poll, due rows
+  across all triggers run **in fire order**, and once a write to effector *E* fails this poll, no
+  later row writing *E* is attempted this poll. So "Observ on" stuck behind a dropped write cannot
+  land after a later "Observ off". (Today's OBSERV/safety writes are dropped on failure; retrying
+  is a small behaviour change, toward the pilot's intent.)
+- **D10 — The inter-row delay** `GUIDANCE_UNIT_SWITCH_DELAY_S` is renamed
+  `belief.effector_engine.EFFECTOR_SEQUENCE_STEP_DELAY_S` (same 1.0, `lo=0.5`, `hi=5.0`), and
+  `config/defaults.toml` regenerated. A user `tuning.toml` with the old key will warn "unknown key"
+  — say so in the commit and the card.
+- **D11 — Mission (re)start** re-runs the runner `__init__`: engine and `GuidanceUnitState` fresh,
+  running/pending runs dropped. Unchanged mechanism.
 
 ---
 
 ## What moves, what stays
 
-| Concern | Today (`sight_effector.py`) | After this plan |
+| Concern | Today | After |
 |---|---|---|
-| Which switches, in what order, what values | Hard-coded `_POWER_UP_SWITCHES` tuple + two more hard single writes | `config/effectors-raw.toml` (generated, every control) + `config/effectors.toml` (curated, the ones in use) + `config/effector-sequences/*.md` |
-| Inter-switch delay | `GUIDANCE_UNIT_SWITCH_DELAY_S` | `EFFECTOR_SEQUENCE_STEP_DELAY_S` (same value, renamed — now generic) |
-| "Is the takeoff sequence done" | `GuidanceUnitState.sight_ready` | `effector_engine.is_complete(EffectorTrigger.TAKEOFF)` |
-| "Guidance unit ready" callout | Hard-coded in `CrewConsole.drain_guidance_unit_ready` | The sequence file's own `petrovich-says` column, spoken through the **same** `CrewConsole._print` path `drain_guidance_unit_ready` already uses — no new speech mechanism (task brief's explicit requirement) |
-| OBSERV-on readiness gate | `_handle_observ_on` checks `self.sight_ready` | **Unchanged** — still checks `self.sight_ready`, now refreshed from `is_complete(TAKEOFF)` instead of `sight_ready(state)`. Gating logic itself never moves into a file (explore-notes decision 3) |
-| Weapons armed/safe refusal logic | None today (unconditional) | None — stays that way; this plan adds no new gate |
-| Sight-position readback (874/876), slew telemetry | `GuidanceUnitState.sight_az_raw`/`sight_elev_raw`, `sight_azimuth_raw_to_deg` | **Unchanged, verbatim** — `BL-B80`'s concern, out of scope, carried in whatever `sight_effector.py` shrinks to |
+| Which switches, order, values | `_POWER_UP_SWITCHES` + two single writes in `sight_effector.py` | `effectors-raw.toml` + `effectors.toml` + `effector-sequences/*.md` |
+| Sequencing state: `takeoff_seen`, `power_up_stage`, `next_switch_due_sim` | `GuidanceUnitState` | **deleted** / `EffectorRunState` |
+| `observ_commanded`, `weapon_safety_commanded` | `GuidanceUnitState` | `EffectorRunState.commanded_values` (written on a successful write). `sight_trace_writer`'s `observ_commanded` column keeps its name and meaning, sourced from there (`None` → `False`, today's default) — Flight A's triage reads it |
+| `observ_observed`, `weapon_safety_observed`, `align_observed`, `ready_observed`, `launch_perm_observed` | `GuidanceUnitState` | **stay** on `GuidanceUnitState` (renaming it is churn with no gain; it is the guidance unit's observed state). `refresh_readback` unchanged |
+| `guidance_unit_ready_announced` | `GuidanceUnitState` latch | **deleted** — replaced by the edge (D4) |
+| `sight_ready` | `sight_ready(state)` = 960 lamp | **unchanged** (R2) |
+| "Guidance unit ready" | `drain_guidance_unit_ready`, first-lit latch | hard-coded on the observed edge (D4, D7) |
+| Condition readback | none | existing `cockpit_switch` feed, arg-keyed view (Stage 2) |
+| `write_sight_target`, slew, `SightHead`, `run_sight_servo` | — | **untouched** |
 
 ---
 
 ## Co-moving Fields
 
-Step 6a's trigger fires: the new engine's internal sequencing state and `CrewConsole`'s
-externally-written signal fields both track "has the pilot's command taken effect," the same shape
-BL-B66's own plan already had to reason about for `GuidanceUnitState`/`OpticState.home_phase` — this
-plan must not let that divergence reopen while renaming the fields underneath it.
+Trigger fires: `EffectorRunState` (internal) and `GuidanceUnitState` readback / `on_ground` /
+`observ_transition` / `weapon_safety_transition` / SPU-8 gate (external) all describe "what the
+switches are and what he is doing about it", and `home_phase` is derived from one of them.
+
+**Construction sites, grepped 2026-10-23 at `147a057d`**: `GuidanceUnitState(` — one, the
+`field(default_factory=GuidanceUnitState)` on `ConsolePerceptionRunner` (`logger.py:492`), re-run by
+mission reset; every other change is `replace()` (`sight_effector.py`, `logger.py` 3285–3436).
+Tests construct it directly (`test_sight_effector.py`, `test_logger.py`, `test_sight_trace_writer.py`)
+— they must be updated, not left constructing removed fields. **`EffectorRunState(` must end up with
+exactly the same one site.** The Implementer re-runs `grep -rn 'EffectorRunState(\|GuidanceUnitState(' body-layer/src`
+after Stage 2 and pastes the result into the review handoff; a helper that builds a "fresh run
+state for trigger X" is the `BL-B71` failure shape and is not allowed.
 
 | Field | Written by | Transition | Must hold true immediately after |
 |---|---|---|---|
-| `EffectorRunState.pending`/`active_*` | internal (`effector_engine`) | any `fire_trigger` call | the trigger is either started immediately (queue was idle) or appended to the per-trigger queue — never dropped |
-| `EffectorRunState.commanded_values[name]` | internal (`advance`, on a successful write) | each row executed | updated to that row's value; a later row's `condition` in *any* file reads this, never a DCS readback (Decision 3) |
-| `is_complete(TAKEOFF)` (via `crew_console.sight_ready`) | internal, refreshed every poll | last row of the takeoff sequence executes | `True`; `_handle_observ_on`'s gate reads this value, unchanged shape from today |
-| `home_phase` | **external** (pilot "Observ on"/"Observ off" via `crew_console`) | OBSERV-on/off request | **if `sight_ready` was `False` at request time: unchanged, refused, `fire_trigger(OBSERV_ON)` never called.** If `True`: `home_phase` set exactly as `BL-B64`/`BL-B66` already do — this plan adds no new branch inside `decide()` |
-| `observ_transition`/`weapon_safety_transition` | **external** (`crew_console` handlers) | pilot command | drained once by the poll loop into exactly one `fire_trigger(...)` call, then cleared to `None` — same one-shot-signal discipline as today, unchanged |
-| `EffectorRunState.observed_values[name]` | **external** (aircraft-layer watched-args readback, Stage 3) | any readback poll | lags the commanded value by the same ~3-frame animation BL-B66 already documents; **no consumer in this entry reads it**, carried for `BL-B67` exactly as `observ_observed`/`weapon_safety_observed` are today |
+| `EffectorRunState.runs[T]` (running cursor: row index, `next_due_sim`, `waiting_since_sim`) | internal | `fire_trigger(T)` while idle | cursor at row 0, due now; same poll's `advance` may execute it |
+| `EffectorRunState.pending[T]` | internal | `fire_trigger(T)` while running | `True`; a second fire leaves it `True` and logs (D1) |
+| `runs[T]` / `pending[T]` | internal | last row of `T` done | if `pending[T]`: new cursor at row 0, `pending[T] = False`; else `runs[T] = None` |
+| `runs[T]` | internal | row reached, condition effector readback `None` | cursor unchanged, `waiting_since_sim` set once; after `EFFECTOR_CONDITION_READBACK_WAIT_S` the row is skipped (D3) |
+| `commanded_values[E]` | internal | successful write of `E` | equals that row's value name; failed write leaves it unchanged (D9) |
+| `GuidanceUnitState.*_observed` | **external** (`cockpit_switch` feed) | any sample | refreshed **before** `advance` this poll (D3); `None` leaves prior value (unchanged posture) |
+| `crew_console.on_ground` | **external** (AGL) | True→False | `fire_trigger(TAKEOFF)` called exactly once this poll; no latch (D2) |
+| `crew_console.sight_ready` | derived | any 960 sample | `== sight_ready(guidance_unit_state)`; unchanged source (R2) |
+| (no field — local in poll block) ready edge | derived | `ready_observed` `False`→`True` | "Guidance unit ready." spoken once; `None`→`True` (air start) speaks nothing (D4) |
+| `OpticState.home_phase` | derived in `run_once` from `observ_observed` | 886 edge | unchanged BL-B80 rule; this plan adds no branch to it |
+| `observ_transition` / `weapon_safety_transition` | **external** (`crew_console` handlers) | pilot command / `_handle_engage` | drained into exactly one `fire_trigger(...)` and set `None` the same poll; the hands-busy `optic_state` update stays where it is |
+| `crew_console.config_error_pending` | startup (D5); internal drain | SPU-8 `gate_open` observed `True` and not silenced | spoken once, flag `False`; mission reset leaves it alone (D6) |
+| all of `EffectorRunState` | runner `__init__` | mission (re)start | fresh; nothing carried (D11) |
 
-**Construction-site check, grepped not narrated**: `EffectorRunState(` must have exactly one
-construction site (`ConsolePerceptionRunner`'s `field(default_factory=EffectorRunState)` plus
-mission-reset's `__init__` re-run) — every function in `effector_engine.py` returns `replace(state,
-...)`. State this explicitly in the Implementer handoff, since the predecessor plan's own worked
-example (`BL-B71`'s two silent fresh-construction sites) is exactly the failure mode a "build a
-fresh run-state for sequence X" helper would reintroduce under time pressure.
+---
+
+## Affected Modules / Files
+
+**Stage 0** — `body-layer/tools/generate_effector_registry.py` (new),
+`body-layer/tests/test_generate_effector_registry.py` (new),
+`body-layer/tests/fixtures/effector_registry/**` (new, synthetic),
+`body-layer/config/effectors-raw.toml` (new, generated on the Windows DCS machine),
+`aircraft-layer/research/2026-10-2x-mi24p-clickabledata-forms.md` (0a).
+
+**Stage 1 (pure, no wiring)**
+- `body-layer/src/belief/effector_registry.py` (new) — loads both TOML files, resolves
+  `source_element`, returns `(registry, errors)`; never raises on bad content (D5).
+- `body-layer/src/belief/effector_sequences.py` (new) — parses `*.md`, returns
+  `(sequences_by_key, errors)`.
+- `body-layer/config/effectors.toml`, `body-layer/config/effector-sequences/mi-24p-copilot-{takeoff,observ-on,observ-off,weapons-arm,weapons-safe}.md` (new).
+
+**Stage 2 (engine + wiring)**
+- `body-layer/src/belief/effector_engine.py` (new) — `EffectorTrigger` (TAKEOFF, OBSERV_ON,
+  OBSERV_OFF, WEAPONS_ARM, WEAPONS_SAFE), `EffectorRunState`, `fire_trigger`,
+  `advance(state, now_sim, readback, client) -> state`, the two new/renamed tunables.
+- `body-layer/src/belief/sight_effector.py` — delete the sequencing half (`_POWER_UP_SWITCHES`,
+  device/cmd constants, `start_power_up`, `advance_power_up`, `write_observ`,
+  `write_weapon_safety`, `GUIDANCE_UNIT_SWITCH_DELAY_S`) and the removed fields; keep
+  `GuidanceUnitState` (readback), `sight_ready`, `refresh_readback`, `write_sight_target`.
+- `body-layer/src/logger.py` — load config at startup (before the poll loop; banner; set
+  `config_error_pending`); `ConsolePerceptionRunner.effector_state`; poll block: refresh readback →
+  takeoff edge fires → transitions fire → `advance` → ready edge → `drain_config_error`.
+- `body-layer/src/belief/crew_console.py` — `config_error_pending`, `drain_config_error`; remove
+  or narrow `drain_guidance_unit_ready` to the edge (D4).
+- `body-layer/src/aircraft_client.py` — `get_spu8_state_latest()`.
+- `body-layer/src/sight_trace_writer.py` — `observ_commanded` sourced from the engine.
+- `body-layer/src/tuning.py` consumers / `config/defaults.toml` regenerated.
+- `aircraft-layer/src/schema/cockpit_switch.py` — `to_api_dict` gains
+  `"args": {"773": <raw>, "761": …, "885": …, "955": …, "886": …, "673": …}`; nothing removed
+  (BL-B80 fields and the six named fields stay). Test in `tests/test_cockpit_switch.py`.
+  **Needs a collector restart on the Windows DCS machine, no `Export.lua` redeploy.** Body-layer
+  against an older collector: no `args` key → readback unknown → D3 waits then skips; log one
+  WARNING "cockpit_switch feed has no args map — update the collector".
+
+**Stage 4 (deferred)** — the generic `watch_args` readback (2026-10-21 Stage 3, kept below).
 
 ---
 
 ## Implementation Plan
 
-**Stage 0 — the generator.** The offline tool described above: parse `devices.lua`/
-`command_defs.lua`/`clickabledata.lua` (helper-call forms **and** the 13-element raw-table-literal
-form), resolve symbols, emit `config/effectors-raw.toml`. Run once against the installed Mi-24P
-module to produce the first committed dump; **DCS-BIOS is read by hand for labelling the curated
-entries below, never parsed by this tool** (decided, see "Registry scope and source"). No body-layer
-runtime code depends on this tool — it is a dev-time step, re-run only when a DCS patch is
-suspected to have shifted something, same cadence as `mi24p-command-surface.md`'s own
-"regenerate after any DCS update" note.
-
-**Stage 1 — curated registry + sequence loader, pure.** `effector_registry.py` (loading both
-`config/effectors-raw.toml` from Stage 0 and the hand-written `config/effectors.toml`, resolving
-`source_element` joins), `effector_sequences.py`, the committed curated registry (six entries,
-the BL-B66 switches re-keyed to their real `source_element` once Stage 0's dump exists) and five
-`config/effector-sequences/*.md` files reproducing BL-B66's current behaviour exactly. Every
-validation rule above enforced with a dedicated test (unknown effector, unknown value, unknown
-trigger, malformed row, duplicate triple, an unresolved `source_element`, a `source_element`
-collision, a well-formed file round-tripping to the expected `SequenceDef`). No body-layer wiring
-yet, no DCS.
-
-**Stage 2 — the engine, wired in (write side only, no aircraft-layer change).** `effector_engine.py`
-(`EffectorRunState`/`fire_trigger`/`advance`/`drain_say_lines`/`is_complete`), driving writes
-through the **existing** `aircraft_client.write_cockpit_switch` (already generic, no new wire
-format needed). `logger.py`'s takeoff/OBSERV/weapons-safety blocks rewired to call `fire_trigger`
-instead of the hard-coded `sight_effector` functions; `sight_effector.py`'s sequencing half deleted.
-**Test the real poll loop, not only the engine's pure functions** — `reviewer`'s own
-`project_terrain_callout_stage5_wiring_gap.md` names this exact wiring-into-the-poll-loop seam as a
-3-times-recurring defect class on this project, most recently on this same feature's predecessor
-(BL-B66). Reuse `test_logger.py`'s existing `_run_crew_text_poll_loop`-driving tests (the ones the
-BL-B66 review required) as the template rather than writing new pure-function-only coverage and
-calling it done.
-
-**Stage 3 — generic low-rate readback.** `Export.lua`'s `watch_args` op + `push_watched_args_state`;
-aircraft-layer schema/collector/API; `aircraft_client.set_watch_args`/`get_watched_args_latest`;
-`effector_engine.refresh_readback`; `logger.py` sends `set_watch_args` once at startup (after the
-registry loads) and again on every detected mission (re)start. **Needs a Windows redeploy** — the
-only stage that does. Best-effort/retried posture for the push itself (not the file validation):
-a `set_watch_args` call failing because aircraft-layer/DCS is not yet running is the ordinary
-"not connected yet" case every other `aircraft_client` call already tolerates, not a startup
-failure — retried every poll until it lands, never fatal.
-
-**Stage 4 — cleanup and parity check.** Remove `GuidanceUnitState` and every now-dead reference;
-confirm (by a diff of `cockpit_switch_writes` test assertions before/after) that the five sequences
-produce byte-identical device/cmd/value writes in byte-identical order with the byte-identical
-1.0 s spacing BL-B66's own tests already pin. Regenerate `config/defaults.toml` for the
-renamed tuning key.
-
-**Stage 0 is its own batch** (a dev-tool script, no body-layer runtime dependency on it, nothing to
-performance/security-review on the hot path — its output is committed data, reviewed the way any
-generated-and-committed file is). **Stages 1–2 are built back to back** (Stage 2 needs Stage 1's
-loader); **Stage 3 is a separate batch** (it is the one stage gated on a Windows redeploy and may
-land later) — one performance pass and one security pass after whichever batch actually ships
-together, per root `CLAUDE.md`'s current cadence, not one per stage.
-
-**No separate acceptance sortie is scoped for this plan** — "Behaviour after the change must be
-identical to the current hard-coded build" (task brief) means the acceptance bar is parity against
-BL-B66's own already-flown Stage 5 card, re-run quickly (take off, hear "Guidance unit ready," say
-"Observ on"/"Observ off," say "weapons armed"/"weapons safe") rather than a new multi-minute test —
-flagged under Decisions in case the user wants a dedicated card instead.
+0. **Stage 0 — generator** (spec above). Own batch.
+1. **Stage 1 — curated registry + sequence loader, pure.** Every D5 error case has a test that
+   asserts it is *collected, not raised*, and that the other files still load: unknown effector,
+   unknown value, unknown trigger, malformed row, say-only row (reserved), duplicate
+   `(aircraft, role, trigger)` (both files rejected — neither silently wins), unresolved
+   `source_element`, duplicate triple collision, unreadable TOML (all sequences off), plus a
+   round-trip of each shipped file. Curated entries are filled from the committed Stage 0 dump.
+2. **Stage 2 — engine, wiring, error surfacing.** Pure tests for D1/D3/D4/D8/D9 transitions, and
+   **real-poll-loop tests** (`_run_crew_text_poll_loop` on a thread, per
+   `feedback_poll_loop_sim_time_integration_tests`), each written to fail under a named mutation:
+   (a) cold takeoff writes the four switches in order with the 1.0 s spacing BL-B66's tests pin
+   — byte-identical `cockpit_switch_writes`; (b) second takeoff with readback all-on writes
+   nothing and says nothing; (c) warm air start (first sample airborne, lamp lit): no "Guidance unit
+   ready", no writes; (d) lamp off→on speaks once, on→off→on speaks twice; (e) readback absent at
+   takeoff waits, then writes once it arrives; (f) "Observ on"/"off" and "weapons armed"/"safe"
+   write exactly as today; (g) a bad sequence file at startup: banner printed, other triggers work,
+   error line spoken only after `spu8` `gate_open` turns true and only once, held while silenced,
+   survives a mission restart; (h) D9 ordering: failed "on" then "off" ends "off". Plus the
+   aircraft-layer `args` map test. Batch with Stage 1 (built back to back): one performance pass,
+   one security pass after Stage 2.
+3. **Stage 3 — short re-flight card** (`/test-card`), branch named on the card. Windows DCS
+   machine: pull the branch, restart the collector (no `Export.lua` redeploy, no Hook change).
+   Items: cold start on the ground → take off → hear the four switches move, then "Guidance unit
+   ready" when the lamp lights; land, take off again → nothing re-run, nothing re-spoken; "Observ
+   on"/"Observ off"; "weapons armed"/"weapons safe"; one air start → no "Guidance unit ready" at
+   spawn; one deliberately broken sequence file (typo in an effector name) → console banner at
+   start, the error line once the intercom is on, everything else still works. ~10 minutes.
+4. **Stage 4 — generic low-rate readback (deferred).** Build when the first sequence names an
+   effector outside the six args the existing feed carries; until then the loader and D3's
+   WARNING say exactly which effector needs it. Design as 2026-10-21 (below), **additive**: the
+   existing `cockpit_switch` line and its BL-B80 fields are not reduced. Needs an `Export.lua`
+   redeploy on the Windows DCS machine.
 
 ---
 
 ## Invariants checked
 
-- **DCS is authoritative; code owns factual state.** Conditions in sequence files read the
-  engine's own commanded state, never a DCS readback — see Decision 3; this keeps the "code owns
-  truth" line exactly where BL-B66 already drew it, rather than letting a config file encode a
-  judgement about live aircraft state.
-- **Never modify the DCS installation.** Every write stays the existing `performClickableAction`
-  path; Stage 3 adds a read-only `get_argument_value` loop, also already in use.
-- **Module independence.** aircraft-layer ↔ body-layer stays HTTP/JSON; no new in-process coupling.
-- **No new abstraction without a named duplication removed.** The registry/sequence split removes
-  the duplication BL-B66 itself flagged as a cost of its own design: five near-identical blocks of
-  "write this switch, wait, write the next" hand-written in `logger.py` and `sight_effector.py`
-  collapse into one engine driven by data.
-- **Single-player only.** No group/coalition scoping anywhere in this entry.
+- **DCS authoritative; code owns factual state.** Conditions now read DCS's own readback (R5) —
+  more faithful than commanded state, and "unknown" is never turned into a value (D3). Gating
+  stays in code.
+- **Never modify the DCS installation.** The generator only reads it; writes stay
+  `performClickableAction` via the existing op.
+- **Module independence.** aircraft-layer ↔ body-layer stays HTTP/JSON (`/cockpit_switch/latest`
+  `args`, `/spu8/state`). The generator imports nothing across subprojects.
+- **No new abstraction without removed duplication.** Engine + data replace five hand-written
+  write blocks; the error line reuses `_print`, the drain shape and the SPU-8 gate.
+- **Provenance.** The raw dump records DCS build and input hashes; curated entries never copy a
+  number.
+- **No GPL dependency; no ED source committed.**
+- **Single-player only.**
 
 ---
 
 ## Risks & Unknowns
 
-- **Startup-fatal validation is a deliberate, stated departure from `tuning.py`'s "never refuses to
-  start" posture** (Decision 2) — a malformed sequence file is a build-breaking error at body-layer
-  launch, by explicit user direction ("I'd rather a check at startup and error than finding out in
-  middle of flight"). Flag this loudly in the error message so it reads as expected behaviour, not
-  a regression, the first time someone hits a typo in a markdown table mid-editing.
-- **The queue-scope question (Decision 1) is the one place this plan's reading of explore-notes
-  could be wrong** — per-trigger queuing (this plan's choice) versus a single global queue (the
-  explore-notes' literal wording) produce different, observable behaviour the moment two different
-  triggers' sequences overlap in time (e.g. "weapons armed" said while the takeoff power-up is
-  still mid-sequence). Needs the user's confirmation before Stage 2, not a silent pick.
-- **The predecessor feature's own recurring defect class — leaf logic unit-tested, poll-loop wiring
-  not** — is specifically guarded against in Stage 2's own instructions above, not left to Reviewer
-  to find a fourth time.
-- **761 (`cplr_distr`) stays UNVERIFIED**, carried through unchanged from BL-B66 into the registry's
-  `unverified = true` field — this plan does not re-open or re-settle that question.
-- **Stage 3's Windows redeploy is the one piece of this plan that cannot be verified without a live
-  DCS session** — if Stage 3 ships separately from Stages 1-2, the committed sequence files still
-  work end to end on the write side alone; Stage 3 only removes the last piece of hard-coding on the
-  *read* side, so splitting it off is safe, not a half-finished feature.
-- **The generator's parser is the one genuinely new, nontrivial piece of code this plan adds, and
-  the known 13-element gap is evidence it is easy to get subtly wrong.** `mi24p-command-surface.md`'s
-  own 2026-09-11 dump — produced by careful manual/semi-automated reading, not a committed script —
-  missed exactly the elements with more than one action (both PTTs, both collectives), because its
-  parser only recognised the four `default_*`/`multiposition_switch` helper-call forms and not raw
-  table literals. Stage 0 explicitly scopes in both forms from the start (see above) specifically so
-  this plan does not reproduce a documented mistake; still flagged as a risk because the raw-literal
-  form is less regular and has not been parsed by any tool in this repo before.
-- **Element-name collision across seats/systems is a real, demonstrated hazard, not a
-  hypothetical one.** The ASP-17's own switch is also internally labelled "Sight Power ON/OFF"
-  (`WEAP-SIGHT-ON-PFF-PTR`, device 16, arg 529) — a different control from the 9K113's "Sight Power
-  (GUID.UNIT POWER)" (device 7, arg 885) this plan actually needs. Joining the curated registry to
-  the raw dump by ED's own **element name** (not by English label, which is exactly what collides
-  here) avoids this for a machine; it does not avoid it for the human writing a new curated entry,
-  who can still pick the wrong element name by matching on label text. No mechanical check catches a
-  wrong-but-resolvable `source_element` — see "What does *not* fail loudly" above.
-- **The generator only runs on a machine with the Mi-24P module installed** (Windows, same
-  constraint every other "read the installed DCS tree" tool in this project already has) — it is
-  not something this repo's own CI or a Mac dev session can execute; the Implementer hands the user
-  the exact command to run on the Windows box, per this project's own "do not run live DCS
-  operations yourself" convention (`feedback_full_build_execution`), rather than attempting it.
+- **The parser's Lua forms are unverified until 0a/0c** (counter restart form, include form,
+  helper parameter lists, loops). Fail-closed design means the cost of a wrong guess is one more
+  0c round-trip, not a wrong number — provided the completeness count and control points are
+  enforced, which is why both are in the tests and 0d.
+- **Per-trigger queues allow interleaving across triggers.** D9 keeps writes to one switch in
+  order; two different multi-row sequences can still interleave rows. None of this cut's
+  sequences has more than one row except takeoff, whose switches no other sequence touches.
+- **A pilot command whose sequence file is bad still gets its normal readback** ("Observ on") while
+  no switch moves. The startup line warned. A cheap follow-up would answer "Unable, system error"
+  for a trigger with no loaded file — gating in code, not in this cut.
+- **`on_ground` jitter near 10 m AGL** (hover-taxi) now fires TAKEOFF repeatedly. Harmless —
+  D1 coalesces and conditions skip — but it means the takeoff file must stay idempotent. A
+  hysteresis on `on_ground` is out of scope (it is shared with the look-refusal gate).
+- **An airborne first sample is a takeoff edge** (`on_ground` defaults `True`). Intended here: it
+  is what powers a cold unit on an air start; on a warm air start every row skips.
+- **Silenced or intercom never on**: the error line may never be voiced. The console banner is the
+  primary channel; the line is a reminder.
+- **761 (`cplr_distr`) stays UNVERIFIED**, carried as `unverified = true`. The user: *"If we get the
+  wrong one, the change is trivial."*
+- **Element-name collision across systems** (the ASP-17's "Sight Power" 529 vs the 9K113's 885):
+  joining by ED element name protects the machine, not the curator. No mechanical check catches a
+  wrong-but-resolvable `source_element`; the 0d control points cover the six that ship.
+- **BL-B80 is merged, not flown.** If Flight A finds 960 is not the READY lamp, `sight_ready` and
+  D4's edge move with it — a BL-B80 fix, but this plan's tests encode 960 by name only through
+  `GuidanceUnitState.ready_observed`, so nothing here hard-codes the number.
 
 ---
 
 ## Second-order effect
 
-Makes the next cockpit-effector sequence (any new trigger, any new switch) a config change rather
-than a code change — the explicit point of the feature. It also sets the pattern `BL-B67`'s own
-ATGM-run writes (launch-station selector, the ARMED check) would want to follow rather than growing
-their own one-off sequencing code, and gives `BL-B80`'s slew-loop tuning a stable, unrelated home
-(`sight_effector.py`'s shrunk remainder) that this refactor does not disturb. **The full-aircraft
-generated dump (Stage 0) is the bigger second-order effect**: once `effectors-raw.toml` exists,
-every future curated entry — `BL-B67`'s launch-station selector, a future pilot-role sequence, a
-future Mi-8 registry — is a lookup against an already-generated, already-current source rather than
-a fresh round of manual probing or research-note archaeology each time.
+The generated whole-aircraft dump makes every later cockpit write (`BL-B67`'s launch-station
+selector, a pilot-role sequence, a Mi-8 registry) a lookup rather than a research round, and the
+non-fatal loader with an intercom-announced error is a pattern any later startup-loaded config
+can reuse. It also leaves `guidance-unit-ready` one small step away (D7), which is the natural
+first consumer of the say-only row and of event-driven (not pilot-driven) triggers like
+`atgm-launch`.
 
 ---
 
 ## Decisions Requiring User Input
 
-1. **Queue scope: per-trigger (this plan's choice) or global, single-engine queue (explore-notes'
-   literal wording)?** Per-trigger preserves BL-B66's exact current timing (a "weapons armed" said
-   mid-power-up still writes immediately, as it does today); a global queue would delay it behind
-   the power-up's remaining switches, a real behaviour change the "must be identical" requirement
-   argues against. **Recommend per-trigger.**
-2. **TAKEOFF's one-shot-per-mission latch vs. the concept doc's own trigger table, which lists
-   `takeoff` as "every time."** BL-B66's current code is one-shot-per-mission (a second takeoff/
-   touch-and-go does not re-run the power-up or re-speak "ready"); this plan keeps that, as a
-   stated, trigger-specific departure from the concept table's generic cardinality, because
-   "identical behaviour" is the explicit bar for this cut. **Recommend keeping TAKEOFF one-shot**;
-   flagged because the concept doc (not binding, "concept not final truth") says otherwise and a
-   future reader should not assume the table is simply unimplemented.
-3. **Fatal-at-startup validation (no "warn and run on defaults" fallback, unlike every tunable
-   constant)** — confirmed by explore-notes point 6, restated here as the one place this plan
-   deliberately contradicts the project's otherwise-universal "never refuse to start" tuning
-   posture. **Recommend confirming this is still wanted**, since it is a different failure mode from
-   anything else in body-layer today: a typo in a markdown table now stops the whole process, not
-   just one constant.
-4. **No dedicated Stage 5 acceptance sortie card** — this plan treats BL-B66's own Stage 5 card as
-   sufficient re-verification once this refactor lands, since the goal is byte-identical behaviour.
-   **Recommend confirming**, or say if a short re-flight card should be written anyway.
+1. **Stage 4 (generic watched-args readback): defer until a sequence needs it?** Recommend
+   **defer** — the existing feed covers every switch this cut touches, Stage 4 is the only part
+   needing an `Export.lua` redeploy, and the loader names the first effector that would need it.
+   (Your 2026-10-21 "readback is registry-driven, low frequency" stands as the design for when it
+   is built.)
+2. **`guidance-unit-ready` trigger in this cut?** Recommend **no** (your default) — ~half a day,
+   seam is in place (D7).
+3. **The BL-B80 air-start "Guidance unit ready" divergence** (above): fix it on `main` before
+   Flight A, or let it ride to this plan's Stage 2? Recommend **fix before Flight A** — it is a
+   few lines and Flight A is an air start.
+
+---
+
+## Superseded (2026-10-21 text), kept for the record
+
+- **Old Decision 2/3 (fatal at startup)** — *"Startup-fatal validation is a deliberate, stated
+  departure from `tuning.py`'s 'never refuses to start' posture … by explicit user direction ('I'd
+  rather a check at startup and error than finding out in middle of flight')."* **Superseded by
+  D5** (user, 2026-10-23: *"bad file: log error and ignore file …"*). The validation rules
+  themselves are unchanged; only what happens on failure changed.
+- **Old Decision 3 (conditions on commanded state)** — chosen to keep "code owns truth" by never
+  letting a file read live aircraft state. **Superseded by D3/R5**: with takeoff on every takeoff,
+  commanded state is wrong exactly when it matters (hot/air start, pilot hand-moved a switch).
+  Reading DCS's own readback is the more truthful source, and gating still stays in code.
+- **Old Decision 1 (queue scope open, recommend per-trigger)** — resolved as recommended (D1).
+- **Old Decision 2 in the Decisions list (TAKEOFF one-shot, recommended)** — **overturned** by
+  the user (D2).
+- **Old Decision 4 (no card)** — **overturned**: Stage 3 card.
+- **Old Stage 3 (generic readback, needed for this cut)** — design kept for Stage 4: new
+  `"watch_args"` op on `Export.lua`'s command listener; `push_watched_args_state` at ~1 Hz reading
+  `GetDevice(0):get_argument_value(arg)` for each watched arg, change-epsilon
+  `COCKPIT_SWITCH_EPSILON`; aircraft-layer `schema/watched_args.py`, `WatchedArgsCache`,
+  `send_watch_args`, `POST /command/watch_args`, `GET /watched_args/latest`; body-layer
+  `set_watch_args` (raises) / `get_watched_args_latest` (swallows), re-sent after every mission
+  (re)start. **Changed**: it no longer removes the six named fields from `CockpitSwitchState` —
+  BL-B80 consumes that line, and removal buys nothing.
+- **Old Stage 4 ("remove `GuidanceUnitState`")** — **superseded by R1**; parity check folded into
+  Stage 2 test (a).
+- **Old co-moving row "`is_complete(TAKEOFF)` via `sight_ready`"** and **"`home_phase` set by the
+  command"** — both stale after BL-B80 (R2; `home_phase` follows observed 886).
+- **Old "no `LICENSE` file exists yet"** — `LICENSE.md` (CC BY-NC-SA 4.0) now exists, which makes
+  the no-GPL rule a hard constraint rather than a precaution.
