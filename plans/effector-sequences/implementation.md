@@ -141,3 +141,121 @@ shape) plus the Reviewer's two required fixes and all three optional refinements
   research note's "every real call uses d = 0.1" was wrong for roughly half the calls that pass
   a `delta_` at all (counted by grepping `helper_args` entries containing a `/` against the ones
   that don't, in the committed real dump — not a guess).
+
+---
+
+## Mission-start triggers (2026-10-23, follow-on)
+
+Adds the two triggers from `explore-notes.md`'s "Two new triggers: mission start"
+(user, verbatim): *"Add trigger for mission-start that fires once at every mission start and
+separate for mission-start-in-air that fires once at mission start only if airborne (AGL >
+10 m)"*. Plan R14 (added this pass) and `body-layer/CLAUDE.md`'s BL-B90 entry record the
+design; no sequence file ships for either trigger (the user writes those).
+
+### Files Changed
+
+- `body-layer/src/belief/effector_sequences.py` — two new `EffectorTrigger` members
+  (`MISSION_START`, `MISSION_START_IN_AIR`), both `cardinality="once"`, with `TRIGGER_INFO`
+  entries. Pruned the `cardinality` field's docstring claim that "no shipped trigger is `once`
+  yet" (now false).
+- `body-layer/config/sequences/triggers.md` — regenerated (`tools/render_triggers.py --write`).
+- `body-layer/src/logger.py`:
+  - `ConsolePerceptionRunner` gains three fields: `pending_mission_start_fire`,
+    `pending_mission_start_in_air_check` (both `bool`, default `False`), and
+    `mission_start_fresh_sample_baseline_t_sim` (`float | None`). All three reset to their
+    declared defaults on `reset_for_new_mission`'s re-run `__init__`, same as every other
+    per-mission field.
+  - `_check_for_new_mission` captures `runner.last_t_sim` *before* calling
+    `_reset_mission_state` (which wipes it to `None`) and, on a genuine reset, arms all three
+    fields explicitly afterward — same pattern `last_mission_start_sequence` already uses.
+    Cannot fire the triggers itself: it runs before `runner.run_once()` each poll and has no
+    ownship sample to decide freshness or airborne-ness from.
+  - `_run_crew_text_poll_loop`'s poll block (where `was_on_ground`/`TAKEOFF` already lived):
+    a `mission_start_resolving` check runs before the takeoff-edge check, now in an `elif`.
+    While either pending flag is set, the block waits for the first ownship sample whose
+    `t_sim` *differs* (`!=`, not `<`) from `mission_start_fresh_sample_baseline_t_sim`, then
+    fires `MISSION_START` (if still pending) and, from that same sample, `MISSION_START_IN_AIR`
+    only if not `crew_console.on_ground`. `TAKEOFF` is suppressed for every poll this
+    resolution is still pending, including the one that resolves it.
+
+### Why `!=` rather than `<` against the baseline
+
+Considered and rejected: comparing the candidate sample's `t_sim` as strictly less than the
+pre-reset baseline (reasoning "a fresh mission's model clock restarts near zero"). Rejected
+because a restart moments into a short previous mission can have a *small* baseline that the
+new mission's own early samples pass straight through — a strict-decrease check can then wait
+for the rest of the mission and never resolve. `!=` only requires detecting *any* change from
+the exact stale value the collector was caching, which holds regardless of which direction the
+clock moved, and converges in at most one real `Export.lua` sample.
+
+### Tests Added (`body-layer/tests/test_logger.py`, driving the real poll loop)
+
+All six use a synthetic one-row sequence each for the two new triggers (`MISSION_START`
+writes `observ`, `MISSION_START_IN_AIR` writes `weapon_safety`) — deliberately *not* any of
+`takeoff`'s own four switches, so a write is unambiguous even against a takeoff firing for an
+unrelated, pre-existing reason. Every test settles on the ground first, because a process's
+very first ownship sample being airborne is itself a takeoff edge under `on_ground`'s `True`
+default (a pre-existing mechanism, exercised deliberately by
+`test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up` already) — settling
+grounded keeps that mechanism out of these tests entirely.
+
+- `test_ground_mission_start_fires_mission_start_only` — ground restart fires `MISSION_START`
+  only.
+- `test_air_mission_start_fires_both_mission_start_triggers_not_takeoff` — air restart fires
+  both, `TAKEOFF` never fires despite the textbook `on_ground: True -> False` shape.
+- `test_air_start_then_land_then_takeoff_fires_takeoff_once` — after the air-start resolves,
+  a real landing then takeoff still fires `TAKEOFF` exactly once.
+- `test_body_layer_start_mid_mission_fires_neither_mission_start_trigger` — a process
+  attaching to an already-running mission (rule 4) fires neither.
+- `test_second_mission_restart_fires_both_triggers_again` — a second restart in the same
+  process fires both again, no latch surviving the first.
+- `test_stale_telemetry_at_mission_restart_does_not_decide_airborne` — a real takeoff
+  establishes a genuinely airborne "old mission" state; the restart is detected but the
+  telemetry object is left unchanged for several polls (the exact stale-cache shape); neither
+  new trigger fires and `TAKEOFF` does not fire a second time during that window; only once a
+  sample with a different `t_sim` (grounded) arrives does `MISSION_START` fire.
+
+**Test-impact check (plan step 1b).** Grepped `tests/` for every existing test referencing
+`mission_start`/`mission-start`/`EffectorTrigger` before writing new ones. Found one mismatch
+the plan's own text did not anticipate: `tests/test_effector_sequences.py::
+test_unknown_trigger_drops_the_file` constructed its "genuinely unknown trigger" fixture by
+substring-replacing `takeoff` → `mission-start` — which this change turns into a *known*
+trigger, silently defeating the test's own premise (it would have kept passing, having
+stopped testing what its name says, since an unknown trigger and a known one with an empty
+rows tuple both parse without raising — the only reason it failed loudly instead is that it
+also asserts `sequences == {}`, which a newly-valid `mission-start` entry violates). Fixed by
+switching the substituted string to `bogus-trigger`, which `EffectorTrigger` will never know.
+
+### Mutation verification performed
+
+Set `mission_start_resolving = False` unconditionally in `logger.py` (deleting the real
+pending-flag check) and re-ran the six new tests: 5 of 6 failed red, each for the stated
+reason (`TAKEOFF` wrongly firing on an air/stale sample, or `MISSION_START_IN_AIR` wrongly
+firing from a stale sample). The sixth
+(`test_body_layer_start_mid_mission_fires_neither_mission_start_trigger`) stayed green
+correctly — that scenario never sets the pending flags at all (rule 4), so the mutation is a
+no-op on that path, not evidence of a gap. Restored by re-applying the exact original text;
+confirmed via a full mypy/ruff/pytest re-run afterward rather than by eye.
+
+### Checks
+
+(body-layer only — the only subproject touched)
+
+- `ruff format --check src tests tools`: pass
+- `ruff check src tests tools`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (74 files)
+- `cd body-layer && .venv/bin/mypy tools`: pass (10 files)
+- `pytest -q`: pass — 2602 passed, 4 xfailed
+
+### Notable Discoveries
+
+- The pre-existing "airborne first sample looks like a takeoff" behaviour
+  (`on_ground` defaulting `True`) is now a documented, deliberate exception for the
+  body-layer-attaches-mid-mission case (rule 4) specifically — it is *not* suppressed there,
+  only for a genuinely detected mission (re)start. Worth flagging because the two cases produce
+  the same wire-level symptom (an airborne first sample) but now diverge in behaviour depending
+  on whether a mission-start event accompanies it.
+- `mission_start_fresh_sample_baseline_t_sim`'s `!=` comparison relies on DCS's own telemetry
+  cache serving a bit-identical `t_sim` float across polls until a genuinely new sample lands —
+  true by construction (`TelemetryCache` serves the same cached object), but worth restating if
+  a future change ever makes the aircraft-layer synthesize or round `t_sim` on each read.

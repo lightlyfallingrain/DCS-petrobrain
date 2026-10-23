@@ -38,9 +38,14 @@ from belief.audio_client import AudioAdapterError
 from belief.console import Console
 from belief.contacts import ContactStore
 from belief.crew_console import CONFIG_ERROR_LINE, CrewConsole
-from belief.effector_engine import EFFECTOR_SEQUENCE_STEP_DELAY_S
+from belief.effector_engine import (
+    AIRCRAFT,
+    EFFECTOR_SEQUENCE_STEP_DELAY_S,
+    PETROVICH_ROLE,
+    EffectorTrigger,
+)
 from belief.effector_registry import EffectorDef, RegistryError
-from belief.effector_sequences import SequenceError
+from belief.effector_sequences import SequenceError, SequenceFile, SwitchRow
 from belief.mission_phase import (
     CompactRoutePoint,
     MissionPhaseTracker,
@@ -5656,6 +5661,657 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
     assert not poll_thread.is_alive()
     assert runner.effector_state.commanded_values["observ"] == "on"
     assert runner.effector_state.commanded_values["weapon_safety"] == "safe"
+
+
+# -- Mission-start triggers (`plans/effector-sequences/explore-notes.md`,
+# "Two new triggers: mission start") -- `MISSION_START`/`MISSION_START_
+# IN_AIR`, through the real poll loop, same technique as the takeoff tests
+# above. No production sequence file ships for either trigger (the plan's
+# own item 6: "the user writes those"), so each test here supplies its own
+# tiny synthetic one -- `MISSION_START` writes `observ` (arg 886),
+# `MISSION_START_IN_AIR` writes `weapon_safety` (arg 673), deliberately
+# *not* any of `takeoff`'s own four switches (`missile_power`/`cplr_distr`/
+# `sight_power`/`scho_pwr_b1`), so a write observed in `cockpit_switch_
+# writes` unambiguously identifies which trigger produced it, including
+# against a takeoff that fires for an unrelated, pre-existing reason (the
+# airborne-first-sample edge every takeoff test already exercises). Every
+# test below settles on the ground first for exactly that reason: a
+# process's very first ownship sample being airborne is *itself* a
+# takeoff edge under `on_ground`'s `True` default, same as `test_second_
+# takeoff_in_the_same_mission_does_not_rerun_the_power_up` relies on
+# deliberately -- settling grounded keeps that pre-existing behaviour from
+# ever entering the picture here. ------------------------------------------
+
+
+def _effector_config_with_mission_start_sequences() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    """The real committed registry/takeoff/OBSERV/weapons files, plus one
+    synthetic one-row sequence each for `MISSION_START` (writes `observ`)
+    and `MISSION_START_IN_AIR` (writes `weapon_safety`) -- see the section
+    banner above for why those two and not any of `takeoff`'s own four.
+    A fresh dict copy of `_real_effector_config()`'s cached sequences --
+    never mutates the module-level cache other tests share."""
+    sequences, registry = _real_effector_config()
+    merged = dict(sequences)
+    merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.MISSION_START.value)] = (
+        SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=EffectorTrigger.MISSION_START.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path("fake-mission-start.md"),
+        )
+    )
+    merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.MISSION_START_IN_AIR.value)] = (
+        SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=EffectorTrigger.MISSION_START_IN_AIR.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector="weapon_safety",
+                    value="armed",
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path("fake-mission-start-in-air.md"),
+        )
+    )
+    return merged, registry
+
+
+_MISSION_START_WRITE = (7, 3002, 1.0)  # observ on
+_MISSION_START_IN_AIR_WRITE = (6, 3020, 1.0)  # weapon_safety armed
+_TAKEOFF_WRITES = [(6, 3028, 1.0), (16, 3015, 1.0), (7, 3001, 1.0), (6, 3030, 1.0)]
+
+#: Every readback this section's sequences, plus the real takeoff file,
+#: could ever consult -- seeded known-off so each row's R12 implicit
+#: self-check writes immediately rather than waiting out `EFFECTOR_
+#: CONDITION_READBACK_WAIT_S` for an absent reading (same posture as the
+#: takeoff cold-start test above).
+_MISSION_START_COCKPIT_SWITCH_STATE = {
+    "args": {"773": 0.0, "761": 0.0, "885": 0.0, "955": 0.0, "886": 0.0, "673": 0.0}
+}
+
+
+def _settled_mission_start_runner(
+    aircraft_client: FakeConsoleAircraftClient,
+) -> ConsolePerceptionRunner:
+    """A runner that has already settled sequence 1 of its own mission
+    start (the ordinary "process just started, nothing to reset yet"
+    case, `_check_for_new_mission`'s own first-poll rule) -- every test
+    below then moves `aircraft_client.mission_start_sequence` to 2 to
+    produce a genuine, detectable restart from the poll loop's very next
+    iteration, same setup `test_crew_text_poll_loop_resets_belief_on_
+    mission_restart` already uses."""
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.last_mission_start_sequence = 1
+    return runner
+
+
+def test_ground_mission_start_fires_mission_start_only(tmp_path: Path) -> None:
+    """A mission (re)start whose first fresh sample is on the ground
+    fires `MISSION_START` and nothing else -- not `MISSION_START_IN_AIR`,
+    and not `TAKEOFF` (rule 3: an air start must never look like a
+    takeoff, and neither must a ground start be mistaken for one just
+    because `on_ground` was reset to its default `True`)."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # on the ground throughout
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        # Settle the first poll (sequence 1, no reset) before arming the
+        # restart -- otherwise `last_mission_start_sequence` could still
+        # be `None` when the fake first reports sequence 2, which the
+        # first-poll rule would then treat as "nothing to reset" instead
+        # of a genuine restart.
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        assert aircraft_client.cockpit_switch_writes == [], (
+            "the settle phase itself must not write anything"
+        )
+
+        # The restart: a different `t_sim` (a fresh mission's own model
+        # clock), still grounded.
+        sim_t = 0.5
+        telemetry["dcs_model_time_s"] = sim_t
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_WRITE in aircraft_client.cockpit_switch_writes
+
+        # A few more polls to give a wrongly-fired MISSION_START_IN_AIR or
+        # TAKEOFF a chance to show up.
+        for _ in range(5):
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [_MISSION_START_WRITE]
+    assert runner.pending_mission_start_fire is False
+    assert runner.pending_mission_start_in_air_check is False
+
+
+def test_air_mission_start_fires_both_mission_start_triggers_not_takeoff(
+    tmp_path: Path,
+) -> None:
+    """The air-start case (explore-notes, verbatim: "No, only real
+    takeoffs"): `MISSION_START` and `MISSION_START_IN_AIR` both fire, in
+    that order (`MISSION_START`'s write lands no later than `MISSION_
+    START_IN_AIR`'s own, since both are evaluated in the same poll
+    block), and `TAKEOFF` never fires even though `on_ground` transitions
+    `True` (the grounded settle phase) `-> False` (the observed airborne
+    restart sample) exactly the way a real takeoff edge looks."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        assert crew_console.on_ground is True
+
+        # The restart: a different `t_sim`, air start.
+        sim_t = 0.5
+        telemetry["dcs_model_time_s"] = sim_t
+        telemetry["altitude_agl_m"] = 500.0
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_IN_AIR_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_IN_AIR_WRITE in aircraft_client.cockpit_switch_writes
+
+        for _ in range(5):
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert sorted(aircraft_client.cockpit_switch_writes) == sorted(
+        [_MISSION_START_WRITE, _MISSION_START_IN_AIR_WRITE]
+    )
+    assert crew_console.on_ground is False
+
+
+def test_air_start_then_land_then_takeoff_fires_takeoff_once(tmp_path: Path) -> None:
+    """Rule 3's second half: once the air-start's initial on-ground state
+    is established (no `TAKEOFF`), a *real* ground->air transition
+    afterwards still fires `TAKEOFF`, exactly once -- unambiguous here
+    because this section's own mission-start writes (`observ`/`weapon_
+    safety`) never overlap with the real takeoff file's four switches."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # The restart: air start.
+        sim_t = 0.5
+        telemetry["dcs_model_time_s"] = sim_t
+        telemetry["altitude_agl_m"] = 500.0
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_IN_AIR_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_IN_AIR_WRITE in aircraft_client.cockpit_switch_writes
+        assert aircraft_client.cockpit_switch_writes == [
+            _MISSION_START_WRITE,
+            _MISSION_START_IN_AIR_WRITE,
+        ], "TAKEOFF must not have fired on the air-start resolving poll"
+
+        # Land, then take off for real.
+        telemetry["altitude_agl_m"] = 5.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while not crew_console.on_ground and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.on_ground is True, "the landing was never observed"
+
+        telemetry["altitude_agl_m"] = 500.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3030,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert (6, 3030, 1.0) in aircraft_client.cockpit_switch_writes
+
+        # A few more polls, to catch a second, spurious TAKEOFF run.
+        for _ in range(5):
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # The real takeoff file's four writes landed exactly once.
+    for write in _TAKEOFF_WRITES:
+        assert aircraft_client.cockpit_switch_writes.count(write) == 1, (
+            aircraft_client.cockpit_switch_writes
+        )
+
+
+def test_body_layer_start_mid_mission_fires_neither_mission_start_trigger(
+    tmp_path: Path,
+) -> None:
+    """Rule 4: a body-layer process start (or restart) against an
+    *already-running* mission is not a DCS mission (re)start --
+    `_check_for_new_mission`'s own first-poll rule (`runner.last_mission_
+    start_sequence is None` on the very first poll) already refuses to
+    treat a sequence already present at startup as a reset; this test
+    pins that `MISSION_START`/`MISSION_START_IN_AIR` specifically never
+    fire from it, through the real poll loop with both triggers' sequence
+    files loaded. Grounded throughout -- the pre-existing "airborne first
+    sample looks like a takeoff" behaviour is a different, unrelated
+    mechanism this test does not need to also exercise."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0
+    telemetry["dcs_model_time_s"] = 300.0
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    # The collector already holds a mission-start event from before this
+    # body-layer process connected (e.g. a prior process on the same
+    # mission) -- a fresh process's own `last_mission_start_sequence` is
+    # `None`, not pre-settled to 1, unlike every test above.
+    aircraft_client.mission_start_sequence = 7
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        assert runner.last_mission_start_sequence == 7
+
+        for _ in range(10):
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
+    assert runner.pending_mission_start_fire is False
+    assert runner.pending_mission_start_in_air_check is False
+
+
+def test_second_mission_restart_fires_both_triggers_again(tmp_path: Path) -> None:
+    """D1/D11-style "every mission (re)start gets its own run": a second
+    restart within the same process fires `MISSION_START`/`MISSION_START_
+    IN_AIR` a second time, for the new mission -- no latch surviving from
+    the first."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # First restart: air start.
+        sim_t = 0.5
+        telemetry["dcs_model_time_s"] = sim_t
+        telemetry["altitude_agl_m"] = 500.0
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_IN_AIR_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert aircraft_client.cockpit_switch_writes.count(_MISSION_START_WRITE) == 1
+        assert (
+            aircraft_client.cockpit_switch_writes.count(_MISSION_START_IN_AIR_WRITE)
+            == 1
+        )
+
+        # A second restart -- a different `t_sim` again, still airborne.
+        sim_t = 0.8
+        telemetry["dcs_model_time_s"] = sim_t
+        aircraft_client.mission_start_sequence = 3
+        deadline = time.monotonic() + 5.0
+        while (
+            aircraft_client.cockpit_switch_writes.count(_MISSION_START_IN_AIR_WRITE) < 2
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes.count(_MISSION_START_WRITE) == 2
+    assert aircraft_client.cockpit_switch_writes.count(_MISSION_START_IN_AIR_WRITE) == 2
+
+
+def test_stale_telemetry_at_mission_restart_does_not_decide_airborne(
+    tmp_path: Path,
+) -> None:
+    """The hazard rule 2 names explicitly: the collector keeps serving
+    the *previous* mission's last cached (airborne) telemetry for a few
+    polls after the restart is detected, before `Export.lua` resumes
+    sending real samples from the new (ground-spawn) mission. The engine
+    must not decide `MISSION_START_IN_AIR`, and must not fire `TAKEOFF`,
+    from any of those stale polls -- only the first sample whose `t_sim`
+    actually differs from the pre-reset baseline may be trusted. The
+    "old mission" here is a real, if brief, flight (settle grounded, take
+    off for real -- unambiguous via `_TAKEOFF_WRITES`, distinct from this
+    section's own `observ`/`weapon_safety` writes) so the stale cached
+    sample genuinely reads airborne, not merely contrived to."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # A real takeoff, mid-process, before any mission restart --
+        # establishes the "old mission's last known state" as a genuine
+        # airborne sample, not a contrived one. Sim time is advanced by
+        # `EFFECTOR_SEQUENCE_STEP_DELAY_S` each iteration (same technique
+        # as the takeoff tests above) so all four rows actually complete
+        # before the restart below -- otherwise the mission-reset that
+        # follows would drop the run mid-sequence and `_TAKEOFF_WRITES`
+        # would never land in full.
+        sim_t += 1.0
+        telemetry["altitude_agl_m"] = 500.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3030,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert (6, 3030, 1.0) in aircraft_client.cockpit_switch_writes
+        # The telemetry dict's `dcs_model_time_s` is still `sim_t` (its
+        # last assignment above, inside the loop body that produced the
+        # fourth write) -- that is this test's "old mission's last known
+        # state", the baseline the staleness check below compares against.
+        stale_t_sim = sim_t
+        time.sleep(0.1)  # let a poll settle `last_t_sim` at exactly that value
+        assert runner.last_t_sim == stale_t_sim
+
+        # Restart is detected, but the telemetry object is left completely
+        # unchanged for several polls -- the exact "stale cache" shape:
+        # same `t_sim`, still airborne.
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            runner.pending_mission_start_in_air_check is not True
+            or runner.mission_start_fresh_sample_baseline_t_sim != stale_t_sim
+        ) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.pending_mission_start_in_air_check is True
+        assert runner.mission_start_fresh_sample_baseline_t_sim == stale_t_sim
+
+        writes_before_stale_wait = list(aircraft_client.cockpit_switch_writes)
+        # Several more polls of the exact same stale sample -- neither
+        # new trigger may fire, and the pending flags must still be armed.
+        for _ in range(10):
+            time.sleep(0.02)
+        assert aircraft_client.cockpit_switch_writes == writes_before_stale_wait
+        assert runner.pending_mission_start_fire is True
+        assert runner.pending_mission_start_in_air_check is True
+
+        # The real new-mission sample finally lands: a *different* t_sim
+        # (smaller, as a fresh mission's model clock would be), grounded.
+        telemetry["dcs_model_time_s"] = 0.5
+        telemetry["altitude_agl_m"] = 5.0
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_WRITE in aircraft_client.cockpit_switch_writes
+
+        for _ in range(5):
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # MISSION_START fired once the real sample arrived; MISSION_START_
+    # IN_AIR never did (the real sample is grounded); TAKEOFF fired only
+    # once, from the real pre-restart flight -- never a second time from
+    # the stale/resolving window.
+    assert aircraft_client.cockpit_switch_writes == [
+        *_TAKEOFF_WRITES,
+        _MISSION_START_WRITE,
+    ]
+    assert runner.pending_mission_start_fire is False
+    assert runner.pending_mission_start_in_air_check is False
 
 
 # --- _load_effector_config (D5/D6) ------------------------------------------

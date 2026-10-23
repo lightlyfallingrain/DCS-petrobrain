@@ -21,3 +21,5 @@ file -- see `belief.effector_sequences.load_sequences`.
 | `observ-off` | The pilot commands "Observ off". A violent manoeuvre can also force OBSERV off automatically, but that path does not fire this trigger -- it is the pilot-commanded path only. | every time |
 | `weapons-arm` | The pilot commands "weapons armed", or starts an attack run ("engage"), which arms the weapons safety bar automatically. | every time |
 | `weapons-safe` | The pilot commands "weapons safe". | every time |
+| `mission-start` | Fires exactly once at every DCS mission (re)start, whether the aircraft spawns on the ground or in the air. | once (per mission) |
+| `mission-start-in-air` | Fires exactly once at a DCS mission (re)start, only when the aircraft is already airborne at that moment -- never on a ground start. Always fires after MISSION_START, same poll. | once (per mission) |

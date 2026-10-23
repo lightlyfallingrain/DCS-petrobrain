@@ -454,6 +454,20 @@ Belief — observation *consumption*:
   engine gives up — explicit conditions then skip the row, the implicit self-check instead writes)
   and `EFFECTOR_SEQUENCE_STEP_DELAY_S` (gap between rows within one trigger's own run, renamed from
   the old `GUIDANCE_UNIT_SWITCH_DELAY_S`).
+  **`mission-start`/`mission-start-in-air` triggers** (explore-notes, "Two new triggers: mission
+  start"): `mission-start` fires once per DCS mission (re)start, on the ground or in the air;
+  `mission-start-in-air` fires immediately after it, same poll, only when that same sample is
+  airborne. `logger.py`'s poll block fires both (never `_check_for_new_mission` itself, which runs
+  before that poll's own ownship sample exists) once it trusts the ownship sample is not the
+  previous mission's stale cached one — `runner.mission_start_fresh_sample_baseline_t_sim` (the
+  `last_t_sim` held immediately before the reset) is compared by `!=`, not `<`, against each
+  candidate sample's own `t_sim`, since a restart's new model clock need not be smaller than
+  whatever the old one happened to reach. **An air start no longer fires `takeoff`** — only a real
+  observed ground→air transition does; `crew_console.on_ground`'s baseline is established from
+  that first trusted sample without firing anything. A body-layer process start/restart against an
+  already-running mission fires neither (unchanged — `_check_for_new_mission`'s pre-existing
+  first-poll rule already refused to treat that as a reset). No sequence file ships for either new
+  trigger this cut.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

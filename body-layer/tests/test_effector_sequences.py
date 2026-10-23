@@ -181,16 +181,20 @@ def test_unknown_effector_in_condition_drops_the_file(tmp_path: Path) -> None:
 
 
 def test_unknown_trigger_drops_the_file(tmp_path: Path) -> None:
+    # `bogus-trigger` -- not `mission-start`, which `EffectorTrigger` now
+    # knows (`plans/effector-sequences/explore-notes.md`, "Two new
+    # triggers: mission start") and would therefore no longer exercise
+    # this "genuinely unknown" case.
     _write(
         tmp_path / "mi-24p" / "t.md",
-        _TAKEOFF_HEADER.replace("takeoff", "mission-start") + "\n" + _DATA_HEADER,
+        _TAKEOFF_HEADER.replace("takeoff", "bogus-trigger") + "\n" + _DATA_HEADER,
     )
 
     sequences, errors = load_sequences(tmp_path, _REGISTRIES)
 
     assert sequences == {}
     assert len(errors) == 1
-    assert "unknown trigger 'mission-start'" in errors[0].reason
+    assert "unknown trigger 'bogus-trigger'" in errors[0].reason
 
 
 def test_malformed_row_wrong_cell_count_drops_the_file(tmp_path: Path) -> None:

@@ -59,9 +59,15 @@ belief.effector_engine.EFFECTOR_SEQUENCE_STEP_DELAY_S: 1.0 (derived)
    immediately each time, matching switch/bar movement, same as before this change. Record: any
    mismatch between what was said and what moved?
 4. **Air start (warm unit, guidance already up).** Start airborne with the unit already powered.
-   Expect: takeoff fires once (airborne-first-sample counts as the edge) but every row's
-   self-check sees the switch already on, so nothing writes and nothing is said — no "Guidance
-   unit ready" at spawn. Record: anything spoken or moved in the first few seconds after spawn?
+   **Updated since this card was first published** (explore-notes, "Two new triggers: mission
+   start"): `TAKEOFF` no longer fires on an air start at all — only a real ground→air transition
+   fires it now. The new `mission-start`/`mission-start-in-air` triggers fire instead (once per
+   mission, the latter only when airborne at that moment), but no sequence file ships for either
+   this cut, so by default nothing writes and nothing is said at spawn — same observable silence
+   as before, different mechanism underneath. If you want something to actually happen on an air
+   start, add your own `config/sequences/mi-24p/copilot-mission-start-in-air.md` (same row format
+   as `copilot-takeoff.md`) before this flight. Record: anything spoken or moved in the first few
+   seconds after spawn?
 5. **Hand-switch one of the four off before takeoff**, e.g. pull MISSILE POWER off in the cockpit,
    then take off. Expect: only that one switch flips back on; the other three are already correct
    and are skipped. Record: did exactly one switch move, and was it the one you flipped?

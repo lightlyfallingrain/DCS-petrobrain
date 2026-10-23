@@ -69,6 +69,21 @@ class EffectorTrigger(Enum):
     OBSERV_OFF = "observ-off"
     WEAPONS_ARM = "weapons-arm"
     WEAPONS_SAFE = "weapons-safe"
+    #: Added 2026-10-23 (`plans/effector-sequences/explore-notes.md`,
+    #: "Two new triggers: mission start" -- user, verbatim: "Add trigger
+    #: for mission-start that fires once at every mission start and
+    #: separate for mission-start-in-air that fires once at mission start
+    #: only if airborne (AGL > 10 m)"). Fired from `logger.py`'s own
+    #: mission-(re)start handling, once the first *fresh* post-restart
+    #: ownship sample is in hand -- see that module's `_run_crew_text_
+    #: poll_loop` for why a fresh sample cannot be assumed on the same
+    #: poll the restart is detected.
+    MISSION_START = "mission-start"
+    #: Fires immediately after `MISSION_START` (same poll), only when that
+    #: first fresh sample is airborne (AGL > `crew_console.
+    #: ON_GROUND_AGL_THRESHOLD_M`). An air start never also fires
+    #: `TAKEOFF` -- see `logger.py`'s poll-block comment on why.
+    MISSION_START_IN_AIR = "mission-start-in-air"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,10 +95,8 @@ class TriggerInfo:
     "while" it holds (`logger.py` fires each of these from an edge
     detection or a one-shot command signal, not a level check).
     `cardinality` is `"every_time"` for a trigger with no per-mission
-    latch (every one of the five below) or `"once"` for one that may
-    only ever fire once per mission -- no shipped trigger is `"once"`
-    yet, but the field exists so a future one does not need a format
-    change to `render_triggers.py`."""
+    latch (the original five) or `"once"` for one that may only ever
+    fire once per mission (`MISSION_START`/`MISSION_START_IN_AIR`)."""
 
     description: str
     cardinality: Literal["every_time", "once"]
@@ -133,6 +146,21 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
     EffectorTrigger.WEAPONS_SAFE: TriggerInfo(
         description='The pilot commands "weapons safe".',
         cardinality="every_time",
+    ),
+    EffectorTrigger.MISSION_START: TriggerInfo(
+        description=(
+            "Fires exactly once at every DCS mission (re)start, whether "
+            "the aircraft spawns on the ground or in the air."
+        ),
+        cardinality="once",
+    ),
+    EffectorTrigger.MISSION_START_IN_AIR: TriggerInfo(
+        description=(
+            "Fires exactly once at a DCS mission (re)start, only when the "
+            "aircraft is already airborne at that moment -- never on a "
+            "ground start. Always fires after MISSION_START, same poll."
+        ),
+        cardinality="once",
     ),
 }
 

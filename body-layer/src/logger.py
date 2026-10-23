@@ -573,6 +573,41 @@ class ConsolePerceptionRunner:
     #: this field looking like "never checked" for the poll that follows.
     last_mission_start_sequence: int | None = None
 
+    #: Set together by `_check_for_new_mission` right after a genuine
+    #: reset (`plans/effector-sequences/explore-notes.md`, "Two new
+    #: triggers: mission start") -- `True` means `EffectorTrigger.
+    #: MISSION_START` has not fired yet for *this* mission (re)start.
+    #: Resets to its declared default (`False`) on the next mission
+    #: reset's re-run `__init__`, same as every other per-mission field --
+    #: a still-pending flag from a restart that is itself being
+    #: superseded by another restart is replaced by this reset's own
+    #: fresh `True`, assigned explicitly afterward, the same pattern
+    #: `last_mission_start_sequence` already uses.
+    pending_mission_start_fire: bool = False
+
+    #: Companion to `pending_mission_start_fire`: `True` means the
+    #: airborne-or-not decision for `EffectorTrigger.MISSION_START_IN_AIR`
+    #: (and whether `TAKEOFF` may fire at all) has not yet been made for
+    #: this mission (re)start -- `_run_crew_text_poll_loop`'s poll block
+    #: holds off firing *either* new trigger, and suppresses `TAKEOFF`
+    #: entirely, for as long as this is `True`. Cleared the poll a fresh
+    #: (non-stale) ownship sample is found, which is also the poll
+    #: `crew_console.on_ground`'s baseline is first established without
+    #: a `TAKEOFF` edge (see that poll block's own comment).
+    pending_mission_start_in_air_check: bool = False
+
+    #: The `last_t_sim` this runner held *immediately before* the reset
+    #: that just set the two flags above -- `None` if no ownship sample
+    #: had ever been read this process. `_run_crew_text_poll_loop` treats
+    #: the first post-reset ownship sample whose own `t_sim` differs from
+    #: this value as the first genuinely fresh one (mission-start
+    #: detection can arrive a poll or more before `Export.lua` resumes
+    #: sending, during which `GET /telemetry/latest` keeps serving the
+    #: previous mission's last cached sample, bit-identical `t_sim` and
+    #: all, every poll until a real one lands) -- see that poll block's
+    #: own comment for why `!=` rather than `<` against this baseline.
+    mission_start_fresh_sample_baseline_t_sim: float | None = None
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1). Re-invokes `__init__` on this same object, passing
@@ -587,9 +622,15 @@ class ConsolePerceptionRunner:
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
         `guidance_unit_state`, `effector_state`, `sight_head`,
         `last_sight_look_sim`, `attitude_history`, `optic`,
-        `_last_look_direction`, `last_mission_start_sequence`) resets to
-        its declared default (D11: a mission (re)start drops every
-        running/pending effector-sequence run with nothing carried over).
+        `_last_look_direction`, `last_mission_start_sequence`,
+        `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
+        `mission_start_fresh_sample_baseline_t_sim`) resets to its
+        declared default (D11: a mission (re)start drops every
+        running/pending effector-sequence run with nothing carried over;
+        the three mission-start-trigger fields reset to `False`/`False`/
+        `None` here too -- `_check_for_new_mission` re-assigns them
+        explicitly afterward, same pattern as `last_mission_start_
+        sequence`).
 
         **`_last_look_direction` needs an explicit line, not just the
         re-invoked `__init__`.** It is declared `field(default=None,
@@ -2377,6 +2418,16 @@ def _check_for_new_mission(
     -- see that function's own docstring for why it defaults to `None` and
     what leaving it out would silently break.
 
+    **A genuine reset also arms `runner.pending_mission_start_fire`/
+    `pending_mission_start_in_air_check`**, with `mission_start_fresh_
+    sample_baseline_t_sim` set to whatever `last_t_sim` held immediately
+    before the reset -- `_run_crew_text_poll_loop`'s poll block is what
+    actually fires `EffectorTrigger.MISSION_START`/`MISSION_START_IN_AIR`,
+    once it has a ownship sample it trusts is not the previous mission's
+    stale cached one. Not done here: this function (and `--console`'s
+    debug REPL, which calls it with no `CrewConsole` at all) has no
+    ownship sample of its own to decide freshness or airborne-ness from.
+
     **Does nothing on the very first poll of a process**, even if a
     sequence is already present (the collector may already hold a mission-
     start event from before body-layer connected) -- `runner.last_mission_
@@ -2440,6 +2491,13 @@ def _check_for_new_mission(
         runner.last_mission_start_sequence,
         sequence,
     )
+    # Captured *before* `_reset_mission_state` wipes `last_t_sim` back to
+    # `None` (it is not in `reset_for_new_mission`'s preserved-field list)
+    # -- `_run_crew_text_poll_loop`'s poll block uses this as the baseline
+    # to recognise the first post-restart ownship sample that is actually
+    # fresh, not the previous mission's last cached one (explore-notes,
+    # "Two new triggers: mission start").
+    pre_reset_t_sim = runner.last_t_sim
     _reset_mission_state(runner, crew_console, mission_memory, fired_on_tracker)
     _maybe_switch_theatre(
         runner,
@@ -2449,6 +2507,15 @@ def _check_for_new_mission(
         trace_sink=trace_sink,
         forest_occlusion=forest_occlusion,
     )
+    # Assigned explicitly after the reset, same pattern as `runner.
+    # last_mission_start_sequence` just below -- `reset_for_new_mission`'s
+    # re-run `__init__` has already put all three back to their declared
+    # defaults (False/False/None), which would otherwise leave this
+    # mission (re)start with no record that `MISSION_START`/
+    # `MISSION_START_IN_AIR` are still owed.
+    runner.pending_mission_start_fire = True
+    runner.pending_mission_start_in_air_check = True
+    runner.mission_start_fresh_sample_baseline_t_sim = pre_reset_t_sim
     runner.last_mission_start_sequence = sequence
     return True
 
@@ -3425,12 +3492,77 @@ def _run_crew_text_poll_loop(
                         # `_handle_observ_on` reads this to gate the
                         # command (plan §3).
                         crew_console.sight_ready = is_sight_ready
+                        # Mission-start triggers (explore-notes, "Two new
+                        # triggers: mission start"), and the one reason
+                        # `TAKEOFF`'s own edge check below is skipped
+                        # entirely while either flag is still pending.
+                        #
+                        # `_check_for_new_mission` cannot fire these
+                        # itself -- it runs before `runner.run_once()`
+                        # each poll and has no ownship sample of its own,
+                        # and mission-start detection can arrive a poll or
+                        # more before `Export.lua` resumes sending (the
+                        # collector keeps serving the previous mission's
+                        # last cached telemetry meanwhile). So it only
+                        # arms `pending_mission_start_fire`/
+                        # `pending_mission_start_in_air_check`, and this
+                        # block waits for the first sample whose `t_sim`
+                        # *differs* from `mission_start_fresh_sample_
+                        # baseline_t_sim` (the value held immediately
+                        # before the reset) -- `!=`, not `<`: DCS model
+                        # time need not be smaller after a restart than
+                        # whatever the previous mission's clock happened
+                        # to reach (a restart moments into a short
+                        # mission could easily have a *larger* baseline
+                        # than the new mission's own early samples), so a
+                        # strict-decrease check can wait forever; the
+                        # stale cached sample, by contrast, is the exact
+                        # same object every poll until a real one lands,
+                        # so its `t_sim` is bit-identical and any
+                        # genuinely new sample's `t_sim` differs from it.
+                        mission_start_resolving = (
+                            runner.pending_mission_start_fire
+                            or runner.pending_mission_start_in_air_check
+                        )
+                        if mission_start_resolving:
+                            baseline = runner.mission_start_fresh_sample_baseline_t_sim
+                            if (
+                                baseline is None
+                                or runner.last_ownship_state.t_sim != baseline
+                            ):
+                                if runner.pending_mission_start_fire:
+                                    runner.effector_state = fire_effector_trigger(
+                                        runner.effector_state,
+                                        EffectorTrigger.MISSION_START,
+                                        runner.last_t_sim,
+                                    )
+                                    runner.pending_mission_start_fire = False
+                                if runner.pending_mission_start_in_air_check:
+                                    # `crew_console.on_ground` was just
+                                    # reassigned above, from this same
+                                    # fresh sample -- this *is* "decide it
+                                    # on the first real ownship sample
+                                    # after the mission start".
+                                    if not crew_console.on_ground:
+                                        runner.effector_state = fire_effector_trigger(
+                                            runner.effector_state,
+                                            EffectorTrigger.MISSION_START_IN_AIR,
+                                            runner.last_t_sim,
+                                        )
+                                    runner.pending_mission_start_in_air_check = False
+                            # `TAKEOFF` is suppressed for every poll this
+                            # mission (re)start is still resolving,
+                            # including the one that just resolved it --
+                            # that poll establishes `crew_console.
+                            # on_ground`'s own new-mission baseline
+                            # without treating it as a transition (an air
+                            # start must never also read as a takeoff).
                         # D2/D4 (`plans/effector-sequences/plan.md`):
                         # fires on **every** takeoff, no `takeoff_seen`
                         # latch -- the takeoff sequence file's own row
                         # conditions (R12's implicit self-check) make a
                         # repeat takeoff or a warm air start a no-op.
-                        if was_on_ground and not crew_console.on_ground:
+                        elif was_on_ground and not crew_console.on_ground:
                             runner.effector_state = fire_effector_trigger(
                                 runner.effector_state,
                                 EffectorTrigger.TAKEOFF,
