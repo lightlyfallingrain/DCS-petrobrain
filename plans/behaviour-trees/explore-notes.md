@@ -63,3 +63,22 @@ conversation as it happens.
 7. **Tree structure: a common tree with mission branches, separate trees per role.** *"probably
    more like own branches of a common tree. Escort certainly would be its own since it's different
    from pure attack. Petrovich roles would mean different trees: copilot, pilot, wingman."*
+
+## Round 3
+
+8. **The operator seat can release countermeasures.** Asked whether "deploy countermeasures" was
+   his own action or a call to the pilot: *"yes"*. So it is an effector action he takes himself.
+9. **Resume if possible, else start new.** *"continue what was interrupted if possible. Missile
+   evasion might make that impossible (no LOS) in which case start new."* An interrupted activity
+   resumes where it was when its precondition (e.g. LOS) still holds, and restarts otherwise.
+10. **The pilot's abort is spoken or inferred.** On whether "unless pilot aborts" was a command or
+    inferred from manoeuvre: *"both"*.
+
+## Status: concept only, not a plan
+
+*"Do not architect anything yet. The whole behaviour tree thing is a concept that I want to explore,
+it may also not be worth it. One option would be to build future behaviour with it and leave what we
+have as is for now."*
+
+No Architect pass. Whether behaviour trees are worth it at all is still open. The user's candidate
+route, if they are: new behaviour is built on trees, and existing hard-coded behaviour stays as it is.
