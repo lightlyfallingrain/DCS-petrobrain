@@ -722,19 +722,20 @@ def advance_sight_aim(
     actually uses (`logger._apply_active_gaze`), so a future controller
     replaces this function's body without moving that call site.
 
-    **Perception-stage body: a pure pass-through.** The sight is slewed by
-    a rate-commanded control loop in reality -- read where it is, command
-    a deflection, repeat (direction §12) -- but that loop belongs to the
-    effector stage (`[[BL-B66]]`), which has not landed. Until it does,
-    `actual := desired` instantly: *permanently* correct for the naked eye
-    and binoculars (a head turn is instant against a 1 Hz poll), a stated
-    placeholder for a sighted optic.
+    **A pure pass-through**, `actual := desired` instantly -- *permanently*
+    correct for the naked eye and binoculars (a head turn is instant
+    against a 1 Hz poll). **`[[BL-B80]]` v1 added a readback-preferring
+    branch for the sight tier (874/876 read as a position); that branch is
+    removed** -- those args echo the *demand*, not a position (confirmed
+    by probe runs 1-10, `docs/acceptance/2026-10-22-9k113-ai-latency-
+    probe.md`), and the sight's own actual aim is now `belief.sight_head.
+    SightHead`'s own simulated body direction, read by `logger._apply_
+    active_gaze` directly rather than through this function at all.
 
-    `dt_s` is accepted and unused here -- reserved for the rate-limited
-    controller `[[BL-B66]]` adds, which needs it to bound how far `actual`
-    may move in one poll. Keeping it in the signature now, even though
-    this body ignores it, is what lets that controller drop in without
-    changing the call site or its callers."""
+    `actual_azimuth_deg`/`actual_elevation_deg` (the prior poll's own
+    `actual` aim) and `dt_s` are accepted and unused -- reserved for a
+    future rate-limited controller for the naked-eye/binocular case (the
+    sight tier's own rate limiting lives in `SightHead` instead)."""
     return desired_azimuth_deg, desired_elevation_deg
 
 

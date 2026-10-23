@@ -207,6 +207,9 @@ class TestCockpitSwitchState:
             "weapons_armed": False,
             "sight_az": None,
             "sight_elev": None,
+            "align_lamp": None,
+            "ready_lamp": None,
+            "launch_perm_lamp": None,
         }
 
 
@@ -366,6 +369,9 @@ class TestCockpitSwitchLatestEndpoint:
             "weapons_armed": False,
             "sight_az": None,
             "sight_elev": None,
+            "align_lamp": None,
+            "ready_lamp": None,
+            "launch_perm_lamp": None,
         }
 
 

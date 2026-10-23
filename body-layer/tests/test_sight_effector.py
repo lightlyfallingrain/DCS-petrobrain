@@ -1,12 +1,20 @@
-"""Tests for `belief.sight_effector` -- `BL-B66` Stages 2-4 (`plans/
-9k113-effectors/plan.md`). No live DCS/aircraft-layer needed -- every
-effector write goes through a fake `AircraftLayerClient` double, same
-posture as every other body-layer effector test."""
+"""Tests for `belief.sight_effector` -- `BL-B66` Stages 2-4 and `[[BL-B80]]`
+v2 (`plans/9k113-effectors/plan.md`, `plans/9k113-sight-pointing/plan.md`).
+No live DCS/aircraft-layer needed -- every effector write goes through a
+fake `AircraftLayerClient` double, same posture as every other body-layer
+effector test.
+
+v1's degree<->raw conversions, `GYRO_ALIGNMENT_S`/`in_gyro_alignment`, and
+the zero-real-warm-up `sight_ready` field are removed with the code they
+tested (the Removal commit) -- `sight_ready()` now reads the real 960
+lamp, and the wire carries degrees directly (`write_sight_target`'s own
+test)."""
 
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -18,10 +26,10 @@ from belief.sight_effector import (
     GuidanceUnitState,
     advance_power_up,
     refresh_readback,
-    sight_azimuth_raw_to_deg,
     sight_ready,
     start_power_up,
     write_observ,
+    write_sight_target,
     write_weapon_safety,
 )
 
@@ -29,27 +37,51 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 class _RecordingAircraftClient:
-    """A fake `AircraftLayerClient` that records every cockpit-switch
-    write and never raises."""
+    """A fake `AircraftLayerClient` that records every cockpit-switch/
+    sight-target write and never raises."""
 
     def __init__(self) -> None:
         self.writes: list[tuple[int, int, float]] = []
+        self.sight_target_writes: list[tuple[float, float, float, float, float]] = []
 
     def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
         self.writes.append((device, cmd, value))
+
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        self.sight_target_writes.append(
+            (goal_az_deg, goal_el_deg, goal_rate_az_deg_s, goal_rate_el_deg_s, t_sim)
+        )
 
     def get_cockpit_switch_state_latest(self) -> dict[str, object] | None:
         return None
 
 
 class _FailingAircraftClient:
-    """A fake `AircraftLayerClient` whose `write_cockpit_switch` always
-    raises `AircraftLayerError`."""
+    """A fake `AircraftLayerClient` whose `write_cockpit_switch`/
+    `write_sight_target` always raise `AircraftLayerError`."""
 
     def __init__(self) -> None:
         self.attempts = 0
 
     def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
+        self.attempts += 1
+        raise AircraftLayerError("simulated failure")
+
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
         self.attempts += 1
         raise AircraftLayerError("simulated failure")
 
@@ -100,7 +132,6 @@ def test_advance_power_up_writes_the_first_switch_immediately() -> None:
     _device, _cmd, value = client.writes[0]
     assert value == 1.0
     assert advanced.next_switch_due_sim == 10.0 + GUIDANCE_UNIT_SWITCH_DELAY_S
-    assert advanced.sight_ready is False
 
 
 def test_advance_power_up_does_not_fire_before_the_delay_has_elapsed() -> None:
@@ -120,7 +151,10 @@ def test_advance_power_up_does_not_fire_before_the_delay_has_elapsed() -> None:
     assert len(client.writes) == 1
 
 
-def test_advance_power_up_writes_all_four_switches_in_order_and_becomes_ready() -> None:
+def test_advance_power_up_writes_all_four_switches_in_order_and_completes() -> None:
+    """`[[BL-B80]]` v2: completion no longer *declares* readiness itself
+    -- `sight_ready()` reads the real 960 lamp, not a sequence-completion
+    latch."""
     client = _RecordingAircraftClient()
     state = start_power_up(GuidanceUnitState(), now_sim=0.0)
 
@@ -131,13 +165,10 @@ def test_advance_power_up_writes_all_four_switches_in_order_and_becomes_ready() 
         t += GUIDANCE_UNIT_SWITCH_DELAY_S
 
     assert len(client.writes) == 4
-    # Never skips a switch even when called with a far-future `now_sim`
-    # (zero-warmup direction: ordering is structural, timing gates are not
-    # the thing being tested here, but a stray extra call must still be a
-    # no-op once complete).
-    assert sight_ready(state) is True
-    assert state.guidance_unit_ready_announced is False  # the caller's job
     assert state.next_switch_due_sim is None
+    # Readiness is independent of the power-up sequence now.
+    assert sight_ready(state) is False
+    assert sight_ready(replace(state, ready_observed=True)) is True
 
     # A true no-op once complete.
     final = advance_power_up(state, now_sim=t + 100.0, aircraft_client=_client(client))
@@ -202,12 +233,13 @@ def test_advance_power_up_uses_the_device_cmd_pairs_in_order() -> None:
     assert cmds == [3028, 3015, 3001, 3030]
 
 
-# --- sight_ready --------------------------------------------------------
+# --- sight_ready (`[[BL-B80]]` v2: the real 960 lamp) ----------------------
 
 
-def test_sight_ready_reflects_the_state_field() -> None:
+def test_sight_ready_reflects_ready_observed() -> None:
     assert sight_ready(GuidanceUnitState()) is False
-    assert sight_ready(GuidanceUnitState(sight_ready=True)) is True
+    assert sight_ready(GuidanceUnitState(ready_observed=False)) is False
+    assert sight_ready(GuidanceUnitState(ready_observed=True)) is True
 
 
 # --- write_observ / write_weapon_safety ---------------------------------
@@ -274,35 +306,59 @@ def test_refresh_readback_leaves_fields_unchanged_when_keys_are_missing() -> Non
     assert result.weapon_safety_observed is False
 
 
-def test_refresh_readback_sets_sight_position_raw_fields_from_the_latest_sample() -> (
-    None
-):
-    """Stage 4b -- args 874/876, raw, from an `Export.lua` new enough to
-    send them."""
+def test_refresh_readback_sets_the_three_lamp_fields() -> None:
+    """`[[BL-B80]]` v2: 898 (Л5 gyro alignment), 960 (READY), 962 (launch
+    permission), real readbacks, no timer."""
     state = GuidanceUnitState()
-    result = refresh_readback(state, {"sight_az": 0.16500, "sight_elev": -0.28125})
-    assert result.sight_az_raw == pytest.approx(0.16500)
-    assert result.sight_elev_raw == pytest.approx(-0.28125)
+    result = refresh_readback(
+        state,
+        {"align_lamp": True, "ready_lamp": False, "launch_perm_lamp": True},
+    )
+    assert result.align_observed is True
+    assert result.ready_observed is False
+    assert result.launch_perm_observed is True
 
 
-def test_refresh_readback_leaves_sight_position_unchanged_when_absent() -> None:
-    """An `Export.lua` predating Stage 4b never sends `sight_az`/
-    `sight_elev` at all -- absence must not be read as "the sight reset to
-    zero", the same reasoning `refresh_readback`'s own docstring states."""
-    state = GuidanceUnitState(sight_az_raw=0.5, sight_elev_raw=-0.25)
+def test_refresh_readback_leaves_lamp_fields_unchanged_when_absent() -> None:
+    """An `Export.lua` predating the three lamps must not be read as "the
+    lamp is off" -- absence leaves the prior value, same posture every
+    other `*_observed` field in this class already takes."""
+    state = GuidanceUnitState(
+        align_observed=True, ready_observed=True, launch_perm_observed=False
+    )
     result = refresh_readback(state, {"observe_on": True})
-    assert result.sight_az_raw == pytest.approx(0.5)
-    assert result.sight_elev_raw == pytest.approx(-0.25)
+    assert result.align_observed is True
+    assert result.ready_observed is True
+    assert result.launch_perm_observed is False
 
 
-def test_sight_azimuth_raw_to_deg_uses_the_confirmed_calibration() -> None:
-    """`arg_874 = (deg / 60) * 0.44`, inverted -- the live-measured
-    calibration (`aircraft-layer/research/2026-10-17-9k113-effector-and-
-    slew-probe-findings.md` finding 2). 0.16500 raw measured at a
-    commanded +22.5 deg."""
-    assert sight_azimuth_raw_to_deg(0.16500) == pytest.approx(22.5)
-    assert sight_azimuth_raw_to_deg(0.33000) == pytest.approx(45.0)
-    assert sight_azimuth_raw_to_deg(0.0) == pytest.approx(0.0)
+# --- write_sight_target (`[[BL-B80]]` v2: degrees on the wire, no raw) ----
+
+
+def test_write_sight_target_passes_the_world_goal_through_unconverted() -> None:
+    client = _RecordingAircraftClient()
+    write_sight_target(
+        _client(client),
+        goal_azimuth_deg=22.5,
+        goal_elevation_deg=-10.0,
+        rate_azimuth_deg_s=1.5,
+        rate_elevation_deg_s=-0.2,
+        t_sim=123.0,
+    )
+    assert client.sight_target_writes == [(22.5, -10.0, 1.5, -0.2, 123.0)]
+
+
+def test_write_sight_target_raises_on_a_failed_write() -> None:
+    client = _FailingAircraftClient()
+    with pytest.raises(AircraftLayerError):
+        write_sight_target(
+            _client(client),
+            goal_azimuth_deg=0.0,
+            goal_elevation_deg=0.0,
+            rate_azimuth_deg_s=0.0,
+            rate_elevation_deg_s=0.0,
+            t_sim=0.0,
+        )
 
 
 # --- single construction site (plan's "Construction-site check") -------

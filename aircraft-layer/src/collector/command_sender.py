@@ -33,6 +33,27 @@ from typing import Literal, Self
 
 logger = logging.getLogger(__name__)
 
+
+def _format_fixed_point(value: float) -> str:
+    """Render `value` as fixed-point decimal, never exponent notation --
+    `json.dumps` emits exponent form for small magnitudes
+    (`json.dumps({'x': 0.00001})` -> `'{"x": 1e-05}'`), which
+    `Export.lua`'s `extract_json_number_field` pattern-matched straight
+    past the "e" and silently truncated (`"1e-05"` parsed as `1`,
+    `"-3.3e-07"` as `-3.3` -- a 60deg-equivalent sight-slew command from
+    a near-zero intent). BL-B80 exponent-float fix, 2026-10-22. 9 decimal
+    places is ample precision for every value on this channel (raw
+    `-1.5..1.5` sight/cockpit-switch commands); trailing zeros are
+    trimmed but at least one digit after the point is kept so the result
+    is still a valid JSON number token (`"0.0"`, never `"0."`)."""
+    text = f"{value:.9f}"
+    if "." in text:
+        text = text.rstrip("0")
+        if text.endswith("."):
+            text += "0"
+    return text
+
+
 #: Loopback only -- `Export.lua`'s new inbound command listener runs inside
 #: the same DCS process tree as the collector's UDP peer, exactly like
 #: `collector.text_sender.DEFAULT_HOST`/`DEFAULT_PORT` for the existing
@@ -126,15 +147,21 @@ class CommandSender:
         **no allow-list of which `(device, cmd)` pairs are accepted** at
         any of those three layers -- user direction 2026-10-21, overriding
         the security plan review's required fix; see `aircraft-layer/
-        CLAUDE.md`'s "What this is" section for the quote."""
+        CLAUDE.md`'s "What this is" section for the quote.
+
+        `value` is hand-formatted via `_format_fixed_point`, not
+        `json.dumps`, so it never reaches `Export.lua` in exponent
+        notation (see that helper's docstring -- BL-B80 exponent-float
+        fix, 2026-10-22)."""
         if self._socket is None:
             self.open()
         sock = self._socket
         assert sock is not None  # `open()` above always sets it
 
-        payload = json.dumps(
-            {"op": "cockpit_switch", "device": device, "cmd": cmd, "value": value}
-        ).encode("utf-8")
+        payload = (
+            f'{{"op": "cockpit_switch", "device": {device}, "cmd": {cmd}, '
+            f'"value": {_format_fixed_point(value)}}}'
+        ).encode()
         try:
             sock.sendto(payload, (self._host, self._port))
         except OSError as exc:
@@ -148,6 +175,70 @@ class CommandSender:
             raise CommandSendError(
                 f"failed to send cockpit switch device={device!r} cmd={cmd!r} "
                 f"value={value!r}: {exc}"
+            ) from exc
+
+    def send_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        """Send `{"op": "sight_target", "goal_az_deg": ..., "goal_el_deg":
+        ..., "goal_rate_az_deg_s": ..., "goal_rate_el_deg_s": ...,
+        "t_sim": ...}` to `Export.lua`'s command listener -- the 9K113
+        pointing channel (`plans/9k113-sight-pointing/plan.md`, BL-B80
+        v2). A **persistent** world goal, unlike `send_cockpit_switch`'s
+        one-shot write: `Export.lua` caches it and its own per-frame
+        servo rate-limits a setpoint toward it while OBSERV reads on
+        (that plan's "Architecture" section on why this is a third,
+        narrow op rather than reusing `cockpit_switch`'s "write once now"
+        semantics). Same `CommandSendError` posture as `send_cockpit_
+        switch`: a dropped goal update is a real behavioral gap, not an
+        opaque display string to swallow.
+
+        **No validation happens here** -- same division of labour as
+        `send_cockpit_switch`'s own docstring: `api.server`'s `POST
+        /command/sight_target` handler validates shape (every value
+        finite, in range, including `t_sim`'s own bound -- the security
+        plan review's required change) before this method is ever
+        called.
+
+        Every field is hand-formatted via `_format_fixed_point`, not
+        `json.dumps`, so none ever reaches `Export.lua` in exponent
+        notation (see that helper's docstring -- BL-B80 exponent-float
+        fix, 2026-10-22): body-layer float arithmetic near sight centre
+        readily produces values below `1e-4`, exactly the magnitude
+        `json.dumps` switches to exponent form for."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = (
+            f'{{"op": "sight_target", "goal_az_deg": {_format_fixed_point(goal_az_deg)}, '
+            f'"goal_el_deg": {_format_fixed_point(goal_el_deg)}, '
+            f'"goal_rate_az_deg_s": {_format_fixed_point(goal_rate_az_deg_s)}, '
+            f'"goal_rate_el_deg_s": {_format_fixed_point(goal_rate_el_deg_s)}, '
+            f'"t_sim": {_format_fixed_point(t_sim)}}}'
+        ).encode()
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "sight-target command send failed: goal_az_deg=%r goal_el_deg=%r "
+                "goal_rate_az_deg_s=%r goal_rate_el_deg_s=%r t_sim=%r",
+                goal_az_deg,
+                goal_el_deg,
+                goal_rate_az_deg_s,
+                goal_rate_el_deg_s,
+                t_sim,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send sight target goal_az_deg={goal_az_deg!r} "
+                f"goal_el_deg={goal_el_deg!r} t_sim={t_sim!r}: {exc}"
             ) from exc
 
 

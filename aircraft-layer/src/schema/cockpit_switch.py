@@ -34,7 +34,18 @@ equality.
 the six switch args above: a deployed `Export.lua` older than Stage 4b
 never sends them at all, and that must parse exactly as "no reading yet",
 the same absence the rest of this layer already treats as "no sample"
-rather than a parse error.
+rather than a parse error. **`[[BL-B80]]` v2 (`EXPORT_SCRIPT_VERSION`
+"...22c") stops sending both** (they echo the AI-axis demand, not a
+position, confirmed by probe runs 1-10) -- the fields stay here, so an
+older `Export.lua` and a newer collector still agree on the shape, but
+every v2 sample carries `None` for both.
+
+**Three more, optional lamps, `[[BL-B80]]` v2**: arg 898 (`align_lamp`,
+Л5 gyro alignment), arg 960 (`ready_lamp`, guidance-unit READY), arg 962
+(`launch_perm_lamp`, launch permission) -- real booleans this time (the
+underlying arg is thresholded in `Export.lua` itself, unlike the six
+switch args' raw-plus-decided split), `bool | None`, same "absent means
+no reading yet" contract as `sight_az`/`sight_elev`.
 """
 
 from __future__ import annotations
@@ -68,9 +79,16 @@ class CockpitSwitchState:
     observe: float
     weap_safe: float
     #: Raw args 874/876 -- see the module docstring's "Two more, optional"
-    #: section. `None` when the sending `Export.lua` predates Stage 4b.
+    #: section. `None` when the sending `Export.lua` predates Stage 4b, or
+    #: (`[[BL-B80]]` v2) always, since the field stopped being sent.
     sight_az: float | None = None
     sight_elev: float | None = None
+    #: The three real lamps -- see the module docstring's "Three more,
+    #: optional lamps" section. `None` when the sending `Export.lua`
+    #: predates `[[BL-B80]]` v2.
+    align_lamp: bool | None = None
+    ready_lamp: bool | None = None
+    launch_perm_lamp: bool | None = None
 
     @property
     def missl_pw_on(self) -> bool:
@@ -148,6 +166,20 @@ class CockpitSwitchState:
             else:
                 optional_values[field] = float(raw)
 
+        # Optional lamps (`[[BL-B80]]` v2) -- same "absent is None, wrong
+        # type is an error" contract, but boolean-shaped.
+        optional_lamps: dict[str, bool | None] = {}
+        for field in ("align_lamp", "ready_lamp", "launch_perm_lamp"):
+            raw = data.get(field)
+            if raw is None:
+                optional_lamps[field] = None
+            elif not isinstance(raw, bool):
+                raise CockpitSwitchParseError(
+                    f"field {field!r} must be a boolean, got {type(raw).__name__}"
+                )
+            else:
+                optional_lamps[field] = raw
+
         return CockpitSwitchState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -159,6 +191,9 @@ class CockpitSwitchState:
             weap_safe=values["weap_safe"],
             sight_az=optional_values["sight_az"],
             sight_elev=optional_values["sight_elev"],
+            align_lamp=optional_lamps["align_lamp"],
+            ready_lamp=optional_lamps["ready_lamp"],
+            launch_perm_lamp=optional_lamps["launch_perm_lamp"],
         )
 
     @staticmethod
@@ -179,7 +214,9 @@ class CockpitSwitchState:
         """What `GET /cockpit_switch/latest` answers with. The six raw
         values and the six decided booleans -- same "raw plus decided"
         shape as `Spu8Sample.to_api_dict` -- plus `sight_az`/`sight_elev`
-        (`None` when the sending `Export.lua` predates Stage 4b)."""
+        (`None` always, as of `[[BL-B80]]` v2) and the three real lamps
+        (`align_lamp`/`ready_lamp`/`launch_perm_lamp`, `None` when the
+        sending `Export.lua` predates v2)."""
         return {
             "t": self.dcs_model_time_s,
             "received_wall_clock_s": self.received_wall_clock_s,
@@ -197,4 +234,7 @@ class CockpitSwitchState:
             "weapons_armed": self.weapons_armed,
             "sight_az": self.sight_az,
             "sight_elev": self.sight_elev,
+            "align_lamp": self.align_lamp,
+            "ready_lamp": self.ready_lamp,
+            "launch_perm_lamp": self.launch_perm_lamp,
         }

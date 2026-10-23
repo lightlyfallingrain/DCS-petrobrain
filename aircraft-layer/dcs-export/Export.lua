@@ -148,7 +148,31 @@ local socket = require("socket.core")
 -- only, same reasoning. Update
 -- aircraft-layer/src/collector/server.py's EXPECTED_EXPORT_VERSION in the
 -- same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-21b"
+--
+-- Bumped again 2026-10-22 (`plans/9k113-sight-pointing/plan.md`, BL-B80)
+-- for the new "sight_target" inbound command op and the per-frame sight-
+-- pointing loop (`run_sight_pointing`) -- additive only, same reasoning.
+--
+-- Bumped again the same day, "...22b" (BL-B80 exponent-float fix) for
+-- `extract_json_number_field` now accepting exponent notation and
+-- rejecting non-finite results -- a behavioral fix to the inbound
+-- command path, not an additive wire-format change, but bumped anyway so
+-- a collector talking to a pre-fix Export.lua is visibly flagged rather
+-- than silently keeping the exponent-truncation bug.
+--
+-- Bumped again 2026-10-22 (`"...22c"`, `plans/9k113-sight-pointing/
+-- plan.md`, BL-B80 re-plan v2) for a **non-additive** reshape: the
+-- `sight_target` op's fields changed (`az_cmd`/`elev_cmd` ->
+-- `goal_az_deg`/`goal_el_deg`/`goal_rate_az_deg_s`/`goal_rate_el_deg_s`/
+-- `t_sim`, degrees on the wire rather than raw command units); the
+-- cockpit-switch line drops `sight_az`/`sight_elev` (874/876, which echo
+-- the demand, not a position) and gains three lamp booleans (`align_
+-- lamp`/`ready_lamp`/`launch_perm_lamp`, args 898/960/962); and a new
+-- `sight_servo` status line (wire key `servo_mode`). A collector built
+-- against the prior shape would silently misparse the reshaped op, so
+-- this bump is load-bearing, not cosmetic -- update `aircraft-layer/src/
+-- collector/server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-10-22c"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -225,6 +249,30 @@ local ARG_WEAP_SAFE = 673
 -- azimuth only) happens on the body-layer side, never here.
 local ARG_SIGHT_AZ = 874
 local ARG_SIGHT_ELEV = 876
+
+-- The three real lamps `BL-B80` v2 (`plans/9k113-sight-pointing/
+-- plan.md`) reads instead of a timer: 898 (Л5, gyro alignment -- lit
+-- ~T+10 s per the probe runs) gates `SightHead.mode`'s `caged` ->
+-- `free` transition; 960 (guidance-unit READY) is `sight_ready()`'s own
+-- source; 962 (launch permission) is carried for `BL-B67`. Pushed on
+-- `push_cockpit_switch_state`'s same change-gated line, as optional
+-- booleans (`None`/absent on an older `Export.lua`) -- **not** raw
+-- values, since all three are binary lamps, unlike the switch args above.
+local ARG_ALIGN_LAMP = 898
+local ARG_READY_LAMP = 960
+local ARG_LAUNCH_PERM_LAMP = 962
+
+-- The 9K113's AI-axis pointing channel (`plans/9k113-sight-pointing/
+-- plan.md`, BL-B80 v2) -- device 7 (I9K113, same device the switch arg
+-- numbers above read from), `SetCommand(3061, v)` azimuth /
+-- `SetCommand(3060, v)` elevation, raw command units. Settled live
+-- (2026-10-21/22 probes): a rate command intermittently obeyed, obeyed
+-- reliably only with a per-frame value change always present (dither or
+-- flicker, run 11) -- `run_sight_servo` below is this file's per-frame
+-- DCS-slave servo.
+local DEV_I9K113 = 7
+local CMD_AI_AZ = 3061
+local CMD_AI_ELEV = 3060
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -711,32 +759,31 @@ end
 --: as the SPU-8 panel's own 377/664).
 local COCKPIT_SWITCH_EPSILON = 0.01
 
--- The sight-position readback (874/876) moves continuously during a slew
--- rather than stepping between two settled values the way a switch does,
--- and the 2026-10-17 probe drove it in steps as small as 0.002 (`aircraft-
--- layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`,
--- staircase test) -- `COCKPIT_SWITCH_EPSILON` above would silently merge
--- several of those steps into one. A finer epsilon for these two fields
--- only; BL-B80's own deadband is a body-layer concern, not this one.
-local SIGHT_POS_EPSILON = 0.0005
-
 local last_missl_pw_sent = nil
 local last_cplr_distr_sent = nil
 local last_sight_pw_sent = nil
 local last_scho_pw_sent = nil
 local last_observe_sent = nil
 local last_weap_safe_sent = nil
-local last_sight_az_sent = nil
-local last_sight_elev_sent = nil
+local last_align_lamp_sent = nil
+local last_ready_lamp_sent = nil
+local last_launch_perm_lamp_sent = nil
 
--- Reads the six 9K113 switch args plus the sight's own position readback
--- (874/876, BL-B66 Stage 4b) and sends a line only when at least one has
+-- Reads the six 9K113 switch args plus the three real lamps (898/960/
+-- 962, `BL-B80` v2) and sends a line only when at least one has
 -- moved -- same "every frame, sent only on change" shape as
 -- push_spu8_state above. Wire key "missl_pw" (not "net1"/"ptt"/etc, so
 -- collector.server._handle_line can tell this line kind apart from every
--- other one on this connection). 874/876 are optional-shaped on the Python
--- side (schema.cockpit_switch.CockpitSwitchState) precisely so an older
--- deployed copy of this file (without these two fields) still parses.
+-- other one on this connection).
+--
+-- **874/876 (the sight's own demand echo) are deliberately NOT on this
+-- line any more** (BL-B66 Stage 4b added them; `BL-B80` v2 removes
+-- them from this feed) -- probe runs 1-10 confirmed they echo the
+-- commanded *demand*, not a position, and under the per-frame dither
+-- they would change every frame, flooding this change-gated line with
+-- the servo's own internal churn. `push_slew_trace` still reads them
+-- directly for debug logging; `run_sight_servo` reads 566/555/etc for
+-- the mark, never 874/876.
 local function push_cockpit_switch_state(t)
     if client == nil then
         return -- nothing to send to yet; the next change will be sent
@@ -759,17 +806,23 @@ local function push_cockpit_switch_state(t)
     local weap_safe = safe_call(function()
         return GetDevice(0):get_argument_value(ARG_WEAP_SAFE)
     end)
-    local sight_az = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    local align_lamp = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_ALIGN_LAMP)
     end)
-    local sight_elev = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    local ready_lamp = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_READY_LAMP)
+    end)
+    local launch_perm_lamp = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_LAUNCH_PERM_LAMP)
     end)
     if missl_pw == nil or cplr_distr == nil or sight_pw == nil
         or scho_pw == nil or observe == nil or weap_safe == nil
-        or sight_az == nil or sight_elev == nil then
+        or align_lamp == nil or ready_lamp == nil or launch_perm_lamp == nil then
         return -- no mainpanel device (briefing screen, wrong airframe)
     end
+    local align_on = align_lamp >= 0.5
+    local ready_on = ready_lamp >= 0.5
+    local launch_perm_on = launch_perm_lamp >= 0.5
     if last_missl_pw_sent ~= nil
         and math.abs(missl_pw - last_missl_pw_sent) < COCKPIT_SWITCH_EPSILON
         and math.abs(cplr_distr - last_cplr_distr_sent) < COCKPIT_SWITCH_EPSILON
@@ -777,8 +830,9 @@ local function push_cockpit_switch_state(t)
         and math.abs(scho_pw - last_scho_pw_sent) < COCKPIT_SWITCH_EPSILON
         and math.abs(observe - last_observe_sent) < COCKPIT_SWITCH_EPSILON
         and math.abs(weap_safe - last_weap_safe_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(sight_az - last_sight_az_sent) < SIGHT_POS_EPSILON
-        and math.abs(sight_elev - last_sight_elev_sent) < SIGHT_POS_EPSILON then
+        and align_on == last_align_lamp_sent
+        and ready_on == last_ready_lamp_sent
+        and launch_perm_on == last_launch_perm_lamp_sent then
         return
     end
     last_missl_pw_sent = missl_pw
@@ -787,8 +841,9 @@ local function push_cockpit_switch_state(t)
     last_scho_pw_sent = scho_pw
     last_observe_sent = observe
     last_weap_safe_sent = weap_safe
-    last_sight_az_sent = sight_az
-    last_sight_elev_sent = sight_elev
+    last_align_lamp_sent = align_on
+    last_ready_lamp_sent = ready_on
+    last_launch_perm_lamp_sent = launch_perm_on
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"missl_pw":' .. string.format("%.3f", missl_pw)
         .. ',"cplr_distr":' .. string.format("%.3f", cplr_distr)
@@ -796,8 +851,9 @@ local function push_cockpit_switch_state(t)
         .. ',"scho_pw":' .. string.format("%.3f", scho_pw)
         .. ',"observe":' .. string.format("%.3f", observe)
         .. ',"weap_safe":' .. string.format("%.3f", weap_safe)
-        .. ',"sight_az":' .. string.format("%.5f", sight_az)
-        .. ',"sight_elev":' .. string.format("%.5f", sight_elev) .. '}\n')
+        .. ',"align_lamp":' .. tostring(align_on)
+        .. ',"ready_lamp":' .. tostring(ready_on)
+        .. ',"launch_perm_lamp":' .. tostring(launch_perm_on) .. '}\n')
     if not ok then
         debug_log("cockpit-switch send failed: " .. tostring(err))
         client:close()
@@ -877,19 +933,31 @@ local function extract_json_string_field(json_text, field_name)
 end
 
 -- Same purpose-built extraction as extract_json_string_field above, for a
--- bare (unquoted) JSON number field -- the "cockpit_switch" op's
--- "device"/"cmd"/"value" fields (plans/9k113-effectors/plan.md, BL-B66
--- Stage 1). Accepts an optional leading "-" and an optional fractional
--- part; returns nil (via tonumber on a failed match) if the field is
--- absent or not shaped like a number, which handle_cockpit_switch_command
--- below treats as "ignore this command" the same way a nil mode already
+-- bare (unquoted) JSON number field shared by every numeric inbound op --
+-- "cockpit_switch"'s "device"/"cmd"/"value" (plans/9k113-effectors/
+-- plan.md, BL-B66 Stage 1) and "sight_target"'s "az_cmd"/"elev_cmd"
+-- (plans/9k113-sight-pointing/plan.md, BL-B80). Accepts an optional
+-- leading "-", an optional fractional part, and an optional exponent
+-- (e.g. "1e-05") -- the sender's `json.dumps` emits exponent notation
+-- for small magnitudes, which the original digits-only pattern silently
+-- truncated at the "e" (BL-B80 bug, found 2026-10-22: "1e-05" parsed as
+-- "1", a 60deg-equivalent sight command from a near-zero intent).
+-- Returns nil if the field is absent, not shaped like a number, or
+-- parses to a non-finite value (NaN, or `math.huge`/`-math.huge` from a
+-- huge exponent overflowing, e.g. "1e999") -- every caller already
+-- treats nil as "ignore this command" the same way a nil mode already
 -- does for petrovich_search.
 local function extract_json_number_field(json_text, field_name)
-    local raw = json_text:match("\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*)")
+    local raw = json_text:match(
+        "\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*[eE]?[%-%+]?%d*)")
     if raw == nil then
         return nil
     end
-    return tonumber(raw)
+    local value = tonumber(raw)
+    if value == nil or value ~= value or value == math.huge or value == -math.huge then
+        return nil
+    end
+    return value
 end
 
 -- Pending long-press release deadline (DCS model-time seconds), or nil if
@@ -972,6 +1040,477 @@ local function handle_cockpit_switch_command(device, cmd, value)
     end)
 end
 
+-- Writes the AI-axis command every frame -- the proven mechanism from
+-- the pointing/dither probes, operating directly on raw command units
+-- (`SetCommand` takes `deg/60`-style az, a piecewise-scaled el).
+local function sight_point_quiet(az_cmd, elev_cmd)
+    local dev = safe_call(function() return GetDevice(DEV_I9K113) end)
+    if dev == nil then return end
+    pcall(dev.SetCommand, dev, CMD_AI_AZ, az_cmd)
+    pcall(dev.SetCommand, dev, CMD_AI_ELEV, elev_cmd)
+end
+
+-- Moves `current` toward `target` by at most `rate_per_s * dt`, landing
+-- exactly on `target` rather than overshooting once within one step of
+-- it. Shared by both axes and both the setpoint's own rate limit and
+-- (indirectly, via `belief.sight_head._step_toward`) the body-layer
+-- head's identical rate limit -- `test_sight_servo_lua.py` pins the two
+-- implementations against each other.
+local function sight_rate_limit_step(current, target, rate_per_s, dt)
+    local delta = target - current
+    local max_step = rate_per_s * dt
+    if delta > max_step then
+        return current + max_step
+    elseif delta < -max_step then
+        return current - max_step
+    end
+    return target
+end
+
+-- World-true `(az, el)` -> body-relative `(az, el)` at the given attitude
+-- -- the Lua twin of `perception.geometry.world_direction_from_body`'s
+-- inverse (i.e. of `body_relative_direction` itself), reused by `belief.
+-- sight_head._world_to_body` on the Python side. Pure math, no DCS calls
+-- -- `test_sight_servo_lua.py` runs this under `luajit` against Python
+-- reference vectors.
+local function sight_world_to_body(world_az_deg, world_el_deg, heading_deg, pitch_deg, bank_deg)
+    local az_rad = math.rad(world_az_deg)
+    local el_rad = math.rad(world_el_deg)
+    local north = math.cos(el_rad) * math.cos(az_rad)
+    local east = math.cos(el_rad) * math.sin(az_rad)
+    local up = math.sin(el_rad)
+
+    local heading_rad = math.rad(heading_deg)
+    local forward0 = north * math.cos(heading_rad) + east * math.sin(heading_rad)
+    local right0 = -north * math.sin(heading_rad) + east * math.cos(heading_rad)
+    local up0 = up
+
+    local pitch_rad = math.rad(pitch_deg)
+    local forward1 = forward0 * math.cos(pitch_rad) + up0 * math.sin(pitch_rad)
+    local up1 = -forward0 * math.sin(pitch_rad) + up0 * math.cos(pitch_rad)
+    local right1 = right0
+
+    local bank_rad = math.rad(bank_deg)
+    local right2 = right1 * math.cos(bank_rad) - up1 * math.sin(bank_rad)
+    local up2 = right1 * math.sin(bank_rad) + up1 * math.cos(bank_rad)
+
+    local body_az_deg = math.deg(math.atan2(right2, forward1))
+    local body_el_deg = math.deg(math.atan2(up2, math.sqrt(forward1 * forward1 + right2 * right2)))
+    return body_az_deg, body_el_deg
+end
+
+-- Raw mark arg -> body-relative degrees: `(raw - boresight) *
+-- deg_per_unit`. Pure affine, calibrated by Flight A's probe (Stage 0) --
+-- the defaults here are placeholders pending that flight (plan's
+-- "Calibration" section), grouped with the rest of this file's own
+-- hand-tuned constants below, not independently sourced.
+local function sight_mark_to_body_deg(raw_mark, boresight_mark, deg_per_unit)
+    return (raw_mark - boresight_mark) * deg_per_unit
+end
+
+-- `BL-B80` v2's per-frame servo constants (`plans/9k113-sight-
+-- pointing/plan.md`) -- grouped in one block so a flight-to-flight
+-- retune is one diff, per the plan's own Affected Files note. No tuning
+-- mechanism outside body-layer (Lua-side constants cannot use `tuning.
+-- py`); keep in sync by hand across this file boundary.
+--
+-- `SERVO_WOBBLE` selects the per-frame value-change mechanism DCS needs
+-- to keep obeying the axis (probe run 11, folded in before Stage 4 was
+-- built): "dither" (0.6 deg / 8 Hz, confirmed to hold 0.006-0.013 deg
+-- RMS, the ATGM-budget-meeting default) or "flicker" (an alternating
+-- +-epsilon well below the 0.003-unit deadzone, kept as the alternative
+-- -- run 11 measured it leaving 0.04-0.06 deg, outside budget, so it is
+-- not the default).
+local SERVO_WOBBLE = "dither"
+local DITHER_AZ_DEG = 0.6
+local DITHER_HZ = 8.0
+-- Elevation's dither component, 90 deg out of phase (cosine) -- run 10's
+-- own measured ratio (0.03 el-command amplitude at 1.5 deg az amplitude,
+-- `Export.probe-9k113-dither.lua`'s `DITHER_EL`/`DITHER_AZ_DEG`).
+local DITHER_EL_DEG = DITHER_AZ_DEG * (0.03 / 1.5)
+-- Flicker's own amplitude -- run 11: any size in 1e-5..1e-3 kept the axis
+-- obeyed; this sits mid-range, still far below the 0.003-unit deadzone.
+local FLICKER_EPS = 1.0e-4
+
+-- Proportional gain and feed-forward, Stage 4 (Kp only, I = 0 -- Stage 5
+-- adds the integral term only if Flight B misses +-0.02 deg). `FF_GAIN`
+-- mirrors the probe's own `TRACK_GAIN` (3 command-deg per deg/s of rate,
+-- i.e. a 3-deg command sustains roughly 1 deg/s of obeyed slew).
+local KP = 3.0
+local FF_GAIN = 3.0
+-- Open-loop command saturation and the modelled deadzone below which an
+-- open-loop command is assumed to produce no obeyed motion at all (the
+-- probe's own measured ~0.18 deg deadzone).
+local OPEN_LOOP_SAT_DEG = 6.0
+local OPEN_LOOP_DEADZONE_DEG = 0.18
+
+-- A `sight_target` command older than this is ignored (mode `hold`
+-- instead) -- the plan's own stale-target timeout. Extrapolation beyond
+-- the goal's own `t_sim` is capped the same way, so a long-dead goal
+-- does not run away.
+local STALE_TARGET_TIMEOUT_S = 3.0
+local EXTRAPOLATION_CAP_S = 2.0
+
+-- Field-of-regard gimbal limits -- same sourced figures as `perception.
+-- optics.SIGHT_WIDE_OPTIC` (one source of truth is the Python side; kept
+-- in sync by hand here, same cross-file convention as every other
+-- Lua-side mirror in this file). `FIELD_MARGIN_DEG` is how far inside the
+-- field the setpoint must sit for the mark to be trusted as valid (step
+-- 3's "not at a clip edge").
+local GIMBAL_AZ_HALF_DEG = 60.0
+local GIMBAL_EL_UP_DEG = 20.0
+local GIMBAL_EL_DOWN_DEG = -15.0
+local FIELD_MARGIN_DEG = 2.0
+
+-- Stall detection (run 8's definition): commanding at least this many
+-- degrees of correction for at least this long with the mark moving less
+-- than this counts as stalled. Report-only -- no recovery trick has
+-- evidence; dither is the remedy and is already always on.
+local STALL_CMD_DEG = 1.5
+local STALL_WINDOW_S = 0.4
+local STALL_MOVE_EPS = 0.003
+
+-- Mark (ASP-17 reticle) calibration -- az from the dither probe's own
+-- measured `MARK_PER_DEG`/boresight; elevation is the plan's own named
+-- open end (555's boresight/clip unknown, never closed-loop-tested) --
+-- these two are placeholders pending Flight A (Stage 0), not a
+-- confirmed calibration.
+local MARK_BORESIGHT_AZ = 0.500
+local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
+local MARK_BORESIGHT_EL = 0.556
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.039
+
+-- `sight_target`'s own wire bounds (security plan review, required
+-- change): a non-finite or out-of-range `t_sim` rejects the whole
+-- command, exactly like a non-finite az/el/rate -- `t_sim` feeds
+-- `clamp(t - t_sim, 0, cap)` directly in `run_sight_servo`, so an
+-- unbounded value there is as dangerous as an unbounded angle.
+local SIGHT_GOAL_AZ_BOUND = 360.0
+local SIGHT_GOAL_EL_BOUND = 90.0
+local SIGHT_GOAL_RATE_BOUND = 30.0
+
+-- The servo's own per-frame state -- `sight_goal_*` is external (set by
+-- the `sight_target` command, persists across frames until replaced or
+-- OBSERV reads off); the rest is internal, advanced by `run_sight_servo`
+-- every frame. All reset to `nil`/`false`/`0` on the OBSERV falling edge
+-- and in `LuaExportStop` (same "a stale target must never survive"
+-- reasoning the v1 state carried).
+local sight_goal_az_deg = nil
+local sight_goal_el_deg = nil
+local sight_goal_rate_az_deg_s = 0.0
+local sight_goal_rate_el_deg_s = 0.0
+local sight_goal_t_sim = nil
+local sight_setpoint_body_az_deg = nil
+local sight_setpoint_body_el_deg = nil
+local sight_estimate_body_az_deg = nil
+local sight_estimate_body_el_deg = nil
+local sight_mode = "off"
+local sight_mark_body_az_deg = nil
+local sight_mark_body_el_deg = nil
+local sight_error_az_deg = nil
+local sight_error_el_deg = nil
+local sight_last_frame_t = nil
+local sight_last_write_az_cmd = 0.0
+local sight_last_write_el_cmd = 0.0
+local sight_flicker_parity = false
+local sight_stall_window_start_t = nil
+local sight_stall_window_start_mark_az = nil
+local sight_stalled = false
+local sight_stall_count = 0
+
+-- Stores the persistent world goal from a `sight_target` command --
+-- external state, held across frames exactly like `pending_release_t` is
+-- for a different purpose, consumed every frame by `run_sight_servo`
+-- below. Rejects the *whole* command (no field written) on any
+-- malformed, non-finite, or out-of-range field -- `az_deg`/`el_deg`/
+-- `rate_az_deg_s`/`rate_el_deg_s`/`t_sim` alike, per the security plan
+-- review's required change.
+local function handle_sight_target_command(goal_az_deg, goal_el_deg, rate_az_deg_s, rate_el_deg_s, t_sim)
+    if goal_az_deg == nil or goal_el_deg == nil or rate_az_deg_s == nil
+        or rate_el_deg_s == nil or t_sim == nil then
+        debug_log("ignoring malformed sight_target command (missing field)")
+        return
+    end
+    if math.abs(goal_az_deg) > SIGHT_GOAL_AZ_BOUND
+        or math.abs(goal_el_deg) > SIGHT_GOAL_EL_BOUND
+        or math.abs(rate_az_deg_s) > SIGHT_GOAL_RATE_BOUND
+        or math.abs(rate_el_deg_s) > SIGHT_GOAL_RATE_BOUND
+        or t_sim < 0 then
+        debug_log("ignoring out-of-range sight_target command: goal_az_deg="
+            .. tostring(goal_az_deg) .. " goal_el_deg=" .. tostring(goal_el_deg)
+            .. " rate_az_deg_s=" .. tostring(rate_az_deg_s)
+            .. " rate_el_deg_s=" .. tostring(rate_el_deg_s)
+            .. " t_sim=" .. tostring(t_sim))
+        return
+    end
+    sight_goal_az_deg = goal_az_deg
+    sight_goal_el_deg = goal_el_deg
+    sight_goal_rate_az_deg_s = rate_az_deg_s
+    sight_goal_rate_el_deg_s = rate_el_deg_s
+    sight_goal_t_sim = t_sim
+end
+
+-- Export.lua's per-frame DCS-slave servo (`plans/9k113-sight-pointing/
+-- plan.md`'s "Export.lua run_sight_servo(t)" design-detail section) --
+-- tracks the world goal body-layer last sent, in airframe axes converted
+-- fresh every frame, closed-loop on the ASP-17 mark where valid, open-
+-- loop estimate otherwise, with the per-frame value-change mechanism
+-- always on. Called every frame from `LuaExportAfterNextFrame`, before
+-- that function's own 5 Hz export throttle -- same reasoning as every
+-- other per-frame function in this file.
+--
+-- **Must stay below `safe_call`/`sight_point_quiet`/`sight_rate_limit_
+-- step`/`sight_world_to_body`/`sight_mark_to_body_deg`** -- same
+-- reasoning as every other function in this file that was found calling
+-- a `local` declared below itself.
+local function run_sight_servo(t)
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local observ_on = type(observe) == "number" and observe >= 0.5
+
+    local dt = 0.0
+    if sight_last_frame_t ~= nil then
+        dt = t - sight_last_frame_t
+    end
+    sight_last_frame_t = t
+
+    if not observ_on then
+        sight_goal_az_deg = nil
+        sight_goal_el_deg = nil
+        sight_goal_rate_az_deg_s = 0.0
+        sight_goal_rate_el_deg_s = 0.0
+        sight_goal_t_sim = nil
+        sight_setpoint_body_az_deg = nil
+        sight_setpoint_body_el_deg = nil
+        sight_estimate_body_az_deg = nil
+        sight_estimate_body_el_deg = nil
+        sight_mode = "off"
+        sight_mark_body_az_deg = nil
+        sight_mark_body_el_deg = nil
+        sight_error_az_deg = nil
+        sight_error_el_deg = nil
+        sight_stall_window_start_t = nil
+        sight_stalled = false
+        return
+    end
+
+    local align = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_ALIGN_LAMP)
+    end)
+    local align_on = type(align) == "number" and align >= 0.5
+
+    if not align_on then
+        sight_mode = "caged"
+        sight_setpoint_body_az_deg = 0.0
+        sight_setpoint_body_el_deg = 0.0
+        sight_estimate_body_az_deg = 0.0
+        sight_estimate_body_el_deg = 0.0
+        sight_mark_body_az_deg = nil
+        sight_mark_body_el_deg = nil
+        sight_error_az_deg = nil
+        sight_error_el_deg = nil
+        sight_stall_window_start_t = nil
+        sight_stalled = false
+        return -- caged: no writes
+    end
+
+    if sight_setpoint_body_az_deg == nil then
+        -- Entering `free` this frame (from `caged`/`off`) -- seed at
+        -- boresight, same as the body-layer head's own seeding.
+        sight_setpoint_body_az_deg = 0.0
+        sight_setpoint_body_el_deg = 0.0
+    end
+    if sight_estimate_body_az_deg == nil then
+        sight_estimate_body_az_deg = sight_setpoint_body_az_deg
+        sight_estimate_body_el_deg = sight_setpoint_body_el_deg
+    end
+
+    local have_goal = sight_goal_az_deg ~= nil and sight_goal_t_sim ~= nil
+    local stale = have_goal and (t - sight_goal_t_sim) > STALE_TARGET_TIMEOUT_S
+
+    local u_az, u_el = 0.0, 0.0
+
+    if not have_goal or stale then
+        sight_mode = "hold"
+        sight_mark_body_az_deg = nil
+        sight_mark_body_el_deg = nil
+        sight_error_az_deg = nil
+        sight_error_el_deg = nil
+        sight_stall_window_start_t = nil
+        sight_stalled = false
+    else
+        local age = t - sight_goal_t_sim
+        if age < 0 then age = 0 end
+        if age > EXTRAPOLATION_CAP_S then age = EXTRAPOLATION_CAP_S end
+        local goal_world_az = sight_goal_az_deg + sight_goal_rate_az_deg_s * age
+        local goal_world_el = sight_goal_el_deg + sight_goal_rate_el_deg_s * age
+
+        local heading_deg, pitch_deg, bank_deg = 0.0, 0.0, 0.0
+        local self_data = safe_call(LoGetSelfData)
+        if type(self_data) == "table" and type(self_data.Heading) == "number" then
+            heading_deg = math.deg(self_data.Heading)
+        end
+        local pitch_rad, bank_rad = safe_call(LoGetADIPitchBankYaw)
+        if type(pitch_rad) == "number" then
+            pitch_deg = math.deg(pitch_rad)
+        end
+        if type(bank_rad) == "number" then
+            bank_deg = math.deg(bank_rad)
+        end
+
+        local goal_body_az, goal_body_el = sight_world_to_body(
+            goal_world_az, goal_world_el, heading_deg, pitch_deg, bank_deg)
+
+        sight_setpoint_body_az_deg = sight_rate_limit_step(
+            sight_setpoint_body_az_deg, goal_body_az, GIMBAL_AZ_HALF_DEG / 3.0, dt)
+        sight_setpoint_body_el_deg = sight_rate_limit_step(
+            sight_setpoint_body_el_deg, goal_body_el, GIMBAL_EL_UP_DEG / 2.0, dt)
+        sight_setpoint_body_az_deg = math.max(
+            -GIMBAL_AZ_HALF_DEG, math.min(GIMBAL_AZ_HALF_DEG, sight_setpoint_body_az_deg))
+        sight_setpoint_body_el_deg = math.max(
+            GIMBAL_EL_DOWN_DEG, math.min(GIMBAL_EL_UP_DEG, sight_setpoint_body_el_deg))
+
+        local m566 = safe_call(function() return GetDevice(0):get_argument_value(566) end)
+        local m555 = safe_call(function() return GetDevice(0):get_argument_value(555) end)
+        local setpoint_inside_field =
+            math.abs(sight_setpoint_body_az_deg) <= (GIMBAL_AZ_HALF_DEG - FIELD_MARGIN_DEG)
+            and sight_setpoint_body_el_deg <= (GIMBAL_EL_UP_DEG - FIELD_MARGIN_DEG)
+            and sight_setpoint_body_el_deg >= (GIMBAL_EL_DOWN_DEG + FIELD_MARGIN_DEG)
+        local mark_valid = setpoint_inside_field
+            and type(m566) == "number" and type(m555) == "number"
+
+        if mark_valid then
+            sight_mode = "closed"
+            sight_mark_body_az_deg = sight_mark_to_body_deg(m566, MARK_BORESIGHT_AZ, MARK_DEG_PER_UNIT_AZ)
+            sight_mark_body_el_deg = sight_mark_to_body_deg(m555, MARK_BORESIGHT_EL, MARK_DEG_PER_UNIT_EL)
+            local e_az = sight_setpoint_body_az_deg - sight_mark_body_az_deg
+            local e_el = sight_setpoint_body_el_deg - sight_mark_body_el_deg
+            sight_error_az_deg = e_az
+            sight_error_el_deg = e_el
+            u_az = KP * e_az + FF_GAIN * sight_goal_rate_az_deg_s
+            u_el = KP * e_el + FF_GAIN * sight_goal_rate_el_deg_s
+            sight_estimate_body_az_deg = sight_mark_body_az_deg
+            sight_estimate_body_el_deg = sight_mark_body_el_deg
+
+            -- Stall (run 8's definition): commanding a real correction
+            -- for `STALL_WINDOW_S` with the mark not moving.
+            if math.abs(u_az) >= STALL_CMD_DEG or math.abs(u_el) >= STALL_CMD_DEG then
+                if sight_stall_window_start_t == nil then
+                    sight_stall_window_start_t = t
+                    sight_stall_window_start_mark_az = sight_mark_body_az_deg
+                elseif t - sight_stall_window_start_t >= STALL_WINDOW_S then
+                    local moved = math.abs(sight_mark_body_az_deg - sight_stall_window_start_mark_az)
+                    if moved < STALL_MOVE_EPS then
+                        if not sight_stalled then
+                            sight_stall_count = sight_stall_count + 1
+                        end
+                        sight_stalled = true
+                    else
+                        sight_stalled = false
+                    end
+                    sight_stall_window_start_t = t
+                    sight_stall_window_start_mark_az = sight_mark_body_az_deg
+                end
+            else
+                sight_stall_window_start_t = nil
+                sight_stalled = false
+            end
+        else
+            sight_mode = "open"
+            sight_mark_body_az_deg = nil
+            sight_mark_body_el_deg = nil
+            sight_stall_window_start_t = nil
+            sight_stalled = false
+            local e_az = sight_setpoint_body_az_deg - sight_estimate_body_az_deg
+            local e_el = sight_setpoint_body_el_deg - sight_estimate_body_el_deg
+            sight_error_az_deg = e_az
+            sight_error_el_deg = e_el
+            u_az = math.max(-OPEN_LOOP_SAT_DEG, math.min(
+                OPEN_LOOP_SAT_DEG, KP * e_az + FF_GAIN * sight_goal_rate_az_deg_s))
+            u_el = math.max(-OPEN_LOOP_SAT_DEG, math.min(
+                OPEN_LOOP_SAT_DEG, KP * e_el + FF_GAIN * sight_goal_rate_el_deg_s))
+            if math.abs(u_az) > OPEN_LOOP_DEADZONE_DEG then
+                sight_estimate_body_az_deg = sight_estimate_body_az_deg + (u_az / FF_GAIN) * dt
+            end
+            if math.abs(u_el) > OPEN_LOOP_DEADZONE_DEG then
+                sight_estimate_body_el_deg = sight_estimate_body_el_deg + (u_el / FF_GAIN) * dt
+            end
+        end
+    end
+
+    -- The per-frame value-change mechanism, always on -- "the written
+    -- value differs from last frame's" is the whole guarantee this
+    -- needs (step 6). One flicker parity flip, shared by both axes this
+    -- frame, so the two never drift out of phase (the known flicker-
+    -- probe bug this avoids).
+    sight_flicker_parity = not sight_flicker_parity
+    local wobble_az, wobble_el
+    if SERVO_WOBBLE == "flicker" then
+        local sign = 1.0
+        if sight_flicker_parity then sign = -1.0 end
+        wobble_az = FLICKER_EPS * sign
+        wobble_el = FLICKER_EPS * sign
+    else
+        wobble_az = DITHER_AZ_DEG * math.sin(2.0 * math.pi * DITHER_HZ * t)
+        wobble_el = DITHER_EL_DEG * math.cos(2.0 * math.pi * DITHER_HZ * t)
+    end
+
+    local write_az_deg = u_az + wobble_az
+    local write_el_deg = u_el + wobble_el
+    if sight_mode == "hold" then
+        -- No net motion -- dither/flicker only, atop the last commanded
+        -- value, never a fresh correction.
+        write_az_deg = sight_last_write_az_cmd * 60.0 + wobble_az
+        write_el_deg = wobble_el -- elevation's last raw command is kept below
+    end
+
+    local write_az_cmd = write_az_deg / 60.0
+    local write_el_cmd
+    if write_el_deg >= 0 then
+        write_el_cmd = write_el_deg / GIMBAL_EL_UP_DEG
+    else
+        write_el_cmd = write_el_deg / -GIMBAL_EL_DOWN_DEG
+    end
+    if sight_mode == "hold" then
+        write_el_cmd = sight_last_write_el_cmd + wobble_el / GIMBAL_EL_UP_DEG
+    end
+    write_az_cmd = math.max(-1.5, math.min(1.5, write_az_cmd))
+    write_el_cmd = math.max(-1.5, math.min(1.5, write_el_cmd))
+
+    sight_point_quiet(write_az_cmd, write_el_cmd)
+    sight_last_write_az_cmd = write_az_cmd
+    sight_last_write_el_cmd = write_el_cmd
+end
+
+-- Sends `run_sight_servo`'s own status -- mode, setpoint, the mark-
+-- derived body direction (or `null` when invalid), error, and the stall
+-- flag -- as a **second** feed from `push_cockpit_switch_state`'s own
+-- line, wire key "servo_mode" (the plan's own "Departure, stated": that
+-- feed is change-gated, this one changes every frame under the per-frame
+-- wobble, a different rate class). Called once per `LuaExportAfterNext
+-- Frame`'s own 5 Hz export throttle, same cadence as the telemetry line.
+local function push_sight_servo_state(t)
+    if client == nil then
+        return
+    end
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"servo_mode":"' .. tostring(sight_mode) .. '"'
+        .. ',"setpoint_azimuth_deg":' .. fmt_num_or_null(sight_setpoint_body_az_deg)
+        .. ',"setpoint_elevation_deg":' .. fmt_num_or_null(sight_setpoint_body_el_deg)
+        .. ',"mark_azimuth_deg":' .. fmt_num_or_null(sight_mark_body_az_deg)
+        .. ',"mark_elevation_deg":' .. fmt_num_or_null(sight_mark_body_el_deg)
+        .. ',"error_azimuth_deg":' .. fmt_num_or_null(sight_error_az_deg)
+        .. ',"error_elevation_deg":' .. fmt_num_or_null(sight_error_el_deg)
+        .. ',"stalled":' .. tostring(sight_stalled)
+        .. ',"stall_count":' .. tostring(sight_stall_count) .. '}\n')
+    if not ok then
+        debug_log("sight-servo send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -995,6 +1534,13 @@ local function poll_command_socket(t)
             local cmd = extract_json_number_field(data, "cmd")
             local value = extract_json_number_field(data, "value")
             handle_cockpit_switch_command(device, cmd, value)
+        elseif op == "sight_target" then
+            local goal_az_deg = extract_json_number_field(data, "goal_az_deg")
+            local goal_el_deg = extract_json_number_field(data, "goal_el_deg")
+            local rate_az_deg_s = extract_json_number_field(data, "goal_rate_az_deg_s")
+            local rate_el_deg_s = extract_json_number_field(data, "goal_rate_el_deg_s")
+            local t_sim = extract_json_number_field(data, "t_sim")
+            handle_sight_target_command(goal_az_deg, goal_el_deg, rate_az_deg_s, rate_el_deg_s, t_sim)
         else
             debug_log("ignoring command with unknown op: " .. tostring(op))
         end
@@ -1025,6 +1571,31 @@ function LuaExportStop()
         command_socket = nil
     end
     pending_release_t = nil
+    -- `plans/9k113-sight-pointing/plan.md`, BL-B80: a mission end/restart
+    -- is not an observed OBSERV falling edge, so `run_sight_servo`'s own
+    -- falling-edge reset never runs for it -- reset explicitly here, same
+    -- reasoning as `pending_release_t`'s reset immediately above, so a
+    -- stale goal/servo state never survives into the next mission.
+    sight_goal_az_deg = nil
+    sight_goal_el_deg = nil
+    sight_goal_rate_az_deg_s = 0.0
+    sight_goal_rate_el_deg_s = 0.0
+    sight_goal_t_sim = nil
+    sight_setpoint_body_az_deg = nil
+    sight_setpoint_body_el_deg = nil
+    sight_estimate_body_az_deg = nil
+    sight_estimate_body_el_deg = nil
+    sight_mode = "off"
+    sight_mark_body_az_deg = nil
+    sight_mark_body_el_deg = nil
+    sight_error_az_deg = nil
+    sight_error_el_deg = nil
+    sight_last_frame_t = nil
+    sight_last_write_az_cmd = 0.0
+    sight_last_write_el_cmd = 0.0
+    sight_stall_window_start_t = nil
+    sight_stalled = false
+    sight_stall_count = 0
     -- plans/spu8-intercom/plan.md Stage 4: reset so a mission restart
     -- re-triggers the 5-second wait rather than staying latched from a
     -- previous sortie.
@@ -1103,6 +1674,13 @@ function LuaExportAfterNextFrame()
     -- file, not the collector socket, so it runs even before `client` is
     -- connected.
     push_slew_trace(t)
+    -- `plans/9k113-sight-pointing/plan.md`, BL-B80 v2: the per-frame
+    -- DCS-slave servo -- tracks the world goal body-layer last sent,
+    -- closed-loop on the ASP-17 mark where valid, open-loop otherwise,
+    -- with the per-frame value-change mechanism always on. Must run
+    -- every frame regardless of the 5 Hz export throttle below, same
+    -- reasoning as every other per-frame function above it.
+    run_sight_servo(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)
@@ -1114,6 +1692,10 @@ function LuaExportAfterNextFrame()
         return -- called every frame; enforce the 5 Hz export rate ourselves
     end
     last_export_t = t
+
+    -- `BL-B80` v2: the sight-servo status line, same 5 Hz cadence as
+    -- the telemetry line below (step 8's own "status line at 5 Hz").
+    push_sight_servo_state(t)
 
     if client == nil then
         if t < next_reconnect_attempt_t then

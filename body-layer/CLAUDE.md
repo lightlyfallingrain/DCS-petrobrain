@@ -209,11 +209,13 @@ doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in
 deliberately allowed to hold both ground truth and belief at once, and is read-only against
 `ContactStore` — see that module's own docstring for the boundary this preserves.
 
-Add `--slew-trace PATH` alongside `--crew-text` (`BL-B66` Stage 4b, `plans/9k113-effectors/
-plan.md`) to write one JSON line per poll to `PATH`: desired vs. actual 9K113 sight aim
-(azimuth/elevation), whether `actual` came from a real position readback or body-layer's own
-rate-limiting model (`actual_*_source`), the resulting error, OBSERV commanded/observed, and optic
-mode — data for `[[BL-B80]]`'s rate-loop tuning, not a user-facing feature. `src/
+Add `--slew-trace PATH` alongside `--crew-text` (`BL-B66` Stage 4b, extended by `[[BL-B80]]` v2,
+`plans/9k113-sight-pointing/plan.md`) to write one JSON line per poll to `PATH`: desired (body) vs.
+actual 9K113 sight aim, the simulated `SightHead`'s own world-frame state (mode, world direction,
+goal, aim source), and — when `GET /sight_servo/latest` has a sample — the DCS-slave servo's mode/
+error/stall status. **874/876 are no longer a position readback** (v1's `actual_*_source` column is
+gone with it — those args echo the AI-axis demand, not a position, confirmed by probe runs 1-10) —
+data for `[[BL-B80]]`'s rate-loop tuning, not a user-facing feature. `src/
 sight_trace_writer.py` is the writer; reduce with `.claude/skills/sortie-log-triage`, which also
 reads `Export.lua`'s own per-**frame** companion log (`aircraft_layer_slew_debug.flag` →
 `aircraft_layer_slew_trace.log`, a different flag from the general `DEBUG` one, since this writes
@@ -336,6 +338,16 @@ break without noticing.
   `detection_trace_writer.py` is the single sanctioned exception — it may hold ground truth and
   belief at once, is read-only against `ContactStore`, and passes no ground-truth field back into
   `ingest`/`Percept`/`Contact`. Do not add a second exception.
+- **The ownship-relative channel has exactly two consumers, and neither is a position.**
+  `Percept.relative_direction` is exact while he is looking at the target
+  (`RELATIVE_DIRECTION_SIGMA_DEG = 0.0`, attack-run §20) and is read under `belief/` only by
+  `attack_run.py` (fence: `test_attack_run.py`). What `attack_run` derives from it reaches exactly
+  two places: the attack-run alignment words, and — through `attack_run.seen_world_direction`,
+  whose one caller is `belief/sight_head.py` — the 9K113 sight goal (BL-B80; fences:
+  `test_sight_head.py`). Neither path writes `Contact` position, `PositionBelief`,
+  `MissionMemory`, a `TOOL_SET` result or any other speech, and a differential test proves the
+  sight path changes none of them. This is the same perception datum given a second consumer,
+  not a second exception beside `detection_trace_writer.py`; a third consumer is a user decision.
 - **Mechanism and calibration never share a commit.** A change to how a gate computes and a change
   to the numbers it computes against are separate commits, so a behaviour shift always has one
   attributable cause. BL-2.6 Stages 6/7 are the worked example.
@@ -405,7 +417,8 @@ Belief — observation *consumption*:
 - `src/belief/mission_phase.py` — mission-phase relevance (BL-7).
 - `src/belief/tools.py` — the brain-facing query API's body, minus a transport; returns the `{facts, summary, phrasing_hints}` triple. Note its **absent-not-null** convention for `facts`. `attack_target_task` (BL-14) mirrors `watch_contact_task`, setting attention `"priority"` instead of `"watch"`.
 - `src/belief/tasks.py` — `PendingIntent`/`TaskStore`. `TaskKind` is `"scan_area"`/`"watch_contact"`/`"attack_target"` (BL-14) — the last two share `watch_contact`'s shape exactly (no area, no success/timeout lifecycle).
-- `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6.
+- `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6. And `seen_world_direction`, whose one caller is `sight_head.py` (BL-B80).
+- `src/belief/sight_head.py` — `SightHead` (BL-B80, `plans/9k113-sight-pointing/plan.md`): Petrovich's simulated 9K113 sight — gyro world-stabilised, gimbal-limited, slew-rate-limited — and the "Aim source" selection rule (`seen`/`held`/`belief`). Advanced once per poll by `logger.py`; the real DCS sight is a best-effort slave of it, outside this process entirely.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

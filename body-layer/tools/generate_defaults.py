@@ -47,8 +47,14 @@ _ACCESSOR_NAMES = {"real", "whole", "fraction", "table", "sequence"}
 
 #: Splits on a sentence-ending period: not preceded or followed by a
 #: digit (so "0.1" never splits), optionally followed by closing markdown
-#: markup (`**`, a backtick), then whitespace or end of string.
-_SENTENCE_SPLIT = re.compile(r"(?<!\d)\.(?:\*\*|`)?(?=\s|$)")
+#: markup (`**`, a backtick), then whitespace or end of string -- and not
+#: inside a double-quoted span (an even number of `"` must follow), so a
+#: quoted pilot verbatim's own full stop does not end the comment's
+#: sentence. The parity rule assumes balanced quotes in each block;
+#: `test_generate_defaults_first_sentence.py` holds every declaration to it.
+_SENTENCE_SPLIT = re.compile(
+    r'(?<!\d)\.(?:\*\*|`)?(?=\s|$)(?=(?:[^"]*"[^"]*")*[^"]*\Z)'
+)
 
 
 @dataclass(frozen=True)
@@ -79,9 +85,20 @@ def _literal(node: ast.expr) -> Any:
 
 
 def _first_sentence(comment_block: str) -> str:
-    parts = _SENTENCE_SPLIT.split(comment_block.strip(), maxsplit=1)
-    sentence = parts[0].strip().strip("*`").strip()
-    return sentence + "." if sentence else sentence
+    """Markup the split consumed after the period (`.**`, `` .` ``) closes
+    a span: if that span opened the sentence it wrapped the whole of it
+    and both ends are dropped, otherwise it is put back after the period.
+    Markup *before* the period -- `` `SLEW_AZ_DPS`. `` -- is the sentence's
+    own and is never touched."""
+    text = comment_block.strip()
+    match = _SENTENCE_SPLIT.search(text)
+    if match is None:
+        return text
+    sentence = text[: match.start()].strip()
+    closing = match.group(0)[1:]
+    if closing and sentence.startswith(closing):
+        return sentence[len(closing) :].strip() + "."
+    return sentence + "." + closing if sentence else sentence
 
 
 def _join_comment_lines(parts: list[str]) -> str:

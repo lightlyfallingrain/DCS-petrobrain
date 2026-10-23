@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.error
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -31,6 +32,7 @@ from support.mock_aircraft_layer import MockAircraftLayerServer
 
 import logger as logger_module
 from aircraft_client import AircraftLayerError
+from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
 from belief.console import Console
@@ -71,6 +73,8 @@ from logger import (
     format_observation_line,
     main,
 )
+from mission_memory.admission import FiredOnTracker
+from mission_memory.store import MissionMemory
 from perception import association
 from perception.forest import ForestOcclusion
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
@@ -78,7 +82,12 @@ from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import SIGHT_NARROW_OPTIC, SIGHT_WIDE_OPTIC
-from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from perception.source import (
+    DerivedWorldPosition,
+    Observation,
+    OwnshipState,
+    RelativeDirection,
+)
 from store.writer import open_for_build
 
 
@@ -134,6 +143,7 @@ def _make_observation(
     classification_raw: str = "BMP",
     bearing_deg: float = 32.0,
     range_m: float = 3100.0,
+    relative_direction: RelativeDirection | None = None,
 ) -> Observation:
     """`bearing_deg`/`range_m` default to every pre-existing caller's
     implied shared position -- added (BL-12 Stage 3) so a caller that
@@ -153,6 +163,7 @@ def _make_observation(
         ownship_at_observation=ownship,
         derived_world_position=None,
         provenance="test",
+        relative_direction=relative_direction,
     )
 
 
@@ -890,6 +901,12 @@ class FakeConsoleAircraftClient:
         #: directly between polls, the same way `mission_start_sequence`
         #: above is driven.
         self.cockpit_switch_state: dict[str, Any] | None = None
+        #: `[[BL-B80]]` (`plans/9k113-sight-pointing/plan.md`) -- every
+        #: `write_sight_target` call this fake has recorded, oldest first.
+        self.sight_target_writes: list[tuple[float, float, float, float, float]] = []
+        #: `[[BL-B80]]` v2 -- `None` (the default) means no `GET /
+        #: sight_servo/latest` sample has arrived yet.
+        self.sight_servo_state: dict[str, Any] | None = None
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -952,6 +969,23 @@ class FakeConsoleAircraftClient:
         # `BL-B66` -- recorded rather than a true no-op, so a test can
         # assert on the guidance-unit power-up sequence's actual writes.
         self.cockpit_switch_writes.append((device, cmd, value))
+
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        # `[[BL-B80]]` -- recorded rather than a true no-op, same reason
+        # as `write_cockpit_switch` above.
+        self.sight_target_writes.append(
+            (goal_az_deg, goal_el_deg, goal_rate_az_deg_s, goal_rate_el_deg_s, t_sim)
+        )
+
+    def get_sight_servo_latest(self) -> dict[str, Any] | None:
+        return self.sight_servo_state
 
 
 @pytest.fixture(autouse=True)
@@ -2377,7 +2411,37 @@ def test_apply_active_gaze_returns_none_when_optic_state_was_never_given() -> No
 # (`plans/9k113-sight/plan.md` §12/§12a, direction §6/§7) -------------------
 
 
-def test_apply_active_gaze_builds_a_sight_cone_from_actual_aim() -> None:
+def test_apply_active_gaze_builds_a_sight_cone_from_the_heads_body_direction() -> None:
+    """`[[BL-B80]]` v2: a sight-tier optic's actual aim comes only from
+    `sight_head_body_az_deg`/`sight_head_body_el_deg` (the simulated
+    head's own body direction) -- never from `decision.look_azimuth_deg`
+    directly, which is belief's *desired* aim."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import SIGHT_NARROW_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=SIGHT_NARROW_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze(
+        [naked_eye],
+        TaskStore(),
+        decision=decision,
+        optic_state=OpticState(),
+        sight_head_body_az_deg=12.0,
+        sight_head_body_el_deg=-3.0,
+    )
+
+    assert naked_eye.sight_cone is not None
+    assert naked_eye.sight_cone.azimuth_deg == 12.0
+    assert naked_eye.sight_cone.half_angle_deg == SIGHT_NARROW_OPTIC.fov_half_angle_deg
+    assert naked_eye.sight_cone.depth_m == SIGHT_NARROW_OPTIC.range_cap_m
+
+
+def test_apply_active_gaze_sight_tier_with_no_head_direction_builds_no_cone() -> None:
+    """The head not yet `free` (`sight_head_body_*_deg is None`) -- no
+    aim to perceive through, regardless of what belief desires."""
     from belief.optic_policy import OpticDecision, OpticState
     from perception.optics import SIGHT_NARROW_OPTIC
 
@@ -2390,10 +2454,7 @@ def test_apply_active_gaze_builds_a_sight_cone_from_actual_aim() -> None:
         [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
     )
 
-    assert naked_eye.sight_cone is not None
-    assert naked_eye.sight_cone.azimuth_deg == 12.0
-    assert naked_eye.sight_cone.half_angle_deg == SIGHT_NARROW_OPTIC.fov_half_angle_deg
-    assert naked_eye.sight_cone.depth_m == SIGHT_NARROW_OPTIC.range_cap_m
+    assert naked_eye.sight_cone is None
 
 
 def test_apply_active_gaze_builds_no_cone_for_a_non_sight_optic() -> None:
@@ -2972,11 +3033,20 @@ def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
 def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None:
     """`BL-B64` Stage 2 review, Pass 2 required fix, exercised through the
     actual command -> drain -> decide sequence, not just `optic_policy`'s
-    own unit tests. Reproduces the exact `observ_transition == "off"` drain
-    block `logger.py`'s poll loop runs (same pattern
-    `test_a_player_command_lowers_the_binoculars` already uses for the
-    binocular case) -- the gap the review found was invisible precisely
-    because no existing test drove this path end to end."""
+    own unit tests (same pattern `test_a_player_command_lowers_the_
+    binoculars` already uses for the binocular case) -- the gap the review
+    found was invisible precisely because no existing test drove this path
+    end to end.
+
+    **Scope note (`[[BL-B80]]`):** the local snippet below reproduces only
+    the hands-busy-suppression/cockpit-write half of the old `observ_
+    transition == "off"` drain block, which is still what production code
+    does on that command. It does **not** cover `home_phase`, which
+    `[[BL-B80]]` moved out of this drain block entirely -- `home_phase` is
+    now derived every poll from the *observed* arg-886 edge in `run_once`,
+    not from this command. `optic_state.home_phase` is set directly below
+    rather than through any reproduced drain logic, purely so `decide`'s
+    phase dispatch has a starting state to suppress from."""
     from dataclasses import replace as _replace
 
     from belief.crew_console import CrewConsole
@@ -3036,6 +3106,488 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert optic_state.phase is OpticPhase.SCANNING
     assert optic_state.home_phase is OpticPhase.SCANNING
     assert optic_state.look_contact_id is None
+
+
+def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` v2's own replacement for the v1 gyro-alignment-timer
+    test: a `run_once`-level test that OBSERV on with the Л5 gyro-
+    alignment lamp (898, `align_observed`) still off never yields
+    `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`, even when `decide_optic`
+    would otherwise choose one -- and that the cap lifts the poll the
+    lamp lights, with no special-casing needed (the cap and `SightHead.
+    mode` are derived from the identical `align_observed`/`observ_
+    observed` inputs, so they can never disagree)."""
+    import logger as logger_module
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    # OBSERV on, but the gyro is not yet aligned (898 off).
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=False
+    )
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()
+
+    # Not aligned: capped to BINOCULAR_OPTIC, never the sight-tier optic
+    # `decide_optic` chose; the head itself is `caged`, not `free`.
+    assert runner.optic is BINOCULAR_OPTIC
+    assert runner.sight_head.mode == "caged"
+    # The cap only affects the sight tier -- a (capped) binocular look
+    # still gets its own pass-through actual aim.
+    assert runner.optic_state.actual_aim_azimuth_deg == pytest.approx(12.0)
+    assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
+
+    # The lamp lights: the cap lifts the very next poll, with no timer.
+    runner.guidance_unit_state = replace(
+        runner.guidance_unit_state, align_observed=True
+    )
+    sim_t += 1.0
+    telemetry["dcs_model_time_s"] = sim_t
+    runner.run_once()
+
+    assert runner.optic is SIGHT_WIDE_OPTIC
+    assert runner.sight_head.mode == "free"
+    # One second at SLEW_AZ_DPS/SLEW_EL_DPS (20/10 deg/s) covers the full
+    # 12/3 degree move from the caged boresight seed, so the head lands
+    # exactly on `decide_optic`'s desired direction in this one poll.
+    assert runner.optic_state.actual_aim_azimuth_deg == pytest.approx(12.0)
+    assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
+
+
+def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` Stage 3's `run_once` wiring test: a sight-tier poll's
+    actual aim -- what perception looks through -- is the simulated head's
+    own body direction, so it lags `decide_optic`'s desired direction by
+    the slew rate and holds its world direction through a turn. Desired
+    stays 50 deg right of the nose throughout; the head starts at the
+    boresight. Polls at 1 s: the first has no elapsed time, the second
+    slews 20 deg, the third (ownship now heading 030) slews another 20 deg
+    in world, which is only 10 deg right of the new nose."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from belief.sight_head import SLEW_AZ_DPS, SightHead
+
+    assert SLEW_AZ_DPS == pytest.approx(20.0), "the expected angles assume 20 deg/s"
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=True
+    )
+    runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=50.0, look_elevation_deg=0.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    actual_az: list[float | None] = []
+    for heading_deg in (0.0, 0.0, 30.0):
+        telemetry["heading_true_rad"] = math.radians(heading_deg)
+        telemetry["dcs_model_time_s"] = sim_t
+        runner.run_once()
+        actual_az.append(runner.optic_state.actual_aim_azimuth_deg)
+        sim_t += 1.0
+
+    assert actual_az == [
+        pytest.approx(0.0, abs=1e-9),
+        pytest.approx(20.0),
+        pytest.approx(10.0),
+    ]
+
+
+def test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` Stage 3b's `run_once` wiring test: a contact admitted
+    through the sight with an exact `relative_direction` (dead ahead,
+    1000 m, level) on poll 1 moves poll 2's sight goal -- the value the
+    crew-text loop writes to the wire as `sight_target` -- onto that true
+    direction, away from belief's desired one (12 deg right, 3 deg down),
+    while the contact's believed position is untouched by it."""
+    from belief.attack_run import SEEN_AIM_HEIGHT_OFFSET_M
+    from belief.optic_policy import OpticDecision, OpticState
+    from belief.sight_head import SightHead
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observation = _make_observation(
+        ownship,
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    source = FakeSource([observation])
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(
+        aircraft_client=aircraft_client,  # type: ignore[arg-type]
+        sources=[source],  # type: ignore[list-item]
+    )
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=True
+    )
+    runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        look = "CONTACT_1" if runner.store.contacts else None
+        return replace(state, look_contact_id=look), OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()  # poll 1: admitted through the sight
+    assert runner.sight_head.aim_source == "belief"
+    (contact,) = runner.store.contacts
+    believed = (contact.position.x, contact.position.z)
+
+    source._observations = []
+    sim_t += 1.0
+    telemetry["dcs_model_time_s"] = sim_t
+    runner.run_once()  # poll 2: looks at it
+
+    head = runner.sight_head
+    assert head.aim_source == "seen"
+    assert head.goal_world_az_deg == pytest.approx(0.0, abs=1e-9)
+    assert head.goal_world_el_deg == pytest.approx(
+        math.degrees(math.atan2(SEEN_AIM_HEIGHT_OFFSET_M, 1000.0))
+    )
+    (contact,) = runner.store.contacts
+    assert (contact.position.x, contact.position.z) == believed
+
+
+@dataclass
+class _F4Run:
+    """One F4 scenario run's every observable sink, captured for diffing."""
+
+    runner: ConsolePerceptionRunner
+    #: `aim_source` after each poll -- the one thing F4 permits to differ.
+    aim_sources: list[str]
+    #: The head's world goal (az, el) after each poll -- also permitted to
+    #: differ.
+    goals: list[tuple[float | None, float | None]]
+    #: Every line he spoke: command readbacks plus everything the poll's
+    #: drains printed, in order.
+    utterances: list[str]
+    #: `MissionMemory.entries`, admission and commanded marks alike.
+    memory_entries: list[object]
+    #: Every `TOOL_SET` tool's result, by tool name, called after the polls.
+    tool_results: dict[str, object]
+
+
+def _f4_poll(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    memory: MissionMemory,
+    fired_on_tracker: FiredOnTracker,
+) -> None:
+    """One poll of `_run_crew_text_poll_loop`'s belief-to-speech sinks, in
+    that loop's own order, minus its cockpit writes (switches and the
+    sight-target goal, which F4 permits to differ) and thread plumbing:
+    `run_once` -> attack-run transition and guidance drain ->
+    `_mission_memory_step` -> `drain_events` -> pending positional replies.
+    Driven inline rather than through the threaded loop because a
+    differential test needs both runs to see exactly the same polls."""
+    runner.run_once()
+    assert runner.last_t_sim is not None and runner.theatre is not None
+    crew_console.enrichment = runner.enrichment
+    crew_console.on_ground = False
+    if crew_console.attack_run_transition == "engage":
+        runner.attack_run_state = AttackRunState()
+        crew_console.attack_run_transition = None
+    runner.attack_run_state = crew_console.drain_attack_run(
+        runner.attack_run_state,
+        runner.last_t_sim,
+        runner.last_ownship_state,
+        resolving_optic=runner.optic,
+    )
+    logger_module._mission_memory_step(
+        memory, runner, runner.last_t_sim, runner.theatre, None, fired_on_tracker
+    )
+    crew_console.drain_events(runner.last_t_sim)
+    crew_console.drain_pending_positional_replies(runner.last_t_sim)
+
+
+def _f4_tool_results(
+    runner: ConsolePerceptionRunner, memory: MissionMemory, now_sim: float
+) -> dict[str, object]:
+    """Calls every `TOOL_SET` tool once. Keyed by tool name and checked
+    against `TOOL_SET` itself, so a tool added later without a call here
+    fails the test rather than silently escaping the fence."""
+    from belief.tasks import PendingIntent
+    from belief.tool_api import TOOL_SET
+
+    tools = {spec.name: spec.fn for spec in TOOL_SET}
+    store, tasks = runner.store, runner.tasks
+    enrichment = runner.enrichment
+    ownship = runner.last_ownship_state
+    assert enrichment is not None and ownship is not None
+    cid = "CONTACT_1"
+    centre = GeoPosition(x=ownship.x, z=ownship.z, alt_m=0.0)
+    results: dict[str, object] = {}
+    # Read-only queries first, so the mutators below cannot shape them.
+    results["get_contacts"] = tools["get_contacts"](store, now_sim, None, enrichment)
+    results["describe_contact"] = tools["describe_contact"](
+        store, cid, now_sim, enrichment
+    )
+    results["get_contact_history"] = tools["get_contact_history"](store, memory, cid)
+    results["find_contact"] = tools["find_contact"](store, "BMP", now_sim, enrichment)
+    results["get_attention_state"] = tools["get_attention_state"](store, cid)
+    events = tools["poll_events"](store)
+    results["poll_events"] = events
+    results["find_place"] = tools["find_place"](enrichment, "a")
+    results["get_situation"] = tools["get_situation"](store, now_sim, enrichment)
+    results["describe_our_position"] = tools["describe_our_position"](enrichment)
+    results["recall_memory"] = tools["recall_memory"](memory, include_struck=True)
+    # Mutators: their results are what the brain would be told.
+    results["remember_location"] = tools["remember_location"](
+        memory,
+        ownship,
+        store,
+        now_sim,
+        anchor="target",
+        contact_id=cid,
+        theatre=runner.theatre,
+        enrichment=enrichment,
+    )
+    results["set_attention"] = tools["set_attention"](store, cid, "watch")
+    results["watch_area"] = tools["watch_area"](store, centre, 2000.0)
+    assert isinstance(events, list)
+    first_event_id = events[0]["id"] if events else "none"
+    results["acknowledge_event"] = tools["acknowledge_event"](store, first_event_id)
+    intent = tools["scan_area"](store, tasks, centre, 2000.0, "f4", now_sim)
+    results["scan_area"] = intent
+    assert isinstance(intent, PendingIntent)
+    task_id = intent.id
+    results["get_task_status"] = tools["get_task_status"](tasks, task_id)
+    results["cancel_task"] = tools["cancel_task"](store, tasks, task_id)
+    assert set(results) == set(tools), set(tools) ^ set(results)
+    return results
+
+
+def _f4_scenario(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, leak_seen_aim: bool
+) -> _F4Run:
+    """Shared scenario for the F4 differential no-leak test below: a
+    contact is admitted with an exact `relative_direction` on poll 1
+    (sight-tier, head free throughout), then looked at again on poll 2 --
+    `aim_source` resolves to `seen` on poll 2 unless `leak_seen_aim` is
+    `False`, in which case `belief.sight_head.seen_world_direction` is
+    monkeypatched to always return `None` (the plan's own differential
+    construction). Polls 3-4 carry the head through `held` while the
+    pilot's `mark_target`/`engage` commands give memory and speech
+    something to say about the contact. `decide_optic`'s desired body
+    direction (12.0, -3.0 deg) is deliberately offset from the seen
+    direction (the contact sits dead ahead, 0/0) -- belief's own
+    systematic bias, per the plan's F4 spec."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from belief.sight_head import SightHead
+
+    if not leak_seen_aim:
+        import belief.sight_head as sight_head_module
+
+        monkeypatch.setattr(
+            sight_head_module, "seen_world_direction", lambda contact: None
+        )
+
+    # `Entry.t_wall` is the one field two runs differ in regardless of the
+    # seen aim; pin it so the memory comparison is about content.
+    import types
+
+    import mission_memory.store as memory_store_module
+
+    monkeypatch.setattr(
+        memory_store_module, "time", types.SimpleNamespace(time=lambda: 0.0)
+    )
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observation = _make_observation(
+        ownship,
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    source = FakeSource([observation])
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    db_path = tmp_path / f"region-leak-{leak_seen_aim}.sqlite"
+    open_for_build(db_path).close()
+    world_model_conn = logger_module.open_world_model(db_path)
+    runner = ConsolePerceptionRunner(
+        aircraft_client=aircraft_client,  # type: ignore[arg-type]
+        sources=[source],  # type: ignore[list-item]
+        world_model_conn=world_model_conn,
+        theatre="Syria",
+    )
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=True
+    )
+    runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    memory = MissionMemory()
+    fired_on_tracker = FiredOnTracker()
+    crew_console = CrewConsole(
+        store=runner.store,
+        tasks=runner.tasks,
+        mark_here_fn=logger_module._mark_here_fn(memory, runner),
+        mark_target_fn=logger_module._mark_target_fn(memory, runner),
+    )
+    output = io.StringIO()
+    crew_console.output = output
+
+    call_count = 0
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        nonlocal call_count
+        call_count += 1
+        new_state = state
+        if call_count >= 2:
+            new_state = replace(state, look_contact_id="CONTACT_1")
+        return new_state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    utterances: list[str] = []
+    aim_sources: list[str] = []
+    goals: list[tuple[float | None, float | None]] = []
+    armour: dict[str, int | str] = {"descriptor": "armor"}
+    commands_after_poll: dict[int, list[tuple[str, dict[str, int | str] | None]]] = {
+        1: [("select_target", armour)],
+        # After the seen poll, so both read belief while the head is seen.
+        2: [("mark_target", None), ("engage", None)],
+    }
+    for poll in range(1, 5):
+        _f4_poll(runner, crew_console, memory, fired_on_tracker)
+        aim_sources.append(runner.sight_head.aim_source)
+        goals.append(
+            (runner.sight_head.goal_world_az_deg, runner.sight_head.goal_world_el_deg)
+        )
+        if poll == 1:
+            # The look is not re-admitted by a new observation.
+            source._observations = []
+        for token, slots in commands_after_poll.get(poll, []):
+            utterances.extend(
+                crew_console.handle_command(token, now_sim=sim_t, slots=slots)
+            )
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+
+    utterances.extend(output.getvalue().splitlines())
+    memory_entries: list[object] = list(memory.entries)
+    tool_results = _f4_tool_results(runner, memory, sim_t - 1.0)
+    return _F4Run(
+        runner=runner,
+        aim_sources=aim_sources,
+        goals=goals,
+        utterances=utterances,
+        memory_entries=memory_entries,
+        tool_results=tool_results,
+    )
+
+
+class TestF4DifferentialNoLeak:
+    """`[[BL-B80]]` v2's F4 fence (plan's "Where the true direction may
+    go, and where it may not" table): the same scenario run twice, once
+    with `belief.sight_head.seen_world_direction` monkeypatched to `None`.
+    `ContactStore` positions, `MissionMemory` entries, every utterance and
+    every `TOOL_SET` result must be identical; only the head's own aim
+    source and goal may differ. A behavioural check of the value's reach,
+    independent of who imports what."""
+
+    def test_contact_positions_are_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        leaking_contacts = {c.id: c.position for c in leaking.runner.store.contacts}
+        not_leaking_contacts = {
+            c.id: c.position for c in not_leaking.runner.store.contacts
+        }
+        assert leaking_contacts == not_leaking_contacts
+        assert leaking_contacts, "the scenario admitted no contact at all"
+
+    def test_mission_memory_is_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        assert leaking.memory_entries == not_leaking.memory_entries
+        assert leaking.memory_entries, "the scenario wrote no memory entry at all"
+
+    def test_utterances_are_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        assert leaking.utterances == not_leaking.utterances
+        assert leaking.utterances, "the scenario spoke nothing at all"
+
+    def test_tool_set_results_are_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        for name, result in leaking.tool_results.items():
+            assert result == not_leaking.tool_results[name], name
+        assert leaking.tool_results["describe_contact"] is not None
+
+    def test_the_heads_own_aim_source_differs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The one thing F4 permits to differ -- proof the scenario
+        actually exercises the seen path when it is not suppressed."""
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        assert leaking.aim_sources[1] == "seen"
+        assert "seen" not in not_leaking.aim_sources
+        leaking_az = leaking.goals[1][0]
+        not_leaking_az = not_leaking.goals[1][0]
+        assert leaking_az is not None and not_leaking_az is not None
+        assert leaking_az != pytest.approx(not_leaking_az)
 
 
 # -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
@@ -4524,9 +5076,12 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
 ) -> None:
     """The full Stage 2 sequence, through the real loop: no write while
     still on the ground; the four switches written in order on the
-    takeoff rising edge; `sight_ready` becomes `True` only after the
-    fourth; "Guidance unit ready." spoken exactly once across several
-    subsequent polls, not once per poll."""
+    takeoff rising edge. `[[BL-B80]]` v2: the sequence completing no
+    longer *declares* readiness itself -- `sight_ready` stays `False`
+    until the real 960 lamp (`ready_lamp`) is observed lit, simulated
+    here via the fake's `cockpit_switch_state`; "Guidance unit ready."
+    then speaks exactly once across several subsequent polls, not once
+    per poll."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -4597,6 +5152,13 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
             (6, 3030, 1.0),
         ], aircraft_client.cockpit_switch_writes
 
+        # The sequence has completed but the real 960 lamp has not been
+        # observed yet -- `[[BL-B80]]` v2's own readiness source.
+        assert crew_console.sight_ready is False
+
+        # The lamp lights.
+        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+
         # A few more polls, sim time still advancing -- "Guidance unit
         # ready." must stay spoken exactly once, not once per poll
         # (the reviewer's second mutation: removing the `announced` guard).
@@ -4610,7 +5172,7 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
 
     assert not poll_thread.is_alive()
     assert crew_console.sight_ready is True
-    assert runner.guidance_unit_state.sight_ready is True
+    assert runner.guidance_unit_state.ready_observed is True
     assert runner.guidance_unit_state.guidance_unit_ready_announced is True
     assert isinstance(crew_console.output, io.StringIO)
     spoken = crew_console.output.getvalue()
@@ -4639,7 +5201,7 @@ def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
     runner.guidance_unit_state = GuidanceUnitState(
         takeoff_seen=True,
         power_up_stage=4,
-        sight_ready=True,
+        ready_observed=True,
         guidance_unit_ready_announced=True,
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
@@ -4759,7 +5321,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
         runner.guidance_unit_state = GuidanceUnitState(
             takeoff_seen=True,
             power_up_stage=4,
-            sight_ready=True,
+            ready_observed=True,
             guidance_unit_ready_announced=True,
         )
         deadline = time.monotonic() + 5.0
@@ -4809,14 +5371,14 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
 
 
 def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
-    """`BL-B66` Stage 4b -- `--slew-trace` is wired through a real
-    `_run_crew_text_poll_loop` run, not only exercised against
-    `SightTraceWriter`/`sight_effector` in isolation (the wiring-gap
-    lesson from this branch's own review: a module's unit tests passing
-    does not mean the poll loop actually calls it). Drives OBSERV on, a
-    sight-position readback arriving via the fake's `cockpit_switch_state`,
-    and OBSERV off again -- then asserts on the rows actually written to
-    disk, in order."""
+    """`BL-B66` Stage 4b, updated for `[[BL-B80]]` v2 -- `--slew-trace` is
+    wired through a real `_run_crew_text_poll_loop` run, not only
+    exercised against `SightTraceWriter`/`sight_effector` in isolation
+    (the wiring-gap lesson from this branch's own review: a module's unit
+    tests passing does not mean the poll loop actually calls it). Drives
+    OBSERV on, the Л5 gyro-alignment lamp (898) arriving via the fake's
+    `cockpit_switch_state`, and OBSERV off again -- then asserts on the
+    rows actually written to disk, in order."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -4832,7 +5394,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     runner.guidance_unit_state = GuidanceUnitState(
         takeoff_seen=True,
         power_up_stage=4,
-        sight_ready=True,
+        ready_observed=True,
         guidance_unit_ready_announced=True,
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
@@ -4877,29 +5439,24 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
             time.sleep(0.01)
         assert (7, 3002, 1.0) in aircraft_client.cockpit_switch_writes
 
-        # A sight-position readback arrives (as if from a hand-slew) --
-        # the next poll's row must carry it, converted to degrees, with
-        # `actual_azimuth_source == "readback"`.
+        # The Л5 gyro-alignment lamp (898) lights -- the simulated head
+        # goes `caged` -> `free` the next poll.
         aircraft_client.cockpit_switch_state = {
             "t": sim_t,
             "received_wall_clock_s": 0.0,
             "observe_on": True,
             "weapons_armed": False,
-            "sight_az": 0.16500,
-            "sight_elev": -0.28125,
+            "align_lamp": True,
         }
         deadline = time.monotonic() + 5.0
-        while (
-            runner.guidance_unit_state.sight_az_raw is None
-            and time.monotonic() < deadline
-        ):
+        while runner.sight_head.mode != "free" and time.monotonic() < deadline:
             sim_t += 0.5
             telemetry["dcs_model_time_s"] = sim_t
             time.sleep(0.02)
-        assert runner.guidance_unit_state.sight_az_raw == pytest.approx(0.16500)
-        # One more poll so the readback this test just set actually lands
-        # in a written row (the write happens with that poll's own state,
-        # not retroactively).
+        assert runner.sight_head.mode == "free"
+        # One more poll so the head's `free` state this test just reached
+        # actually lands in a written row (the write happens with that
+        # poll's own state, not retroactively).
         sim_t += 0.5
         telemetry["dcs_model_time_s"] = sim_t
         time.sleep(0.1)
@@ -4924,14 +5481,9 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
         json.loads(line)
         for line in slew_trace_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert len(rows) >= 2, "expected at least the pre- and post-readback rows"
+    assert len(rows) >= 2, "expected at least the pre- and post-alignment rows"
     assert any(row["observ_commanded"] is True for row in rows)
-    readback_rows = [row for row in rows if row["actual_azimuth_source"] == "readback"]
-    assert readback_rows, rows
-    assert readback_rows[-1]["actual_azimuth_deg"] == pytest.approx(22.5)
-    assert readback_rows[-1]["raw_sight_az"] == pytest.approx(0.16500)
-    assert readback_rows[-1]["raw_sight_elev"] == pytest.approx(-0.28125)
-    # Elevation never claims "readback" -- 876's degrees-per-unit is
-    # unmeasured (`sight_trace_writer`'s own module docstring).
-    assert readback_rows[-1]["actual_elevation_source"] != "readback"
+    free_rows = [row for row in rows if row["head_mode"] == "free"]
+    assert free_rows, rows
+    assert free_rows[-1]["head_world_azimuth_deg"] is not None
     assert any(row["observ_commanded"] is False for row in rows)

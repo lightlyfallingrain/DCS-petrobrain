@@ -66,6 +66,7 @@ from belief.contacts import Contact
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.groups import Group
 from belief.optic_policy import guidance_request_for
+from belief.percept import Percept
 from belief.speech import (
     OutgoingSpeech,
     _unit_type_display,
@@ -137,6 +138,26 @@ ATTACK_RUN_RELATIVE_MAX_AGE_S: Final[float] = tuning.real(
     lo=0.5,
     hi=10.0,
     status="judgement",
+)
+
+#: How far above a seen target's reported ground point the 9K113 sight
+#: aims, in metres -- zero aims at the vehicle's base, too large rides the
+#: crosshair over the top of a small vehicle at close range; the default
+#: 1.2 m is half a BTR-80's 2.4 m hull height. `seen_world_direction`'s own
+#: aim-point correction (`[[BL-B80]]`, plan Decision 6, pilot 2026-10-22,
+#: verbatim: *"no idea. let's assume on ground"*). The associated object's
+#: reported position is the DCS unit's reference point, likely near
+#: ground/base level -- this raises the seen elevation by the angle the
+#: offset subtends at the look's own range. One flat offset, no per-class
+#: table yet (the plan's own Decision 6, left for a later, separate change
+#: if Flight B's screenshot shows it is still off). The default is an
+#: agreed guess pending that flight.
+SEEN_AIM_HEIGHT_OFFSET_M: Final[float] = tuning.real(
+    "belief.attack_run.SEEN_AIM_HEIGHT_OFFSET_M",
+    1.2,
+    lo=0.0,
+    hi=3.0,
+    status="agreed-guess",
 )
 
 #: One row of an alignment word table: `(threshold_deg, positive_phrase,
@@ -289,29 +310,30 @@ class AttackRunState:
     requested_optic: Optic | None = None
 
 
-def _tier1_alignment(
-    ownship: OwnshipState, contact: Contact, now_sim: float
-) -> tuple[float, float] | None:
-    """Tier 1's alignment, or `None` when no fresh relative observation
-    exists -- Decision 17's tier change, handled by `decide` falling
-    through to `_tier2_alignment` below.
+def _seen_world_offset(percept: Percept) -> tuple[float, float, float] | None:
+    """The world-frame offset (north_m, east_m, up_m), from the ownship
+    position *at the observing poll* to the target -- `None` when `percept`
+    carries no `relative_direction` at all. Factored out of `_tier1_
+    alignment` (`[[BL-B80]]`, `plans/9k113-sight-pointing/plan.md`, "Aim
+    source") as the first half of that function's own derivation: undoing
+    `relative_direction`'s own yaw-only rotation (`contact.last_percept.
+    relative_direction` is yaw-removed *at the observing poll's own
+    heading*, Decision 16's "why a finished angle cannot be carried").
 
-    **Re-derives the current azimuth/elevation from a carried offset,
-    never a frozen one** (Decision 16's "why a finished angle cannot be
-    carried"). `contact.last_percept.relative_direction` is yaw-removed
-    *at the observing poll's own heading* -- recovering the world-frame
-    offset therefore means undoing that specific rotation (not the
-    *current* heading), adding ownship's own translation since the look
-    (the target is assumed stationary for tier 1's short window -- both
-    ownship translation and target motion are an order below the lined-up
-    band, per the plan's own figures), and re-rotating by *current*
-    attitude via `geometry.alignment_direction` (bank removed)."""
-    percept = contact.last_percept
-    if percept is None or percept.relative_direction is None:
+    **Two callers, two different second halves.** `_tier1_alignment`
+    continues by adding ownship's own translation *since* the look and
+    re-rotating into the *current* body frame (`alignment_direction`) --
+    appropriate for guidance, which needs where the target is *now*
+    relative to the nose. `seen_world_direction` below stops here and
+    reads off the world-true azimuth/elevation directly, with no ownship-
+    displacement adjustment and no attitude at all -- appropriate for the
+    sight goal, which wants the direction *as seen at the look* (the rate
+    `sight_head.select_sight_goal` derives from consecutive looks already
+    covers both ownship translation and target motion since; adding a
+    displacement correction here too would double-count it, per the
+    plan's "Aim source" notes)."""
+    if percept.relative_direction is None:
         return None
-    if now_sim - percept.t_sim > ATTACK_RUN_RELATIVE_MAX_AGE_S:
-        return None
-
     observed = percept.ownship_at_observation
     relative = percept.relative_direction
     heading_obs_rad = math.radians(observed.heading_true_deg)
@@ -324,10 +346,38 @@ def _tier1_alignment(
         heading_obs_rad
     ) + relative.right_m * math.cos(heading_obs_rad)
     up_m = relative.up_m
+    return north_m, east_m, up_m
+
+
+def _tier1_alignment(
+    ownship: OwnshipState, contact: Contact, now_sim: float
+) -> tuple[float, float] | None:
+    """Tier 1's alignment, or `None` when no fresh relative observation
+    exists -- Decision 17's tier change, handled by `decide` falling
+    through to `_tier2_alignment` below.
+
+    **Re-derives the current azimuth/elevation from a carried offset,
+    never a frozen one** (Decision 16's "why a finished angle cannot be
+    carried"), via `_seen_world_offset` (the yaw-undoing half shared with
+    `seen_world_direction`) plus ownship's own translation since the look
+    (the target is assumed stationary for tier 1's short window -- both
+    ownship translation and target motion are an order below the lined-up
+    band, per the plan's own figures), re-rotated by *current* attitude
+    via `geometry.alignment_direction` (bank removed)."""
+    percept = contact.last_percept
+    if percept is None:
+        return None
+    if now_sim - percept.t_sim > ATTACK_RUN_RELATIVE_MAX_AGE_S:
+        return None
+    offset = _seen_world_offset(percept)
+    if offset is None:
+        return None
+    north_m, east_m, up_m = offset
 
     # Ownship's own displacement since the look -- a telemetry delta, not
     # an absolute position (Decision 16's "the offset is relative on
     # purpose").
+    observed = percept.ownship_at_observation
     adjusted_north_m = north_m - (ownship.x - observed.x)
     adjusted_east_m = east_m - (ownship.z - observed.z)
     adjusted_up_m = up_m - (ownship.alt_m - observed.alt_m)
@@ -339,6 +389,57 @@ def _tier1_alignment(
         pitch_deg=ownship.pitch_deg,
     )
     return direction.azimuth_deg, direction.elevation_deg
+
+
+@dataclass(frozen=True, slots=True)
+class SeenDirection:
+    """The world-true direction to a contact *as seen at the look*
+    (`[[BL-B80]]`, "Aim source") -- `seen_world_direction`'s own return
+    type. `az_true_deg` is a compass bearing (`[0, 360)`), `el_deg` is
+    above the world-horizontal plane; neither carries any attitude or
+    ownship-displacement correction (see `_seen_world_offset`'s own
+    docstring for why not). `t_look` is `percept.t_sim`, the look's own
+    timestamp -- `sight_head.select_sight_goal`'s freshness test compares
+    this against `last_sight_look_sim`."""
+
+    az_true_deg: float
+    el_deg: float
+    t_look: float
+
+
+def seen_world_direction(contact: Contact) -> SeenDirection | None:
+    """The world-true direction to `contact`, *as seen* at its last look
+    through a sight-tier optic -- `[[BL-B80]]`'s sanctioned second
+    consumer of `Percept.relative_direction` (`plans/9k113-sight-pointing/
+    plan.md`, "Aim source": *"Petrovich can see the target and point
+    sight at it even if belief about world location is incorrect"*).
+
+    `None` when `contact.last_percept` carries no `relative_direction` at
+    all (never observed through an optic that reports exact relative
+    geometry -- unaided/binocular looks also set it, so **this function
+    alone does not know whether the look came through the sight**; that
+    is `sight_head.select_sight_goal`'s own `last_sight_look_sim` check,
+    per the plan's "Notes on the rule").
+
+    **No staleness check** -- unlike `_tier1_alignment`, which gates on
+    `ATTACK_RUN_RELATIVE_MAX_AGE_S`. Freshness for the sight goal is an
+    exact-equality test against `last_sight_look_sim` in `select_sight_
+    goal`, not an age threshold; this function simply reports what the
+    last percept said, however old."""
+    percept = contact.last_percept
+    if percept is None:
+        return None
+    offset = _seen_world_offset(percept)
+    if offset is None:
+        return None
+    north_m, east_m, up_m = offset
+    horizontal_m = math.hypot(north_m, east_m)
+    # `SEEN_AIM_HEIGHT_OFFSET_M`: the reported position is assumed to be
+    # at ground level, so the aim point is raised by the angle a
+    # half-nominal-vehicle-height offset subtends at this range.
+    az_true_deg = math.degrees(math.atan2(east_m, north_m)) % 360.0
+    el_deg = math.degrees(math.atan2(up_m + SEEN_AIM_HEIGHT_OFFSET_M, horizontal_m))
+    return SeenDirection(az_true_deg=az_true_deg, el_deg=el_deg, t_look=percept.t_sim)
 
 
 def _remembered_target_alt_m(contact: Contact) -> float | None:

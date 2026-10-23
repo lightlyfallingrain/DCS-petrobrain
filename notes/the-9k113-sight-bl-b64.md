@@ -114,3 +114,56 @@
   its own docstring — could settle which number was real. When a fix narrows or re-times a shared
   gate to handle a pathological input, the healthy-input re-measurement belongs in a committed test,
   not a one-off script's printed number, even when the fix is otherwise obviously correct.
+- **A readback value and the command value that produced it can share a physical quantity (degrees)
+  and formula on one half of their range while needing genuinely different formulas on the other
+  half, with nothing in the type system to tell them apart.** `BL-B80`'s elevation calibration has
+  one linear conversion for the readback argument (`arg_876 * 20.0`, both signs — a piecewise 0.75
+  gauge factor on the negative argument side exactly cancels the 20/15 degree-per-unit asymmetry)
+  and a genuinely different piecewise conversion for the command value sent via `SetCommand` (no
+  readback step happens on the way out, so nothing cancels). The first implementation applied the
+  readback formula's piecewise version by mistake and a unit test caught it immediately
+  (`sight_elevation_raw_to_deg(-0.75)` returned `-11.25`, not `-15.0`) — but only because that test
+  existed; both functions take and return a bare `float`, so a future call site swapping one for
+  the other would type-check and silently produce a wrong-but-plausible number. When a conversion
+  has a command direction and a readback direction, treat them as two formulas from the start
+  rather than assuming one is the other's algebraic inverse, and say in each function's docstring
+  which domain it is for.
+- **A per-optic perception cap can be defeated by a shared belief field that keeps the previous
+  optic's last real value instead of clearing when the optic that owns it stops being used.**
+  `BL-B80`'s gyro-alignment window caps `optic_decision.optic` to `BINOCULAR_OPTIC` specifically so
+  naked-eye/binocular perception does not read through the sight while it is unusable — but
+  `GuidanceUnitState.sight_az_raw`/`sight_elev_raw` (consumed generically by
+  `perception/naked_eye_source.py`'s gaze-cone builder, not only by sight perception) are set by
+  `refresh_readback` on every numeric sample and never cleared back to `None`, so once any sight
+  readback has ever arrived, naked-eye/binocular perception keeps reading the sight's literal head
+  position for the rest of the mission regardless of which optic is actually in use — defeating the
+  cap's purpose everywhere, not only during the alignment window it was built for. No test combined
+  a non-sight optic with a populated readback field, so the gap went unexercised rather than merely
+  untested-for. The general shape: a field two code paths share (one that owns writing it, several
+  that read it generically) must be gated at the read site on which path currently applies, not
+  assumed clear just because the writer's own caller thinks it is between uses.
+- **DCS's AI axis (the 9K113's own guidance-unit servo) only obeys a `SetCommand` write whose
+  value differs from the previous frame's — a per-frame constant value, however correct, is
+  silently ignored after the first frame.** Eleven probe runs on `BL-B80` chased "intermittent
+  obedience" under several hypotheses (timing, device index, command id) before the pilot's own
+  hypothesis — "DCS acts on an axis only when its value changes" — was tested directly and
+  confirmed (flicker 18/18 steps obeyed, constant 3/10). A tiny invisible per-frame dither
+  (0.6°/8 Hz here) or flicker (±1e-5…1e-3 unit) written on top of the real setpoint keeps the axis
+  "live" without a visible effect, and this reclassified a whole prior plan's "intermittent
+  obedience" defect as expected behaviour of an edge-triggered axis, not a bug to chase further.
+  Worth checking for on any DCS-cockpit axis that appears to only sometimes take a commanded value:
+  try a dithered/changing write before assuming a timing or addressing problem.
+- **A position-model premise built and reviewed can still be wrong in a way invisible to any of
+  its own unit tests, because the axis it reasoned about behaves like a different control
+  primitive than assumed.** `BL-B80`'s v1 plan modelled the 9K113 axis as a *position* target
+  (874/876 as a position readback, the AI overlay required on) — internally consistent, reviewed,
+  security-approved, fully unit-tested — and was overturned wholesale by live probe runs 1–10 once
+  flown: the axis is rate/edge-driven, 874/876 echo the *demand* not a position, and the AI overlay
+  is not required at all. Nothing in the v1 test suite could have caught this, because every test
+  exercised the model's own internals against its own assumptions; only flying the probe against
+  the real DCS axis surfaced the mismatch. The whole mechanism (`ShowMenu`, `ai_believed_on`,
+  `GYRO_ALIGNMENT_S`, the elevation-conversion functions above) was removed rather than patched.
+  When a plan's physical/control-loop model of a DCS system has never been checked against a live
+  probe, treat "passes review and all its own tests" as necessary, not sufficient — the probe is
+  what the architecture actually depends on, and it belongs before the model is built on, not
+  after.

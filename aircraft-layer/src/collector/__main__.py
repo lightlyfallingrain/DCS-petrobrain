@@ -100,6 +100,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    SightServoCache,
     Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
@@ -342,6 +343,10 @@ def main() -> None:
     # command_sender (above) to write, since both channels target
     # Export.lua's one inbound command listener.
     cockpit_switch_cache = CockpitSwitchCache()
+    # `[[BL-B80]]` v2 -- the DCS-slave servo's own status feed, a second
+    # cache from cockpit_switch_cache above (see `schema.sight_servo`'s
+    # own "Departure, stated").
+    sight_servo_cache = SightServoCache()
 
     collector = CollectorServer(
         cache,
@@ -351,6 +356,7 @@ def main() -> None:
         ptt_cache=ptt_cache,
         spu8_cache=spu8_cache,
         cockpit_switch_cache=cockpit_switch_cache,
+        sight_servo_cache=sight_servo_cache,
         host=args.host,
         port=args.port,
     )
@@ -377,6 +383,7 @@ def main() -> None:
         emitter_tracker=emitter_tracker,
         mission_start_cache=mission_start_cache,
         cockpit_switch_cache=cockpit_switch_cache,
+        sight_servo_cache=sight_servo_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
