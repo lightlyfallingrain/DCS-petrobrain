@@ -4,7 +4,7 @@ perceived" (`plans/pb2-contact-memory/plan.md`'s Interface confirmation gap
 
 `perception.source.Observation` carries `derived_world_position` (DCS
 ground truth x/z) alongside the perceived bearing/range on both concrete
-tiers -- convenient for `logger.py`'s text output and for future
+tiers -- convenient for `body.py`'s text output and for future
 world-enrichment work (BL-3), but exactly the field belief code must never
 read. Rather than rely on every future `belief/` function remembering not
 to touch `observation.derived_world_position` or `observation.id`-as-DCS-

@@ -987,7 +987,7 @@ def test_2c_transcript_fixture_renders_three_lines_not_seven(
     instant.** A real sortie produces detections as Petrovich actually
     flies past each thing, each with its own `CALLOUT_MAX_AGE_S` budget
     counted from *its own* arrival -- polled here every second, the way
-    `logger.py`'s poll loop actually calls `drain_events`.
+    `body.py`'s poll loop actually calls `drain_events`.
 
     **Rewritten a second time for `BL-B48` / BL-12 Stage 0a
     (2026-10-11) -- line 3 changed and line 4 is new. Read off a run, not

@@ -503,7 +503,7 @@ def test_hold_recovery_time_is_bounded_independent_of_poll_interval() -> None:
     squared pieces of a fixed budget is always less than squaring the whole
     budget -- so recovery time scaled as roughly `1 / poll_interval_s` and
     grew without bound as poll rate increased: measured (pre-fix, direct
-    execution) ~47s at `logger._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at
+    execution) ~47s at `body._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at
     0.05s, against the single-gap ~20s the merged review's approval rested
     on. This test fails against that code: it reproduces the same
     near-parallel disagreeing-looks scenario `test_fold_position_near_

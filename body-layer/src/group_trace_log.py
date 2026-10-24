@@ -14,7 +14,7 @@ available evidence was a wrong spoken line in the cockpit, which is exactly
 the failure class this project tries to catch from a log instead
 (`plans/group-contact-identity/plan.md` amendment A4, reasons 1/3/4).
 
-Sits beside `logger.py` rather than inside `belief/`, the same placement
+Sits beside `body.py` rather than inside `belief/`, the same placement
 and for the same reason as `speech_log.py`/`detection_trace_writer.py`: no
 package gains an import because a debug artifact exists.
 """

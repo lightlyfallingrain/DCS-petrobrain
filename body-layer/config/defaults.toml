@@ -147,10 +147,10 @@ SLEW_AZ_DPS = 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
 
-[logger]
+[body]
 # Bounded fallback for the mission-start resolving window: how many seconds of **wall clock** (not sim time, not a poll count -- see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own docstring for why) `_run_crew_text_poll_loop` may wait for a fresh ownship sample before giving up on `t_sim`-based freshness and firing `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23: the fallback cannot tell a `t_sim` coincidence apart from no fresh sample at all, and only the former is safe to classify airborne from).
 # status: judgement | range: 5.0 .. 120.0
-# source: logger.py:MISSION_START_RESOLVE_FALLBACK_S
+# source: body.py:MISSION_START_RESOLVE_FALLBACK_S
 MISSION_START_RESOLVE_FALLBACK_S = 30.0
 
 [mission_memory.admission]

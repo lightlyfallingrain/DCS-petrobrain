@@ -180,7 +180,7 @@ def head_body_direction(
 ) -> tuple[float, float] | None:
     """The head's current direction, converted to body-relative at
     `ownship`'s attitude -- `None` unless `head.mode == "free"`. The one
-    place `logger._apply_active_gaze` (perception's actual gaze) and
+    place `body._apply_active_gaze` (perception's actual gaze) and
     `sight_trace_writer` read the head's position as a body direction;
     everywhere else the head's own state stays in the world frame it is
     actually held in."""

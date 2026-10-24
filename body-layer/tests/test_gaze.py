@@ -192,7 +192,7 @@ def test_commanded_ahead_cycles_its_own_11_12_1_legs_from_command_time() -> None
     assert gaze_at(11.0, plan).label == "11_oclock"  # wraps after 6 s
 
     # Cone width is unchanged by the cycling -- `LOOK_DIRECTION_FOV_HALF_DEG`
-    # (`logger.py`) governs the LOS push's width and does not depend on
+    # (`body.py`) governs the LOS push's width and does not depend on
     # which o'clock leg is active; this module's own cone half-width is
     # likewise the same `FOCUS_CONE_HALF_WIDTH_DEG` every leg uses.
     for t_sim in (5.0, 7.0, 9.0):
@@ -337,7 +337,7 @@ def test_legs_within_wedge_handles_the_rear_wraparound() -> None:
 def test_legs_within_wedge_never_empty_for_a_real_compass_sector_half_width() -> None:
     # Every one of the eight compass sectors' 45-degree half-width, at every
     # possible relative center, must resolve to at least one leg -- an empty
-    # result here would silently degrade `logger._active_gaze`'s compass
+    # result here would silently degrade `body._active_gaze`'s compass
     # conversion into an invalid zero-leg `ScanPlan`.
     for degrees in range(0, 360, 5):
         assert len(legs_within_wedge(float(degrees), 45.0)) > 0, degrees

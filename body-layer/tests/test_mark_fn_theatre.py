@@ -1,4 +1,4 @@
-"""`logger._mark_here_fn`/`_mark_target_fn` read `runner.theatre` live --
+"""`body._mark_here_fn`/`_mark_target_fn` read `runner.theatre` live --
 `BL-15` Stage 3's own fix to a stale-closure bug these two functions would
 otherwise have introduced: before this stage, each took `theatre: str` as
 a plain constructor-time parameter, bound once by `main()` before the poll

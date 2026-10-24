@@ -2,7 +2,7 @@
 
 Uses a fake `AircraftLayerClient`-shaped object (duck-typed, matching
 `get_petrovich_indication_latest`/`get_world_objects_latest`) -- no network
-I/O, mirroring `test_logger.py`'s fake-client pattern. `association.
+I/O, mirroring `test_body.py`'s fake-client pattern. `association.
 wgs84_to_dcs` is monkeypatched to an identity-ish mapping so candidate
 positions in these tests are plain numbers, not real theatre projection
 math (already covered by `test_association.py`'s own conversion test and

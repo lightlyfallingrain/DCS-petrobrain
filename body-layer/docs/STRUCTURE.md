@@ -265,7 +265,7 @@ The entries are in the order they were written, which is roughly perception → 
   with its cluster's member `object_id`s and the emitted `Observation.id` once clustering/emission
   are done — see `detection_trace.py`'s own Structure entry. `forest: perception.forest.
   ForestOcclusion | None = None` (`plans/forest-occlusion/plan.md` Stage 2) is constructed by
-  `logger._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
+  `body._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
   `check_visibility` call this poll, alongside `trace_sink` — `None` (the default) is a true no-op.
   `_build_observation` populates `Observation.relative_direction` (`plans/attack-run/plan.md`
   Decision 16, Stage 2) only when the emitted cluster's `live_los_clear is True` — truth-to-truth
@@ -665,6 +665,19 @@ The entries are in the order they were written, which is roughly perception → 
   a readback while Petrovich kept free-scanning. `run_once` passes `ownship.heading_true_deg`; test
   call sites default it to `0.0`. `_search_sweep`/`_format_gaze_line` stay gated on `commanded_
   sector` alone for the binocular band, extended only for the debug overlay's own label.
+
+  **Obsolete note, 2026-10-24 (`BL-B96`, `plans/default-crew-pipeline/plan.md`):** the above
+  narrates `body.py`'s evolution up to and including the `--console`/`--overlay`/`--crew-text`/
+  `--f10-commands`/`--speech-audio`/`--speech-input` mode-flag era and is kept as the historical
+  record of how each piece arrived. `BL-B96` deleted every one of those flags along with the
+  plain-text-logger `else:` branch and the `--console` REPL/poll-loop pair they names above
+  (`_run_console_poll_loop`/`_run_console_repl`, `belief.console.Console`,
+  `format_event_for_overlay`, `overlay_client`, `push_text_line`, `get_f10_commands`,
+  `_poll_f10_commands`): the crew session described from `--crew-text` onward is now the only
+  thing `main()` does, unconditionally, and speech in/out are always on through the now-required
+  `--audio-adapter-url`. `body-layer/CLAUDE.md`'s "## Commands" section is the current reference;
+  this entry is not rewritten in place because the sequence of *why* each piece was added is
+  still the right account of how the module got here.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`GAZE`/`COCKPIT_MASK`/`OPTIC_FOV`/
   `RANGE_OR_SIZE`/`TERRAIN_LOS`/`FOREST`/`ADMITTED`/`PLAYER_BUBBLE` — `FOREST` added `plans/
   forest-occlusion/plan.md` Stage 1, the answer to "lost in forest" vs. "lost to terrain LOS" a
@@ -722,7 +735,7 @@ The entries are in the order they were written, which is roughly perception → 
   sortie ever flown and the 2026-10-05 analysis had to seek to byte offset 2,448,471,603 to find
   that flight. **Timestamping rather than truncate-on-open is the decision here**: truncating also
   removes the seeking and is shorter, but silently destroys the previous flight's log, which the
-  user reads after landing. Applied at the CLI boundary by `logger._per_run_log_paths` (one stamp
+  user reads after landing. Applied at the CLI boundary by `body._per_run_log_paths` (one stamp
   shared by all three logs, so a sortie's files are recognisable as a set), never inside a writer —
   a writer handed an exact path still writes exactly there, which is what keeps them testable and
   lets `tools/` read a named file.
@@ -892,7 +905,7 @@ The entries are in the order they were written, which is roughly perception → 
   `ATTACK_RUN_ELEVATION_GATE_DEG`/`ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the word tables are
   declared here, the single source of truth Decision 11 REVISED calls for. `CrewConsole.
   drain_attack_run` (Stage 3) is this module's one caller — **wired into
-  `logger._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
+  `body._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
   every poll once `ConsolePerceptionRunner.attack_run_state` is non-`None` (set by `engage`, via
   `CrewConsole.attack_run_transition`'s one-shot signal — this class cannot replace `runner.
   attack_run_state` directly, so it leaves an instruction for the poll loop instead); as of Stage
@@ -974,7 +987,7 @@ The entries are in the order they were written, which is roughly perception → 
   (`rebuild_struck_by`), tested against both the in-memory store and a genuine JSONL round-trip.
 - `src/mission_memory/admission.py` — the `group`/`air_defence`/`fired_on` admission rules
   (Decision 3). **Driven by belief-state transitions, not by percepts or callouts** — `step` is
-  called once per poll from `logger._mission_memory_step`, after `ContactStore.tick()` has settled
+  called once per poll from `body._mission_memory_step`, after `ContactStore.tick()` has settled
   that poll's belief and before any speech is drained. `_seen_how` reads `Contact.sighting_spans
   [-1].source` for `SeenHow.optic`, deliberately never `Contact.last_percept` (that field's own
   docstring names `belief.attack_run` as its one sanctioned reader outside `Contact`'s pulled-on
@@ -1272,7 +1285,7 @@ The entries are in the order they were written, which is roughly perception → 
   for_confirm` gained matching branches so cancel/confirm wording names the hour the same way the
   other two families already do. **Stage 5 also fixes the measured pre-existing defect that a
   compass scan never steered gaze at all** — see `perception/gaze.py`'s and `body.py`'s own
-  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `logger._active_gaze`'s
+  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `body._active_gaze`'s
   absolute→relative conversion). The nine new tokens are **unbenched**, same cost class as
   `cancel_scan`/`cancel_watch` before 2026-09-23.
 - `src/perception/gaze.py` — `ScanPlan` (module docstring: pure per-`t_sim` `gaze_at`), unchanged

@@ -3,7 +3,7 @@ Stage 2 (D1/D3/D4/D8/D9/D10/D11/R12) and Stage 4 (S4.3, "readback by
 need"). Replaces BL-B66's hand-coded power-up/OBSERV/weapons-safety
 write blocks (`belief.sight_effector`'s now-deleted sequencing half)
 with a small state machine that walks a loaded `effector_sequences.
-SequenceFile`'s rows, driven once per poll by `logger.py`.
+SequenceFile`'s rows, driven once per poll by `body.py`.
 
 **One queue per trigger (D1).** Each `EffectorTrigger` has at most one
 *running* cursor (`EffectorRunState.runs[trigger]`) and one *pending*
@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 #: 2026-10-23 -- see that module's docstring); listing it here tells
 #: `mypy --strict` this import is a deliberate re-export, not an unused
 #: one, so `from belief.effector_engine import EffectorTrigger`
-#: (`logger.py`, tests) keeps working unchanged.
+#: (`body.py`, tests) keeps working unchanged.
 __all__ = ["EffectorTrigger"]
 
 #: The aircraft/role this runtime always runs as -- "Role mismatch ->
@@ -274,7 +274,7 @@ def advance(
     """Advances every currently-running trigger by at most one write
     each, in fire order (D9), evaluating as many skip-only rows as apply
     first (D1/R12 can collapse an entire already-satisfied sequence into
-    zero writes in one call). Called once per poll by `logger.py`,
+    zero writes in one call). Called once per poll by `body.py`,
     unconditionally -- a true no-op when no trigger is running.
 
     **No `readback` parameter** (Stage 4) -- each cursor's own one-shot

@@ -73,7 +73,7 @@ class EffectorTrigger(Enum):
     #: "Two new triggers: mission start" -- user, verbatim: "Add trigger
     #: for mission-start that fires once at every mission start and
     #: separate for mission-start-in-air that fires once at mission start
-    #: only if airborne (AGL > 10 m)"). Fired from `logger.py`'s own
+    #: only if airborne (AGL > 10 m)"). Fired from `body.py`'s own
     #: mission-(re)start handling, once the first *fresh* post-restart
     #: ownship sample is in hand -- see that module's `_run_crew_text_
     #: poll_loop` for why a fresh sample cannot be assumed on the same
@@ -82,10 +82,10 @@ class EffectorTrigger(Enum):
     #: Fires immediately after `MISSION_START` (same poll), only when that
     #: first fresh sample is airborne (AGL > `crew_console.
     #: ON_GROUND_AGL_THRESHOLD_M`). An air start never also fires
-    #: `TAKEOFF` -- see `logger.py`'s poll-block comment on why. **May not
+    #: `TAKEOFF` -- see `body.py`'s poll-block comment on why. **May not
     #: fire at all** if no fresh ownship sample arrives within
-    #: `logger.MISSION_START_RESOLVE_FALLBACK_S` of the mission (re)start
-    #: (a long load, or a mission that starts paused) -- `logger.py`'s
+    #: `body.MISSION_START_RESOLVE_FALLBACK_S` of the mission (re)start
+    #: (a long load, or a mission that starts paused) -- `body.py`'s
     #: bounded-fallback comment has the full account of why that case
     #: cannot be classified from the stale sample it has instead.
     MISSION_START_IN_AIR = "mission-start-in-air"
@@ -97,7 +97,7 @@ class TriggerInfo:
     `render_triggers.py`'s only input besides the enum itself.
     `description` is one line, from the pilot's point of view, naming
     *when* the trigger fires -- on the transition into the state, never
-    "while" it holds (`logger.py` fires each of these from an edge
+    "while" it holds (`body.py` fires each of these from an edge
     detection or a one-shot command signal, not a level check).
     `cardinality` is `"every_time"` for a trigger with no per-mission
     latch (the original five) or `"once"` for one that may only ever
@@ -109,7 +109,7 @@ class TriggerInfo:
 
 #: Canonical, pilot-facing documentation for every `EffectorTrigger`
 #: member -- the single source `render_triggers.py` reads to produce
-#: `config/sequences/triggers.md`. Sourced from `logger.py`'s own
+#: `config/sequences/triggers.md`. Sourced from `body.py`'s own
 #: fire-site comments and `crew_console.py`'s handler docstrings
 #: (`_handle_observ_on`/`_handle_observ_off`/`_handle_weapons_armed`/
 #: `_handle_weapons_safe`), not re-derived independently.

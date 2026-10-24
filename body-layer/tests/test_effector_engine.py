@@ -6,7 +6,7 @@ every read goes through a fake `AircraftLayerClient` double, same
 posture as `test_sight_effector.py`.
 
 Real-poll-loop integration tests (the takeoff edge, mission restart,
-the startup-error banner/audio line) live in `test_logger.py` instead --
+the startup-error banner/audio line) live in `test_body.py` instead --
 this file is only the engine's own transition logic against hand-built
 `SequenceFile`/`EffectorDef` fixtures, not markdown parsing or wiring."""
 

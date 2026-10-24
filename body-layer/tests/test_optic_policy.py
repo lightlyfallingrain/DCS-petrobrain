@@ -2388,8 +2388,8 @@ class TestSearchCycle:
     """The three-leg-plus-binocular cycle itself (`plans/
     9k113-narrow-search/plan.md` Stage 3, amendment 2) -- `_decide_
     sighting`'s own mechanism, driven here with small synthetic sequences
-    rather than `logger.py`'s real geometry (that geometry has its own
-    tests in `test_logger.py`)."""
+    rather than `body.py`'s real geometry (that geometry has its own
+    tests in `test_body.py`)."""
 
     def _sighting_state(self, **overrides: object) -> OpticState:
         base = OpticState(
@@ -2977,7 +2977,7 @@ class TestManoeuvreForcesObservOff:
 
 class TestObservOffStopsTheSightImmediately:
     """`BL-B64` Stage 2 review, Pass 2 required fix. The pilot's "Observ
-    off" command (`logger.py`'s poll loop) drains into `state.home_phase`
+    off" command (`body.py`'s poll loop) drains into `state.home_phase`
     alone, one poll lagged -- the same shape `_force_observ_off` already
     uses for a violated `sight_steady`, just arriving from a pilot command
     instead of a manoeuvre. Every test here builds the *diverged* state

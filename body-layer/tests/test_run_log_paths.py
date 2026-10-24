@@ -1,4 +1,4 @@
-"""Tests for `run_log_paths` and `logger._per_run_log_paths` -- `BL-11`
+"""Tests for `run_log_paths` and `body._per_run_log_paths` -- `BL-11`
 Stage 5's per-run log filenames.
 
 Both halves are tested: the pure stamping helper, and the wiring that

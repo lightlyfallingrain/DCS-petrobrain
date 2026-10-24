@@ -2602,7 +2602,7 @@ def test_a_player_command_lowers_the_binoculars() -> None:
     asks "did the player ask for anything just now" by comparing
     `CrewConsole.commands_handled` across one poll iteration, then lowers
     the binoculars if it changed. Reproduces that exact conditional (see
-    `logger._run_crew_text_poll_loop`) rather than checking the counter and
+    `body._run_crew_text_poll_loop`) rather than checking the counter and
     `lower_binoculars` as two unrelated facts, which is what let the real
     D4 gap (only `handle_command` incremented the counter -- a typed or
     voice-fallthrough free-form request did not) go uncaught: a resolvable
@@ -4801,11 +4801,11 @@ def test_log_live_los_coverage_summary_is_visible_under_default_logging_config(
     (`PYTHONPATH=... python -c "logger.logger.info(...)"`).
 
     `_configure_logger_for_main()` runs unconditionally at the top of
-    `main()`, before any branch on `--crew-text`/etc., so this calls it
+    `main()`, before `main()` builds anything else, so this calls it
     directly and then the real logging function, rather than driving a
     full `main()` CLI invocation (BL-B96 removed the plain-logger `else:`
     branch this test used to drive via `_run_plain_logger_main_for_n_
-    polls`; the surviving `--crew-text` branch blocks on real `sys.stdin`
+    polls`; the surviving crew-session path blocks on real `sys.stdin`
     inside `_run_crew_text_repl`, which that helper's `KeyboardInterrupt`-
     from-`time.sleep` trick -- raised on the *background* poll thread --
     cannot unblock, so porting this to drive through `main()` again is not

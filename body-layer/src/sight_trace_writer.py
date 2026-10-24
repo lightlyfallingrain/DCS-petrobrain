@@ -13,7 +13,7 @@ own docstring): "desired" is still `OpticState.look_azimuth_deg`/
 `look_elevation_deg` (belief's own commanded aim, body-relative);
 "actual" is `OpticState.actual_aim_azimuth_deg`/`actual_aim_elevation_
 deg`, which for a sight-tier optic is now the simulated `SightHead`'s own
-body direction (set by `logger._apply_active_gaze`, never a cockpit
+body direction (set by `body._apply_active_gaze`, never a cockpit
 readback). The head's own world-frame state (`mode`, `world_az_true_deg`/
 `world_el_deg`, `goal_world_az_deg`/`goal_world_el_deg`, `aim_source`) is
 carried separately, and the DCS-slave servo's own status (`sight_servo_

@@ -9,7 +9,7 @@ own independent copy rather than an import of anything in `brain-layer/`
 in-process exception) with one structural difference: `handle()` must
 **never block the caller**, even briefly (D2's user constraint: "the
 game world moves on"). A synchronous `urlopen` call -- even a fast one --
-sits on `logger.py`'s poll thread if called directly (1.0 s per poll by
+sits on `body.py`'s poll thread if called directly (1.0 s per poll by
 default, and the argument does not depend on the rate), so `handle()`
 instead hands the payload to a **single-slot background worker thread**
 and returns in microseconds; the worker does the actual POST.
@@ -148,7 +148,7 @@ def _payload_to_dict(payload: EscalationPayload) -> dict[str, Any]:
 def _reply_from_dict(data: dict[str, Any]) -> BrainReply | None:
     """Defensive structural parse of one `GET /replies/poll` item -- `None`
     (skip, not raise) on anything malformed, the same "schema mismatch is
-    skipped, not fatal" posture `logger._poll_transcripts` already applies
+    skipped, not fatal" posture `body._poll_transcripts` already applies
     to its own drain-on-poll payload. This is *not* D10's validator (that
     checks a reply's *semantic* legality -- a `PICK`'s id was actually
     offered, a `BECAUSE` clause's words actually appear in the transcript
@@ -295,7 +295,7 @@ class BrainLayerClient:
         client.
 
         **An unreachable brain logs the one line, no traceback** -- the
-        same split as `logger._is_connection_loss`: a `URLError`/`OSError`
+        same split as `body._is_connection_loss`: a `URLError`/`OSError`
         underneath means brain-layer is not answering (not started yet,
         or on another box that is down), and a stack trace per retry
         says nothing the line does not. Anything else (invalid JSON, a

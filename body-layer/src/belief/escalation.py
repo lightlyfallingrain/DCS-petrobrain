@@ -42,7 +42,7 @@ cannot be synchronous... it cannot block anything") requires -- a real
 brain (`belief.brain_client.BrainLayerClient`, BR-1) answers
 asynchronously into its own queue, and `poll_replies()` is how
 `belief.crew_console.CrewConsole.drain_brain` drains it once per poll,
-alongside `drain_events`/`_poll_f10_commands`/`_poll_transcripts`. Both
+alongside `drain_events`/`_poll_transcripts`. Both
 stand-ins below return `[]` -- their documented "does nothing" behaviour is
 unchanged by this addition."""
 

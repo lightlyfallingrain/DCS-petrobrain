@@ -85,7 +85,7 @@ class TaggedTheatre:
     """Local mirror of `runtime.compact.RuntimeMissionUnderstanding.theatre`'s
     `Tagged[str]` envelope (multi-theatre-afghanistan plan, Stage 5) --
     `value` is the plain DCS theatre name (e.g. `"Afghanistan"`), matched
-    exactly against `logger.py`'s derived store path and
+    exactly against `body.py`'s derived store path and
     `coordinates.projections.THEATRE_PROJECTIONS`'s registry keys."""
 
     value: str

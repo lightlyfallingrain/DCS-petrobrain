@@ -733,7 +733,7 @@ def test_drain_brain_tick_rate_unaffected_by_a_wedged_brain() -> None:
     not just `BrainLayerClient.poll_replies()`'s own unit-level guarantee
     (`test_brain_client.py`) -- since `drain_brain` is what the shared
     crew-text poll thread actually calls once per tick alongside
-    `drain_events`/`_poll_f10_commands`/`_poll_transcripts`. Before the
+    `drain_events`/`_poll_transcripts`. Before the
     fix, this exact scenario cost 5015ms per call, every call."""
     with _WedgedBrainServer() as server:
         brain_client = BrainLayerClient(base_url=server.base_url, poll_timeout_s=5.0)
@@ -1428,13 +1428,13 @@ def test_not_refused_by_default_dispatches_normally() -> None:
 # "(a)"): `drain_events`/`drain_brain` must not speak proactively while ----
 # `refused` either -- constructed directly against a non-empty store/ -----
 # pending-escalation state, bypassing the reset-always-precedes-refusal ----
-# call graph `logger.py` happens to give today, so these do not depend on ---
+# call graph `body.py` happens to give today, so these do not depend on ---
 # that invariant holding. -----------------------------------------------
 
 
 def test_refused_drain_events_speaks_nothing_against_a_non_empty_store() -> None:
     """A real, unacknowledged `CONTACT_DETECTED` event is present (built
-    directly on the store, not via `logger.py`'s reset-then-refuse call
+    directly on the store, not via `body.py`'s reset-then-refuse call
     graph) and `console.refused` is set directly -- proves the guard is a
     property of `CrewConsole` itself, not a consequence of the store
     always being empty by the time refusal is reached."""
@@ -1474,7 +1474,7 @@ def test_refused_drain_events_consumes_rather_than_leaves_the_event_queued() -> 
 
 def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> None:
     """A real escalation is outstanding and a reply for it is queued
-    (built directly, not via `logger.py`'s call graph) -- `console.refused`
+    (built directly, not via `body.py`'s call graph) -- `console.refused`
     set directly must stop both D8's "stand by" and the reply's own
     readback/confirm/pick action, not merely suppress the returned lines
     while still running `_handle_brain_reply`'s side effects
@@ -2482,7 +2482,7 @@ def test_cancel_task_cancels_superseded_tasks_too_so_none_resurrect(
     reasoning that a superseded scan is not "currently governing" and so
     should not be swept up. That reasoning had the consequence backwards.
     A superseded `scan_area` is inert *precisely because* a newer one
-    outranks it in `logger._active_gaze`'s most-recent-wins tie-break --
+    outranks it in `body._active_gaze`'s most-recent-wins tie-break --
     so cancelling only the newest **promotes the older one straight back
     into steering the gaze**.
 
@@ -4066,7 +4066,7 @@ def test_follow_with_no_qualifiers_says_again() -> None:
 
 
 # --- Stage 4 (plans/sortie-2026-09-26-fixes/plan.md, Fix C): --------------
-# command-dependent lowering. `logger.py` reads `commands_handled`/
+# command-dependent lowering. `body.py` reads `commands_handled`/
 # `last_command_target_contact_id` to decide whether to lower the
 # binoculars -- these tests pin the `CrewConsole`-side facts that decision
 # rests on: what actually increments `commands_handled`, and what
@@ -4116,10 +4116,10 @@ def test_say_again_does_not_burn_the_optic_interrupt() -> None:
 
 def test_follow_records_its_resolved_target(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_handle_follow` sets `last_command_target_contact_id` to the
-    contact it resolved -- the fact `logger.py`'s glue block reads to
+    contact it resolved -- the fact `body.py`'s glue block reads to
     decide whether a `follow` continued an in-progress look. Confirmed
     directly against `CrewConsole` state, independent of `OpticState`
-    (that half is `logger.py`'s own concern, see `test_logger.py`)."""
+    (that half is `body.py`'s own concern, see `test_body.py`)."""
     store = ContactStore()
     store.ingest(
         [
@@ -5194,7 +5194,7 @@ def test_engage_with_no_selection_starts_the_run_via_slots(
 ) -> None:
     """`engage <what> <where>` (Decision 15) -- selects exactly as
     `select_target` does, then sets `attack_run_transition` to signal the
-    poll loop (`logger.py`'s own wiring, not exercised by this test)."""
+    poll loop (`body.py`'s own wiring, not exercised by this test)."""
     store = ContactStore()
     store.ingest(
         [
@@ -5349,7 +5349,7 @@ def test_where_is_it_with_no_target_selected_says_no_target() -> None:
     exact wording: *"if no target ... then say 'No target'"*. The token
     sets `where_is_it_requested` and returns `[]` immediately
     (`NO_RETURN_VALUE_COMMAND_TOKENS`); the real answer is spoken by
-    `drain_where_is_it`, called the way `logger.py`'s poll loop calls it
+    `drain_where_is_it`, called the way `body.py`'s poll loop calls it
     -- right after `handle_command`, with `runner.attack_run_state`
     (`None` here, since no run was ever engaged)."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
@@ -5679,7 +5679,7 @@ def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
     assert console.scheduler.busy_until_sim > 0.0
     printed_after_engage = output.getvalue()
 
-    # The poll loop's own first tick after `engage` (`logger.py`): a fresh
+    # The poll loop's own first tick after `engage` (`body.py`): a fresh
     # `AttackRunState()`, drained immediately, same `now_sim` the readback
     # was spoken at -- the channel is still busy.
     busy_state = console.drain_attack_run(
@@ -5717,7 +5717,7 @@ def test_drain_attack_run_ends_the_run_after_drop_target(
     task was gone -- the engaged flag then survived to wrongly claim the
     gaze for whatever was selected next. `drain_attack_run` must treat
     "the standing task is gone" exactly like the vanished-contact branch:
-    return `None`, which is what `logger.py` assigns straight onto
+    return `None`, which is what `body.py` assigns straight onto
     `runner.attack_run_state`, clearing `attack_run_engaged`."""
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()

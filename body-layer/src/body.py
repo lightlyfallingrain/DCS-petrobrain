@@ -278,7 +278,7 @@ logger = logging.getLogger(__name__)
 #: well under a second) and short enough that case (1) still self-heals
 #: within the same sortie.
 MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
-    "logger.MISSION_START_RESOLVE_FALLBACK_S",
+    "body.MISSION_START_RESOLVE_FALLBACK_S",
     30.0,
     lo=5.0,
     hi=120.0,
@@ -3631,7 +3631,7 @@ def _run_crew_text_repl(
     world_model_db: Path,
     theatre: str,
 ) -> None:
-    """`--crew-text`'s foreground REPL: reads one line at a time from
+    """The crew session's foreground REPL: reads one line at a time from
     stdin and dispatches it into `CrewConsole.handle_line`.
 
     **BL-B96 fix (found while porting a `--console`-path regression test

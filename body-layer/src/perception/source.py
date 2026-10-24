@@ -138,7 +138,7 @@ class OwnshipState:
         own naming, on the consuming side of the seam.
 
         Raises `KeyError`/`TypeError` on a malformed dict -- callers that
-        read straight from the network (`logger.py`) are expected to treat
+        read straight from the network (`body.py`) are expected to treat
         those as a dropped/skipped poll, the same way
         `collector.server._handle_line` drops a malformed telemetry line
         rather than crashing the export loop.

@@ -181,12 +181,12 @@ additive posture as every other per-run log.
 
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
-mission memory, and every perception source a clean slate (`logger._check_for_new_mission`/
+mission memory, and every perception source a clean slate (`body._check_for_new_mission`/
 `_reset_mission_state`) — this is what removes the old "restart body-layer between missions"
 workaround.
 
 **Theatre switching (Stage 3).** If the mission-start event's `theatre` differs from the one
-currently running, `logger._maybe_switch_theatre` re-resolves the store at
+currently running, `body._maybe_switch_theatre` re-resolves the store at
 `--world-model-dir/<theatre.lower()>-full.sqlite` (the same `<theatre.lower()>-full.sqlite` naming
 `--mission-understanding --world-model-dir` already uses above) and switches to it live —
 `--world-model-dir` is therefore also accepted (optionally) alongside an explicit

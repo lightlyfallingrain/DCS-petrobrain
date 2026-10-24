@@ -158,7 +158,7 @@ detection here to be ambiguous *about*):
    pattern as `trace`) counts how many candidates reached this gate and
    how many of those carried no live verdict, so a dead live-LOS feed is
    observable in the logs rather than indistinguishable from an empty sky
-   (step 4; see `logger.py`).
+   (step 4; see `body.py`).
 5. **Forest occlusion, binary and target-position-only**
    (`plans/forest-occlusion/plan.md` Stage 1, specification `docs/
    acceptance/2026-10-13-tree-cover-direction.md`). `perception.forest.
@@ -271,7 +271,7 @@ class LiveLosCoverage:
     `candidate.live_los_clear is None` specifically -- a confirmed
     `False` (blocked) is not a coverage gap and does not increment it.
     `NakedEyePerceptionSource` owns one instance for the lifetime of the
-    source; `logger.py`'s poll loop reads it after every `poll()` call."""
+    source; `body.py`'s poll loop reads it after every `poll()` call."""
 
     evaluated: int = 0
     no_verdict: int = 0

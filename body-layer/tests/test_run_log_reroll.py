@@ -1,4 +1,4 @@
-"""Tests for `logger._reroll_run_logs` -- `plans/bl15-mission-start/plan.md`
+"""Tests for `body._reroll_run_logs` -- `plans/bl15-mission-start/plan.md`
 Stage 1 Decision 5 ("per mission", not a marker line): on an in-process
 mission (re)start, the per-run logs roll to a fresh stamped filename, the
 same mechanism `BL-11` Stage 5 already applies once at process start.

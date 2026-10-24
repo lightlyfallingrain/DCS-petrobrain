@@ -14,7 +14,7 @@ through a preserve-set update fails this test immediately, rather than
 surviving a mission restart unnoticed.
 
 The orchestration tests at the bottom (`_reset_mission_state`/`_check_for_
-new_mission`) are unit tests against `logger`'s private functions directly
+new_mission`) are unit tests against `body`'s private functions directly
 -- the wiring-level proof that the real poll loops actually reach them is
 `test_body.py::test_crew_text_poll_loop_resets_belief_on_mission_restart`.
 """

@@ -8,10 +8,10 @@ to live in belief -- it is driven by commands, which are belief-level
 intents -- but it is a *perceptual act*, not a belief. The resolution: a
 `Gaze` is a frozen value, not a state machine. Belief owns the *intent*
 (`belief.tasks.PendingIntent` + `belief.attention.AttentionArea.
-relative_sector`, both already exist); `logger.py`'s poll loop reads that
+relative_sector`, both already exist); `body.py`'s poll loop reads that
 intent each tick and hands perception a frozen `Gaze`; perception owns the
 *act* of filtering against it. Nothing here mutates, resets on a telemetry
-gap, or needs serialising for replay -- see `logger.py`'s own resolution
+gap, or needs serialising for replay -- see `body.py`'s own resolution
 function (`_active_gaze`) for the belief-side half of this boundary.
 
 **2B is deliberately behaviour-preserving.** `check_visibility`'s `gaze`
@@ -19,14 +19,14 @@ parameter defaults to `None`, meaning "no restriction at all" -- the gaze
 gate is skipped entirely, exactly today's behaviour before this module
 existed. `FULL_GAZE` below is a named, explicit forward-hemisphere wedge
 (the same 90-degree half-width `RelativeSector`'s own `"full"` wedge
-already uses) -- but it is *not* what `logger.py` assigns by default when
+already uses) -- but it is *not* what `body.py` assigns by default when
 no scan command is pending, specifically because it is narrower than the
 cockpit mask's own 130-degree rear cutoff (`cockpit_mask.py`,
 `rear_cutoff_deg=130.0`): assigning it unconditionally would silently
 narrow real detection between 90 and 130 degrees off the nose, which is not
 a no-op. `FULL_GAZE` exists as the explicit "player selected the full
 forward sector" value (`RelativeSector.full`'s own gaze), not as a
-disguised always-on default. `logger.py` assigns `None` when no command is
+disguised always-on default. `body.py` assigns `None` when no command is
 active, precisely so the regression gate this slice is named for ("with no
 command issued, the trace is identical to the previous slice") holds by
 construction, not by coincidence on whatever a given fixture happens to
@@ -71,7 +71,7 @@ serialise for replay. Two cases, both driven by table lookup + a modulo,
 never a loop or a sweep:
 
 - **Free scan** (`plan.commanded_sector is None`, `NakedEyePerceptionSource`'s
-  own default when `logger.py` has no `scan_area` task pending): `SCAN_PLAN`
+  own default when `body.py` has no `scan_area` task pending): `SCAN_PLAN`
   -- the o'clock-cone table `12, 11, 10, 9, 12, 1, 2, 3`, each held for
   `FOCUS_DWELL_S` (2.0 s) -- indexed by `t_sim % SCAN_CYCLE_PERIOD_S`
   (16.0 s, derived as `len(SCAN_PLAN) * FOCUS_DWELL_S` rather than stated
@@ -90,7 +90,7 @@ never a loop or a sweep:
   anything drifting into the forward arc's own edges during a commanded
   scan; this is the same per-hour dwell cycling mechanism `left`/`right`
   already use, not a wider cone -- `LOOK_DIRECTION_FOV_HALF_DEG` in
-  `logger.py` is unchanged and unrelated),
+  `body.py` is unchanged and unrelated),
   `left` -> `11, 10, 9`, `right` -> `1, 2, 3`, `full` -> the same 8-slot
   table free scan uses), cycled from `t_sim - plan.command_t_sim` instead
   of from absolute sim time, so a scan a player just ordered starts at that
@@ -105,7 +105,7 @@ never a loop or a sweep:
   general narrowing every leg gets under this model, not a special case.
 
 `gaze_from_relative_sector` (2B) is retired here, not kept alongside --
-its one caller (`logger.py`'s `_active_gaze`) now builds a `ScanPlan`
+its one caller (`body.py`'s `_active_gaze`) now builds a `ScanPlan`
 instead of a static `Gaze`, and a function with no caller left is dead
 code, not a hedge. `_RELATIVE_SECTOR_WEDGE_DEG` stays: `belief.attention.
 AttentionArea` still reads it directly for the *success-check* wedge (a
@@ -260,7 +260,7 @@ SCAN_PLAN: Final[tuple[int, ...]] = tuning.sequence(
 #: `index = min(..., len(legs) - 1)` always resolve to `0` -- a fixed
 #: stare at 12 that `left`/`right` never had, since cycling through a
 #: real multi-leg table is the whole mechanism this dict exists for.
-#: `LOOK_DIRECTION_FOV_HALF_DEG` (`logger.py`, a fixed 90 degrees,
+#: `LOOK_DIRECTION_FOV_HALF_DEG` (`body.py`, a fixed 90 degrees,
 #: independent of which hour is active) is unaffected: this widens how
 #: often each of 11/12/1 is actually looked at, not how wide any single
 #: look is. The real effect is cadence, not geometry -- each hour on a
@@ -300,7 +300,7 @@ class ScanPlan:
     scan that is not one of the four named `RelativeSector`s** -- a single
     o'clock hour (`scan_clock_1`..`scan_clock_12`) is a one-leg tuple, and
     a compass-absolute scan (`scan north`/`scan bearing 320`) converts to
-    its current-heading-relative legs every poll (`logger._active_gaze`,
+    its current-heading-relative legs every poll (`body._active_gaze`,
     via `legs_within_wedge` below). The architect's own reasoning for this
     field, rather than widening `RelativeSector` with twelve more
     literals: a single o'clock hour is not one of the four named sectors,
@@ -339,7 +339,7 @@ class ScanPlan:
     #: Refinements, decided rather than left open). No production path
     #: constructs that combination today: `fixed_look_at` above always
     #: passes `commanded_sector=None` and leaves `commanded_legs` at its
-    #: `None` default, and `logger._apply_active_gaze` only ever
+    #: `None` default, and `body._apply_active_gaze` only ever
     #: *replaces* `resolved_plan` wholesale with a fresh
     #: `fixed_look_at(...)`, never merges one onto an existing commanded
     #: plan -- `tests/test_gaze.py::test_fixed_look_wins_over_commanded_
@@ -393,7 +393,7 @@ class ScanPlan:
 
 
 #: Free scan, module docstring's default -- `NakedEyePerceptionSource.
-#: scan_plan`'s own default and `logger.py`'s `_active_gaze` fallback when
+#: scan_plan`'s own default and `body.py`'s `_active_gaze` fallback when
 #: no `scan_area` task is pending.
 FREE_SCAN_PLAN: Final[ScanPlan] = ScanPlan(commanded_sector=None, command_t_sim=None)
 
@@ -420,7 +420,7 @@ def legs_within_wedge(
     ordered by signed offset from `center_azimuth_deg` ascending -- a
     left-to-right sweep, generalising `_SECTOR_LEGS`'s per-sector tables
     to an arbitrary wedge (Stage 5, `plans/voice-command-completeness/
-    plan.md` Decision 5). `logger._active_gaze` is the one caller: it
+    plan.md` Decision 5). `body._active_gaze` is the one caller: it
     converts an absolute compass-sector scan (`AttentionArea.sector`) into
     `ScanPlan.commanded_legs` every poll, using that poll's own ownship
     heading -- the absolute->relative conversion the module docstring's

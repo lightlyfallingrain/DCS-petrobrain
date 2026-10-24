@@ -78,7 +78,7 @@ Buffers before flushing, mirroring `DetectionTraceWriter`'s own reasoning
 -- disk I/O never sits on the poll loop's own critical path. Deliberately
 does **not** clear the shared `perception.detection_trace.
 DetectionTraceCollector` it reads (unlike `DetectionTraceWriter.
-write_poll`): `logger.py`'s poll loop may run `--detection-trace`,
+write_poll`): `body.py`'s poll loop may run `--detection-trace`,
 `--eyesight-view`, and `--belief-truth-log` in any combination against the
 one collector each poll builds, so exactly one of them -- `DetectionTraceWriter`
 if present, else the poll loop itself -- owns clearing it once every reader
@@ -438,7 +438,7 @@ class BeliefTruthLogWriter:
         every reader of this poll's collector has had its turn.
 
         `attack_run_target_contact_id` (`plans/attack-run-sortie-fixes/
-        plan.md` BL-B70 §9) is the caller's (`logger.py`'s poll loop,
+        plan.md` BL-B70 §9) is the caller's (`body.py`'s poll loop,
         reading `ConsolePerceptionRunner.attack_run_state.last_contact_id`)
         own knowledge of which contact an active attack run is guiding
         on -- this module computes nothing about *which* contact matters,

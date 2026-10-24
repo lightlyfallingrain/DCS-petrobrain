@@ -176,7 +176,7 @@ def test_c6_sequence_files_never_change_the_polled_set(tmp_path: Path) -> None:
 def test_c7_shipped_file_resolves_to_exactly_required(tmp_path: Path) -> None:
     """Mirrors the shipped `config/sequences/mi-24p/polled.toml`'s own
     shape -- a dedicated round-trip test against the real file lives in
-    `test_logger.py`/the generated-file staleness tests; this is the
+    `test_body.py`/the generated-file staleness tests; this is the
     loader's own unit coverage of that shape."""
     path = _write(
         tmp_path / "polled.toml",

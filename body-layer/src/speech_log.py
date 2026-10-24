@@ -17,7 +17,7 @@ object; this one answers "why did he not hear that" and is one row per
 utterance. Merging them would make both harder to read and neither easier
 to write.
 
-Sits beside `logger.py` rather than inside `belief/`, the same placement
+Sits beside `body.py` rather than inside `belief/`, the same placement
 and for the same reason as `detection_trace_writer.py`: no package gains an
 import because a debug artifact exists.
 """

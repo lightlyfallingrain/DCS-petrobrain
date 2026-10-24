@@ -96,7 +96,7 @@ MOTION_ANGULAR_THRESHOLD_RAD_S: Final[float] = math.radians(
 #: Lua rather than left as a plan quotation: `aircraft-layer/dcs-export/
 #: Export.lua`'s `EXPORT_INTERVAL_S = 0.2` gates the `LoGetWorldObjects`
 #: send, and `petrobrain-mission-telemetry-hook.lua`'s `POLL_INTERVAL_S =
-#: 1.0` gates the velocity send. `logger._DEFAULT_POLL_INTERVAL_S` (1.0 s,
+#: 1.0` gates the velocity send. `body._DEFAULT_POLL_INTERVAL_S` (1.0 s,
 #: unchanged since `abf49cd`) is irrelevant to this bound: the skew below
 #: is `|world_objects_t - unit_velocity_t|`, a difference between two
 #: *producer* sim stamps, so how often body-layer reads the two `/latest`

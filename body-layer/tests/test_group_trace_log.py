@@ -1,5 +1,5 @@
 """Tests for `group_trace_log.GroupTraceLogWriter` -- the `--group-trace`
-writer (`BL-12` amendment A4). Mirrors `test_logger.py`'s own
+writer (`BL-12` amendment A4). Mirrors `test_body.py`'s own
 `SpeechLogWriter` tests (same unbuffered-write/disable-after-first-failure
 shape) rather than `DetectionTraceWriter`'s, which buffers."""
 

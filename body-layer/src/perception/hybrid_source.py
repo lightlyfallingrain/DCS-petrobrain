@@ -50,7 +50,7 @@ Debounce compares the *whole set* of distinct populated texts this poll
 against the set that produced the last emitted `Observation`s -- the exact
 window is an implementation detail, not an architectural one (plan stage 6),
 picked here because it's the cheapest thing that stops a persisting
-detection set from spamming `logger.py`'s output every poll tick while still
+detection set from spamming `body.py`'s output every poll tick while still
 re-emitting immediately on any real change (including every leaf clearing
 and the same text reappearing later -- see `poll`'s handling of a
 momentarily-empty leaf set resetting the debounce state). This mirrors PB-1's

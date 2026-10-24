@@ -54,7 +54,7 @@ an opaque display string to swallow.
 Stage 1) is this seam's `GET /mission_start/latest` counterpart to
 `get_line_of_sight_latest` above -- same "not an error" empty-cache
 posture (no `onSimulationStart` has fired yet this collector process's
-lifetime, the ordinary state before a mission ever loads). `logger.py`'s
+lifetime, the ordinary state before a mission ever loads). `body.py`'s
 `_check_for_new_mission` is the one caller, comparing the returned
 `sequence` against the last one it saw to detect a genuine mission
 (re)start -- this client does no comparison or interpretation itself, same
@@ -135,7 +135,7 @@ pure pass-through now rather than a conversion site.
 `get_spu8_state_latest` (`plans/effector-sequences/plan.md` D6, BL-B90
 Stage 2) is this seam's `GET /spu8/state` counterpart to `get_cockpit_
 switch_state_latest` -- same "not an error" empty-cache posture. Its one
-caller is `CrewConsole.drain_config_error` via `logger.py`'s poll loop,
+caller is `CrewConsole.drain_config_error` via `body.py`'s poll loop,
 reading `gate_open` to decide whether the intercom is up before speaking
 the one-shot "bad sequence file" error line (D6: *"once the intercom is
 up"*).

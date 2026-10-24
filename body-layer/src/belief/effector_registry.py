@@ -399,7 +399,7 @@ def load_polled_config(
 
     A **missing** `polled_path` is not an error -- required-only, per the
     plan ("A missing file is not an error: required-only, with an INFO
-    log" -- the INFO log itself is the caller's job, `logger.py`'s
+    log" -- the INFO log itself is the caller's job, `body.py`'s
     startup banner). An unreadable/unparsable file *is* a `"polled-file"`
     D5 error, and the result is still required-only (never a partial
     config)."""
