@@ -259,3 +259,14 @@ Gaps raised:
 - **Audience: the user now, any user later.** *"for now, only me. Eventually, any user who wishes to
   use it could write their own."* So the sandbox and the load-time checks must eventually hold for
   strangers' scripts (fits the public open-source intent), but they need not be hardened for that yet.
+
+### Outcome, 2026-10-24
+
+The user approved re-scoping the backlog (*"yes, that's good"*) and added: *"the dome light is
+simply an example (though a nice touch), no need to actually build the light level things yet.
+There are more important things first."* So:
+
+- `[[BL-B95]]` was re-scoped from behaviour trees to event-driven Lua scripting. Deferred.
+- `[[BL-B94]]` was narrowed to the param catalogue. The table condition syntax was dropped and the
+  light level stays an example only. Deferred.
+- The root `CLAUDE.md` actions-and-params rule stands, re-aimed at scripting.
