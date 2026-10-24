@@ -847,8 +847,8 @@ def check_visibility(
     is possible today only by an explicit caller, none of which exist.
 
     `trace` (`perception.detection_trace`, BL-9) is additive and defaults
-    to `None` -- a true no-op, same pattern `overlay_client`/`speech_client`
-    already use elsewhere in this codebase. When set, records exactly one
+    to `None` -- a true no-op, same pattern `speech_client`
+    already uses elsewhere in this codebase. When set, records exactly one
     `DetectionTrace` entry per call, at whichever gate decided this
     candidate's fate (or `ADMITTED` if it cleared all four) -- see that
     module's docstring for why `range_threshold_m`/`threshold_bound` are

@@ -14,8 +14,7 @@ contacts.Contact` inside the task's area was observed after the task was
 created), `failed` (nothing confirmed by `deadline_sim`), or is still
 `pending`. This module has **no DCS I/O** -- the live trigger that (per the
 plan's newer half) actually makes Petrovich search lives one layer up, in
-`console.py`'s `scan-area` handler, the same place BL-2.5 wired the overlay
-push rather than inside `tools.py`.
+`crew_console.py`'s `scan-area` handler, not inside `tools.py`.
 
 **A `watch_contact` task has no success/timeout lifecycle at all** --
 watching a contact does not "succeed" (there is nothing to confirm beyond

@@ -48,15 +48,6 @@ that) -- a connection opened on one thread and queried from another raises
 thread-local `sqlite3.Connection`/`EnrichmentContext` instead of reading
 `runner.enrichment` at all.
 
-**`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`; extended by
-`plans/overlay-speech-callouts/plan.md`)**: `main()` passes the aircraft-
-layer client as `CrewConsole.overlay_client`, so every line `CrewConsole`
-speaks (readbacks, contact reports, drained lifecycle events, and injected
-urgent calls prefixed `"!! "`) is pushed verbatim to the in-cockpit text
-overlay via `POST /text/push` -- a radio-callout feed, not a debug mirror.
-Defaults off -- a true no-op when absent, since `overlay_client` stays
-`None` and nothing touches the aircraft-layer client for this purpose.
-
 **`--mission-understanding PATH` (BL-7, `plans/bl7-mission-phase-relevance/
 plan.md`)**: optional. When given, `main()` calls `belief.mission_phase.
 load_mission_understanding(path)` once at startup (a mission-interpreter
@@ -74,8 +65,7 @@ in a new field. Omitted (default `None`): a true no-op, `get_situation`'s
 `mission_phase` fact is absent entirely.
 
 **The player-facing crew session (BL-5a,
-`plans/bl5a-text-mode-crew-interaction/plan.md`; `--overlay` combination
-added by `plans/overlay-speech-callouts/plan.md`)**: runs `belief.
+`plans/bl5a-text-mode-crew-interaction/plan.md`)**: runs `belief.
 crew_console.CrewConsole`. After each `runner.run_once()`, it applies
 whatever `engage`/`disengage` transition the previous poll's command
 dispatch left and calls `crew_console.drain_attack_run(...)`
@@ -110,24 +100,13 @@ default o'clock scan loop, not "no restriction" any more) -- see
 split this now resolves to. `ConsolePerceptionRunner.scan_plan` keeps that
 same resolved value visible after `run_once` returns.
 
-**Gaze is shown on the overlay, not just applied (cones 2C sortie finding,
-"show where Petrovich is looking")**: `_run_crew_text_poll_loop` calls
-`_push_gaze_line` after every `run_once()`, whenever `crew_console.
-overlay_client` (`--overlay`) is set -- a read of `runner.scan_plan` via
-`perception.gaze.gaze_at`, pushed only when the resolved o'clock cone
-changes so it does not crowd out the overlay's real content on every poll.
-A pure display of existing state: it changes nothing about detection.
-
 **Speech in and out are always on (BL-10 first slice, `plans/
 tts-voice-output/plan.md`; Stage 3, `plans/inbound-speech/plan.md`;
 unconditional as of `plans/default-crew-pipeline/plan.md`, BL-B96)**:
 `main()` builds one `belief.audio_client.AudioAdapterClient` from the now-
 required `--audio-adapter-url` and passes it as `CrewConsole.speech_client`,
 so every line `CrewConsole` speaks is synthesized and made audible via
-`audio-adapter`'s `POST /speak` -- the same lines `--overlay` mirrors to
-the in-cockpit text overlay, pushed through the identical `_print` funnel,
-just to a different sink and a different process (`audio-adapter`, not the
-aircraft layer). The poll loop also polls/dispatches recognised speech
+`audio-adapter`'s `POST /speak`. The poll loop also polls/dispatches recognised speech
 transcripts via the same client's `GET /transcripts/poll`, through
 `CrewConsole.handle_transcript`. If `audio-adapter` is unreachable, start-
 up and the poll loop continue regardless -- see `ConnectionReporter` and
@@ -687,7 +666,7 @@ class ConsolePerceptionRunner:
         # truth for gaze (`perception.gaze.gaze_at`), the Lua side never
         # re-derives it. A push failure degrades to "the Hook script keeps
         # querying whatever wedge it last had" (or its own default), never
-        # stops the poll loop -- same posture as the overlay push below.
+        # stops the poll loop.
         gaze_for_look_direction = gaze_at(ownship.t_sim, self.scan_plan)
         look_direction = (
             _hour_for_gaze(gaze_for_look_direction),
@@ -1563,56 +1542,6 @@ def _apply_active_gaze(
     return updated_state
 
 
-def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
-    """One short overlay line naming where Petrovich is currently looking
-    and whether that is free scan or a commanded sector (cones 2C sortie
-    finding, "show where Petrovich is looking" -- the pilot could not judge
-    the scan loop at all without this). `gaze.label` is always an o'clock
-    hour under `gaze_at` (`"11_oclock"`, `perception.gaze.Gaze`'s own
-    docstring: a label meant for exactly this kind of debug/trace display),
-    reformatted here rather than branched on. A `commanded_legs`-only plan
-    (Stage 5: a bare o'clock hour, or a compass-sector scan converted to
-    relative legs) has no single sector name to speak -- it says "commanded
-    scan" rather than naming a sector, since the sector-naming detail lives
-    on `AttentionArea`/`crew_console.py`'s own readback, not here."""
-    where = gaze.label.replace("_oclock", " o'clock")
-    if scan_plan.commanded_sector is not None:
-        return (
-            f"Petrovich: looking {where} (commanded {scan_plan.commanded_sector} scan)"
-        )
-    if scan_plan.commanded_legs is not None:
-        return f"Petrovich: looking {where} (commanded scan)"
-    return f"Petrovich: looking {where} (free scan)"
-
-
-def _push_gaze_line(
-    overlay_client: AircraftLayerClient,
-    scan_plan: ScanPlan,
-    t_sim: float,
-    last_gaze_label: str | None,
-) -> str | None:
-    """Pushes one overlay line naming Petrovich's current gaze
-    (`_format_gaze_line`) when it has changed since the last push, and
-    returns the label to compare against next poll -- called from both
-    `_run_console_poll_loop` and `_run_crew_text_poll_loop`. Deliberately
-    only pushes on change: the focus cone holds for `perception.gaze.
-    FOCUS_DWELL_S` (2 s), well above a typical 1 s poll interval, so pushing
-    unconditionally would repeat the same line on most polls and crowd out
-    the overlay's real content (lifecycle/contact-report lines, an
-    `AutoScrollText` log, not a single-line display -- see
-    `petrobrain-overlay-hook.lua`'s own docstring). Same per-push isolation
-    as every other overlay push in this file: a failed push is logged and
-    swallowed, never allowed to stop the poll loop."""
-    gaze = gaze_at(t_sim, scan_plan)
-    if gaze.label == last_gaze_label:
-        return last_gaze_label
-    try:
-        overlay_client.push_text_line(_format_gaze_line(scan_plan, gaze))
-    except AircraftLayerError:
-        logger.warning("gaze overlay push failed (continuing)", exc_info=True)
-    return gaze.label
-
-
 def _warn_live_los_coverage_gap_once(
     sources: list[PerceptionSource], already_warned: bool
 ) -> bool:
@@ -1622,11 +1551,13 @@ def _warn_live_los_coverage_gap_once(
     channel the first time `no_verdict` becomes nonzero -- called from
     `_run_crew_text_poll_loop`.
 
-    **Not `_push_gaze_line`'s log-on-change shape, deliberately** -- that
-    function's earlier revision copied it and that was the bug (review
-    round 1, `plans/bl11-stage4-fail-closed/review.md`). `_push_gaze_line`
-    repeats on a *label* that can hold steady at a repeating value, so
-    "changed since last call" is a real steady-state guard. `no_verdict`
+    **Not a log-on-change shape, deliberately** -- an earlier revision of
+    this function copied that shape from a sibling overlay-pushing
+    function (since removed, `BL-B96`) and that was the bug (review
+    round 1, `plans/bl11-stage4-fail-closed/review.md`). Log-on-change
+    works for a value that can hold steady at a repeating value, so
+    "changed since last call" is a real steady-state guard there.
+    `no_verdict`
     is cumulative for the process lifetime, so under a continuously dead
     feed it is strictly greater than whatever was last logged on every
     single poll -- there is no steady state for a monotonically
@@ -1648,9 +1579,7 @@ def _warn_live_los_coverage_gap_once(
 
     Returns `True` once the warning has fired (unchanged from
     `already_warned=True` on every later call), so the caller's local
-    carries forward to the next poll -- the same "carry a local across
-    polls" pattern `_push_gaze_line` uses for `last_gaze_label`, applied
-    to a different trigger condition."""
+    carries the already-fired state forward to the next poll."""
     if already_warned:
         return True
     for source in sources:
@@ -1718,8 +1647,7 @@ def _render_eyesight_frame(
 ) -> str | None:
     """One `--eyesight-view` frame for the poll that just ran (`todo/
     todo.md`'s "Added 2026-09-25 (user)" entry) -- `None` before the first
-    successful poll (`runner.last_ownship_state`/`last_t_sim` still unset),
-    the same "nothing to show yet" guard `_push_gaze_line` already uses.
+    successful poll (`runner.last_ownship_state`/`last_t_sim` still unset).
 
     `trace_records` must be a snapshot taken *before* `--detection-trace`'s
     own `DetectionTraceWriter.write_poll` clears the shared
@@ -2899,9 +2827,7 @@ def _run_crew_text_poll_loop(
     then keeps calling `runner.run_once()` (which fills `runner.store` and
     updates `runner.last_t_sim`) until `stop_event` is set, plus one extra
     call per poll: `crew_console.drain_events` speaks whatever lifecycle
-    events this poll's `tick()` newly surfaced, the same hook point
-    `--overlay`'s mirroring uses in `ConsolePerceptionRunner.run_once`
-    itself. `speech_input_enabled` (BL-B96: always
+    events this poll's `tick()` newly surfaced. `speech_input_enabled` (BL-B96: always
     `True` in `main()`'s own wiring; the parameter stays for tests that
     want it off) polls `speech_client.get_transcripts()` via `_poll_
     transcripts` -- `speech_client` is non-`None` whenever `main()` builds
@@ -3002,7 +2928,6 @@ def _run_crew_text_poll_loop(
         )
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
-        last_gaze_label: str | None = None
         live_los_warned = False
         connection = ConnectionReporter(logger)
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
@@ -3017,8 +2942,8 @@ def _run_crew_text_poll_loop(
             # **The failure this prevents is silent and costs a whole
             # sortie.** This runs on a daemon thread, so an exception
             # escaping here kills the thread without killing the process:
-            # the REPL keeps accepting input, the overlay keeps its last
-            # frame, and perception, belief and speech are simply dead from
+            # the REPL keeps accepting input, and perception, belief and
+            # speech are simply dead from
             # that moment on, with a stderr traceback as the only symptom.
             # Nothing in the cockpit says so. A skipped poll, by contrast,
             # costs one cycle at the configured poll rate
@@ -3676,13 +3601,6 @@ def _run_crew_text_poll_loop(
                             runner.optic_state = lower_binoculars(
                                 runner.optic_state, runner.last_t_sim
                             )
-                    if crew_console.overlay_client is not None:
-                        last_gaze_label = _push_gaze_line(
-                            crew_console.overlay_client,
-                            runner.scan_plan,
-                            runner.last_t_sim,
-                            last_gaze_label,
-                        )
                 connection.report_success()
             except Exception as exc:
                 # Deliberately bare-ish: anything at all, because the
@@ -4188,19 +4106,6 @@ def main() -> None:
         help="seconds between poll ticks",
     )
     parser.add_argument(
-        "--overlay",
-        action="store_true",
-        help=(
-            "mirror text to the in-cockpit text overlay via the aircraft "
-            "layer's POST /text/push -- BL-2.5, extended by overlay-speech-"
-            "callouts. Mirrors every line CrewConsole speaks (readbacks, "
-            "contact reports, lifecycle lines, urgent calls prefixed "
-            "'!! ') -- a radio-callout feed. Defaults off, a true no-op "
-            "when absent. Reuses the same --aircraft-layer-url instance, "
-            "no separate URL needed."
-        ),
-    )
-    parser.add_argument(
         "--mission-understanding",
         type=Path,
         default=None,
@@ -4604,7 +4509,6 @@ def main() -> None:
         output=sys.stdout,
         aircraft_client=aircraft_client,
         tasks=crew_runner.tasks,
-        overlay_client=aircraft_client if args.overlay else None,
         speech_client=audio_adapter_client,
         audio_adapter_reporter=audio_adapter_reporter,
         transcript_log=(

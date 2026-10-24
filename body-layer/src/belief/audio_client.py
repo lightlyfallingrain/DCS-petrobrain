@@ -9,13 +9,11 @@ world-model<->body-layer in-process import is the sole sanctioned
 cross-subproject exception, not a precedent to extend here. The seam is
 HTTP end to end, same as the aircraft-layer seam.
 
-`push_speech` **raises** `AudioAdapterError` on any transport failure,
-mirroring `AircraftLayerClient.push_text_line`'s raise-and-let-the-caller-
-catch contract, not a swallow-internally one -- `CrewConsole._print`'s own
-`try`/`except` (the same funnel `overlay_client`/`aircraft_client` already
-go through) is where that failure is meant to be caught, per plan
-Decision 5's "swallow at every hop, but each hop's own client call still
-raises so its caller decides how to degrade" shape.
+`push_speech` **raises** `AudioAdapterError` on any transport failure --
+a raise-and-let-the-caller-catch contract, not a swallow-internally one --
+`CrewConsole._print`'s own `try`/`except` is where that failure is meant
+to be caught, per plan Decision 5's "swallow at every hop, but each hop's
+own client call still raises so its caller decides how to degrade" shape.
 
 `get_transcripts` (`plans/inbound-speech/plan.md` Stage 3) is this
 seam's first *inbound* read -- `GET /transcripts/poll` drains

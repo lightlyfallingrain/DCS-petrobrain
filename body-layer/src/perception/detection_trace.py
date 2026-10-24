@@ -13,7 +13,7 @@ matching `source.py`'s own perception/belief boundary rule.
 **`DetectionTraceCollector` is a true no-op when unused.** Every caller
 (`check_visibility`, `NakedEyePerceptionSource.poll`) takes an optional
 `trace`/`trace_sink` parameter defaulting to `None`, the same additive
-pattern `overlay_client`/`speech_client` already use elsewhere in this
+pattern `speech_client` already uses elsewhere in this
 codebase (`body-layer/CLAUDE.md`).
 
 `DetectionTrace` is deliberately mutable (not `frozen`): `check_visibility`

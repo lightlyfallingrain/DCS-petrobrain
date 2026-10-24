@@ -58,10 +58,8 @@ from body import (
     _apply_active_gaze,
     _build_sources,
     _commanded_or_default_sector,
-    _format_gaze_line,
     _log_live_los_coverage_summary,
     _poll_transcripts,
-    _push_gaze_line,
     _resolve_speech_log_path,
     _run_crew_text_poll_loop,
     _run_crew_text_repl,
@@ -296,21 +294,6 @@ def test_console_runner_tracks_last_t_sim_for_the_repl() -> None:
     assert runner.last_t_sim == ownship.t_sim
 
 
-class FakeOverlayClient:
-    """A `push_text_line`-only double (BL-2.5). `fail_on` names texts that
-    raise `AircraftLayerError` instead of recording -- used to exercise
-    `ConsolePerceptionRunner.run_once`'s per-push isolation."""
-
-    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
-        self.pushed: list[str] = []
-        self._fail_on = fail_on
-
-    def push_text_line(self, text: str) -> None:
-        if text in self._fail_on:
-            raise AircraftLayerError("simulated push failure")
-        self.pushed.append(text)
-
-
 def test_console_runner_group_trace_sink_defaults_to_none_and_is_a_true_noop() -> None:
     """`--group-trace` (`BL-12` amendment A4): `group_trace_sink` defaults
     to `None`, and `run_once` must not fail passing it straight through to
@@ -360,108 +343,6 @@ def test_console_runner_threads_group_trace_sink_into_store_tick() -> None:
     runner.run_once()
 
     assert tick_kwargs == [fake_sink]
-
-
-# --- Cones 2C sortie finding: "show where Petrovich is looking" ------------
-#
-# The pilot could not judge two of the acceptance card's four blocks without
-# this -- `_format_gaze_line`/`_push_gaze_line` are the overlay-facing read
-# of `perception.gaze.gaze_at`, wired into both poll loops' existing
-# per-poll overlay hook point.
-
-
-def test_format_gaze_line_names_the_oclock_hour_in_free_scan() -> None:
-    gaze = gaze_at(0.0, FREE_SCAN_PLAN)  # t_sim=0 -> SCAN_PLAN[0] == 12
-    assert gaze.label == "12_oclock"
-
-    line = _format_gaze_line(FREE_SCAN_PLAN, gaze)
-
-    assert line == "Petrovich: looking 12 o'clock (free scan)"
-
-
-def test_format_gaze_line_names_the_commanded_sector() -> None:
-    plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
-    gaze = gaze_at(0.0, plan)  # left's own legs start at 11 o'clock
-
-    line = _format_gaze_line(plan, gaze)
-
-    assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
-
-
-def test_format_gaze_line_names_a_commanded_legs_scan_generically() -> None:
-    # A `commanded_legs`-only plan (Stage 5: a bare o'clock hour, or a
-    # converted compass scan) has no single sector name to speak.
-    plan = ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=(1,))
-    gaze = gaze_at(0.0, plan)
-
-    line = _format_gaze_line(plan, gaze)
-
-    assert line == "Petrovich: looking 1 o'clock (commanded scan)"
-
-
-def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
-    overlay_client = FakeOverlayClient()
-
-    # t_sim=0.0 and t_sim=1.0 both fall in FOCUS_DWELL_S's first 2 s window
-    # (12 o'clock) -- the second call must not push a duplicate line.
-    label_after_first = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-    label_after_second = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        1.0,
-        label_after_first,  # type: ignore[arg-type]
-    )
-
-    assert label_after_first == "12_oclock"
-    assert label_after_second == label_after_first
-    assert overlay_client.pushed == ["Petrovich: looking 12 o'clock (free scan)"]
-
-
-def test_push_gaze_line_pushes_again_when_the_cone_changes() -> None:
-    overlay_client = FakeOverlayClient()
-
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-    # FOCUS_DWELL_S is 2.0 s -- t_sim=2.0 has stepped to the next cone (11).
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        2.0,
-        label,  # type: ignore[arg-type]
-    )
-
-    assert label == "11_oclock"
-    assert overlay_client.pushed == [
-        "Petrovich: looking 12 o'clock (free scan)",
-        "Petrovich: looking 11 o'clock (free scan)",
-    ]
-
-
-def test_push_gaze_line_failure_is_isolated_and_still_advances_the_label() -> None:
-    # Same per-push isolation as the lifecycle-event overlay pushes: a
-    # failed gaze push must not raise, and the dedup label must still
-    # advance so a later successful push isn't suppressed by a stale label.
-    failing_text = "Petrovich: looking 12 o'clock (free scan)"
-    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
-
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-
-    assert label == "12_oclock"
-    assert overlay_client.pushed == []
 
 
 def test_console_runner_run_once_updates_scan_plan() -> None:
@@ -3861,7 +3742,7 @@ def test_crew_text_poll_loop_survives_a_raising_poll_and_keeps_going(
 ) -> None:
     """The poll loop runs on a *daemon* thread, so an exception escaping it
     kills the thread without killing the process: the REPL keeps accepting
-    input, the overlay holds its last frame, and perception/belief/speech
+    input, and perception/belief/speech
     are dead for the rest of the sortie with only a stderr traceback to say
     so. Nothing in the cockpit reports it.
 

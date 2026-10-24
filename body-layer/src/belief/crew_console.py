@@ -72,11 +72,11 @@ detector exists.
 nothing is spoken while silenced, not even an urgent threat callout, a
 deliberate choice made after showing the user the consequence in those
 terms. One fixed word acknowledges the command (`speech.render_silence_ack`),
-then nothing else until a real command -- F10/voice token, or a free-text
+then nothing else until a real command -- a spoken token, or a free-text
 utterance the grammar actually resolves -- ends it; stray speech recognised
 as nothing does not. See `_handle_silence`'s own docstring for the full
 account, including why `self.silenced` gates `_print`'s `speech_client` push
-alone, never `output`/`overlay_client`.
+alone, never `output`.
 
 **On the ground, Petrovich does not scan** (`plans/radio-check/plan.md`,
 `[[BL-B82]]`, user direction 2026-10-19, replacing the `plans/
@@ -99,7 +99,7 @@ from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
 
 import tuning
-from aircraft_client import AircraftLayerClient, AircraftLayerError
+from aircraft_client import AircraftLayerClient
 from belief.attack_run import AttackRunState
 from belief.attack_run import decide as decide_attack_run
 from belief.attack_run import query as query_attack_run
@@ -274,13 +274,6 @@ def _match_radio_check_or_greeting(
         return "greeting", {"time_of_day": time_of_day}
     return None
 
-
-#: Prepended to the overlay-pushed copy of an urgent (`bypass_gate=True`)
-#: line only -- see `CrewConsole._print`'s docstring and `plans/
-#: overlay-speech-callouts/plan.md`'s resolved "Urgent-call visual
-#: prominence" decision. `TextOverlaySender` has no color/bold mechanism,
-#: so a plain text prefix is the only available distinction.
-_URGENT_OVERLAY_PREFIX = "!! "
 
 #: `scan_ahead`/`scan_left`/`scan_right`/`scan_full` -> `belief.attention.
 #: RelativeSector` -- the ownship-relative half of the F10 scan vocabulary
@@ -1186,7 +1179,7 @@ class CrewConsole:
     where_is_it_requested: bool = False
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
-    #: `overlay_client`/`speech_client`: `None` is a true no-op.
+    #: `speech_client`: `None` is a true no-op.
     #:
     #: **It exists because an unmatched utterance was previously
     #: unobservable.** A transcript that matched no command fell through to
@@ -1196,23 +1189,10 @@ class CrewConsole:
     #: are logged too: false fires are only findable by seeing what he
     #: *did* act on.
     transcript_log: Callable[[dict[str, object]], None] | None = None
-    #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
-    #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
-    #: None-means-no-op pattern exactly. **Deliberately a separate field
-    #: from `aircraft_client` above** -- that field is reserved for a
-    #: different purpose (live search-trigger commands, per its own
-    #: docstring) and has no reader today; this one is read by `_print`
-    #: every time `CrewConsole` produces spoken text. `logger.py`'s
-    #: `--crew-text` branch wires this to the same `AircraftLayerClient`
-    #: instance already used for telemetry when `--overlay` is passed, no
-    #: separate URL/flag needed, matching `--console --overlay`'s own
-    #: wiring.
-    overlay_client: AircraftLayerClient | None = None
     #: Spoken-audio sink (BL-10 first slice, `plans/tts-voice-output/
-    #: plan.md`), mirroring `overlay_client`'s None-means-no-op pattern
-    #: exactly -- a third, separate optional field read by `_print`
-    #: alongside `overlay_client` every time `CrewConsole` produces spoken
-    #: text. `bypass_gate` (already computed for the overlay `"!! "`
+    #: plan.md`), `None`-means-no-op -- a second, separate optional field
+    #: read by `_print`
+    #: every time `CrewConsole` produces spoken text. `bypass_gate` (already computed for the overlay `"!! "`
     #: prefix) is threaded straight through as `push_speech`'s `urgent`
     #: argument -- no new signal invented, matching the plan's Decision 3.
     #: `body.py`'s `main()` always builds and wires one (BL-B96: speech
@@ -1247,7 +1227,7 @@ class CrewConsole:
     #: module lives in `belief/` and `belief_truth_log` imports *from*
     #: `belief/` -- holding the writer here would close that loop. The
     #: callback keeps the dependency pointing one way, and matches the
-    #: optional-sink shape `output`/`overlay_client`/`speech_client`
+    #: optional-sink shape `output`/`speech_client`
     #: already use. `logger` supplies a closure that can read the current
     #: gaze and optic at call time, which is the part that makes these
     #: rows answer "what was he looking at when he said that".
@@ -1287,7 +1267,7 @@ class CrewConsole:
     #: `drain_events` delegates to. One scheduler per `CrewConsole`
     #: (per-session occupancy state), mirroring every other optional-sink
     #: field above in spirit though it is never `None`: unlike
-    #: `overlay_client`/`speech_client`, scheduling applies to *every*
+    #: `speech_client`, scheduling applies to *every*
     #: sink (the plan's Decision 1 -- "One crew voice, one channel"), so
     #: there is no no-op state for this field to have.
     scheduler: CalloutScheduler = field(default_factory=CalloutScheduler)
@@ -1358,9 +1338,9 @@ class CrewConsole:
     #: choice: he was shown the risk in those terms (silenced near a
     #: friendly airbase, a Shilka opens up and says nothing) and chose
     #: absolute over "urgent still gets through" anyway. `output`
-    #: (printed/crew-text) and `overlay_client` are deliberately **not**
+    #: (printed/crew-text) is deliberately **not**
     #: gated on this flag -- the use case is audio ("during radio
-    #: traffic"), so the text/overlay surfaces keep working; only spoken
+    #: traffic"), so the text surface keeps working; only spoken
     #: audio goes quiet. `self.scheduler` keeps ticking normally while
     #: this is `True` (`drain_events` is unconditional) so belief events
     #: are still chosen, rendered and consumed at the scheduler's own
@@ -1431,10 +1411,10 @@ class CrewConsole:
         survive the reset -- the shared `store`/`tasks` references (their
         own `reset_for_new_mission()` must already have run before this
         call, via `_reset_mission_state`'s explicit ordering, the same
-        reasoning as `logger.ConsolePerceptionRunner.reset_for_new_
+        reasoning as `body.ConsolePerceptionRunner.reset_for_new_
         mission`), the injected collaborators (`brain_client`, `output`,
         `aircraft_client`, `mark_here_fn`, `mark_target_fn`, `transcript_
-        log`, `overlay_client`, `speech_client`, `speech_log_sink`), and
+        log`, `speech_client`, `speech_log_sink`), and
         `silenced` -- whether a pilot's deliberate mute should survive a
         mission restart is an open product question (see the plan's
         "Decisions Requiring User Input"); until decided, this preserves it
@@ -1464,7 +1444,6 @@ class CrewConsole:
             mark_here_fn=self.mark_here_fn,
             mark_target_fn=self.mark_target_fn,
             transcript_log=self.transcript_log,
-            overlay_client=self.overlay_client,
             speech_client=self.speech_client,
             speech_log_sink=self.speech_log_sink,
             silenced=self.silenced,
@@ -4383,29 +4362,22 @@ class CrewConsole:
         correlation_id: str | None = None,
     ) -> None:
         """Prints each line to `output` (unchanged) and, when
-        `overlay_client`/`speech_client` are configured, pushes the same
-        line to the in-cockpit text overlay (`AircraftLayerClient.
-        push_text_line`, `POST /text/push`) and/or the TTS audio pipeline
+        `speech_client` is configured, pushes the same
+        line to the TTS audio pipeline
         (`AudioAdapterClient.push_speech`, `POST /speak` -- BL-10 first
         slice, `plans/tts-voice-output/plan.md`) -- the single funnel
         point every path that produces spoken text (`handle_line`,
-        `drain_events`) already goes through, so neither sink needs a
+        `drain_events`) already goes through, so that sink needs no
         separate "what to push and when" logic to write or desync from
-        what's printed. Each push is wrapped in its own
-        `try/except`, mirroring `logger.ConsolePerceptionRunner.run_once`'s
-        BL-2.5 push loop's degrade-on-failure shape: a failed push must not
-        raise, must not stop the remaining lines in this batch from being
-        printed/pushed/spoken, and must not stop the other sink's own push
-        for the same line.
+        what's printed. The push is wrapped in its own
+        `try/except`: a failed push must not
+        raise and must not stop the remaining lines in this batch from being
+        printed/pushed/spoken.
 
         `bypass_gate` (True only for an injected urgent call, per `plans/
-        overlay-speech-callouts/plan.md`'s resolved decision) prepends
-        `_URGENT_OVERLAY_PREFIX` to the *pushed* overlay line only -- the
-        `output` print path stays exactly the text `belief.speech`
-        produced, since this is an overlay-display concern, not a change
-        to what was spoken/printed generally. For `speech_client`,
-        `bypass_gate` is threaded straight through as `push_speech`'s
-        `urgent` argument instead (plan Decision 3/4: no new signal
+        overlay-speech-callouts/plan.md`'s resolved decision) is threaded
+        straight through as `push_speech`'s
+        `urgent` argument (plan Decision 3/4: no new signal
         invented -- an injected urgent call is the only line that ever
         sets it, and the aircraft-layer's `AudioPlaybackSender` is what
         actually preempts routine playback for it).
@@ -4425,9 +4397,9 @@ class CrewConsole:
 
         **`self.silenced` gates `speech_client` only** (`plans/
         silence-command/plan.md`, user direction 2026-10-04) -- `output`
-        and `overlay_client` are untouched by it, since the use case is
+        is untouched by it, since the use case is
         audio specifically ("during radio traffic", "near a friendly
-        airbase"); the crew-text/overlay surfaces keep working. The gate
+        airbase"); the crew-text surface keeps working. The gate
         applies regardless of `bypass_gate`: an injected urgent call is
         suppressed exactly like a routine line while silenced -- this
         project's own chosen reading of "absolute silence," not an
@@ -4461,17 +4433,6 @@ class CrewConsole:
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
-            if self.overlay_client is not None:
-                overlay_line = (
-                    f"{_URGENT_OVERLAY_PREFIX}{line}" if bypass_gate else line
-                )
-                try:
-                    self.overlay_client.push_text_line(overlay_line)
-                except AircraftLayerError:
-                    logger.warning(
-                        "overlay push failed for crew-text line (continuing)",
-                        exc_info=True,
-                    )
             push_sent_wall: float | None = None
             push_acked_wall: float | None = None
             push_duration_s: float | None = None

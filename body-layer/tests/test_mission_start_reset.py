@@ -195,7 +195,6 @@ _CREW_CONSOLE_PRESERVE = {
     "mark_here_fn",
     "mark_target_fn",
     "transcript_log",
-    "overlay_client",
     "speech_client",
     "speech_log_sink",
     "silenced",
