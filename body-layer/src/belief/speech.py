@@ -731,10 +731,34 @@ def render_attack_run_lost_sight(
 
 
 def render_attack_run_regained_sight(phrase: str) -> OutgoingSpeech:
-    """BL-B70 §10's "regaining sight" transition -- `"Eyes on,
-    <phrase>."`, spoken once on the tier-2 too-far -> tier-1 transition,
-    symmetric with `render_attack_run_lost_sight`."""
+    """BL-B70 §10's "regaining sight" transition, revised by `plans/
+    attack-run-los/plan.md` F2 -- `"Eyes on, <phrase>."`, spoken once on
+    the not-sighted -> sighted (tier-2 -> tier-1) transition, symmetric
+    with `render_attack_run_lost_sight`/`render_attack_run_behind_
+    terrain`."""
     return OutgoingSpeech(text=f"Eyes on, {phrase}.", template="attack_run")
+
+
+def render_attack_run_behind_terrain(phrase: str) -> OutgoingSpeech:
+    """F2 (2026-10-24 sortie feedback), option C -- "Behind the ridge,
+    <phrase>." on the sighted -> `cause == "obstructed"` edge, symmetric
+    with `render_attack_run_regained_sight`. "Ridge" is a fixed word for
+    any terrain-blocked LOS, not a terrain-type classification (user
+    direction, verbatim, 2026-10-24: "ridge/hill/any terrrain ->
+    'ridge'")."""
+    return OutgoingSpeech(text=f"Behind the ridge, {phrase}.", template="attack_run")
+
+
+def render_no_target() -> OutgoingSpeech:
+    """ "No target." -- `plans/attack-run-los/plan.md` F3/Decision 1,
+    the "where is it?" answer when no `attack_target` task is standing
+    (no selection, or the selection was dropped). The pilot's own exact
+    wording, 2026-10-24: *"if no target ... then say 'No target'"* --
+    not one of `_UNABLE_TEMPLATES`' entries, since the command was heard
+    and understood; there is simply nothing to report on (this project's
+    "say again" vs "unable" distinction does not cover this case
+    either -- it is its own, third kind of reply)."""
+    return OutgoingSpeech(text="No target.", template="readback")
 
 
 def render_stand_by() -> OutgoingSpeech:

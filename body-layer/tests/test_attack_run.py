@@ -30,6 +30,7 @@ from belief.attack_run import (
     _tier1_alignment,
     _tier2_alignment,
     decide,
+    query,
     seen_world_direction,
 )
 from belief.contacts import Contact
@@ -199,15 +200,16 @@ def test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale
     assert speech1.text == "A little lower."
     assert state.last_known_target_alt_m == pytest.approx(200.0)
 
-    # Tier 1's and tier 2's elevation axis render the identical "A little
-    # lower." with no live LOS verdict at all (the `"unknown"` cause,
-    # fail-open, no qualifier) -- so the tier transition is silent by
-    # `_should_emit`'s own text-equality veto (the same accepted collapse
-    # `test_decide_lined_up_tier2_unknown_cause_collapses_the_transition`
-    # documents). A fresh, genuine DCS LOS block distinguishes the two
-    # ticks' text so the memory this test actually cares about (tier 2's
+    # A fresh, genuine DCS LOS block, so the tier-1 -> tier-2 edge below
+    # has a distinguishing cause (`plans/attack-run-los/plan.md` F2/
+    # Decision 2: this is the losing-sight edge, not a steady tick, so it
+    # speaks `"Behind the ridge, ..."` once rather than the ordinary
+    # qualified phrase -- see `test_decide_tier_transition_speaks_the_
+    # qualifier_without_flipping_direction`'s own fuller account of this
+    # edge). The memory this test actually cares about (tier 2's
     # elevation reading the *remembered* altitude, not `ownship.alt_m`)
-    # is still visible in what is spoken.
+    # is still visible in the elevation word, `"a little lower,"` common
+    # to both sentence shapes.
     contact.live_los_clear = False
     contact.last_seen_sim = ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.01
     _state2, speech2 = decide(
@@ -218,7 +220,7 @@ def test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale
     )
 
     assert speech2 is not None
-    assert speech2.text == "A little lower, obstructed."
+    assert speech2.text == "Behind the ridge, a little lower."
 
 
 def test_decide_dead_ahead_and_level_lines_up_and_speaks_once() -> None:
@@ -472,7 +474,20 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
     specifically so the tier-2 ticks below have the `"obstructed"` cause
     -- without that, the qualifier would not appear at all (a contact
     with no live LOS verdict is the `"unknown"` cause, fail-open, see
-    `test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept`)."""
+    `test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept`).
+
+    **Revised for `plans/attack-run-los/plan.md` F2/Decision 2.** The
+    tier-1 -> tier-2 edge with a fresh `"obstructed"` cause is now the
+    losing-sight register's own `"Behind the ridge, ..."` line (once),
+    not an ordinary qualified phrase -- the qualified phrase still
+    appears, one tick later, because that sentence's text differs from
+    the transition line's, so `_should_emit`'s text-equality veto treats
+    it as a fresh utterance (the same "one extra utterance after a
+    transition" behaviour `test_decide_losing_and_regaining_sight_keys_
+    on_resolvability_not_masking` already has for the `"too_far"` case).
+    Regaining sight (tier 2 -> tier 1 again) now speaks `"Eyes on, ..."`
+    rather than the bare phrase, since F2 redefines the register on
+    `tier`, not on `cause == "too_far"`."""
     relative = RelativeDirection(forward_m=1000.0, right_m=100.0, up_m=0.0)
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
@@ -509,24 +524,44 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
         ownship=_ownship(),
         contact=contact,
     )
+    # F2/Decision 2: the losing-sight edge with a fresh `"obstructed"`
+    # cause speaks the terrain-blocked line, once -- not the ordinary
+    # qualified phrase (that comes one tick later, below).
     assert speech2 is not None
-    assert speech2.text == "Right, obstructed."
+    assert speech2.text == "Behind the ridge, right."
     assert state.last_spoken_tier == 2
 
     # Still stale, unchanged geometry, LOS verdict still fresh enough
-    # (1.0 s < `ATTACK_TARGET_LOS_MAX_AGE_S`) -- silent (the steady-state
-    # repeat suppression tier 1's own "Lined up."-then-silence has).
+    # (1.0 s < `ATTACK_TARGET_LOS_MAX_AGE_S`) -- steady, but the ordinary
+    # qualified phrase's text differs from the transition line just
+    # spoken, so `_should_emit`'s text-equality veto still lets this one
+    # through (the same "one extra utterance after a transition"
+    # behaviour `test_decide_losing_and_regaining_sight_keys_on_
+    # resolvability_not_masking` already has for the `"too_far"` case).
     state, speech3 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.1,
         ownship=_ownship(),
         contact=contact,
     )
-    assert speech3 is None
+    assert speech3 is not None
+    assert speech3.text == "Right, obstructed."
 
-    # Regain sight -- a fresh percept with the identical geometry.
+    # A genuinely steady repeat (identical geometry/cause) is now
+    # suppressed, since this text matches what was just spoken.
+    state, speech3b = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech3b is None
+
+    # Regain sight -- a fresh percept with the identical geometry. F2:
+    # this is now the tier-2 -> tier-1 edge, so it speaks "Eyes on, ...",
+    # not the bare phrase.
     contact.last_percept = Percept(
-        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
         source="naked_eye_visual_filtered",
         classification_raw="OP_ARMORED",
         bearing_deg=0.0,
@@ -537,17 +572,17 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
     )
     state, speech4 = decide(
         state,
-        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.4,
         ownship=_ownship(),
         contact=contact,
     )
     assert speech4 is not None
-    assert speech4.text == "A bit right."
+    assert speech4.text == "Eyes on, a bit right."
     assert state.last_spoken_tier == 1
 
     # Every utterance agreed on direction -- "right," never "left," across
     # the whole transition.
-    for speech in (speech1, speech2, speech4):
+    for speech in (speech1, speech2, speech3, speech4):
         assert "right" in speech.text.lower()
         assert "left" not in speech.text.lower()
 
@@ -566,7 +601,15 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
     tier-2 tick below would be the `"unknown"` cause (no qualifier, and
     `"Lined up."` both tiers, which is `test_decide_lined_up_
     tier2_unknown_cause_collapses_the_transition`'s own, deliberately
-    different, point)."""
+    different, point).
+
+    **Revised for `plans/attack-run-los/plan.md` F2/Decision 2** -- same
+    revision as `test_decide_tier_transition_speaks_the_qualifier_
+    without_flipping_direction`'s own docstring: the tier-1 -> tier-2
+    edge with a fresh `"obstructed"` cause speaks `"Behind the ridge,
+    ..."` once, the ordinary qualified phrase follows one tick later
+    (its text differs from the transition line), and regaining sight
+    speaks `"Eyes on, ..."`."""
     relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
@@ -589,7 +632,7 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
     assert speech2 is None
 
     # Lose sight -- still lined up, but tier 2 with a fresh, genuine DCS
-    # LOS block: spoken once.
+    # LOS block: the losing-sight edge, "Behind the ridge, ...", once.
     contact.live_los_clear = False
     contact.last_seen_sim = ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1
     state, speech3 = decide(
@@ -598,19 +641,32 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
         ownship=_ownship(),
         contact=contact,
     )
-    assert speech3 is not None and speech3.text == "Lined up, obstructed."
+    assert speech3 is not None and speech3.text == "Behind the ridge, lined up."
 
+    # One tick later, still obstructed: the ordinary qualified phrase's
+    # text differs from the transition line, so this still speaks once
+    # (same "one extra utterance" shape the directional test documents).
     state, speech4 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.1,
         ownship=_ownship(),
         contact=contact,
     )
-    assert speech4 is None
+    assert speech4 is not None and speech4.text == "Lined up, obstructed."
 
-    # Regain sight -- still lined up, back to tier 1: spoken once, bare.
+    # A genuinely steady repeat is now silent.
+    state, speech4b = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech4b is None
+
+    # Regain sight -- still lined up, back to tier 1: F2's "Eyes on,
+    # ..." edge.
     contact.last_percept = Percept(
-        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
         source="naked_eye_visual_filtered",
         classification_raw="OP_ARMORED",
         bearing_deg=0.0,
@@ -621,19 +677,29 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
     )
     state, speech5 = decide(
         state,
-        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
-        ownship=_ownship(),
-        contact=contact,
-    )
-    assert speech5 is not None and speech5.text == "Lined up."
-
-    state, speech6 = decide(
-        state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.4,
         ownship=_ownship(),
         contact=contact,
     )
-    assert speech6 is None
+    assert speech5 is not None and speech5.text == "Eyes on, lined up."
+
+    # One tick later, the steady tier-1 bare phrase's text differs from
+    # the transition line, so it speaks once more before settling.
+    state, speech6 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.5,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech6 is not None and speech6.text == "Lined up."
+
+    state, speech7 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.6,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech7 is None
 
 
 def test_decide_lined_up_tier2_unknown_cause_collapses_the_transition() -> None:
@@ -837,7 +903,19 @@ def test_decide_losing_and_regaining_sight_keys_on_resolvability_not_masking() -
     re-announce the loss, and must not announce "eyes on" just because
     the target came back from behind the mask -- only the resolvable ->
     unresolvable edge (and back) does that, never a masked tick in
-    between."""
+    between.
+
+    **Revised for `plans/attack-run-los/plan.md` F2.** The register now
+    keys on `tier`, not `cause == "too_far"` -- "regaining sight"
+    requires a genuine tier-1 look, not merely the target coming back
+    within naked-eye presence range while still carrying no relative-
+    direction percept at all (`_contact_at`'s own docstring: it is built
+    to force tier 2 regardless of range). The masked-break portion below
+    (losing sight once, no re-announcement across a break or while still
+    too far) never reaches tier 1 and is unaffected by that redefinition;
+    only the final "regain" step is changed here to use a genuine look
+    -- this is the exact mechanism that used to wrongly fire "eyes on"
+    from range alone, which F2 fixes."""
     contact = _contact_at(bearing_deg=0.0, range_m=2000.0)  # too far
     state = AttackRunState()
 
@@ -864,11 +942,32 @@ def test_decide_losing_and_regaining_sight_keys_on_resolvability_not_masking() -
     assert "last seen" not in speech3.text
     assert state.last_spoken_unresolved is True
 
-    # Turning back in, now within acquisition range -- "eyes on," once.
+    # Coming back within naked-eye range alone does **not** regain sight
+    # (F2: no genuine look, no "eyes on") -- tier stays 2 (still no
+    # relative-direction percept at all), so this stays silent (same
+    # text as the previous tick, "Lined up.").
     _move_contact_to(contact, x=1000.0, z=0.0, now_sim=3.0)
     state, speech4 = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact)
-    assert speech4 is not None
-    assert speech4.text == "Eyes on, lined up."
+    assert speech4 is None
+    assert state.last_spoken_unresolved is True
+
+    # A genuine live look is what actually regains sight -- "Eyes on,
+    # ...", once.
+    contact.last_percept = Percept(
+        t_sim=3.1,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(t_sim=3.1),
+        observation_id="OBS_2",
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    state, speech5 = decide(
+        state, now_sim=3.1, ownship=_ownship(t_sim=3.1), contact=contact
+    )
+    assert speech5 is not None
+    assert speech5.text == "Eyes on, lined up."
     assert state.last_spoken_unresolved is False
 
 
@@ -907,17 +1006,30 @@ def test_decide_retarget_resets_last_spoken_unresolved() -> None:
     never open with `"Eyes on, ..."` or inherit a last-seen clause from
     the previous target -- the re-point reset (security-fix review
     finding 5) already resets the whole state to fresh, and `last_spoken_
-    unresolved` must be one of the fields that resets with it."""
+    unresolved` must be one of the fields that resets with it.
+
+    **Revised for `plans/attack-run-los/plan.md` F2.** `contact_b` must
+    carry a genuine tier-1 look, not merely be "within range" with no
+    percept at all (`_contact_at`'s own docstring: it forces tier 2
+    regardless of range) -- under F2's `tier`-keyed redefinition, a
+    tier-2-only contact is *never* "resolved," so a within-range-but-
+    tier-2 `contact_b` would read `last_spoken_unresolved is True`
+    regardless of the reset, which this test's old form did not
+    distinguish from a reset defect."""
     contact_a = _contact_at(bearing_deg=0.0, range_m=2000.0)  # too far
     state = AttackRunState()
     state, speech_a = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact_a)
     assert speech_a is not None
     assert state.last_spoken_unresolved is True
 
-    contact_b = _contact_at(bearing_deg=0.0, range_m=1000.0)  # within range
+    contact_b = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.1),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+        t_sim=0.1,
+    )
     contact_b.id = "CONTACT_2"
     new_state, speech_b = decide(
-        state, now_sim=0.1, ownship=_ownship(), contact=contact_b
+        state, now_sim=0.1, ownship=_ownship(t_sim=0.1), contact=contact_b
     )
 
     assert speech_b is not None
@@ -1554,3 +1666,298 @@ def test_decide_with_granted_binoculars_resolves_tier_1_instead_of_losing_sight(
     # recorded as "unresolved," which would wrongly prime the next tick
     # for a "regained sight" announcement that never lost anything.
     assert new_state.last_spoken_unresolved is False
+
+
+# -- decide(): `plans/attack-run-los/plan.md` F2/Decision 2 -------------
+
+
+def test_decide_f2_repro_no_eyes_on_after_a_long_unresolved_occlusion() -> None:
+    """The exact F2 reproduction -- the user's own account: *"had visual,
+    lost when I turned away and flew behind ridge, a minute or so"*.
+    Under the old `cause`-keyed register, a `"too_far"` episode set
+    `last_spoken_unresolved = True`; once the target's stale LOS verdict
+    aged past `ATTACK_TARGET_LOS_MAX_AGE_S` and fell through to
+    `"unknown"`, `now_unresolved_OLD = cause == "too_far"` read `False`
+    again -- `True -> False` wrongly read as "regained sight," with no
+    fresh look at all. Under F2's `tier`-keyed register, tier stays 2
+    throughout (the percept never refreshes), so `now_unresolved` stays
+    `True` the whole time and the edge never fires. Mutation: reverting
+    `now_unresolved` to `cause == "too_far"` makes this fail."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    state = AttackRunState()
+
+    # A genuine tier-1 sighting.
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert state.last_spoken_unresolved is False
+
+    # The target goes beyond naked-eye presence range -- a genuine
+    # "too_far" episode, the full remembered-sighting claim spoken once.
+    _move_contact_to(contact, x=5000.0, z=0.0, now_sim=3.0)
+    state, speech2 = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact)
+    assert speech2 is not None
+    assert "last seen" in speech2.text
+    assert state.last_spoken_unresolved is True
+
+    # Masked occlusion -- the pilot turns away. Not an announcement, and
+    # `last_spoken_unresolved` is frozen, not cleared.
+    _move_contact_to(contact, x=-1000.0, z=0.0, now_sim=4.0)
+    state, speech3 = decide(state, now_sim=4.0, ownship=_ownship(), contact=contact)
+    assert speech3 is None
+    assert state.last_spoken_unresolved is True
+
+    # Unmask, a minute later, back within naked-eye range -- but the
+    # percept is still ancient (no tier-1 look) and no live LOS verdict
+    # was ever recorded, so `cause` reads `"unknown"` outright. This is
+    # the exact tick the old code misread as "regained sight."
+    _move_contact_to(contact, x=1000.0, z=0.0, now_sim=64.0)
+    state, speech4 = decide(state, now_sim=64.0, ownship=_ownship(), contact=contact)
+    assert speech4 is not None
+    assert "eyes on" not in speech4.text.lower()
+    assert speech4.text == "Lined up."
+    assert state.last_spoken_unresolved is True
+
+
+def test_decide_masked_then_obstructed_on_unmask_speaks_behind_the_ridge_once() -> None:
+    """F2 option C / Decision 2: a genuine tier-1 sighting, a masked
+    occlusion, then unmask with a fresh, genuine DCS LOS block --
+    `"Behind the ridge, <phrase>."` fires once, and `terrain_blocked_
+    held` is `True` afterward."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    state = AttackRunState()
+
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert state.terrain_blocked_held is False
+
+    _move_contact_to(contact, x=-1000.0, z=0.0, now_sim=1.0)  # masked
+    state, speech2 = decide(state, now_sim=1.0, ownship=_ownship(), contact=contact)
+    assert speech2 is None
+
+    contact.live_los_clear = False
+    contact.last_seen_sim = 60.0
+    _move_contact_to(contact, x=1000.0, z=0.0, now_sim=60.0)
+    state, speech3 = decide(state, now_sim=60.0, ownship=_ownship(), contact=contact)
+    assert speech3 is not None
+    assert speech3.text == "Behind the ridge, lined up."
+    assert state.terrain_blocked_held is True
+
+    # Steady renders drop the transition wording -- the next tick (still
+    # obstructed) speaks the ordinary qualified phrase instead (a new
+    # text, so it still speaks once, same shape every other transition
+    # in this module has).
+    state, speech4 = decide(state, now_sim=60.1, ownship=_ownship(), contact=contact)
+    assert speech4 is not None
+    assert speech4.text == "Lined up, obstructed."
+
+
+def test_decide_sighted_then_too_far_still_speaks_the_full_remembered_claim() -> None:
+    """Regression guard: F2's fix changes the loss/regain *register's*
+    keying (`tier`, not `cause`), not the `"too_far"` wording itself -- a
+    genuine tier-1 sighting followed by the target going beyond naked-eye
+    presence range (`cause == "too_far"`, tier falls to 2) must still
+    speak the existing full remembered-sighting claim, unchanged."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+        t_sim=0.0,
+    )
+    state = AttackRunState()
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert state.last_spoken_unresolved is False
+
+    # Stale percept (tier falls to 2) and beyond presence range.
+    _move_contact_to(contact, x=5000.0, z=0.0, now_sim=3.0)
+    state, speech2 = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact)
+    assert speech2 is not None
+    assert "last seen" in speech2.text
+    assert state.last_spoken_unresolved is True
+
+
+def test_decide_terrain_blocked_held_survives_the_obstructed_verdicts_own_staleness() -> (
+    None
+):
+    """Decision 2's own case: a fresh `"obstructed"` verdict, observed
+    once, keeps the `", obstructed"` qualifier alive through later ticks
+    whose own `cause` has decayed to `"unknown"` (the verdict's own
+    freshness window, `ATTACK_TARGET_LOS_MAX_AGE_S`, has elapsed).
+    Mutation: dropping the `effective_cause` substitution (reverting to
+    raw `cause` in the qualifier/table lookup) must fail this test."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    state = AttackRunState()
+
+    state, _ = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    contact.live_los_clear = False
+    contact.last_seen_sim = 3.0
+    state, speech_obstructed = decide(
+        state, now_sim=3.0, ownship=_ownship(), contact=contact
+    )
+    assert speech_obstructed is not None
+    assert speech_obstructed.text == "Behind the ridge, lined up."
+    assert state.terrain_blocked_held is True
+
+    # The verdict's own freshness window elapses -- `cause` now reads
+    # "unknown" (`contact.last_seen_sim` is unchanged), but the qualifier
+    # survives because the hold does.
+    later_now_sim = 3.0 + ATTACK_TARGET_LOS_MAX_AGE_S + 1.0
+    state, speech_held = decide(
+        state, now_sim=later_now_sim, ownship=_ownship(), contact=contact
+    )
+    assert speech_held is not None
+    assert speech_held.text == "Lined up, obstructed."
+    assert state.terrain_blocked_held is True
+
+    # Several ticks later still, the hold has not decayed away.
+    state, speech_held_2 = decide(
+        state, now_sim=later_now_sim + 5.0, ownship=_ownship(), contact=contact
+    )
+    assert speech_held_2 is None  # identical text -- suppressed
+    assert state.terrain_blocked_held is True
+
+
+def test_decide_terrain_blocked_held_clears_on_a_live_look() -> None:
+    """Decision 2: a tier-1 tick clears the hold unconditionally -- a
+    subsequent `"unknown"` tick (losing tier 1 again, no fresh
+    `"obstructed"` verdict since) then gets bare guidance, not the
+    `", obstructed"` qualifier, proving the hold does not survive a live
+    look."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    state = AttackRunState()
+    state, _ = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    contact.live_los_clear = False
+    contact.last_seen_sim = 3.0
+    state, _ = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact)
+    assert state.terrain_blocked_held is True
+
+    contact.last_percept = Percept(
+        t_sim=3.1,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(t_sim=3.1),
+        observation_id="OBS_2",
+        relative_direction=relative,
+    )
+    state, speech_eyes_on = decide(
+        state, now_sim=3.1, ownship=_ownship(t_sim=3.1), contact=contact
+    )
+    assert speech_eyes_on is not None
+    assert state.terrain_blocked_held is False
+
+    # Losing tier 1 again, no fresh "obstructed" verdict since --
+    # `contact.last_seen_sim` is still 3.0, now stale past `ATTACK_
+    # TARGET_LOS_MAX_AGE_S`, so `cause` reads "unknown" and the hold is
+    # gone: bare guidance.
+    later = 3.1 + ATTACK_RUN_RELATIVE_MAX_AGE_S + ATTACK_TARGET_LOS_MAX_AGE_S + 1.0
+    state, speech_bare = decide(
+        state, now_sim=later, ownship=_ownship(), contact=contact
+    )
+    assert speech_bare is not None
+    assert speech_bare.text == "Lined up."
+    assert state.terrain_blocked_held is False
+
+
+def test_decide_terrain_blocked_held_resets_on_retarget() -> None:
+    """Decision 2 / the module docstring's re-point reset: a new target's
+    `terrain_blocked_held` starts `False` even though the old target's
+    was `True`."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact_a = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    state = AttackRunState()
+    state, _ = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact_a)
+    contact_a.live_los_clear = False
+    contact_a.last_seen_sim = 3.0
+    state, _ = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact_a)
+    assert state.terrain_blocked_held is True
+
+    contact_b = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=3.1), relative=relative, t_sim=3.1
+    )
+    contact_b.id = "CONTACT_2"
+    new_state, _ = decide(
+        state, now_sim=3.1, ownship=_ownship(t_sim=3.1), contact=contact_b
+    )
+    assert new_state.terrain_blocked_held is False
+
+
+# -- query(): `plans/attack-run-los/plan.md` F3 --------------------------
+
+
+def test_query_never_mutates_the_state_it_is_given() -> None:
+    """F3, point 3: `query` is pure -- it must never write `state` or
+    return a new one, so the same `AttackRunState` is unchanged, by
+    value, after the call."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(t_sim=0.0), relative=relative, t_sim=0.0
+    )
+    original = AttackRunState(terrain_blocked_held=True, last_known_target_alt_m=123.0)
+    speech = query(original, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech is not None
+    assert original == AttackRunState(
+        terrain_blocked_held=True, last_known_target_alt_m=123.0
+    )
+
+
+def test_query_renders_the_steady_state_phrase_for_each_effective_cause() -> None:
+    """F3: the four effective causes render exactly what `decide`'s own
+    steady-state branch would -- bare for `"too_far"`/`"unknown"`/
+    `"masked"`, qualified for `"obstructed"` and for a held `"unknown"`
+    (Decision 2) -- and never the transition wording (`"Eyes on"`/`"last
+    seen"`/`"Behind the ridge"`), since a query is point-in-time, not a
+    transition."""
+    contact_far = _contact_at(bearing_deg=0.0, range_m=2000.0)  # too_far
+    speech_far = query(
+        AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact_far
+    )
+    assert speech_far.text == "Lined up."
+
+    contact_unknown = _contact_at(bearing_deg=0.0, range_m=1000.0)  # unknown
+    speech_unknown = query(
+        AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact_unknown
+    )
+    assert speech_unknown.text == "Lined up."
+
+    contact_obstructed = _contact_at(bearing_deg=0.0, range_m=1000.0)
+    contact_obstructed.live_los_clear = False
+    contact_obstructed.last_seen_sim = 0.0
+    speech_obstructed = query(
+        AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact_obstructed
+    )
+    assert speech_obstructed.text == "Lined up, obstructed."
+
+    contact_masked = _contact_at(bearing_deg=180.0, range_m=1000.0)
+    speech_masked = query(
+        AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact_masked
+    )
+    assert "obstructed" not in speech_masked.text.lower()
+
+    contact_held = _contact_at(bearing_deg=0.0, range_m=1000.0)  # unknown, held
+    speech_held = query(
+        AttackRunState(terrain_blocked_held=True),
+        now_sim=0.0,
+        ownship=_ownship(),
+        contact=contact_held,
+    )
+    assert speech_held.text == "Lined up, obstructed."
+
+    for speech in (speech_far, speech_unknown, speech_obstructed, speech_held):
+        assert "eyes on" not in speech.text.lower()
+        assert "last seen" not in speech.text.lower()
+        assert "behind the ridge" not in speech.text.lower()

@@ -5504,6 +5504,99 @@ def test_disengage_speaks_unconditionally_even_with_no_run_active() -> None:
     assert lines == ["Attack run off."]
 
 
+def test_where_is_it_with_no_target_selected_says_no_target() -> None:
+    """`plans/attack-run-los/plan.md` F3/Decision 1 -- the pilot's own
+    exact wording: *"if no target ... then say 'No target'"*. The token
+    sets `where_is_it_requested` and returns `[]` immediately
+    (`NO_RETURN_VALUE_COMMAND_TOKENS`); the real answer is spoken by
+    `drain_where_is_it`, called the way `logger.py`'s poll loop calls it
+    -- right after `handle_command`, with `runner.attack_run_state`
+    (`None` here, since no run was ever engaged)."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("where_is_it", now_sim=0.0)
+    assert lines == []
+    assert console.where_is_it_requested is True
+
+    answer = console.drain_where_is_it(None, now_sim=0.0, ownship=_ownship())
+    assert answer == ["No target."]
+
+
+def test_where_is_it_with_target_selected_but_no_engaged_run_answers_the_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: "where is it?" answers whether or not a run is
+    engaged -- the reproduction of the gap this decision closes. Before
+    Decision 1 this would have refused with "Unable, no attack run.";
+    now it answers from a throwaway, memoryless `AttackRunState` built
+    on the spot."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    # Deliberately never calls `engage` -- Decision 1's own case.
+
+    lines = console.handle_command("where_is_it", now_sim=1.0)
+    assert lines == []
+
+    answer = console.drain_where_is_it(None, now_sim=1.0, ownship=_ownship())
+    assert answer != ["No target."]
+    assert "unable" not in answer[0].lower()
+
+
+def test_where_is_it_with_an_engaged_run_reuses_the_live_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: when a run *is* engaged, `drain_where_is_it` must
+    reuse the live, per-contact `AttackRunState` -- not a throwaway one
+    -- so the answer reflects whatever that run has already accumulated
+    (here, `terrain_blocked_held=True`), which a fresh default instance
+    would not."""
+    store = ContactStore()
+    # `_observation`, not `_observation_for_follow` -- the latter's
+    # clock/range offset compounds with its own fixed `bearing_deg=0.0,
+    # range_m=1000.0`, landing well past the naked eye's presence range
+    # ("too_far", which `terrain_blocked_held`'s override never reaches).
+    # `_observation`'s own fixed geometry (bearing 0, range 1000 m,
+    # ownship at the origin) keeps the contact within range, so the
+    # cause this test actually needs ("unknown", with no live LOS verdict
+    # ever recorded) is reachable.
+    store.ingest([_observation(obs_id="OBS_ARMOR", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    contact_id = store.contacts[0].id
+    task = attack_target_task(store, tasks, contact_id, now_sim=0.0)
+    assert task is not None
+
+    lines = console.handle_command("where_is_it", now_sim=1.0)
+    assert lines == []
+    assert console.where_is_it_requested is True
+
+    live_state = AttackRunState(last_contact_id=contact_id, terrain_blocked_held=True)
+    answer = console.drain_where_is_it(
+        live_state, now_sim=1.0, ownship=_ownship(x=0.0, z=0.0)
+    )
+    assert answer[0].endswith("obstructed.")
+
+
 def test_observ_on_signals_the_poll_loop_and_speaks() -> None:
     """`BL-B64` Stage 2, direction §6 -- the same one-shot-signal shape
     `attack_run_transition` uses, since `OpticState.home_phase` lives on

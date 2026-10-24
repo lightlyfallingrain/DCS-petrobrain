@@ -73,6 +73,7 @@ from belief.speech import (
     alignment_clock_hour,
     alignment_phrase,
     render_alignment,
+    render_attack_run_behind_terrain,
     render_attack_run_lost_sight,
     render_attack_run_regained_sight,
 )
@@ -242,16 +243,24 @@ class AttackRunState:
     adjacent sector). Reset to `None` on a re-point (below): a new
     target's first callout must never read as a sector crossing.
 
-    `last_spoken_unresolved` (§10, BL-B70) is whether `last_spoken_text`
-    was produced while the target's cause was `"too_far"` -- the baseline
-    for the "losing sight"/"regaining sight" transition sentences
-    (`belief.speech.render_attack_run_lost_sight`/`render_attack_run_
-    regained_sight`): `decide` speaks the full remembered-sighting claim
-    only on the `False` -> `True` edge, and `"Eyes on, ..."` only on the
-    `True` -> `False` edge (tier 1 resolving again). A `MASKED` tick
-    leaves this untouched, same reasoning as `last_spoken_text` -- going
-    behind the cockpit mask mid-episode must not end or restart the
-    episode, since §2 is silent on both edges by design.
+    `last_spoken_unresolved` (`plans/attack-run-los/plan.md` F2, revising
+    BL-B70 §10) is whether `last_spoken_text` was produced while `tier !=
+    1` -- i.e. no genuine live look, regardless of what `_no_look_cause`
+    says about why. **Not** `cause == "too_far"` any more: that keying
+    let "eyes on" fire on the mere expiry of a stale `"obstructed"`
+    verdict (the target falls through to `"unknown"`, which reads as
+    "resolved" under the old rule) with no fresh look at all -- the
+    reported bug this plan fixes. `tier != 1` is the honest test, since
+    tier 1 already *is* "has LOS and a fresh look" by construction. This
+    is the baseline for the "losing sight"/"regaining sight" transition
+    sentences (`belief.speech.render_attack_run_lost_sight`/
+    `render_attack_run_regained_sight`/`render_attack_run_behind_
+    terrain`): `decide` speaks a losing-sight sentence only on the
+    `False` -> `True` edge, and `"Eyes on, ..."` only on the `True` ->
+    `False` edge (tier 1 resolving again). A `MASKED` tick leaves this
+    untouched, same reasoning as `last_spoken_text` -- going behind the
+    cockpit mask mid-episode must not end or restart the episode, since
+    §2 is silent on both edges by design.
 
     `current_azimuth_deg`/`current_elevation_deg` are **not** a cadence
     baseline -- updated unconditionally on *every* call, spoken or not,
@@ -290,6 +299,24 @@ class AttackRunState:
     "falls out of §2" means in the plan -- no separate check needed.
     `None` before the first non-masked tick this contact has ever had.
 
+    `terrain_blocked_held` (`plans/attack-run-los/plan.md` Decision 2,
+    user 2026-10-24: *"until a genuine live look"*) is whether a fresh
+    `cause == "obstructed"` verdict has been seen for this contact and
+    not yet superseded by a live look -- held across the verdict's own
+    freshness window ageing out, rather than decaying to silent
+    `"unknown"` the instant `ATTACK_TARGET_LOS_MAX_AGE_S` elapses (the
+    same staleness mechanism F2 itself exhibits one level up). Set `True`
+    on a tier-2 tick whose `cause` is `"obstructed"`; cleared `False` on
+    any tier-1 tick (a genuine live look is the one thing that ends the
+    hold, regardless of what `cause` would otherwise say -- tier 1 never
+    reads `cause` for wording at all); left unchanged on a tier-2 tick
+    whose `cause` is `"too_far"` or `"unknown"` (neither confirms nor
+    contradicts a terrain-blocked belief). Read, never written, by
+    `query` (F3) via the same `effective_cause` substitution `decide`
+    uses. `False` by default -- no construction site needs an explicit
+    update (every `AttackRunState(` site, including `drain_where_is_it`'s
+    own throwaway instance, gets this for free).
+
     `last_contact_id` is the run-level/per-contact seam itself (the
     security-fix review's finding 5, `plans/attack-run/review.md`): every
     other field above describes *this contact's* last look, never the
@@ -308,6 +335,7 @@ class AttackRunState:
     last_known_target_alt_m: float | None = None
     last_contact_id: str | None = None
     requested_optic: Optic | None = None
+    terrain_blocked_held: bool = False
 
 
 def _seen_world_offset(percept: Percept) -> tuple[float, float, float] | None:
@@ -537,13 +565,19 @@ def _tier2_alignment(
 #: - `"masked"` -- behind the cockpit mask. Silence (§2); the run stays
 #:   engaged.
 #: - `"too_far"` -- naked-eye presence range exceeded. The remembered-
-#:   sighting transition register (§10).
+#:   sighting age clause, once the loss/regain edge fires (`plans/
+#:   attack-run-los/plan.md` F2: the edge now keys on `tier != 1`, not on
+#:   this cause specifically -- see `AttackRunState.last_spoken_
+#:   unresolved`'s own docstring).
 #: - `"obstructed"` -- a fresh DCS live LOS verdict says blocked by
-#:   terrain or buildings. `", obstructed"` -- the word's only remaining
-#:   caller (§8).
+#:   terrain or buildings. `", obstructed"` -- and, held across staleness
+#:   by `AttackRunState.terrain_blocked_held` (Decision 2), the losing-
+#:   sight edge's `"Behind the ridge, ..."` line (§8, F2).
 #: - `"unknown"` -- no fresh live LOS verdict either way. Fail-open, no
 #:   qualifier at all (F2) -- the same posture `ContactStore.tick`'s own
-#:   engagement term already takes for a missing/stale verdict.
+#:   engagement term already takes for a missing/stale verdict, unless
+#:   `terrain_blocked_held` overrides it to `"obstructed"` for wording
+#:   (`effective_cause`, Decision 2).
 NoLookCause = Literal["masked", "obstructed", "too_far", "unknown"]
 
 
@@ -647,6 +681,118 @@ def _no_look_cause(
     return "unknown"
 
 
+@dataclass(frozen=True, slots=True)
+class _Alignment:
+    """The computation `decide`'s steady-state rendering and `query`
+    (`plans/attack-run-los/plan.md` F3, point 3) both need -- factored
+    out so the two share one cause/tier/alignment/qualifier derivation
+    rather than duplicating it. `cause` is `_no_look_cause`'s raw answer;
+    `effective_cause` is Decision 2's substitution (`"obstructed"` in
+    place of `"unknown"` while `terrain_blocked_held` is `True`), which
+    is what both callers read for *wording* -- `cause` itself is never
+    used for wording directly, only to decide `terrain_blocked_held`'s
+    own next value. `terrain_blocked_held` here is the value *after*
+    this tick's update rule (still unread/unwritten on `cause ==
+    "masked"`, the same freeze `AttackRunState.requested_optic` already
+    gets -- see `_current_alignment`'s own docstring)."""
+
+    tier: Literal[1, 2]
+    cause: NoLookCause
+    effective_cause: NoLookCause
+    azimuth_deg: float
+    elevation_deg: float
+    target_alt_m: float | None
+    azimuth_table: tuple[_WordTableRow, ...]
+    elevation_table: tuple[_WordTableRow, ...]
+    terrain_blocked_held: bool
+
+
+def _current_alignment(
+    state: AttackRunState,
+    *,
+    now_sim: float,
+    ownship: OwnshipState,
+    contact: Contact,
+    group: Group | None,
+    resolving_optic: Optic | None,
+) -> _Alignment:
+    """Tier/cause/alignment/qualifier, shared by `decide` and `query`
+    (`plans/attack-run-los/plan.md` F3, point 3) -- the tier-1/tier-2
+    branch, `_no_look_cause`'s gate chain, and Decision 2's held-flag
+    update rule and `effective_cause` substitution, in one place so a
+    change to any of them cannot land in one caller and not the other.
+
+    **`terrain_blocked_held`'s update rule** (Decision 2): `cause ==
+    "masked"` freezes it at `state.terrain_blocked_held` -- the same
+    posture `AttackRunState.requested_optic` already has for a masked
+    tick (`decide`'s own early return there is what makes that freeze
+    stick for `decide`'s caller; `query` never writes `state` at all, so
+    for `query` this is simply "do not derive a new value to report").
+    Otherwise `tier == 1` clears it, `cause == "obstructed"` sets it,
+    and any other case (`"too_far"`/`"unknown"`) carries the previous
+    value forward unchanged.
+
+    **`effective_cause`** overrides `"unknown"` to `"obstructed"` while
+    `terrain_blocked_held` (the *updated* value) is `True` -- the
+    override is read-only input to rendering, never fed back into the
+    update rule above (which always reads raw `cause`, never `effective_
+    cause`), per Decision 2's own "never fed back" clause. A masked
+    tick's `cause` is `"masked"`, which never matches `"unknown"`, so
+    `effective_cause` passes it through unchanged -- `query`'s own
+    "masked renders bare, like unknown" rule follows from `effective_
+    cause` then being neither `"too_far"` nor `"obstructed"`, not from a
+    separate masked branch here."""
+    cause = _no_look_cause(
+        ownship,
+        contact,
+        now_sim,
+        optic=resolving_optic if resolving_optic is not None else UNAIDED_OPTIC,
+    )
+
+    tier: Literal[1, 2]
+    alignment = _tier1_alignment(ownship, contact, now_sim)
+    if alignment is not None:
+        tier = 1
+        azimuth_deg, elevation_deg = alignment
+        target_alt_m = _remembered_target_alt_m(contact)
+        azimuth_table: tuple[_WordTableRow, ...] = AZIMUTH_WORD_TABLE
+        elevation_table: tuple[_WordTableRow, ...] = ELEVATION_WORD_TABLE
+    else:
+        tier = 2
+        target_alt_m = state.last_known_target_alt_m
+        azimuth_deg, elevation_deg_opt = _tier2_alignment(
+            ownship, contact, now_sim, target_alt_m, group
+        )
+        elevation_deg = elevation_deg_opt if elevation_deg_opt is not None else 0.0
+        azimuth_table = TIER2_AZIMUTH_WORD_TABLE
+        elevation_table = ELEVATION_WORD_TABLE if elevation_deg_opt is not None else ()
+
+    if cause == "masked":
+        terrain_blocked_held = state.terrain_blocked_held
+    elif tier == 1:
+        terrain_blocked_held = False
+    elif cause == "obstructed":
+        terrain_blocked_held = True
+    else:
+        terrain_blocked_held = state.terrain_blocked_held
+
+    effective_cause: NoLookCause = (
+        "obstructed" if cause == "unknown" and terrain_blocked_held else cause
+    )
+
+    return _Alignment(
+        tier=tier,
+        cause=cause,
+        effective_cause=effective_cause,
+        azimuth_deg=azimuth_deg,
+        elevation_deg=elevation_deg,
+        target_alt_m=target_alt_m,
+        azimuth_table=azimuth_table,
+        elevation_table=elevation_table,
+        terrain_blocked_held=terrain_blocked_held,
+    )
+
+
 def _should_emit(state: AttackRunState, text: str) -> bool:
     """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §1: emit if and only
     if the rendered text differs from the last *spoken* text -- text
@@ -696,42 +842,53 @@ def decide(
     asking for, the other is what actually resolved this look).
 
     **`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy
-    (`_no_look_cause`) decides three things on top of the tier, in this
-    order:**
+    (`_no_look_cause`), as revised by `plans/attack-run-los/plan.md` F2/
+    Decision 2, decides three things on top of the tier, in this
+    order (shared with `query` via `_current_alignment`):**
 
     1. **`"masked"` -> silence** (§2): `speech` is `None` and neither
-       `last_spoken_text`, `last_spoken_clock_hour` nor `last_spoken_
-       unresolved` move -- the run stays engaged, but a suppressed-for-
-       masking tick must not look like a spoken one to the next tick's
-       comparison. Memory (`last_known_target_alt_m`,
-       `current_azimuth_deg`/`current_elevation_deg`) still updates, same
-       as any other tick.
-    2. **Tier 2's qualifier is cause-keyed, not tier-keyed** (§8, revising
-       Stage 6's "tier 2 always says obstructed"): `"obstructed"` ->
-       `", obstructed"`; `"too_far"` -> the §10 transition register
-       below; `"unknown"` -> no qualifier at all (fail-open, F2). Tier 1
-       never carries a qualifier regardless of what `_no_look_cause`
-       says about the *previous* tick's geometry.
+       `last_spoken_text`, `last_spoken_clock_hour`, `last_spoken_
+       unresolved` nor `terrain_blocked_held` move -- the run stays
+       engaged, but a suppressed-for-masking tick must not look like a
+       spoken one to the next tick's comparison. Memory (`last_known_
+       target_alt_m`, `current_azimuth_deg`/`current_elevation_deg`)
+       still updates, same as any other tick.
+    2. **Tier 2's qualifier is keyed on `effective_cause`, not raw
+       `cause`** (§8, revising Stage 6's "tier 2 always says obstructed",
+       then F2/Decision 2 again): `"obstructed"` -> `", obstructed"`
+       (including a stale `"unknown"` tick held over from a genuine
+       `"obstructed"` verdict, Decision 2); `"too_far"` -> the §10
+       transition register below; `"unknown"` with no hold -> no
+       qualifier at all (fail-open, F2). Tier 1 never carries a
+       qualifier regardless of what `_no_look_cause` says about the
+       *previous* tick's geometry.
     3. **§10's "losing sight"/"regaining sight" announcements key on
-       resolvability, not on having been masked** (direction §11, user's
-       own words: *"losing sight is expected in a break after a gun/
-       rocket run... the important question is whether Petrovich sees
-       the target when we turn to see what is happening"*).
-       `AttackRunState.last_spoken_unresolved` tracks whether the cause
-       behind `last_spoken_text` was `"too_far"`; a `"masked"` tick never
-       touches it, so a break that masks the target mid-episode neither
-       starts nor ends one, and pulling off target (which masks on every
-       pass) does not announce a loss once per pass -- only the
-       resolvable/unresolvable edge does, which is `"too_far"`'s edge
-       alone.
+       `tier`, not on `cause`** (F2: the reported bug was exactly this
+       register treating any non-`"too_far"` cause as "sighted," which
+       let a stale terrain-blocked verdict decaying to `"unknown"` read
+       as a regained sighting with no fresh look at all). `tier == 1` is
+       already "has LOS and a fresh look" by construction (module
+       docstring), so `AttackRunState.last_spoken_unresolved` now tracks
+       whether `last_spoken_text` was produced at `tier != 1`, not
+       whether its cause was `"too_far"`. A `"masked"` tick never touches
+       it, so a break that masks the target mid-episode neither starts
+       nor ends one, and pulling off target (which masks on every pass)
+       does not announce a loss once per pass -- only the tier-1/tier-2
+       edge does.
 
-       - `False -> True` (newly too far): `render_attack_run_lost_sight`
-         -- the full remembered-sighting claim, once.
-       - steady `True`: ordinary bare guidance, no appended clause.
-       - `True -> False` (back inside acquisition range, i.e. tier 1
-         resolves again): `render_attack_run_regained_sight` -- `"Eyes
-         on, ..."`, once.
-       - steady `False`: ordinary rendering (§8/§4 as usual).
+       - `False -> True` (tier 1 -> tier 2) **and** `effective_cause ==
+         "too_far"`: `render_attack_run_lost_sight` -- the full
+         remembered-sighting claim, once.
+       - `False -> True` **and** `effective_cause == "obstructed"`:
+         `render_attack_run_behind_terrain` -- `"Behind the ridge,
+         ..."`, once (F2 option C, Decision 2).
+       - `False -> True` **and** `effective_cause == "unknown"` (never
+         held, Decision 2): no transition line at all -- falls through
+         to ordinary rendering below, which also carries no qualifier.
+       - steady `True`: ordinary rendering (qualifier per point 2 above).
+       - `True -> False` (back to a genuine live look, tier 1 again):
+         `render_attack_run_regained_sight` -- `"Eyes on, ..."`, once.
+       - steady `False`: ordinary rendering.
 
     `AttackRunState.last_known_target_alt_m`/`current_azimuth_deg`/
     `current_elevation_deg` update on **every** call regardless of tier,
@@ -764,53 +921,55 @@ def decide(
     `requested_optic` to `None` (`BL-B71`) -- a re-point must start its own
     ladder evaluation from `floor`, never inherit the old target's
     de-escalation baseline, which could otherwise hand the new target an
-    optic its own range never earned."""
+    optic its own range never earned -- and `terrain_blocked_held` to
+    `False` (`plans/attack-run-los/plan.md` Decision 2), for the identical
+    reason: a fresh target's terrain occlusion has nothing to do with the
+    old one's, so this new instance's plain-dataclass default is already
+    the right answer."""
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
 
-    cause = _no_look_cause(
-        ownship,
-        contact,
-        now_sim,
-        optic=resolving_optic if resolving_optic is not None else UNAIDED_OPTIC,
+    alignment = _current_alignment(
+        state,
+        now_sim=now_sim,
+        ownship=ownship,
+        contact=contact,
+        group=group,
+        resolving_optic=resolving_optic,
     )
-
-    tier: Literal[1, 2]
-    alignment = _tier1_alignment(ownship, contact, now_sim)
-    if alignment is not None:
-        tier = 1
-        azimuth_deg, elevation_deg = alignment
-        target_alt_m = _remembered_target_alt_m(contact)
-        azimuth_table: tuple[_WordTableRow, ...] = AZIMUTH_WORD_TABLE
-        elevation_table: tuple[_WordTableRow, ...] = ELEVATION_WORD_TABLE
-    else:
-        tier = 2
-        target_alt_m = state.last_known_target_alt_m
-        azimuth_deg, elevation_deg_opt = _tier2_alignment(
-            ownship, contact, now_sim, target_alt_m, group
-        )
-        elevation_deg = elevation_deg_opt if elevation_deg_opt is not None else 0.0
-        azimuth_table = TIER2_AZIMUTH_WORD_TABLE
-        elevation_table = ELEVATION_WORD_TABLE if elevation_deg_opt is not None else ()
+    cause = alignment.cause
+    effective_cause = alignment.effective_cause
+    tier = alignment.tier
+    azimuth_deg = alignment.azimuth_deg
+    elevation_deg = alignment.elevation_deg
+    azimuth_table = alignment.azimuth_table
+    elevation_table = alignment.elevation_table
 
     # Memory updates every tick regardless of tier/cause/emit -- see
     # `AttackRunState`'s own docstring on why this must not wait for a
     # spoken tick.
     state = replace(
         state,
-        last_known_target_alt_m=target_alt_m,
+        last_known_target_alt_m=alignment.target_alt_m,
         current_azimuth_deg=azimuth_deg,
         current_elevation_deg=elevation_deg,
     )
 
     if cause == "masked":
-        # §2: silence, run stays engaged, cadence/sector/unresolved
+        # §2: silence, run stays engaged, cadence/sector/unresolved/held
         # baselines all untouched (direction §11 -- a break that masks
         # the target must not itself count as losing or regaining sight).
-        # `BL-B71` guard 1: `requested_optic` is also untouched -- this
-        # `return` is the only reason it stays frozen, not a separate
-        # check (`AttackRunState.requested_optic`'s own docstring).
+        # `BL-B71` guard 1 / Decision 2: `requested_optic` and `terrain_
+        # blocked_held` are also untouched -- this `return` is the only
+        # reason either stays frozen (`_current_alignment` itself never
+        # updates `terrain_blocked_held` on a masked tick, so there is
+        # nothing to commit here even before the early return).
         return state, None
+
+    # Decision 2: commit the held flag now that this tick is confirmed
+    # non-masked -- `_current_alignment` already computed its next value;
+    # this is the one place that writes it back onto `state`.
+    state = replace(state, terrain_blocked_held=alignment.terrain_blocked_held)
 
     # `BL-B71`: the ladder's own standing request, re-evaluated every
     # non-masked tick regardless of tier/cause/emit, same posture as the
@@ -836,25 +995,16 @@ def decide(
         and state.last_spoken_clock_hour is not None
     )
 
-    # §10/§11: keyed on whether the target is resolvable *now*
-    # (`cause == "too_far"`), never on tier directly and never on having
-    # been masked -- direction §11, the user's own words: "the important
-    # question is whether Petrovich sees the target when we turn to see
-    # what is happening," not whether a break masked him in the
-    # meantime. `tier == 1` with `cause == "too_far"` IS reachable once
-    # `BL-B71`'s optic ladder is live and `_no_look_cause` above is fed
-    # the wrong (narrower) optic: a fresh relative percept only implies
-    # admission within *some* optic's presence range, not necessarily
-    # the one `_no_look_cause` tests against. `resolving_optic` closes that
-    # gap by testing the same optic that actually admitted the percept
-    # (review's required fix, `plans/attack-run-sortie-fixes/
-    # review-bl-b71.md`) -- a prior cut of this docstring called the
-    # combination "not reachable in practice," which was true only while
-    # the admitting optic was fixed at `UNAIDED_OPTIC`. The condition is
-    # written against `cause` rather than `tier` regardless, so a range
-    # closing while tier stays 2 (still no fresh percept, but no longer
-    # too far) correctly announces "eyes on" too, not only a tier flip.
-    now_unresolved = cause == "too_far"
+    # F2 (`plans/attack-run-los/plan.md`): keyed on `tier`, not on
+    # `cause` -- the reported bug was `cause`-keying treating a stale
+    # `"obstructed"` verdict's decay to `"unknown"` as "resolved" with no
+    # fresh look at all. `tier == 1` already *is* "has LOS and a fresh
+    # look" by construction (module docstring), including the documented
+    # case where tier 1 persists under `cause == "too_far"` once the
+    # optic ladder (`BL-B71`) has granted a narrower optic -- that stays
+    # a genuine sighting under `tier`-keying, which `cause`-keying got
+    # wrong (it would have kept reporting the stale "too far" claim).
+    now_unresolved = tier != 1
     regaining_sight = state.last_spoken_unresolved and not now_unresolved
     losing_sight = now_unresolved and not state.last_spoken_unresolved
     speech: OutgoingSpeech
@@ -866,33 +1016,45 @@ def decide(
             elevation_table=elevation_table,
         )
         speech = render_attack_run_regained_sight(phrase)
-    elif losing_sight:
+    elif losing_sight and effective_cause in ("too_far", "obstructed"):
         phrase = alignment_phrase(
             azimuth_deg,
             elevation_deg,
             azimuth_table=azimuth_table,
             elevation_table=elevation_table,
         )
-        what = _unit_type_display(
-            contact.classification.value, contact.classification.level.name.lower()
-        )
-        # §10's `<where>` clause is suppressed, not worded, when it would
-        # restate `phrase` verbatim (review's required fix 2): outside the
-        # 12 o'clock sector `phrase` is itself a clock-hour phrase (e.g.
-        # "Three o'clock"), via the same `alignment_clock_hour` sector
-        # test `alignment_phrase` uses internally -- a second `<where>`
-        # clause there would speak the same position twice, once as a
-        # word and once as a digit if it were not suppressed. Inside the
-        # sector `phrase` is a qualitative word ("come left"/"lined up")
-        # that carries no position at all, so `<where>` still earns its
-        # place there, as "ahead".
-        where = "ahead" if alignment_clock_hour(azimuth_deg) is None else None
-        speech = render_attack_run_lost_sight(
-            phrase, what, where, now_sim - contact.last_seen_sim
-        )
+        if effective_cause == "obstructed":
+            # F2 option C (Decision 2): "Behind the ridge, <phrase>.",
+            # once -- no what/where/age clause, unlike the too-far case
+            # below; `render_attack_run_behind_terrain`'s own docstring.
+            speech = render_attack_run_behind_terrain(phrase)
+        else:
+            what = _unit_type_display(
+                contact.classification.value,
+                contact.classification.level.name.lower(),
+            )
+            # §10's `<where>` clause is suppressed, not worded, when it
+            # would restate `phrase` verbatim (review's required fix 2):
+            # outside the 12 o'clock sector `phrase` is itself a
+            # clock-hour phrase (e.g. "Three o'clock"), via the same
+            # `alignment_clock_hour` sector test `alignment_phrase` uses
+            # internally -- a second `<where>` clause there would speak
+            # the same position twice, once as a word and once as a
+            # digit if it were not suppressed. Inside the sector `phrase`
+            # is a qualitative word ("come left"/"lined up") that carries
+            # no position at all, so `<where>` still earns its place
+            # there, as "ahead".
+            where = "ahead" if alignment_clock_hour(azimuth_deg) is None else None
+            speech = render_attack_run_lost_sight(
+                phrase, what, where, now_sim - contact.last_seen_sim
+            )
     else:
+        # Covers steady `True`/`False`, and `losing_sight` with
+        # `effective_cause == "unknown"` (never held, Decision 2): no
+        # transition line, ordinary rendering -- the edge stays silent
+        # exactly as F2's own fail-open posture requires.
         qualifier: str | None = None
-        if tier == 2 and cause == "obstructed":
+        if tier == 2 and effective_cause == "obstructed":
             qualifier = ", obstructed"
         speech = render_alignment(
             azimuth_deg,
@@ -916,3 +1078,76 @@ def decide(
         last_contact_id=contact.id,
     )
     return new_state, speech
+
+
+def query(
+    state: AttackRunState,
+    *,
+    now_sim: float,
+    ownship: OwnshipState,
+    contact: Contact,
+    group: Group | None = None,
+    resolving_optic: Optic | None = None,
+) -> OutgoingSpeech:
+    """ "Where is it?" (`plans/attack-run-los/plan.md` F3) -- a
+    point-in-time read of the standard attack-run guidance phrase, based
+    on A) seeing the target and B) current belief, the pilot's own
+    stated inputs. Pure: never writes `state`, never returns a new one,
+    and cannot corrupt `decide`'s own `_should_emit` cadence baseline,
+    the `requested_optic` ladder's hysteresis, or `terrain_blocked_
+    held`'s own update rule -- `_current_alignment` (shared with
+    `decide`) computes what the *next* `terrain_blocked_held` would be,
+    but this function simply never commits it anywhere.
+
+    **Decision 1 makes this answerable whether or not a run is engaged**
+    -- the caller (`belief.crew_console.drain_where_is_it`) passes either
+    the live, per-contact `AttackRunState` an engaged run is carrying, or
+    a throwaway `AttackRunState(last_contact_id=contact.id)` it
+    constructs on the spot when none is engaged. Only `last_known_
+    target_alt_m`/`terrain_blocked_held` come from `state` itself (both
+    default to `None`/`False` on a throwaway instance, which is exactly
+    correct: no run means no accumulated per-contact memory, the same
+    "first tick after `engage`" fail-open posture `_tier2_alignment`'s
+    own elevation-axis comment already documents) -- `now_sim`/
+    `ownship`/`contact`/`group`/`resolving_optic` all come from live
+    telemetry/belief regardless of run state.
+
+    **Always returns speech, never `None`, including on a masked tick**
+    -- `cause == "masked"` silences *passive* guidance (§2: don't talk
+    over a pilot who hasn't asked anything); an explicit question gets
+    an answer either way. On a masked tick this renders the same bare-
+    guidance phrase a `cause == "unknown"` tick would (`effective_cause`
+    is `"masked"` there, which matches neither `"too_far"` nor
+    `"obstructed"` below, so no qualifier is added) -- azimuth/elevation
+    are already computed from belief independent of the mask, so this is
+    still "B) current belief," not an invented sentence.
+
+    **Deliberately no transition wording** (`"Eyes on"` / `"last seen
+    ... ago"` / `"Behind the ridge"`) -- those describe *what just
+    changed*, and this is a point-in-time query that may land well after
+    any transition. Renders exactly what `decide`'s own steady-state
+    (`else`) branch would: bare alignment phrase, `", obstructed"`
+    qualifier for `tier == 2 and effective_cause == "obstructed"`
+    (Decision 2's held flag included), nothing for `"too_far"`/
+    `"unknown"`/`"masked"` (the same fail-open posture F2 settles for
+    `decide`)."""
+    alignment = _current_alignment(
+        state,
+        now_sim=now_sim,
+        ownship=ownship,
+        contact=contact,
+        group=group,
+        resolving_optic=resolving_optic,
+    )
+    qualifier: str | None = None
+    if alignment.tier == 2 and alignment.effective_cause == "obstructed":
+        qualifier = ", obstructed"
+    announce_twelve = False  # a query is never read as a sector-crossing event.
+    return render_alignment(
+        alignment.azimuth_deg,
+        alignment.elevation_deg,
+        azimuth_table=alignment.azimuth_table,
+        elevation_table=alignment.elevation_table,
+        qualifier=qualifier,
+        announce_twelve=announce_twelve,
+    )
