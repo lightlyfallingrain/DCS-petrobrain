@@ -30,7 +30,7 @@ from typing import Any, NoReturn
 import pytest
 from support.mock_aircraft_layer import MockAircraftLayerServer
 
-import logger as logger_module
+import body as body_module
 from aircraft_client import AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
@@ -53,7 +53,7 @@ from belief.mission_phase import (
 )
 from belief.sight_effector import GuidanceUnitState
 from belief.tasks import TaskStore
-from logger import (
+from body import (
     _SIGHT_WIDE_SEARCH_FAR_M,
     DEFAULT_SPEECH_LOG_PATH,
     LOOK_DIRECTION_FOV_HALF_DEG,
@@ -1066,7 +1066,7 @@ def _real_effector_config() -> tuple[dict[tuple[str, str, str], Any], dict[str, 
     wrong reason."""
     global _real_effector_config_cache
     if _real_effector_config_cache is None:
-        sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+        sequences, registry, had_errors, _polled = body_module._load_effector_config()
         assert not had_errors, "the real committed effector config has load errors"
         _real_effector_config_cache = (sequences, registry)
     return _real_effector_config_cache
@@ -1396,7 +1396,7 @@ class TestSightInRegardSweepElevation:
         list[tuple[float, float]], list[tuple[float, float]], list[tuple[float, float]]
     ]:
         """The same three in-regard legs `PerceptionLogger.run_once` builds
-        (`logger.py`'s `sight_wide_search=`/`sight_narrow_near_search=`/
+        (`body.py`'s `sight_wide_search=`/`sight_narrow_near_search=`/
         `sight_narrow_far_search=` wiring) -- same near/far edges, so this
         exercises the real production geometry, not a synthetic stand-in."""
         from belief.optic_policy import (
@@ -1792,7 +1792,7 @@ class TestSightWideSearchFarM:
         own unconditional computation already has), so no `SIGHTING`
         dwell needs to be set up to observe it -- a default runner's very
         first poll already makes the call."""
-        real_sweep = logger_module._sight_in_regard_sweep
+        real_sweep = body_module._sight_in_regard_sweep
         captured_far_m: list[float] = []
 
         def spy(
@@ -1802,7 +1802,7 @@ class TestSightWideSearchFarM:
                 captured_far_m.append(far_m)
             return real_sweep(*args, optic=optic, far_m=far_m, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(logger_module, "_sight_in_regard_sweep", spy)
+        monkeypatch.setattr(body_module, "_sight_in_regard_sweep", spy)
 
         runner = ConsolePerceptionRunner(
             aircraft_client=FakeAircraftClient(_telemetry_dict()),  # type: ignore[arg-type]
@@ -3155,7 +3155,7 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert lines == ["Observ off."]
     assert console.observ_transition == "off"
 
-    # ...and the poll loop's own drain block (logger.py) is what actually
+    # ...and the poll loop's own drain block (body.py) is what actually
     # touches `optic_state` -- reproduced verbatim rather than invoking the
     # whole runner.
     if console.observ_transition == "off":
@@ -3203,7 +3203,7 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     lamp lights, with no special-casing needed (the cap and `SightHead.
     mode` are derived from the identical `align_observed`/`observ_
     observed` inputs, so they can never disagree)."""
-    import logger as logger_module
+    import body as body_module
     from belief.optic_policy import OpticDecision, OpticState
     from perception.optics import BINOCULAR_OPTIC
 
@@ -3227,7 +3227,7 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     runner.run_once()
 
@@ -3292,7 +3292,7 @@ def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_ai
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=50.0, look_elevation_deg=0.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     actual_az: list[float | None] = []
     for heading_deg in (0.0, 0.0, 30.0):
@@ -3351,7 +3351,7 @@ def test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     runner.run_once()  # poll 1: admitted through the sight
     assert runner.sight_head.aim_source == "belief"
@@ -3418,7 +3418,7 @@ def _f4_poll(
         runner.last_ownship_state,
         resolving_optic=runner.optic,
     )
-    logger_module._mission_memory_step(
+    body_module._mission_memory_step(
         memory, runner, runner.last_t_sim, runner.theatre, None, fired_on_tracker
     )
     crew_console.drain_events(runner.last_t_sim)
@@ -3531,7 +3531,7 @@ def _f4_scenario(
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
     db_path = tmp_path / f"region-leak-{leak_seen_aim}.sqlite"
     open_for_build(db_path).close()
-    world_model_conn = logger_module.open_world_model(db_path)
+    world_model_conn = body_module.open_world_model(db_path)
     runner = ConsolePerceptionRunner(
         aircraft_client=aircraft_client,  # type: ignore[arg-type]
         sources=[source],  # type: ignore[list-item]
@@ -3548,8 +3548,8 @@ def _f4_scenario(
     crew_console = CrewConsole(
         store=runner.store,
         tasks=runner.tasks,
-        mark_here_fn=logger_module._mark_here_fn(memory, runner),
-        mark_target_fn=logger_module._mark_target_fn(memory, runner),
+        mark_here_fn=body_module._mark_here_fn(memory, runner),
+        mark_target_fn=body_module._mark_target_fn(memory, runner),
     )
     output = io.StringIO()
     crew_console.output = output
@@ -3568,7 +3568,7 @@ def _f4_scenario(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     utterances: list[str] = []
     aim_sources: list[str] = []
@@ -3981,7 +3981,7 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
         )
 
     monkeypatch.setattr(
-        logger_module, "open_world_model", _fail_if_open_world_model_called
+        body_module, "open_world_model", _fail_if_open_world_model_called
     )
 
     monkeypatch.setattr(
@@ -4292,7 +4292,7 @@ def test_warn_live_los_coverage_gap_once_fires_exactly_once_under_continuous_gro
     `>= 1` -- `>= 1` is what the pre-fix flood already satisfies."""
     source = _naked_eye_source_stub()
     warned = False
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         for no_verdict in range(1, 11):
             source.live_los_coverage.no_verdict = no_verdict
             warned = _warn_live_los_coverage_gap_once([source], warned)
@@ -4309,7 +4309,7 @@ def test_warn_live_los_coverage_gap_once_never_fires_while_no_verdict_stays_zero
     must never log the transition warning, across many polls."""
     source = _naked_eye_source_stub()
     warned = False
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         for _ in range(10):
             warned = _warn_live_los_coverage_gap_once([source], warned)
 
@@ -4327,7 +4327,7 @@ def test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy(
     source.live_los_coverage.evaluated = 7
     source.live_los_coverage.no_verdict = 0
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         _log_live_los_coverage_summary([source])
 
     messages = [r.getMessage() for r in caplog.records]
@@ -4360,7 +4360,7 @@ def test_console_poll_loop_logs_the_coverage_summary_in_its_finally_block(
         target=_run_console_poll_loop,
         args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
     )
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         poll_thread.start()
         try:
             deadline = time.monotonic() + 5.0
@@ -4412,7 +4412,7 @@ def test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block(
             stop_event,
         ),
     )
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         poll_thread.start()
         try:
             deadline = time.monotonic() + 5.0
@@ -4458,7 +4458,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
     replaced with a spy (not a stub of `decide`'s own logic -- that is
     covered directly by `test_attack_run.py`'s `resolving_optic` tests)
     so this test asserts exactly one thing: the value crossing the
-    `logger.py`/`crew_console.py` boundary.
+    `body.py`/`crew_console.py` boundary.
 
     Confirmed to fail for the stated reason: reverting the call site
     to `resolving_optic=runner.optic_state.guidance_optic` makes
@@ -4904,10 +4904,10 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     coincidence, not something `--randomly-seed` alone pins, which is why
     reruns of the same seed did not reproduce it deterministically.
     """
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module._ConnectionReporter()
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_failure(dead)
         reporter.report_failure(dead)
         reporter.report_failure(dead)
@@ -4917,7 +4917,7 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     messages = [
         record.getMessage()
         for record in caplog.records
-        if record.name == logger_module.__name__
+        if record.name == body_module.__name__
     ]
     assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
@@ -4941,13 +4941,13 @@ def test_connection_reporter_announces_the_first_connection(
     (a leaked `BrainLayerClient` daemon thread elsewhere in the suite
     logs via a different logger that also propagates to root).
     """
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module._ConnectionReporter()
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_success()
 
     messages = [
-        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
     ]
     assert messages == ["aircraft layer connected"], messages
 
@@ -4961,10 +4961,10 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
     Filters to this module's own logger -- `BL-B92`, see
     `test_connection_reporter_says_disconnected_once_then_connected_once`'s
     docstring for why an unfiltered `caplog.records` is order-dependent."""
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module._ConnectionReporter()
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_failure(dead)
         reporter.report_success()
         reporter.report_failure(dead)
@@ -4972,7 +4972,7 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
         reporter.report_success()
 
     messages = [
-        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
     ]
     assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
@@ -4997,10 +4997,10 @@ def test_only_a_dead_socket_counts_as_connection_loss() -> None:
     timed_out.__cause__ = TimeoutError("timed out")
     bad_json = AircraftLayerError("invalid JSON from http://host/x: line 1")
 
-    assert logger_module._is_connection_loss(refused) is True
-    assert logger_module._is_connection_loss(timed_out) is True
-    assert logger_module._is_connection_loss(bad_json) is False
-    assert logger_module._is_connection_loss(ValueError("something else")) is False
+    assert body_module._is_connection_loss(refused) is True
+    assert body_module._is_connection_loss(timed_out) is True
+    assert body_module._is_connection_loss(bad_json) is False
+    assert body_module._is_connection_loss(ValueError("something else")) is False
 
 
 # --- _wait_for_next_tick (BL-11 Stage 1) ---------------------------------
@@ -5013,11 +5013,11 @@ def test_wait_for_next_tick_sleeps_only_the_remainder_of_the_interval(
     after the work, so a 1.0 s setting with 0.33 s of work realised 1.33 s.
     Sleeping to a deadline means the wait absorbs the work."""
     waits: list[float] = []
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 100.33)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 100.33)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == [pytest.approx(0.67)]
     assert next_tick == pytest.approx(102.0)
@@ -5028,11 +5028,11 @@ def test_wait_for_next_tick_does_not_sleep_when_the_work_overran(
 ) -> None:
     """An overrunning poll gets no sleep at all -- it is already late."""
     waits: list[float] = []
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 101.4)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 101.4)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == []
     assert next_tick == pytest.approx(102.4)
@@ -5050,11 +5050,11 @@ def test_wait_for_next_tick_drops_missed_ticks_rather_than_queueing_them(
     reads the latest telemetry rather than a backlog."""
     waits: list[float] = []
     # Four intervals past a 1.0 s deadline.
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 105.0)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 105.0)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == []
     # 106.0, not 102.0: the three skipped ticks are gone, and the next poll
@@ -5069,7 +5069,7 @@ def test_wait_for_next_tick_returns_immediately_when_stopping() -> None:
     stop_event.set()
 
     started = time.monotonic()
-    logger_module._wait_for_next_tick(stop_event, started + 5.0, 5.0)
+    body_module._wait_for_next_tick(stop_event, started + 5.0, 5.0)
 
     assert time.monotonic() - started < 1.0
 
@@ -5083,7 +5083,7 @@ def test_no_stale_five_hertz_claims_remain_in_src() -> None:
     `perception/motion.py` is deliberately exempt: its 5 Hz claim is a
     *behavioural* assumption about object arrival rate, tracked as
     `BL-B34`, not a statement about this loop's own rate."""
-    src = Path(logger_module.__file__).parent
+    src = Path(body_module.__file__).parent
     offenders = sorted(
         str(path.relative_to(src))
         for path in src.rglob("*.py")
@@ -5112,7 +5112,7 @@ def _run_plain_logger_main_for_n_polls(
     (not the real `time` module's `sleep` attribute) to a stand-in that
     raises on the `n_polls`-th call rather than actually sleeping.
 
-    **Deliberately not `monkeypatch.setattr(logger_module.time, "sleep",
+    **Deliberately not `monkeypatch.setattr(body_module.time, "sleep",
     ...)`** -- that mutates the real, process-wide `time` module, so any
     *other* thread calling `time.sleep` during this test (e.g. a leftover
     `belief.brain_client.BrainLayerClient` daemon poll thread from an
@@ -5120,7 +5120,7 @@ def _run_plain_logger_main_for_n_polls(
     because nothing stops a `daemon=True` thread) gets an unrelated
     `KeyboardInterrupt` raised inside it too -- observed as a
     `PytestUnhandledThreadExceptionWarning` the first time this was tried.
-    Rebinding `logger_module.time` itself only changes what `logger.py`'s
+    Rebinding `body_module.time` itself only changes what `body.py`'s
     own `time.sleep(...)` call resolves to; every other module's `import
     time` still gets the real one.
 
@@ -5151,7 +5151,7 @@ def _run_plain_logger_main_for_n_polls(
     real_time = time
 
     class _RaiseAfterNSleeps:
-        """Stands in for the `time` module as seen from inside `logger.py`
+        """Stands in for the `time` module as seen from inside `body.py`
         only -- every other attribute `main()` touches before reaching the
         poll loop (`time.time()`, for `_per_run_log_paths`'s stamping)
         delegates to the real module unchanged; only `sleep` is faked."""
@@ -5167,8 +5167,8 @@ def _run_plain_logger_main_for_n_polls(
         def __getattr__(self, name: str) -> object:
             return getattr(real_time, name)
 
-    monkeypatch.setattr(logger_module, "time", _RaiseAfterNSleeps())
-    logger_module.main()
+    monkeypatch.setattr(body_module, "time", _RaiseAfterNSleeps())
+    body_module.main()
 
 
 def test_plain_logger_path_warns_on_the_live_los_coverage_gap_once(
@@ -5198,7 +5198,7 @@ def test_plain_logger_path_warns_on_the_live_los_coverage_gap_once(
     server = MockAircraftLayerServer(frames)
     url = server.start()
     try:
-        with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+        with caplog.at_level(logging.WARNING, logger=body_module.__name__):
             _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
     finally:
         server.stop()
@@ -5227,7 +5227,7 @@ def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
     server = MockAircraftLayerServer(frames)
     url = server.start()
     try:
-        with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        with caplog.at_level(logging.INFO, logger=body_module.__name__):
             _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
     finally:
         server.stop()
@@ -5247,7 +5247,7 @@ def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
 # that hid this defect from four review rounds. These two prove the two
 # log lines are visible with *no* level override at all, i.e. under
 # whatever `main()` itself configures (`_configure_logger_for_main`), the
-# same way a real operator running `python -m logger ...` would see
+# same way a real operator running `python -m body ...` would see
 # them. ------------------------------------------------------------------
 
 
@@ -6695,7 +6695,7 @@ def test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff(
             "effector_registry": effector_registry,
         },
     )
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         poll_thread.start()
         try:
             deadline = time.monotonic() + 5.0
@@ -6930,7 +6930,7 @@ def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
 
 
 def test_load_effector_config_round_trips_the_real_committed_files() -> None:
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is False
     assert set(registry) == {
@@ -6955,10 +6955,8 @@ def test_load_effector_config_logs_the_unverified_effector(
 ) -> None:
     """Stage 1 review follow-up: `EffectorDef.unverified` (`cplr_distr`)
     had no consumer at all -- surfaced as one startup `INFO` line."""
-    with caplog.at_level(logging.INFO, logger="logger"):
-        _sequences, registry, _had_errors, _polled = (
-            logger_module._load_effector_config()
-        )
+    with caplog.at_level(logging.INFO, logger="body"):
+        _sequences, registry, _had_errors, _polled = body_module._load_effector_config()
 
     assert registry["cplr_distr"].unverified is True
     assert any(
@@ -6992,12 +6990,12 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
         ),
     }
     monkeypatch.setattr(
-        logger_module,
+        body_module,
         "load_registries_by_aircraft",
         lambda: fake_registries_by_aircraft,
     )
     monkeypatch.setattr(
-        logger_module,
+        body_module,
         "load_sequences",
         lambda *_args, **_kwargs: (
             {},
@@ -7005,7 +7003,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
         ),
     )
 
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is True
     assert registry == fake_registry
@@ -7019,12 +7017,12 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
 def test_load_effector_config_missing_own_aircraft_directory_is_an_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(logger_module, "load_registries_by_aircraft", dict)
+    monkeypatch.setattr(body_module, "load_registries_by_aircraft", dict)
     monkeypatch.setattr(
-        logger_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
+        body_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
     )
 
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is True
     assert registry == {}

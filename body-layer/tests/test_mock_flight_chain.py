@@ -18,7 +18,7 @@ what admits a naked-eye candidate here), and -- in the second test below --
 the real `--console` threading model (`logger._run_console_poll_loop` on a
 background thread, `belief.console.Console` dispatch on the foreground
 thread), catching the class of cross-thread `sqlite3.ProgrammingError` bug
-`test_logger.py`'s own Stage 6/BL-5 regression tests were written for, but
+`test_body.py`'s own Stage 6/BL-5 regression tests were written for, but
 now against two sources and many consecutive polls instead of one.
 
 **World-model's offline `line_of_sight_clear` is exercised directly below
@@ -113,7 +113,7 @@ from belief.attention import AttentionArea
 from belief.console import Console
 from belief.tasks import TaskStore
 from belief.tools import describe_contact, get_contacts
-from logger import (
+from body import (
     ConsolePerceptionRunner,
     _build_sources,
     _run_console_poll_loop,
@@ -360,7 +360,7 @@ def test_mock_flight_chain_threaded_console_smoke(tmp_path: Path) -> None:
     commands via `belief.console.Console`/`_run_console_repl` against the
     same store. Asserts no exception crosses either thread -- this is the
     test that would have caught the cross-thread `sqlite3.ProgrammingError`
-    class of bug (`test_logger.py`'s Stage 6/BL-5 regression tests cover the
+    class of bug (`test_body.py`'s Stage 6/BL-5 regression tests cover the
     single-poll case; this drives the same real functions across the whole
     20-frame fixture)."""
     frames = _load_frames()
@@ -402,7 +402,7 @@ def test_mock_flight_chain_threaded_console_smoke(tmp_path: Path) -> None:
             output = io.StringIO()
             console = Console(store=runner.store, output=output)
             # `_run_console_repl` reads sys.stdin line-by-line until EOF --
-            # mirrors test_logger.py's own monkeypatched-stdin pattern.
+            # mirrors test_body.py's own monkeypatched-stdin pattern.
             stdin = io.StringIO("contacts\nshow CONTACT_1\n")
             real_stdin = sys.stdin
             sys.stdin = stdin

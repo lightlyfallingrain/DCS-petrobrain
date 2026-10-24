@@ -83,7 +83,7 @@ though the code is correct. The only correct invocation is `cd body-layer && myp
 
 Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 
-**Running the live logger** (`src/logger.py`'s `main()`): `src` isn't installed as a package,
+**Running the live logger** (`src/body.py`'s `main()`): `src` isn't installed as a package,
 same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector (see its `WORKFLOW.md`).
 **Must use `body-layer/.venv`'s interpreter, not the system/plain `python`** — the world-model
 seam pulls in `pyproj`, which is only installed in this subproject's own venv (see
@@ -101,7 +101,7 @@ built for a different theatre than the resolved one, is a startup error (`parser
 silent default or a wrong-projection run. From `cd body-layer`:
 
 ```sh
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName> --world-model-db <path-to-region.sqlite>
+PYTHONPATH=src:../world-model/src .venv/bin/python -m body --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName> --world-model-db <path-to-region.sqlite>
 ```
 
 (Or `source .venv/bin/activate` first, then drop the `.venv/bin/` prefix.) Plain `python -m
@@ -275,7 +275,7 @@ ran).
 2. Set `PETROBRAIN_TUNING=config/tuning.toml` in the run command (an environment variable, never
    a CLI flag — a flag would be parsed after every constant has already resolved, and would fail
    silently).
-3. Restart `logger.py`. **Startup only, no mid-sortie reload** — a reload without re-importing
+3. Restart `body.py`. **Startup only, no mid-sortie reload** — a reload without re-importing
    would change `--print-tuning`'s answer and not the cockpit's actual behaviour, and several of
    these constants (the decay half-lives) integrate belief state over time, so a value changed
    mid-flight would make the observed behaviour belong to neither setting.
@@ -288,7 +288,7 @@ always available via `--print-tuning`, which also works standalone (without
 `--aircraft-layer-url`) so it can be checked without launching anything:
 
 ```sh
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --print-tuning
+PYTHONPATH=src:../world-model/src .venv/bin/python -m body --print-tuning
 ```
 
 **Regenerating `config/defaults.toml`:** never hand-edit it — `tools/generate_defaults.py --write`
@@ -418,7 +418,7 @@ Belief — observation *consumption*:
 - `src/belief/tools.py` — the brain-facing query API's body, minus a transport; returns the `{facts, summary, phrasing_hints}` triple. Note its **absent-not-null** convention for `facts`. `attack_target_task` (BL-14) mirrors `watch_contact_task`, setting attention `"priority"` instead of `"watch"`.
 - `src/belief/tasks.py` — `PendingIntent`/`TaskStore`. `TaskKind` is `"scan_area"`/`"watch_contact"`/`"attack_target"` (BL-14) — the last two share `watch_contact`'s shape exactly (no area, no success/timeout lifecycle).
 - `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6. And `seen_world_direction`, whose one caller is `sight_head.py` (BL-B80).
-- `src/belief/sight_head.py` — `SightHead` (BL-B80, `plans/9k113-sight-pointing/plan.md`): Petrovich's simulated 9K113 sight — gyro world-stabilised, gimbal-limited, slew-rate-limited — and the "Aim source" selection rule (`seen`/`held`/`belief`). Advanced once per poll by `logger.py`; the real DCS sight is a best-effort slave of it, outside this process entirely.
+- `src/belief/sight_head.py` — `SightHead` (BL-B80, `plans/9k113-sight-pointing/plan.md`): Petrovich's simulated 9K113 sight — gyro world-stabilised, gimbal-limited, slew-rate-limited — and the "Aim source" selection rule (`seen`/`held`/`belief`). Advanced once per poll by `body.py`; the real DCS sight is a best-effort slave of it, outside this process entirely.
 - `src/belief/sight_effector.py` — `GuidanceUnitState` (the 9K113 lamps/switches *readback*
   only: `sight_ready`, `refresh_readback`) and `write_sight_target` (BL-B80). Switch *sequencing*
   moved out of this module to the effector engine below. `refresh_readback` reads the continuous
@@ -477,7 +477,7 @@ Belief — observation *consumption*:
   **`mission-start`/`mission-start-in-air` triggers** (explore-notes, "Two new triggers: mission
   start"): `mission-start` fires once per DCS mission (re)start, on the ground or in the air;
   `mission-start-in-air` fires immediately after it, same poll, only when that same sample is
-  airborne. `logger.py`'s poll block fires both (never `_check_for_new_mission` itself, which runs
+  airborne. `body.py`'s poll block fires both (never `_check_for_new_mission` itself, which runs
   before that poll's own ownship sample exists) once it trusts the ownship sample is not the
   previous mission's stale cached one — `runner.mission_start_fresh_sample_baseline_t_sim` (the
   `last_t_sim` held immediately before the reset) is compared by `!=`, not `<`, against each
@@ -516,7 +516,7 @@ Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory
   never the reverse — `tool_api.py` is the one `belief/` file allowed to import `mission_memory`,
   grep-enforced against `src/belief/*.py` by
   `tests/test_mission_memory_import_direction.py`. `crew_console.py`'s need to drive a write
-  without importing `mission_memory` is resolved by closure injection in `logger.py` (the same
+  without importing `mission_memory` is resolved by closure injection in `body.py` (the same
   pattern `speech_log_sink` already uses), not an exception to the rule.
 
 Surfaces and transports:
@@ -528,7 +528,7 @@ Surfaces and transports:
 - `src/belief/brain_client.py`, `src/belief/brain_reply.py` — the brain-layer HTTP seam and structured-reply handling.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API. `push_text_line` and the other writes **raise** rather than swallow; the caller's try/except is the designed catch point.
 - `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`).
-- `src/logger.py` — the poll-loop entrypoint and every `--flag` branch. `main()`'s CLI wiring is untested by design; the runners are tested against fakes.
+- `src/body.py` — the poll-loop entrypoint and every `--flag` branch. `main()`'s CLI wiring is untested by design; the runners are tested against fakes.
 - `src/detection_trace_writer.py` — the sanctioned ground-truth-plus-belief join. Read-only, one-directional, buffered off the poll loop's critical path.
 - `src/run_log_paths.py` — per-run log filenames (`BL-11` Stage 5). The three JSONL logs roll per run rather than appending across sorties, so **the path passed on the command line is not the path written** — see `RUN.md`.
 - `src/replay.py` — the BL-0 replay harness; drives any `PerceptionSource` over recorded ownship states.

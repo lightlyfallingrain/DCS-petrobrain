@@ -16,7 +16,7 @@ surviving a mission restart unnoticed.
 The orchestration tests at the bottom (`_reset_mission_state`/`_check_for_
 new_mission`) are unit tests against `logger`'s private functions directly
 -- the wiring-level proof that the real poll loops actually reach them is
-`test_logger.py::test_crew_text_poll_loop_resets_belief_on_mission_restart`.
+`test_body.py::test_crew_text_poll_loop_resets_belief_on_mission_restart`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.tasks import TaskStore
-from logger import (
+from body import (
     ConsolePerceptionRunner,
     _check_for_new_mission,
     _enter_refusal_mode,
@@ -248,7 +248,7 @@ def test_crew_console_reset_preserves_silenced_true() -> None:
     assert crew_console.silenced is True
 
 
-# --- _reset_mission_state / _check_for_new_mission (logger.py) -------------
+# --- _reset_mission_state / _check_for_new_mission (body.py) -------------
 
 
 class _FakeMissionStartClient:
@@ -469,7 +469,7 @@ def test_reset_mission_state_is_a_noop_for_fired_on_tracker_when_omitted() -> No
 
 def _build_region_store(path: Path, theatre: str) -> None:
     """A minimal on-disk world-model store whose embedded `Region.theatre`
-    is `theatre` -- mirrors `test_logger.py`'s own
+    is `theatre` -- mirrors `test_body.py`'s own
     `test_main_rejects_world_model_db_theatre_mismatch` fixture pattern."""
     conn = open_for_build(path)
     insert_region(

@@ -1702,7 +1702,7 @@ def _apply_active_gaze(
     # `BL-B64` Stage 2, direction §6 -- the 1 s hand movement. `None`
     # (the default) on every pre-existing `OpticState`, so this is a
     # true no-op until the pilot's "Observ on"/"Observ off" command sets
-    # it (`logger.py`'s poll loop).
+    # it (`body.py`'s poll loop).
     suppressed_until_sim = (
         optic_state.hands_busy_until_sim if optic_state is not None else None
     )
@@ -2286,7 +2286,7 @@ def _reset_mission_state(
     reasoning `_check_for_new_mission`'s own `world_model_dir`/`trace_sink`/
     `forest_occlusion` defaults give, see that function's docstring) --
     `None` only arises if a future caller genuinely has no tracker to
-    reset, since both of `logger.py`'s own poll loops always build one.
+    reset, since both of `body.py`'s own poll loops always build one.
     Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
     `FiredOnTracker` predates `BL-15` and was not brought under this
     mechanism when it was built -- see its own `reset_for_new_mission`
@@ -4555,7 +4555,7 @@ def _configure_logger_for_main() -> None:
 
     **Deliberately scoped to this module's own logger instance, never
     `logging.basicConfig`/the root logger.** `main()` is this subproject's
-    own standalone entrypoint (`python -m logger ...`), so touching
+    own standalone entrypoint (`python -m body ...`), so touching
     logging configuration here is defensible -- but a global
     `basicConfig` call would do two things this fix does not want: clobber
     a host application's own logging setup if this module were ever
@@ -4566,7 +4566,7 @@ def _configure_logger_for_main() -> None:
     fix exists to close in the opposite direction. Named loggers
     (`logging.getLogger(__name__)`) are independent of each other unless
     one's name is a dotted child of another's; `"logger"` (this module's
-    `__name__` when run via `python -m logger`) is not a parent of
+    `__name__` when run via `python -m body`) is not a parent of
     `"perception.hybrid_source"` or `"belief.crew_console"`, so this call
     cannot reach them.
 
@@ -4585,7 +4585,7 @@ def _configure_logger_for_main() -> None:
 
 
 def main() -> None:
-    """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
+    """CLI entrypoint: `python -m body --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
     fixed interval against a real `HybridPerceptionSource` and (PB-1.5)
     `NakedEyePerceptionSource` until interrupted. Not exercised by automated

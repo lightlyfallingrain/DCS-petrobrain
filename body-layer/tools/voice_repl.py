@@ -7,7 +7,7 @@ verb_anchored, ambiguous}` and decides what to do with it. This script builds
 a `CrewConsole` over an empty `ContactStore` and drops you into its REPL, so
 the act/confirm/say-again bands can be exercised by typing.
 
-It exists because the obvious route -- `python -m logger --crew-text` -- needs
+It exists because the obvious route -- `python -m body --crew-text` -- needs
 `--aircraft-layer-url`, `--theatre` and `--world-model-db`, all three
 required, which means a running aircraft layer and therefore the Windows box.
 That would gate a behaviour that has no hardware in it on hardware being

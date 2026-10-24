@@ -43,7 +43,7 @@ region whose coverage includes wherever you are flying.
 
 ```zsh
 cd body-layer
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
+PYTHONPATH=src:../world-model/src .venv/bin/python -m body \
   --aircraft-layer-url http://192.168.1.50:7791 \
   --theatre Syria \
   --world-model-db ../world-model/data/syria-full.sqlite
@@ -54,7 +54,7 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
 ```bat
 cd body-layer
 set PYTHONPATH=src;..\world-model\src
-.venv\Scripts\python -m logger ^
+.venv\Scripts\python -m body ^
   --aircraft-layer-url http://192.168.1.50:7791 ^
   --theatre Syria ^
   --world-model-db ..\world-model\data\syria-full.sqlite
@@ -62,7 +62,7 @@ set PYTHONPATH=src;..\world-model\src
 
 Two things that will bite:
 
-- **The venv interpreter is not optional.** Plain `python -m logger` fails with
+- **The venv interpreter is not optional.** Plain `python -m body` fails with
   `ModuleNotFoundError: No module named 'pyproj'` once it reaches the
   world-model import chain. Either use the `.venv/bin/python` prefix or
   `source .venv/bin/activate` first (`.venv\Scripts\activate.bat` on Windows).

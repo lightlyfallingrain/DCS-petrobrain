@@ -21,7 +21,7 @@ from typing import cast
 
 from aircraft_client import AircraftLayerClient
 from belief.enrichment import EnrichmentContext
-from logger import ConsolePerceptionRunner, _mark_here_fn, _mark_target_fn
+from body import ConsolePerceptionRunner, _mark_here_fn, _mark_target_fn
 from mission_memory.entries import MarkPayload
 from mission_memory.store import MissionMemory
 from perception.geometry import open_world_model

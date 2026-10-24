@@ -45,7 +45,7 @@ known-first-party = [
     "perception",
     "aircraft_client",
     "replay",
-    "logger",
+    "body",
     "coordinates",
     "geometry",
     "query",

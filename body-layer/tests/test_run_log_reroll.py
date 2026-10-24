@@ -4,7 +4,7 @@ mission (re)start, the per-run logs roll to a fresh stamped filename, the
 same mechanism `BL-11` Stage 5 already applies once at process start.
 
 Exercises the mechanism directly (not through a real poll loop thread) --
-`test_logger.py`'s own poll-loop tests are the wiring-level proof that the
+`test_body.py`'s own poll-loop tests are the wiring-level proof that the
 real loops call this at the right point."""
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from typing import cast
 from aircraft_client import AircraftLayerClient
 from belief.crew_console import CrewConsole
 from belief_truth_log import BeliefTruthLogWriter
+from body import ConsolePerceptionRunner, _reroll_run_logs, _speech_log_sink
 from detection_trace_writer import DetectionTraceWriter
-from logger import ConsolePerceptionRunner, _reroll_run_logs, _speech_log_sink
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
 from sight_trace_writer import SightTraceWriter

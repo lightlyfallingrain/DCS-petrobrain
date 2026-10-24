@@ -173,7 +173,7 @@ def test_write_sight_target_raises_on_a_failed_write() -> None:
 # --- single construction site (plan's "Construction-site check") -------
 
 
-def test_guidance_unit_state_is_constructed_in_exactly_one_place_in_logger_py() -> None:
+def test_guidance_unit_state_is_constructed_in_exactly_one_place_in_body_py() -> None:
     """`ConsolePerceptionRunner`'s `field(default_factory=GuidanceUnitState)`
     is the plan's named single construction site -- grepped, not counted
     by eye, per the `BL-B71` lesson the plan explicitly transfers here
@@ -182,13 +182,13 @@ def test_guidance_unit_state_is_constructed_in_exactly_one_place_in_logger_py() 
     machinery calls it -- so this checks for the factory reference itself,
     not a call-shaped substring (unlike the sibling test below, which
     checks `sight_effector.py` never calls this constructor directly)."""
-    text = (_SRC / "logger.py").read_text()
+    text = (_SRC / "body.py").read_text()
     hits = re.findall(r"default_factory=GuidanceUnitState\b", text)
     assert len(hits) == 1, (
         f"expected exactly one `default_factory=GuidanceUnitState` "
-        f"construction site in logger.py, found {len(hits)}"
+        f"construction site in body.py, found {len(hits)}"
     )
-    # And no *literal* construction call anywhere in logger.py either --
+    # And no *literal* construction call anywhere in body.py either --
     # `reset_for_new_mission`'s re-run `__init__` reaches the same single
     # factory above, never a second, independent `GuidanceUnitState(...)`.
     assert re.findall(r"\bGuidanceUnitState\(", text) == []

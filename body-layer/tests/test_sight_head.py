@@ -97,15 +97,15 @@ def test_fence_f2_seen_world_direction_only_in_attack_run_and_sight_head() -> No
     assert _SEEN_WORLD_DIRECTION_PATTERN.search(inspect.getsource(sight_head_module))
 
 
-def test_fence_f3_sight_head_imported_only_by_logger_and_trace_writer() -> None:
-    """`sight_head` is imported in `src/` only by `logger.py` and `sight_
+def test_fence_f3_sight_head_imported_only_by_body_and_trace_writer() -> None:
+    """`sight_head` is imported in `src/` only by `body.py` and `sight_
     trace_writer.py`; nothing under `belief/`/`mission_memory/` imports it
     (other than `sight_head.py` itself, which does not import its own
     module by that name), and `belief.tools`/`tool_api`/`crew_console`/
     `speech` never mention `SightHead`."""
     src_dir = pathlib.Path(inspect.getfile(sight_head_module)).parent.parent
 
-    allowed_importers = {"logger.py", "sight_trace_writer.py"}
+    allowed_importers = {"body.py", "sight_trace_writer.py"}
     checked_any = False
     for path in src_dir.rglob("*.py"):
         if path.name == "sight_head.py":
