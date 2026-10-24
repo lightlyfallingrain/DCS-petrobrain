@@ -1328,6 +1328,15 @@ local sight_stall_window_start_t = nil
 local sight_stall_window_start_mark_az = nil
 local sight_stalled = false
 local sight_stall_count = 0
+-- `docs/acceptance/2026-10-24-sortie-feedback.md` F1: whether OBSERV was
+-- on as of the *previous* frame this function ran -- the only state
+-- `sight_observ_transition` needs to tell an on->off edge (write the
+-- axes to zero once) from every other off frame (write nothing) or an
+-- off frame that was never preceded by an on one (also write nothing;
+-- there is no stale command to clear). Reset in `LuaExportStop`, same
+-- "a stale target must never survive" reasoning as the rest of this
+-- block.
+local sight_was_observ_on = false
 
 -- Stores the persistent world goal from a `sight_target` command --
 -- external state, held across frames exactly like `pending_release_t` is
@@ -1361,6 +1370,21 @@ local function handle_sight_target_command(goal_az_deg, goal_el_deg, rate_az_deg
     sight_goal_t_sim = t_sim
 end
 
+-- `docs/acceptance/2026-10-24-sortie-feedback.md` F1: "when observ is
+-- turned OFF, ... write 0 to both axis, but only once. Then stop writing
+-- the axis values. We should only write axis values when observ is ON."
+-- Pure decision, factored out of `run_sight_servo` so it is testable
+-- without a DCS environment (`tests/test_sight_servo_lua.py`): given
+-- this frame's `observ_on` and whether OBSERV was on as of the previous
+-- frame, returns whether this frame is the one-time on->off edge that
+-- must write (0, 0), and the `was_on` value to carry into next frame.
+local function sight_observ_transition(observ_on, was_on)
+    if observ_on then
+        return false, true
+    end
+    return was_on, false
+end
+
 -- Export.lua's per-frame DCS-slave servo (`plans/9k113-sight-pointing/
 -- plan.md`'s "Export.lua run_sight_servo(t)" design-detail section) --
 -- tracks the world goal body-layer last sent, in airframe axes converted
@@ -1371,14 +1395,22 @@ end
 -- other per-frame function in this file.
 --
 -- **Must stay below `safe_call`/`sight_point_quiet`/`sight_rate_limit_
--- step`/`sight_world_to_body`/`sight_mark_to_body_deg`** -- same
--- reasoning as every other function in this file that was found calling
--- a `local` declared below itself.
+-- step`/`sight_world_to_body`/`sight_mark_to_body_deg`/`sight_observ_
+-- transition`** -- same reasoning as every other function in this file
+-- that was found calling a `local` declared below itself.
 local function run_sight_servo(t)
     local observe = safe_call(function()
         return GetDevice(0):get_argument_value(ARG_OBSERVE)
     end)
     local observ_on = type(observe) == "number" and observe >= 0.5
+
+    -- F1 fix: decide the one-time falling-edge zero write *before* any
+    -- of this frame's other state is touched, from the previous frame's
+    -- `sight_was_observ_on` -- `dt`/`sight_last_frame_t` below are
+    -- unrelated to this and must not be read as a proxy for it (a first
+    -- frame has `sight_last_frame_t == nil` regardless of OBSERV state).
+    local observ_falling_edge, new_was_observ_on = sight_observ_transition(observ_on, sight_was_observ_on)
+    sight_was_observ_on = new_was_observ_on
 
     local dt = 0.0
     if sight_last_frame_t ~= nil then
@@ -1403,6 +1435,20 @@ local function run_sight_servo(t)
         sight_error_el_deg = nil
         sight_stall_window_start_t = nil
         sight_stalled = false
+        if observ_falling_edge then
+            -- F1: the one-time zero write on the on->off edge -- 0 is
+            -- centre for both axes at this function's own convention
+            -- (`write_az_cmd`/`write_el_cmd` are both 0 at write_az_deg/
+            -- write_el_deg == 0), and matches the probe findings that a
+            -- centred/no-command axis reads back 0
+            -- (`aircraft-layer/research/2026-10-21-9k113-slew-readback-
+            -- probe-findings.md`). No further writes happen on any
+            -- later off frame -- `observ_falling_edge` is only ever true
+            -- on the one frame the edge occurs.
+            sight_point_quiet(0.0, 0.0)
+            sight_last_write_az_cmd = 0.0
+            sight_last_write_el_cmd = 0.0
+        end
         return
     end
 
@@ -1770,6 +1816,13 @@ function LuaExportStop()
     sight_stall_window_start_t = nil
     sight_stalled = false
     sight_stall_count = 0
+    -- F1 fix: a mission end/restart is not an observed OBSERV falling
+    -- edge either (same reasoning as the rest of this block) -- without
+    -- this, `sight_was_observ_on` could stay `true` from the sortie
+    -- that just ended, so the new sortie's first off frame would wrongly
+    -- fire the one-time zero write before OBSERV has even been read
+    -- this mission.
+    sight_was_observ_on = false
     -- plans/spu8-intercom/plan.md Stage 4: reset so a mission restart
     -- re-triggers the 5-second wait rather than staying latched from a
     -- previous sortie.
