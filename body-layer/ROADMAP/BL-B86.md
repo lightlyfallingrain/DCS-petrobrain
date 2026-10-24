@@ -1,6 +1,12 @@
-# BL-B86 — above ~3.6–4 km AGL the sight's idle search cycle goes fully idle (free/ahead scan)
+# BL-B86 — above ~3.6–4 km AGL the sight's idle search cycle goes fully idle (free/ahead scan), declined
 
-- [ ] **BL-B86 — Found by the Reviewer re-review of the `9k113-narrow-search` elevation
+- [x] **BL-B86 — DECLINED 2026-10-25 by user direction: outside the operating envelope.** #status/done
+  *"if B86's only thing is the high alt scan then reject it."* It is: every effect it describes is the
+  idle cycle emptying at high altitude. One residue for `[[BL-B89]]`, not this entry: the threshold
+  moves with pitch, and nose-up lowers it, so BL-B89's tests should include a nose-up attitude inside
+  50–800 m AGL.
+
+  Original finding: Found by the Reviewer re-review of the `9k113-narrow-search` elevation
   field-of-regard security fix (`plans/9k113-narrow-search/security-review.md` Required Fix 1,
   closed by commit `bb6364b0`), by direct measurement, not by inspection: once the fix correctly
   filters `_sight_in_regard_sweep`'s steps through `within_field_of_regard`, a **free scan** or a
@@ -9,7 +15,7 @@
   produces an out-of-regard remainder (`logger._sight_out_of_regard_sweep` returns `[]` for both,
   by construction) — the idle search cycle has nothing left to step through at all and falls to
   `_idle_sight_rest`: the sight stops searching entirely and holds a fixed aim (last position, or
-  dead-ahead/level) until something becomes worth a look.** #status/open
+  dead-ahead/level) until something becomes worth a look.
 
   **Measured** (this branch's tuned constants, `SIGHT_SEARCH_NEAR_M=2333`/`MID_M=5647`/
   `FAR_M=13556`, `_SIGHT_WIDE_SEARCH_FAR_M≈8282`): `wide`/`narrow_near` already empty out by

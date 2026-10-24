@@ -57,3 +57,8 @@ So the design and the tests target 50–800 m AGL, with 1000–2000 m as a rare 
 work. Above 2000 m is out of scope. `[[BL-B86]]` (the cycle goes idle above ~3.6–4 km AGL) is folded
 in only as far as it falls out of the design naturally: no special handling and no tests above
 2000 m.
+
+**`[[BL-B86]]` declined, 2026-10-25.** *"if B86's only thing is the high alt scan then reject it."*
+It was, so it is declined, not folded in. One residue carries into this plan: the altitude at which
+a band empties moves with pitch, and nose-up lowers it. Test the scan at a nose-up attitude within
+50–800 m AGL.
