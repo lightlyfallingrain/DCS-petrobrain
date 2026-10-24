@@ -27,7 +27,11 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R11 | Curated registry + sequence files at `body-layer/config/effectors.toml` / `body-layer/config/effector-sequences/*.md` | **`body-layer/config/sequences/`** — `effectors.toml`, `*.md` sequence files, and the generated `switch-reference.md` all live there; the raw dump stays at `body-layer/config/effectors-raw.toml` | User, 2026-10-23: first "sequence files ... go to body-layer/sequences/", then corrected mid-Stage-1 to "body-layer/config/sequences is better" |
 | R12 | Takeoff rows carry an explicit `<effector> != on` self-condition (D3/R5) | **The engine itself skips a switch row whose effector's OBSERVED readback already equals the row's target value** — no write, no step delay, no speech — for *every* trigger, not only takeoff; the takeoff file's self-conditions are removed as redundant. If that readback is still unknown after `EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (an absolute-value write is harmless if the switch was already there) — this is the opposite of an explicit `condition` cell's unknown-timeout, which *skips* (D3, unchanged). Explicit `condition` cells are reserved for genuine cross-switch dependencies, which no shipped file needs this cut. | User, 2026-10-23, verbatim: *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that switch is already in set position, so no action. I'll use the conditions for real this-depends-on-some-other-condition cases."* Reversible (main loop's own call on the unknown-timeout writing rather than skipping) — flagged in `implementation.md`. |
 | R13 | One flat registry + sequences directory, a device/cmd/arg collision drops *both* entries (D5) | **Per-aircraft layout**: `config/sequences/<aircraft-dir>/effectors.toml`, `.../switch-reference.md`, `.../copilot-<trigger>.md` (the `mi-24p-` filename prefix drops now the directory carries it); the raw dump moves to `config/effectors-raw/<aircraft-dir>.toml`. `<aircraft-dir>` is a sequence file's own `aircraft` header value, lower-cased (`Mi-24P` → `mi-24p`) — stated once, in `effector_registry.aircraft_dir_name`, and never re-derived elsewhere. The loader loads one registry per aircraft directory; a sequence file resolves effectors only against its own aircraft's registry, and an `aircraft` header that does not map to the directory it was found in is a file error (D5-collected, not fatal); each aircraft directory is independent — a bad registry in one disables only that aircraft's sequences, never another's. **Collision rule also changes**: the *first* curated entry (TOML file order) to claim a `(device, cmd, arg)` triple wins; every later one is rejected with a non-fatal error naming the triple and the winner — not "drop both" (superseded, see below). | User, 2026-10-23, verbatim: *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at this time, better to be ready now."* Shape (directory names, filename-prefix drop) is the main loop's own reversible choice, logged in `implementation.md`. |
+| R15 | Stage 4 = "design as 2026-10-21, corrected for reduction" (one paragraph, not specified) | **Specified, 2026-10-24 — see "Stage 4 — watched-args readback (spec)"**. The fixed per-frame `push_cockpit_switch_state` line (9 args) is **retired whole**, lamps included; body-layer declares one watched set (sequence-file args ∪ three code-consumer args), `Export.lua` reads only those inside its existing 5 Hz export tick, raw values, change-gated, echoing a content-derived `watch_id` so body-layer knows when to re-send. `/cockpit_switch/latest` and `CockpitSwitchState` are removed; the new feed reuses Stage 2's `"args"` map shape so `effector_engine` does not change. | User, 2026-10-23 (explore-notes "Readback rate and scope"); *"Go ahead with BL-B90 last stage"*, 2026-10-24. Per-arg consumer audit in the spec: no consumer of that line reads it faster than body-layer's 1 Hz poll, and the two args the Lua servo needs per frame (886/898) it already reads itself. |
 | R14 | Five triggers (`takeoff`/`observ-on`/`observ-off`/`weapons-arm`/`weapons-safe`), each `cardinality="every_time"` | **Two more**, `mission-start`/`mission-start-in-air`, both `cardinality="once"` (per mission) — fired by `logger.py`'s poll block once it has a *fresh* post-restart ownship sample (never the stale pre-restart one `GET /telemetry/latest` may still be serving), per D2's "mission (re)start re-runs the runner `__init__`" for the pending-flag fields this adds. **`TAKEOFF` no longer fires on an air start** — only a real observed ground→air transition fires it now; the air-start case fires `MISSION_START`/`MISSION_START_IN_AIR` instead. **A body-layer process start/restart against an already-running mission fires neither** (unchanged: `_check_for_new_mission`'s pre-existing first-poll rule already refused to treat that as a reset). No sequence file ships for either new trigger this cut — a trigger with no loaded file fires into nothing. | User, 2026-10-23, verbatim: *"Add trigger for mission-start that fires once at every mission start and separate for mission-start-in-air that fires once at mission start only if airborne (AGL > 10 m)"*; *"No, only real takeoffs"*; *"No, only real mission starts"* (explore-notes, "Two new triggers: mission start"). |
+
+- **2026-10-24 — Stage 4 specified** (R15, plan only), at `5b33b7b7`: "Stage 4 — watched-args
+  readback (spec)". Three new Decisions items (4–6), all with recommendations.
 
 Superseded text that a later reader needs is kept in "Superseded (2026-10-21 text)" at the end,
 not deleted.
@@ -608,13 +612,8 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
   against an older collector: no `args` key → readback unknown → D3 waits then skips; log one
   WARNING "cockpit_switch feed has no args map — update the collector".
 
-**Stage 4 (last stage, in scope — not deferred, R7 2026-10-23)** — the generic low-rate/on-demand
-switch readback, replacing BL-B80's per-frame push of the six switch args. Design as 2026-10-21
-(kept below, "Superseded (2026-10-21 text)"), with the 2026-10-23 scope correction: **move the six
-switch args off the per-frame feed**, not merely add a parallel low-rate one — the user's "better
-not do it every frame" / "query a set of switches when they are needed, not everything" is a
-reduction, not an addition, for switch positions specifically (axis args stay per-frame, per
-BL-B80, unaffected).
+**Stage 4 (last stage, in scope — R7/R15)** — full file list in "Stage 4 — watched-args readback
+(spec)" below. The 2026-10-23 one-paragraph version of this entry is under "Superseded".
 
 ---
 
@@ -647,18 +646,419 @@ BL-B80, unaffected).
    on"/"Observ off"; "weapons armed"/"weapons safe"; one air start → no "Guidance unit ready" at
    spawn; one deliberately broken sequence file (typo in an effector name) → console banner at
    start, the error line once the intercom is on, everything else still works. ~10 minutes.
-4. **Stage 4 — generic low-rate readback, BL-B90's last stage** (R7, user direction 2026-10-23,
-   explore-notes "Readback rate and scope" — *"we'll be reading a lot of args eventually. Better
-   not do it every frame... If possible, query a set of switches when they are needed, not
-   everything. This at DCS export level if possible, for performance reasons. Ok to defer to
-   later stage, but will be needed soonish. Let's say BL-B90 last step."* **In scope for this
-   milestone, run after Stage 3's card** — not a backlog item, and not merely additive: the six
-   switch args move off BL-B80's per-frame `cockpit_switch` push onto the lower-rate
-   poll, ideally an on-demand query of just the set of switches a loaded sequence actually
-   references, done at `Export.lua`/DCS-export level for the performance win the user asked for.
-   Axis args (BL-B80's own slew-rate reads) are unaffected — this is switch positions only.
-   Design as 2026-10-21 (below, "Superseded (2026-10-21 text)"), corrected for this reduction
-   rather than addition. Needs an `Export.lua` redeploy on the Windows DCS machine.
+4. **Stage 4 — watched-args readback, BL-B90's last stage.** Spec, stages 4a–4d and tests:
+   "Stage 4 — watched-args readback (spec)" below. Built **before** Stage 3's card is flown (user,
+   2026-10-24: *"Go ahead with BL-B90 last stage"*), so a single card on the Stage 4 branch covers
+   both. Its own batch: one performance pass and one security pass after 4c. Needs an `Export.lua`
+   redeploy on the Windows DCS machine.
+
+---
+
+## Stage 4 — watched-args readback (spec, 2026-10-24)
+
+**Goal.** Switch positions leave `Export.lua`'s per-frame work. Body-layer declares the set of
+args it actually needs. `Export.lua` reads only those, inside its existing 5 Hz export tick, and
+sends them on change. The aircraft-layer↔body-layer boundary stays HTTP/JSON.
+
+### 4.1 Which args move: a measured audit of `push_cockpit_switch_state`
+
+Read from the code at `5b33b7b7`. Body-layer polls at **1 Hz** (`_DEFAULT_POLL_INTERVAL_S = 1.0`)
+and reads `/cockpit_switch/latest` **once per poll** (`logger.py` ~3548). The collector's
+`CockpitSwitchCache` keeps the latest sample only, and no other process reads that endpoint (repo
+grep: body-layer only). So whatever `Export.lua` pushes per frame is effectively consumed at 1 Hz.
+
+| Arg | What | Who reads it on the Python side | Rate it needs | Per-frame Lua reader (unchanged) | After Stage 4 |
+|---|---|---|---|---|---|
+| 773 | MISSILE POWER | engine self-check (`copilot-takeoff.md`) | 1 Hz poll | — | watched via sequence file |
+| 761 | CPLR DISTR (unverified) | same | 1 Hz | — | watched via sequence file |
+| 885 | Sight Power | same | 1 Hz | — | watched via sequence file |
+| 955 | ЩО PWR B1 | same | 1 Hz | — | watched via sequence file |
+| 886 | OBSERV | `home_phase` derivation, `SightHead`'s `head_will_be_free`, `sight_trace_writer`; observ-on/off self-check | 1 Hz | `run_sight_servo`, `push_slew_trace` read 886 **themselves** | watched as a **code consumer** (and via sequence) |
+| 673 | weapons safety bar | weapons-arm/safe self-check; `weapon_safety_observed` (**no reader**, carried for BL-B67) | 1 Hz | — | watched via sequence file only |
+| 898 | Л5 align lamp | `SightHead.mode` caged→free | 1 Hz | `run_sight_servo` reads 898 **itself** | watched as a **code consumer** |
+| 960 | READY lamp | `sight_ready()` gate; "Guidance unit ready" edge | 1 Hz (edge = two consecutive polls) | — | watched as a **code consumer** |
+| 962 | launch permission lamp | `launch_perm_observed` (**no reader**, carried for BL-B67) | none today | — | **not watched**. BL-B67 adds it to the code set (one int) when it gains a reader |
+
+**Conclusion: the whole line goes, lamps included.** No consumer of this line needs it faster than
+the 1 Hz poll. The per-frame needs (886/898 for the slew servo) are already met by
+`run_sight_servo`'s own reads, which this stage does not touch. **Axis args are untouched**:
+566/555 (mark), the AI-axis writes and `push_sight_servo_state` stay as they are.
+
+**What the 5 Hz tick costs the edge detectors.** A change now reaches the collector up to 0.2 s
+later than before (one export tick). The 1 Hz poll already adds up to 1 s. A lamp blip shorter than
+200 ms can now be missed, but the 1 Hz poll misses one anyway. **No behaviour visible to the pilot
+changes** beyond ≤ 0.2 s on "Guidance unit ready" and on the `home_phase` follow.
+
+### 4.2 Wire shape
+
+**Inbound op** (body-layer → `POST /command/watch_args` → `CommandSender` → loopback UDP 7793 →
+`Export.lua`'s existing command listener):
+
+```json
+{"op": "watch_args", "watch_id": "3f9a0c21b7d4", "args": [673, 761, 773, 885, 886, 898, 955, 960]}
+```
+
+- **`watch_id` is derived from the content**: the first 12 hex digits of `sha1` over the sorted,
+  comma-joined arg list. It is not a counter. With a counter, a restarted body-layer would send id 1
+  again while `Export.lua` still held the previous process's id 1, which may be a different set if
+  a sequence file was edited in between. With a content hash, the same set means the same id, which
+  is the property the confirmation check needs.
+- **Replace, never merge.** Each op installs exactly its own set. An empty list is valid and
+  clears the set.
+
+**Outbound line** (`Export.lua` → collector TCP, inside the 5 Hz tick):
+
+```json
+{"t": 123.456, "watch_id": "3f9a0c21b7d4", "watched": {"673": 0.000, "761": 1.000, "773": 1.000}}
+```
+
+- Raw values, `%.3f`, keyed by arg number as a string. **The `"args"` map shape Stage 2 already
+  feeds the engine**, so `effector_engine.observed_value` (`readback.get(str(arg))`) and `advance`
+  stay as they are.
+- An arg whose read failed (`pcall` false or `nil`) is **omitted**, never sent as 0. Absent means
+  unknown, the D3 posture.
+- The wire key `"watch_id"` is how `collector.server._handle_line` tells this line kind apart, the
+  same way `"missl_pw"`/`"net1"` do today.
+
+**Lamps are now raw, and body-layer decides.** `Export.lua` used to threshold 898/960/962 to
+booleans (`>= 0.5`). It now sends raw, and `sight_effector.refresh_readback` applies the same
+`>= 0.5`. The rule and the threshold are unchanged; only where they run moves, to the side where
+they can be tested without a redeploy. The PTT feed (`push_ptt_state`) is the precedent.
+
+### 4.3 `Export.lua`
+
+Version **`EXPORT_SCRIPT_VERSION = "2026-10-24"`**, plus `EXPECTED_EXPORT_VERSION` in the same
+commit. The change is **non-additive** (a line is removed, and a new op and a new line are added),
+so the bump is load-bearing.
+
+- **Delete** `push_cockpit_switch_state`, its nine `last_*_sent` locals, and its call in
+  `LuaExportAfterNextFrame`. **Keep** `ARG_OBSERVE`/`ARG_ALIGN_LAMP`: `run_sight_servo` and
+  `push_slew_trace` use them. Delete the other `ARG_*` switch/lamp constants that only that
+  function read (Implementer: grep each before deleting).
+- **New module state** (declared **above** every function that uses it; see the no-hoisting rule
+  in `aircraft-layer/CLAUDE.md`. `test_dcs_export_lua_local_order.py` catches a miss):
+  `watched_args` (sorted array of ints, empty), `watched_id` (`nil`), `watched_last_sent` (table
+  arg→value, empty), `watched_force_send` (`false`).
+- **Three pure `local function`s**, so the existing extraction harness can test them with no DCS:
+  - `parse_watch_args(json_text)` → `(watch_id, args)` or `(nil, reason)`. `watch_id` comes from
+    `extract_json_string_field` (`[%w_]+`) and must be 1–16 characters. The list is captured with
+    `'"args"%s*:%s*%[([^%]]*)%]'`. Each comma-separated token, trimmed, must match `^%d+$`, have
+    ≤ 4 digits and be ≤ `MAX_WATCHED_ARG_NUMBER` (**4095**; the Mi-24P dump's args run 0–1034).
+    Duplicates are dropped and the result sorted. More than `MAX_WATCHED_ARGS` (**64**) after
+    dedupe **rejects the whole op**. It never truncates: a truncated set would look installed while
+    silently missing args. Any bad token rejects the whole op. Rejected → `debug_log` with the
+    reason, and the previous set stays installed.
+  - `watched_args_changed(last_sent, values, epsilon)` → bool: true if any key was added or removed,
+    or any value moved by ≥ `epsilon`. It reuses `COCKPIT_SWITCH_EPSILON` (0.01), renamed
+    `WATCHED_ARG_EPSILON` since its old owner is gone.
+  - `encode_watched_args_line(t, watch_id, args, values)` → the line above. Keys are emitted in
+    `args` order, and `nil` values are skipped.
+- **`handle_watch_args_command(data)`** (dispatched from `poll_command_socket`'s new
+  `op == "watch_args"` branch): on success, install `watched_args`/`watched_id`, clear
+  `watched_last_sent`, set `watched_force_send = true`, and `debug_log("watch_args installed id=…
+  n=…")`. **An identical re-send still forces a send**, because body-layer re-sends precisely when
+  it has not seen confirmation.
+- **`push_watched_args_state(t)`** is called **inside the 5 Hz section**, after the telemetry
+  line's send succeeds (so `client` is alive and `LoGetSelfData` worked, meaning we are in the
+  cockpit). If `#watched_args == 0`, return. Fetch `GetDevice(0)` **once** per tick (pcall), then
+  read each arg with `pcall(dev.get_argument_value, dev, arg)`, with no per-arg closure. This also
+  answers the performance reviewer's standing "one `GetDevice(0)` per field" note
+  (`performance-reviewer/project_export_lua_per_frame_push_functions.md`). Send if
+  `watched_force_send` or `watched_args_changed(...)`, then update `watched_last_sent` and clear
+  the flag. A failed send closes the client, the same as every other push.
+- **Reconnect → full snapshot.** Set `watched_force_send = true` wherever `try_connect()` returns
+  a socket (both call sites). This covers a collector restart. **Pre-existing gap, fixed as a side
+  effect**: today's change-gated cockpit-switch line never resends after a reconnect, so a
+  restarted collector serves `null` until a switch moves.
+- **`LuaExportStop`**: reset all four new locals, following the file's own "a stale X must never
+  survive" convention (`sight_goal_*`, `pending_release_t`).
+- **Not tunable.** The rate is the existing `EXPORT_INTERVAL_S` throttle. The user's "the normal
+  lower frequency poll is enough" is this tick, so no second timer is invented. `tuning.py` does
+  not exist on this side anyway. If a slower rate is ever wanted, the op can carry an interval
+  later.
+
+### 4.4 aircraft-layer Python
+
+- **New** `src/schema/watched_args.py`: `WatchedArgsState(dcs_model_time_s, received_wall_clock_s,
+  watch_id: str, values: Mapping[int, float])`, frozen. `from_dict` validates `watch_id` against
+  `^[A-Za-z0-9_]{1,16}$`. Every `watched` key must be a decimal string in 0..4095. Every value must
+  be a finite, non-bool number (`math.isfinite`; see `dod/project_recurring_unguarded_nonfinite_
+  float_before_conversion.md`). The number of keys must be ≤ 64. `to_api_dict()` →
+  `{"t", "received_wall_clock_s", "watch_id", "args": {"<arg>": raw}}`. Re-exported from
+  `schema/__init__.py`.
+- **New** `WatchedArgsCache` in `collector/cache.py`: the `CockpitSwitchCache` shape plus
+  **`clear()`**.
+- `collector/server.py._handle_line`:
+  - new `"watch_id" in data` branch (ahead of the telemetry fallthrough, the same reasoning as the
+    other branches);
+  - **on every `export_version` line, `watched_args_cache.clear()`**. A version line means a new
+    `Export.lua` session (mission start/restart, or reconnect), whose set has been reset. Clearing
+    turns the cache's stale pre-restart line into `null`, which is what tells body-layer to re-send
+    (4.5). Without this, a restart would leave a stale line whose `watch_id` still matches, and
+    body-layer would believe its set was installed;
+  - the old `"missl_pw"` branch becomes a **DEBUG-level drop**: an old `Export.lua` logs nothing
+    louder than the existing VERSION MISMATCH warning, and its lines are not misreported as
+    malformed telemetry.
+- `collector/command_sender.py`: `send_watch_args(watch_id, args)` formats the datagram with
+  `%d`/`json.dumps` of a validated str, and never sends a float.
+- `api/server.py`: `GET /watched_args/latest` (`null` when empty) and `POST /command/watch_args`.
+  The POST validates `watch_id` against the same pattern and `args` as a list of non-bool ints in
+  0..4095, deduped, ≤ 64. Anything else gets `400 {"error"}`, and `503` when no sender is
+  configured, the `/command/cockpit_switch` posture. The handler follows the existing POST shape,
+  including its unbounded `Content-Length` read; **add `/command/watch_args` to `AC-B11`'s list**
+  rather than forking a capped variant for one endpoint.
+- **Remove** `schema/cockpit_switch.py`, `CockpitSwitchCache`, `GET /cockpit_switch/latest`,
+  `tests/test_cockpit_switch.py` and their `__main__.py` wiring. Only body-layer read them, and it
+  moves in 4.5. Keeping a second switch feed nothing reads is the duplication "Do not reinvent the
+  wheel" warns against.
+- **Bounds stated in three places, one per side** (no shared import across subprojects):
+  `Export.lua`, `api/server.py`, body-layer. **New test** `tests/test_export_lua_constants_parity.py`
+  greps `Export.lua` for `EXPORT_SCRIPT_VERSION`, `MAX_WATCHED_ARGS` and `MAX_WATCHED_ARG_NUMBER`
+  and asserts each equals its Python twin. No test checks the version pair today; the comment
+  above it says "update both", and that is the kind of rule that drifts.
+
+### 4.5 body-layer
+
+- **The watched set**: a new pure function `belief.effector_engine.watched_args(sequences_by_key,
+  registry_entries, code_args) -> frozenset[int]` returns the union of every switch row's effector
+  `.arg` and every explicit `condition`'s effector `.arg`, across **loaded** files only (a file D5
+  rejected contributes nothing), plus `code_args`. `code_args` = a new
+  `sight_effector.READBACK_ARGS = (ARG_OBSERV, ARG_ALIGN_LAMP, ARG_READY_LAMP)` = `(886, 898,
+  960)`, named constants beside `GuidanceUnitState`. They are code constants rather than registry
+  lookups because `home_phase` and `sight_ready` must work when every sequence file is bad (D5).
+  Today's set has 8 args: 673, 761, 773, 885, 886, 898, 955, 960. `watch_id_for(args) -> str` sits
+  beside it. Both are computed **once at startup**, next to `effector_sequences_by_key` (`logger.py`
+  ~4998), and passed into the poll loop the same way. They are not runner state, so a mission reset
+  cannot lose them.
+- **Shaping (root `CLAUDE.md`, "Behaviour as actions and params")**: the set is *declared* by its
+  consumers, and the observed-value accessor stays the one existing `observed_value(effector_def,
+  readback)`. A later script layer (`BL-B95`'s `effector(name):get`) adds its names to the union
+  and re-declares. Re-declaring is already supported by the protocol (content id plus replace), so
+  that is a body-layer-only change. This stage builds no dynamic set (Decisions, item 4).
+- `aircraft_client.py`: `get_watched_args_latest() -> dict | None` (the `get_*` posture) and
+  `set_watch_args(watch_id, args) -> None` (raises, the `write_cockpit_switch` posture). **Remove**
+  `get_cockpit_switch_state_latest`.
+- `sight_effector.refresh_readback(state, readback_args: Mapping[str, float] | None)`: reads `"886"`
+  → `observ_observed`, `"673"` → `weapon_safety_observed`, `"898"`/`"960"`/`"962"` → the lamp
+  fields. Each uses `>= 0.5` and requires a finite number. A key that is missing leaves the field
+  unchanged, the posture it already documents. `launch_perm_observed` therefore stays `None` until
+  962 is watched; its docstring says so.
+- **Poll block** (`logger.py`, where `get_cockpit_switch_state_latest` is called today, same
+  position, before `advance`):
+  1. `latest = get_watched_args_latest()`. An `AircraftLayerError` is treated as `None` and logged
+     once per mission at WARNING: "watched-args feed unavailable — collector older than this
+     body-layer?".
+  2. `readback = latest["args"] if latest is not None and latest.get("watch_id") == desired_id else
+     None`. **A line for a different set is not used**, because it may lack args this set needs and
+     would read as "unknown" piecemeal.
+  3. **Re-send decision**, a pure `watch_args_due(latest, desired_id, last_sent_sim, now_sim) ->
+     bool`: due when not confirmed (`readback is None`) **and** (`last_sent_sim is None` **or**
+     `now_sim - last_sent_sim >= WATCH_ARGS_RESEND_S`). If due, call `set_watch_args(...)`, log any
+     `AircraftLayerError` at DEBUG, and set `runner.watch_args_last_sent_sim = now_sim` either way.
+     `WATCH_ARGS_RESEND_S = 2.0` sim-seconds, a **plain literal**: it is a transport retry, not
+     Petrovich behaviour. It is chosen so that a lost first datagram is recovered well inside
+     `EFFECTOR_CONDITION_READBACK_WAIT_S` (5.0 s default). See Risks for the coupling if that
+     tunable is lowered.
+  4. `runner.guidance_unit_state = refresh_readback(..., readback)` and `effector_readback =
+     readback`, the existing ordering.
+  5. **One WARNING per mission** once unconfirmed for ≥ 10 s of sim time while ownship telemetry is
+     flowing: *"Export.lua has not confirmed the watched-arg set after 10 s — is the deployed
+     Export.lua current? (collector log: VERSION MISMATCH)"*. Without this, an un-redeployed
+     `Export.lua` looks like "guidance unit never ready" and nothing else.
+- New runner field `watch_args_last_sent_sim: float | None = None` (plus whatever the WARNING latch
+  needs), as an **ordinary init field with a default**. It must not be `field(default=…,
+  init=False)`, which `reset_for_new_mission`'s own docstring warns the re-invoked `__init__` does
+  not reset. A mission reset sets it to `None`, so the first post-restart poll re-sends at once.
+
+### Co-moving Fields (Stage 4)
+
+Trigger: four places hold "which args are watched, and is it installed", and three of them are
+written outside body-layer. **Construction sites (Implementer: grep and paste into the handoff):**
+`WatchedArgsState(` must have exactly one production site (`from_dict`). The runner field is reset
+only by `reset_for_new_mission`'s `__init__`. In `Export.lua`, the four locals are written only
+in `handle_watch_args_command`, `push_watched_args_state`, the two `try_connect` call sites, and
+`LuaExportStop`.
+
+| Field | Written by | Transition | Must hold true immediately after |
+|---|---|---|---|
+| `desired_args` / `desired_id` (body-layer) | startup | process start | = `watched_args(loaded files, registry, READBACK_ARGS)`; constant for the process |
+| `runner.watch_args_last_sent_sim` | internal | mission (re)start | `None` → next poll sends regardless of the timer |
+| `runner.watch_args_last_sent_sim` | internal | send attempted (success or `AircraftLayerError`) | `= now_sim`; no second send for 2.0 sim-s unless a mission reset intervenes |
+| `watched_args`/`watched_id` (Export) | external (op) | valid `watch_args` op | replaced whole; `watched_last_sent` empty; `watched_force_send = true` |
+| `watched_args`/`watched_id` (Export) | external (op) | invalid op (65 args, arg 4096, bad token, bad id) | **unchanged** — previous set still installed; debug-logged |
+| `watched_force_send` (Export) | Export | `try_connect` succeeds | `true` — next tick sends a full snapshot even if nothing moved |
+| all four Export locals | Export | `LuaExportStop` | empty / `nil` / `false` |
+| `WatchedArgsCache` (collector) | external (Export line) | `watch_id` line | latest = that line |
+| `WatchedArgsCache` (collector) | collector | `export_version` line | **cleared** → `GET` answers `null` → body-layer unconfirmed → re-send |
+| `readback` used by engine/`refresh_readback` | derived | latest `watch_id` ≠ `desired_id` | `None` (unknown) — never a partial map from another set |
+
+### 4.6 Compatibility and rollout
+
+| Combination | What happens | Visible as |
+|---|---|---|
+| all current | normal | collector log `wire-format version 2026-10-24 (matches)` |
+| **new collector + body-layer, old `Export.lua`** (the likely one: pulled, forgot to re-copy) | no `watch_id` lines; old `missl_pw` lines dropped at DEBUG; readback unknown → `sight_ready` False ("Unable, guidance unit not ready"), `home_phase` never follows OBSERV, takeoff rows write after the 5 s wait | collector VERSION MISMATCH warning **and** body-layer's 10 s "not confirmed" WARNING |
+| new `Export.lua`, old collector (collector not restarted) | `watch_id` lines fall through to telemetry parse → "malformed telemetry" warnings; `POST /command/watch_args` 404 | VERSION MISMATCH, plus body-layer's "feed unavailable" WARNING |
+| new body-layer, old aircraft-layer | `GET /watched_args/latest` 404 → treated as unavailable | body-layer WARNING once per mission |
+| old body-layer, new aircraft-layer | old body-layer's `GET /cockpit_switch/latest` 404s | unsupported; deploy matched branches |
+
+**No fallback to the old feed.** A dual read path would double the readback code to cover a
+deployment slip that two loud warnings already name. **Windows redeploy**, the `aircraft-layer/
+WORKFLOW.md` procedure unchanged: pull the branch, **re-copy `aircraft-layer/dcs-export/Export.lua`
+to `Saved Games\DCS\Scripts\Export.lua`** (and to any untracked `win-mac-sync` copy in use),
+restart the collector, start the mission, and check the version line. No Hook change.
+
+### 4.7 Stages within Stage 4
+
+- **4a — aircraft-layer** (schema, cache with clear-on-version, API, sender, removals, parity test).
+- **4b — `Export.lua`** (removal, three pure functions, handler, push, reconnect/stop resets,
+  version bump) and its Lua tests.
+- **4c — body-layer** (set/id, client, `refresh_readback`, poll block, warnings), with the existing
+  `test_logger.py` fakes migrated (Decisions, item 5).
+- **4d — card.** The Stage 3 card, re-pointed and extended (4.9).
+
+Built back to back as one batch: **one performance pass and one security pass after 4c**, then DoD.
+The security pass has a new inbound command path to examine, and that is the point of it.
+
+### 4.8 Tests: each written to fail under the named mutation
+
+**Lua, real interpreter** (`aircraft-layer/tests/test_watched_args_lua.py`). It uses the
+`_extract_lua_function` technique from `test_sight_servo_lua.py`/`test_exponent_float_fix.py`.
+`luajit` and `lua5.5` are on this Mac, so these **run** rather than skip. A skip proves nothing:
+say so in the handoff if one occurs.
+
+- L1 `parse_watch_args`: valid list, sorted and deduped. 64 accepted, **65 rejected**. `"4096"`,
+  `"-1"`, `"1.5"`, `"1e3"`, `"12345"` and an empty token are each rejected. A missing or 17-char
+  `watch_id` is rejected. `[]` gives an empty set. *Mutations*: truncate-to-64 instead of reject;
+  drop the digit-count check; accept a float token.
+- L2 `watched_args_changed`: a 0.009 move is not a change, a 0.010 move is. An added or removed key
+  is a change. *Mutation*: compare values only for keys present in both.
+- L3 `encode_watched_args_line`: Python `json.loads` parses it; `nil` values are absent, not
+  `null`/0; keys are strings; it ends in `\n`. *Mutation*: emit `nil` as `0.000`.
+- L4 the existing `test_dcs_export_lua_local_order.py` and `test_dcs_export_lua_syntax.py` pass over
+  the edited file. This catches a new local declared below its first use.
+
+**aircraft-layer Python**
+
+- A1 `WatchedArgsState.from_dict`: valid; and errors for a bad id character, a key of `"abc"`/`"-1"`/
+  `"4096"`, a value that is NaN/`inf`/bool, and 65 keys. *Mutation*: drop `isfinite`.
+- A2 `_handle_line`: a `watch_id` line is cached; a following `export_version` line → `latest() is
+  None`. *Mutation*: remove `clear()`. This is the test that pins the restart-recovery mechanism.
+- A3 an old `missl_pw` line → nothing cached, no WARNING (caplog). *Mutation*: delete the drop
+  branch, so it falls through to telemetry.
+- A4 `POST /command/watch_args` against a real `TelemetryAPIServer` (the `test_petrovich_search_api`
+  shape): valid → sender called with the sorted, deduped list; 65 args, 4096, bool, float, negative
+  or bad id → 400; no sender → 503. *Mutation*: accept bool (Python's `isinstance(True, int)`).
+- A5 `send_watch_args` datagram text: exact bytes, `json.loads`-parseable, integers only.
+- A6 `GET /watched_args/latest`: `null` when empty, `to_api_dict` shape when not.
+- A7 constants parity (4.4). *Mutation*: change `MAX_WATCHED_ARGS` in one file.
+
+**body-layer pure**
+
+- B1 `watched_args`: the shipped files plus `READBACK_ARGS` give exactly the 8-arg set; an explicit
+  condition's effector is included; a D5-rejected file's args are excluded. *Mutations*: forget
+  condition effectors; include rejected files.
+- B2 `watch_id_for`: order-independent and duplicate-independent; different sets give different ids.
+  *Mutation*: hash the unsorted list.
+- B3 `refresh_readback`: 0.5 → True, 0.49 → False, missing → unchanged (both from `None` and from
+  `True`), NaN → unchanged. *Mutations*: `>`; missing coerced to `False`.
+- B4 `watch_args_due`: `None` with no prior send is due; inside 2.0 s it is not due; at 2.0 s it is
+  due; a matching id is never due; a mismatched id is due. *Mutation*: treat any non-`None` latest
+  as confirmed.
+
+**body-layer real poll loop** (`_run_crew_text_poll_loop` on a thread, `implementer/
+feedback_poll_loop_sim_time_integration_tests.md`; seed the readback deliberately, `implementer/
+feedback_readback_driven_poll_tests_need_sim_time_or_manual_state.md`). The fake gains
+`watched_args_state` and records `set_watch_args` calls, and **echoes on request** (a flag), so a
+test chooses between "Export confirms" and "Export silent".
+
+- P1 startup: one `set_watch_args` with the 8-arg set and its id. The echo is on, so there are
+  **zero** further sends over ≥ 5 sim-s. *Mutation*: send every poll.
+- P2 Export silent: re-sends at about 2.0 sim-s intervals, not every poll and not never. A single
+  WARNING after 10 sim-s, not repeated. *Mutations*: no resend; a per-poll WARNING.
+- P3 mission restart (the mission-start event the existing reset tests use, with the fake cache
+  cleared to `None`): a re-send on the **first** post-restart poll, without waiting 2 s. *Mutation*:
+  `watch_args_last_sent_sim` declared `init=False` / not reset.
+- P4 a stale line with a different `watch_id` → readback treated as unknown: `sight_ready` stays
+  False even though the stale map says 960 = 1.0. *Mutation*: use the map regardless of id.
+- P5 Stage 2's existing tests (a)–(h) **migrated** to the new fake shape and still passing
+  unchanged in substance. (a) in particular stays byte-identical in `cockpit_switch_writes`.
+- P6 `get_watched_args_latest` raising `AircraftLayerError` → the loop survives, readback is
+  unknown, one WARNING.
+
+### 4.9 Acceptance: what the Windows/flight check must confirm
+
+**The Stage 3 card has not been flown, and the user chose to build Stage 4 first.** So **one card,
+flown once on `feature/effector-sequences-stage4`, covers both stages.** Every one of its six
+blocks now also runs on the new readback, because each depends on observed switch state: the self-
+check (blocks 1, 2, 5), `sight_ready` and the edge (1, 3, 4), `home_phase` (3). Block 5 (one
+switch hand-pulled off before takeoff, so exactly one flips back) is the most direct Stage 4 check:
+it passes only if a sequence-watched arg is read correctly at the low rate.
+
+**The card needs these edits (main loop, via `/test-card`):**
+
+- Branch → `feature/effector-sequences-stage4`.
+- Setup step 2 is reversed: **re-copy `Export.lua`**, restart the collector, and confirm `wire-format
+  version 2026-10-24 (matches)`. Optional with the debug flag: `aircraft_layer_debug.log` shows
+  `watch_args installed id=… n=8`.
+- Delete the "Stage 4 is not built yet" bullet under "Not testable".
+- **Add block 7 — collector restart in flight** (~2 min). With the unit up, stop and restart the
+  collector. Expect `Observ on`/`off` to keep working within a few seconds of the restart, without
+  touching a switch. This proves the reconnect full snapshot. Record whether it did, and how long it
+  took.
+- **Add block 8 — mission restart from the menu** (~2 min). Restart, cold start, take off. Expect
+  block 1's behaviour again. This proves clear-on-version plus the re-send. Record any "Unable,
+  guidance unit not ready" that block 1 did not show.
+- **Bisection if a block fails**: `feature/effector-sequences` still carries Stages 1–2 on the old
+  readback. Re-flying the failing block there tells Stage 4 apart from Stages 1–2.
+
+**Performance claim, by count, not by frame time.** No frame-time measurement exists in this repo
+(`performance-reviewer/project_export_lua_per_frame_push_functions.md`). Before: 9
+`get_argument_value` + 9 `GetDevice(0)` + 9 closures every frame. At the ~8 ms frame interval
+measured in aircraft-layer stage 5 (~125 fps), that is ~1,125 reads/s. After: 8 reads + 1
+`GetDevice(0)` per 5 Hz tick, ~40 reads/s, **about 28× fewer**, with no per-arg closure. At the
+64-arg cap: 320 reads/s, still under today's figure. That is why the cap is 64 and not larger. The
+claim is checkable by reading the diff, and the performance pass should confirm the count rather
+than re-derive it.
+
+### 4.10 DCS internals this relies on, and their status
+
+- Every frame `LuaExportAfterNextFrame`, and the 5 Hz throttle as `last_export_t`: **confirmed
+  live** (aircraft-layer stage 5).
+- `get_argument_value` on an arbitrary arg number: **unverified for out-of-range numbers** (does it
+  return 0 or error?). **Not decisive.** Each read is `pcall`-guarded and a failure is "omitted =
+  unknown", and the range check (≤ 4095) bounds what can be asked. No investigator pass.
+- Whether DCS reloads `Export.lua` per mission: **not relied on.** `LuaExportStop` resets
+  explicitly, and the collector clears on the version line either way.
+- LuaSocket UDP `receivefrom` default size (8 KiB): the largest op is under 400 bytes, with a wide
+  margin. Not decisive.
+
+### 4.11 Risks (Stage 4)
+
+- **Cross-key coupling**: the 2.0 s re-send against `EFFECTOR_CONDITION_READBACK_WAIT_S`. Lowered
+  toward its `lo` of 1.0, one lost datagram at a mission start could time a condition out before
+  the readback arrives. The default 5.0 is safe. Per root `CLAUDE.md`'s third tuning trap, per-key
+  bounds cannot catch this. If the Implementer documents it on the tunable, it must go in the
+  `#:` comment's **first** sentence, because the generator emits only that one. Check the rendered
+  `defaults.toml`, not the comment. Otherwise leave it recorded here only.
+- **The rendezvous after a mission restart takes ~1–3 s** (version line → clear → next poll →
+  send → next tick → next poll). It sits inside the 5 s readback wait. Takeoff from a cold start is
+  much later, and the mission-start triggers have no shipped file.
+- **Test-fake migration is wide** (~28 uses of the fake's `cockpit_switch_state` in
+  `test_logger.py`). It is mechanical, but under the AGENTS.md escalation rule it is a rewrite, so
+  it is listed in Decisions, item 5.
+- **962 not watched** means `launch_perm_observed` is permanently `None` until BL-B67 adds it. That
+  is intended, and BL-B67's entry should say so (4d bookkeeping: one line in `body-layer/ROADMAP/
+  BL-B67.md`).
+- The card now carries two stages: a failure is less localised. Mitigated by the bisection branch
+  (4.9).
+
+### 4.12 Second-order effect
+
+Adding a readback becomes adding a number to a set, at no per-frame cost. That directly unblocks
+BL-B67's 962 lamp, a pilot-role sequence's switches, and `BL-B95`'s `effector(name):get`. It also
+narrows one thing: anything that needs a switch edge faster than 200 ms must now be read inside
+`Export.lua`, as `run_sight_servo` already does.
 
 ---
 
@@ -670,7 +1070,13 @@ BL-B80, unaffected).
 - **Never modify the DCS installation.** The generator only reads it; writes stay
   `performClickableAction` via the existing op.
 - **Module independence.** aircraft-layer ↔ body-layer stays HTTP/JSON (`/cockpit_switch/latest`
-  `args`, `/spu8/state`). The generator imports nothing across subprojects.
+  `args`, `/spu8/state`; from Stage 4, `/watched_args/latest` + `POST /command/watch_args`). The
+  generator imports nothing across subprojects. Stage 4's shared bounds are restated per side and
+  held equal by a parity test, never imported.
+- **Never modify the DCS installation (Stage 4).** `Export.lua` lives in Saved Games, not the
+  install, and the new op only *reads* args. The one new inbound path is shape-validated three
+  times (body-layer, collector, Lua), bounded (≤ 64 args, each ≤ 4095), and can only choose
+  *which* args are read, never run anything.
 - **No new abstraction without removed duplication.** Engine + data replace five hand-written
   write blocks; the error line reuses `_print`, the drain shape and the SPU-8 gate.
 - **Provenance.** The raw dump records DCS build and input hashes; curated entries never copy a
@@ -738,6 +1144,24 @@ first consumer of the say-only row and of event-driven (not pilot-driven) trigge
    `fix/guidance-ready-edge`, merged to `main` (explore-notes: *"there's already a note somewhere
    to say it on change to ready. Use that"* — BL-B80 decision 2), independently of this plan's own
    Stage 2. Nothing further needed here.
+4. **Stage 4: is "when they are needed" which switches, or also when in the flight?** The plan reads
+   *"query a set of switches when they are needed, not everything"* as **which**: the args that
+   some loaded file or code reader actually uses (8 today), declared once per process. The other
+   reading is a set that changes with flight phase (e.g. the takeoff switches only on the ground).
+   **Recommend the static set.** At 5 Hz the eight reads cost about nothing, and a set that changes
+   by phase would put an unknown-readback gap (a re-send round trip) exactly where a sequence is
+   about to read it. The protocol already supports re-declaring, so a per-phase set later is a
+   body-layer-only change. Say if you meant the per-phase reading.
+5. **Stage 4 rewrites existing tests (AGENTS.md escalation rule).** Retiring the fixed feed means
+   the ~28 places in `test_logger.py` that set the fake's `cockpit_switch_state` (named booleans
+   such as `{"ready_lamp": True}`) move to the arg-keyed shape (`{"watch_id": …, "args": {"960":
+   1.0}}`). The change is mechanical; what each test asserts does not change. **Recommend the
+   rewrite.** The alternative, a body-layer adapter that rebuilds the old named dict from the new
+   map, exists only to spare test edits and leaves two readback shapes in the code.
+6. **Stage 4 removes `GET /cockpit_switch/latest` outright, with no fallback.** Recommend yes: only
+   body-layer read it, and a stale `Export.lua` is named by two warnings (4.6). If you would rather
+   keep the old feed working for one release as a rollback path, that costs a dual readback path
+   in body-layer. Say so before 4c.
 
 ---
 
@@ -756,7 +1180,22 @@ first consumer of the say-only row and of event-driven (not pilot-driven) trigge
 - **Old Decision 2 in the Decisions list (TAKEOFF one-shot, recommended)** — **overturned** by
   the user (D2).
 - **Old Decision 4 (no card)** — **overturned**: Stage 3 card.
-- **Old Stage 3 (generic readback, needed for this cut)** — design kept for Stage 4: new
+- **2026-10-23 Stage 4 text (Affected Modules and Implementation Plan step 4), superseded by the
+  2026-10-24 spec (R15)**. Affected Modules read: *"the generic low-rate/on-demand switch
+  readback, replacing BL-B80's per-frame push of the six switch args. Design as 2026-10-21 …
+  **move the six switch args off the per-frame feed**, not merely add a parallel low-rate one …
+  (axis args stay per-frame, per BL-B80, unaffected)."* Step 4 read: *"In scope for this
+  milestone, run after Stage 3's card … the six switch args move off BL-B80's per-frame
+  `cockpit_switch` push onto the lower-rate poll … Design as 2026-10-21 … corrected for this
+  reduction rather than addition. Needs an `Export.lua` redeploy."* **What changed**: the lamps
+  (898/960/962) move too, which the per-arg audit justifies; the work runs *before* the card, by
+  the user's 2026-10-24 choice; and the fixed `cockpit_switch` feed is removed rather than kept
+  alongside.
+- **Old Stage 3 (generic readback, needed for this cut)** — design kept for Stage 4 (**and
+  re-specified there, R15**: same op/line/cache/client names, `~1 Hz` → the existing 5 Hz tick,
+  `set_watch_args` re-send driven by a content `watch_id` echo rather than "after every mission
+  (re)start" alone, and the six named fields **are** removed after all, with the whole fixed
+  line): new
   `"watch_args"` op on `Export.lua`'s command listener; `push_watched_args_state` at ~1 Hz reading
   `GetDevice(0):get_argument_value(arg)` for each watched arg, change-epsilon
   `COCKPIT_SWITCH_EPSILON`; aircraft-layer `schema/watched_args.py`, `WatchedArgsCache`,
