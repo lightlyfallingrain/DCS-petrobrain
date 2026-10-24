@@ -46,3 +46,14 @@ as the main loop's:
 - **`[[BL-B86]]` is folded in.** *"yes"*. Above ~4 km AGL the idle cycle must not go fully idle.
 - **Code, not a script.** *"this is quite complex still, keep in code"*. It is built in code, shaped
   per root `CLAUDE.md`, "Behaviour as actions and params" (`[[BL-B95]]` stays deferred).
+
+## Operating altitude, 2026-10-25 (verbatim)
+
+> *"note that 4km AGL it practically never. Helicoters do not fly that high. Assume normal
+> operation at 50 - 800 m AGL, with 1000 - 2000 m AGL being possible but rare. 2000+ m AGL do not
+> even consider."*
+
+So the design and the tests target 50–800 m AGL, with 1000–2000 m as a rare case that must still
+work. Above 2000 m is out of scope. `[[BL-B86]]` (the cycle goes idle above ~3.6–4 km AGL) is folded
+in only as far as it falls out of the design naturally: no special handling and no tests above
+2000 m.
