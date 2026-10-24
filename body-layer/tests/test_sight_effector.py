@@ -1,7 +1,11 @@
-"""Tests for `belief.sight_effector` -- `BL-B66` Stages 2-4 and `[[BL-B80]]`
-v2 (`plans/9k113-effectors/plan.md`, `plans/9k113-sight-pointing/plan.md`).
-No live DCS/aircraft-layer needed -- every effector write goes through a
-fake `AircraftLayerClient` double, same posture as every other body-layer
+"""Tests for `belief.sight_effector` -- `[[BL-B80]]` v2 (`plans/
+9k113-sight-pointing/plan.md`) and the readback-only module that remains
+after `plans/effector-sequences/plan.md` Stage 2 moved the power-up/
+OBSERV/weapons-safety *sequencing* half out to `belief.effector_engine`
+(see `test_effector_engine.py` for that half's own tests, and `belief.
+sight_effector`'s own module docstring for exactly what moved). No live
+DCS/aircraft-layer needed -- every write goes through a fake
+`AircraftLayerClient` double, same posture as every other body-layer
 effector test.
 
 v1's degree<->raw conversions, `GYRO_ALIGNMENT_S`/`in_gyro_alignment`, and
@@ -12,9 +16,7 @@ test)."""
 
 from __future__ import annotations
 
-import logging
 import re
-from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -22,30 +24,21 @@ import pytest
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.sight_effector import (
-    GUIDANCE_UNIT_SWITCH_DELAY_S,
     GuidanceUnitState,
-    advance_power_up,
     refresh_readback,
     sight_ready,
-    start_power_up,
-    write_observ,
     write_sight_target,
-    write_weapon_safety,
 )
 
 _SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 class _RecordingAircraftClient:
-    """A fake `AircraftLayerClient` that records every cockpit-switch/
-    sight-target write and never raises."""
+    """A fake `AircraftLayerClient` that records every sight-target write
+    and never raises."""
 
     def __init__(self) -> None:
-        self.writes: list[tuple[int, int, float]] = []
         self.sight_target_writes: list[tuple[float, float, float, float, float]] = []
-
-    def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
-        self.writes.append((device, cmd, value))
 
     def write_sight_target(
         self,
@@ -59,20 +52,13 @@ class _RecordingAircraftClient:
             (goal_az_deg, goal_el_deg, goal_rate_az_deg_s, goal_rate_el_deg_s, t_sim)
         )
 
-    def get_cockpit_switch_state_latest(self) -> dict[str, object] | None:
-        return None
-
 
 class _FailingAircraftClient:
-    """A fake `AircraftLayerClient` whose `write_cockpit_switch`/
-    `write_sight_target` always raise `AircraftLayerError`."""
+    """A fake `AircraftLayerClient` whose `write_sight_target` always
+    raises `AircraftLayerError`."""
 
     def __init__(self) -> None:
         self.attempts = 0
-
-    def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
-        self.attempts += 1
-        raise AircraftLayerError("simulated failure")
 
     def write_sight_target(
         self,
@@ -85,152 +71,9 @@ class _FailingAircraftClient:
         self.attempts += 1
         raise AircraftLayerError("simulated failure")
 
-    def get_cockpit_switch_state_latest(self) -> dict[str, object] | None:
-        return None
-
 
 def _client(fake: object) -> AircraftLayerClient:
     return cast(AircraftLayerClient, fake)
-
-
-# --- start_power_up / advance_power_up --------------------------------------
-
-
-def test_start_power_up_sets_takeoff_seen_and_fires_immediately() -> None:
-    state = GuidanceUnitState()
-    started = start_power_up(state, now_sim=10.0)
-
-    assert started.takeoff_seen is True
-    assert started.next_switch_due_sim == 10.0
-    assert started.power_up_stage == 0
-
-
-def test_start_power_up_is_a_no_op_once_already_started() -> None:
-    state = GuidanceUnitState(takeoff_seen=True, next_switch_due_sim=10.0)
-    result = start_power_up(state, now_sim=20.0)
-
-    assert result is state
-
-
-def test_start_power_up_is_a_no_op_once_the_sequence_has_progressed() -> None:
-    """`power_up_stage > 0` alone (even with `next_switch_due_sim` reset
-    to `None` by a completed sequence) must not re-start."""
-    state = GuidanceUnitState(power_up_stage=1, next_switch_due_sim=None)
-    result = start_power_up(state, now_sim=20.0)
-
-    assert result is state
-
-
-def test_advance_power_up_writes_the_first_switch_immediately() -> None:
-    client = _RecordingAircraftClient()
-    state = start_power_up(GuidanceUnitState(), now_sim=10.0)
-
-    advanced = advance_power_up(state, now_sim=10.0, aircraft_client=_client(client))
-
-    assert advanced.power_up_stage == 1
-    assert len(client.writes) == 1
-    _device, _cmd, value = client.writes[0]
-    assert value == 1.0
-    assert advanced.next_switch_due_sim == 10.0 + GUIDANCE_UNIT_SWITCH_DELAY_S
-
-
-def test_advance_power_up_does_not_fire_before_the_delay_has_elapsed() -> None:
-    client = _RecordingAircraftClient()
-    state = start_power_up(GuidanceUnitState(), now_sim=10.0)
-    state = advance_power_up(state, now_sim=10.0, aircraft_client=_client(client))
-    assert len(client.writes) == 1
-
-    # Not yet due -- `GUIDANCE_UNIT_SWITCH_DELAY_S` has not elapsed.
-    still = advance_power_up(
-        state,
-        now_sim=10.0 + GUIDANCE_UNIT_SWITCH_DELAY_S / 2,
-        aircraft_client=_client(client),
-    )
-
-    assert still is state
-    assert len(client.writes) == 1
-
-
-def test_advance_power_up_writes_all_four_switches_in_order_and_completes() -> None:
-    """`[[BL-B80]]` v2: completion no longer *declares* readiness itself
-    -- `sight_ready()` reads the real 960 lamp, not a sequence-completion
-    latch."""
-    client = _RecordingAircraftClient()
-    state = start_power_up(GuidanceUnitState(), now_sim=0.0)
-
-    t = 0.0
-    for expected_stage in range(1, 5):
-        state = advance_power_up(state, now_sim=t, aircraft_client=_client(client))
-        assert state.power_up_stage == expected_stage
-        t += GUIDANCE_UNIT_SWITCH_DELAY_S
-
-    assert len(client.writes) == 4
-    assert state.next_switch_due_sim is None
-    # Readiness is independent of the power-up sequence now.
-    assert sight_ready(state) is False
-    assert sight_ready(replace(state, ready_observed=True)) is True
-
-    # A true no-op once complete.
-    final = advance_power_up(state, now_sim=t + 100.0, aircraft_client=_client(client))
-    assert final is state
-    assert len(client.writes) == 4
-
-
-def test_advance_power_up_before_start_is_a_no_op() -> None:
-    client = _RecordingAircraftClient()
-    state = GuidanceUnitState()  # never started
-
-    result = advance_power_up(state, now_sim=50.0, aircraft_client=_client(client))
-
-    assert result is state
-    assert client.writes == []
-
-
-def test_advance_power_up_retries_on_a_failed_write(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Security plan review finding 3: a dropped write must not advance
-    the stage or stall the sequence -- the same switch is retried next
-    poll, which is safe because every write is an idempotent absolute
-    set."""
-    client = _FailingAircraftClient()
-    state = start_power_up(GuidanceUnitState(), now_sim=0.0)
-
-    with caplog.at_level(logging.WARNING):
-        after_failure = advance_power_up(
-            state, now_sim=0.0, aircraft_client=_client(client)
-        )
-
-    assert after_failure.power_up_stage == 0
-    assert after_failure.next_switch_due_sim == 0.0
-    assert client.attempts == 1
-    assert any("power-up" in r.message for r in caplog.records)
-
-    # Retried next poll, this time against a working client.
-    working = _RecordingAircraftClient()
-    retried = advance_power_up(
-        after_failure, now_sim=0.0, aircraft_client=_client(working)
-    )
-    assert retried.power_up_stage == 1
-    assert len(working.writes) == 1
-
-
-def test_advance_power_up_uses_the_device_cmd_pairs_in_order() -> None:
-    """MISSILE POWER -> CPLR DISTR -> Sight Power -> SHCHO PWR B1
-    (`docs/acceptance/2026-10-17-9k113-procedures-direction.md` §3,
-    explore-notes point 4)."""
-    client = _RecordingAircraftClient()
-    state = start_power_up(GuidanceUnitState(), now_sim=0.0)
-    t = 0.0
-    for _ in range(4):
-        state = advance_power_up(state, now_sim=t, aircraft_client=_client(client))
-        t += GUIDANCE_UNIT_SWITCH_DELAY_S
-
-    devices = [w[0] for w in client.writes]
-    cmds = [w[1] for w in client.writes]
-    # device 6 (WEAP_SYS), 16 (ASP_17V), 7 (I9K113), 6 (WEAP_SYS)
-    assert devices == [6, 16, 7, 6]
-    assert cmds == [3028, 3015, 3001, 3030]
 
 
 # --- sight_ready (`[[BL-B80]]` v2: the real 960 lamp) ----------------------
@@ -242,46 +85,7 @@ def test_sight_ready_reflects_ready_observed() -> None:
     assert sight_ready(GuidanceUnitState(ready_observed=True)) is True
 
 
-# --- write_observ / write_weapon_safety ---------------------------------
-
-
-def test_write_observ_on_writes_arg_886_device_7_value_1() -> None:
-    client = _RecordingAircraftClient()
-    write_observ(_client(client), on=True)
-    assert client.writes == [(7, 3002, 1.0)]
-
-
-def test_write_observ_off_writes_value_0() -> None:
-    client = _RecordingAircraftClient()
-    write_observ(_client(client), on=False)
-    assert client.writes == [(7, 3002, 0.0)]
-
-
-def test_write_observ_raises_on_a_failed_write() -> None:
-    client = _FailingAircraftClient()
-    with pytest.raises(AircraftLayerError):
-        write_observ(_client(client), on=True)
-
-
-def test_write_weapon_safety_armed_writes_arg_673_device_6_value_1() -> None:
-    client = _RecordingAircraftClient()
-    write_weapon_safety(_client(client), armed=True)
-    assert client.writes == [(6, 3020, 1.0)]
-
-
-def test_write_weapon_safety_safe_writes_value_0() -> None:
-    client = _RecordingAircraftClient()
-    write_weapon_safety(_client(client), armed=False)
-    assert client.writes == [(6, 3020, 0.0)]
-
-
-def test_write_weapon_safety_raises_on_a_failed_write() -> None:
-    client = _FailingAircraftClient()
-    with pytest.raises(AircraftLayerError):
-        write_weapon_safety(_client(client), armed=True)
-
-
-# --- refresh_readback ----------------------------------------------------
+# --- refresh_readback (Stage 4: the continuous feed's raw "args" map) ----
 
 
 def test_refresh_readback_is_a_no_op_when_no_sample_yet() -> None:
@@ -290,45 +94,50 @@ def test_refresh_readback_is_a_no_op_when_no_sample_yet() -> None:
     assert result is state
 
 
-def test_refresh_readback_sets_observed_fields_from_the_latest_sample() -> None:
+def test_refresh_readback_sets_observed_fields_from_the_args_map() -> None:
     state = GuidanceUnitState()
-    result = refresh_readback(
-        state, {"observe_on": True, "weapons_armed": False, "missl_pw_on": True}
-    )
+    result = refresh_readback(state, {"886": 1.0, "898": 0.0, "960": 1.0})
     assert result.observ_observed is True
-    assert result.weapon_safety_observed is False
+    assert result.align_observed is False
+    assert result.ready_observed is True
+
+
+def test_refresh_readback_thresholds_at_half_not_equality() -> None:
+    """Same `>= 0.5` threshold `Export.lua` used to apply itself before
+    Stage 4 moved it here -- a mid-transit raw value must still read as
+    the decided boolean."""
+    state = GuidanceUnitState()
+    result = refresh_readback(state, {"886": 0.64})
+    assert result.observ_observed is True
+    result = refresh_readback(state, {"886": 0.32})
+    assert result.observ_observed is False
 
 
 def test_refresh_readback_leaves_fields_unchanged_when_keys_are_missing() -> None:
-    state = GuidanceUnitState(observ_observed=True, weapon_safety_observed=False)
+    state = GuidanceUnitState(observ_observed=True, ready_observed=False)
     result = refresh_readback(state, {})
     assert result.observ_observed is True
-    assert result.weapon_safety_observed is False
-
-
-def test_refresh_readback_sets_the_three_lamp_fields() -> None:
-    """`[[BL-B80]]` v2: 898 (Л5 gyro alignment), 960 (READY), 962 (launch
-    permission), real readbacks, no timer."""
-    state = GuidanceUnitState()
-    result = refresh_readback(
-        state,
-        {"align_lamp": True, "ready_lamp": False, "launch_perm_lamp": True},
-    )
-    assert result.align_observed is True
     assert result.ready_observed is False
-    assert result.launch_perm_observed is True
 
 
-def test_refresh_readback_leaves_lamp_fields_unchanged_when_absent() -> None:
-    """An `Export.lua` predating the three lamps must not be read as "the
-    lamp is off" -- absence leaves the prior value, same posture every
-    other `*_observed` field in this class already takes."""
-    state = GuidanceUnitState(
-        align_observed=True, ready_observed=True, launch_perm_observed=False
-    )
-    result = refresh_readback(state, {"observe_on": True})
-    assert result.align_observed is True
-    assert result.ready_observed is True
+def test_refresh_readback_leaves_fields_unchanged_on_a_non_finite_value() -> None:
+    """A NaN/inf must never be read as a value -- same posture as an
+    absent key, never coerced to `False` (mutation: drop the
+    `math.isfinite` guard)."""
+    state = GuidanceUnitState(observ_observed=True)
+    result = refresh_readback(state, {"886": float("nan")})
+    assert result.observ_observed is True
+
+
+def test_refresh_readback_does_not_touch_weapon_safety_or_launch_perm() -> None:
+    """Stage 4 removed these two args' old per-frame reader with
+    nothing replacing it yet (673/962 are no longer polled by code) --
+    `refresh_readback` must not read them from the "args" map at all,
+    even if a caller mistakenly passed them in (which the real
+    `REQUIRED_POLLED_ARGS`-driven set never would)."""
+    state = GuidanceUnitState(weapon_safety_observed=True, launch_perm_observed=False)
+    result = refresh_readback(state, {"673": 0.0, "962": 1.0})
+    assert result.weapon_safety_observed is True
     assert result.launch_perm_observed is False
 
 

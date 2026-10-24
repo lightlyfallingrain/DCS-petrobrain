@@ -241,6 +241,73 @@ class CommandSender:
                 f"goal_el_deg={goal_el_deg!r} t_sim={t_sim!r}: {exc}"
             ) from exc
 
+    def send_watch_args(self, watch_id: str, args: list[int]) -> None:
+        """Send `{"op": "watch_args", "watch_id": watch_id, "args": args}`
+        to `Export.lua`'s command listener -- the continuous watched-args
+        channel (`plans/effector-sequences/plan.md` Stage 4). Installs a
+        replacement watched set whole, never a merge -- see `Export.lua`'s
+        own `handle_watch_args_command`. Same `CommandSendError` posture
+        as `send_cockpit_switch`/`send_sight_target`.
+
+        **No validation happens here** -- same division of labour as
+        `send_cockpit_switch`'s own docstring: `api.server`'s `POST
+        /command/watch_args` handler validates shape (watch_id pattern,
+        args non-bool ints in 0..4095, deduped, <= 64) before this method
+        is ever called, and `Export.lua`'s own `parse_arg_list` validates
+        a third time."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        args_text = ",".join(str(int(a)) for a in args)
+        payload = (
+            f'{{"op": "watch_args", "watch_id": "{watch_id}", "args": [{args_text}]}}'
+        ).encode()
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "watch_args command send failed: watch_id=%r args=%r",
+                watch_id,
+                args,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send watch_args watch_id={watch_id!r}: {exc}"
+            ) from exc
+
+    def send_read_args(self, read_id: str, args: list[int]) -> None:
+        """Send `{"op": "read_args", "read_id": read_id, "args": args}` to
+        `Export.lua`'s command listener -- the one-shot read channel
+        (`plans/effector-sequences/plan.md` Stage 4, S4.2). The reply does
+        not come back on this UDP socket -- it arrives on the existing
+        Export.lua<->collector TCP connection
+        (`collector.arg_read_broker.ArgReadBroker` is the one caller of
+        this method, and is also the one piece of code that waits for that
+        reply). Same `CommandSendError` posture as `send_watch_args`."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        args_text = ",".join(str(int(a)) for a in args)
+        payload = (
+            f'{{"op": "read_args", "read_id": "{read_id}", "args": [{args_text}]}}'
+        ).encode()
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "read_args command send failed: read_id=%r args=%r",
+                read_id,
+                args,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send read_args read_id={read_id!r}: {exc}"
+            ) from exc
+
 
 #: Loopback only -- `petrobrain-line-of-sight-hook.lua`'s own inbound
 #: listener runs inside the same DCS process tree as the collector's UDP

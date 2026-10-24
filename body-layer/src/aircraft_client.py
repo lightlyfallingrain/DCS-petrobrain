@@ -89,21 +89,54 @@ same as every other `get_*` on an unreachable endpoint). `naked_eye_
 source.py` resolves the per-`unit_name` join itself, same split of
 responsibility as the velocity and LOS feeds.
 
-`write_cockpit_switch`/`get_cockpit_switch_state_latest` (`plans/
-9k113-effectors/plan.md`, BL-B66 Stage 1) are this seam's write/read pair
-for the generic cockpit-switch channel. `write_cockpit_switch` follows
-`push_text_line`/`trigger_petrovich_search`'s raise-on-failure posture,
-not the `get_*` methods' swallow-and-return-`None` one -- a dropped
-cockpit-switch write is a real behavioral gap (a 9K113 power-up switch
-silently not thrown), not an opaque display string to swallow. It takes a
-raw `device`/`cmd`/`value` triple and performs **no validation and no
-allow-list check** of its own -- `belief.sight_effector` is the one
-module above this client that knows which device/cmd numbers mean what;
-this client is a pure pass-through, same division of labour
+`write_cockpit_switch` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1)
+is this seam's write side for the generic cockpit-switch channel. It
+follows `push_text_line`/`trigger_petrovich_search`'s raise-on-failure
+posture, not the `get_*` methods' swallow-and-return-`None` one -- a
+dropped cockpit-switch write is a real behavioral gap (a 9K113 power-up
+switch silently not thrown), not an opaque display string to swallow. It
+takes a raw `device`/`cmd`/`value` triple and performs **no validation
+and no allow-list check** of its own -- `belief.sight_effector` is the
+one module above this client that knows which device/cmd numbers mean
+what; this client is a pure pass-through, same division of labour
 `post_look_direction` already has for its own two already-validated
-integers. `get_cockpit_switch_state_latest` is an ordinary `get_*` read
-(swallows nothing itself, `None` on an empty cache), mirroring
-`get_petrovich_wheel_latest`'s shape exactly.
+integers. **Its matching readback, `get_cockpit_switch_state_latest`, is
+removed** (`plans/effector-sequences/plan.md` Stage 4, decided "remove")
+-- see `get_watched_args_latest`/`read_args` below, this seam's two
+replacement read paths.
+
+`get_watched_args_latest`/`set_watch_args`/`read_args` (`plans/
+effector-sequences/plan.md` Stage 4, "readback by need" option B) are
+this seam's two cockpit-arg readback paths, replacing `get_cockpit_
+switch_state_latest` above.
+
+- `get_watched_args_latest` is an ordinary `get_*` read (`GET
+  /watched_args/latest`, swallows nothing itself, `None` on an empty
+  cache) mirroring `get_petrovich_wheel_latest`'s shape exactly -- the
+  **continuous** feed, a small `polled.toml`-driven arg set `Export.lua`
+  polls at its own export tick (the same cadence as the telemetry line)
+  and sends only on change.
+- `set_watch_args` (`POST /command/watch_args`) follows `write_cockpit_
+  switch`'s raise-on-failure posture -- installing the wrong watched
+  set, or failing to install one at all, is a real behavioral gap
+  (`sight_ready`/`home_phase` silently never updating), not an opaque
+  display string to swallow.
+- `read_args` (`POST /query/read_args`) is this seam's first
+  **synchronous** call -- it blocks until the aircraft layer's own
+  `ArgReadBroker` round-trips a one-shot read through `Export.lua` (or
+  the request times out), unlike every other method here, which either
+  returns immediately from a cache or fires-and-forgets a command. Also
+  raises `AircraftLayerError` on any failure (non-200, including the
+  aircraft layer's own `504`/`503`), **and re-validates the response
+  body before returning it** (security plan review required change 1,
+  `plans/effector-sequences/security-stage4-plan.md`): every value must
+  be a finite, non-bool number, every key a decimal string in 0..4095
+  that is one of the args actually *requested*, and the whole map at
+  most 64 entries -- the HTTP response is still a trust boundary (a
+  compromised aircraft-layer/collector dependency, or a plain bug in the
+  forwarding path), and a NaN must never reach `belief.effector_engine`'s
+  own `_matches` (`abs(NaN - t) < g` is `False`, which would read as
+  "differs" and write).
 
 `write_sight_target` (`plans/9k113-sight-pointing/plan.md`, BL-B80) is a
 third, narrower write op on the same `POST /command/*` family -- a
@@ -116,6 +149,14 @@ and `Export.lua`'s own servo converts internally; `belief.sight_effector.
 write_sight_target` is still the one caller above this client, just a
 pure pass-through now rather than a conversion site.
 
+`get_spu8_state_latest` (`plans/effector-sequences/plan.md` D6, BL-B90
+Stage 2) is this seam's `GET /spu8/state` counterpart to `get_cockpit_
+switch_state_latest` -- same "not an error" empty-cache posture. Its one
+caller is `CrewConsole.drain_config_error` via `logger.py`'s poll loop,
+reading `gate_open` to decide whether the intercom is up before speaking
+the one-shot "bad sequence file" error line (D6: *"once the intercom is
+up"*).
+
 `get_sight_servo_latest` is this seam's read side for the same feed --
 `Export.lua`'s per-frame DCS-slave servo status (mode, setpoint, the
 mark-derived body direction when valid, error, stall flag), a *second*
@@ -127,6 +168,8 @@ stated")."""
 from __future__ import annotations
 
 import json
+import math
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -254,19 +297,88 @@ class AircraftLayerClient:
             )
         return result
 
-    def get_cockpit_switch_state_latest(self) -> dict[str, Any] | None:
-        """`GET /cockpit_switch/latest` -> the most recent
-        `CockpitSwitchState` as a dict (see `aircraft-layer/src/schema/
-        cockpit_switch.py`'s `CockpitSwitchState.to_api_dict`), or `None`
-        if nothing has been received yet -- same "not an error" posture
-        as `get_line_of_sight_latest` (`plans/9k113-effectors/plan.md`,
-        BL-B66 Stage 1)."""
-        result = self._get_json("/cockpit_switch/latest")
+    def get_watched_args_latest(self) -> dict[str, Any] | None:
+        """`GET /watched_args/latest` -> the most recent `WatchedArgsState`
+        as a dict (see `aircraft-layer/src/schema/watched_args.py`'s
+        `WatchedArgsState.to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "watch_id", "args"}`), or `None` if nothing has been received yet
+        -- the continuous readback feed (`plans/effector-sequences/plan.md`
+        Stage 4)."""
+        result = self._get_json("/watched_args/latest")
         if result is None:
             return None
         if not isinstance(result, dict):
             raise AircraftLayerError(
-                f"expected a JSON object or null from /cockpit_switch/latest, got {type(result).__name__}"
+                f"expected a JSON object or null from /watched_args/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def set_watch_args(self, watch_id: str, args: list[int]) -> None:
+        """`POST /command/watch_args` -> installs the set of args the
+        continuous feed above should watch (`plans/effector-sequences/
+        plan.md` Stage 4). Raises `AircraftLayerError` on any failure,
+        mirroring `write_cockpit_switch` -- see the module docstring for
+        why."""
+        self._post_json(
+            "/command/watch_args",
+            {"watch_id": watch_id, "args": args},
+        )
+
+    def read_args(self, args: list[int]) -> dict[str, float]:
+        """`POST /query/read_args` -> a synchronous one-shot read of
+        `args` (`plans/effector-sequences/plan.md` Stage 4, S4.2). Blocks
+        until the aircraft layer's own `ArgReadBroker` round-trips the
+        read through `Export.lua`, or raises `AircraftLayerError` on any
+        failure (non-200, including the aircraft layer's own `504` on a
+        timeout or `503` when the channel is unconfigured/busy) -- see
+        the module docstring for why this call, unlike every `get_*`
+        method above, both raises on failure *and* re-validates its own
+        response body before returning it."""
+        result = self._post_json("/query/read_args", {"args": args})
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object from /query/read_args, got {type(result).__name__}"
+            )
+        raw_values = result.get("values")
+        if not isinstance(raw_values, dict) or len(raw_values) > 64:
+            raise AircraftLayerError(
+                f"'values' must be an object of at most 64 entries, got {raw_values!r}"
+            )
+        requested = set(args)
+        validated: dict[str, float] = {}
+        for key, raw in raw_values.items():
+            if (
+                not isinstance(key, str)
+                or not re.fullmatch(r"\d{1,4}", key)
+                or int(key) > 4095
+                or int(key) not in requested
+            ):
+                raise AircraftLayerError(f"bad or unrequested arg key {key!r}")
+            if (
+                isinstance(raw, bool)
+                or not isinstance(raw, (int, float))
+                or not math.isfinite(raw)
+            ):
+                raise AircraftLayerError(
+                    f"value for arg {key} must be a finite number, got {raw!r}"
+                )
+            validated[key] = float(raw)
+        return validated
+
+    def get_spu8_state_latest(self) -> dict[str, Any] | None:
+        """`GET /spu8/state` -> the most recent SPU-8 intercom-panel
+        reading as a dict (see `aircraft-layer/src/schema/spu8.py`'s
+        `Spu8Sample.to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "net1", "ics_power", "vol", "net1_on", "ics_power_on",
+        "gate_open"}`), or `None` if nothing has been received yet --
+        same "not an error" posture as `get_watched_args_latest`
+        (`plans/effector-sequences/plan.md` D6)."""
+        result = self._get_json("/spu8/state")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /spu8/state, got {type(result).__name__}"
             )
         return result
 

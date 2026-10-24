@@ -200,6 +200,9 @@ _CREW_CONSOLE_PRESERVE = {
     "speech_client",
     "speech_log_sink",
     "silenced",
+    # `plans/effector-sequences/plan.md` D6 -- describes this *process's*
+    # startup state, not per-mission state, same as `silenced` above.
+    "config_error_pending",
 }
 
 

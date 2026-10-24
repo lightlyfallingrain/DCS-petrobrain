@@ -190,6 +190,7 @@ different process (`audio-adapter`, not the aircraft layer). `--overlay` and
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import shutil
 import sqlite3
@@ -201,8 +202,9 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal, TextIO
+from typing import Final, Literal, TextIO
 
+import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attention import (
@@ -216,6 +218,19 @@ from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
+from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
+from belief.effector_engine import EffectorRunState, EffectorTrigger
+from belief.effector_engine import advance as advance_effectors
+from belief.effector_engine import fire_trigger as fire_effector_trigger
+from belief.effector_registry import (
+    DEFAULT_SEQUENCES_DIR,
+    EffectorDef,
+    PolledSet,
+    aircraft_dir_name,
+    load_polled_config,
+    load_registries_by_aircraft,
+)
+from belief.effector_sequences import SequenceFile, load_sequences
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import (
@@ -242,15 +257,12 @@ from belief.optic_policy import (
 )
 from belief.optic_policy import decide as decide_optic
 from belief.sight_effector import (
+    REQUIRED_POLLED_ARGS,
     GuidanceUnitState,
     write_sight_target,
 )
-from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
 from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
 from belief.sight_effector import sight_ready as guidance_unit_sight_ready
-from belief.sight_effector import start_power_up as start_guidance_unit_power_up
-from belief.sight_effector import write_observ as write_observ_switch
-from belief.sight_effector import write_weapon_safety as write_weapon_safety_switch
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
@@ -306,6 +318,45 @@ from store.reader import load_only_region
 from tuning import render_print_tuning, render_startup_block, validate_against_defaults
 
 logger = logging.getLogger(__name__)
+
+#: Bounded fallback for the mission-start resolving window: how many
+#: seconds of **wall clock** (not sim time, not a poll count -- see
+#: `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own
+#: docstring for why) `_run_crew_text_poll_loop` may wait for a fresh
+#: ownship sample before giving up on `t_sim`-based freshness and firing
+#: `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/
+#: effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23:
+#: the fallback cannot tell a `t_sim` coincidence apart from no fresh
+#: sample at all, and only the former is safe to classify airborne from).
+#: Two cases reach this fallback. (1) The pathological coincidence this
+#: constant was first written for: the restart happens near `t_sim = 0`
+#: **and** the first fresh sample lands on the exact same float as the
+#: baseline -- the `!=` check this backs up is sound for the reason stated
+#: at its own call site -- the user, confirming the underlying DCS fact:
+#: "Mission restart always resets the mission elapsed timer in DCS" -- so
+#: this is rare and self-heals on the next restart. (2) The far more
+#: ordinary case: no fresh sample has arrived at all within the window --
+#: a long mission-load screen, or (common in DCS) a mission that starts
+#: paused and the pilot has not yet un-paused. Case (2) does **not**
+#: self-heal: firing `MISSION_START_IN_AIR` against `crew_console.
+#: on_ground` computed from the stale previous-mission sample would
+#: classify this mission from the wrong mission's data, uncorrected for
+#: the rest of the sortie -- so the fallback fires `MISSION_START`
+#: (a one-shot setup hook that does not depend on air state) but drops the
+#: `MISSION_START_IN_AIR` check entirely rather than guess, and ends the
+#: takeoff-suppression window the same way normal resolution does, so
+#: `on_ground`'s baseline is re-established from the next sample without
+#: firing `TAKEOFF` on it. 30 s is long enough that it is never reached by
+#: an ordinary restart (which resolves on the very next poll, typically
+#: well under a second) and short enough that case (1) still self-heals
+#: within the same sortie.
+MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
+    "logger.MISSION_START_RESOLVE_FALLBACK_S",
+    30.0,
+    lo=5.0,
+    hi=120.0,
+    status="judgement",
+)
 
 
 def format_observation_line(ownship: OwnshipState, observation: Observation) -> str:
@@ -483,13 +534,40 @@ class ConsolePerceptionRunner:
     #: apply instead; see that field's own docstring.
     attack_run_state: AttackRunState | None = None
 
-    #: The 9K113 guidance unit's own state (`BL-B66`, `plans/
+    #: The 9K113 guidance unit's own *observed* state (`BL-B66`, `plans/
     #: 9k113-effectors/plan.md` Stages 2-4), carried the same way
     #: `optic_state`/`attack_run_state` are -- replaced wholesale each
-    #: poll via `replace()`, never mutated. `belief.sight_effector` is the
-    #: one module that knows this state's device/arg/command numbers;
-    #: this field only carries the value between polls.
+    #: poll via `replace()`, never mutated. `belief.sight_effector` only
+    #: carries the readback now; the *sequencing* state that used to live
+    #: here too moved to `effector_state` below (`plans/
+    #: effector-sequences/plan.md` Stage 2).
     guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
+
+    #: The effector-sequence engine's own run state (`belief.
+    #: effector_engine.EffectorRunState`, `plans/effector-sequences/
+    #: plan.md` Stage 2) -- replaces `GuidanceUnitState`'s former
+    #: `takeoff_seen`/`power_up_stage`/`next_switch_due_sim`/`observ_
+    #: commanded`/`weapon_safety_commanded` fields. Replaced wholesale
+    #: each poll via `replace()`, same discipline as every other field
+    #: here; **one construction site**, this `field(default_factory=...)`
+    #: and mission-reset's re-run `__init__`.
+    effector_state: EffectorRunState = field(default_factory=EffectorRunState)
+
+    #: `plans/effector-sequences/plan.md` Stage 4, S4.5 -- the sim time
+    #: the continuous feed's `watch_args` install was last (re)sent, or
+    #: `None` before the first poll or right after a mission reset. An
+    #: **ordinary init field with a default**, not `field(default=...,
+    #: init=False)` -- `reset_for_new_mission`'s re-run `__init__` does
+    #: not reset the latter kind, so the first post-restart poll must
+    #: re-send regardless of the resend timer.
+    watch_args_last_sent_sim: float | None = None
+
+    #: One-per-mission latches for the two startup/ops WARNINGs S4.5
+    #: describes (feed unavailable; not confirmed after
+    #: `WATCH_ARGS_UNCONFIRMED_WARN_S`) -- plain `bool`s, reset by the
+    #: same mission-reset re-`__init__` as every other field here.
+    watched_args_unavailable_warned: bool = False
+    watch_args_unconfirmed_warned: bool = False
 
     #: Petrovich's **simulated** 9K113 sight head (`[[BL-B80]]` v2,
     #: `plans/9k113-sight-pointing/plan.md`) -- carried the same way
@@ -555,6 +633,64 @@ class ConsolePerceptionRunner:
     #: this field looking like "never checked" for the poll that follows.
     last_mission_start_sequence: int | None = None
 
+    #: Set together by `_check_for_new_mission` right after a genuine
+    #: reset (`plans/effector-sequences/explore-notes.md`, "Two new
+    #: triggers: mission start") -- `True` means `EffectorTrigger.
+    #: MISSION_START` has not fired yet for *this* mission (re)start.
+    #: Resets to its declared default (`False`) on the next mission
+    #: reset's re-run `__init__`, same as every other per-mission field --
+    #: a still-pending flag from a restart that is itself being
+    #: superseded by another restart is replaced by this reset's own
+    #: fresh `True`, assigned explicitly afterward, the same pattern
+    #: `last_mission_start_sequence` already uses.
+    pending_mission_start_fire: bool = False
+
+    #: Companion to `pending_mission_start_fire`: `True` means the
+    #: airborne-or-not decision for `EffectorTrigger.MISSION_START_IN_AIR`
+    #: (and whether `TAKEOFF` may fire at all) has not yet been made for
+    #: this mission (re)start -- `_run_crew_text_poll_loop`'s poll block
+    #: holds off firing *either* new trigger, and suppresses `TAKEOFF`
+    #: entirely, for as long as this is `True`. Cleared one of two ways:
+    #: the poll a fresh (non-stale) ownship sample is found -- also the
+    #: poll `crew_console.on_ground`'s baseline is first established
+    #: without a `TAKEOFF` edge -- or, if no fresh sample has arrived at
+    #: all, the poll `MISSION_START_RESOLVE_FALLBACK_S` elapses, in which
+    #: case the in-air classification is dropped rather than guessed (see
+    #: that poll block's own comment, and `MISSION_START_RESOLVE_FALLBACK_S`'s
+    #: declaration, for why the two cases cannot be told apart from body-layer's
+    #: own telemetry).
+    pending_mission_start_in_air_check: bool = False
+
+    #: The `last_t_sim` this runner held *immediately before* the reset
+    #: that just set the two flags above -- `None` if no ownship sample
+    #: had ever been read this process. `_run_crew_text_poll_loop` treats
+    #: the first post-reset ownship sample whose own `t_sim` differs from
+    #: this value as the first genuinely fresh one (mission-start
+    #: detection can arrive a poll or more before `Export.lua` resumes
+    #: sending, during which `GET /telemetry/latest` keeps serving the
+    #: previous mission's last cached sample, bit-identical `t_sim` and
+    #: all, every poll until a real one lands) -- see that poll block's
+    #: own comment for why `!=` rather than `<` against this baseline.
+    mission_start_fresh_sample_baseline_t_sim: float | None = None
+
+    #: `time.monotonic()` at the poll `_check_for_new_mission` armed the
+    #: two pending flags above -- `MISSION_START_RESOLVE_FALLBACK_S`'s own
+    #: bounded-fallback clock (`plans/effector-sequences/
+    #: review-mission-start.md`'s optional refinement). `None` whenever
+    #: neither pending flag is set (the normal state outside a mission-
+    #: start resolving window). Deliberately **wall-clock, not a poll
+    #: count**: a poll-count bound would be relative to whatever
+    #: `--poll-interval-s` happens to be (1.0 s default, but tests run it
+    #: far faster to stay quick), so a count large enough to never
+    #: mis-fire during this codebase's own fast-interval stale-cache
+    #: tests (`test_stale_telemetry_at_mission_restart_does_not_decide_
+    #: airborne` deliberately holds the resolving window open across
+    #: several dozen such polls) would be too large to self-heal promptly
+    #: at the real 1.0 s interval, and a count small enough to self-heal
+    #: promptly there would misfire during those tests' fast polling.
+    #: Wall-clock time has neither problem.
+    mission_start_resolving_since_wall: float | None = None
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1). Re-invokes `__init__` on this same object, passing
@@ -567,9 +703,19 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `guidance_unit_state`, `sight_head`, `last_sight_look_sim`,
-        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
-        start_sequence`) resets to its declared default.
+        `guidance_unit_state`, `effector_state`, `watch_args_last_sent_sim`,
+        `watched_args_unavailable_warned`, `watch_args_unconfirmed_warned`,
+        `sight_head`, `last_sight_look_sim`, `attitude_history`, `optic`,
+        `_last_look_direction`, `last_mission_start_sequence`,
+        `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
+        `mission_start_fresh_sample_baseline_t_sim`,
+        `mission_start_resolving_since_wall`) resets to its
+        declared default (D11: a mission (re)start drops every
+        running/pending effector-sequence run with nothing carried over;
+        the three mission-start-trigger fields reset to `False`/`False`/
+        `None` here too -- `_check_for_new_mission` re-assigns them
+        explicitly afterward, same pattern as `last_mission_start_
+        sequence`).
 
         **`_last_look_direction` needs an explicit line, not just the
         re-invoked `__init__`.** It is declared `field(default=None,
@@ -2357,6 +2503,20 @@ def _check_for_new_mission(
     -- see that function's own docstring for why it defaults to `None` and
     what leaving it out would silently break.
 
+    **A genuine reset also arms `runner.pending_mission_start_fire`/
+    `pending_mission_start_in_air_check`**, with `mission_start_fresh_
+    sample_baseline_t_sim` set to whatever `last_t_sim` held immediately
+    before the reset -- `_run_crew_text_poll_loop`'s poll block is what
+    actually fires `EffectorTrigger.MISSION_START`/`MISSION_START_IN_AIR`,
+    once it has a ownship sample it trusts is not the previous mission's
+    stale cached one -- or, if no such sample arrives before
+    `MISSION_START_RESOLVE_FALLBACK_S` elapses, once that bounded fallback
+    fires instead (dropping the in-air classification rather than guessing
+    it from a stale sample; see that poll block's own comment). Not done
+    here: this function (and `--console`'s
+    debug REPL, which calls it with no `CrewConsole` at all) has no
+    ownship sample of its own to decide freshness or airborne-ness from.
+
     **Does nothing on the very first poll of a process**, even if a
     sequence is already present (the collector may already hold a mission-
     start event from before body-layer connected) -- `runner.last_mission_
@@ -2420,6 +2580,13 @@ def _check_for_new_mission(
         runner.last_mission_start_sequence,
         sequence,
     )
+    # Captured *before* `_reset_mission_state` wipes `last_t_sim` back to
+    # `None` (it is not in `reset_for_new_mission`'s preserved-field list)
+    # -- `_run_crew_text_poll_loop`'s poll block uses this as the baseline
+    # to recognise the first post-restart ownship sample that is actually
+    # fresh, not the previous mission's last cached one (explore-notes,
+    # "Two new triggers: mission start").
+    pre_reset_t_sim = runner.last_t_sim
     _reset_mission_state(runner, crew_console, mission_memory, fired_on_tracker)
     _maybe_switch_theatre(
         runner,
@@ -2429,6 +2596,19 @@ def _check_for_new_mission(
         trace_sink=trace_sink,
         forest_occlusion=forest_occlusion,
     )
+    # Assigned explicitly after the reset, same pattern as `runner.
+    # last_mission_start_sequence` just below -- `reset_for_new_mission`'s
+    # re-run `__init__` has already put all three back to their declared
+    # defaults (False/False/None), which would otherwise leave this
+    # mission (re)start with no record that `MISSION_START`/
+    # `MISSION_START_IN_AIR` are still owed.
+    runner.pending_mission_start_fire = True
+    runner.pending_mission_start_in_air_check = True
+    runner.mission_start_fresh_sample_baseline_t_sim = pre_reset_t_sim
+    # Starts the bounded-fallback clock the resolving block below checks
+    # against `MISSION_START_RESOLVE_FALLBACK_S` -- see that field's own
+    # docstring for why this is wall-clock time, not a poll count.
+    runner.mission_start_resolving_since_wall = time.monotonic()
     runner.last_mission_start_sequence = sequence
     return True
 
@@ -3038,6 +3218,161 @@ def _poll_transcripts(
         )
 
 
+#: How often an unconfirmed `watch_args` install is re-sent (`plans/
+#: effector-sequences/plan.md` S4.4) -- a transport retry, not Petrovich
+#: behaviour, so a plain literal rather than a tunable. Chosen so a lost
+#: first datagram recovers well inside `belief.effector_engine.
+#: EFFECTOR_CONDITION_READBACK_WAIT_S` (5.0 s default) -- see that
+#: tunable's own "cross-key coupling" comment if lowering it.
+WATCH_ARGS_RESEND_S: Final[float] = 2.0
+
+#: How long the continuous feed may go unconfirmed before the one-per-
+#: mission "is Export.lua current?" WARNING fires (plan S4.5/§4.5).
+WATCH_ARGS_UNCONFIRMED_WARN_S: Final[float] = 10.0
+
+
+def watch_id_for(args: Sequence[int]) -> str:
+    """Content-derived id for a watched-arg set (plan §4.2) -- the first
+    12 hex digits of `sha1` over the sorted, comma-joined arg list. Not a
+    counter: a restarted body-layer sending id 1 again could name a
+    *different* set than the one `Export.lua` still has installed under
+    that id if a sequence/`polled.toml` edit happened in between; a
+    content hash means the same set always gets the same id, which is
+    the property the confirmation check (`watch_args_due`) needs."""
+    text = ",".join(str(a) for a in sorted(args))
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def watch_args_due(
+    latest: Mapping[str, object] | None,
+    desired_id: str,
+    last_sent_sim: float | None,
+    now_sim: float,
+) -> bool:
+    """`True` when the continuous feed's own install should be (re)sent
+    this poll (plan §4.5): due when not confirmed (`latest` is `None`, or
+    its own `"watch_id"` does not match `desired_id`) **and**
+    (`last_sent_sim` is `None` -- never sent yet -- **or** at least
+    `WATCH_ARGS_RESEND_S` sim-seconds have passed since the last send).
+    A matching `watch_id` is never due, regardless of `last_sent_sim`."""
+    confirmed = latest is not None and latest.get("watch_id") == desired_id
+    if confirmed:
+        return False
+    return last_sent_sim is None or now_sim - last_sent_sim >= WATCH_ARGS_RESEND_S
+
+
+def _load_effector_config() -> tuple[
+    dict[tuple[str, str, str], SequenceFile],
+    dict[str, EffectorDef],
+    bool,
+    PolledSet,
+]:
+    """Loads the effector registry/sequence files for this runtime's own
+    aircraft (`belief.effector_engine.AIRCRAFT`), `plans/
+    effector-sequences/plan.md` D5. Called once at `--crew-text` startup,
+    before `_run_crew_text_poll_loop` ever runs -- `--console` has no
+    `CrewConsole` to drive a trigger from at all, so it never calls this.
+
+    Every loader underneath is itself non-fatal on bad content (`belief.
+    effector_registry.load_registry`/`belief.effector_sequences.
+    load_sequences` both collect errors rather than raise); this
+    function's own job is only to aggregate **both** loaders' error lists
+    (D5: "pulling from BOTH load_registry's and load_sequences' error
+    lists so the root cause is visible") into one unmissable console
+    banner plus a `logger.error` per finding, and tell the caller whether
+    `CrewConsole.config_error_pending` should be set.
+
+    `load_registries_by_aircraft` loads every aircraft directory under
+    `config/sequences/` (R13), not only this runtime's own -- a stray
+    second aircraft directory's bad registry cannot affect this one
+    (each is loaded fully independently), but its errors are still
+    surfaced here for visibility rather than silently dropped. The
+    registry this function *returns*, however, is only this runtime's
+    own aircraft's (`"mi-24p"`) -- a missing directory for it is its own
+    synthetic error, the same severity as an unreadable file."""
+    registries_by_aircraft = load_registries_by_aircraft()
+    own_dir = aircraft_dir_name(EFFECTOR_AIRCRAFT)
+
+    banner_lines: list[str] = []
+    for aircraft_dir_name_, (_, reg_errors) in sorted(registries_by_aircraft.items()):
+        for err in reg_errors:
+            where = f" {err.name!r}" if err.name is not None else ""
+            banner_lines.append(
+                f"registry[{aircraft_dir_name_}] ({err.scope}{where}): {err.reason}"
+            )
+    if own_dir not in registries_by_aircraft:
+        banner_lines.append(
+            f"registry[{own_dir}]: no config/sequences/{own_dir}/ directory found"
+        )
+
+    registries_only = {
+        name: registry for name, (registry, _) in registries_by_aircraft.items()
+    }
+    sequences_by_key, sequence_errors = load_sequences(
+        DEFAULT_SEQUENCES_DIR, registries_only
+    )
+    for seq_err in sequence_errors:
+        where = f":{seq_err.line}" if seq_err.line is not None else ""
+        banner_lines.append(f"sequence[{seq_err.file}{where}]: {seq_err.reason}")
+
+    own_registry, _ = registries_by_aircraft.get(own_dir, ({}, []))
+    # `plans/effector-sequences/plan.md` S4.4a: the continuous feed's own
+    # arg set, required-args-union-`polled.toml`. A bad `polled.toml`
+    # entry joins the same banner/`config_error_pending` posture as a bad
+    # registry/sequence file (D5), so it is folded into `banner_lines`
+    # before the one banner below is built. `polled_warnings` (an
+    # omitted-required-arg) do **not** join the banner -- the behaviour
+    # is already correct, so that one is logged separately, below.
+    polled, polled_errors, polled_warnings = load_polled_config(
+        DEFAULT_SEQUENCES_DIR / own_dir / "polled.toml",
+        own_registry,
+        REQUIRED_POLLED_ARGS,
+    )
+    for perr in polled_errors:
+        where = f" {perr.name!r}" if perr.name is not None else ""
+        banner_lines.append(f"polled[{own_dir}] ({perr.scope}{where}): {perr.reason}")
+
+    if banner_lines:
+        banner = "\n".join(
+            [
+                "=" * 78,
+                (
+                    "EFFECTOR CONFIG ERROR -- one or more sequence/registry "
+                    "files failed to load."
+                ),
+                "Petrobrain will continue, but some functionality may not work.",
+                *banner_lines,
+                "=" * 78,
+            ]
+        )
+        print(banner, file=sys.stderr)
+        for line in banner_lines:
+            logger.error("effector config: %s", line)
+
+    # Stage 1 review follow-up: `EffectorDef.unverified` had no consumer
+    # at all -- surfaced here, once, at startup, so "this write is not
+    # confirmed against a live sortie" (e.g. `cplr_distr`) is visible
+    # without reading the curated TOML.
+    unverified_names = sorted(
+        name for name, entry in own_registry.items() if entry.unverified
+    )
+    if unverified_names:
+        logger.info(
+            "effector config: %d unverified effector(s), not confirmed "
+            "against a live sortie: %s",
+            len(unverified_names),
+            ", ".join(unverified_names),
+        )
+    for warning_text in polled_warnings:
+        logger.warning("effector config: %s", warning_text)
+    logger.info(
+        "polling %d args: %s",
+        len(polled.args),
+        ", ".join(f"{polled.names[a]}({a})" for a in polled.args),
+    )
+    return sequences_by_key, own_registry, bool(banner_lines), polled
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -3063,6 +3398,9 @@ def _run_crew_text_poll_loop(
     mission_memory_base: Path | None = None,
     slew_trace_path: Path | None = None,
     slew_trace_base: Path | None = None,
+    effector_sequences: Mapping[tuple[str, str, str], SequenceFile] | None = None,
+    effector_registry: Mapping[str, EffectorDef] | None = None,
+    polled_args: Sequence[int] | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -3098,7 +3436,36 @@ def _run_crew_text_poll_loop(
     (`--slew-trace`, `BL-B66` Stage 4b) are the same "this loop's own
     addition" shape as `speech_log_base` and for the same reason: the
     takeoff/power-up/OBSERV wiring this writer reads only runs here, never
-    in `--console`."""
+    in `--console`.
+
+    `effector_sequences`/`effector_registry` (`plans/effector-sequences/
+    plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
+    -- loaded once at startup, before this thread exists, and passed in
+    read-only rather than reloaded per poll or per mission (nothing about
+    them is per-mission state; D11's mission-reset is `effector_state`'s
+    own job). `None` (every existing call site that predates the engine,
+    and this function's own tests that do not exercise effector triggers)
+    is treated as "nothing loaded" -- every trigger fires into nothing,
+    same as a genuinely empty sequence directory.
+
+    `polled_args` (`plans/effector-sequences/plan.md` Stage 4, S4.4a) is
+    `main()`'s own `_load_effector_config()` result's `PolledSet.args` --
+    the continuous feed's resolved set, computed once at startup next to
+    `effector_sequences`/`effector_registry` above and passed in the same
+    read-only way. `None`/empty is treated as "nothing to watch" (the
+    poll block below never sends an install, and `refresh_cockpit_switch_
+    readback` always sees `None`), same degenerate-but-safe posture as
+    `effector_sequences`/`effector_registry`'s own `None` case."""
+    effector_sequences_by_key: Mapping[tuple[str, str, str], SequenceFile] = (
+        effector_sequences if effector_sequences is not None else {}
+    )
+    effector_registry_entries: Mapping[str, EffectorDef] = (
+        effector_registry if effector_registry is not None else {}
+    )
+    desired_watch_args: tuple[int, ...] = (
+        tuple(polled_args) if polled_args is not None else ()
+    )
+    desired_watch_id = watch_id_for(desired_watch_args)
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -3273,38 +3640,76 @@ def _run_crew_text_poll_loop(
                             runner.last_ownship_state.alt_agl_m
                             <= ON_GROUND_AGL_THRESHOLD_M
                         )
-                        # The power-up sequencer fires once on the rising
-                        # edge of "was on the ground, now is not" this
-                        # mission, reusing `on_ground`'s existing signal
-                        # rather than a new telemetry field.
-                        if (
-                            was_on_ground
-                            and not crew_console.on_ground
-                            and not runner.guidance_unit_state.takeoff_seen
-                        ):
-                            runner.guidance_unit_state = start_guidance_unit_power_up(
-                                runner.guidance_unit_state, runner.last_t_sim
+                        # `plans/effector-sequences/plan.md` Stage 2's own
+                        # poll-block ordering: refresh readback -> takeoff
+                        # edge fires -> transitions fire -> advance ->
+                        # ready edge -> drain_config_error. Stage 4 narrows
+                        # what "refresh readback" fetches: only the
+                        # continuous feed (polled.toml ∪ REQUIRED_POLLED_
+                        # ARGS) -- the engine's own one-shot reads
+                        # (`advance_effectors` -> `client.read_args`) are
+                        # no longer sourced from here at all.
+                        try:
+                            watched_args_latest = (
+                                aircraft_client.get_watched_args_latest()
                             )
-                        # Advances the sequence (a true no-op before it
-                        # has started or once it is complete) and
-                        # refreshes the readback fields from the aircraft
-                        # layer's own cockpit-switch telemetry.
-                        # `weapon_safety_observed` is carried forward with
-                        # no consumer yet, for `BL-B67` (plan §3);
-                        # `observ_observed`/`align_observed`/`ready_
-                        # observed`/`launch_perm_observed` do have
-                        # consumers now (`[[BL-B80]]` v2's `home_phase`/
-                        # `SightHead.mode` derivation, read one poll
-                        # lagged from here -- see `run_once`'s own
-                        # comments on that lag).
-                        runner.guidance_unit_state = advance_guidance_unit_power_up(
-                            runner.guidance_unit_state,
-                            runner.last_t_sim,
-                            aircraft_client,
+                        except AircraftLayerError:
+                            watched_args_latest = None
+                        if (
+                            watched_args_latest is None
+                            and not runner.watched_args_unavailable_warned
+                        ):
+                            logger.warning(
+                                "watched-args feed unavailable -- collector "
+                                "older than this body-layer?"
+                            )
+                            runner.watched_args_unavailable_warned = True
+                        # A line for a different set is never used -- it
+                        # may lack args this set needs, which would read
+                        # as "unknown" piecemeal rather than the honest
+                        # "unconfirmed" state.
+                        watched_args_confirmed = (
+                            watched_args_latest is not None
+                            and watched_args_latest.get("watch_id") == desired_watch_id
                         )
+                        readback_args = (
+                            watched_args_latest.get("args")
+                            if watched_args_confirmed
+                            and watched_args_latest is not None
+                            else None
+                        )
+                        if watch_args_due(
+                            watched_args_latest,
+                            desired_watch_id,
+                            runner.watch_args_last_sent_sim,
+                            runner.last_t_sim,
+                        ):
+                            try:
+                                aircraft_client.set_watch_args(
+                                    desired_watch_id, list(desired_watch_args)
+                                )
+                            except AircraftLayerError:
+                                logger.debug("set_watch_args failed", exc_info=True)
+                            runner.watch_args_last_sent_sim = runner.last_t_sim
+                        if (
+                            not watched_args_confirmed
+                            and runner.watch_args_last_sent_sim is not None
+                            and not runner.watch_args_unconfirmed_warned
+                            and (
+                                runner.last_t_sim - runner.watch_args_last_sent_sim
+                                >= WATCH_ARGS_UNCONFIRMED_WARN_S
+                            )
+                        ):
+                            logger.warning(
+                                "Export.lua has not confirmed the watched-arg "
+                                "set after %.0fs -- is the deployed Export.lua "
+                                "current? (collector log: VERSION MISMATCH)",
+                                WATCH_ARGS_UNCONFIRMED_WARN_S,
+                            )
+                            runner.watch_args_unconfirmed_warned = True
                         runner.guidance_unit_state = refresh_cockpit_switch_readback(
                             runner.guidance_unit_state,
-                            aircraft_client.get_cockpit_switch_state_latest(),
+                            readback_args,
                         )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
@@ -3313,28 +3718,151 @@ def _run_crew_text_poll_loop(
                         # `_handle_observ_on` reads this to gate the
                         # command (plan §3).
                         crew_console.sight_ready = is_sight_ready
-                        # Called every poll, unconditionally -- not only
-                        # while `is_sight_ready` -- so an observed unlit
-                        # poll (power-down, or no lamp reading yet) is
-                        # tracked too; otherwise a power cycle's falling
-                        # edge would never update `guidance_unit_ready_
-                        # prev_observed`, and the later rising edge would
-                        # not be recognised as one (bug fix, `plans/
-                        # 9k113-sight-pointing/plan.md` decision 2).
-                        runner.guidance_unit_state = replace(
-                            runner.guidance_unit_state,
-                            guidance_unit_ready_prev_observed=(
-                                crew_console.drain_guidance_unit_ready(
-                                    runner.last_t_sim,
-                                    ready_observed=(
-                                        runner.guidance_unit_state.ready_observed
-                                    ),
-                                    previously_observed=(
-                                        runner.guidance_unit_state.guidance_unit_ready_prev_observed
-                                    ),
-                                )
-                            ),
+                        # Mission-start triggers (explore-notes, "Two new
+                        # triggers: mission start"), and the one reason
+                        # `TAKEOFF`'s own edge check below is skipped
+                        # entirely while either flag is still pending.
+                        #
+                        # `_check_for_new_mission` cannot fire these
+                        # itself -- it runs before `runner.run_once()`
+                        # each poll and has no ownship sample of its own,
+                        # and mission-start detection can arrive a poll or
+                        # more before `Export.lua` resumes sending (the
+                        # collector keeps serving the previous mission's
+                        # last cached telemetry meanwhile). So it only
+                        # arms `pending_mission_start_fire`/
+                        # `pending_mission_start_in_air_check`, and this
+                        # block waits for the first sample whose `t_sim`
+                        # *differs* from `mission_start_fresh_sample_
+                        # baseline_t_sim` (the value held immediately
+                        # before the reset) -- `!=`, not `<`: DCS model
+                        # time need not be smaller after a restart than
+                        # whatever the previous mission's clock happened
+                        # to reach (a restart moments into a short
+                        # mission could easily have a *larger* baseline
+                        # than the new mission's own early samples), so a
+                        # strict-decrease check can wait forever; the
+                        # stale cached sample, by contrast, is the exact
+                        # same object every poll until a real one lands,
+                        # so its `t_sim` is bit-identical and any
+                        # genuinely new sample's `t_sim` differs from it.
+                        # User, confirming the DCS fact this check leans on:
+                        # "Mission restart always resets the mission
+                        # elapsed timer in DCS" -- so a real restart's
+                        # fresh samples almost always differ from the
+                        # pre-reset baseline on the first poll; the
+                        # coincidence this leaves open (a restart landing
+                        # near `t_sim = 0` whose first fresh sample happens
+                        # to match the baseline exactly) is covered by the
+                        # bounded fallback below
+                        # (`MISSION_START_RESOLVE_FALLBACK_S`).
+                        mission_start_resolving = (
+                            runner.pending_mission_start_fire
+                            or runner.pending_mission_start_in_air_check
                         )
+                        if mission_start_resolving:
+                            baseline = runner.mission_start_fresh_sample_baseline_t_sim
+                            fresh_sample_confirmed = (
+                                baseline is None
+                                or runner.last_ownship_state.t_sim != baseline
+                            )
+                            # Bounded fallback (`MISSION_START_RESOLVE_
+                            # FALLBACK_S`'s own declaration comment and
+                            # `mission_start_resolving_since_wall`'s own
+                            # docstring for why this is wall-clock, not a
+                            # poll count): reached either by the rare
+                            # `t_sim`-coincidence case the `!=` check above
+                            # cannot resolve on its own, *or* by no fresh
+                            # sample having arrived at all within the
+                            # window (a long mission-load screen, or a
+                            # mission that starts paused) -- the two are
+                            # indistinguishable from here, so `fallback_due`
+                            # never fires `MISSION_START_IN_AIR` below:
+                            # only `fresh_sample_confirmed` may.
+                            resolving_since = runner.mission_start_resolving_since_wall
+                            fallback_due = not fresh_sample_confirmed and (
+                                resolving_since is not None
+                                and time.monotonic() - resolving_since
+                                >= MISSION_START_RESOLVE_FALLBACK_S
+                            )
+                            if fallback_due:
+                                logger.warning(
+                                    "mission-start resolving window hit its "
+                                    "%.0fs fallback with no fresh t_sim "
+                                    "(baseline=%r) -- firing MISSION_START "
+                                    "anyway, but dropping the MISSION_START_"
+                                    "IN_AIR check for this mission (re)start "
+                                    "(a stale sample's on_ground cannot be "
+                                    "trusted to classify it)",
+                                    MISSION_START_RESOLVE_FALLBACK_S,
+                                    baseline,
+                                )
+                            if fresh_sample_confirmed or fallback_due:
+                                if runner.pending_mission_start_fire:
+                                    # Fires unconditionally, on either path
+                                    # -- `MISSION_START` is a one-shot setup
+                                    # hook that does not depend on air
+                                    # state, so it need not wait for a
+                                    # fresh sample at all.
+                                    runner.effector_state = fire_effector_trigger(
+                                        runner.effector_state,
+                                        EffectorTrigger.MISSION_START,
+                                        runner.last_t_sim,
+                                    )
+                                    runner.pending_mission_start_fire = False
+                                if runner.pending_mission_start_in_air_check:
+                                    # `crew_console.on_ground` was just
+                                    # reassigned above, from this same
+                                    # fresh sample -- this *is* "decide it
+                                    # on the first real ownship sample
+                                    # after the mission start". Gated on
+                                    # `fresh_sample_confirmed`, not just
+                                    # `not crew_console.on_ground`: see the
+                                    # comment below for why a fallback-
+                                    # forced resolution must never reach
+                                    # this fire at all.
+                                    if (
+                                        fresh_sample_confirmed
+                                        and not crew_console.on_ground
+                                    ):
+                                        runner.effector_state = fire_effector_trigger(
+                                            runner.effector_state,
+                                            EffectorTrigger.MISSION_START_IN_AIR,
+                                            runner.last_t_sim,
+                                        )
+                                    # fallback_due-only case: no fresh
+                                    # sample ever arrived, so
+                                    # `crew_console.on_ground` here is still
+                                    # the *previous* mission's stale cached
+                                    # value -- drop the check rather than
+                                    # classify this mission from the wrong
+                                    # mission's data; unlike the coincidence
+                                    # case this would not self-heal, since
+                                    # the pending flag is cleared either way.
+                                    runner.pending_mission_start_in_air_check = False
+                                runner.mission_start_resolving_since_wall = None
+                            # `TAKEOFF` is suppressed for every poll this
+                            # mission (re)start is still resolving,
+                            # including the one that just resolved it --
+                            # that poll establishes `crew_console.
+                            # on_ground`'s own new-mission baseline
+                            # without treating it as a transition (an air
+                            # start must never also read as a takeoff).
+                        # D2/D4 (`plans/effector-sequences/plan.md`):
+                        # fires on **every** real ground->air transition,
+                        # no `takeoff_seen` latch -- the takeoff sequence
+                        # file's own row conditions (R12's implicit
+                        # self-check) make a repeat takeoff a no-op. Never
+                        # reached on an air start: that case is handled
+                        # entirely by the `mission_start_resolving` branch
+                        # above, which suppresses this `elif` for the
+                        # whole resolving window.
+                        elif was_on_ground and not crew_console.on_ground:
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.TAKEOFF,
+                                runner.last_t_sim,
+                            )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous
                         # poll's command dispatch left as a one-shot
@@ -3370,10 +3898,13 @@ def _run_crew_text_poll_loop(
                         # from the *observed* arg-886 edge instead, so it
                         # also follows DCS's own automatic OBSERV-off (a
                         # hard manoeuvre) and not only this command. This
-                        # block still drives the cockpit write and the
-                        # hands-busy suppression, which are about the
-                        # pilot's hand moving to the switch, not the
-                        # observed edge.
+                        # block still drives the hands-busy suppression,
+                        # which is about the pilot's hand moving to the
+                        # switch, not the observed edge -- the cockpit
+                        # write itself is now the engine's job
+                        # (`plans/effector-sequences/plan.md` Stage 2),
+                        # fired here and performed by `advance_effectors`
+                        # below.
                         if crew_console.observ_transition == "on":
                             runner.optic_state = replace(
                                 runner.optic_state,
@@ -3381,23 +3912,15 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
-                            # `BL-B66` Stage 3 -- the real cockpit write
-                            # (arg 886), issued exactly once per accepted
-                            # request. `_handle_observ_on` has already
-                            # gated this on `sight_ready` at command time
-                            # (plan §3), so reaching here means the
-                            # request was accepted.
-                            try:
-                                write_observ_switch(aircraft_client, on=True)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    observ_commanded=True,
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "OBSERV-on cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            # `_handle_observ_on` has already gated this
+                            # on `sight_ready` at command time (plan §3),
+                            # so reaching here means the request was
+                            # accepted.
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.OBSERV_ON,
+                                runner.last_t_sim,
+                            )
                             crew_console.observ_transition = None
                         elif crew_console.observ_transition == "off":
                             runner.optic_state = replace(
@@ -3406,51 +3929,94 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
-                            try:
-                                write_observ_switch(aircraft_client, on=False)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    observ_commanded=False,
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "OBSERV-off cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.OBSERV_OFF,
+                                runner.last_t_sim,
+                            )
                             crew_console.observ_transition = None
                         # `BL-B66` Stage 4 (plan §4/Co-moving Fields) --
-                        # the weapons safety bar (arg 673), one write, no
-                        # sequencing, same one-shot-signal shape as
-                        # `observ_transition` above. Set by
+                        # the weapons safety bar (arg 673), same one-shot-
+                        # signal shape as `observ_transition` above. Set by
                         # `_handle_weapons_armed`/`_handle_weapons_safe`
                         # or by `_handle_engage`'s own existing "any
                         # attack run start" trigger.
                         if crew_console.weapon_safety_transition == "armed":
-                            try:
-                                write_weapon_safety_switch(aircraft_client, armed=True)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    weapon_safety_commanded="armed",
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "weapons-armed cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.WEAPONS_ARM,
+                                runner.last_t_sim,
+                            )
                             crew_console.weapon_safety_transition = None
                         elif crew_console.weapon_safety_transition == "safe":
-                            try:
-                                write_weapon_safety_switch(aircraft_client, armed=False)
-                                runner.guidance_unit_state = replace(
-                                    runner.guidance_unit_state,
-                                    weapon_safety_commanded="safe",
-                                )
-                            except AircraftLayerError:
-                                logger.warning(
-                                    "weapons-safe cockpit write failed (continuing)",
-                                    exc_info=True,
-                                )
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.WEAPONS_SAFE,
+                                runner.last_t_sim,
+                            )
                             crew_console.weapon_safety_transition = None
+                        # Advances every currently-running trigger by at
+                        # most one write each, in fire order (D9) --
+                        # takeoff and any of the four transitions fired
+                        # above all progress in this one call. No
+                        # `readback` argument any more (Stage 4) -- each
+                        # running trigger makes its own one-shot
+                        # `client.read_args(...)` call internally.
+                        runner.effector_state = advance_effectors(
+                            runner.effector_state,
+                            runner.last_t_sim,
+                            aircraft_client,
+                            effector_sequences_by_key,
+                            effector_registry_entries,
+                        )
+                        # The "Guidance unit ready" edge, after the
+                        # engine has had a chance to run this poll (plan's
+                        # own poll-block ordering) -- unaffected either
+                        # way, since `ready_observed` is a readback field
+                        # the engine never writes, but kept in the stated
+                        # order rather than silently reordered. Called
+                        # every poll, unconditionally -- not only while
+                        # `is_sight_ready` -- so an observed unlit poll
+                        # (power-down, or no lamp reading yet) is tracked
+                        # too; otherwise a power cycle's falling edge
+                        # would never update `guidance_unit_ready_prev_
+                        # observed`, and the later rising edge would not
+                        # be recognised as one (bug fix, `plans/
+                        # 9k113-sight-pointing/plan.md` decision 2).
+                        runner.guidance_unit_state = replace(
+                            runner.guidance_unit_state,
+                            guidance_unit_ready_prev_observed=(
+                                crew_console.drain_guidance_unit_ready(
+                                    runner.last_t_sim,
+                                    ready_observed=(
+                                        runner.guidance_unit_state.ready_observed
+                                    ),
+                                    previously_observed=(
+                                        runner.guidance_unit_state.guidance_unit_ready_prev_observed
+                                    ),
+                                )
+                            ),
+                        )
+                        # D5/D6 (`plans/effector-sequences/plan.md`): the
+                        # one-shot "bad sequence file" line, held until
+                        # the SPU-8 intercom gate reads open. Only fetch
+                        # `/spu8/state` while the flag it serves is still
+                        # pending -- `drain_config_error` clears it after
+                        # one successful speak, so this GET fires at most
+                        # once per process lifetime in the common case
+                        # (no bad file), not on every poll of every sortie
+                        # (performance review, `plans/effector-sequences/
+                        # performance-stage1-2.md`).
+                        intercom_open = False
+                        if crew_console.config_error_pending:
+                            spu8_latest = aircraft_client.get_spu8_state_latest()
+                            intercom_open = (
+                                spu8_latest is not None
+                                and spu8_latest.get("gate_open") is True
+                            )
+                        crew_console.drain_config_error(
+                            runner.last_t_sim, intercom_open=intercom_open
+                        )
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,
@@ -3534,6 +4100,7 @@ def _run_crew_text_poll_loop(
                                 runner.guidance_unit_state,
                                 runner.sight_head,
                                 sight_servo_latest,
+                                commanded_values=runner.effector_state.commanded_values,
                             )
                     # BL-8: after `run_once()` has settled this poll's
                     # belief, before `drain_events` -- Decision 3's
@@ -4578,6 +5145,18 @@ def main() -> None:
             if (args.speech_audio or args.speech_input)
             else None
         )
+        # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
+        # loaded once here, before `CrewConsole` exists, so a bad
+        # registry/sequence file can set `config_error_pending` at
+        # construction time rather than needing a second mutation after
+        # the fact. `--console` never calls this (no `CrewConsole` to
+        # drive a trigger from, and no poll loop that fires one either).
+        (
+            effector_sequences_by_key,
+            effector_registry_entries,
+            had_config_errors,
+            polled_args_set,
+        ) = _load_effector_config()
         crew_console = CrewConsole(
             store=crew_runner.store,
             brain_client=brain_client,
@@ -4591,6 +5170,7 @@ def main() -> None:
                 if args.speech_log is not None
                 else None
             ),
+            config_error_pending=had_config_errors,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
@@ -4620,6 +5200,9 @@ def main() -> None:
                 mission_memory_base,
                 args.slew_trace,
                 slew_trace_base,
+                effector_sequences_by_key,
+                effector_registry_entries,
+                polled_args_set.args,
             ),
             daemon=True,
         )

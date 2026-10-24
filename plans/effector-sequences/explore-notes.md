@@ -38,6 +38,122 @@
    unknown effector/value names, unknown trigger, duplicate (aircraft, role, trigger), malformed
    rows. No hot reload.
 
+## 2026-10-23 — after BL-B80 v2 merged (`a2ea382c`); answers to the plan's four decisions
+
+Context: BL-B80 v2 rewrote `sight_effector.py`/`logger.py` after the plan was written —
+readiness now comes from the real READY lamp (arg 960), and `GuidanceUnitState` carries the
+898/960/962 lamp readbacks that pointing depends on. The user's direction on that:
+
+- *"guidance unit power switch flip can go to sequence file"*
+- On "Guidance unit ready" being spoken on the 960 lamp's edge: *"this is correct. For now it can
+  be hard coded, but it should really be it's own trigger for a sequence file."* — so the
+  `guidance-unit-ready` trigger (deferred in decision 2) is the intended home; hard-coded is
+  acceptable in this cut.
+- On risk of wrong arg values: *"It's easy to change the arg values in the sequence files. If we
+  get the wrong one, the change is trivial. That's a benefit of the sequence files."* — so building
+  this before Flight A settles the lamp args is not a blocker.
+
+The plan's "Decisions Requiring User Input":
+
+1. **Queues: per trigger** — *"queues: per trigger"*. (Refines decision 4: queueing is within one
+   trigger, not across triggers.)
+2. **Takeoff: every takeoff** — *"takeoff: per takeoff, the sequence file will then deal with it
+   not being the first takeoff"*. Overturns the plan's one-shot-per-mission recommendation; the
+   file's own row conditions handle the already-powered case.
+3. **Bad file: log, ignore that file, keep running** — **supersedes decision 6's "fail loudly /
+   refuse to start"**. User's words: *"bad file: log error and ignore file. Write a clear and
+   obvious error message to console and queue audio error message to play once the intercom is up:
+   'System error, bad sequence file, see the logs. Petrobrain will continue, but some functionality
+   may not work.'"*
+4. **Re-flight: own short card** — *"re-flight: own short card."*
+
+### Readback rate and scope (2026-10-23, after the plan revision)
+
+On the revised plan's R7 (*"BL-B80 already reads all six switches every frame"*), the user:
+
+> *"we'll be reading a lot of args eventually. Better not do it every frame. The axis value
+> (BL-B80) are required at max rate, but for switch positions the normal lower frequency poll is
+> enough. If possible, query a set of switches when they are needed, not everything. This at DCS
+> export level if possible, for performance reasons. Ok to defer to later stage, but will be needed
+> soonish. Let's say BL-B90 last step."*
+
+So: axis args stay per-frame (BL-B80). Switch positions move to the lower-rate poll, ideally an
+on-demand query of just the needed set, done in `Export.lua`. Deferred, but it is BL-B90's **last
+stage** (in scope, not backlog). That reverses the revised plan's "Stage 4 deferred, additive":
+it now also moves the six switch args off BL-B80's per-frame push.
+
+On "Guidance unit ready" at spawn on an air start: *"there's already a note somewhere to say it on
+*change* to ready. Use that."* (BL-B80 decision 2, *"only on change"*.) Fixed separately on
+`fix/guidance-ready-edge` before Flight A, not in BL-B90.
+
+### File locations and the switch reference (2026-10-23, before Stages 1–2)
+
+> *"1 and 2 — and do build a full list of switches that are available. Save to file so I can
+> reference it when building/modifying sequence files. — sequence files (and the available
+> effectors list) go to body-layer/sequences/"*
+
+So: the sequence files and the curated effector registry (the names a sequence file may use) live
+in `body-layer/sequences/`, not `config/effector-sequences/`. Alongside them goes a
+human-readable reference of **every** available Mi-24P switch, generated from the Stage 0 dump, so
+the user can find an ED control while writing a sequence. Main-loop reading of "the available
+effectors list": the curated registry plus the full reference both sit in `sequences/`. The
+generated raw dump (`config/effectors-raw.toml`) stays where Stage 0 put it, as machine data. That
+placement is reversible, so it is the main loop's choice; say so if it should move too.
+
+### Already-set switches are skipped by the engine, not by a condition (2026-10-23, after Stage 1)
+
+On the shipped takeoff row `| missile_power != on | missile_power | on |`:
+
+> *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that
+> switch is already in set position, so no action. I'll use the conditions for real
+> this-depends-on-some-other-condition cases."*
+
+So the engine itself skips a row whose effector already reads the target value, so no write, no
+step delay and no line spoken. The `condition` column is kept for genuine cross-switch
+dependencies. The shipped files drop their `X != on` self-conditions. Main-loop choice where the
+user did not say: if the effector's readback is still unknown after
+`EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (a write sets an absolute value, so it
+is harmless if the switch was already there). Reversible; say if unknown should skip instead.
+
+### Collision rule and per-aircraft registry (2026-10-23)
+
+> *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at
+> this time, better to be ready now."*
+
+- When two curated entries point at the same device/cmd/arg, the **first wins**. The later one is
+  rejected with an error (non-fatal, D5). This replaces Stage 1's drop-both rule.
+- The registry is per aircraft. Main-loop layout, reversible: one directory per aircraft,
+  `body-layer/config/sequences/mi-24p/`, holding that aircraft's `effectors.toml`,
+  `switch-reference.md`, and its sequence files. The raw dump becomes
+  `body-layer/config/effectors-raw/mi-24p.toml`. A sequence file's `aircraft` param must match
+  the directory it sits in, and it resolves effectors only against that aircraft's registry.
+
+### Two new triggers: mission start (2026-10-23)
+
+> *"Add trigger for mission-start that fires once at every mission start and separate for
+> mission-start-in-air that fires once at mission start only if airborne (AGL > 10 m)"*
+
+- `mission-start`: once per mission start, on the ground or in the air.
+- `mission-start-in-air`: once per mission start, only if airborne at that moment. "Airborne" is
+  AGL > 10 m, which is exactly the existing tunable `ON_GROUND_AGL_THRESHOLD_M` (10.0 m), reused
+  rather than a second constant.
+- Asked and answered, same day:
+  - **An air start does NOT fire `takeoff`** (*"No, only real takeoffs"*). After a mission start,
+    `takeoff` fires only on an actual ground→air transition. Today body-layer assumes on-ground at
+    start, so an air start's first sample counted as a takeoff; that goes.
+  - **A body-layer start or restart during a running mission does NOT count as a mission start**
+    (*"No, only real mission starts"*). Only DCS's own mission (re)start event fires the two
+    triggers.
+
+Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
+tool for creating the switch list."* (Stage 0, the generator.)
+
+**Correction, 2026-10-23, mid-Stage-1**: *"actually, body-layer/config/sequences is better."*
+Overrides the placement two paragraphs up — the curated registry (`effectors.toml`), the sequence
+`*.md` files, and the generated `switch-reference.md` all live under
+`body-layer/config/sequences/`, not `body-layer/sequences/`. The raw dump stays at
+`body-layer/config/effectors-raw.toml`, unaffected by either placement.
+
 ## Carried from the concept, unchanged
 
 - 1 s between effectors (existing tunable `GUIDANCE_UNIT_SWITCH_DELAY_S`); axes excluded.
@@ -45,3 +161,34 @@
 - Triggers are a code enumeration; fire on the transition, not while true.
 - Format: proposed TOML registry + markdown-table sequence files (the concept's own shape); user
   accepted the registry, did not object to the markdown sequences. Architect may confirm.
+
+## Stage 4 decisions, 2026-10-24
+
+The user's answers to the Stage 4 plan's Decisions 4–6:
+
+- **Decision 4 (watched set): partly redirected.**
+
+  > *"can be fixed set, but take into account that the number of switches that we use will
+  > increase. Also the sequences can flip any switch. Most of them we really only need a few times
+  > per flight. Though the switch flip logic could do this: body tells aircraft layer to set switch
+  > position. Aircraft layer sets it. Assumes success. No switch position read required. Then
+  > there'd be certain switches or light where we need to know the state and those get polled."*
+
+  So there are two classes: sequence switches, which are written without continuous polling, and a
+  small set of state switches and lamps, which are polled. The conflict with R12 (skip a row whose
+  switch is already set) was raised back to the user, as two options:
+
+  - **A.** Write and assume success. R12's skip is dropped, so second takeoffs repeat the
+    `petrovich-says` lines and the step spacing.
+  - **B.** Read the trigger's own switches **once, when the trigger fires**, then write only the
+    ones that differ. R12 is kept. A small fixed set of state switches and lamps is still polled.
+
+  **User: *"B"*.**
+- **Polled set comes from config, not code.** On the revised plan's hard-coded
+  `READBACK_ARGS = (886, 898, 960)`: *"Better add a config for which effectors need constant
+  updates. The list will likely grow."* The main loop added a guard, which the user did not object
+  to: the args that code itself reads (886, 898, 960) are always polled, with a startup warning if
+  the config omits them. The config names indicators (e.g. the READY lamp, which is not clickable)
+  by arg number as well as switches by effector name.
+- **Decision 5 (test fakes): rewrite.** *"rewrite"*.
+- **Decision 6 (old feed): remove.** *"remove"*.

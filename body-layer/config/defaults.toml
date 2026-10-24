@@ -63,6 +63,17 @@ LOST_THRESHOLD_S = 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0
 
+[belief.effector_engine]
+# How long a run waits, per snapshot (Stage 4: once at run start, once again after each wait row), for `client.read_args` to succeed before giving up on the readback ever arriving and treating every arg as unknown -- long enough to survive a brief collector/Export.lua gap, short enough that a genuinely-down aircraft layer does not stall a sequence indefinitely.
+# status: derived | range: 1.0 .. 30.0
+# source: belief/effector_engine.py:EFFECTOR_CONDITION_READBACK_WAIT_S
+EFFECTOR_CONDITION_READBACK_WAIT_S = 5.0
+
+# Minimum seconds between successive writes *within one trigger's own* sequence -- renamed from `belief.sight_effector.GUIDANCE_UNIT_SWITCH_DELAY_S` (D10); same value, same reasoning (the measured ~3-frame/~0.1s DCS switch-animation ramp plus margin).
+# status: derived | range: 0.5 .. 5.0
+# source: belief/effector_engine.py:EFFECTOR_SEQUENCE_STEP_DELAY_S
+EFFECTOR_SEQUENCE_STEP_DELAY_S = 1.0
+
 [belief.enrichment]
 # `landmark-words-no-names` (F7 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the area, in m^2, below which a subtype-less/`"built_up"` settlement polygon reads as "a village" rather than "a town" in speech -- the only size evidence available when `world-model`'s `SettlementInfo.subtype` isn't one of the named `city`/`town`/`village` place values.
 # status: judgement | range: 100000.0 .. 5000000.0
@@ -120,12 +131,6 @@ SIGHT_STALL_COOLDOWN_S = 132.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 
-[belief.sight_effector]
-# Minimum seconds between successive 9K113 guidance-unit power-up switch writes after takeoff -- too low risks writing the next switch while DCS is still animating the previous one; 1.0 s is the default, roughly the measured per-switch animation time plus margin.
-# status: derived | range: 0.5 .. 5.0
-# source: belief/sight_effector.py:GUIDANCE_UNIT_SWITCH_DELAY_S
-GUIDANCE_UNIT_SWITCH_DELAY_S = 1.0
-
 [belief.sight_head]
 # How long the sight keeps tracking the last *seen* direction after the target drops out of the glass (left the FOV, LOS blocked, a binocular/ unaided poll, hands busy) before falling back to belief's own desired direction -- the plan's "Aim source" selection rule, `held` row.
 # status: agreed-guess | range: 0.0 .. 10.0
@@ -141,6 +146,12 @@ SLEW_AZ_DPS = 20.0
 # status: derived | range: 2.0 .. 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
+
+[logger]
+# Bounded fallback for the mission-start resolving window: how many seconds of **wall clock** (not sim time, not a poll count -- see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own docstring for why) `_run_crew_text_poll_loop` may wait for a fresh ownship sample before giving up on `t_sim`-based freshness and firing `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23: the fallback cannot tell a `t_sim` coincidence apart from no fresh sample at all, and only the former is safe to classify airborne from).
+# status: judgement | range: 5.0 .. 120.0
+# source: logger.py:MISSION_START_RESOLVE_FALLBACK_S
+MISSION_START_RESOLVE_FALLBACK_S = 30.0
 
 [mission_memory.admission]
 # How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.

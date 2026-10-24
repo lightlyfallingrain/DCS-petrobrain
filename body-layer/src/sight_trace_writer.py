@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -61,6 +62,7 @@ class SightTraceWriter:
         guidance_unit_state: GuidanceUnitState,
         sight_head: SightHead,
         sight_servo_latest: dict[str, Any] | None = None,
+        commanded_values: Mapping[str, str] | None = None,
     ) -> None:
         """Appends this poll's one row. Called every poll, unconditionally
         (unlike the Lua-side per-frame log, which only runs while OBSERV
@@ -69,7 +71,15 @@ class SightTraceWriter:
         side record, not resolution). `sight_servo_latest` is the raw
         `GET /sight_servo/latest` dict (`None` before the first sample, or
         for a caller that does not poll it) -- optional so every existing
-        construction/call site keeps working."""
+        construction/call site keeps working.
+
+        `commanded_values` is `belief.effector_engine.EffectorRunState.
+        commanded_values` (`plans/effector-sequences/plan.md`, "What moves,
+        what stays" -- `observ_commanded` moved off `GuidanceUnitState` to
+        here, Stage 2). `None` -- the default, for every existing call site
+        that predates the engine -- reads as "no successful write yet",
+        the same `False` default `observ_commanded` already had on
+        `GuidanceUnitState` before the move."""
         if self._disabled:
             return
         try:
@@ -81,6 +91,7 @@ class SightTraceWriter:
                         guidance_unit_state,
                         sight_head,
                         sight_servo_latest,
+                        commanded_values,
                     )
                 )
             )
@@ -131,6 +142,7 @@ def _row(
     guidance_unit_state: GuidanceUnitState,
     sight_head: SightHead,
     sight_servo_latest: dict[str, Any] | None,
+    commanded_values: Mapping[str, str] | None = None,
 ) -> dict[str, object | None]:
     desired_azimuth_deg = optic_state.look_azimuth_deg
     desired_elevation_deg = optic_state.look_elevation_deg
@@ -176,7 +188,7 @@ def _row(
         "servo_error_azimuth_deg": servo_error_azimuth_deg,
         "servo_error_elevation_deg": servo_error_elevation_deg,
         "servo_stalled": servo_stalled,
-        "observ_commanded": guidance_unit_state.observ_commanded,
+        "observ_commanded": ((commanded_values or {}).get("observ") == "on"),
         "observ_observed": guidance_unit_state.observ_observed,
         "optic_mode": (
             optic_state.look_optic.name if desired_azimuth_deg is not None else None

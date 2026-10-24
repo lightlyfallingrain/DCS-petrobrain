@@ -172,7 +172,14 @@ local socket = require("socket.core")
 -- against the prior shape would silently misparse the reshaped op, so
 -- this bump is load-bearing, not cosmetic -- update `aircraft-layer/src/
 -- collector/server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-22c"
+--
+-- Bumped again 2026-10-24 (`plans/effector-sequences/plan.md` Stage 4) for
+-- a **non-additive** reshape: `push_cockpit_switch_state` and its
+-- "missl_pw" wire key are removed entirely, replaced by the generic
+-- `watch_args`/`read_args` ops and their `"watch_id"`/`"read_id"` reply
+-- lines -- update `aircraft-layer/src/collector/server.py`'s
+-- `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-10-24"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -210,32 +217,20 @@ local WHEEL_CENTER_BUTTON = 3015
 -- not on a dedicated timer.
 local WHEEL_LONG_PRESS_S = 0.6
 
--- 9K113 guidance-unit power-up / OBSERV / weapon-safety-bar switches
--- (plans/9k113-effectors/plan.md, BL-B66 Stage 1). **Only the draw
--- arguments are declared here, for the readback telemetry push below
--- (push_cockpit_switch_state) -- the write side is the new generic
--- "cockpit_switch" op (handle_cockpit_switch_command), which takes
--- device/cmd/value straight off the wire with no allow-list (user
--- direction 2026-10-21, see aircraft-layer/CLAUDE.md's "What this is").**
--- `body-layer/src/belief/sight_effector.py` is the one module that knows
--- these six switches' device/cmd numbers; this file deliberately does not
--- duplicate them for the write path.
---
--- Confirmed live (aircraft-layer/research/2026-10-17-9k113-effector-and-
--- slew-probe-findings.md) for 773/955/885/886/673. **761 (CPLR DISTR) is
--- UNVERIFIED** -- corroborated by two independent readings
--- (mi24p-command-surface.md's positional table and DCS-BIOS's own Mi-24P
--- survey, aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-
--- controls.md Q2), but which physical switch arg 761 actually is has not
--- been confirmed by a live read-probe -- per the user's own "we can
--- change the switch number easily" (explore-notes.md), a one-line fix if
--- the acceptance sortie finds it wrong, not a blocker.
-local ARG_MISSL_PW = 773
-local ARG_CPLR_DISTR = 761 -- UNVERIFIED, see comment above
-local ARG_SIGHT_PW = 885
-local ARG_SCHO_PW = 955
+-- The 9K113's OBSERV switch, arg 886. Still read directly here (not only
+-- via the generic watched-args mechanism below) because `push_slew_trace`
+-- and `run_sight_servo` both need it every frame, faster than the 1 Hz
+-- poll the watched-args mechanism serves (`plans/effector-sequences/
+-- plan.md` Stage 4, S4.1's per-arg audit). The other five switches this
+-- comment used to also declare here (773/761/885/955/673) no longer have
+-- a per-frame reader -- Stage 4 retired `push_cockpit_switch_state`
+-- whole, and the generic `watch_args`/`read_args` ops (below) read any
+-- arg generically, by number, with no named constant needed. Confirmed
+-- live for 773/955/885/886/673 (aircraft-layer/research/2026-10-17-
+-- 9k113-effector-and-slew-probe-findings.md); 761 (CPLR DISTR) stays
+-- UNVERIFIED (see `body-layer/src/belief/sight_effector.py`'s own
+-- registry entry for that switch).
 local ARG_OBSERVE = 886
-local ARG_WEAP_SAFE = 673
 
 -- The sight head's own actual-position readback -- args 874 (azimuth) and
 -- 876 (elevation), BL-B66 Stage 4b (`plans/9k113-effectors/plan.md`). Not a
@@ -250,17 +245,14 @@ local ARG_WEAP_SAFE = 673
 local ARG_SIGHT_AZ = 874
 local ARG_SIGHT_ELEV = 876
 
--- The three real lamps `BL-B80` v2 (`plans/9k113-sight-pointing/
--- plan.md`) reads instead of a timer: 898 (Л5, gyro alignment -- lit
--- ~T+10 s per the probe runs) gates `SightHead.mode`'s `caged` ->
--- `free` transition; 960 (guidance-unit READY) is `sight_ready()`'s own
--- source; 962 (launch permission) is carried for `BL-B67`. Pushed on
--- `push_cockpit_switch_state`'s same change-gated line, as optional
--- booleans (`None`/absent on an older `Export.lua`) -- **not** raw
--- values, since all three are binary lamps, unlike the switch args above.
+-- The Л5 gyro-alignment lamp, arg 898 -- `BL-B80` v2 reads this directly
+-- (not only via watch_args) because `run_sight_servo` needs it every
+-- frame for `sight_mode`'s `caged` -> `free` transition, the same
+-- per-frame-reader reasoning as `ARG_OBSERVE` above. 960 (guidance-unit
+-- READY) and 962 (launch permission), by contrast, have no per-frame
+-- reader in this file any more -- Stage 4 reads them generically, by
+-- number, through `polled.toml`/`watch_args` on the body-layer side.
 local ARG_ALIGN_LAMP = 898
-local ARG_READY_LAMP = 960
-local ARG_LAUNCH_PERM_LAMP = 962
 
 -- The 9K113's AI-axis pointing channel (`plans/9k113-sight-pointing/
 -- plan.md`, BL-B80 v2) -- device 7 (I9K113, same device the switch arg
@@ -753,109 +745,228 @@ local function push_spu8_state(t)
     end
 end
 
---: Below this, two readings of any of the six 9K113 switch args are the
---: same reading -- same reasoning as SPU8_EPSILON above (the probe found
---: a ~3-frame animation ramp on every one of these switches, same shape
---: as the SPU-8 panel's own 377/664).
-local COCKPIT_SWITCH_EPSILON = 0.01
+--: The generic cockpit-arg readback (`plans/effector-sequences/plan.md`
+--: Stage 4, "readback by need" option B) -- replaces
+--: `push_cockpit_switch_state` whole (decided, "remove"). Two classes,
+--: never mixed on the wire:
+--:
+--: - **Continuous (`watch_args`/this file's own per-tick push,
+--:   `push_watched_args_state` below)**: a small, body-layer-declared set
+--:   of args, read at the existing 5 Hz export tick, sent only on change,
+--:   wire key `"watch_id"`.
+--: - **One-shot (`read_args`, `handle_read_args_command` below)**: any
+--:   args a sequence trigger needs, read once on request and answered on
+--:   the *same frame*, on the existing TCP connection (no new socket) --
+--:   wire key `"read_id"`.
+--:
+--: Below this, two readings of a watched arg are the same reading --
+--: same reasoning as SPU8_EPSILON above.
+local WATCHED_ARG_EPSILON = 0.01
 
-local last_missl_pw_sent = nil
-local last_cplr_distr_sent = nil
-local last_sight_pw_sent = nil
-local last_scho_pw_sent = nil
-local last_observe_sent = nil
-local last_weap_safe_sent = nil
-local last_align_lamp_sent = nil
-local last_ready_lamp_sent = nil
-local last_launch_perm_lamp_sent = nil
+--: Shared per-op bound, both ops, both ends of the wire -- held equal to
+--: `aircraft-layer/src/schema/watched_args.py`'s own copies by
+--: `tests/test_export_lua_constants_parity.py`. `MAX_WATCHED_ARGS`
+--: bounds how large a single `watch_id`/`read_id` install can be (a
+--: `SequenceFile.read_args` set exceeding it is a load-time D5 error on
+--: the body-layer side); `MAX_WATCHED_ARG_NUMBER` is the Mi-24P dump's
+--: own highest arg number with generous headroom (the dump's args run
+--: 0-1034, per the first Stage 4 spec's own measurement).
+local MAX_WATCHED_ARGS = 64
+local MAX_WATCHED_ARG_NUMBER = 4095
 
--- Reads the six 9K113 switch args plus the three real lamps (898/960/
--- 962, `BL-B80` v2) and sends a line only when at least one has
--- moved -- same "every frame, sent only on change" shape as
--- push_spu8_state above. Wire key "missl_pw" (not "net1"/"ptt"/etc, so
--- collector.server._handle_line can tell this line kind apart from every
--- other one on this connection).
---
--- **874/876 (the sight's own demand echo) are deliberately NOT on this
--- line any more** (BL-B66 Stage 4b added them; `BL-B80` v2 removes
--- them from this feed) -- probe runs 1-10 confirmed they echo the
--- commanded *demand*, not a position, and under the per-frame dither
--- they would change every frame, flooding this change-gated line with
--- the servo's own internal churn. `push_slew_trace` still reads them
--- directly for debug logging; `run_sight_servo` reads 566/555/etc for
--- the mark, never 874/876.
-local function push_cockpit_switch_state(t)
-    if client == nil then
-        return -- nothing to send to yet; the next change will be sent
+--: `read_args`'s own per-frame bound -- this file's command drain loop
+--: (`poll_command_socket`) is otherwise unbounded, so a flood of
+--: `read_args` ops could make a single frame spend an unbounded amount
+--: of time on `GetDevice(0):get_argument_value` calls. `watch_args`
+--: installs are O(1) state writes with no device read, so that op is
+--: deliberately left uncapped (matches `cockpit_switch`'s own existing
+--: unbounded-but-cheap posture in the same drain loop).
+local MAX_READS_PER_FRAME = 4
+
+--: Module state for the continuous feed -- installed by
+--: `handle_watch_args_command`, read by `push_watched_args_state`, reset
+--: by `LuaExportStop`, and the two `try_connect()` call sites force a
+--: full resend on reconnect (see those sites' own comments).
+local watched_args = {}
+local watched_id = nil
+local watched_last_sent = {}
+local watched_force_send = false
+
+--: Extracts a 1-16 character `[%w_]` id field (`watch_id`/`read_id`) --
+--: a tighter sibling of `extract_json_string_field` above, which has no
+--: length bound of its own. Both ops' ids share this one helper rather
+--: than each re-deriving the same length check.
+local function extract_json_id_field(json_text, field_name)
+    local value = json_text:match("\"" .. field_name .. "\"%s*:%s*\"([%w_]+)\"")
+    if value == nil or #value > 16 then
+        return nil
     end
-    local missl_pw = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_MISSL_PW)
-    end)
-    local cplr_distr = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_CPLR_DISTR)
-    end)
-    local sight_pw = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_PW)
-    end)
-    local scho_pw = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SCHO_PW)
-    end)
-    local observe = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_OBSERVE)
-    end)
-    local weap_safe = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_WEAP_SAFE)
-    end)
-    local align_lamp = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_ALIGN_LAMP)
-    end)
-    local ready_lamp = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_READY_LAMP)
-    end)
-    local launch_perm_lamp = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_LAUNCH_PERM_LAMP)
-    end)
-    if missl_pw == nil or cplr_distr == nil or sight_pw == nil
-        or scho_pw == nil or observe == nil or weap_safe == nil
-        or align_lamp == nil or ready_lamp == nil or launch_perm_lamp == nil then
-        return -- no mainpanel device (briefing screen, wrong airframe)
+    return value
+end
+
+-- Parses an `"args":[...]` field shared by both `watch_args` and
+-- `read_args` -- not a general JSON array parser (this file's existing
+-- "hand-roll only what the fixed wire schema needs" policy), since the
+-- only shape either op's `args` field ever carries is a flat list of
+-- small non-negative integers. Returns the sorted, deduplicated list of
+-- integers, or `nil` on any violation -- an invalid token, a value over
+-- `MAX_WATCHED_ARG_NUMBER`, or more than `MAX_WATCHED_ARGS` distinct
+-- values after dedup -- so the caller rejects the **whole** op rather
+-- than silently truncating or dropping just the bad entry (a truncated
+-- set would look installed while silently missing args). `[]` (an empty
+-- array) is valid and returns `{}`.
+local function parse_arg_list(json_text)
+    local list_text = json_text:match('"args"%s*:%s*%[([^%]]*)%]')
+    if list_text == nil then
+        return nil
     end
-    local align_on = align_lamp >= 0.5
-    local ready_on = ready_lamp >= 0.5
-    local launch_perm_on = launch_perm_lamp >= 0.5
-    if last_missl_pw_sent ~= nil
-        and math.abs(missl_pw - last_missl_pw_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(cplr_distr - last_cplr_distr_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(sight_pw - last_sight_pw_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(scho_pw - last_scho_pw_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(observe - last_observe_sent) < COCKPIT_SWITCH_EPSILON
-        and math.abs(weap_safe - last_weap_safe_sent) < COCKPIT_SWITCH_EPSILON
-        and align_on == last_align_lamp_sent
-        and ready_on == last_ready_lamp_sent
-        and launch_perm_on == last_launch_perm_lamp_sent then
+    local trimmed = list_text:match("^%s*(.-)%s*$")
+    if trimmed == "" then
+        return {}
+    end
+    local seen = {}
+    local args = {}
+    for token in (trimmed .. ","):gmatch("([^,]*),") do
+        local token_trimmed = token:match("^%s*(.-)%s*$")
+        if token_trimmed == "" or not token_trimmed:match("^%d+$")
+            or #token_trimmed > 4 then
+            return nil
+        end
+        local n = tonumber(token_trimmed)
+        if n == nil or n > MAX_WATCHED_ARG_NUMBER then
+            return nil
+        end
+        if not seen[n] then
+            seen[n] = true
+            args[#args + 1] = n
+        end
+    end
+    if #args > MAX_WATCHED_ARGS then
+        return nil
+    end
+    table.sort(args)
+    return args
+end
+
+-- Pure core of the per-frame read-op admission check (L6) -- a plain
+-- counter comparison, factored out so it can be tested without a DCS
+-- environment. `poll_command_socket` keeps the counter itself, as a
+-- `local` reset every call (every frame), so no module-level state is
+-- needed for it.
+local function admit_read(reads_this_frame)
+    return reads_this_frame < MAX_READS_PER_FRAME
+end
+
+-- True if `values` (an arg->raw-value table) differs from `last_sent`
+-- (the same shape) by at least `epsilon` on any key, or has a key either
+-- side lacks the other -- shared by the continuous feed's own change
+-- gate. `last_sent`/`values` use integer arg numbers as keys (unlike the
+-- wire line itself, which stringifies them).
+local function watched_args_changed(last_sent, values, epsilon)
+    for arg, v in pairs(values) do
+        local prev = last_sent[arg]
+        if prev == nil or math.abs(v - prev) >= epsilon then
+            return true
+        end
+    end
+    for arg, _ in pairs(last_sent) do
+        if values[arg] == nil then
+            return true
+        end
+    end
+    return false
+end
+
+-- Encodes the continuous feed's own change-gated line:
+-- {"t":...,"watch_id":"...","watched":{"<arg>":<raw>,...}}. `args` gives
+-- the key order (ascending, since `parse_arg_list`/`handle_watch_args_
+-- command` already sorted it); an arg whose read failed is **omitted**
+-- from `values`, never sent as 0 -- absent means unknown, the D3 posture
+-- this wire format exists to preserve.
+local function encode_watched_args_line(t, watch_id, args, values)
+    local parts = {}
+    for i = 1, #args do
+        local arg = args[i]
+        local v = values[arg]
+        if v ~= nil then
+            parts[#parts + 1] = "\"" .. tostring(arg) .. "\":" .. string.format("%.3f", v)
+        end
+    end
+    return "{\"t\":" .. string.format("%.3f", t) .. ",\"watch_id\":\"" .. tostring(watch_id)
+        .. "\",\"watched\":{" .. table.concat(parts, ",") .. "}}\n"
+end
+
+-- Encodes one `read_args` reply line:
+-- {"t":...,"read_id":"...","values":{"<arg>":<raw>,...}} -- same omit-
+-- on-failed-read rule as encode_watched_args_line above, under the
+-- `"values"` key `collector.arg_read_broker.ArgReadBroker`'s own line
+-- parser expects (distinct from `"watched"`, the continuous feed's key,
+-- so a collector or body-layer reader can never confuse the two by shape
+-- alone -- it keys off `"watch_id"` vs. `"read_id"` first).
+local function build_read_reply_line(t, read_id, args, values)
+    local parts = {}
+    for i = 1, #args do
+        local arg = args[i]
+        local v = values[arg]
+        if v ~= nil then
+            parts[#parts + 1] = "\"" .. tostring(arg) .. "\":" .. string.format("%.3f", v)
+        end
+    end
+    return "{\"t\":" .. string.format("%.3f", t) .. ",\"read_id\":\"" .. tostring(read_id)
+        .. "\",\"values\":{" .. table.concat(parts, ",") .. "}}\n"
+end
+
+-- Installs a replacement watched set whole (never a merge -- a short
+-- `args` list means "watch only these", not "also watch these"). An
+-- invalid op (bad/missing id, bad/oversized `args`) leaves whatever set
+-- was already installed untouched and logs the rejection -- same
+-- "reject the whole op, never partially apply it" rule `handle_cockpit_
+-- switch_command` already follows for its own fields.
+local function handle_watch_args_command(data)
+    local watch_id_value = extract_json_id_field(data, "watch_id")
+    local args = parse_arg_list(data)
+    if watch_id_value == nil or args == nil then
+        debug_log("ignoring malformed/invalid watch_args command")
         return
     end
-    last_missl_pw_sent = missl_pw
-    last_cplr_distr_sent = cplr_distr
-    last_sight_pw_sent = sight_pw
-    last_scho_pw_sent = scho_pw
-    last_observe_sent = observe
-    last_weap_safe_sent = weap_safe
-    last_align_lamp_sent = align_on
-    last_ready_lamp_sent = ready_on
-    last_launch_perm_lamp_sent = launch_perm_on
-    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
-        .. ',"missl_pw":' .. string.format("%.3f", missl_pw)
-        .. ',"cplr_distr":' .. string.format("%.3f", cplr_distr)
-        .. ',"sight_pw":' .. string.format("%.3f", sight_pw)
-        .. ',"scho_pw":' .. string.format("%.3f", scho_pw)
-        .. ',"observe":' .. string.format("%.3f", observe)
-        .. ',"weap_safe":' .. string.format("%.3f", weap_safe)
-        .. ',"align_lamp":' .. tostring(align_on)
-        .. ',"ready_lamp":' .. tostring(ready_on)
-        .. ',"launch_perm_lamp":' .. tostring(launch_perm_on) .. '}\n')
+    watched_args = args
+    watched_id = watch_id_value
+    watched_last_sent = {}
+    watched_force_send = true
+    debug_log("watch_args installed id=" .. watch_id_value .. " n=" .. tostring(#args))
+end
+
+-- Reads `args` off `GetDevice(0)` once, in this same frame, and replies
+-- on the existing `client` TCP connection (never a new socket -- the
+-- collector's `ArgReadBroker` correlates the reply against this same
+-- connection it is already reading lines from). If `client` is `nil`
+-- the request is silently dropped and the broker times out -- same
+-- "nothing to send to yet" posture every push_* function above takes.
+local function handle_read_args_command(data, t)
+    local read_id_value = extract_json_id_field(data, "read_id")
+    local args = parse_arg_list(data)
+    if read_id_value == nil or args == nil then
+        debug_log("ignoring malformed/invalid read_args command")
+        return
+    end
+    if client == nil then
+        return
+    end
+    local dev = safe_call(function() return GetDevice(0) end)
+    local values = {}
+    if dev ~= nil then
+        for i = 1, #args do
+            local arg = args[i]
+            local v = safe_call(function() return dev:get_argument_value(arg) end)
+            if v ~= nil then
+                values[arg] = v
+            end
+        end
+    end
+    local line = build_read_reply_line(t, read_id_value, args, values)
+    local ok, err = client:send(line)
     if not ok then
-        debug_log("cockpit-switch send failed: " .. tostring(err))
+        debug_log("read_args reply send failed: " .. tostring(err))
         client:close()
         client = nil
     end
@@ -1511,6 +1622,48 @@ local function push_sight_servo_state(t)
     end
 end
 
+-- Sends the continuous watched-args feed's own change-gated line
+-- (`plans/effector-sequences/plan.md` Stage 4) -- called inside the 5 Hz
+-- export section, *after* the telemetry line's own send has succeeded
+-- (so `client` is alive and `LoGetSelfData` worked, meaning we are
+-- actually in the cockpit, not the briefing screen). A true no-op when
+-- no set has been installed yet (`#watched_args == 0`), the ordinary
+-- state before body-layer's first `watch_args` POST lands.
+local function push_watched_args_state(t)
+    if client == nil then
+        return
+    end
+    if #watched_args == 0 then
+        return
+    end
+    local dev = safe_call(function() return GetDevice(0) end)
+    if dev == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    local values = {}
+    for i = 1, #watched_args do
+        local arg = watched_args[i]
+        local v = safe_call(function() return dev:get_argument_value(arg) end)
+        if v ~= nil then
+            values[arg] = v
+        end
+    end
+    if not watched_force_send
+        and not watched_args_changed(watched_last_sent, values, WATCHED_ARG_EPSILON) then
+        return
+    end
+    local line = encode_watched_args_line(t, watched_id, watched_args, values)
+    local ok, err = client:send(line)
+    if not ok then
+        debug_log("watched-args send failed: " .. tostring(err))
+        client:close()
+        client = nil
+        return
+    end
+    watched_last_sent = values
+    watched_force_send = false
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -1520,6 +1673,10 @@ local function poll_command_socket(t)
     if command_socket == nil then
         return
     end
+    -- `read_args`'s own per-frame cap (MAX_READS_PER_FRAME) -- a plain
+    -- local, reset every call since this function runs once per frame;
+    -- no module-level state needed (see admit_read's own comment).
+    local reads_this_frame = 0
     while true do
         local data, _err = command_socket:receivefrom()
         if data == nil then
@@ -1541,6 +1698,15 @@ local function poll_command_socket(t)
             local rate_el_deg_s = extract_json_number_field(data, "goal_rate_el_deg_s")
             local t_sim = extract_json_number_field(data, "t_sim")
             handle_sight_target_command(goal_az_deg, goal_el_deg, rate_az_deg_s, rate_el_deg_s, t_sim)
+        elseif op == "watch_args" then
+            handle_watch_args_command(data)
+        elseif op == "read_args" then
+            if admit_read(reads_this_frame) then
+                reads_this_frame = reads_this_frame + 1
+                handle_read_args_command(data, t)
+            else
+                debug_log("dropping read_args command: per-frame cap reached")
+            end
         else
             debug_log("ignoring command with unknown op: " .. tostring(op))
         end
@@ -1549,6 +1715,14 @@ end
 
 function LuaExportStart()
     client = try_connect()
+    -- `plans/effector-sequences/plan.md` Stage 4: a (re)connect means
+    -- Export.lua just lost whatever it last sent -- force a full
+    -- watched-args snapshot on the next tick rather than waiting for a
+    -- value to change (this covers a collector restart, and the first
+    -- connect of a new mission equally).
+    if client ~= nil then
+        watched_force_send = true
+    end
     command_socket = try_open_command_socket()
 end
 
@@ -1614,6 +1788,17 @@ function LuaExportStop()
     -- reasoning the module-level `local last_export_t = -1` initializer
     -- already relies on for the very first mission start).
     last_export_t = -1
+    -- `plans/effector-sequences/plan.md` Stage 4: "a stale X must never
+    -- survive" (this file's own convention -- see sight_goal_* above),
+    -- applied to the watched-args state. The collector clears its own
+    -- cache on the matching `export_version` line either way, but
+    -- resetting here too means a reconnect to the *same* collector
+    -- process (no export_version re-send) still starts from an empty
+    -- set rather than one that belonged to the mission that just ended.
+    watched_args = {}
+    watched_id = nil
+    watched_last_sent = {}
+    watched_force_send = false
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -1666,9 +1851,6 @@ function LuaExportAfterNextFrame()
     -- plans/spu8-intercom/plan.md Stage 1: same "every frame, send only
     -- on change" reasoning as push_ptt_state immediately above.
     push_spu8_state(t)
-    -- plans/9k113-effectors/plan.md, BL-B66 Stage 1: same "every frame,
-    -- send only on change" reasoning as push_spu8_state immediately above.
-    push_cockpit_switch_state(t)
     -- plans/9k113-effectors/plan.md, BL-B66 Stage 4b: a true no-op unless
     -- SLEW_DEBUG is on (see that flag's own comment) -- writes to a local
     -- file, not the collector socket, so it runs even before `client` is
@@ -1706,6 +1888,8 @@ function LuaExportAfterNextFrame()
         if client == nil then
             return
         end
+        -- Same reasoning as the LuaExportStart call site above.
+        watched_force_send = true
     end
 
     local self_data = safe_call(LoGetSelfData)
@@ -1782,6 +1966,12 @@ function LuaExportAfterNextFrame()
         client = nil
         return -- don't attempt the world-objects send on a dead connection
     end
+
+    -- `plans/effector-sequences/plan.md` Stage 4: here, after the
+    -- telemetry send succeeded, so `client` is alive and `LoGetSelfData`
+    -- worked (we are actually in the cockpit) -- see that function's own
+    -- docstring.
+    push_watched_args_state(t)
 
     -- LoGetWorldObjects poll, mirroring LoGetSelfData's mechanism exactly:
     -- same throttle (this function only reaches here once per

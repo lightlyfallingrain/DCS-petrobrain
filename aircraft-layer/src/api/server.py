@@ -163,21 +163,18 @@ the body/brain process, on either Windows or Mac (compute topology note in
   (a dropped look-direction push is a real coverage gap, not an opaque
   display string to swallow).
 
-- `GET /cockpit_switch/latest` -> the most recent `CockpitSwitchState`
-  (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1) as JSON, or JSON `null`
-  on the same "not an error" basis as every other `/latest` endpoint. The
-  9K113 guidance-unit power-up/OBSERV/weapon-safety-bar switches (args
-  773/761/885/955/886/673).
 - `POST /command/cockpit_switch` -> the aircraft layer's sixth
-  inbound/write path (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1).
-  Body `{"device": int, "cmd": int, "value": number}`; forwards to
-  `collector.command_sender.CommandSender.send_cockpit_switch`, which
-  fires the JSON command at `Export.lua`'s inbound UDP listener (writing
-  *any* clickable cockpit control -- **no allow-list**, user direction
-  2026-10-21, see `aircraft-layer/CLAUDE.md`'s "What this is" section),
-  and responds `200 {"ok": true}` on the same "attempted the call"
-  contract as `/command/petrovich_search`. `400 {"error": ...}` on a
-  missing/non-integer `device`/`cmd` or a missing/non-finite `value`, or a
+  inbound/write path (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1),
+  **unchanged by Stage 4** (only this endpoint's own *readback* sibling,
+  `GET /cockpit_switch/latest`, is removed below). Body `{"device": int,
+  "cmd": int, "value": number}`; forwards to `collector.command_sender.
+  CommandSender.send_cockpit_switch`, which fires the JSON command at
+  `Export.lua`'s inbound UDP listener (writing *any* clickable cockpit
+  control -- **no allow-list**, user direction 2026-10-21, see
+  `aircraft-layer/CLAUDE.md`'s "What this is" section), and responds
+  `200 {"ok": true}` on the same "attempted the call" contract as
+  `/command/petrovich_search`. `400 {"error": ...}` on a missing/
+  non-integer `device`/`cmd` or a missing/non-finite `value`, or a
   non-JSON body -- shape validation only, never a value/vocabulary check,
   same posture `Export.lua`'s own dispatch takes. `503
   {"error": "cockpit switch channel not configured"}` if this server was
@@ -185,6 +182,43 @@ the body/brain process, on either Windows or Mac (compute topology note in
   `500 {"error": ...}`, same posture as `/command/petrovich_search` (a
   dropped switch write is a real behavioral gap, not an opaque display
   string to swallow).
+
+- `GET /watched_args/latest` -> the most recent `WatchedArgsState`
+  (`plans/effector-sequences/plan.md` Stage 4, replacing the old
+  `GET /cockpit_switch/latest`) as JSON, or JSON `null` on the same
+  "not an error" basis as every other `/latest` endpoint. The continuous
+  cockpit-arg readback -- a small, `polled.toml`-driven set of args
+  `Export.lua` polls at its own 5 Hz export tick and sends only on change.
+- `POST /command/watch_args` -> installs the set of args the continuous
+  feed above should watch (`plans/effector-sequences/plan.md` Stage 4).
+  Body `{"watch_id": "<1-16 char [A-Za-z0-9_] string>", "args": [int,
+  ...]}`; forwards to `collector.command_sender.CommandSender.
+  send_watch_args`, which fires the JSON command at `Export.lua`'s inbound
+  UDP listener (replacing the previously-installed set whole, never
+  merging), and responds `200 {"ok": true}` on the same "attempted the
+  call" contract as `/command/petrovich_search`. `400 {"error": ...}` on
+  a missing/malformed `watch_id`, or a missing/non-integer/out-of-range/
+  oversized `args` list, or a non-JSON body. `503
+  {"error": "watch_args channel not configured"}` if this server was
+  built without a `command_sender`; a send failure propagates as
+  `500 {"error": ...}`, same posture as `/command/petrovich_search`.
+- `POST /query/read_args` -> the aircraft layer's sixth inbound/write path,
+  and its first **synchronous** one (`plans/effector-sequences/plan.md`
+  Stage 4, S4.2, "readback by need" option B). Body `{"args": [int, ...]}`;
+  forwards to `collector.arg_read_broker.ArgReadBroker.read`, which fires
+  a one-shot `read_args` command at `Export.lua`'s inbound UDP listener
+  and **blocks this HTTP worker thread** waiting for `Export.lua`'s TCP
+  reply, up to `collector.arg_read_broker.ARG_READ_TIMEOUT_S` (about one
+  DCS frame plus the LAN round trip in the common case) -- unlike every
+  other endpoint on this API, a `200` here means the values were actually
+  read this call, not merely that a command was handed off. `400
+  {"error": ...}` on a missing/invalid `args` list (same shape rules as
+  `/command/watch_args`'s own `args`), or a non-JSON body. `503
+  {"error": "read_args channel not configured"}` if this server was built
+  without an `arg_read_broker`, or `{"error": "too many reads outstanding"}`
+  if `collector.arg_read_broker.MAX_OUTSTANDING_READS` concurrent reads are
+  already in flight. `504 {"error": ...}` if no reply arrives within the
+  timeout (no Export.lua peer connected, or a stalled frame).
 
 - `POST /command/sight_target` -> the aircraft layer's seventh
   inbound/write path (`plans/9k113-sight-pointing/plan.md`, BL-B80 v2).
@@ -238,14 +272,19 @@ import binascii
 import json
 import logging
 import math
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlparse
 
+from collector.arg_read_broker import (
+    ArgReadBroker,
+    ArgReadBrokerBusy,
+    ArgReadTimeout,
+)
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
-    CockpitSwitchCache,
     F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
@@ -256,6 +295,7 @@ from collector.cache import (
     Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
+    WatchedArgsCache,
     WorldObjectsCache,
 )
 from collector.command_sender import (
@@ -266,6 +306,7 @@ from collector.command_sender import (
 )
 from collector.firing_receiver import EmitterTracker
 from collector.text_sender import TextOverlaySender
+from schema import MAX_WATCHED_ARG_NUMBER, MAX_WATCHED_ARGS
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +322,7 @@ _MISSION_START_LATEST_PATH = "/mission_start/latest"
 _FIRING_LATEST_PATH = "/firing/latest"
 _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
-_COCKPIT_SWITCH_LATEST_PATH = "/cockpit_switch/latest"
+_WATCHED_ARGS_LATEST_PATH = "/watched_args/latest"
 _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
@@ -289,6 +330,8 @@ _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
+_COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
+_QUERY_READ_ARGS_PATH = "/query/read_args"
 _COMMAND_SIGHT_TARGET_PATH = "/command/sight_target"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
@@ -335,6 +378,11 @@ _SIGHT_TARGET_AZ_BOUND = 360.0
 _SIGHT_TARGET_EL_BOUND = 90.0
 _SIGHT_TARGET_RATE_BOUND = 30.0
 _SIGHT_TARGET_TSIM_BOUND = 86400.0
+
+#: `/command/watch_args`'s own `watch_id` validation -- matches
+#: `Export.lua`'s own `[%w_]{1,16}` bound on the wire (`plans/
+#: effector-sequences/plan.md` Stage 4, S4.5).
+_WATCH_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -409,20 +457,43 @@ def _handle_spu8_state(cache: Spu8Cache) -> dict[str, Any] | None:
     return None if sample is None else sample.to_api_dict()
 
 
-def _handle_cockpit_switch_latest(
-    cache: CockpitSwitchCache,
+def _handle_watched_args_latest(
+    cache: WatchedArgsCache,
 ) -> dict[str, Any] | None:
-    """`null` before the first cockpit-switch line arrives -- same "not an
+    """`null` before the first watched-args line arrives -- same "not an
     error" posture as `/spu8/state`."""
     sample = cache.latest()
     return None if sample is None else sample.to_api_dict()
+
+
+def _validate_arg_list(raw: Any) -> list[int] | None:
+    """Shared shape validation for an `"args"` field, used by both
+    `/command/watch_args` and `/query/read_args` (`plans/
+    effector-sequences/plan.md` Stage 4) -- a list of non-bool ints in
+    `[0, MAX_WATCHED_ARG_NUMBER]`, deduped, at most `MAX_WATCHED_ARGS`
+    entries. Returns the deduped, sorted list, or `None` if `raw` fails
+    any of those checks (the caller responds `400`)."""
+    if not isinstance(raw, list):
+        return None
+    seen: set[int] = set()
+    for item in raw:
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or not (0 <= item <= MAX_WATCHED_ARG_NUMBER)
+        ):
+            return None
+        seen.add(item)
+    if len(seen) > MAX_WATCHED_ARGS:
+        return None
+    return sorted(seen)
 
 
 def _handle_sight_servo_latest(
     cache: SightServoCache,
 ) -> dict[str, Any] | None:
     """`null` before the first sight-servo line arrives -- same "not an
-    error" posture as `/cockpit_switch/latest`."""
+    error" posture as `/watched_args/latest`."""
     sample = cache.latest()
     return None if sample is None else sample.to_api_dict()
 
@@ -461,8 +532,9 @@ def _make_handler(
     look_direction_sender: LookDirectionSender | None,
     emitter_tracker: EmitterTracker,
     mission_start_cache: MissionStartCache,
-    cockpit_switch_cache: CockpitSwitchCache,
+    watched_args_cache: WatchedArgsCache,
     sight_servo_cache: SightServoCache,
+    arg_read_broker: ArgReadBroker | None,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -499,10 +571,8 @@ def _make_handler(
             if path == _SPU8_STATE_PATH:
                 self._respond_json(200, _handle_spu8_state(spu8_cache))
                 return
-            if path == _COCKPIT_SWITCH_LATEST_PATH:
-                self._respond_json(
-                    200, _handle_cockpit_switch_latest(cockpit_switch_cache)
-                )
+            if path == _WATCHED_ARGS_LATEST_PATH:
+                self._respond_json(200, _handle_watched_args_latest(watched_args_cache))
                 return
             if path == _SIGHT_SERVO_LATEST_PATH:
                 self._respond_json(200, _handle_sight_servo_latest(sight_servo_cache))
@@ -542,6 +612,12 @@ def _make_handler(
                 return
             if path == _COMMAND_COCKPIT_SWITCH_PATH:
                 self._handle_command_cockpit_switch()
+                return
+            if path == _COMMAND_WATCH_ARGS_PATH:
+                self._handle_command_watch_args()
+                return
+            if path == _QUERY_READ_ARGS_PATH:
+                self._handle_query_read_args()
                 return
             if path == _COMMAND_SIGHT_TARGET_PATH:
                 self._handle_command_sight_target()
@@ -729,6 +805,117 @@ def _make_handler(
                 self._respond_json(500, {"error": str(exc)})
                 return
             self._respond_json(200, {"ok": True})
+
+        def _handle_command_watch_args(self) -> None:
+            """`POST /command/watch_args` -- shape validation only
+            (`watch_id` pattern, `args` list bounds -- see the module
+            docstring's own entry for this endpoint). Reuses
+            `command_sender`, the same `CommandSender` instance every
+            other `Export.lua`-targeted write already forwards through."""
+            if command_sender is None:
+                self._respond_json(503, {"error": "watch_args channel not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            watch_id = data.get("watch_id")
+            if not isinstance(watch_id, str) or not _WATCH_ID_RE.fullmatch(watch_id):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'watch_id' must be a 1-16 char [A-Za-z0-9_] "
+                            f"string, got {watch_id!r}"
+                        )
+                    },
+                )
+                return
+
+            args = _validate_arg_list(data.get("args"))
+            if args is None:
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'args' must be a list of at most "
+                            f"{MAX_WATCHED_ARGS} integers in "
+                            f"[0, {MAX_WATCHED_ARG_NUMBER}]"
+                        )
+                    },
+                )
+                return
+
+            try:
+                command_sender.send_watch_args(watch_id, args)
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_query_read_args(self) -> None:
+            """`POST /query/read_args` -- the one *synchronous* write path
+            on this API (`plans/effector-sequences/plan.md` Stage 4, S4.2).
+            Shape validation only (same `args` bounds as `/command/
+            watch_args`), then blocks this handler thread inside
+            `ArgReadBroker.read` until Export.lua answers or the broker's
+            own timeout elapses -- see the module docstring's own entry
+            for this endpoint."""
+            if arg_read_broker is None:
+                self._respond_json(503, {"error": "read_args channel not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            args = _validate_arg_list(data.get("args"))
+            if args is None:
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'args' must be a list of at most "
+                            f"{MAX_WATCHED_ARGS} integers in "
+                            f"[0, {MAX_WATCHED_ARG_NUMBER}]"
+                        )
+                    },
+                )
+                return
+
+            try:
+                result = arg_read_broker.read(args)
+            except ArgReadBrokerBusy as exc:
+                self._respond_json(503, {"error": str(exc)})
+                return
+            except ArgReadTimeout as exc:
+                self._respond_json(504, {"error": str(exc)})
+                return
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(
+                200,
+                {
+                    "t": result.dcs_model_time_s,
+                    "values": {str(arg): value for arg, value in result.values.items()},
+                },
+            )
 
         def _handle_command_sight_target(self) -> None:
             """`POST /command/sight_target` -- shape validation only
@@ -936,8 +1123,9 @@ class TelemetryAPIServer:
         look_direction_sender: LookDirectionSender | None = None,
         emitter_tracker: EmitterTracker | None = None,
         mission_start_cache: MissionStartCache | None = None,
-        cockpit_switch_cache: CockpitSwitchCache | None = None,
+        watched_args_cache: WatchedArgsCache | None = None,
         sight_servo_cache: SightServoCache | None = None,
+        arg_read_broker: ArgReadBroker | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
@@ -989,14 +1177,17 @@ class TelemetryAPIServer:
             if mission_start_cache is not None
             else MissionStartCache()
         )
-        self._cockpit_switch_cache = (
-            cockpit_switch_cache
-            if cockpit_switch_cache is not None
-            else CockpitSwitchCache()
+        self._watched_args_cache = (
+            watched_args_cache if watched_args_cache is not None else WatchedArgsCache()
         )
         self._sight_servo_cache = (
             sight_servo_cache if sight_servo_cache is not None else SightServoCache()
         )
+        # `arg_read_broker` defaults to `None`, same posture as
+        # `command_sender`/`text_sender`/`audio_sender` above --
+        # `/query/read_args` answers `503` rather than crashing when it
+        # isn't configured.
+        self._arg_read_broker = arg_read_broker
         # `EmitterTracker` defaults to a fresh, never-fed instance -- same
         # "unconfigured answers the empty/default state, never crashes"
         # posture as every other optional cache above, just with no
@@ -1052,8 +1243,9 @@ class TelemetryAPIServer:
                 self._look_direction_sender,
                 self._emitter_tracker,
                 self._mission_start_cache,
-                self._cockpit_switch_cache,
+                self._watched_args_cache,
                 self._sight_servo_cache,
+                self._arg_read_broker,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

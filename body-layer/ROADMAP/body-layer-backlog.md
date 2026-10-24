@@ -129,6 +129,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B88]] — `join_voice_latency.py` crashes whole on one malformed JSONL line
 - [[BL-B89]] — 9K113 scanning procedure: points of interest, not band sweeps (next after 9k113-narrow-search)
 - [[BL-B90]] — configurable cockpit effector sequences: named registry + per-trigger sequence files (after [[BL-B80]])
+- [[BL-B91]] — effector-registry TOML renderer did not escape control characters in free-text fields (fixed)
 - [[BL-B92]] — `test_connection_reporter_*` tests order-dependent under pytest-randomly (fixed, merged `27f9821f`)
 - [[BL-B93]] — `test_tuning.py` autouse fixture leaves the tuning registry empty for later tests
 - [[BL-B94]] — named, checked catalogue of state params (light level as the example) `[>]` deferred

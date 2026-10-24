@@ -3,8 +3,9 @@
 - [ ] **AC-B11 — Cap the body size `TelemetryAPIServer`'s POST handlers will read.** #status/open
 
 Every `POST` handler in `aircraft-layer/src/api/server.py` (`_handle_text_push`,
-`_handle_audio_play`, `_handle_command_petrovich_search`, `_handle_command_look_direction`, and
-`BL-B66`'s new `_handle_command_cockpit_switch`) does:
+`_handle_audio_play`, `_handle_command_petrovich_search`, `_handle_command_look_direction`,
+`BL-B66`'s `_handle_command_cockpit_switch`, and `BL-B90` Stage 4's new
+`_handle_command_watch_args`/`_handle_query_read_args`, `plans/effector-sequences/plan.md`) does:
 
 ```python
 length = int(self.headers.get("Content-Length", "0") or "0")
