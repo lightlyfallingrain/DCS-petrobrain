@@ -161,3 +161,21 @@ Overrides the placement two paragraphs up — the curated registry (`effectors.t
 - Triggers are a code enumeration; fire on the transition, not while true.
 - Format: proposed TOML registry + markdown-table sequence files (the concept's own shape); user
   accepted the registry, did not object to the markdown sequences. Architect may confirm.
+
+## Stage 4 decisions, 2026-10-24
+
+The user's answers to the Stage 4 plan's Decisions 4–6:
+
+- **Decision 4 (watched set): partly redirected.**
+
+  > *"can be fixed set, but take into account that the number of switches that we use will
+  > increase. Also the sequences can flip any switch. Most of them we really only need a few times
+  > per flight. Though the switch flip logic could do this: body tells aircraft layer to set switch
+  > position. Aircraft layer sets it. Assumes success. No switch position read required. Then
+  > there'd be certain switches or light where we need to know the state and those get polled."*
+
+  So there are two classes: sequence switches, which are written without continuous polling, and a
+  small set of state switches and lamps, which are polled. The conflict with R12 (skip a row whose
+  switch is already set) was raised back to the user.
+- **Decision 5 (test fakes): rewrite.** *"rewrite"*.
+- **Decision 6 (old feed): remove.** *"remove"*.
