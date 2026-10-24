@@ -963,8 +963,11 @@ Version **`2026-10-24`**, one bump for the whole stage. `Export.lua` now has two
 is removed. The collector branches on `"read_id"` and `"watch_id"`, and drops `missl_pw` at DEBUG.
 `/cockpit_switch/latest`, `CockpitSwitchState` and its cache are removed (decided, item 6). The
 new LAN routes are `POST /query/read_args`, `POST /command/watch_args` and `GET
-/watched_args/latest`. Add both POSTs to `AC-B11`. `test_export_lua_constants_parity.py` also
-covers `MAX_READS_PER_FRAME`.
+/watched_args/latest`. Add both POSTs to `AC-B11`. **Corrected post-implementation**:
+`MAX_READS_PER_FRAME` is a pure Lua-side transport bound with no Python-side twin to check parity
+against (nothing on that side consumes it), so it is not in `test_export_lua_constants_parity.py`
+— its own mutation coverage (the per-frame cap, and the mutation that would break it) lives in
+`TestAdmitRead` in `test_watched_args_lua.py` instead, verified live at review.
 
 ### Co-moving Fields (Stage 4, revised)
 

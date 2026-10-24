@@ -874,40 +874,6 @@ def _t72_world_object_no_live_verdict() -> dict[str, Any]:
     return {**_t72_world_object(), "unit_name": None}
 
 
-#: Stage 4's fake-client translation layer (see `FakeConsoleAircraftClient.
-#: cockpit_switch_state`'s own docstring): the named boolean keys every
-#: pre-Stage-4 test literal already uses, mapped to the real DCS arg
-#: number they represent -- lets every existing `cockpit_switch_state =
-#: {...}` literal in this file keep working unchanged against the new
-#: `read_args`/`get_watched_args_latest` methods.
-_GROUND_TRUTH_RAW_ARG: dict[str, int] = {
-    "ready_lamp": 960,
-    "align_lamp": 898,
-    "launch_perm_lamp": 962,
-    "observe_on": 886,
-    "weapons_armed": 673,
-}
-
-
-def _merged_raw_args(cockpit_switch_state: dict[str, Any] | None) -> dict[int, float]:
-    """Flattens `FakeConsoleAircraftClient.cockpit_switch_state` into one
-    `{arg: raw_value}` map: its `"args"` sub-dict (string-keyed, as the
-    real wire carries it) plus any named lamp/switch key
-    `_GROUND_TRUTH_RAW_ARG` knows, coerced to `1.0`/`0.0`. `None` (no
-    sample set yet) is an empty map, not an error."""
-    if cockpit_switch_state is None:
-        return {}
-    merged: dict[int, float] = {}
-    raw_args_sub = cockpit_switch_state.get("args")
-    if isinstance(raw_args_sub, dict):
-        for key, value in raw_args_sub.items():
-            merged[int(key)] = float(value)
-    for name, arg in _GROUND_TRUTH_RAW_ARG.items():
-        if name in cockpit_switch_state:
-            merged[arg] = 1.0 if cockpit_switch_state[name] else 0.0
-    return merged
-
-
 class FakeConsoleAircraftClient:
     """Duck-typed `AircraftLayerClient` covering everything `_build_sources`'
     two concrete tiers call: telemetry (both tiers), world objects (both
@@ -937,19 +903,18 @@ class FakeConsoleAircraftClient:
         #: `write_cockpit_switch` call this fake has recorded, oldest
         #: first.
         self.cockpit_switch_writes: list[tuple[int, int, float]] = []
-        #: `BL-B66` Stage 4b, **repurposed by Stage 4** (`plans/
-        #: effector-sequences/plan.md`) as the single ground-truth store
-        #: both new read paths serve from: its `"args"` sub-dict (if any)
-        #: and any of the named lamp/switch keys `_GROUND_TRUTH_RAW_ARG`
-        #: knows (`"ready_lamp"`, `"align_lamp"`, etc.) are merged into
-        #: one `{arg: raw_value}` map by `_merged_raw_args` below, which
-        #: both `read_args` (the one-shot engine read) and
-        #: `get_watched_args_latest` (the continuous feed) read from --
-        #: kept as one field, and every existing test's literal dict
-        #: unchanged, rather than forcing ~30 call sites to split it in
-        #: two. `None` is the ordinary pre-first-sample startup state,
-        #: same posture the old `get_cockpit_switch_state_latest` had.
-        self.cockpit_switch_state: dict[str, Any] | None = None
+        #: `plans/effector-sequences/plan.md` Stage 4 -- the single
+        #: ground-truth store both new read paths serve from, string-arg-
+        #: keyed exactly as the real wire carries it (`{"960": 1.0}`, not
+        #: a named `{"ready_lamp": True}`). `read_args` (the engine's
+        #: one-shot read) filters this down to the requested args;
+        #: `get_watched_args_latest` (the continuous feed) serves it
+        #: whole, once `set_watch_args` has installed a `watch_id`.
+        #: Starts empty -- the ordinary pre-first-sample state, same
+        #: posture the old `get_cockpit_switch_state_latest`'s `None`
+        #: default had (an empty map and a `None` sample both mean "every
+        #: arg unknown" to every consumer here).
+        self.raw_args: dict[str, float] = {}
         #: Stage 4 -- every `set_watch_args` call's `(watch_id, args)`,
         #: oldest first; `_watch_id_installed` is the latest one, which
         #: `get_watched_args_latest` echoes back as confirmation.
@@ -971,7 +936,7 @@ class FakeConsoleAircraftClient:
         #: means no `GET /spu8/state` sample has arrived yet, same "not
         #: an error" posture as every other `get_*` default on this fake.
         #: A test exercising `drain_config_error`'s intercom gate drives
-        #: this directly, the same way `cockpit_switch_state` is driven.
+        #: this directly, the same way `raw_args` is driven.
         self.spu8_state: dict[str, Any] | None = None
         #: Performance review (`plans/effector-sequences/
         #: performance-stage1-2.md`) -- counts every `get_spu8_state_
@@ -1036,12 +1001,11 @@ class FakeConsoleAircraftClient:
         # posture as every other `get_*` default on this fake.
         if self._watch_id_installed is None:
             return None
-        merged = _merged_raw_args(self.cockpit_switch_state)
         return {
             "t": 0.0,
             "received_wall_clock_s": 0.0,
             "watch_id": self._watch_id_installed,
-            "args": {str(arg): value for arg, value in merged.items()},
+            "args": dict(self.raw_args),
         }
 
     def set_watch_args(self, watch_id: str, args: list[int]) -> None:
@@ -1052,8 +1016,11 @@ class FakeConsoleAircraftClient:
         self.read_args_calls.append(list(args))
         if self.fail_read_args:
             raise AircraftLayerError("simulated read_args failure")
-        merged = _merged_raw_args(self.cockpit_switch_state)
-        return {str(arg): merged[arg] for arg in args if arg in merged}
+        return {
+            str(arg): self.raw_args[str(arg)]
+            for arg in args
+            if str(arg) in self.raw_args
+        }
 
     def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
         # `BL-B66` -- recorded rather than a true no-op, so a test can
@@ -5195,8 +5162,8 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
     still on the ground; the four switches written in order on the
     takeoff rising edge. `[[BL-B80]]` v2: the sequence completing no
     longer *declares* readiness itself -- `sight_ready` stays `False`
-    until the real 960 lamp (`ready_lamp`) is observed lit, simulated
-    here via the fake's `cockpit_switch_state`; "Guidance unit ready."
+    until the real 960 lamp is observed lit, simulated here via the
+    fake's `raw_args`; "Guidance unit ready."
     then speaks exactly once across several subsequent polls, not once
     per poll.
 
@@ -5258,8 +5225,11 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
         telemetry["altitude_agl_m"] = 500.0
         sim_t = 1.0
         telemetry["dcs_model_time_s"] = sim_t
-        aircraft_client.cockpit_switch_state = {
-            "args": {"773": 0.0, "761": 0.0, "885": 0.0, "955": 0.0}
+        aircraft_client.raw_args = {
+            "773": 0.0,
+            "761": 0.0,
+            "885": 0.0,
+            "955": 0.0,
         }
 
         deadline = time.monotonic() + 5.0
@@ -5297,7 +5267,7 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
         # The lamp is observed explicitly unlit first -- a real cold
         # start, not merely an unobserved reading -- so the later rise is
         # a genuine off->on edge.
-        aircraft_client.cockpit_switch_state = {"ready_lamp": False}
+        aircraft_client.raw_args = {"960": 0.0}
         deadline = time.monotonic() + 5.0
         while (
             runner.guidance_unit_state.ready_observed is not False
@@ -5309,7 +5279,7 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
         assert runner.guidance_unit_state.ready_observed is False
 
         # The lamp lights.
-        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+        aircraft_client.raw_args = {"960": 1.0}
 
         # A few more polls, sim time still advancing -- "Guidance unit
         # ready." must stay spoken exactly once, not once per poll
@@ -5358,9 +5328,12 @@ def test_guidance_unit_ready_is_silent_on_a_warm_air_start_through_the_real_poll
     # every switch already reads *on* (R12's implicit self-check), so it
     # collapses to zero writes in one poll -- a warm start finishing the
     # power-up "on its own" by simply having nothing left to do.
-    aircraft_client.cockpit_switch_state = {
-        "ready_lamp": True,
-        "args": {"773": 1.0, "761": 1.0, "885": 1.0, "955": 1.0},
+    aircraft_client.raw_args = {
+        "960": 1.0,
+        "773": 1.0,
+        "761": 1.0,
+        "885": 1.0,
+        "955": 1.0,
     }
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
@@ -5436,9 +5409,12 @@ def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_p
     # first sample also triggers (`on_ground` defaults `True`) collapses
     # to zero writes via R12's self-check, same as the warm-air-start
     # test above; only the lamp-edge behaviour is under test here.
-    aircraft_client.cockpit_switch_state = {
-        "ready_lamp": False,
-        "args": {"773": 1.0, "761": 1.0, "885": 1.0, "955": 1.0},
+    aircraft_client.raw_args = {
+        "960": 0.0,
+        "773": 1.0,
+        "761": 1.0,
+        "885": 1.0,
+        "955": 1.0,
     }
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
     runner.guidance_unit_state = GuidanceUnitState(
@@ -5474,7 +5450,7 @@ def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_p
         assert runner.last_t_sim is not None
 
         # First rise.
-        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+        aircraft_client.raw_args = {"960": 1.0}
         deadline = time.monotonic() + 5.0
         while crew_console.sight_ready is not True and time.monotonic() < deadline:
             sim_t += 0.5
@@ -5485,7 +5461,7 @@ def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_p
         assert crew_console.output.getvalue().count("Guidance unit ready.") == 1
 
         # Power down: the lamp is observed unlit again.
-        aircraft_client.cockpit_switch_state = {"ready_lamp": False}
+        aircraft_client.raw_args = {"960": 0.0}
         deadline = time.monotonic() + 5.0
         while crew_console.sight_ready is not False and time.monotonic() < deadline:
             sim_t += 0.5
@@ -5494,7 +5470,7 @@ def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_p
         assert crew_console.sight_ready is False
 
         # Power up again: the second rise.
-        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+        aircraft_client.raw_args = {"960": 1.0}
         deadline = time.monotonic() + 5.0
         while crew_console.sight_ready is not True and time.monotonic() < deadline:
             sim_t += 0.5
@@ -5539,8 +5515,11 @@ def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
     # Every switch already reads on -- both takeoff edges this test
     # drives must each collapse to zero writes via R12's self-check.
-    aircraft_client.cockpit_switch_state = {
-        "args": {"773": 1.0, "761": 1.0, "885": 1.0, "955": 1.0}
+    aircraft_client.raw_args = {
+        "773": 1.0,
+        "761": 1.0,
+        "885": 1.0,
+        "955": 1.0,
     }
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
     runner.guidance_unit_state = GuidanceUnitState(
@@ -5681,7 +5660,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
             ready_observed=True,
             guidance_unit_ready_prev_observed=True,
         )
-        aircraft_client.cockpit_switch_state = {"args": {"886": 0.0, "673": 0.0}}
+        aircraft_client.raw_args = {"886": 0.0, "673": 0.0}
         deadline = time.monotonic() + 5.0
         while not crew_console.sight_ready and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -5713,7 +5692,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
         # without updating it, "weapons safe"'s own self-check would see
         # its target (0.0) already matching this stale 0.0 reading and
         # wrongly skip rather than write.
-        aircraft_client.cockpit_switch_state = {"args": {"886": 1.0, "673": 1.0}}
+        aircraft_client.raw_args = {"886": 1.0, "673": 1.0}
 
         lines = crew_console.handle_command("weapons_safe", now_sim=sim_t)
         assert lines == ["Weapons safe."]
@@ -5813,8 +5792,13 @@ _TAKEOFF_WRITES = [(6, 3028, 1.0), (16, 3015, 1.0), (7, 3001, 1.0), (6, 3030, 1.
 #: self-check writes immediately rather than waiting out `EFFECTOR_
 #: CONDITION_READBACK_WAIT_S` for an absent reading (same posture as the
 #: takeoff cold-start test above).
-_MISSION_START_COCKPIT_SWITCH_STATE = {
-    "args": {"773": 0.0, "761": 0.0, "885": 0.0, "955": 0.0, "886": 0.0, "673": 0.0}
+_MISSION_START_RAW_ARGS = {
+    "773": 0.0,
+    "761": 0.0,
+    "885": 0.0,
+    "955": 0.0,
+    "886": 0.0,
+    "673": 0.0,
 }
 
 
@@ -5849,7 +5833,7 @@ def test_ground_mission_start_fires_mission_start_only(tmp_path: Path) -> None:
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -5935,7 +5919,7 @@ def test_air_mission_start_fires_both_mission_start_triggers_not_takeoff(
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6009,7 +5993,7 @@ def test_air_start_then_land_then_takeoff_fires_takeoff_once(tmp_path: Path) -> 
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6119,7 +6103,7 @@ def test_body_layer_start_mid_mission_fires_neither_mission_start_trigger(
     telemetry["dcs_model_time_s"] = 300.0
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     # The collector already holds a mission-start event from before this
     # body-layer process connected (e.g. a prior process on the same
     # mission) -- a fresh process's own `last_mission_start_sequence` is
@@ -6183,7 +6167,7 @@ def test_second_mission_restart_fires_both_triggers_again(tmp_path: Path) -> Non
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6274,7 +6258,7 @@ def test_stale_telemetry_at_mission_restart_does_not_decide_airborne(
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6411,7 +6395,7 @@ def test_baseline_collision_resolves_via_bounded_fallback(tmp_path: Path) -> Non
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6517,7 +6501,7 @@ def test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff(
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -6652,7 +6636,7 @@ def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
     telemetry["dcs_model_time_s"] = sim_t
 
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
-    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = (
@@ -7037,7 +7021,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     (the wiring-gap lesson from this branch's own review: a module's unit
     tests passing does not mean the poll loop actually calls it). Drives
     OBSERV on, the Л5 gyro-alignment lamp (898) arriving via the fake's
-    `cockpit_switch_state`, and OBSERV off again -- then asserts on the
+    `raw_args`, and OBSERV off again -- then asserts on the
     rows actually written to disk, in order."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
@@ -7058,7 +7042,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     # OBSERV known-off so the write below lands immediately rather than
     # waiting on `EFFECTOR_CONDITION_READBACK_WAIT_S` of *sim* time, which
     # this test's early polling loops never advance.
-    aircraft_client.cockpit_switch_state = {"args": {"886": 0.0}}
+    aircraft_client.raw_args = {"886": 0.0}
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     effector_sequences, effector_registry = _real_effector_config()
     slew_trace_path = tmp_path / "slew.jsonl"
@@ -7111,14 +7095,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
         # just-written OBSERV-on forward, so the upcoming "observ off"
         # command's own self-check sees a real mismatch rather than
         # "unknown" again.
-        aircraft_client.cockpit_switch_state = {
-            "t": sim_t,
-            "received_wall_clock_s": 0.0,
-            "observe_on": True,
-            "weapons_armed": False,
-            "align_lamp": True,
-            "args": {"886": 1.0},
-        }
+        aircraft_client.raw_args = {"886": 1.0, "898": 1.0}
         deadline = time.monotonic() + 5.0
         while runner.sight_head.mode != "free" and time.monotonic() < deadline:
             sim_t += 0.5

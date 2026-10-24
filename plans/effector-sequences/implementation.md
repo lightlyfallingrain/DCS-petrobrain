@@ -717,8 +717,89 @@ a lamp-state change with no settling loop.
   general sentence, not per-trigger), since the read-once-per-run/wait-row rule applies identically
   to every trigger — adding it per-row would have repeated the same sentence five times in the
   rendered table.
-- `body-layer/CLAUDE.md`'s own BL-B90 module-map paragraph (the long one describing
-  `effector_registry.py`/`effector_sequences.py`/`effector_engine.py`) was **not** updated for this
-  stage's mechanism change (per-run snapshot instead of per-row wait) — out of this task's explicit
-  4e bookkeeping list (`AC-B11.md`, `BL-B67.md`, `aircraft-layer/CLAUDE.md`, `triggers.md` only), so
-  left for a follow-up pass rather than scope-creeping into a large living doc.
+- `body-layer/CLAUDE.md`'s own BL-B90 module-map paragraph was **not** updated for this stage's
+  mechanism change in the first pass — flagged above as a deliberate scope decision, and then
+  overridden by `review-stage4.md`'s required fix 2 (see "Review fixes" below), since the reviewer
+  judged it in scope after all. Recorded here as the superseded reasoning, not deleted, per this
+  project's own "supersede, don't delete" convention.
+
+---
+
+## Review fixes (2026-10-24, follow-on)
+
+Applies `plans/effector-sequences/review-stage4.md`'s two required fixes, on top of the reviewed
+tip `5da55c71`.
+
+### Required fix 1: the test-fake "rewrite" was a relocated adapter, not a call-site rewrite
+
+The reviewer's finding was correct: `_GROUND_TRUTH_RAW_ARG`/`_merged_raw_args` let every
+pre-Stage-4 `cockpit_switch_state = {"ready_lamp": True, ...}` literal keep working unchanged,
+which is exactly the adapter the plan's own text (`plan.md:1641-1647`) rejected, relocated from
+production code into the test fake. Fixed as directed: removed both, renamed the fake's field from
+`cockpit_switch_state` to `raw_args: dict[str, float]` (string-arg-keyed, the shape the real wire
+actually carries — `{"960": 1.0}`, never a named `{"ready_lamp": True}`), and rewrote every one of
+the ~40 call sites (not ~28 — the plan's own estimate undercounted the only-named-key reads
+alongside the `cockpit_switch_state = {...}` assignments) to the arg-keyed shape directly:
+
+- `{"ready_lamp": True}` → `{"960": 1.0}` (and the `False`/`0.0` pairing).
+- `{"args": {"773": 0.0, ...}}` → `{"773": 0.0, ...}` directly (the field itself *is* the args map
+  now, so the `"args"` nesting is gone).
+- `{"ready_lamp": True, "args": {...}}` → `{"960": 1.0, ...}` merged into one flat dict.
+- The one outlier with dead-weight keys from an even earlier shape (`"t"`, `"received_wall_clock_s"`,
+  `"observe_on"`, `"weapons_armed"` — none of which anything ever read, confirmed by grepping the
+  old `_GROUND_TRUTH_RAW_ARG`/`_merged_raw_args` for which keys they actually consumed before
+  deleting them) is now just `{"886": 1.0, "898": 1.0}` — the two keys the test actually depends on.
+- `_MISSION_START_COCKPIT_SWITCH_STATE` renamed `_MISSION_START_RAW_ARGS`, its `"args"` nesting
+  dropped.
+
+**What each test asserts is unchanged** — only the literal shape driving the fake changed, per the
+plan's own "the change is mechanical" framing. All 191 tests in `test_logger.py` pass with the
+rewritten call sites, including the ones depending on the continuous feed's one-poll-later
+confirmation lag the reviewer confirmed is real production behaviour (every one already tolerates
+it via its own polling-with-deadline loop, unchanged by this fix) — exercising that lag from a
+direct arg-keyed assignment rather than through the removed adapter is exactly the "real path from
+the start" the reviewer asked for.
+
+### Required fix 2: `body-layer/CLAUDE.md`'s BL-B90 paragraph updated for Stage 4
+
+Added, without expanding the section much: one-shot reads at run start/after wait rows,
+`assumed_writes` (engine-wide, lets a later trigger see an earlier one's same-poll write),
+`absolute_write` (writes on unknown only for a confirmed-absolute shape), and the second
+continuously-polled class (`REQUIRED_POLLED_ARGS` union `polled.toml`, via
+`load_polled_config`). Also corrected the `sight_effector.py` bullet's now-stale "untouched by
+BL-B90" claim (Stage 4 added `REQUIRED_POLLED_ARGS` there and rewrote `refresh_readback`) and
+`EFFECTOR_CONDITION_READBACK_WAIT_S`'s tunable description ("per snapshot", matching the rendered
+`defaults.toml`'s own first sentence rather than the pre-Stage-4 per-row wording).
+
+### Optional refinement applied: plan.md's parity-test claim corrected
+
+`plan.md` S4.5 said `test_export_lua_constants_parity.py` "also covers `MAX_READS_PER_FRAME`." It
+does not and cannot meaningfully — that constant is a pure Lua-side transport bound with no
+Python-side twin to check parity against. Corrected in place (superseded, not deleted) to point at
+where the real coverage lives: `TestAdmitRead` in `test_watched_args_lua.py`.
+
+### Checks
+
+- `aircraft-layer`: `ruff format --check`, `ruff check`, `mypy src` (strict): pass, 28 source files.
+  `pytest tests -q` (`PYTHONPATH=src`): 608 passed. (Untouched by this fix round; re-run anyway per
+  the dispatch instruction to check both subprojects.)
+- `body-layer`: `ruff format --check`/`ruff check` on `src tests tools`: pass, 184 files. `mypy src`:
+  pass, 74 source files. `mypy tools`: pass, 10 source files. `pytest tests -q`
+  (`PYTHONPATH=src:../world-model/src`): 2650 passed, 4 xfailed (unchanged counts from before this
+  fix round — the rewrite changed only how each test drives the fake, not what it asserts).
+
+### Notable Discoveries
+
+- The plan's own "~28 places" estimate for the fake's call sites (Decision 5's own text) was low —
+  closer to 40 once the only-named-key reads inside multi-key literals (e.g. the one with
+  `"ready_lamp"` *and* `"args"` in the same dict) are counted as separate conversions, not one. The
+  reviewer's required-fix text already used "~40" for this reason.
+- Checked before dropping the one outlier literal's extra keys (`"t"`, `"received_wall_clock_s"`,
+  `"observe_on"`, `"weapons_armed"`): `"t"`/`"received_wall_clock_s"` were never read by the old
+  `_merged_raw_args` at all (not in `_GROUND_TRUTH_RAW_ARG`, and not the `"args"` key it also
+  checked), so those two were dead literal noise from an even earlier shape. `"weapons_armed"`
+  *was* recognised (→ arg 673) and did reach `merged[673] = 0.0` under the old translation, but
+  nothing in this test's own assertions reads arg 673 back, so it was dead to the test's purpose
+  rather than to the translation function. `"observe_on"` (→ 886, value `True` → `1.0`) agreed
+  with the literal's own `"args": {"886": 1.0}` — same value, no actual conflict in this instance,
+  checked rather than assumed before writing this note.

@@ -420,8 +420,9 @@ Belief — observation *consumption*:
 - `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6. And `seen_world_direction`, whose one caller is `sight_head.py` (BL-B80).
 - `src/belief/sight_head.py` — `SightHead` (BL-B80, `plans/9k113-sight-pointing/plan.md`): Petrovich's simulated 9K113 sight — gyro world-stabilised, gimbal-limited, slew-rate-limited — and the "Aim source" selection rule (`seen`/`held`/`belief`). Advanced once per poll by `logger.py`; the real DCS sight is a best-effort slave of it, outside this process entirely.
 - `src/belief/sight_effector.py` — `GuidanceUnitState` (the 9K113 lamps/switches *readback*
-  only: `sight_ready`, `refresh_readback`) and `write_sight_target` (BL-B80, untouched by
-  BL-B90). Switch *sequencing* moved out of this module to the effector engine below.
+  only: `sight_ready`, `refresh_readback`) and `write_sight_target` (BL-B80). Switch *sequencing*
+  moved out of this module to the effector engine below. `refresh_readback` reads the continuous
+  feed's raw `"args"` map (Stage 4); `REQUIRED_POLLED_ARGS` is declared here, beside its readers.
 - `src/belief/effector_registry.py` / `effector_sequences.py` / `effector_engine.py` (`BL-B90`,
   `plans/effector-sequences/plan.md`) — cockpit switch sequences, data-driven instead of
   hand-written write blocks. `effector_registry.load_registries_by_aircraft` loads one curated
@@ -432,6 +433,15 @@ Belief — observation *consumption*:
   run, a row writes unless its own effector is already observed at the target value (the implicit
   self-check — no explicit `!= on` condition needed in a sequence file for that), and a failed
   write blocks later writes to the *same* switch this poll without blocking other triggers.
+  **Readback is one-shot, not a standing feed (Stage 4, "readback by need")**: a run reads its own
+  `SequenceFile.read_args` (every row's effector arg, union every condition's) once via
+  `AircraftLayerClient.read_args` at run start and again after each wait row, never per-row and
+  never from a per-frame push. `EffectorRunState.assumed_writes` (every successful write, engine-
+  wide, keyed by arg) lets a later trigger's row see an earlier trigger's same-poll write without
+  rereading DCS, and makes writing the same switch twice in one file correct. An unknown self-check
+  readback writes only when `EffectorDef.absolute_write` is true (confirmed only for
+  `default_2_position_tumb`) — any other shape skips with a WARNING rather than risk a toggle/press
+  landing the wrong way on no information.
   **A bad raw dump/curated file disables every sequence for that aircraft; a bad sequence file
   disables only itself** — neither is fatal (`logger.error` per finding, one stderr banner at
   startup, one spoken line — "System error, bad sequence file, see the logs..." — held until the
@@ -454,10 +464,16 @@ Belief — observation *consumption*:
   `triggers.md` from code alone, staleness-checked by `test_render_triggers.py`, no Windows dump
   needed) are dev tools, not run at body-layer startup. Two tunables, `[belief.effector_engine]`
   in `config/defaults.toml`:
-  `EFFECTOR_CONDITION_READBACK_WAIT_S` (how long an unknown readback is waited on before the
-  engine gives up — explicit conditions then skip the row, the implicit self-check instead writes)
+  `EFFECTOR_CONDITION_READBACK_WAIT_S` (how long a run waits, per snapshot, for its one-shot read
+  to succeed before giving up and treating every arg as unknown — explicit conditions then skip
+  the row, the implicit self-check instead writes if the effector is `absolute_write`)
   and `EFFECTOR_SEQUENCE_STEP_DELAY_S` (gap between rows within one trigger's own run, renamed from
-  the old `GUIDANCE_UNIT_SWITCH_DELAY_S`).
+  the old `GUIDANCE_UNIT_SWITCH_DELAY_S`). A **second**, continuously-polled readback class exists
+  alongside the one-shot reads above (`GET /watched_args/latest`, Stage 4): `sight_effector.
+  REQUIRED_POLLED_ARGS` (886/898/960, each with a code consumer every poll) union
+  `config/sequences/<aircraft-dir>/polled.toml` (`effector_registry.load_polled_config`), required
+  first then config file order, capped at 64 — a bad entry disables only polling (not sequences),
+  an omitted required arg is a startup warning, never an error.
   **`mission-start`/`mission-start-in-air` triggers** (explore-notes, "Two new triggers: mission
   start"): `mission-start` fires once per DCS mission (re)start, on the ground or in the air;
   `mission-start-in-air` fires immediately after it, same poll, only when that same sample is
