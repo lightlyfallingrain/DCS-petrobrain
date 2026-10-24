@@ -40,7 +40,7 @@ footer{color:var(--muted);font-size:.8rem}
 <div class="wrap">
 <header>
   <h1>Petrovich Command Map</h1>
-  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-21. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
+  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-24. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
 </header>
 
 <div class="legend">
@@ -126,8 +126,8 @@ flowchart LR
 </section>
 
 <section>
-  <h2><span class="n">6</span> Attack run</h2>
-  <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up.</p>
+  <h2><span class="n">6</span> Attack run <span class="badge">new</span></h2>
+  <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up. “Where is it” repeats the guidance on demand whenever a target is set.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   ST(["select target / set target"]) --> WHAT{{"what"}}
@@ -138,15 +138,16 @@ flowchart LR
   N --> DIR
   EN(["engage / engage target"]) -.-> SL["what · where · how far"]
   EN -.-> WP["guns · rockets · missiles"]
-  EN ==> ARM["also sets weapons ARMED  ⟵ new"]
+  EN ==> ARM["also sets weapons ARMED"]
   DT(["drop target"])
   DG(["disengage / stop attack / abort"])
+  WI(["where is it / where is target"]) --> WIa["guidance phrase, or “No target.”  ⟵ new"]
   </pre></div>
 </section>
 
 <div class="grid2">
 <section>
-  <h2><span class="n">7</span> 9K113 sight &amp; weapons <span class="badge">new</span></h2>
+  <h2><span class="n">7</span> 9K113 sight &amp; weapons</h2>
   <p class="note">After takeoff Petrovich powers the guidance unit up by himself and says “Guidance unit ready”. Observ on before that gets “Unable, guidance unit not ready.”</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
@@ -154,8 +155,8 @@ flowchart LR
   OB(["observ / observe"]) --> ON["on"]
   OB --> OFF["off"]
   RDY -.->|"needed first"| ON
-  WP(["weapons"]) --> AR["armed  ⟵ new"]
-  WP --> SF["safe  ⟵ new"]
+  WP(["weapons"]) --> AR["armed"]
+  WP --> SF["safe"]
   </pre></div>
 </section>
 
@@ -181,7 +182,7 @@ flowchart LR
 <footer>Source: <code>audio-adapter/src/vocabulary.py</code> (PHRASES and the slot word lists). Phrasings shown are the ones the recogniser is tuned toward; close variants may also match. Kept current by <code>.claude/scripts/command-map-check.py</code>, run at every merge.</footer>
 <script type="application/json" id="command-map-manifest">
 {
- "vocabulary_sha256": "af8646ca3854621d78f857ad6956f6dc5e01a38dc319dc2a6452108fd9a6c37d",
+ "vocabulary_sha256": "68b35c3f8c77398f96de06faf838de5dd46b12b1ef5fe8018c1f358d1256e364",
  "cards": {
   "wake_petrovich": 1,
   "cancel_nevermind": 1,
@@ -237,6 +238,7 @@ flowchart LR
   "step": 6,
   "engage": 6,
   "disengage": 6,
+  "where_is_it": 6,
   "observ_on": 7,
   "observ_off": 7,
   "weapons_armed": 7,
