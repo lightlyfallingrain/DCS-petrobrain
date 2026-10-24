@@ -1,0 +1,48 @@
+source ./petrobrain.env
+
+set -e
+
+# aircraft layer - collector
+if [[ ! -f /tmp/petrobrain-aircraft-collector.pid ]]
+then
+    pushd $PETROBRAIN_PATH/aircraft-layer/src >/dev/null
+    python.exe -m collector --api-host 0.0.0.0 >/dev/null &
+    echo $! > /tmp/petrobrain-aircraft-collector.pid
+    echo "aircraft layer started, pid $!"
+    popd >/dev/null
+else
+    echo "aircraft layer already running, no-op"
+fi
+
+# audio layer - capture
+if [[ ! -f /tmp/petrobrain-audio-capture.pid ]]
+then
+    pushd $PETROBRAIN_PATH/audio-adapter/src >/dev/null
+    python.exe -m audio_adapter.capture --adapter-url http://$AUDIO_ADAPTER_IP:7795 --sox-binary $SOX_PATH --ptt dcs >/dev/null &
+    echo $! > /tmp/petrobrain-audio-capture.pid
+    echo "audio capture started, pid $!"
+    popd >/dev/null
+else
+    echo "audio capture already running, no-op"
+fi
+
+# body layer - logger
+# not started to background
+pushd ../body-layer/ >/dev/null
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://$DCS_COLLECTOR_IP:7791 \
+    --theatre Syria \
+    --world-model-db ../world-model/data/world-model/syria-full.sqlite \
+    --speech-audio \
+    --speech-input \
+    --crew-text \
+    --f10-commands \
+    --audio-adapter-url http://$AUDIO_ADAPTER_IP:7795 \
+    --speech-log logs/dcs-speech.jsonl \
+    --eyesight-view \
+    --eyesight-view-radius-m 5000 \
+    --belief-truth-log logs/dcs-belief-truth.jsonl \
+    --detection-trace logs/dcs-detection-trace.jsonl \
+    --brain-client http --brain-url http://$BRAIN_CLIENT_IP:7796 >/dev/null 
+    $@
+popd >/dev/null
+

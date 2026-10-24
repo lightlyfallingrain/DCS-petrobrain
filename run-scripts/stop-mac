@@ -1,0 +1,13 @@
+PIDS="/tmp/petrobrain-piper.pid\
+    /tmp/petrobrain-audio-adapter.pid\
+    /tmp/petrobrain-brain.pid"
+
+for pidfile in $PIDS
+do
+    if [ -f $pidfile ]
+    then
+        kill $(cat $pidfile)
+        echo "stopped $(echo $pidfile | sed -e 's=/tmp/petrobrain-==' | sed -e 's=.pid==')"
+        rm $pidfile
+    fi
+done

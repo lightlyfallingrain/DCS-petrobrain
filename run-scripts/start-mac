@@ -1,0 +1,47 @@
+source ./petrobrain.env
+
+set -e
+
+# audio layer - piper dependency
+if [[ ! -f /tmp/petrobrain-audio-adapter.pid ]]
+then
+    $PIPER_VENV_PYTHON -m piper.http_server \
+        --host 127.0.0.1 --port 7800 \
+        --model en_GB-northern_english_male-medium \
+        --data-dir $PIPER_VOICES_DIR >/dev/null &
+    echo $! > /tmp/petrobrain-piper.pid
+    echo "piper started, pid $!"
+else
+    echo "piper already running, no-op"
+fi
+
+# audio layer - adapter
+if [[ ! -f /tmp/petrobrain-audio-adapter.pid ]]
+then
+    pushd ../audio-adapter/ >/dev/null
+    PYTHONPATH=src .venv/bin/python -m audio_adapter \
+        --host 0.0.0.0 \
+        --whisper-model ~/whisper-models/ggml-small.en.bin \
+        --target aircraft-layer --aircraft-layer-url http://$DCS_COLLECTOR_IP:7791  >/dev/null &
+    echo $! > /tmp/petrobrain-audio-adapter.pid
+    echo "audio adapter started, pid $!"
+    popd >/dev/null
+else
+    echo "audio adapter already running, no-op"
+fi
+
+# brain layer 
+if [[ ! -f /tmp/petrobrain-brain.pid ]]
+then
+    pushd ../brain-layer/ >/dev/null
+    PYTHONPATH=src .venv/bin/python -m brain_layer \
+        --stub-delay-s 0 \
+        --decider ollama \
+        --host 0.0.0.0 >/dev/null &
+    echo $! > /tmp/petrobrain-brain.pid
+    echo "brain started, pid $!"
+    popd >/dev/null
+else
+    echo "brain already running, no-op"
+fi
+

@@ -1,0 +1,17 @@
+# aircraft layer
+if [ -f /tmp/petrobrain-aircraft-collector.pid ]
+then
+    kill $(cat /tmp/petrobrain-aircraft-collector.pid)
+    rm /tmp/petrobrain-aircraft-collector.pid
+fi
+
+# audio layer - capture
+if [ -f /tmp/petrobrain-audio-capture.pid ]
+then
+    kill $(cat /tmp/petrobrain-audio-capture.pid)
+    rm /tmp/petrobrain-audio-capture.pid
+fi
+
+# body layer - logger
+# not a background run, no stop needed
+
