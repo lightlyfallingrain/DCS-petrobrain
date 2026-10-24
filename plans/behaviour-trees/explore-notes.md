@@ -143,3 +143,130 @@ So:
   "when" decisions kept out of the action code, so a later move to trees is a refactor and not a
   rewrite. Recorded in root `CLAUDE.md`, "Behaviour as actions and params".
 - Existing hard-coded behaviour stays as it is.
+
+## 2026-10-24: the user's alternative, an event-driven system (evaluation asked, not designed)
+
+> *"Further thoughts on the behaviour trees. I think we're better off expanding the effector table
+> solution. That's already like a branch of a tree.*
+>
+> *Petrobrain would do better with an event driven system. Expand effector tables to define
+> Petrovitch actions, not only cockpit effector. Add custom triggers that files can register and
+> fire. Others can use them as triggers. That'd give us an event driven system.
+> If's and while loops.*
+>
+> *That'd get us far.
+> That's also much more like real scripting than just tables. Maybe use .lua then?*
+>
+> *Do not design anything yet, but evaluate my idea."*
+
+Main loop's evaluation, in short: a good direction, closer to the existing code than trees. The one
+thing it does not give for free is arbitration (several handlers wanting one sight, one voice), so
+priority, resource claims, pre-emption and resume belong in the engine. Lua for logic, because
+coroutines make "do, wait, do" plain code. Cost: the `lupa` dependency, weaker load-time checking,
+and a need for offline replay testing.
+
+### The user's answer and API sketch, 2026-10-24 (verbatim)
+
+> *"Tables are good for cockpit switches, they are like checklists. For behaviour, I'd want
+> scripting language like lua."*
+
+> *I vision somehting like:*
+>
+> *- fixed set of functions to call*
+> *- set of effector names (exists) action names (does not exist) and both fixed triggers from code
+>   (partially exists) and custom triggers from script.*
+
+```
+setup()
+    .aircraft(<mi-24p>)
+    .role(<copilot>)   ; copilot, pilot, crew, wignman, any   (crew = pilot or copilot)
+    .trigger(<trigger-name>)
+
+effector(<effector-name>)
+    .get()
+    .set(<value>)
+    .increment(<value>)  ; degative value decrements
+
+param(<param-name>)
+    .get()
+    .set()  ; some params would be read-only
+
+action(<action-name>)
+    .arg(<arg-name>)
+        .get()
+        .set(<value>)
+    .start()
+    .stop()
+    .pause()
+    .continue()
+
+trigger(<trigger-name>)
+    .register()
+    .fire()
+    .listen()
+        .then(<function to execute>)
+; some mechanism for trigger().playerCommand("scan *").listen().then(scanFunction) <- would need the full text as param to scanFunction
+
+speak()
+    .ics("<text to speak>")
+    .radio("<text to speak>")
+
+interrupt(<interrupt-name>)  ; interrupts are triggers, same things apply except interrupt gets priority
+```
+
+> *That'd allow*
+
+```
+setup().aircraft(mi-24p).role(copilot)
+
+trigger(start-navigation).register() ; this script may fire this trigger
+trigger(take-off).listen().then(takeOffActions)
+trigger(take-off-clearance).listen().then(takeOffClearanceActions)
+
+function takeOffActions() {
+  effector(missilePower).set(on)   ; or maybe effector.executeSequence(sequence-name)
+  effector(guidanceUnit).set(on)
+  if (timeOfDay != day) {
+    effector(domeLight).set(red)
+  }
+
+  trigger(start-navigation).fire()
+}
+
+function takeOffClearanceActions() {
+  speak("Commander, we are cleared for take-off")
+}
+```
+
+> *"Something along those lines. Not exact, just ideas and pseudocode."*
+
+Main loop's response (a Lua rendering with a scan handler and an interrupt): the sketch's boundary
+is right; `register()` enables load-time checking; `pause()`/`continue()` match round 3's resume.
+Gaps raised:
+
+1. scripts must read Petrovich's belief only, never DCS truth (the `Percept` boundary);
+2. waiting and completion (coroutines, `done()`, succeeded/failed);
+3. interrupts need a priority and the resources they claim (sight, voice, hands, later controls),
+   which gives both pre-empt and concurrent kinds;
+4. several scripts on one trigger;
+5. player commands as parsed slots plus raw text, not a glob;
+6. `speak():radio` needs SRS; writable params are shared script state, kept apart from belief
+   params.
+
+### Answers, 2026-10-24
+
+- **Mission scripts add to the common one, never replace it.** *"add to common"*.
+- **Audience: the user now, any user later.** *"for now, only me. Eventually, any user who wishes to
+  use it could write their own."* So the sandbox and the load-time checks must eventually hold for
+  strangers' scripts (fits the public open-source intent), but they need not be hardened for that yet.
+
+### Outcome, 2026-10-24
+
+The user approved re-scoping the backlog (*"yes, that's good"*) and added: *"the dome light is
+simply an example (though a nice touch), no need to actually build the light level things yet.
+There are more important things first."* So:
+
+- `[[BL-B95]]` was re-scoped from behaviour trees to event-driven Lua scripting. Deferred.
+- `[[BL-B94]]` was narrowed to the param catalogue. The table condition syntax was dropped and the
+  light level stays an example only. Deferred.
+- The root `CLAUDE.md` actions-and-params rule stands, re-aimed at scripting.

@@ -1,41 +1,77 @@
-# BL-B95 — Behaviour trees: the drill from a file, once the vocabulary exists
+# BL-B95 — Event-driven behaviour scripting in Lua
 
-- [>] **BL-B95 — Drive Petrovich's drill (what happens when) from behaviour-tree files, with the
-  actions and state params staying in code.** #status/deferred Filed 2026-10-23 at user direction,
-  closing the explore in `plans/behaviour-trees/explore-notes.md`, which has every answer verbatim.
+- [>] **BL-B95 — Drive Petrovich's behaviour ("what happens when") from Lua scripts over a fixed API
+  of effectors, actions, params, triggers and speech. Functionality stays in code.**
+  #status/deferred Filed 2026-10-23 as "behaviour trees". **Re-scoped 2026-10-24** to the user's
+  event-driven alternative. The full conversation, the user's API sketch and every answer, verbatim,
+  are in `plans/behaviour-trees/explore-notes.md`. Concept only, nothing designed.
 
-  > *"Keep this idea, we'll move in this direction, but need the commands first. Future code should
-  > be structured so that refactoring to decision trees can be easy."*
+  > *"I think we're better off expanding the effector table solution. That's already like a branch
+  > of a tree. Petrobrain would do better with an event driven system. Expand effector tables to
+  > define Petrovitch actions, not only cockpit effector. Add custom triggers that files can register
+  > and fire."*
 
-  **Deferred until** the vocabulary of commands, actions and state params is large enough for a tree
-  to be worth more than a sequence file: *"it would need a comprehensive set of state params and
-  actions, otherwise it's very limited."* Meanwhile the vocabulary grows through `[[BL-B94]]`
-  (param comparisons in sequence files), and new code follows root `CLAUDE.md`, "Behaviour as
-  actions and params".
+  > *"Tables are good for cockpit switches, they are like checklists. For behaviour, I'd want
+  > scripting language like lua."*
 
-  **What the explore settled** (details and quotes in the notes):
+  **Deferred until** enough actions, params and commands exist for scripts to be worth more than
+  sequence files. In the user's words: *"we'll move in this direction, but need the commands
+  first"*. The tree-era warning still applies: *"it would need a comprehensive set of state params
+  and actions, otherwise it's very limited."* Meanwhile new code follows root `CLAUDE.md`, "Behaviour
+  as actions and params", and the param catalogue is `[[BL-B94]]`.
 
-  - Tree = drill, brain = judgement. The brain turns speech into a choice of tree plus parameters;
-    the tree runs the drill; code flies, looks and switches.
-  - Editable: which sector, when, how long, scan distance, optic, and later flight patterns. Not
-    editable: detection, classification, LOS.
-  - Two kinds of interrupt: **pre-empt** (missile aimed at us aborts the activity, alert,
-    countermeasures, which the operator seat can release) and **concurrent** (AAA: urgent report,
-    attack run and ATGM guidance carry on unless the pilot aborts, by command or by manoeuvre).
-    During guidance it is a rule, not absolute: ATGM time to impact against the SAM/AAM's.
-  - An interrupted activity resumes where it was if its preconditions still hold (e.g. LOS),
-    otherwise it starts fresh.
-  - One tree per role (copilot, pilot, wingman); mission types as branches of a common tree
-    (escort clearly its own). Context selects the drill: territory, waypoint, mission phase,
-    target area, time of day, player marks.
-  - Existing hard-coded behaviour stays as it is.
+  ## The concept, as the user sketched it
 
-  **Candidate first trial:** `[[BL-B89]]`'s scan procedure. It is new, it is pure drill, and the user
-  wants to iterate on it without code changes (*"yes, that would make it easy to modify, test and
-  iterate"*). **Biggest payoff:** aircraft control. In the user's words: *"fly heading, alt, speed",
-  "move x km to left", "hide behind ridge", "attack run from southeast, pop up 3 km from target",
-  "evasive action behaviour automatically"*, and *"sane"* wingman behaviour to replace DCS's own.
+  A fixed set of functions over named things. Effector names already exist; action names do not yet.
+  Triggers come from code (partly exist) and from scripts (custom):
 
-  **Known gaps in the vocabulary** that are not body-layer's to fill alone: territory, mission phase,
-  target area and marks need mission understanding (Mission Interpreter). Terrain conditions
-  ("behind ridge") come from the world model.
+  - `setup():aircraft():role()`, where the role is `copilot` | `pilot` | `crew` | `wingman` | `any`
+    (crew = pilot or copilot);
+  - `effector(name)`: `get` / `set` / `increment`. Switch checklists stay as BL-B90 tables, which a
+    script can run;
+  - `param(name)`: `get`, and `set` where writable;
+  - `action(name)`: `arg`, `start` / `stop` / `pause` / `continue`;
+  - `trigger(name)`: `register` / `fire` / `listen(fn)`;
+  - `speak():ics()` / `:radio()`;
+  - `interrupt(name)`: a trigger with priority.
+
+  ## Settled in the explore
+
+  - **Mission scripts add to the common one, never replace it.** Both handlers run, common first.
+  - **Audience:** *"for now, only me. Eventually, any user who wishes to use it could write their
+    own."* The sandbox and load-time checks must eventually hold for strangers' scripts.
+  - **Interrupt kinds.**
+    - Pre-empt: a missile aimed at us aborts the activity, alerts and releases flares. The operator
+      seat can release them.
+    - Concurrent: AAA gets an urgent report while the attack run or ATGM guidance carries on, unless
+      the pilot aborts, by command or by manoeuvre.
+    - During guidance a missile at us is a rule, not absolute: ATGM time to impact against the
+      SAM/AAM's.
+  - **Resume:** an interrupted activity resumes if its preconditions still hold (e.g. LOS), and
+    otherwise starts fresh.
+  - **Editable by script:** sector, timing, dwell, scan distance, optic, later flight patterns.
+    **Not editable by script:** detection, classification, LOS.
+  - **Context the scripts will want:** territory, waypoint, mission phase, target area, time of day,
+    player marks. Several of these need the Mission Interpreter. Terrain ("behind ridge") comes from
+    the world model.
+
+  ## Gaps raised in evaluation, to resolve at design time
+
+  1. **No omniscience.** Scripts read Petrovich's belief only, never DCS truth.
+  2. **Waiting and completion.** Lua coroutines, `done()`, and succeeded/failed results.
+  3. **Arbitration in the engine.** Each activity has a priority and the resources it claims:
+     sight, voice, hands, later the controls. The engine pre-empts and resumes. Scripts never
+     hand-roll this.
+  4. **Player commands** arrive as parsed slots plus the raw text, not as a glob. Parsing stays in
+     code.
+  5. `speak():radio` needs SRS. Writable params are shared script state, kept apart from belief
+     params.
+  6. **Cost:** a new dependency (`lupa`, MIT; needs the user's approval), weaker load-time checking
+     than tables unless every name goes through `register()`, and offline replay testing for
+     scripts.
+
+  **Candidate first script:** `[[BL-B89]]`'s scan procedure, which the user wants to *"modify, test
+  and iterate to get correct without needing code changes"*. **Biggest payoff:** aircraft control,
+  i.e. Petrovich as pilot and the wingman: *"fly heading, alt, speed", "move x km to left", "hide
+  behind ridge", "attack run from southeast, pop up 3 km from target", "evasive action behaviour
+  automatically"*, and *"sane"* wingman behaviour.

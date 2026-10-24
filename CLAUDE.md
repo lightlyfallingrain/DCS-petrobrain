@@ -276,13 +276,14 @@ rather than improvising a second one.
 the first sentence, so a warning written second reaches nobody — and that survived three review
 passes by readers reading the diff.
 
-### Behaviour as actions and params — so behaviour trees can come later
+### Behaviour as actions and params — so behaviour scripting can come later
 
 **User direction, 2026-10-23:** *"Future code should be structured so that refactoring to decision
-trees can be easy."* No tree engine yet (`[[BL-B95]]`, deferred). New behaviour code is shaped as
+trees can be easy."* (Re-aimed 2026-10-24 at event-driven Lua scripting, `[[BL-B95]]`, deferred;
+the shaping rule is unchanged.) New behaviour code is shaped as
 **actions** (do one thing, explicit params, report running/succeeded/failed, never decide *when*),
-**state params** (named read-only queries with a declared type, shared with sequence-file
-conditions, `[[BL-B94]]`), and the **"when"** (priorities, interrupts, preconditions) kept in one
+**state params** (named read-only queries over Petrovich's belief, never DCS truth, with a declared
+type, `[[BL-B94]]`), and the **"when"** (priorities, interrupts, preconditions) kept in one
 place per behaviour, apart from the actions, so it can later move into a file without touching them.
 Existing hard-coded behaviour stays unless a change touches it anyway.
 
