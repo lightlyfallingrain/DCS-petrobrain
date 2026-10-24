@@ -32,38 +32,11 @@ Optional: create `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any
 content, even empty) to turn on verbose logging to
 `Saved Games\DCS\Logs\aircraft_layer_debug.log`.
 
-## Deploy the overlay Hook script (Windows box, once per change)
-
-**UNVERIFIED against a live DCS session** (`plans/dcs-text-panel-output/plan.md`
-Stage 2) — authored from `aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md`
-and modeled directly on DCS-SRS's own installed, working overlay
-(`Mods\Services\DCS-SRS\Scripts\DCS-SRS-OverlayGameGUI.lua` +
-`Mods\Services\DCS-SRS\UI\DCS-SRS-Overlay.dlg`), but not run against a real DCS
-process. Copy both files to `Saved Games\DCS\Scripts\Hooks\`:
-
-- `aircraft-layer/dcs-export/petrobrain-overlay-hook.lua` ->
-  `Saved Games\DCS\Scripts\Hooks\petrobrain-overlay.lua`
-- `aircraft-layer/dcs-export/petrobrain-overlay.dlg` ->
-  `Saved Games\DCS\Scripts\Hooks\petrobrain-overlay.dlg`
-
-Same discipline as `Export.lua`: the repo copy is canonical, never edit the
-deployed copy in place. Unlike `Export.lua`, Hook scripts load once into the
-GUI Lua state at DCS **application** startup, not per-mission — restart DCS
-(not just the mission) after copying either file for a change to take effect.
-
-This opens a second window (420x200px by default, top-left corner of the
-screen, draggable) showing the last few lines body-layer's `--overlay` mode
-pushes, expiring each line after 20s. It listens on loopback UDP port 7792 —
-distinct from Export.lua's own port (7790) and the LAN API port (7791) — fed
-by the collector's `POST /text/push` (see "Query from the Mac" below). If the
-window never appears, or `dcs.log` shows a Lua error tagged
-`PetrobrainOverlay`, that is exactly what Stage 2's live check is for; this
-deploy step alone does not confirm the script actually works.
-
 ## Deploy the mission-start Hook script (Windows box, once per change)
 
 `plans/bl15-mission-start/plan.md`, BL-15 Stage 1. Unverified against a live DCS session as of
-authorship — same posture as the overlay/F10-commands Hook scripts at their own authorship time.
+authorship — same posture the retired overlay/F10-commands Hook scripts (removed by `BL-B96`) had
+at their own authorship time.
 Copy:
 
 - `aircraft-layer/dcs-export/petrobrain-mission-start-hook.lua` ->
@@ -87,8 +60,8 @@ That single line is sufficient -- **live-confirmed 2026-09-13** (DCS 2.9.29.2727
 F10-commands Hook's own Stage 4 check): with only it in `autoexec.cfg`, `dcs.log` showed
 `registration -> ok=true result=registered`. No `net.allow_unsafe_api` entry is needed. This is a
 user-machine config change that applies to every DCS session and every installed Hook script,
-ED-labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the overlay/search-trigger
-channels).
+ED-labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the search-trigger
+channel).
 
 This registers no F10 menu — it is a one-shot push per mission (re)start, not a drained queue.
 Each `onSimulationStart` firing sends one UDP datagram
@@ -154,8 +127,8 @@ work:
 - **`winsound` does not exist on Linux.** Spoken-audio playback is a Windows-stdlib call, so a
   native-WSL collector loses Petrovich's voice entirely.
 - **Several channels are UDP, and WSL2's `localhostForwarding` is TCP-only.** Unit
-  velocity arrives from the Hook scripts over UDP; the text overlay and the Petrovich search command
-  leave over UDP. Export.lua's TCP feed would forward fine and *everything else would silently stop
+  velocity arrives from the Hook scripts over UDP; the Petrovich search command
+  leaves over UDP. Export.lua's TCP feed would forward fine and *everything else would silently stop
   arriving* — a failure that presents as "movement detection broke", not as a networking
   misconfiguration. Windows 11 23H2+'s `networkingMode=mirrored` does fix UDP in both directions,
   but it does not bring `winsound` back, so it is not worth the configuration.
@@ -172,14 +145,6 @@ This starts two servers in one process, sharing one in-memory cache:
 - **Telemetry API** — LAN-facing (`0.0.0.0:7791` by default, `--api-host`/
   `--api-port` to override). This is the port the Mac (or any LAN client)
   reaches.
-
-The collector also opens a `TextOverlaySender` on loopback UDP port 7792 by
-default (`--text-overlay-host`/`--text-overlay-port` to override) — the other
-end of the "Deploy the overlay Hook script" section above. This is
-fire-and-forget: the collector starts this sender unconditionally, whether or
-not the overlay Hook script is actually loaded in DCS, since a missing
-listener is an expected state (DCS not running yet, or running without the
-overlay script) rather than an error.
 
 The collector also constructs an `AudioPlaybackSender` unconditionally (BL-10 first slice,
 `plans/tts-voice-output/plan.md`) — no host/port of its own, since it plays audio directly on
@@ -240,29 +205,18 @@ snapshot, flagged rather than dropped. See
 `aircraft-layer/src/schema/world_objects.py` for the field list/units.
 
 ```
-curl -X POST http://<windows-box-lan-ip>:7791/text/push -d '{"text":"hello Petrovich"}'
-```
-
-Pushes one line to the in-cockpit overlay (see "Deploy the overlay Hook
-script" above) — `200 {"ok": true}` on success (meaning only "the collector
-attempted the UDP send," not "the line appeared on screen" — delivery is
-fire-and-forget, by design), `400` on a missing/empty/non-string `text`
-field, `503` if the collector wasn't built with a `text_sender` (should not
-happen via `python -m collector`, which always constructs one).
-
-```
 curl -X POST http://<windows-box-lan-ip>:7791/audio/play -d '{"audio_b64":"<base64 WAV bytes>"}'
 ```
 
 Plays a synthesized WAV directly on this box via `winsound` (BL-10 first slice, `plans/
-tts-voice-output/plan.md`) — `200 {"ok": true}` on success (same "attempted the call" contract as
-`/text/push`: the audio was handed to the playback queue, not confirmation it was actually heard),
+tts-voice-output/plan.md`) — `200 {"ok": true}` on success (an "attempted the call" contract:
+the audio was handed to the playback queue, not confirmation it was actually heard),
 `400` on missing/invalid `audio_b64`/`urgent` or non-JSON body, `503` if the collector wasn't
 built with an `audio_sender` (should not happen via `python -m collector`, which always constructs
 one). Normally called by `audio-adapter --target aircraft-layer`, not by hand — see
 `audio-adapter/CLAUDE.md`'s own run command for the full TTS-to-audible-speech path.
 
-These write/inbound paths (`/text/push`, `/command/petrovich_search`,
+These write/inbound paths (`/command/petrovich_search`,
 `/audio/play`) are the only
 parts of this API that are not plain read-only telemetry — everything else
 remains read-only.

@@ -21,54 +21,45 @@ the body/brain process, on either Windows or Mac (compute topology note in
   shape/lifecycle as the other two `/latest` endpoints. Raw parsed text
   only -- no detection/interpretation/association logic here, that is
   body-layer's job (`body-layer/src/perception/association.py`).
-- `POST /text/push` -> the aircraft layer's first inbound/write path
-  (`plans/dcs-text-panel-output/plan.md`, BL-2.5). Body `{"text": "<string>"}`;
-  a non-empty (after `.strip()`) string forwards to
-  `collector.text_sender.TextOverlaySender.send_line`, which fires the line at
-  the in-cockpit overlay Hook script over loopback UDP, and responds
-  `200 {"ok": true}`. `400 {"error": ...}` on a missing/invalid/empty `text`
-  field or non-JSON body; `503 {"error": "text push not configured"}` if this
-  server was built without a `text_sender` (matching the
-  optional-cache-defaults-to-empty pattern below, rather than crashing). This
-  endpoint carries opaque display strings only -- no aircraft state, no
-  commands, no code -- everything else on this API remains read-only.
 - `GET /petrovich_wheel/latest` -> the most recent `list_indication(10)`
   (Petrovich's AI-Wheel state) sample as JSON, or JSON `null` on the same
   "not an error" basis. Added by `plans/bl6-commands-inspect-adapt/plan.md`
   (BL-6) as a live diagnostic for `scan_area`'s `task-status` console
   command; same shape/lifecycle as the other `/latest` endpoints.
-- `POST /command/petrovich_search` -> the aircraft layer's second
-  inbound/write path (BL-6). Body `{"mode": "forward"|"boresight"}`; a valid
+- `POST /command/petrovich_search` -> the aircraft layer's first
+  inbound/write path (BL-6; `/text/push`, the original first write path,
+  was removed by `plans/default-crew-pipeline/plan.md`, BL-B96). Body
+  `{"mode": "forward"|"boresight"}`; a valid
   mode forwards to `collector.command_sender.CommandSender.send_command`,
   which fires the JSON command at `Export.lua`'s new inbound UDP listener
   (driving Petrovich's AI Wheel), and responds `200 {"ok": true}` --
-  matching `/text/push`'s "attempted the call" contract exactly: a `200`
+  an "attempted the call" contract: a `200`
   here means the datagram was hand off to the OS, never that Petrovich
   actually searched (that confirmation is `/petrovich_wheel/latest`'s job).
   `400 {"error": ...}` on a missing/invalid `mode` or non-JSON body;
   `503 {"error": "command channel not configured"}` if this server was
-  built without a `command_sender`. Unlike `/text/push`, a send failure here
+  built without a `command_sender`. Unlike `/audio/play` below, a send failure here
   propagates as `500 {"error": ...}` rather than being swallowed --
   `collector.command_sender.CommandSender.send_command` raises
   `CommandSendError` on a clearly-failed send (see that module's docstring
-  for why this write path does not share `/text/push`'s
-  never-raises posture).
-- `POST /audio/play` -> the aircraft layer's third inbound/write path
+  for why this write path does not share the never-raises posture the
+  audio/display paths use).
+- `POST /audio/play` -> the aircraft layer's second inbound/write path
   (BL-10 first slice, `plans/tts-voice-output/plan.md`). Body
   `{"audio_b64": "<base64 WAV bytes>", "urgent": bool}`; forwards the
   decoded bytes to `collector.audio_sender.AudioPlaybackSender.play_audio`,
   which plays them through `winsound` on this (Windows) box, and responds
-  `200 {"ok": true}` -- same "attempted the call" contract as `/text/push`
-  and `/command/petrovich_search`: a `200` means the audio was handed to
+  `200 {"ok": true}` -- same "attempted the call" contract as
+  `/command/petrovich_search`: a `200` means the audio was handed to
   the playback queue, never that it was actually heard. `400 {"error": ...}`
   on a missing/invalid `audio_b64`/`urgent` or non-JSON body; `503
   {"error": "audio playback not configured"}` if this server was built
-  without an `audio_sender`. Like `/text/push` (and unlike
-  `/command/petrovich_search`), this never propagates a `500` for a
+  without an `audio_sender`. Unlike
+  `/command/petrovich_search`, this never propagates a `500` for a
   playback failure -- `AudioPlaybackSender.play_audio` never raises (plan
   Decision 5: audio is best-effort display-equivalent output, not a
   verifiable command).
-- `POST /audio/stop` -> the aircraft layer's fourth inbound/write path
+- `POST /audio/stop` -> the aircraft layer's third inbound/write path
   (`plans/inbound-speech/plan.md` Stage 3 follow-up, "stop_talking"'s
   interrupt-only path). No request body is read or required -- forwards
   directly to `collector.audio_sender.AudioPlaybackSender.interrupt`,
@@ -133,7 +124,7 @@ the body/brain process, on either Windows or Mac (compute topology note in
   response is always a well-formed object. Joined client-side by
   `unit_name`, same convention as `/unit_velocity/latest`/
   `/line_of_sight/latest`.
-- `POST /command/look_direction` -> the aircraft layer's fifth
+- `POST /command/look_direction` -> the aircraft layer's fourth
   inbound/write path (`plans/dcs-driven-los/plan.md` SS9). Body
   `{"hour": <int 0..11>, "fov_half_deg": <int 5..180>}`; forwards to
   `collector.command_sender.LookDirectionSender.send_look_direction`,
@@ -148,7 +139,7 @@ the body/brain process, on either Windows or Mac (compute topology note in
   (a dropped look-direction push is a real coverage gap, not an opaque
   display string to swallow).
 
-- `POST /command/cockpit_switch` -> the aircraft layer's sixth
+- `POST /command/cockpit_switch` -> the aircraft layer's fifth
   inbound/write path (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1),
   **unchanged by Stage 4** (only this endpoint's own *readback* sibling,
   `GET /cockpit_switch/latest`, is removed below). Body `{"device": int,
@@ -187,7 +178,7 @@ the body/brain process, on either Windows or Mac (compute topology note in
   {"error": "watch_args channel not configured"}` if this server was
   built without a `command_sender`; a send failure propagates as
   `500 {"error": ...}`, same posture as `/command/petrovich_search`.
-- `POST /query/read_args` -> the aircraft layer's sixth inbound/write path,
+- `POST /query/read_args` -> the aircraft layer's fifth inbound/write path,
   and its first **synchronous** one (`plans/effector-sequences/plan.md`
   Stage 4, S4.2, "readback by need" option B). Body `{"args": [int, ...]}`;
   forwards to `collector.arg_read_broker.ArgReadBroker.read`, which fires
@@ -205,7 +196,7 @@ the body/brain process, on either Windows or Mac (compute topology note in
   already in flight. `504 {"error": ...}` if no reply arrives within the
   timeout (no Export.lua peer connected, or a stalled frame).
 
-- `POST /command/sight_target` -> the aircraft layer's seventh
+- `POST /command/sight_target` -> the aircraft layer's sixth
   inbound/write path (`plans/9k113-sight-pointing/plan.md`, BL-B80 v2).
   Body `{"goal_az_deg": number, "goal_el_deg": number, "goal_rate_az_
   deg_s": number, "goal_rate_el_deg_s": number, "t_sim": number}`;
@@ -289,7 +280,6 @@ from collector.command_sender import (
     SearchMode,
 )
 from collector.firing_receiver import EmitterTracker
-from collector.text_sender import TextOverlaySender
 from schema import MAX_WATCHED_ARG_NUMBER, MAX_WATCHED_ARGS
 
 logger = logging.getLogger(__name__)
@@ -310,7 +300,6 @@ _WATCHED_ARGS_LATEST_PATH = "/watched_args/latest"
 _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
-_TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
@@ -500,7 +489,6 @@ def _make_handler(
     world_objects_cache: WorldObjectsCache,
     petrovich_indication_cache: PetrovichIndicationCache,
     petrovich_wheel_cache: PetrovichWheelCache,
-    text_sender: TextOverlaySender | None,
     command_sender: CommandSender | None,
     audio_sender: AudioPlaybackSender | None,
     unit_velocity_cache: UnitVelocityCache,
@@ -570,9 +558,6 @@ def _make_handler(
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
-            if path == _TEXT_PUSH_PATH:
-                self._handle_text_push()
-                return
             if path == _COMMAND_PETROVICH_SEARCH_PATH:
                 self._handle_command_petrovich_search()
                 return
@@ -598,30 +583,6 @@ def _make_handler(
                 self._handle_command_sight_target()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
-
-        def _handle_text_push(self) -> None:
-            if text_sender is None:
-                self._respond_json(503, {"error": "text push not configured"})
-                return
-
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            raw_body = self.rfile.read(length) if length > 0 else b""
-            try:
-                data = json.loads(raw_body.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                self._respond_json(400, {"error": "body must be valid JSON"})
-                return
-            if not isinstance(data, dict):
-                self._respond_json(400, {"error": "body must be a JSON object"})
-                return
-
-            text = data.get("text")
-            if not isinstance(text, str) or not text.strip():
-                self._respond_json(400, {"error": "'text' must be a non-empty string"})
-                return
-
-            text_sender.send_line(text)
-            self._respond_json(200, {"ok": True})
 
         def _handle_command_petrovich_search(self) -> None:
             if command_sender is None:
@@ -1045,9 +1006,8 @@ def _make_handler(
                 return
 
             # Never raises -- see AudioPlaybackSender.play_audio's own
-            # docstring and plan Decision 5 (this is /text/push's
-            # never-raises posture, not /command/petrovich_search's
-            # propagate-500 one).
+            # docstring and plan Decision 5 (never-raises posture, not
+            # /command/petrovich_search's propagate-500 one).
             audio_sender.play_audio(audio, urgent, correlation_id)
             self._respond_json(200, {"ok": True})
 
@@ -1086,7 +1046,6 @@ class TelemetryAPIServer:
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         petrovich_indication_cache: PetrovichIndicationCache | None = None,
-        text_sender: TextOverlaySender | None = None,
         petrovich_wheel_cache: PetrovichWheelCache | None = None,
         command_sender: CommandSender | None = None,
         audio_sender: AudioPlaybackSender | None = None,
@@ -1111,9 +1070,9 @@ class TelemetryAPIServer:
         # answers `null`, same as an empty cache would -- and
         # `/ptt/state`'s served `"intercom"` correctly reads as fail-safe-
         # closed (plan Decision 3) against a never-populated `Spu8Cache`.
-        # `text_sender`/`command_sender`/`audio_sender` default to `None`
+        # `command_sender`/`audio_sender` default to `None`
         # rather than a real sender for the same reason --
-        # `/text/push`/`/command/petrovich_search`/`/audio/play` answer
+        # `/command/petrovich_search`/`/audio/play` answer
         # `503` rather than crashing when they aren't configured.
         self._cache = cache
         self._world_objects_cache = (
@@ -1155,7 +1114,7 @@ class TelemetryAPIServer:
             sight_servo_cache if sight_servo_cache is not None else SightServoCache()
         )
         # `arg_read_broker` defaults to `None`, same posture as
-        # `command_sender`/`text_sender`/`audio_sender` above --
+        # `command_sender`/`audio_sender` above --
         # `/query/read_args` answers `503` rather than crashing when it
         # isn't configured.
         self._arg_read_broker = arg_read_broker
@@ -1167,7 +1126,6 @@ class TelemetryAPIServer:
         self._emitter_tracker = (
             emitter_tracker if emitter_tracker is not None else EmitterTracker()
         )
-        self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
         self._look_direction_sender = look_direction_sender
@@ -1203,7 +1161,6 @@ class TelemetryAPIServer:
                 self._world_objects_cache,
                 self._petrovich_indication_cache,
                 self._petrovich_wheel_cache,
-                self._text_sender,
                 self._command_sender,
                 self._audio_sender,
                 self._unit_velocity_cache,

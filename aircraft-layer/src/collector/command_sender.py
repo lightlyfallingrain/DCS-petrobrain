@@ -1,27 +1,19 @@
 """Collector-side sender for the Petrovich-search command channel (BL-6,
 `plans/bl6-commands-inspect-adapt/plan.md`).
 
-This is the aircraft layer's **second** outbound hop, mirroring
-`collector.text_sender.TextOverlaySender`'s DCS-ward flow: the collector
-fires a small JSON command at `Export.lua`'s new inbound UDP listener over
-loopback, the same "collector -> Export.lua" direction `TextOverlaySender`
-already established for the in-cockpit overlay (BL-2.5).
+The collector fires a small JSON command at `Export.lua`'s new inbound
+UDP listener over loopback, the "collector -> Export.lua" direction.
 
-**Deliberate asymmetry from `TextOverlaySender.send_line`, flagged
-explicitly per the plan:** `send_line` never raises, because a missing
-overlay listener is an expected, everyday state carrying an opaque display
-string -- losing one line is cosmetic. `send_command` is different: it
-drives a real effector (Petrovich's AI Wheel), and a dropped command is a
-real behavioral gap the caller needs to know about, not a state to
-silently swallow. `send_command` therefore raises `CommandSendError` on a
-clearly-failed send (an `OSError` from the underlying socket), the same
-raise-on-failure posture `aircraft_client.AircraftLayerClient.
-push_text_line` already established for this project's other write path.
-Note this still cannot promise the command *worked* -- UDP is
-fire-and-forget, so a `send_command` call that does not raise means only
-"the datagram was handed to the OS," never "Petrovich actually searched."
-Live confirmation of that is `GET /petrovich_wheel/latest`'s job, not this
-sender's."""
+**`send_command` raises on failure, deliberately:** it drives a real
+effector (Petrovich's AI Wheel), and a dropped command is a real
+behavioral gap the caller needs to know about, not a state to silently
+swallow -- unlike a display-only write, where losing one line is
+cosmetic. `send_command` therefore raises `CommandSendError` on a
+clearly-failed send (an `OSError` from the underlying socket). Note this
+still cannot promise the command *worked* -- UDP is fire-and-forget, so a
+`send_command` call that does not raise means only "the datagram was
+handed to the OS," never "Petrovich actually searched." Live confirmation
+of that is `GET /petrovich_wheel/latest`'s job, not this sender's."""
 
 from __future__ import annotations
 
@@ -55,12 +47,11 @@ def _format_fixed_point(value: float) -> str:
 
 
 #: Loopback only -- `Export.lua`'s new inbound command listener runs inside
-#: the same DCS process tree as the collector's UDP peer, exactly like
-#: `collector.text_sender.DEFAULT_HOST`/`DEFAULT_PORT` for the existing
-#: outbound-to-overlay channel. A distinct port from both
-#: `collector.server.DEFAULT_PORT` (Export.lua -> collector, TCP) and
-#: `collector.text_sender.DEFAULT_PORT` (collector -> overlay Hook script,
-#: UDP) -- this is a third, separate loopback channel.
+#: the same DCS process tree as the collector's UDP peer. A distinct port
+#: from `collector.server.DEFAULT_PORT` (Export.lua -> collector, TCP) and
+#: 7792 (formerly `collector.text_sender.TextOverlaySender`'s
+#: collector -> overlay Hook script UDP channel, retired by `BL-B96`) --
+#: this is a third, separate loopback channel.
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7793
 
@@ -74,16 +65,14 @@ SearchMode = Literal["forward", "boresight"]
 
 class CommandSendError(RuntimeError):
     """Raised when `CommandSender.send_command` cannot hand its datagram to
-    the OS -- see the module docstring for why this sender, unlike
-    `TextOverlaySender`, does not swallow that failure."""
+    the OS -- see the module docstring for why this sender does not
+    swallow that failure."""
 
 
 class CommandSender:
     """Sends short JSON command datagrams to `Export.lua`'s inbound command
-    listener over UDP. Structurally mirrors `TextOverlaySender`'s
-    open-once/close-on-shutdown lifecycle (see that class's own docstring
-    for why, even though UDP is connectionless) -- only `send_command`'s
-    failure posture differs."""
+    listener over UDP. Open-once/close-on-shutdown lifecycle, even though
+    UDP is connectionless."""
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         self._host = host
@@ -113,8 +102,8 @@ class CommandSender:
     def send_command(self, mode: SearchMode) -> None:
         """Send `{"op": "petrovich_search", "mode": mode}` to `Export.lua`'s
         command listener. Raises `CommandSendError` if the underlying socket
-        send fails (see the module docstring for why this call, unlike
-        `TextOverlaySender.send_line`, does not swallow that failure)."""
+        send fails (see the module docstring for why this call does not
+        swallow that failure)."""
         if self._socket is None:
             self.open()
         sock = self._socket
@@ -315,10 +304,11 @@ class CommandSender:
 #: `Export.lua`'s command listener (`DEFAULT_PORT` above) -- this directive
 #: has to land in the mission-scripting state (`land.*`/`world.*` live
 #: there, not in the Export state Export.lua runs in), so it is a
-#: Hook-script-owned socket, structurally like `petrobrain-overlay-hook.
-#: lua`'s inbound listener, not Export.lua's (`plans/dcs-driven-los/
+#: Hook-script-owned socket, structurally like the retired overlay Hook
+#: script's inbound listener was, not Export.lua's (`plans/dcs-driven-los/
 #: plan.md` SS9a). A distinct loopback port: `collector.server.
-#: DEFAULT_PORT` (7790), `text_sender.DEFAULT_PORT` (7792), this module's
+#: DEFAULT_PORT` (7790), 7792 (formerly `text_sender.TextOverlaySender`,
+#: retired by `BL-B96`), this module's
 #: own `DEFAULT_PORT` (7793), 7794 (formerly the F10 command channel,
 #: retired by `BL-B96`), `unit_velocity_receiver.DEFAULT_PORT` (7795),
 #: `line_of_sight_receiver.DEFAULT_PORT` (7796), and this one (7797).
@@ -374,8 +364,8 @@ class LookDirectionSender:
         """Send `{"op": "look_direction", "hour": hour, "fov_half_deg":
         fov_half_deg}` to the LOS Hook script's inbound listener. Raises
         `CommandSendError` if the underlying socket send fails -- see this
-        class's own docstring for why this does not swallow that failure
-        the way `TextOverlaySender.send_line` does."""
+        class's own docstring for why this does not swallow that
+        failure."""
         if self._socket is None:
             self.open()
         sock = self._socket

@@ -7,18 +7,15 @@ sample to stdout for manual verification (plan stage 2); that dump is kept
 (`--dump-interval`) since it's still useful for watching the pipeline without
 a separate HTTP client.
 
-A `TextOverlaySender` (`plans/dcs-text-panel-output/plan.md`, BL-2.5) is also
-constructed here and handed to `TelemetryAPIServer` so `POST /text/push` can
-forward lines to the in-cockpit overlay Hook script over loopback UDP -- the
-one inbound/write path on this otherwise read-only pipeline. A
-`CommandSender` (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) is
-constructed the same way for `POST /command/petrovich_search`, this
-pipeline's second inbound/write path.
+A `CommandSender` (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) is
+constructed here and handed to `TelemetryAPIServer` for `POST /command/
+petrovich_search`, this pipeline's first inbound/write path (`BL-B96`
+removed the original first, `TextOverlaySender`/`POST /text/push`).
 
 An `AudioPlaybackSender` (BL-10 first slice, `plans/tts-voice-output/
-plan.md`) is constructed the same way as `text_sender`/`command_sender`
-for `POST /audio/play`, this pipeline's third inbound/write path -- unlike
-those two, it has no host/port (it plays audio directly on this box via
+plan.md`) is constructed the same way as `command_sender`
+for `POST /audio/play`, this pipeline's second inbound/write path -- unlike
+that one, it has no host/port (it plays audio directly on this box via
 `winsound`, no loopback UDP peer involved).
 
 A `UnitVelocityReceiver` (`plans/movement-detection/plan.md` Stage 1) is
@@ -75,7 +72,7 @@ reply -- so both halves of this request/reply pair, and the single
 and API server exactly as `WatchedArgsCache` is.
 
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
-       [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
+       [--api-port PORT]
        [--command-host HOST] [--command-port PORT]
        [--unit-velocity-host HOST] [--unit-velocity-port PORT]
        [--mission-start-host HOST] [--mission-start-port PORT]
@@ -129,9 +126,6 @@ from collector.mission_start_receiver import (
 )
 from collector.mission_start_receiver import MissionStartReceiver
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
-from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
-from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
-from collector.text_sender import TextOverlaySender
 from collector.unit_velocity_receiver import DEFAULT_HOST as UNIT_VELOCITY_DEFAULT_HOST
 from collector.unit_velocity_receiver import DEFAULT_PORT as UNIT_VELOCITY_DEFAULT_PORT
 from collector.unit_velocity_receiver import UnitVelocityReceiver
@@ -150,17 +144,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-port", type=int, default=API_DEFAULT_PORT, help="Mac-facing LAN API port"
-    )
-    parser.add_argument(
-        "--text-overlay-host",
-        default=TEXT_OVERLAY_DEFAULT_HOST,
-        help="in-cockpit overlay Hook script listener host (loopback)",
-    )
-    parser.add_argument(
-        "--text-overlay-port",
-        type=int,
-        default=TEXT_OVERLAY_DEFAULT_PORT,
-        help="in-cockpit overlay Hook script listener port",
     )
     parser.add_argument(
         "--command-host",
@@ -251,10 +234,6 @@ def main() -> None:
     world_objects_cache = WorldObjectsCache()
     petrovich_indication_cache = PetrovichIndicationCache()
     petrovich_wheel_cache = PetrovichWheelCache()
-    text_sender = TextOverlaySender(
-        host=args.text_overlay_host, port=args.text_overlay_port
-    )
-    text_sender.open()
     command_sender = CommandSender(host=args.command_host, port=args.command_port)
     command_sender.open()
     unit_velocity_cache = UnitVelocityCache()
@@ -351,7 +330,6 @@ def main() -> None:
         host=args.api_host,
         port=args.api_port,
         petrovich_indication_cache=petrovich_indication_cache,
-        text_sender=text_sender,
         petrovich_wheel_cache=petrovich_wheel_cache,
         command_sender=command_sender,
         audio_sender=audio_sender,
@@ -380,7 +358,6 @@ def main() -> None:
     finally:
         api.close()
         collector.close()
-        text_sender.close()
         command_sender.close()
         audio_sender.close()
         unit_velocity_receiver.close()

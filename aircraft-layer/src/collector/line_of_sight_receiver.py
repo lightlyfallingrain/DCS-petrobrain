@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 #: Loopback only, same reasoning as every other channel in this module. A
 #: distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
-#: `text_sender.DEFAULT_PORT` (7792), `command_sender.DEFAULT_PORT` (7793),
+#: 7792 (formerly `text_sender.TextOverlaySender`, retired by `BL-B96`), `command_sender.DEFAULT_PORT` (7793),
 #: 7794 (formerly the F10 command channel, retired by `BL-B96`),
 #: `unit_velocity_receiver.DEFAULT_PORT` (7795), and this one (7796).
 DEFAULT_HOST = "127.0.0.1"

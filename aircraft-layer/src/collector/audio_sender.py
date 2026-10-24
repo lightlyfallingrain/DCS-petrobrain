@@ -1,7 +1,7 @@
 """Collector-side player for the audio-playback channel (BL-10 first slice,
 `plans/tts-voice-output/plan.md` stages 2/4/5).
 
-Unlike `text_sender.py`/`command_sender.py` (UDP datagrams to a DCS-side
+Unlike `command_sender.py` (UDP datagrams to a DCS-side
 listener), this sender plays audio **directly on the Windows box** via the
 stdlib `winsound` module -- no DCS process involvement needed for this
 channel, per the plan's recon (`audio-adapter/research/2026-09-17-tts-audio-
@@ -308,7 +308,7 @@ else:
 class AudioPlaybackSender:
     """Owns a background worker thread + `queue.Queue` of temp `.wav`
     paths, playing them one at a time via a `WavPlayer`. Mirrors
-    `TextOverlaySender`/`CommandSender`'s open()/close() lifecycle shape,
+    `CommandSender`'s open()/close() lifecycle shape,
     though the underlying resource here is a thread, not a socket."""
 
     def __init__(
@@ -341,8 +341,7 @@ class AudioPlaybackSender:
         and interrupts in-flight playback before this file is enqueued
         (plan Decision 4) -- otherwise it joins the FIFO queue behind
         whatever is already queued. Never raises: a failure to write the
-        temp file is logged and the line is dropped, matching
-        `TextOverlaySender.send_line`'s never-raises posture (plan
+        temp file is logged and the line is dropped (plan
         Decision 5 -- playback is best-effort, display-equivalent output,
         not a verifiable command).
 
