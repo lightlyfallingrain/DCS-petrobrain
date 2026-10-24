@@ -25,4 +25,28 @@ So the rule has three parts:
 2. While OBSERV is off, write nothing.
 3. Axis values are written only while OBSERV is on.
 
-Fixed on `fix/observ-off-axis-zero`.
+Fixed on `fix/observ-off-axis-zero`. DoD: fixture-verified (21/21 `test_sight_servo_lua.py`
+against the real `run_sight_servo`, 619/619 full aircraft-layer suite, format/lint/`mypy --strict`/
+`luac5.1 -p`/own-helper-leak scan all clean); Reviewer and Security both APPROVED, no required
+fixes. `#needs-flight` — no fixture can confirm that `SetCommand(..., 0.0)` actually recentres the
+real ASP-17 mark rather than merely halting further motion from wherever it was; see the flight
+check below.
+
+**Flight check** (card: https://claude.ai/artifact/Cwgypqi7oLswCVoZwLfPrN, branch
+`fix/observ-off-axis-zero`):
+
+1. **Setup.** OBSERV on, slew the sight with Petrovich active (voice/F10 `Watch`/`Scan` command, or
+   just let his autonomous scan run) so the mark is visibly off-centre and moving.
+2. **Do**: turn OBSERV off **by Petrovich command** (e.g. `Cancel Task` while he is watching/scanning,
+   or whatever currently drives his own OBSERV-off path). **Expect**: the mark stops moving within
+   one frame of OBSERV going off. **Record**: does it stop where it was, or snap/drift to centre?
+3. **Do**: turn OBSERV off **by hand** (the cockpit switch/keybind). **Expect**: same — stops, does
+   not keep wandering. **Record**: same question — stop-in-place or recentre?
+4. **Do**: turn OBSERV off **via the DCS AI** (let a hard manoeuvre trigger DCS's own auto-OBSERV-off,
+   per `[[BL-B80]]`'s "home_phase" note) if one can be provoked, otherwise skip and say so. **Expect**:
+   same stop behaviour. **Record**: same question, plus whether this path was reachable at all this
+   sortie.
+5. **Bring back**: for each of the three causes exercised, did the mark *stop in place* or *snap to
+   centre*? (The fix commands `(0.0, 0.0)` once, which is the servo's own zero/centre convention —
+   `debug.md`'s own open question is whether DCS's gimbal interprets that as "go to centre" or "stop
+   wherever you are.") Anything that surprised you is worth more than this list.

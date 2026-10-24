@@ -178,3 +178,15 @@
   observation) is not an edge either. The general shape: any "announce on this becoming true"
   callout needs the previous *observed* value, not a has-this-ever-fired flag, or it cannot
   distinguish "just became true" from "was already true before we were watching."
+- **Stopping writing a `SetCommand` axis is not the same as commanding it to zero, and this is a
+  separate failure from the dither finding above.** The dither note above is about DCS *ignoring*
+  a per-frame write whose value never changes; this is about what happens when the writes *stop
+  entirely* — the AI axis (`CMD_AI_AZ`/`CMD_AI_ELEV`, 9K113) simply holds whatever was last
+  commanded, indefinitely, with no decay or self-reset. `run_sight_servo`'s OBSERV-off path reset
+  its own software state on OBSERV going off but never re-touched the axis itself, so a dither/
+  tracking value written the frame before OBSERV went off stayed commanded for the rest of the
+  sortie — reported as "the ASP-17 mark still moving" (`docs/acceptance/2026-10-24-sortie-feedback.md`
+  F1, fixed on `fix/observ-off-axis-zero`, `[[BL-B80]]`). The general shape: on any DCS axis that
+  latches, "stop driving it" and "command it to a safe/neutral value" are two different actions,
+  and ending a control loop without the second leaves whatever the loop was doing at that instant
+  frozen in place rather than cleared.

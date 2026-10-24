@@ -44,6 +44,24 @@
   no correction. Flight B (not yet written) should note that "Guidance unit ready." is expected
   once, on the observed lamp's off→on transition, not at mission start if the unit is already warm.
 
+  **Fixed on `fix/observ-off-axis-zero` (DoD pass 2026-10-24, tip `8a46e30a`), merged to `main`
+  2026-10-24.** `docs/acceptance/2026-10-24-sortie-feedback.md` F1: the pilot saw the ASP-17 mark
+  still moving with OBSERV off. `run_sight_servo`'s existing `if not observ_on then ... return end`
+  path reset only its own software state, never the AI axis (`CMD_AI_AZ`/`CMD_AI_ELEV` via
+  `SetCommand`) — and that axis latches at whatever was last commanded once nothing keeps writing
+  it (a distinct mechanism from the dither finding two paragraphs above, which is about DCS
+  *ignoring* an unchanging per-frame write; this is about the axis holding its value when writes
+  *stop entirely* — see `notes/the-9k113-sight-bl-b64.md`). The fix adds a one-time zero write
+  (`sight_point_quiet(0.0, 0.0)`) on the genuine OBSERV on→off edge, by whichever of Petrovich/DCS
+  AI/the player caused it, and writes nothing on every other off frame; `LuaExportStop` resets the
+  new edge-tracking state so a mission restart cannot replay a stale edge. Reviewer and Security
+  both APPROVED, no required fixes. This is the only change on that branch — no change to
+  `sight_ready()`, the servo's on-path proportional loop, or anything else this entry's v2 design
+  touches. `#needs-flight` — fixture-verified only; whether `SetCommand(..., 0.0)` actually
+  recentres the real gimbal, or merely halts it where it was, needs the live check in that sortie-
+  feedback entry. Does not change what Flight A/B above should observe (neither flight's card
+  exercises an OBSERV-off transition).
+
   ## Status, 2026-10-22 — v2 Stages 1-4 (with 3b) built and reviewed; Stage 0/4 flights outstanding
 
   `feature/9k113-sight-pointing` (tip `e009465eba841a1a320ac02740dbbd1133221b96`) implements the
