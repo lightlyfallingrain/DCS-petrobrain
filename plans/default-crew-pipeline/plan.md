@@ -84,6 +84,49 @@ engine both old branches ran on, not REPL-specific, and the "console" in its nam
   reach.
 - `src/belief/audio_client.py` — **unchanged.** Speech in/out stays; nothing here was behind a
   flag at this layer.
+- `_format_gaze_line`/`_push_gaze_line` (`logger.py`/`body.py`, ~line 1718/1740) — **deleted
+  entirely.** Both exist solely to push Petrovich's current gaze label to the overlay
+  (`overlay_client.push_text_line`), called from both `_run_console_poll_loop` (already deleted)
+  and `_run_crew_text_poll_loop`; with `overlay_client` gone, the one remaining call site
+  (`_run_crew_text_poll_loop`'s `last_gaze_label = _push_gaze_line(...)`) is also deleted. **Missed
+  by the first pass of this sweep** — found by re-grepping for every `overlay_client` consumer
+  rather than trusting the file list already gathered. Six tests in `test_logger.py` go with them:
+  `test_format_gaze_line_names_the_oclock_hour_in_free_scan`,
+  `test_format_gaze_line_names_the_commanded_sector`,
+  `test_format_gaze_line_names_a_commanded_legs_scan_generically`,
+  `test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change`,
+  `test_push_gaze_line_pushes_again_when_the_cone_changes`,
+  `test_push_gaze_line_failure_is_isolated_and_still_advances_the_label`.
+- `tests/test_mock_flight_chain.py` — `test_mock_flight_chain_threaded_console_smoke` (~line 355)
+  exercises the real `--console` threading model end to end (`_run_console_poll_loop` on a
+  background thread, `belief.console.Console`/`_run_console_repl` on the foreground) against the
+  shared fixture. With that model deleted, this test cannot simply disappear without losing the one
+  thing it actually proved: that the *shared poll-loop/REPL threading pattern* (thread-local
+  world-model connection, clean shutdown via `stop_event`) survives against a real fixture, not a
+  fake. There is no existing crew-text equivalent in this file (confirmed by grep — no
+  `test_mock_flight_chain_threaded_crew_text_*`). **Rewrite it against `_run_crew_text_poll_loop`/
+  `CrewConsole`/`_run_crew_text_repl` instead of deleting it outright** — same fixture, same
+  threading shape, swap the REPL driver. This is the "existing tests must be rewritten rather than
+  extended" case `AGENTS.md`'s escalation rules name; flagging it here rather than leaving the
+  Implementer to decide silently, but proceeding under the reading that BL-B96.md's "deleting tests
+  for removed features is in scope" extends to *rewriting* a test whose subject (the threading
+  model) survived even though its REPL did not.
+- `body-layer/CLAUDE.md` — the "## Commands" section's `--console`/`--overlay`/`--crew-text`/
+  `--f10-commands`/`--speech-audio`/`--speech-input` paragraphs (roughly a dozen paragraphs,
+  "Running the live logger" through "Add `--speech-input ...`") describe behaviour that is now
+  unconditional or deleted, not optional — these need rewriting, not just the mechanical
+  `logger`→`body` rename Stage 1 already covers. The `--detection-trace`/`--group-trace`/
+  `--mission-memory`/`--belief-truth-log`/`--eyesight-view` paragraphs' "Only meaningful with
+  `--console` or `--crew-text`" clauses become vacuous (always true) and should read as unconditional
+  too. "## What this is"'s "reached from three input surfaces: the DCS F10 radio menu, a spoken
+  voice command, and a committed confirm-band answer" becomes **two** surfaces once F10 is gone.
+- `body-layer/RUN.md` — "## 2. Run the perception logger"'s example command is the plain-text-logger
+  invocation (no `--console`/`--crew-text` at all) — the branch Stage 2 deletes. This section needs
+  a real rewrite to show the new always-on crew-session invocation (`-m body`, required
+  `--audio-adapter-url`, no mode flags), not just the `logger`→`body` substitution Stage 1 covers;
+  the "### Arguments" table's required-flags list is also stale against current `main()` already
+  (`--world-model-dir`/`--mission-understanding` aren't listed) — fix both while touching this file
+  rather than compounding the staleness.
 - Tests (see "Test impact" below for the full account):
   - `tests/test_console.py` — **deleted entirely** (55 tests; it exists only to test
     `belief/console.py`'s `Console`/`format_event_for_overlay`, both deleted). The `test_console_
@@ -250,7 +293,8 @@ edited (root `CLAUDE.md`'s doc conventions treat these as a log, not living docu
    the `elif args.console:`/`else:` branches in `main()`, the `--console` flag, and
    `ConsolePerceptionRunner.overlay_client`/the `format_event_for_overlay` call in `run_once`.
    Delete `tests/test_console.py` and the `test_logger.py` tests named in "Affected files" above.
-   Run the command set.
+   **Rewrite** (not delete) `test_mock_flight_chain.py`'s `test_mock_flight_chain_threaded_console_
+   smoke` against the crew-text threading model, per "Affected files" above. Run the command set.
 3. **Make crew-text, speech-audio, and speech-input unconditional** (separate commit). Delete the
    `--crew-text`/`--speech-audio`/`--speech-input` flags; `main()` always builds
    `AudioAdapterClient`, `CrewConsole(speech_client=..., ...)`. `--audio-adapter-url` becomes
@@ -288,11 +332,15 @@ edited (root `CLAUDE.md`'s doc conventions treat these as a log, not living docu
 6. **Remove the overlay in aircraft-layer and body-layer.** Delete `TextOverlaySender`, the
    `POST /text/push` route, the overlay Hook `.lua`/`.dlg`, the two overlay test files, and
    `aircraft_client.py`'s `push_text_line`; delete `CrewConsole.overlay_client` and its `_print`
-   block. Update both `CLAUDE.md` files. Run both subprojects' command sets.
-7. **Backlog/docs bookkeeping.** Append the obsolescence note to `BL-B7`/`BL-B8`/`BL-B9`. Run
-   `/command-map` to redraw `docs/status/petrovich-commands.html` without the F10 badges/caption
-   and re-stamp its manifest (`command-map-check.py --stamp`, which refuses if a live token is
-   missing from the redraw — a built-in correctness check for this exact step). Update
+   block; delete `_format_gaze_line`/`_push_gaze_line`, their one remaining call site in
+   `_run_crew_text_poll_loop`, and the six tests named in "Affected files" above. Update both
+   `CLAUDE.md` files. Run both subprojects' command sets.
+7. **Backlog/docs bookkeeping.** Append the obsolescence note to `BL-B7`/`BL-B8`/`BL-B9`. Rewrite
+   `body-layer/CLAUDE.md`'s "## Commands" flag paragraphs and "## What this is"'s surface count, and
+   `body-layer/RUN.md`'s "Run the perception logger" section and argument table, per "Affected
+   files" above. Run `/command-map` to redraw `docs/status/petrovich-commands.html` without the F10
+   badges/caption and re-stamp its manifest (`command-map-check.py --stamp`, which refuses if a live
+   token is missing from the redraw — a built-in correctness check for this exact step). Update
    `run-scripts/*.sh` per "Run scripts" above.
 8. **Full-repo final sweep.** Re-run the four `grep` patterns from the dispatching brief
    (`python -m logger`, `import logger`, `from logger`, `logger.py`, plus `--console`,
