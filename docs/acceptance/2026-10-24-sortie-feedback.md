@@ -89,3 +89,43 @@ related; that is not yet checked. The logs and the branch flown are not yet in h
   terrain-blocked verdict keeps the target "behind the ridge" until a real look, rather than
   decaying to silent "unknown". The user: *"agreed"*.
 - **Command surface.** *"voice only"*.
+
+Fixed on `feature/attack-run-los` (`plans/attack-run-los/plan.md`): the loss/regain register
+re-keyed from `cause == "too_far"` to `tier != 1` (F2), a `terrain_blocked_held` flag holding a
+genuine `"obstructed"` verdict's consequence across its own freshness-window staleness (Decision
+2), and a voice-only `"where is it?"` command (F3). DoD: fixture-verified (body-layer 2663
+passed/4 xfailed, audio-adapter 349 passed/2 skipped, both subprojects' format/lint/`mypy --strict`
+clean; two independent mutation reversions confirm the register actually depends on the new
+keying). Reviewer APPROVED, no required fixes. Security plan review/performance/security deep
+analysis all waived by the user for this change. `#needs-flight` (`[[BL-B97]]`) — nothing here can
+confirm the new wording lands at a moment that actually helps during a live run, or that "where is
+it?" behaves correctly against DCS's own timing rather than the unit suite's synthetic ticks; see
+the flight check below.
+
+**Flight check** (card: https://claude.ai/artifact/BxG7nojsxP5tBA1YCk4Mob, branch `main`, once this
+merges — or `feature/attack-run-los` directly before then):
+
+1. **Setup.** Select an attack target, engage an attack run, and get Petrovich's naked eye to a
+   genuine tier-1 look (he must actually be looking at and resolving it, not just within acquisition
+   range) so he says `"Eyes on, ..."` once.
+2. **Do**: turn away and fly behind terrain (a ridge, hill, or any mask) for long enough that the
+   old bug's ~1.5 s/2.0 s freshness windows would have lapsed — at least 15–20 s, matching the
+   reported "a minute or so." **Expect**: no further `"Eyes on, ..."` while still behind the mask.
+   The first qualifier spoken on losing sight should be `"Behind the ridge, <o'clock>."` if a fresh
+   terrain-blocked verdict was seen, said once — not repeated every tick. **Record**: was any
+   `"Eyes on"` heard while the target was still genuinely hidden? Did `"Behind the ridge"` fire, and
+   only once?
+3. **Do**: continue the turn until the target is genuinely back in naked-eye view (no mask, no
+   terrain, in FOV and range). **Expect**: `"Eyes on, <o'clock>"` fires now, on the real re-look.
+   **Record**: did it fire at the moment of genuine re-acquisition, not before?
+4. **Do**: during the run, before any sighting this sortie, say `"where is it?"` with a target set
+   but the run not yet engaged. **Expect**: the standard guidance phrase, from whatever belief is
+   currently held (not a refusal). **Record**: what was actually said.
+5. **Do**: say `"where is it?"` with no target selected at all. **Expect**: `"No target."`
+   **Record**: exact wording heard.
+6. **Do**: say `"where is it?"` again while behind terrain, after step 2's "Behind the ridge" has
+   fired. **Expect**: the held qualifier still shows up in the answer (not silently reset to bare
+   guidance). **Record**: what was said.
+7. **Bring back**: anything the wording did that did not match "he only claims to see it when he
+   genuinely does" — a false "Eyes on", a missing "Behind the ridge", a "where is it?" answer that
+   felt stale or wrong. Anything that surprised you is worth more than this list.
