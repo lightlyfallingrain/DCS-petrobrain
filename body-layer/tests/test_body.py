@@ -2517,6 +2517,34 @@ def test_poll_transcripts_failed_poll_degrades_without_raising() -> None:
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
 
 
+def test_poll_transcripts_reports_failure_and_recovery_through_the_shared_reporter(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """BL-B96 Stage 4: with a real `ConnectionReporter` wired (`main()`'s
+    own posture, not the `None`-fallback the test above exercises), a
+    failed poll reports through it -- once, on the transition -- instead
+    of a full traceback, and a later successful poll announces recovery."""
+    console = CrewConsole(store=ContactStore())
+    console.audio_adapter_reporter = body_module.ConnectionReporter(
+        body_module.logger, label="audio adapter"
+    )
+    client = FakeSpeechInputClient(should_fail=True)
+
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+        client.should_fail = False
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+
+    messages = [
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
+    ]
+    assert messages == [
+        "audio adapter disconnected (poll failed (test double))",
+        "audio adapter connected",
+    ], messages
+
+
 def test_poll_transcripts_skips_malformed_items() -> None:
     console = CrewConsole(store=ContactStore())
     client = FakeSpeechInputClient(
@@ -2551,6 +2579,10 @@ class _RecordingCrewConsole:
         #: `calls` so every existing assertion on that tuple (transcript/
         #: token/slots only) keeps working unchanged.
         self.correlation_ids: list[str | None] = []
+        #: BL-B96 Stage 4: `_poll_transcripts` reads this field on both its
+        #: success and failure paths -- `None` is the true-no-op fallback
+        #: every test not exercising the reporter itself expects.
+        self.audio_adapter_reporter: body_module.ConnectionReporter | None = None
 
     def handle_transcript(
         self,
@@ -4599,7 +4631,7 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     coincidence, not something `--randomly-seed` alone pins, which is why
     reruns of the same seed did not reproduce it deterministically.
     """
-    reporter = body_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
     with caplog.at_level(logging.INFO, logger=body_module.__name__):
@@ -4636,7 +4668,7 @@ def test_connection_reporter_announces_the_first_connection(
     (a leaked `BrainLayerClient` daemon thread elsewhere in the suite
     logs via a different logger that also propagates to root).
     """
-    reporter = body_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
 
     with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_success()
@@ -4656,7 +4688,7 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
     Filters to this module's own logger -- `BL-B92`, see
     `test_connection_reporter_says_disconnected_once_then_connected_once`'s
     docstring for why an unfiltered `caplog.records` is order-dependent."""
-    reporter = body_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
     with caplog.at_level(logging.INFO, logger=body_module.__name__):

@@ -130,7 +130,7 @@ just to a different sink and a different process (`audio-adapter`, not the
 aircraft layer). The poll loop also polls/dispatches recognised speech
 transcripts via the same client's `GET /transcripts/poll`, through
 `CrewConsole.handle_transcript`. If `audio-adapter` is unreachable, start-
-up and the poll loop continue regardless -- see `_ConnectionReporter` and
+up and the poll loop continue regardless -- see `ConnectionReporter` and
 the "Audio adapter unreachable" note below; Petrovich simply stays silent
 until it answers.
 """
@@ -213,6 +213,7 @@ from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
+from connection_reporter import ConnectionReporter
 from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
@@ -2020,41 +2021,6 @@ def _is_connection_loss(exc: BaseException) -> bool:
     return isinstance(exc.__cause__, (urllib.error.URLError, OSError))
 
 
-class _ConnectionReporter:
-    """One line when the aircraft layer goes away, one when it comes back,
-    and nothing in between.
-
-    The poll loop retries every `poll_interval_s`, so an unreachable
-    collector used to print a fresh traceback every second for as long as
-    it stayed down -- thousands of identical stack traces burying anything
-    real. The pilot needs to know the state changed, not to be told the
-    same fact once a second (user direction, 2026-10-02).
-
-    State is tri-valued on purpose: `None` means nothing has been reported
-    yet, so the first successful poll announces "connected" rather than
-    staying silent on the grounds that nothing broke.
-    """
-
-    def __init__(self, label: str = "aircraft layer") -> None:
-        self._label = label
-        self._connected: bool | None = None
-
-    def report_failure(self, exc: BaseException) -> None:
-        """Log `disconnected` on the transition only; later failures are
-        silent until a success resets the state."""
-        if self._connected is False:
-            return
-        self._connected = False
-        logger.warning("%s disconnected (%s)", self._label, exc)
-
-    def report_success(self) -> None:
-        """Log `connected` on the transition, including the first one."""
-        if self._connected is True:
-            return
-        self._connected = True
-        logger.info("%s connected", self._label)
-
-
 def _mission_memory_step(
     memory: MissionMemory,
     runner: ConsolePerceptionRunner,
@@ -2395,7 +2361,7 @@ def _check_for_new_mission(
     **An unreachable collector is skipped silently, not logged here.**
     This is the one aircraft-layer call that runs *before* `run_once()`
     in the poll loop, so with the collector down it used to print a
-    full traceback every poll -- the exact spew `_ConnectionReporter`
+    full traceback every poll -- the exact spew `ConnectionReporter`
     exists to prevent. `run_once()`'s own telemetry read hits the same
     dead host a moment later and reports the transition once ("aircraft
     layer disconnected"), so a second message here would only repeat it.
@@ -2704,12 +2670,26 @@ def _poll_transcripts(
     `correlation_id` (`plans/voice-latency-instrumentation/plan.md` Stage 3)
     is the ninth field `TranscriptEvent.to_dict` now carries -- threaded
     through the same way, `None` allowed (an older capture process, or a
-    direct `curl`, never supplied one)."""
+    direct `curl`, never supplied one).
+
+    **BL-B96 Stage 4**: a failed/successful poll reports through
+    `crew_console.audio_adapter_reporter` (the same instance `CrewConsole.
+    _print`'s push path reports through) instead of logging a full
+    traceback every failed poll -- `audio-adapter` unreachable is now the
+    default-path case (speech is unconditional), not a rare opt-in
+    failure, so the old `exc_info=True` posture would flood the log the
+    moment a sortie starts before `audio-adapter` does. `None` (every
+    test that doesn't wire one) falls back to the old noisy behaviour."""
     try:
         transcripts = audio_client.get_transcripts()
-    except AudioAdapterError:
-        logger.warning("transcript poll failed (continuing)", exc_info=True)
+    except AudioAdapterError as exc:
+        if crew_console.audio_adapter_reporter is not None:
+            crew_console.audio_adapter_reporter.report_failure(exc)
+        else:
+            logger.warning("transcript poll failed (continuing)", exc_info=True)
         return
+    if crew_console.audio_adapter_reporter is not None:
+        crew_console.audio_adapter_reporter.report_success()
     for item in transcripts:
         transcript = item.get("transcript")
         confidence = item.get("confidence")
@@ -3051,7 +3031,7 @@ def _run_crew_text_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         live_los_warned = False
-        connection = _ConnectionReporter()
+        connection = ConnectionReporter(logger)
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
         next_tick = time.monotonic() + poll_interval_s
@@ -4644,6 +4624,13 @@ def main() -> None:
     # both always on now, so exactly one `AudioAdapterClient` is always
     # built -- no more "only if --speech-audio/--speech-input" branching.
     audio_adapter_client = AudioAdapterClient(base_url=args.audio_adapter_url)
+    # BL-B96 Stage 4 (user direction: "warn and keep trying ... as with a
+    # bad config file"): one shared ConnectionReporter for the audio
+    # adapter, covering both CrewConsole._print's push path and
+    # _poll_transcripts' poll path -- see CrewConsole.audio_adapter_
+    # reporter's own docstring for why this must be the *same* instance,
+    # not one per path.
+    audio_adapter_reporter = ConnectionReporter(logger, label="audio adapter")
     # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
     # loaded once here, before `CrewConsole` exists, so a bad
     # registry/sequence file can set `config_error_pending` at
@@ -4663,6 +4650,7 @@ def main() -> None:
         tasks=crew_runner.tasks,
         overlay_client=aircraft_client if args.overlay else None,
         speech_client=audio_adapter_client,
+        audio_adapter_reporter=audio_adapter_reporter,
         transcript_log=(
             SpeechLogWriter(args.speech_log).write
             if args.speech_log is not None

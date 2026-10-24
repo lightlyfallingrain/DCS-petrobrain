@@ -178,6 +178,7 @@ from belief.voice_commands import (
     classify_response,
     classify_yes_no,
 )
+from connection_reporter import ConnectionReporter
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
@@ -1214,11 +1215,27 @@ class CrewConsole:
     #: text. `bypass_gate` (already computed for the overlay `"!! "`
     #: prefix) is threaded straight through as `push_speech`'s `urgent`
     #: argument -- no new signal invented, matching the plan's Decision 3.
-    #: `logger.py`'s `--crew-text --speech-audio` branch wires this to a
-    #: `belief.audio_client.AudioAdapterClient` built from `--audio-adapter-url`,
+    #: `body.py`'s `main()` always builds and wires one (BL-B96: speech
+    #: in/out are unconditional), from a `belief.audio_client.
+    #: AudioAdapterClient` built from the now-required `--audio-adapter-url`,
     #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
     #: different process, a different URL).
     speech_client: AudioAdapterClient | None = None
+    #: Warn-and-keep-trying state machine for an unreachable audio
+    #: adapter (`plans/default-crew-pipeline/plan.md`, BL-B96 Stage 4,
+    #: user direction: "warn and keep trying ... as with a bad config
+    #: file"). `None` (the default, every test that doesn't care about
+    #: this) falls back to the pre-BL-B96 posture: a full traceback
+    #: logged on every failed push. When `body.py`'s `main()` sets this,
+    #: the *same* `connection_reporter.ConnectionReporter` instance is
+    #: shared with `_poll_transcripts`'s own failure/success reporting
+    #: (`main()` constructs exactly one, for exactly this reason) --
+    #: without that sharing, a push failure and a poll failure for the
+    #: same underlying outage would each independently announce
+    #: "disconnected", and a success on either path would silence the
+    #: other's still-true "disconnected" state. See that class's own
+    #: docstring for why state is tri-valued and transition-only.
+    audio_adapter_reporter: ConnectionReporter | None = None
 
     #: Optional callback invoked for every line this console speaks, with
     #: `(line, urgent)` -- `logger` wires it to `belief_truth_log.
@@ -4465,11 +4482,23 @@ class CrewConsole:
                     self.speech_client.push_speech(
                         line, urgent=bypass_gate, correlation_id=correlation_id
                     )
-                except AudioAdapterError:
-                    logger.warning(
-                        "speech push failed for crew-text line (continuing)",
-                        exc_info=True,
-                    )
+                except AudioAdapterError as exc:
+                    # BL-B96 Stage 4: audio-adapter unreachable is now the
+                    # default-path case (speech is unconditional), not a
+                    # rare opt-in failure -- report through the shared
+                    # reporter (warn-once-on-transition) instead of a full
+                    # traceback on every push, which would flood the log
+                    # the moment a sortie starts before audio-adapter does.
+                    if self.audio_adapter_reporter is not None:
+                        self.audio_adapter_reporter.report_failure(exc)
+                    else:
+                        logger.warning(
+                            "speech push failed for crew-text line (continuing)",
+                            exc_info=True,
+                        )
+                else:
+                    if self.audio_adapter_reporter is not None:
+                        self.audio_adapter_reporter.report_success()
                 push_duration_s = time.monotonic() - t0
                 push_acked_wall = time.time()
             if self.speech_log_sink is not None:

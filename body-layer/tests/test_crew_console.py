@@ -10,6 +10,7 @@ explicitly."""
 
 from __future__ import annotations
 
+import logging
 import math
 import socket
 import sqlite3
@@ -57,6 +58,7 @@ from belief.voice_commands import (
     CONFIRM_LATE_ANSWER_GRACE_S,
     CONFIRM_WINDOW_S,
 )
+from connection_reporter import ConnectionReporter
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
@@ -1126,6 +1128,45 @@ def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay(
     lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
     assert speech_client.pushed == [(f"Watching {contact_id}.", False)]
     assert lines == [f"Watching {contact_id}."]
+
+
+def test_speech_push_failure_reports_through_the_shared_reporter_and_recovers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """BL-B96 Stage 4 (user direction: "warn and keep trying ... as with a
+    bad config file"): with `audio_adapter_reporter` wired (`body.py`'s own
+    posture, not the `None`-fallback the test above exercises), a failed
+    push reports through it once, on the transition, rather than a full
+    traceback -- and the *same* reporter instance is what `_poll_
+    transcripts` reports through too (not asserted here, see `test_body.
+    py`'s own test for that half), which is the entire reason this must be
+    shared rather than built fresh per call site."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    detected_line = "BMP-2."
+
+    speech_client = FakeSpeechClient(fail_on=frozenset({detected_line}))
+    reporter = ConnectionReporter(logging.getLogger("body"), label="audio adapter")
+    console = CrewConsole(
+        store=store,
+        speech_client=speech_client,  # type: ignore[arg-type]
+        audio_adapter_reporter=reporter,
+    )
+
+    with caplog.at_level(logging.INFO, logger="body"):
+        console.drain_events(now_sim=0.0)  # the failing push
+        speech_client._fail_on = frozenset()  # adapter recovers
+        console.handle_line("radio check", now_sim=0.0)  # any later push
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "body"]
+    assert messages == [
+        "audio adapter disconnected (simulated push failure)",
+        "audio adapter connected",
+    ], messages
 
 
 # -- handle_command (plans/f10-crew-commands/plan.md) -------------------
