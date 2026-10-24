@@ -146,7 +146,6 @@ _RUNNER_PRESERVE = {
     "store",
     "tasks",
     "output",
-    "overlay_client",
     "group_trace_sink",
     "world_model_conn",
     "theatre",

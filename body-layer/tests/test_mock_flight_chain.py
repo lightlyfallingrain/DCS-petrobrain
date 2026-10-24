@@ -2,7 +2,7 @@
 replay of `tests/fixtures/mock_flight_canonical.json` through the real
 aircraft-layer HTTP wire shape (`tests/support/mock_aircraft_layer.
 MockAircraftLayerServer`), the real body-layer perception/belief pipeline
-(`logger._build_sources` + `logger.ConsolePerceptionRunner`), and a real
+(`body._build_sources` + `body.ConsolePerceptionRunner`), and a real
 synthetic world-model store (`tests/support/mock_world_model`), asserting
 the whole chain reaches a known `belief.contacts.ContactStore` end state.
 
@@ -15,11 +15,12 @@ plan.md`, `BL-11` Stage 4 -- fail-closed means gate 4 only ever consults
 this live verdict, never world-model's offline primitive, so the fixture's
 own per-frame `"line_of_sight"` key, not a flat synthetic terrain store, is
 what admits a naked-eye candidate here), and -- in the second test below --
-the real `--console` threading model (`logger._run_console_poll_loop` on a
-background thread, `belief.console.Console` dispatch on the foreground
-thread), catching the class of cross-thread `sqlite3.ProgrammingError` bug
-`test_body.py`'s own Stage 6/BL-5 regression tests were written for, but
-now against two sources and many consecutive polls instead of one.
+the real crew-session threading model (`body._run_crew_text_poll_loop` on a
+background thread, `belief.crew_console.CrewConsole` dispatch on the
+foreground thread), catching the class of cross-thread
+`sqlite3.ProgrammingError` bug `test_body.py`'s own Stage 6/BL-5 regression
+tests were written for, but now against two sources and many consecutive
+polls instead of one.
 
 **World-model's offline `line_of_sight_clear` is exercised directly below
 (`test_mock_world_model_line_of_sight_clear_over_flat_terrain`), not
@@ -110,14 +111,14 @@ from support.mock_world_model import build_mock_world_model
 
 from aircraft_client import AircraftLayerClient
 from belief.attention import AttentionArea
-from belief.console import Console
+from belief.crew_console import CrewConsole
 from belief.tasks import TaskStore
 from belief.tools import describe_contact, get_contacts
 from body import (
     ConsolePerceptionRunner,
     _build_sources,
-    _run_console_poll_loop,
-    _run_console_repl,
+    _run_crew_text_poll_loop,
+    _run_crew_text_repl,
 )
 from perception.geometry import GeoPosition, line_of_sight_clear, open_world_model
 
@@ -352,17 +353,20 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
 # --- Threaded console/REPL smoke test ---------------------------------------
 
 
-def test_mock_flight_chain_threaded_console_smoke(tmp_path: Path) -> None:
-    """Runs the real `--console` threading model against the same fixture:
-    `_run_console_poll_loop` on a background thread (mirroring `main()`'s
-    `--console` wiring exactly, including opening its own thread-local
+def test_mock_flight_chain_threaded_crew_text_smoke(tmp_path: Path) -> None:
+    """Runs the real crew-session threading model against the same fixture:
+    `_run_crew_text_poll_loop` on a background thread (mirroring `main()`'s
+    wiring exactly, including opening its own thread-local
     `sqlite3.Connection`), while the foreground thread dispatches REPL
-    commands via `belief.console.Console`/`_run_console_repl` against the
-    same store. Asserts no exception crosses either thread -- this is the
-    test that would have caught the cross-thread `sqlite3.ProgrammingError`
-    class of bug (`test_body.py`'s Stage 6/BL-5 regression tests cover the
+    commands via `CrewConsole`/`_run_crew_text_repl` against the same
+    store. Asserts no exception crosses either thread -- this is the test
+    that would have caught the cross-thread `sqlite3.ProgrammingError` class
+    of bug (`test_body.py`'s Stage 6/BL-5 regression tests cover the
     single-poll case; this drives the same real functions across the whole
-    20-frame fixture)."""
+    20-frame fixture). Rewritten from the pre-BL-B96 `--console` version of
+    this test (BL-B96 removed the `--console` REPL mode and its threading
+    twin `_run_console_poll_loop`/`_run_console_repl`) -- same fixture, same
+    threading shape, crew-text's REPL driver in place of console's."""
     frames = _load_frames()
     world_model_db = tmp_path / "region.sqlite"
     build_mock_world_model(world_model_db)
@@ -371,11 +375,16 @@ def test_mock_flight_chain_threaded_console_smoke(tmp_path: Path) -> None:
     try:
         aircraft_client = AircraftLayerClient(base_url=url)
         runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)
+        output = io.StringIO()
+        crew_console = CrewConsole(
+            store=runner.store, output=output, aircraft_client=aircraft_client
+        )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
-            target=_run_console_poll_loop,
+            target=_run_crew_text_poll_loop,
             args=(
                 runner,
+                crew_console,
                 aircraft_client,
                 _THEATRE,
                 world_model_db,
@@ -399,15 +408,18 @@ def test_mock_flight_chain_threaded_console_smoke(tmp_path: Path) -> None:
                 f"{_THREAD_JOIN_TIMEOUT_S}s"
             )
 
-            output = io.StringIO()
-            console = Console(store=runner.store, output=output)
-            # `_run_console_repl` reads sys.stdin line-by-line until EOF --
+            # `_run_crew_text_repl` reads sys.stdin line-by-line until EOF --
             # mirrors test_body.py's own monkeypatched-stdin pattern.
-            stdin = io.StringIO("contacts\nshow CONTACT_1\n")
+            # `status CONTACT_1`/`watch CONTACT_1` exercise the same
+            # `self.enrichment`-touching report code paths the old
+            # `--console` smoke test's `contacts`/`show CONTACT_1` did --
+            # CONTACT_1 is this fixture's one real contact, confirmed by
+            # the single-threaded test above.
+            stdin = io.StringIO("status CONTACT_1\nwatch CONTACT_1\n")
             real_stdin = sys.stdin
             sys.stdin = stdin
             try:
-                _run_console_repl(runner, console, world_model_db, _THEATRE)
+                _run_crew_text_repl(runner, crew_console, world_model_db, _THEATRE)
             finally:
                 sys.stdin = real_stdin
         finally:
