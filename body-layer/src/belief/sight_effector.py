@@ -35,10 +35,25 @@ what")."""
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Final
 
 from aircraft_client import AircraftLayerClient
+
+#: The continuous (polled) set's own code-required args (plan S4.4a) --
+#: always unioned into `effector_registry.load_polled_config`'s result,
+#: with a warning (never a D5 error) if `polled.toml` omits one. Declared
+#: beside its readers: `"home_phase"`/`"SightHead.mode"`/`"sight_ready"`
+#: each name the one consumer that needs this arg every poll regardless
+#: of what any sequence file does (`logger.py`'s `home_phase` derivation,
+#: `belief.sight_head.SightHead.mode`, and `sight_ready()` below).
+REQUIRED_POLLED_ARGS: Final[dict[int, str]] = {
+    886: "home_phase",
+    898: "SightHead.mode",
+    960: "sight_ready",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,20 +81,25 @@ class GuidanceUnitState:
 
     `observ_observed`/`weapon_safety_observed` are the cockpit's own
     telemetry readback for OBSERV. and the weapons safety bar.
-    `weapon_safety_observed` is carried for `BL-B67` to read before
-    trusting the safety bar is actually armed (plan §3/Co-moving Fields)
-    and has no consumer yet. `observ_observed` does: `logger.py`'s poll
-    loop derives `OpticState.home_phase` from it every poll.
+    `observ_observed` is a `REQUIRED_POLLED_ARGS` member (`logger.py`'s
+    poll loop derives `OpticState.home_phase` from it every poll).
+    `weapon_safety_observed` **has no reader as of Stage 4** (`plans/
+    effector-sequences/plan.md`): arg 673 is no longer polled by any
+    code, having lost its old per-frame reader
+    (`push_cockpit_switch_state`) with nothing replacing it yet -- it
+    stays whatever it last was until `BL-B67` decides whether 673 joins
+    `polled.toml` or is read at need.
 
-    **`align_observed`/`ready_observed`/`launch_perm_observed`
-    (`[[BL-B80]]` v2) are the real 898 (Л5 gyro alignment)/960 (guidance-
-    unit READY)/962 (launch permission) lamp readbacks** --
-    `belief.sight_head.SightHead.mode` reads `align_observed` directly
-    (its `caged` -> `free` transition); `sight_ready()` below reads
-    `ready_observed`. `None` whenever no lamp sample has arrived yet
-    (startup, or an `Export.lua` predating these lamps) -- absence is
-    never read as `False`, same posture every other `*_observed` field in
-    this class already takes."""
+    **`align_observed`/`ready_observed` (`[[BL-B80]]` v2) are the real
+    898 (Л5 gyro alignment)/960 (guidance-unit READY) lamp readbacks**,
+    both `REQUIRED_POLLED_ARGS` members -- `belief.sight_head.SightHead.
+    mode` reads `align_observed` directly (its `caged` -> `free`
+    transition); `sight_ready()` below reads `ready_observed`. `None`
+    whenever no lamp sample has arrived yet -- absence is never read as
+    `False`, same posture every other `*_observed` field in this class
+    already takes. **`launch_perm_observed` (962) has no reader as of
+    Stage 4**, same posture as `weapon_safety_observed` above -- carried
+    for `BL-B67`, which decides whether it joins `polled.toml`."""
 
     guidance_unit_ready_prev_observed: bool | None = None
     observ_observed: bool | None = None
@@ -126,50 +146,48 @@ def write_sight_target(
     )
 
 
+def _threshold_or_none(raw: float | None) -> bool | None:
+    """`raw >= 0.5`, or `None` when `raw` is absent or non-finite --
+    `>= 0.5` is the same threshold `Export.lua` used to apply itself
+    before Stage 4 moved it here (plan S4.4: "the rule and the threshold
+    are unchanged; only where they run moves"). A non-finite `raw` (NaN)
+    is treated the same as absent, never as a value -- `AircraftLayerClient.
+    read_args`/`get_watched_args_latest` already reject a NaN before it
+    reaches here, but this function does not assume that upstream guard
+    is the only caller."""
+    if raw is None or not math.isfinite(raw):
+        return None
+    return raw >= 0.5
+
+
 def refresh_readback(
     state: GuidanceUnitState,
-    cockpit_switch_latest: dict[str, Any] | None,
+    readback_args: Mapping[str, float] | None,
 ) -> GuidanceUnitState:
-    """Refreshes `observ_observed`/`weapon_safety_observed`/`align_
-    observed`/`ready_observed`/`launch_perm_observed` from the aircraft
-    layer's own cockpit-switch telemetry (`GET /cockpit_switch/latest`,
-    `AircraftLayerClient.get_cockpit_switch_state_latest`).
-    `weapon_safety_observed` is carried forward with no consumer yet, so
-    `BL-B67` can read a real readback rather than rediscovering that it
-    needs one (plan §3/Co-moving Fields); `observ_observed` has a
-    consumer (`logger.py`'s `home_phase` derivation); `align_observed`/
-    `ready_observed`/`launch_perm_observed` feed `belief.sight_head.
-    SightHead.mode` and `sight_ready()` (`[[BL-B80]]` v2).
+    """Refreshes `observ_observed`/`align_observed`/`ready_observed` from
+    the continuous watched-args feed's own `"886"`/`"898"`/`"960"` (plan
+    S4.4 -- `REQUIRED_POLLED_ARGS`'s own three args). `weapon_safety_
+    observed`/`launch_perm_observed` (673/962) are **not** touched here
+    any more -- Stage 4 removed their old per-frame reader with nothing
+    replacing it yet (see `GuidanceUnitState`'s own docstring); they stay
+    whatever they last were.
 
-    `None` (no cockpit-switch sample received yet) leaves every field
-    unchanged -- absence of a reading is not evidence the reading is
-    `False`, same posture every field in this class already takes."""
-    if cockpit_switch_latest is None:
+    `readback_args` is the `"args"` map `GET /watched_args/latest`
+    carries (same shape Stage 2's `cockpit_switch` feed used, preserved
+    so `logger.py`'s poll block changes only *which* client call feeds
+    this function, not this function's own signature). `None` (no sample
+    yet, or the latest sample's `watch_id` does not match what body-layer
+    currently wants installed -- `logger.py`'s own check, not this
+    function's) leaves every field unchanged, same posture every field
+    in this class already takes."""
+    if readback_args is None:
         return state
-    observe_on = cockpit_switch_latest.get("observe_on")
-    weapons_armed = cockpit_switch_latest.get("weapons_armed")
-    align_lamp = cockpit_switch_latest.get("align_lamp")
-    ready_lamp = cockpit_switch_latest.get("ready_lamp")
-    launch_perm_lamp = cockpit_switch_latest.get("launch_perm_lamp")
+    observe = _threshold_or_none(readback_args.get("886"))
+    align = _threshold_or_none(readback_args.get("898"))
+    ready = _threshold_or_none(readback_args.get("960"))
     return replace(
         state,
-        observ_observed=(
-            observe_on if isinstance(observe_on, bool) else state.observ_observed
-        ),
-        weapon_safety_observed=(
-            weapons_armed
-            if isinstance(weapons_armed, bool)
-            else state.weapon_safety_observed
-        ),
-        align_observed=(
-            align_lamp if isinstance(align_lamp, bool) else state.align_observed
-        ),
-        ready_observed=(
-            ready_lamp if isinstance(ready_lamp, bool) else state.ready_observed
-        ),
-        launch_perm_observed=(
-            launch_perm_lamp
-            if isinstance(launch_perm_lamp, bool)
-            else state.launch_perm_observed
-        ),
+        observ_observed=observe if observe is not None else state.observ_observed,
+        align_observed=align if align is not None else state.align_observed,
+        ready_observed=ready if ready is not None else state.ready_observed,
     )

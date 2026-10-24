@@ -73,6 +73,10 @@ def render_markdown() -> str:
         "queue). A sequence file naming a trigger not listed here is a bad",
         "file -- see `belief.effector_sequences.load_sequences`.",
         "",
+        "A file's own switches (and any condition's) are read once when its",
+        "trigger fires, and again after each `wait_s(...)` row -- never on a",
+        "standing per-poll feed (`plans/effector-sequences/plan.md` Stage 4).",
+        "",
         "| Trigger | Fires when | Cardinality |",
         "| --- | --- | --- |",
     ]

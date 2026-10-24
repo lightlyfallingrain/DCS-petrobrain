@@ -64,7 +64,7 @@ LOST_THRESHOLD_S = 120.0
 POSITION_HALF_LIFE_S = 30.0
 
 [belief.effector_engine]
-# How long a row with an unknown readback waits before the engine gives up on the readback ever arriving this run (D3/R12) -- long enough to survive a brief telemetry gap, short enough that a genuinely-missing feed (an old aircraft-layer predating the `args` map) does not stall a sequence indefinitely.
+# How long a run waits, per snapshot (Stage 4: once at run start, once again after each wait row), for `client.read_args` to succeed before giving up on the readback ever arriving and treating every arg as unknown -- long enough to survive a brief collector/Export.lua gap, short enough that a genuinely-down aircraft layer does not stall a sequence indefinitely.
 # status: derived | range: 1.0 .. 30.0
 # source: belief/effector_engine.py:EFFECTOR_CONDITION_READBACK_WAIT_S
 EFFECTOR_CONDITION_READBACK_WAIT_S = 5.0

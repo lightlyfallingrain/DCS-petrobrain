@@ -226,6 +226,15 @@ class WaitRow:
 Row = SwitchRow | WaitRow
 
 
+#: The wire bound every one-shot `read_args` request shares with the
+#: continuous `watch_args` feed (`aircraft-layer/src/schema/watched_args.py`'s
+#: `MAX_WATCHED_ARGS`) -- stated again here (no cross-subproject import)
+#: since this is the load-time check that ties a sequence file's own
+#: `read_args` set to that runtime bound (plan S4.3: "a file whose set
+#: exceeds 64 is a D5 file error").
+_MAX_READ_ARGS = 64
+
+
 @dataclass(frozen=True, slots=True)
 class SequenceFile:
     aircraft: str
@@ -233,6 +242,13 @@ class SequenceFile:
     trigger: str
     rows: tuple[Row, ...]
     source_path: Path
+    #: Every switch row's effector `.arg` union every explicit
+    #: `condition`'s effector `.arg` (plan S4.3) -- computed once at load
+    #: time, read once per run start and once after each `WaitRow`
+    #: (`belief.effector_engine.advance`'s one-shot snapshot read). A
+    #: condition that names another switch is included, deliberately --
+    #: "yes, a condition that names another switch is included."
+    read_args: frozenset[int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -462,6 +478,22 @@ def _parse_data_table(
     return [], rows
 
 
+def _compute_read_args(
+    rows: list[Row], registry: Mapping[str, EffectorDef]
+) -> frozenset[int]:
+    """Every switch row's effector `.arg`, union every explicit
+    `condition`'s effector `.arg` (plan S4.3). Every name here already
+    resolved against `registry` in `_parse_data_table`, so a direct
+    index is safe."""
+    args: set[int] = set()
+    for row in rows:
+        if isinstance(row, SwitchRow):
+            args.add(registry[row.effector].arg)
+            if row.condition is not None:
+                args.add(registry[row.condition.effector].arg)
+    return frozenset(args)
+
+
 def _load_one_file(
     path: Path, registry: Mapping[str, EffectorDef]
 ) -> tuple[list[SequenceError], SequenceFile | None]:
@@ -491,12 +523,26 @@ def _load_one_file(
     if data_errors:
         return data_errors, None
 
+    read_args = _compute_read_args(rows, registry)
+    if len(read_args) > _MAX_READ_ARGS:
+        return [
+            SequenceError(
+                file=path.name,
+                line=None,
+                reason=(
+                    f"file's switches exceed the {_MAX_READ_ARGS}-arg wire "
+                    f"bound after dedupe ({len(read_args)} distinct args)"
+                ),
+            )
+        ], None
+
     return [], SequenceFile(
         aircraft=header["aircraft"],
         petrovich_role=header["petrovich-role"],
         trigger=header["run-on-trigger"],
         rows=tuple(rows),
         source_path=path,
+        read_args=read_args,
     )
 
 

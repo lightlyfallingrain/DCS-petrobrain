@@ -190,6 +190,7 @@ different process (`audio-adapter`, not the aircraft layer). `--overlay` and
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import shutil
 import sqlite3
@@ -224,7 +225,9 @@ from belief.effector_engine import fire_trigger as fire_effector_trigger
 from belief.effector_registry import (
     DEFAULT_SEQUENCES_DIR,
     EffectorDef,
+    PolledSet,
     aircraft_dir_name,
+    load_polled_config,
     load_registries_by_aircraft,
 )
 from belief.effector_sequences import SequenceFile, load_sequences
@@ -254,6 +257,7 @@ from belief.optic_policy import (
 )
 from belief.optic_policy import decide as decide_optic
 from belief.sight_effector import (
+    REQUIRED_POLLED_ARGS,
     GuidanceUnitState,
     write_sight_target,
 )
@@ -549,6 +553,22 @@ class ConsolePerceptionRunner:
     #: and mission-reset's re-run `__init__`.
     effector_state: EffectorRunState = field(default_factory=EffectorRunState)
 
+    #: `plans/effector-sequences/plan.md` Stage 4, S4.5 -- the sim time
+    #: the continuous feed's `watch_args` install was last (re)sent, or
+    #: `None` before the first poll or right after a mission reset. An
+    #: **ordinary init field with a default**, not `field(default=...,
+    #: init=False)` -- `reset_for_new_mission`'s re-run `__init__` does
+    #: not reset the latter kind, so the first post-restart poll must
+    #: re-send regardless of the resend timer.
+    watch_args_last_sent_sim: float | None = None
+
+    #: One-per-mission latches for the two startup/ops WARNINGs S4.5
+    #: describes (feed unavailable; not confirmed after
+    #: `WATCH_ARGS_UNCONFIRMED_WARN_S`) -- plain `bool`s, reset by the
+    #: same mission-reset re-`__init__` as every other field here.
+    watched_args_unavailable_warned: bool = False
+    watch_args_unconfirmed_warned: bool = False
+
     #: Petrovich's **simulated** 9K113 sight head (`[[BL-B80]]` v2,
     #: `plans/9k113-sight-pointing/plan.md`) -- carried the same way
     #: `optic_state`/`guidance_unit_state` are, advanced once per poll by
@@ -683,8 +703,9 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `guidance_unit_state`, `effector_state`, `sight_head`,
-        `last_sight_look_sim`, `attitude_history`, `optic`,
+        `guidance_unit_state`, `effector_state`, `watch_args_last_sent_sim`,
+        `watched_args_unavailable_warned`, `watch_args_unconfirmed_warned`,
+        `sight_head`, `last_sight_look_sim`, `attitude_history`, `optic`,
         `_last_look_direction`, `last_mission_start_sequence`,
         `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
         `mission_start_fresh_sample_baseline_t_sim`,
@@ -3197,10 +3218,54 @@ def _poll_transcripts(
         )
 
 
+#: How often an unconfirmed `watch_args` install is re-sent (`plans/
+#: effector-sequences/plan.md` S4.4) -- a transport retry, not Petrovich
+#: behaviour, so a plain literal rather than a tunable. Chosen so a lost
+#: first datagram recovers well inside `belief.effector_engine.
+#: EFFECTOR_CONDITION_READBACK_WAIT_S` (5.0 s default) -- see that
+#: tunable's own "cross-key coupling" comment if lowering it.
+WATCH_ARGS_RESEND_S: Final[float] = 2.0
+
+#: How long the continuous feed may go unconfirmed before the one-per-
+#: mission "is Export.lua current?" WARNING fires (plan S4.5/§4.5).
+WATCH_ARGS_UNCONFIRMED_WARN_S: Final[float] = 10.0
+
+
+def watch_id_for(args: Sequence[int]) -> str:
+    """Content-derived id for a watched-arg set (plan §4.2) -- the first
+    12 hex digits of `sha1` over the sorted, comma-joined arg list. Not a
+    counter: a restarted body-layer sending id 1 again could name a
+    *different* set than the one `Export.lua` still has installed under
+    that id if a sequence/`polled.toml` edit happened in between; a
+    content hash means the same set always gets the same id, which is
+    the property the confirmation check (`watch_args_due`) needs."""
+    text = ",".join(str(a) for a in sorted(args))
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def watch_args_due(
+    latest: Mapping[str, object] | None,
+    desired_id: str,
+    last_sent_sim: float | None,
+    now_sim: float,
+) -> bool:
+    """`True` when the continuous feed's own install should be (re)sent
+    this poll (plan §4.5): due when not confirmed (`latest` is `None`, or
+    its own `"watch_id"` does not match `desired_id`) **and**
+    (`last_sent_sim` is `None` -- never sent yet -- **or** at least
+    `WATCH_ARGS_RESEND_S` sim-seconds have passed since the last send).
+    A matching `watch_id` is never due, regardless of `last_sent_sim`."""
+    confirmed = latest is not None and latest.get("watch_id") == desired_id
+    if confirmed:
+        return False
+    return last_sent_sim is None or now_sim - last_sent_sim >= WATCH_ARGS_RESEND_S
+
+
 def _load_effector_config() -> tuple[
     dict[tuple[str, str, str], SequenceFile],
     dict[str, EffectorDef],
     bool,
+    PolledSet,
 ]:
     """Loads the effector registry/sequence files for this runtime's own
     aircraft (`belief.effector_engine.AIRCRAFT`), `plans/
@@ -3250,6 +3315,23 @@ def _load_effector_config() -> tuple[
         where = f":{seq_err.line}" if seq_err.line is not None else ""
         banner_lines.append(f"sequence[{seq_err.file}{where}]: {seq_err.reason}")
 
+    own_registry, _ = registries_by_aircraft.get(own_dir, ({}, []))
+    # `plans/effector-sequences/plan.md` S4.4a: the continuous feed's own
+    # arg set, required-args-union-`polled.toml`. A bad `polled.toml`
+    # entry joins the same banner/`config_error_pending` posture as a bad
+    # registry/sequence file (D5), so it is folded into `banner_lines`
+    # before the one banner below is built. `polled_warnings` (an
+    # omitted-required-arg) do **not** join the banner -- the behaviour
+    # is already correct, so that one is logged separately, below.
+    polled, polled_errors, polled_warnings = load_polled_config(
+        DEFAULT_SEQUENCES_DIR / own_dir / "polled.toml",
+        own_registry,
+        REQUIRED_POLLED_ARGS,
+    )
+    for perr in polled_errors:
+        where = f" {perr.name!r}" if perr.name is not None else ""
+        banner_lines.append(f"polled[{own_dir}] ({perr.scope}{where}): {perr.reason}")
+
     if banner_lines:
         banner = "\n".join(
             [
@@ -3267,7 +3349,6 @@ def _load_effector_config() -> tuple[
         for line in banner_lines:
             logger.error("effector config: %s", line)
 
-    own_registry, _ = registries_by_aircraft.get(own_dir, ({}, []))
     # Stage 1 review follow-up: `EffectorDef.unverified` had no consumer
     # at all -- surfaced here, once, at startup, so "this write is not
     # confirmed against a live sortie" (e.g. `cplr_distr`) is visible
@@ -3282,7 +3363,14 @@ def _load_effector_config() -> tuple[
             len(unverified_names),
             ", ".join(unverified_names),
         )
-    return sequences_by_key, own_registry, bool(banner_lines)
+    for warning_text in polled_warnings:
+        logger.warning("effector config: %s", warning_text)
+    logger.info(
+        "polling %d args: %s",
+        len(polled.args),
+        ", ".join(f"{polled.names[a]}({a})" for a in polled.args),
+    )
+    return sequences_by_key, own_registry, bool(banner_lines), polled
 
 
 def _run_crew_text_poll_loop(
@@ -3312,6 +3400,7 @@ def _run_crew_text_poll_loop(
     slew_trace_base: Path | None = None,
     effector_sequences: Mapping[tuple[str, str, str], SequenceFile] | None = None,
     effector_registry: Mapping[str, EffectorDef] | None = None,
+    polled_args: Sequence[int] | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -3357,13 +3446,26 @@ def _run_crew_text_poll_loop(
     own job). `None` (every existing call site that predates the engine,
     and this function's own tests that do not exercise effector triggers)
     is treated as "nothing loaded" -- every trigger fires into nothing,
-    same as a genuinely empty sequence directory."""
+    same as a genuinely empty sequence directory.
+
+    `polled_args` (`plans/effector-sequences/plan.md` Stage 4, S4.4a) is
+    `main()`'s own `_load_effector_config()` result's `PolledSet.args` --
+    the continuous feed's resolved set, computed once at startup next to
+    `effector_sequences`/`effector_registry` above and passed in the same
+    read-only way. `None`/empty is treated as "nothing to watch" (the
+    poll block below never sends an install, and `refresh_cockpit_switch_
+    readback` always sees `None`), same degenerate-but-safe posture as
+    `effector_sequences`/`effector_registry`'s own `None` case."""
     effector_sequences_by_key: Mapping[tuple[str, str, str], SequenceFile] = (
         effector_sequences if effector_sequences is not None else {}
     )
     effector_registry_entries: Mapping[str, EffectorDef] = (
         effector_registry if effector_registry is not None else {}
     )
+    desired_watch_args: tuple[int, ...] = (
+        tuple(polled_args) if polled_args is not None else ()
+    )
+    desired_watch_id = watch_id_for(desired_watch_args)
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -3541,21 +3643,73 @@ def _run_crew_text_poll_loop(
                         # `plans/effector-sequences/plan.md` Stage 2's own
                         # poll-block ordering: refresh readback -> takeoff
                         # edge fires -> transitions fire -> advance ->
-                        # ready edge -> drain_config_error. One cockpit-
-                        # switch fetch, reused for both `GuidanceUnitState`'s
-                        # own readback (lamps/booleans, unchanged consumers)
-                        # and the engine's own arg-keyed `"args"` map (R7).
-                        cockpit_switch_latest = (
-                            aircraft_client.get_cockpit_switch_state_latest()
+                        # ready edge -> drain_config_error. Stage 4 narrows
+                        # what "refresh readback" fetches: only the
+                        # continuous feed (polled.toml ∪ REQUIRED_POLLED_
+                        # ARGS) -- the engine's own one-shot reads
+                        # (`advance_effectors` -> `client.read_args`) are
+                        # no longer sourced from here at all.
+                        try:
+                            watched_args_latest = (
+                                aircraft_client.get_watched_args_latest()
+                            )
+                        except AircraftLayerError:
+                            watched_args_latest = None
+                        if (
+                            watched_args_latest is None
+                            and not runner.watched_args_unavailable_warned
+                        ):
+                            logger.warning(
+                                "watched-args feed unavailable -- collector "
+                                "older than this body-layer?"
+                            )
+                            runner.watched_args_unavailable_warned = True
+                        # A line for a different set is never used -- it
+                        # may lack args this set needs, which would read
+                        # as "unknown" piecemeal rather than the honest
+                        # "unconfirmed" state.
+                        watched_args_confirmed = (
+                            watched_args_latest is not None
+                            and watched_args_latest.get("watch_id") == desired_watch_id
                         )
+                        readback_args = (
+                            watched_args_latest.get("args")
+                            if watched_args_confirmed
+                            and watched_args_latest is not None
+                            else None
+                        )
+                        if watch_args_due(
+                            watched_args_latest,
+                            desired_watch_id,
+                            runner.watch_args_last_sent_sim,
+                            runner.last_t_sim,
+                        ):
+                            try:
+                                aircraft_client.set_watch_args(
+                                    desired_watch_id, list(desired_watch_args)
+                                )
+                            except AircraftLayerError:
+                                logger.debug("set_watch_args failed", exc_info=True)
+                            runner.watch_args_last_sent_sim = runner.last_t_sim
+                        if (
+                            not watched_args_confirmed
+                            and runner.watch_args_last_sent_sim is not None
+                            and not runner.watch_args_unconfirmed_warned
+                            and (
+                                runner.last_t_sim - runner.watch_args_last_sent_sim
+                                >= WATCH_ARGS_UNCONFIRMED_WARN_S
+                            )
+                        ):
+                            logger.warning(
+                                "Export.lua has not confirmed the watched-arg "
+                                "set after %.0fs -- is the deployed Export.lua "
+                                "current? (collector log: VERSION MISMATCH)",
+                                WATCH_ARGS_UNCONFIRMED_WARN_S,
+                            )
+                            runner.watch_args_unconfirmed_warned = True
                         runner.guidance_unit_state = refresh_cockpit_switch_readback(
                             runner.guidance_unit_state,
-                            cockpit_switch_latest,
-                        )
-                        effector_readback = (
-                            cockpit_switch_latest.get("args")
-                            if cockpit_switch_latest is not None
-                            else None
+                            readback_args,
                         )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
@@ -3804,11 +3958,13 @@ def _run_crew_text_poll_loop(
                         # Advances every currently-running trigger by at
                         # most one write each, in fire order (D9) --
                         # takeoff and any of the four transitions fired
-                        # above all progress in this one call.
+                        # above all progress in this one call. No
+                        # `readback` argument any more (Stage 4) -- each
+                        # running trigger makes its own one-shot
+                        # `client.read_args(...)` call internally.
                         runner.effector_state = advance_effectors(
                             runner.effector_state,
                             runner.last_t_sim,
-                            effector_readback,
                             aircraft_client,
                             effector_sequences_by_key,
                             effector_registry_entries,
@@ -4995,9 +5151,12 @@ def main() -> None:
         # construction time rather than needing a second mutation after
         # the fact. `--console` never calls this (no `CrewConsole` to
         # drive a trigger from, and no poll loop that fires one either).
-        effector_sequences_by_key, effector_registry_entries, had_config_errors = (
-            _load_effector_config()
-        )
+        (
+            effector_sequences_by_key,
+            effector_registry_entries,
+            had_config_errors,
+            polled_args_set,
+        ) = _load_effector_config()
         crew_console = CrewConsole(
             store=crew_runner.store,
             brain_client=brain_client,
@@ -5043,6 +5202,7 @@ def main() -> None:
                 slew_trace_base,
                 effector_sequences_by_key,
                 effector_registry_entries,
+                polled_args_set.args,
             ),
             daemon=True,
         )

@@ -14,6 +14,10 @@ copies at once, and never collides with a different trigger's own
 queue). A sequence file naming a trigger not listed here is a bad
 file -- see `belief.effector_sequences.load_sequences`.
 
+A file's own switches (and any condition's) are read once when its
+trigger fires, and again after each `wait_s(...)` row -- never on a
+standing per-poll feed (`plans/effector-sequences/plan.md` Stage 4).
+
 | Trigger | Fires when | Cardinality |
 | --- | --- | --- |
 | `takeoff` | Every time the aircraft leaves the ground on a real observed ground -> air transition (on-ground true -> false). Never on an air start -- that fires MISSION_START/MISSION_START_IN_AIR instead. No per-mission latch: a repeat takeoff re-fires it, and the engine's own implicit self-check -- a row does not write if its switch is already observed at the target value -- makes an already-satisfied repeat a no-op, with no explicit condition needed in the sequence file itself. | every time |

@@ -90,6 +90,7 @@ def test_good_registry_resolves_every_entry(tmp_path: Path) -> None:
         cmd=3028,
         arg=773,
         values={"on": 1.0, "off": 0.0},
+        shape="default_2_position_tumb",
         unverified=False,
     )
     assert registry["weapon_safety"].values == {"armed": 1.0, "safe": 0.0}

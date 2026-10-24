@@ -85,7 +85,7 @@ def test_sight_ready_reflects_ready_observed() -> None:
     assert sight_ready(GuidanceUnitState(ready_observed=True)) is True
 
 
-# --- refresh_readback ----------------------------------------------------
+# --- refresh_readback (Stage 4: the continuous feed's raw "args" map) ----
 
 
 def test_refresh_readback_is_a_no_op_when_no_sample_yet() -> None:
@@ -94,45 +94,50 @@ def test_refresh_readback_is_a_no_op_when_no_sample_yet() -> None:
     assert result is state
 
 
-def test_refresh_readback_sets_observed_fields_from_the_latest_sample() -> None:
+def test_refresh_readback_sets_observed_fields_from_the_args_map() -> None:
     state = GuidanceUnitState()
-    result = refresh_readback(
-        state, {"observe_on": True, "weapons_armed": False, "missl_pw_on": True}
-    )
+    result = refresh_readback(state, {"886": 1.0, "898": 0.0, "960": 1.0})
     assert result.observ_observed is True
-    assert result.weapon_safety_observed is False
+    assert result.align_observed is False
+    assert result.ready_observed is True
+
+
+def test_refresh_readback_thresholds_at_half_not_equality() -> None:
+    """Same `>= 0.5` threshold `Export.lua` used to apply itself before
+    Stage 4 moved it here -- a mid-transit raw value must still read as
+    the decided boolean."""
+    state = GuidanceUnitState()
+    result = refresh_readback(state, {"886": 0.64})
+    assert result.observ_observed is True
+    result = refresh_readback(state, {"886": 0.32})
+    assert result.observ_observed is False
 
 
 def test_refresh_readback_leaves_fields_unchanged_when_keys_are_missing() -> None:
-    state = GuidanceUnitState(observ_observed=True, weapon_safety_observed=False)
+    state = GuidanceUnitState(observ_observed=True, ready_observed=False)
     result = refresh_readback(state, {})
     assert result.observ_observed is True
-    assert result.weapon_safety_observed is False
-
-
-def test_refresh_readback_sets_the_three_lamp_fields() -> None:
-    """`[[BL-B80]]` v2: 898 (Л5 gyro alignment), 960 (READY), 962 (launch
-    permission), real readbacks, no timer."""
-    state = GuidanceUnitState()
-    result = refresh_readback(
-        state,
-        {"align_lamp": True, "ready_lamp": False, "launch_perm_lamp": True},
-    )
-    assert result.align_observed is True
     assert result.ready_observed is False
-    assert result.launch_perm_observed is True
 
 
-def test_refresh_readback_leaves_lamp_fields_unchanged_when_absent() -> None:
-    """An `Export.lua` predating the three lamps must not be read as "the
-    lamp is off" -- absence leaves the prior value, same posture every
-    other `*_observed` field in this class already takes."""
-    state = GuidanceUnitState(
-        align_observed=True, ready_observed=True, launch_perm_observed=False
-    )
-    result = refresh_readback(state, {"observe_on": True})
-    assert result.align_observed is True
-    assert result.ready_observed is True
+def test_refresh_readback_leaves_fields_unchanged_on_a_non_finite_value() -> None:
+    """A NaN/inf must never be read as a value -- same posture as an
+    absent key, never coerced to `False` (mutation: drop the
+    `math.isfinite` guard)."""
+    state = GuidanceUnitState(observ_observed=True)
+    result = refresh_readback(state, {"886": float("nan")})
+    assert result.observ_observed is True
+
+
+def test_refresh_readback_does_not_touch_weapon_safety_or_launch_perm() -> None:
+    """Stage 4 removed these two args' old per-frame reader with
+    nothing replacing it yet (673/962 are no longer polled by code) --
+    `refresh_readback` must not read them from the "args" map at all,
+    even if a caller mistakenly passed them in (which the real
+    `REQUIRED_POLLED_ARGS`-driven set never would)."""
+    state = GuidanceUnitState(weapon_safety_observed=True, launch_perm_observed=False)
+    result = refresh_readback(state, {"673": 0.0, "962": 1.0})
+    assert result.weapon_safety_observed is True
     assert result.launch_perm_observed is False
 
 

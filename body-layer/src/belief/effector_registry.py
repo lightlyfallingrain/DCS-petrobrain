@@ -45,11 +45,12 @@ swallowed."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 #: Where the generated raw dumps (`generate_effector_registry.py
 #: --write`, Stage 0) live, one file per aircraft directory name
@@ -77,11 +78,27 @@ def aircraft_dir_name(aircraft: str) -> str:
     return aircraft.lower()
 
 
+#: Shapes confirmed live as an absolute set (`performClickableAction(cmd,
+#: value)` always leaves the control at `value`, regardless of where it
+#: was) -- plan S4.3: "true only for `default_2_position_tumb`, the one
+#: helper shape whose ... is confirmed live ... all six shipped
+#: effectors, BL-B66." A row's implicit self-check (R12) may write on an
+#: *unknown* readback only for an effector whose `shape` is in this set --
+#: every other shape (buttons, covers, springloaded, 3-position,
+#: multiposition, axes) is not absolute until a later research note
+#: confirms it live and widens this tuple. Widening is a one-line change
+#: here, each widening with its own `aircraft-layer/research/` note.
+_ABSOLUTE_WRITE_SHAPES: Final[frozenset[str]] = frozenset({"default_2_position_tumb"})
+
+
 @dataclass(frozen=True, slots=True)
 class EffectorDef:
     """One resolved curated entry -- device/cmd/arg are the raw numbers
     `source_element` (plus `index`) resolved to, never typed into the
-    curated file directly."""
+    curated file directly. `shape` is copied straight from the raw
+    dump's own element (so the provenance survives); `absolute_write`
+    is derived from it, never stored, so widening `_ABSOLUTE_WRITE_
+    SHAPES` changes every existing `EffectorDef`'s answer with no reload."""
 
     name: str
     source_element: str
@@ -89,17 +106,29 @@ class EffectorDef:
     cmd: int
     arg: int
     values: dict[str, float]
+    shape: str
     unverified: bool = False
+
+    @property
+    def absolute_write(self) -> bool:
+        """`True` only for a shape confirmed live as an absolute set
+        (plan S4.3) -- a fail-safe for sequence files that may name *any*
+        switch, not new reach: sequencing a non-absolute control (press +
+        release) is not designed here. See `_ABSOLUTE_WRITE_SHAPES`."""
+        return self.shape in _ABSOLUTE_WRITE_SHAPES
 
 
 @dataclass(frozen=True, slots=True)
 class RegistryError:
     """One loader finding, collected rather than raised (D5). `scope`
-    distinguishes a whole-file problem (`"raw-dump"`/`"curated-file"`,
-    `name` is `None`) from one bad curated entry (`"entry"`, `name` is
-    the curated effector name)."""
+    distinguishes a whole-file problem (`"raw-dump"`/`"curated-file"`/
+    `"polled-file"`, `name` is `None`) from one bad entry (`"entry"`,
+    `name` is the curated effector/indicator name). `"polled-file"` is
+    `load_polled_config`'s own (S4.4a) -- a separate scope from
+    `"curated-file"` so a reader can tell "bad effectors.toml" apart from
+    "bad polled.toml" without parsing `name`."""
 
-    scope: Literal["raw-dump", "curated-file", "entry"]
+    scope: Literal["raw-dump", "curated-file", "polled-file", "entry"]
     name: str | None
     reason: str
 
@@ -179,6 +208,14 @@ def _resolve_entry(
             reason=f"source_element {source_element!r} has a non-integer cmd/arg at index {index}",
         )
 
+    shape = element.get("shape")
+    if not isinstance(shape, str) or not shape:
+        return RegistryError(
+            scope="entry",
+            name=name,
+            reason=f"source_element {source_element!r} has no 'shape'",
+        )
+
     values = entry.get("values")
     if not isinstance(values, dict) or not values:
         return RegistryError(
@@ -213,6 +250,7 @@ def _resolve_entry(
         cmd=cmd,
         arg=arg,
         values=resolved_values,
+        shape=shape,
         unverified=unverified,
     )
 
@@ -318,3 +356,238 @@ def load_registries_by_aircraft(
         raw_dump_path = raw_dump_dir / f"{aircraft_dir.name}.toml"
         result[aircraft_dir.name] = load_registry(raw_dump_path, curated_path)
     return result
+
+
+#: `load_polled_config`'s own cap (plan S4.4a): "required ∪ config, max 64
+#: in total" -- the same wire bound `watch_args`/`SequenceFile.read_args`
+#: use, stated again here rather than imported (no shared constant across
+#: these three load-time call sites in this file's own module, by the
+#: project's "no reinventing the wheel" rule's own exception clause: each
+#: side states its bound once, held equal only where a parity test can
+#: check it -- here, nothing crosses a subproject boundary, so this is a
+#: plain duplicate literal, not a parity-tested pair).
+_MAX_POLLED_ARGS: Final[int] = 64
+
+_INDICATOR_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_]+")
+
+
+@dataclass(frozen=True, slots=True)
+class PolledSet:
+    """The final resolved continuous-poll set (plan S4.4a) -- `args` is
+    ordered (code-required first, then `polled.toml`'s own file order,
+    per `effectors` then `indicators`), `names` is `{arg: name}` for
+    logging ("polling N args: observ(886), align_lamp(898), ...")."""
+
+    args: tuple[int, ...]
+    names: Mapping[int, str]
+
+
+def load_polled_config(
+    polled_path: Path,
+    registry: Mapping[str, EffectorDef],
+    required: Mapping[int, str],
+) -> tuple[PolledSet, list[RegistryError], list[str]]:
+    """Returns `(polled_set, errors, warnings)` (plan S4.4a).
+
+    `required` is `sight_effector.REQUIRED_POLLED_ARGS` (`{arg: reason}`,
+    dict order = union order) -- always included, first. `errors` are
+    collected D5-style (never raised, scope `"polled-file"`/`"entry"`);
+    `warnings` are informational only and never set `config_error_pending`
+    -- currently only "config omits required arg" messages, since the
+    behaviour is already correct (required args poll regardless) and the
+    warning only keeps the file honest as a reference.
+
+    A **missing** `polled_path` is not an error -- required-only, per the
+    plan ("A missing file is not an error: required-only, with an INFO
+    log" -- the INFO log itself is the caller's job, `logger.py`'s
+    startup banner). An unreadable/unparsable file *is* a `"polled-file"`
+    D5 error, and the result is still required-only (never a partial
+    config)."""
+    required_order = list(required.keys())
+
+    if not polled_path.exists():
+        return PolledSet(args=tuple(required_order), names=dict(required)), [], []
+
+    try:
+        text = polled_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return (
+            PolledSet(args=tuple(required_order), names=dict(required)),
+            [
+                RegistryError(
+                    scope="polled-file",
+                    name=None,
+                    reason=f"cannot read {polled_path}: {exc}",
+                )
+            ],
+            [],
+        )
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        return (
+            PolledSet(args=tuple(required_order), names=dict(required)),
+            [
+                RegistryError(
+                    scope="polled-file",
+                    name=None,
+                    reason=f"cannot parse {polled_path} as TOML: {exc}",
+                )
+            ],
+            [],
+        )
+
+    errors: list[RegistryError] = []
+    names: dict[int, str] = dict(required)
+    order: list[int] = list(required_order)
+    config_covered: set[int] = set()
+
+    effectors_entry = doc.get("effectors", [])
+    if not isinstance(effectors_entry, list):
+        errors.append(
+            RegistryError(
+                scope="polled-file",
+                name="effectors",
+                reason="'effectors' must be a list of effector names",
+            )
+        )
+        effectors_entry = []
+    for name in effectors_entry:
+        if not isinstance(name, str):
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=str(name),
+                    reason="effector name must be a string",
+                )
+            )
+            continue
+        effector_def = registry.get(name)
+        if effector_def is None:
+            errors.append(
+                RegistryError(
+                    scope="entry", name=name, reason=f"unknown effector {name!r}"
+                )
+            )
+            continue
+        arg = effector_def.arg
+        config_covered.add(arg)
+        if arg in names:
+            if arg in required:
+                # Already in the set via `required` -- the config's own
+                # friendly name still wins for logging (plan's own
+                # startup-line example names a required arg by its
+                # config name, e.g. "ready_lamp(960)", not by its
+                # required-reason string).
+                names[arg] = name
+            else:
+                errors.append(
+                    RegistryError(
+                        scope="entry",
+                        name=name,
+                        reason=f"duplicate arg {arg} already polled",
+                    )
+                )
+            continue
+        names[arg] = name
+        order.append(arg)
+
+    indicators_entry = doc.get("indicators", {})
+    if not isinstance(indicators_entry, dict):
+        errors.append(
+            RegistryError(
+                scope="polled-file",
+                name="indicators",
+                reason="'indicators' must be a table",
+            )
+        )
+        indicators_entry = {}
+    for ind_name, ind_value in indicators_entry.items():
+        if not isinstance(ind_name, str) or not _INDICATOR_NAME_RE.fullmatch(ind_name):
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=str(ind_name),
+                    reason="indicator name must match [a-z0-9_]+",
+                )
+            )
+            continue
+        if ind_name in registry:
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=ind_name,
+                    reason=f"indicator name {ind_name!r} clashes with an effector name",
+                )
+            )
+            continue
+        if not isinstance(ind_value, dict):
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=ind_name,
+                    reason="indicator entry must be a table",
+                )
+            )
+            continue
+        ind_arg = ind_value.get("arg")
+        if (
+            isinstance(ind_arg, bool)
+            or not isinstance(ind_arg, int)
+            or not (0 <= ind_arg <= 4095)
+        ):
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=ind_name,
+                    reason=f"indicator 'arg' must be an int in 0..4095, got {ind_arg!r}",
+                )
+            )
+            continue
+        config_covered.add(ind_arg)
+        if ind_arg in names:
+            if ind_arg in required:
+                names[ind_arg] = ind_name
+            else:
+                errors.append(
+                    RegistryError(
+                        scope="entry",
+                        name=ind_name,
+                        reason=f"duplicate arg {ind_arg} already polled",
+                    )
+                )
+            continue
+        names[ind_arg] = ind_name
+        order.append(ind_arg)
+
+    warnings = [
+        f"polled.toml does not list arg {arg} ({reason}); polling it "
+        "anyway because code reads it"
+        for arg, reason in required.items()
+        if arg not in config_covered
+    ]
+
+    if len(order) > _MAX_POLLED_ARGS:
+        # Required args are never dropped; overflow config entries are
+        # dropped from the end of the file (plan S4.4a).
+        required_set = set(required_order)
+        kept: list[int] = []
+        dropped: list[int] = []
+        config_entries = [a for a in order if a not in required_set]
+        keep_count = _MAX_POLLED_ARGS - len(required_set)
+        kept_config = config_entries[:keep_count] if keep_count > 0 else []
+        dropped = config_entries[len(kept_config) :]
+        kept = required_order + kept_config
+        for arg in dropped:
+            errors.append(
+                RegistryError(
+                    scope="entry",
+                    name=names.get(arg),
+                    reason=f"arg {arg} dropped: polled set exceeds the "
+                    f"{_MAX_POLLED_ARGS}-arg cap",
+                )
+            )
+        order = kept
+        names = {arg: names[arg] for arg in order}
+
+    return PolledSet(args=tuple(order), names=names), errors, warnings

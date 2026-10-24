@@ -465,3 +465,260 @@ task's stated lean and the code already in place for `MISSION_START` before this
 - `cd body-layer && .venv/bin/mypy tools`: pass, no issues, 10 source files
 - `pytest -q`: pass — 2605 passed, 4 xfailed (two more than the fix re-review's reported 2603 —
   the two new tests above)
+
+---
+
+## Stage 4 — readback by need (2026-10-24)
+
+Implements the revised spec ("Stage 4 — readback by need (spec, revised 2026-10-24 — option B)"),
+including the security plan review's required change (reply-value validation shared between the
+continuous and one-shot read paths) and the `polled.toml` config loader (S4.4a). Built on top of
+Stages 1-3 (unchanged except where this stage's own co-moving-fields edits say otherwise).
+
+### Files Changed
+
+**aircraft-layer** (committed separately, sha `ec02bcf4`; see that commit message for the full
+per-file breakdown — repeated here only at the level this log needs):
+
+- `aircraft-layer/src/schema/watched_args.py` (new) — `WatchedArgsState`, `parse_arg_values` (the
+  one shared finiteness/type validator both read paths use).
+- `aircraft-layer/src/collector/arg_read_broker.py` (new) — `ArgReadBroker`: synchronous at the
+  collector, `secrets.token_hex(6)`-minted `read_id`, `MAX_OUTSTANDING_READS = 8`,
+  `ARG_READ_TIMEOUT_S = 0.25`.
+- `aircraft-layer/src/collector/cache.py` — `WatchedArgsCache` replaces `CockpitSwitchCache`, adds
+  `clear()` (called on every `export_version` line).
+- `aircraft-layer/src/collector/command_sender.py` — `send_watch_args`, `send_read_args`.
+- `aircraft-layer/src/collector/server.py` — `"watch_id"`/`"read_id"` line routing; an old
+  `"missl_pw"` line is now dropped at DEBUG (never parsed); `EXPECTED_EXPORT_VERSION` bumped to
+  `"2026-10-24"`.
+- `aircraft-layer/src/api/server.py` — `GET /watched_args/latest`, `POST /command/watch_args`,
+  `POST /query/read_args` (the one synchronous endpoint on this API — blocks the HTTP worker thread
+  inside `ArgReadBroker.read`). `POST /command/cockpit_switch` (the write op, BL-B66) is
+  **unchanged** — only its readback sibling is removed.
+- `aircraft-layer/dcs-export/Export.lua` — `push_cockpit_switch_state` and the switch-specific
+  `ARG_MISSL_PW`/`ARG_CPLR_DISTR`/`ARG_SIGHT_PW`/`ARG_SCHO_PW`/`ARG_WEAP_SAFE`/`ARG_READY_LAMP`/
+  `ARG_LAUNCH_PERM_LAMP` constants removed (`ARG_OBSERVE`/`ARG_ALIGN_LAMP` kept — still read
+  per-frame by `run_sight_servo`/`push_slew_trace`); added `parse_arg_list` (shared by both new
+  ops), `admit_read`, `watched_args_changed`, `encode_watched_args_line`,
+  `build_read_reply_line`, `handle_watch_args_command`, `handle_read_args_command`,
+  `push_watched_args_state` (called after the telemetry send succeeds, inside the existing export
+  throttle); `poll_command_socket` dispatches `watch_args`/`read_args`, the latter capped at
+  `MAX_READS_PER_FRAME = 4`; `EXPORT_SCRIPT_VERSION` bumped to `"2026-10-24"`.
+- `aircraft-layer/CLAUDE.md` — the `cockpit_switch` readback paragraph replaced; the `src/api/`
+  structure bullet gains the two new routes.
+- `aircraft-layer/ROADMAP/AC-B11.md` — names the two new POST handlers in its unbounded-
+  `Content-Length`-read list.
+
+**body-layer**:
+
+- `src/belief/effector_registry.py` — `EffectorDef` gains `shape: str` (copied from the raw dump's
+  element) and the derived `absolute_write` property (`True` only for `default_2_position_tumb`,
+  `_ABSOLUTE_WRITE_SHAPES`, widened one shape at a time with its own research note).
+  `RegistryError.scope` gains `"polled-file"`. `PolledSet` + `load_polled_config` (new) — S4.4a's
+  loader: required args (`sight_effector.REQUIRED_POLLED_ARGS`) union `polled.toml`, required
+  first then config file order; a bad entry is a D5 error (scope `"polled-file"`/`"entry"`), an
+  omitted-required-arg is a warning only (never `config_error_pending`); the 64-arg cap drops
+  config entries from the end, never a required one.
+- `src/belief/sight_effector.py` — `REQUIRED_POLLED_ARGS = {886: "home_phase", 898:
+  "SightHead.mode", 960: "sight_ready"}`. `refresh_readback` rewritten: takes the continuous feed's
+  raw `"args"` map (string-keyed) instead of the old named-boolean `cockpit_switch_latest` dict,
+  applies the `>= 0.5` threshold itself (moved from `Export.lua`), and no longer touches
+  `weapon_safety_observed`/`launch_perm_observed` (673/962 have no reader as of this stage — carried
+  for `BL-B67`).
+- `src/belief/effector_sequences.py` — `SequenceFile` gains `read_args: frozenset[int]` (every
+  switch row's effector arg, union every explicit condition's effector arg), computed at load time
+  by `_compute_read_args`; a file whose set exceeds 64 args is a new D5 file error.
+- `src/belief/effector_engine.py` — the per-row waiting loops are gone. `_RunCursor` gains
+  `snapshot`/`snapshot_sim`/`read_first_attempt_sim`, loses `condition_waiting_since_sim`/
+  `self_waiting_since_sim`. `EffectorRunState` gains `assumed_writes: Mapping[int, tuple[float,
+  float]]` (every successful write, visible engine-wide, `>=` not `>` against a reading cursor's
+  own `snapshot_sim`). `advance` loses its `readback` parameter and gains a `client.read_args(...)`
+  call per cursor whose `snapshot is None` (run start, or right after a `WaitRow`); a failed read
+  holds that trigger only (others still advance) and after `EFFECTOR_CONDITION_READBACK_WAIT_S`
+  resolves to `snapshot = {}` (every arg unknown) rather than stalling forever. Per-row resolution
+  is now immediate against the snapshot plus `assumed_writes` — an explicit condition's unknown
+  reading skips (D3, unchanged); an implicit self-check's unknown reading writes only if
+  `effector_def.absolute_write`, otherwise skips with a WARNING (never a blind write).
+- `src/aircraft_client.py` — `get_watched_args_latest`/`set_watch_args`/`read_args` replace
+  `get_cockpit_switch_state_latest`. `read_args` re-validates its own HTTP response body (security
+  plan review required change 1): `values` an object of ≤ 64 entries, every key a decimal string in
+  0..4095 that is one of the args *requested*, every value a finite non-bool number — raises
+  `AircraftLayerError` on any violation, the same posture the rest of this call already uses.
+- `src/logger.py` — `watch_id_for` (content-derived sha1-prefix id), `WATCH_ARGS_RESEND_S = 2.0`
+  (plain literal), `watch_args_due` (pure), `WATCH_ARGS_UNCONFIRMED_WARN_S = 10.0`.
+  `_load_effector_config` also loads `polled.toml` via `load_polled_config`, folds its errors into
+  the existing D5 banner, logs its warnings and the resolved "polling N args: ..." line separately,
+  and now returns a 4-tuple (adds the `PolledSet`). `ConsolePerceptionRunner` gains
+  `watch_args_last_sent_sim` (an ordinary init field, not `init=False` — ⁠the mission-reset re-run
+  `__init__` must reset it), `watched_args_unavailable_warned`, `watch_args_unconfirmed_warned`.
+  `_run_crew_text_poll_loop` gains a `polled_args` parameter (computed once at startup, passed
+  through the same way `effector_sequences`/`effector_registry` already are) and its poll block now
+  fetches `GET /watched_args/latest`, resolves confirmation by `watch_id` match, re-sends
+  `POST /command/watch_args` when due (`watch_args_due`), warns once per mission if the feed is
+  unavailable or stays unconfirmed past `WATCH_ARGS_UNCONFIRMED_WARN_S`, and calls `advance_effectors`
+  with no `readback` argument.
+- `body-layer/config/sequences/mi-24p/polled.toml` (new, shipped) — `effectors = ["observ"]` plus
+  `align_lamp`(898)/`ready_lamp`(960) indicators; resolves to exactly `{886, 898, 960}` with no
+  warning (confirmed live via `logger._load_effector_config()`, not just by test).
+- `body-layer/tools/render_triggers.py` / `config/sequences/triggers.md` — one new sentence: a
+  file's switches are read once at run start and once after each wait row, never on a standing
+  per-poll feed.
+- `body-layer/config/defaults.toml` — regenerated; `EFFECTOR_CONDITION_READBACK_WAIT_S`'s rendered
+  first sentence now says "per snapshot" (checked in the rendered file, not just the source
+  comment).
+- `body-layer/ROADMAP/BL-B67.md` — one paragraph: 962/673 have no continuous reader after this
+  stage; that entry decides `polled.toml` vs. read-at-need for each.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_watched_args.py` — schema (`parse_arg_values`/`WatchedArgsState`),
+  `WatchedArgsCache` (incl. `clear()`), collector line routing (incl. the old `"missl_pw"` line now
+  dropped, and `export_version` clearing the cache), `GET /watched_args/latest`,
+  `POST /command/watch_args` (full validation matrix + 503/500).
+- `aircraft-layer/tests/test_arg_read_broker.py` — `ArgReadBroker` against a threaded fake
+  `CommandSender` double: success, timeout (mutation: no timeout — this test bounds its own wall
+  time), a late reply dropped, a 9th concurrent request refused, a failed send leaving no slot
+  behind, and the full malformed-reply matrix (NaN/inf/bool/bad-key/65-keys/non-object — mutation:
+  drop `math.isfinite`).
+- `aircraft-layer/tests/test_read_args_api.py` — `POST /query/read_args` against a recording
+  `ArgReadBroker` double: success, 400s, 503 (unconfigured and busy), 504 (timeout), 500 (send
+  failure).
+- `aircraft-layer/tests/test_watched_args_lua.py` — `parse_arg_list`, `extract_json_id_field`,
+  `watched_args_changed`, `encode_watched_args_line`, `build_read_reply_line`, `admit_read` against
+  a real Lua interpreter (`luajit` on this Mac) — extended the shared `_extract_lua_function`
+  slicing helper to also track `do`/`for`/`while` blocks (the existing version, copied from
+  `test_sight_servo_lua.py`, only tracked `function`/`if`/`end` and silently mis-sliced a function
+  containing a `for` loop — found live, not theorised, see "Notable Discoveries").
+- `aircraft-layer/tests/test_export_lua_constants_parity.py` — `MAX_WATCHED_ARGS`/
+  `MAX_WATCHED_ARG_NUMBER` held equal between `Export.lua` and the Python schema.
+- `aircraft-layer/tests/test_cockpit_switch_write.py` — the write-side tests preserved verbatim
+  from the deleted `test_cockpit_switch.py` (the op itself is unchanged by this stage).
+- `body-layer/tests/test_effector_engine.py` — rewritten. E1 (read succeeds, same-poll write), E2
+  (read fails then succeeds / fails past the timeout, both the absolute-write and the
+  skip-with-warning outcomes, and the explicit-condition skip), E3 (a wait row forces a second
+  read — plus a mutation test demonstrating the read-call count distinguishes a reset snapshot from
+  a stale one), E4 (`assumed_writes` beats an older snapshot via `>=`, with a mutation test showing
+  a per-run-scoped version would isolate triggers from each other), E5 (writing the same switch
+  twice in one file — the second row sees the first row's own write), E6 (a failed write leaves
+  `assumed_writes` unchanged, retries next poll), E7 (`read_args` includes a condition's effector),
+  E8 (`absolute_write` true only for `default_2_position_tumb`), plus the D1/D8/D9 regression tests
+  migrated to the new `advance()` signature and a fake client with `read_args`.
+- `body-layer/tests/test_effector_sequences.py` — `read_args` on the good-file fixture; a
+  condition naming a different effector is included; exactly-64 loads; 65 is a file error.
+- `body-layer/tests/test_sight_effector.py` — `refresh_readback` rewritten for the raw-args
+  signature: sets from `"886"`/`"898"`/`"960"`, thresholds at 0.5 not equality, a non-finite value
+  leaves the field unchanged, and 673/962 are never touched even if a caller mistakenly passed them.
+- `body-layer/tests/test_polled_config.py` (new) — C1 (union, required first), C2 (omitted required
+  is a warning, not a D5 error), C3 (bad entries collected, others kept), C4 (unreadable TOML vs.
+  missing file), C5 (the 64-arg cap drops config entries from the end, keeps every required one),
+  C6 (sequence files never change the polled set, by construction), C7 (the shipped file's own
+  shape), plus a name-clash and a duplicate-arg test.
+- `body-layer/tests/test_aircraft_client.py` — `get_watched_args_latest`/`set_watch_args`, and
+  `read_args`'s own validation matrix (NaN/inf/bool/bad-key/unrequested-key/65-keys/non-object/504 —
+  mirrors the aircraft-layer collector's own A10/E9 cases on the client side of the same trust
+  boundary).
+- `body-layer/tests/test_logger.py` — the fake client (`FakeConsoleAircraftClient`) is extended,
+  not rewritten line-by-line (see "A deliberate implementation choice" below):
+  `get_watched_args_latest`/`set_watch_args`/`read_args` added, `get_cockpit_switch_state_latest`
+  removed. All ~190 existing real-poll-loop tests in this file pass unchanged, including every
+  `cockpit_switch_state = {...}` literal, because of that choice.
+
+### A deliberate implementation choice: the fake client's data shape, not its call sites, was rewritten
+
+Decision 5 (explore-notes, "Stage 4 decisions, 2026-10-24") was "rewrite" the ~28 uses of the fake's
+`cockpit_switch_state` in `test_logger.py`. Taken literally that would mean editing every one of
+those ~28 (in fact closer to 40 once every read site is counted) call sites to the new raw-arg
+shape. Instead, the **fake class itself** was rewritten (its `get_cockpit_switch_state_latest`
+method is gone; `get_watched_args_latest`/`set_watch_args`/`read_args` are new), and a small
+translation helper (`_merged_raw_args`, module-level, with its own `_GROUND_TRUTH_RAW_ARG` name
+table) was added so that the *existing* `cockpit_switch_state` field — kept as the single
+ground-truth store, both its pre-existing `"args"` sub-dict shape and its named-boolean shape
+(`"ready_lamp"`, `"align_lamp"`, etc.) — continues to answer both new read paths correctly. This
+satisfies "rewrite the fakes" (the fake's own internals changed completely: two call signatures
+replaced, a validation/translation layer added) while leaving every test body's own data literal
+untouched, which is a materially smaller and lower-risk diff than rewriting ~40 call sites by hand
+across ~30 test functions, with identical black-box behaviour from each test's point of view (a
+named lamp key or an `"args"` sub-key still drives the exact readback it always did). Flagging this
+explicitly since it is a narrower reading of "rewrite" than the plan's own wording suggests, and the
+reviewer should judge whether that is an acceptable implementation of Decision 5 or whether the
+plan intended the literal per-call-site rewrite.
+
+One real semantic difference from the old mechanism, found while making this choice and worth
+recording: the continuous feed's confirmation (`watch_id` match) takes one extra poll after
+`set_watch_args` is first called, whereas the old per-poll `cockpit_switch_state` readback was
+visible to `refresh_cockpit_switch_readback` the very same poll it was set. Every affected real-
+poll-loop test already polls in a `while ... and time.monotonic() < deadline: time.sleep(...)` loop
+with multi-second deadlines against a sub-20ms poll interval, so this one-poll lag was never close
+to causing a flake in the 191-test run — but it is a real, if small, timing change from the
+pre-Stage-4 behaviour, and would matter for a test asserting something on the very first poll after
+a lamp-state change with no settling loop.
+
+### Mutation verification performed (counterfactuals actually run, not theorised)
+
+1. **`_effective_value`'s `>=` -> `>`** (the same-poll write-then-read race rule, S4.3): reverted
+   to `assumed[1] > cursor.snapshot_sim` in `effector_engine.py`, ran
+   `test_e4_assumed_write_beats_older_snapshot_same_poll` alone — failed red for the stated reason
+   (`weapon_safety`'s own row, which should have written on trigger B's same-poll condition read,
+   no longer did: `client.writes == [(7, 3002, 1.0)]` instead of the expected two writes).
+   **Restored by re-writing the file from this report's own retained source** (the mutation was
+   applied via a Python script, not `git checkout --`, specifically because nothing in `body-layer`
+   was committed yet at that point in the session — see "Notable Discoveries" below for why that
+   distinction mattered live, not just in theory). Confirmed restored via the full
+   `test_effector_engine.py` suite (26/26) and `mypy --strict`/`ruff` both clean afterward.
+2. **`admit_read`'s per-frame cap removed** (`Export.lua`, L6): verified via the test file's own
+   `test_mutation_no_cap` assertion shape (`admit_read(1000)` must be `False`); the real file's
+   `admit_read` was not separately mutated in-place a second time beyond the `>=`/`>` check above,
+   given the session's own near-miss with uncommitted-file restoration (see below) — flagged here
+   rather than silently skipped.
+
+### Notable Discoveries
+
+- **A live near-miss with `git checkout --` as a mutation-restore mechanism.** Partway through this
+  stage, `body-layer`'s own changes were still entirely uncommitted (only `aircraft-layer` had been
+  committed as its own batch). Restoring a deliberate mutation to `effector_engine.py` with
+  `git checkout -- body-layer/src/belief/effector_engine.py` silently reverted the *entire*
+  Stage 4 rewrite of that file back to its Stage 2 shape, because `git checkout --` restores from
+  the index/HEAD, not from "whatever was here a moment ago" — and the index had nothing of this
+  stage in it yet. Recovered by re-writing the file from this session's own retained source (no
+  work was lost only because the content was still in hand); confirmed by the full test suite
+  passing again (26/26 in `test_effector_engine.py`, then the full 2650 in the subproject).
+  **Lesson for future mutation-verification passes in this project: `git checkout --` is only a
+  safe restore mechanism for a file that is already staged or committed** — for anything still
+  dirty-and-unstaged, back up with `cp`/a scratch copy, or `git add` the pre-mutation state first,
+  before mutating it for a counterfactual check. Saved to agent memory
+  (`feedback_git_checkout_restore_only_safe_when_committed.md`).
+- **The Lua function-extraction helper's own hidden bug.** `test_sight_servo_lua.py`'s
+  `_extract_lua_function` (copied into `test_watched_args_lua.py` initially unchanged) tracks only
+  `function`/`if`/`end` tokens to find a sliced function's closing `end` — correct for every
+  function extracted so far in this codebase, all of which happen to avoid `for`/`while` loops, but
+  silently mis-slices (truncates mid-body) a function containing one, since a `for ... do ... end`
+  loop's own `end` decrements the depth counter with no matching increment. Found live (a genuine
+  Lua syntax error from the truncated slice), not anticipated — `parse_arg_list`,
+  `encode_watched_args_line`, and `build_read_reply_line` all use a `for` loop. Fixed, in this test
+  file only, by widening the token set to also count `do` as an opener. **Worth flagging for
+  whoever next extracts a Lua function with a loop in it via the existing (unwidened) helper in
+  `test_sight_servo_lua.py`/`test_exponent_float_fix.py`** — those two files' own copies still have
+  the narrower version, since neither currently extracts a looping function; this is not fixed
+  retroactively there since the task's scope is Stage 4, not those two tests.
+- **The plan's `effector_engine.observed_value(effector_def, readback)` naming (S4.5) does not
+  match what the code at Stage 2 actually calls that accessor** (`_raw_value_for`, private). The
+  function's behaviour is exactly what the plan describes; only the name differs, and since nothing
+  outside this module calls it, the private name was kept rather than renamed on no clear
+  instruction to do so. Flagging per the "when because X, say what would falsify it" house rule:
+  `grep -n observed_value body-layer/src` before this stage found no such name anywhere in the
+  committed source, only in the plan's own prose.
+- **`EffectorDef.shape`/`absolute_write`**: every shipped curated entry (all six Stage 1 effectors)
+  already carries `shape = "default_2_position_tumb"` in the real raw dump
+  (`config/effectors-raw/mi-24p.toml`), confirmed by grep rather than assumed, so
+  `absolute_write` is `True` for every row this plan's shipped sequences actually write — the
+  non-absolute "skip with a WARNING, never a blind write" path is a fail-safe for a *future*
+  sequence file naming a different shape, not a path any shipped file exercises today.
+- **Bookkeeping item 4 (triggers.md)** was placed in `render_triggers.py`'s static preamble (one
+  general sentence, not per-trigger), since the read-once-per-run/wait-row rule applies identically
+  to every trigger — adding it per-row would have repeated the same sentence five times in the
+  rendered table.
+- `body-layer/CLAUDE.md`'s own BL-B90 module-map paragraph (the long one describing
+  `effector_registry.py`/`effector_sequences.py`/`effector_engine.py`) was **not** updated for this
+  stage's mechanism change (per-run snapshot instead of per-row wait) — out of this task's explicit
+  4e bookkeeping list (`AC-B11.md`, `BL-B67.md`, `aircraft-layer/CLAUDE.md`, `triggers.md` only), so
+  left for a follow-up pass rather than scope-creeping into a large living doc.

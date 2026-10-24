@@ -874,6 +874,40 @@ def _t72_world_object_no_live_verdict() -> dict[str, Any]:
     return {**_t72_world_object(), "unit_name": None}
 
 
+#: Stage 4's fake-client translation layer (see `FakeConsoleAircraftClient.
+#: cockpit_switch_state`'s own docstring): the named boolean keys every
+#: pre-Stage-4 test literal already uses, mapped to the real DCS arg
+#: number they represent -- lets every existing `cockpit_switch_state =
+#: {...}` literal in this file keep working unchanged against the new
+#: `read_args`/`get_watched_args_latest` methods.
+_GROUND_TRUTH_RAW_ARG: dict[str, int] = {
+    "ready_lamp": 960,
+    "align_lamp": 898,
+    "launch_perm_lamp": 962,
+    "observe_on": 886,
+    "weapons_armed": 673,
+}
+
+
+def _merged_raw_args(cockpit_switch_state: dict[str, Any] | None) -> dict[int, float]:
+    """Flattens `FakeConsoleAircraftClient.cockpit_switch_state` into one
+    `{arg: raw_value}` map: its `"args"` sub-dict (string-keyed, as the
+    real wire carries it) plus any named lamp/switch key
+    `_GROUND_TRUTH_RAW_ARG` knows, coerced to `1.0`/`0.0`. `None` (no
+    sample set yet) is an empty map, not an error."""
+    if cockpit_switch_state is None:
+        return {}
+    merged: dict[int, float] = {}
+    raw_args_sub = cockpit_switch_state.get("args")
+    if isinstance(raw_args_sub, dict):
+        for key, value in raw_args_sub.items():
+            merged[int(key)] = float(value)
+    for name, arg in _GROUND_TRUTH_RAW_ARG.items():
+        if name in cockpit_switch_state:
+            merged[arg] = 1.0 if cockpit_switch_state[name] else 0.0
+    return merged
+
+
 class FakeConsoleAircraftClient:
     """Duck-typed `AircraftLayerClient` covering everything `_build_sources`'
     two concrete tiers call: telemetry (both tiers), world objects (both
@@ -903,13 +937,30 @@ class FakeConsoleAircraftClient:
         #: `write_cockpit_switch` call this fake has recorded, oldest
         #: first.
         self.cockpit_switch_writes: list[tuple[int, int, float]] = []
-        #: `BL-B66` Stage 4b -- `None` (the default) means no cockpit-
-        #: switch sample has arrived yet, matching `get_cockpit_switch_
-        #: state_latest`'s own pre-existing default. A test exercising the
-        #: sight-position readback (`sight_az`/`sight_elev`) sets this
-        #: directly between polls, the same way `mission_start_sequence`
-        #: above is driven.
+        #: `BL-B66` Stage 4b, **repurposed by Stage 4** (`plans/
+        #: effector-sequences/plan.md`) as the single ground-truth store
+        #: both new read paths serve from: its `"args"` sub-dict (if any)
+        #: and any of the named lamp/switch keys `_GROUND_TRUTH_RAW_ARG`
+        #: knows (`"ready_lamp"`, `"align_lamp"`, etc.) are merged into
+        #: one `{arg: raw_value}` map by `_merged_raw_args` below, which
+        #: both `read_args` (the one-shot engine read) and
+        #: `get_watched_args_latest` (the continuous feed) read from --
+        #: kept as one field, and every existing test's literal dict
+        #: unchanged, rather than forcing ~30 call sites to split it in
+        #: two. `None` is the ordinary pre-first-sample startup state,
+        #: same posture the old `get_cockpit_switch_state_latest` had.
         self.cockpit_switch_state: dict[str, Any] | None = None
+        #: Stage 4 -- every `set_watch_args` call's `(watch_id, args)`,
+        #: oldest first; `_watch_id_installed` is the latest one, which
+        #: `get_watched_args_latest` echoes back as confirmation.
+        self.watch_args_calls: list[tuple[str, list[int]]] = []
+        self._watch_id_installed: str | None = None
+        #: Stage 4 -- every `read_args` request's own `args` list, oldest
+        #: first; `fail_read_args` makes the next (and every subsequent,
+        #: until cleared) call raise `AircraftLayerError`, simulating a
+        #: down aircraft layer for the engine's one-shot read.
+        self.read_args_calls: list[list[int]] = []
+        self.fail_read_args = False
         #: `[[BL-B80]]` (`plans/9k113-sight-pointing/plan.md`) -- every
         #: `write_sight_target` call this fake has recorded, oldest first.
         self.sight_target_writes: list[tuple[float, float, float, float, float]] = []
@@ -978,12 +1029,31 @@ class FakeConsoleAircraftClient:
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
 
-    def get_cockpit_switch_state_latest(self) -> dict[str, Any] | None:
-        # `BL-B66` (`plans/9k113-effectors/plan.md`) -- `None` is the
-        # ordinary startup state, same "not an error" posture as every
-        # other `get_*` default on this fake; Stage 4b's tests drive
-        # `self.cockpit_switch_state` directly.
-        return self.cockpit_switch_state
+    def get_watched_args_latest(self) -> dict[str, Any] | None:
+        # Stage 4 -- `None` until this fake's `set_watch_args` has been
+        # called at least once (the real poll loop calls it on its own
+        # first poll, same as production), same "not an error" startup
+        # posture as every other `get_*` default on this fake.
+        if self._watch_id_installed is None:
+            return None
+        merged = _merged_raw_args(self.cockpit_switch_state)
+        return {
+            "t": 0.0,
+            "received_wall_clock_s": 0.0,
+            "watch_id": self._watch_id_installed,
+            "args": {str(arg): value for arg, value in merged.items()},
+        }
+
+    def set_watch_args(self, watch_id: str, args: list[int]) -> None:
+        self.watch_args_calls.append((watch_id, list(args)))
+        self._watch_id_installed = watch_id
+
+    def read_args(self, args: list[int]) -> dict[str, float]:
+        self.read_args_calls.append(list(args))
+        if self.fail_read_args:
+            raise AircraftLayerError("simulated read_args failure")
+        merged = _merged_raw_args(self.cockpit_switch_state)
+        return {str(arg): merged[arg] for arg in args if arg in merged}
 
     def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
         # `BL-B66` -- recorded rather than a true no-op, so a test can
@@ -1029,7 +1099,7 @@ def _real_effector_config() -> tuple[dict[tuple[str, str, str], Any], dict[str, 
     wrong reason."""
     global _real_effector_config_cache
     if _real_effector_config_cache is None:
-        sequences, registry, had_errors = logger_module._load_effector_config()
+        sequences, registry, had_errors, _polled = logger_module._load_effector_config()
         assert not had_errors, "the real committed effector config has load errors"
         _real_effector_config_cache = (sequences, registry)
     return _real_effector_config_cache
@@ -5710,6 +5780,7 @@ def _effector_config_with_mission_start_sequences() -> tuple[
                 ),
             ),
             source_path=Path("fake-mission-start.md"),
+            read_args=frozenset({886}),
         )
     )
     merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.MISSION_START_IN_AIR.value)] = (
@@ -5727,6 +5798,7 @@ def _effector_config_with_mission_start_sequences() -> tuple[
                 ),
             ),
             source_path=Path("fake-mission-start-in-air.md"),
+            read_args=frozenset({673}),
         )
     )
     return merged, registry
@@ -6704,7 +6776,7 @@ def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
 
 
 def test_load_effector_config_round_trips_the_real_committed_files() -> None:
-    sequences, registry, had_errors = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
 
     assert had_errors is False
     assert set(registry) == {
@@ -6730,7 +6802,9 @@ def test_load_effector_config_logs_the_unverified_effector(
     """Stage 1 review follow-up: `EffectorDef.unverified` (`cplr_distr`)
     had no consumer at all -- surfaced as one startup `INFO` line."""
     with caplog.at_level(logging.INFO, logger="logger"):
-        _sequences, registry, _had_errors = logger_module._load_effector_config()
+        _sequences, registry, _had_errors, _polled = (
+            logger_module._load_effector_config()
+        )
 
     assert registry["cplr_distr"].unverified is True
     assert any(
@@ -6754,6 +6828,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
             cmd=3002,
             arg=886,
             values={"on": 1.0, "off": 0.0},
+            shape="default_2_position_tumb",
         )
     }
     fake_registries_by_aircraft = {
@@ -6776,7 +6851,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
         ),
     )
 
-    sequences, registry, had_errors = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
 
     assert had_errors is True
     assert registry == fake_registry
@@ -6795,7 +6870,7 @@ def test_load_effector_config_missing_own_aircraft_directory_is_an_error(
         logger_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
     )
 
-    sequences, registry, had_errors = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
 
     assert had_errors is True
     assert registry == {}

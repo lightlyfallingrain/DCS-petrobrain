@@ -36,6 +36,7 @@ _REGISTRY_FIXTURE = {
         cmd=3028,
         arg=773,
         values={"on": 1.0, "off": 0.0},
+        shape="default_2_position_tumb",
     ),
     "observ": EffectorDef(
         name="observ",
@@ -44,6 +45,7 @@ _REGISTRY_FIXTURE = {
         cmd=3002,
         arg=886,
         values={"on": 1.0, "off": 0.0},
+        shape="default_2_position_tumb",
     ),
 }
 
@@ -103,6 +105,11 @@ def test_good_file_loads(tmp_path: Path) -> None:
             comment="OBSERV",
         ),
     )
+    # plan S4.3: read_args is every switch row's own effector arg, union
+    # every explicit condition's effector arg -- here the condition and
+    # the row both name `missile_power` (773), so the set is just the
+    # two distinct args, not three.
+    assert seq.read_args == frozenset({773, 886})
 
 
 def test_wait_row_parses(tmp_path: Path) -> None:
@@ -178,6 +185,78 @@ def test_unknown_effector_in_condition_drops_the_file(tmp_path: Path) -> None:
     assert sequences == {}
     assert len(errors) == 1
     assert "unknown effector 'ghost' in condition" in errors[0].reason
+
+
+def test_read_args_condition_naming_a_different_effector_is_included(
+    tmp_path: Path,
+) -> None:
+    """plan S4.3: "a condition that names another switch is included"."""
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER
+        + "\n"
+        + _DATA_HEADER
+        + "| observ = on | missile_power | on | | x |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert errors == []
+    key = ("Mi-24P", "copilot", "takeoff")
+    assert sequences[key].read_args == frozenset({886, 773})
+
+
+def test_read_args_over_64_distinct_args_is_a_file_error(tmp_path: Path) -> None:
+    """plan S4.3: "a file whose set exceeds 64 is a D5 file error"."""
+    registry = {
+        f"sw{n}": EffectorDef(
+            name=f"sw{n}",
+            source_element=f"SW{n}-PTR",
+            device=6,
+            cmd=3000 + n,
+            arg=n,
+            values={"on": 1.0, "off": 0.0},
+            shape="default_2_position_tumb",
+        )
+        for n in range(65)
+    }
+    rows_text = "".join(f"| | sw{n} | on | | x |\n" for n in range(65))
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER + "\n" + _DATA_HEADER + rows_text,
+    )
+
+    sequences, errors = load_sequences(tmp_path, {"mi-24p": registry})
+
+    assert sequences == {}
+    assert len(errors) == 1
+    assert "exceed the 64-arg wire bound" in errors[0].reason
+
+
+def test_read_args_exactly_64_distinct_args_loads(tmp_path: Path) -> None:
+    registry = {
+        f"sw{n}": EffectorDef(
+            name=f"sw{n}",
+            source_element=f"SW{n}-PTR",
+            device=6,
+            cmd=3000 + n,
+            arg=n,
+            values={"on": 1.0, "off": 0.0},
+            shape="default_2_position_tumb",
+        )
+        for n in range(64)
+    }
+    rows_text = "".join(f"| | sw{n} | on | | x |\n" for n in range(64))
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER + "\n" + _DATA_HEADER + rows_text,
+    )
+
+    sequences, errors = load_sequences(tmp_path, {"mi-24p": registry})
+
+    assert errors == []
+    key = ("Mi-24P", "copilot", "takeoff")
+    assert len(sequences[key].read_args) == 64
 
 
 def test_unknown_trigger_drops_the_file(tmp_path: Path) -> None:
