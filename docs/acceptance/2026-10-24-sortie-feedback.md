@@ -25,7 +25,7 @@ So the rule has three parts:
 2. While OBSERV is off, write nothing.
 3. Axis values are written only while OBSERV is on.
 
-Fixed on `fix/observ-off-axis-zero`. DoD: fixture-verified (21/21 `test_sight_servo_lua.py`
+Fixed on `fix/observ-off-axis-zero`, merged to `main` 2026-10-24 (`e1d16037`). DoD: fixture-verified (21/21 `test_sight_servo_lua.py`
 against the real `run_sight_servo`, 619/619 full aircraft-layer suite, format/lint/`mypy --strict`/
 `luac5.1 -p`/own-helper-leak scan all clean); Reviewer and Security both APPROVED, no required
 fixes. `#needs-flight` — no fixture can confirm that `SetCommand(..., 0.0)` actually recentres the
@@ -60,3 +60,22 @@ check below.
 `regaining_sight` branch). It is keyed on the cause changing away from `"too_far"`, not on line of
 sight. BL-B76 notes that a terrain-blocked live LOS verdict never reaches belief. The two may be
 related; that is not yet checked. The logs and the branch flown are not yet in hand.
+
+**Explored, 2026-10-24.** Answers, verbatim:
+
+- **"Eyes on" means he sees it.** *"if there is no LOS, there is no eyes on. That's the whole
+  meaning of eyes on, that he *sees* it."*
+- **Wording: option C.** Shown three mocks: A, silence until he really sees it; B, *"Lost it behind
+  the ridge, 9 o'clock"*; C, *"Behind the ridge, 9 o'clock"* said once, when the target leaves the
+  cockpit-frame mask but terrain still hides it. The user: *"option C, because I still get info on
+  where it's believed to be"*.
+- **History.** *"yes, had visual, lost when I turned away and flew mehind ridge, a minute or so"*.
+- **Logs.** The detection trace is *"a 200 MB detection trace, too large"*, so this is diagnosed
+  from code without it.
+
+## F3 — new command: "where is it?" during an attack run
+
+> *"Add command "where is it?" that gives me an update during an attack run based on A) seeing the
+> target B) current belief*
+> *- use the standard attack run guidance phrase, just trigger it on that command. Nothing else
+> needed."*

@@ -45,7 +45,7 @@
   once, on the observed lamp's off→on transition, not at mission start if the unit is already warm.
 
   **Fixed on `fix/observ-off-axis-zero` (DoD pass 2026-10-24, tip `8a46e30a`), merged to `main`
-  2026-10-24.** `docs/acceptance/2026-10-24-sortie-feedback.md` F1: the pilot saw the ASP-17 mark
+  2026-10-24 (`e1d16037`).** `docs/acceptance/2026-10-24-sortie-feedback.md` F1: the pilot saw the ASP-17 mark
   still moving with OBSERV off. `run_sight_servo`'s existing `if not observ_on then ... return end`
   path reset only its own software state, never the AI axis (`CMD_AI_AZ`/`CMD_AI_ELEV` via
   `SetCommand`) — and that axis latches at whatever was last commanded once nothing keeps writing
