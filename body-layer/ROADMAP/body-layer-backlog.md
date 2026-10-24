@@ -134,6 +134,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B93]] — `test_tuning.py` autouse fixture leaves the tuning registry empty for later tests
 - [[BL-B94]] — named, checked catalogue of state params (light level as the example) `[>]` deferred
 - [[BL-B95]] — event-driven behaviour scripting in Lua (was: behaviour trees) `[>]` deferred
+- [[BL-B96]] — crew pipeline by default: no mode flags, F10 and overlay removed, `logger` → `body`
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
