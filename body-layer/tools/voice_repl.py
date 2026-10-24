@@ -15,7 +15,7 @@ hardware in it on hardware being available, the same wrong dependency
 `tools/speak_samples.py` was written to avoid.
 
 Needs both `PYTHONPATH` entries and this subproject's own interpreter, same
-as the live logger -- `belief.tasks` reaches `perception.geometry`, which
+as `body.py` -- `belief.tasks` reaches `perception.geometry`, which
 imports the world-model seam, which pulls in `pyproj`. What it does *not* need
 is a running aircraft layer, a world-model database, or a theatre:
 

@@ -9,7 +9,7 @@ transport-recon.md`): the collector alone can play a WAV file.
 
 **Queueing/preemption (plan Decision 4), decided here, not in
 `audio-adapter` or `body-layer`.** `winsound` (like any audio API) plays one
-sound at a time, and `logger.py`'s `--crew-text` poll loop can emit several
+sound at a time, and `body.py`'s poll loop can emit several
 lines in one poll -- garbled overlapping speech is worse than a short queue
 delay, so routine lines queue FIFO and play in order. A single background
 worker thread draining a `queue.Queue` of temp `.wav` paths naturally

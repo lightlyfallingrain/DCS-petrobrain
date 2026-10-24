@@ -9,27 +9,24 @@ some point."* So the F10 command set is now the derived, legacy thing,
 and this vocabulary is free to grow past it.
 
 The split below is kept, but only as history rather than an obligation.
-`LEGACY_F10_TOKENS` are the 15 that happen to coincide with the F10 menu
-today, and `VOICE_ONLY_TOKENS` are the ones that never existed there.
-**Divergence between the two is expected and is not a bug** -- do not
-"fix" a mismatch against `aircraft-layer`'s `ALLOWED_COMMANDS` by
-deleting anything here. When the F10 path is removed the split collapses
-and both tuples fold into `TOKENS`.
-`audio-adapter` must stand alone (root `CLAUDE.md`'s module-independence
-rule -- the body-layer<->world-model in-process import is the sole
-sanctioned exception, and this is not it), so it cannot import
+`LEGACY_F10_TOKENS` are the 15 that happened to coincide with the former F10
+menu, and `VOICE_ONLY_TOKENS` are the ones that never existed there.
+**Divergence between the two is expected and is not a bug.** The F10 path
+itself was removed by `BL-B96` (`plans/default-crew-pipeline/plan.md`),
+along with aircraft-layer's `ALLOWED_COMMANDS`/`f10_command_receiver.py`,
+which had hand-synced this same 15-token set with `crew_console.py` and the
+Hook script's F10 menu; the split's *value* here stays unchanged (that
+plan's own Decision) since it costs nothing and the constant is pure
+naming/classification, not a transport dependency. `audio-adapter` must
+stand alone (root `CLAUDE.md`'s module-independence rule -- the
+body-layer<->world-model in-process import is the sole sanctioned
+exception, and this is not it), so it cannot import
 `body-layer/src/belief/crew_console.py`'s `_RELATIVE_SCAN_TOKENS`/
-`_BEARING_SCAN_TOKENS` tables directly. `aircraft-layer/src/collector/
-f10_command_receiver.py`'s `ALLOWED_COMMANDS` tuple is the same 15 tokens,
-hand-synced with that same crew_console.py source and with the Hook
-script's F10 menu -- this file follows that established precedent (a third
-hand-synced copy) rather than inventing a shared-constants mechanism.
+`_BEARING_SCAN_TOKENS` tables directly.
 
-Nothing here is synced automatically, and as of the direction above
-nothing here needs to be synced at all. Stage 2's matcher and the
-body-layer command path are where these tokens acquire behaviour; that
-path is the one that must cover `TOKENS`, and it is independent of
-whatever the F10 menu still offers.
+Nothing here is synced automatically. Stage 2's matcher and the body-layer
+command path are where these tokens acquire behaviour; voice is now the
+only transport.
 
 `PHRASES` is this file's own addition, not mirrored from anywhere -- it is
 the recogniser **bias hint list**: the spoken phrasings a constrained
@@ -46,11 +43,9 @@ from __future__ import annotations
 
 import re
 
-#: The 15 tokens that also exist in the legacy F10 radio menu, in that
-#: menu's own order. Kept as a named group for traceability while the F10
-#: path still runs; it carries no obligation to match, since that path is
-#: being retired (see this module's docstring). Expect it to fold into
-#: `TOKENS` when F10 is removed.
+#: The 15 tokens that also existed in the now-removed F10 radio menu, in
+#: that menu's own order. Kept as a named group for traceability only --
+#: it carries no obligation to match (see this module's docstring).
 LEGACY_F10_TOKENS: tuple[str, ...] = (
     "scan_ahead",
     "scan_left",

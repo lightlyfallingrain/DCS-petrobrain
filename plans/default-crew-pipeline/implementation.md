@@ -217,3 +217,45 @@ narrowed to voice-only).
    fast with a clear `parser.error` rather than silently running with speech off.
 4. No other DCS-side change: the mission-start Hook and the telemetry/line-of-sight/firing Hooks
    are untouched by this feature.
+
+### Review fixes
+
+Applied `plans/default-crew-pipeline/review.md`'s one required fix and all three optional items.
+
+- **Required fix — command map's F10 affordance claim removed** (`docs/status/
+  petrovich-commands.html`): dropped the three `.f10`-badge spans (legend, card 3 "Search", card
+  4 "Watch a contact"), the card-3 caption clause ("F10 has ahead/left/right/full and the compass
+  points."), and the now-unused `.f10` CSS rule; updated the header date to 2026-10-25. This is the
+  manual redraw step the plan called out (`/command-map`'s judgement step, not the mechanical
+  token check alone) — the token set itself (`TOKENS`/`LEGACY_F10_TOKENS`) is unchanged per the
+  plan's own Decision, so `command-map-check.py` reporting "current" before this fix was never
+  evidence the page was correct (`.claude/agent-memory/reviewer/
+  feedback_command_map_check_vs_hand_redraw.md`). Re-stamped with `--stamp` after the HTML edit,
+  then again after the vocabulary.py prose fix below changed the file's hash with no token
+  change; `command-map-check.py` now exits 0.
+- **Optional — `aircraft-layer/src/collector/audio_sender.py`** module docstring: `` `logger.py`'s
+  `--crew-text` poll loop `` → `` `body.py`'s poll loop `` (the flag no longer exists, behaviour is
+  unconditional).
+- **Optional — `aircraft-layer/src/schema/watched_args.py:111`**: `` `logger.py`'s own poll-block
+  check `` → `` `body.py`'s own poll-block check ``. Not touched by the original diff at all — a
+  pre-existing miss the plan's Stage 8 sweep should have caught, per the review.
+- **Optional — `audio-adapter/src/vocabulary.py`** module docstring and the `LEGACY_F10_TOKENS`
+  comment: replaced present/future-tense claims ("while the F10 path still runs," "that path is
+  being retired," "When the F10 path is removed the split collapses," `aircraft-layer`'s
+  `ALLOWED_COMMANDS`/`f10_command_receiver.py` described as if still present) with past tense —
+  the F10 path and `aircraft-layer`'s own copy of the token set were in fact removed by this same
+  branch (`BL-B96`). The constant's *value* is unchanged, per the plan's own Decision; only the
+  surrounding prose was stale.
+- **Optional — `body-layer/tools/voice_repl.py:18`**: "same as the live logger" → "same as
+  `body.py`" (generic leftover reference to the pre-rename module name).
+
+#### Checks (re-run after the fixes)
+
+- aircraft-layer: `ruff format --check`/`ruff check` on touched files + `src tests` — pass;
+  `mypy --strict` — pass (25 source files); `pytest tests -q` — 581 passed.
+- audio-adapter: `ruff format --check`/`ruff check src tests` — pass; `mypy --strict` — pass
+  (16 source files); `pytest tests -q` — 349 passed, 2 skipped.
+- body-layer: `ruff format --check`/`ruff check src tests tools` — pass; `mypy --strict` — pass
+  (74 source files); `pytest tests -q` — 2576 passed, 4 xfailed.
+- `python3 .claude/scripts/command-map-check.py` — exits 0 ("command map current (67 tokens)").
+   are untouched by this feature.
