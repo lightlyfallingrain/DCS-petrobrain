@@ -35,7 +35,6 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
-from .cockpit_switch import CockpitSwitchParseError, CockpitSwitchState
 from .f10_command import F10CommandEvent, F10CommandParseError
 from .line_of_sight import (
     LineOfSightParseError,
@@ -56,6 +55,13 @@ from .unit_velocity import (
     UnitVelocitySample,
     UnitVelocitySnapshot,
 )
+from .watched_args import (
+    MAX_WATCHED_ARG_NUMBER,
+    MAX_WATCHED_ARGS,
+    WatchedArgsParseError,
+    WatchedArgsState,
+    parse_arg_values,
+)
 from .world_objects import (
     WorldObjectParseError,
     WorldObjectSample,
@@ -63,8 +69,8 @@ from .world_objects import (
 )
 
 __all__ = [
-    "CockpitSwitchParseError",
-    "CockpitSwitchState",
+    "MAX_WATCHED_ARGS",
+    "MAX_WATCHED_ARG_NUMBER",
     "F10CommandEvent",
     "F10CommandParseError",
     "LineOfSightParseError",
@@ -87,9 +93,12 @@ __all__ = [
     "UnitVelocityParseError",
     "UnitVelocitySample",
     "UnitVelocitySnapshot",
+    "WatchedArgsParseError",
+    "WatchedArgsState",
     "WorldObjectParseError",
     "WorldObjectSample",
     "WorldObjectsSnapshot",
+    "parse_arg_values",
 ]
 
 # Field names as they appear in the JSON line Export.lua sends. Kept short

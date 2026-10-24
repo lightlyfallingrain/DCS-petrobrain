@@ -78,4 +78,13 @@
     to settle, not `BL-B64`'s: **which missile word to speak**, and **the flight-time callout's
     interim**.
 
-  Related: `[[BL-B64]]`, `[[BL-B66]]`, `[[BL-B65]]`, `[[BL-B63]]`, `[[BL-B62]]`, `[[BL-14]]`.
+  **Readback note (`[[BL-B90]]` Stage 4, 2026-10-24):** arg 962 (launch permission lamp) and arg 673
+  (the weapons safety bar) are no longer read continuously by anything after Stage 4 —
+  `push_cockpit_switch_state` is gone, and `GuidanceUnitState.launch_perm_observed`/
+  `weapon_safety_observed` currently have no reader. This entry chooses, for each, whether it goes
+  into `body-layer/config/sequences/mi-24p/polled.toml` (continuous, if the run needs to react to a
+  state change on its own) or is read at need via a trigger's own one-shot read (if it is only ever
+  checked at a specific moment, e.g. "launch permission at the moment of firing").
+
+  Related: `[[BL-B64]]`, `[[BL-B66]]`, `[[BL-B65]]`, `[[BL-B63]]`, `[[BL-B62]]`, `[[BL-14]]`,
+  `[[BL-B90]]`.

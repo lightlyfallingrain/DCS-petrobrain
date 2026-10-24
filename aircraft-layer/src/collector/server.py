@@ -19,12 +19,15 @@ Petrovich-indication line has a top-level `"indication"` key instead; a
 Petrovich-wheel line (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) has
 a top-level `"wheel"` key instead; a push-to-talk line has a top-level
 `"ptt"` key instead; a SPU-8 intercom-state line (`plans/spu8-intercom/
-plan.md` Stage 1) has a top-level `"net1"` key instead; a 9K113
-cockpit-switch state line (`plans/9k113-effectors/plan.md`, BL-B66
-Stage 1) has a top-level `"missl_pw"` key instead (see
-`schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
+plan.md` Stage 1) has a top-level `"net1"` key instead; the continuous
+watched-cockpit-arg line (`plans/effector-sequences/plan.md` Stage 4,
+replacing the old 9K113 cockpit-switch feed) has a top-level `"watch_id"`
+key instead, and a one-shot read reply has a top-level `"read_id"` key
+instead (see `schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
 `schema.PetrovichIndicationSample`/`schema.PetrovichWheelSample`/
-`schema.PttSample`/`schema.Spu8Sample`/`schema.CockpitSwitchState`).
+`schema.PttSample`/`schema.Spu8Sample`/`schema.WatchedArgsState`). An old
+`Export.lua`'s cockpit-switch line (top-level `"missl_pw"` key) is dropped
+at DEBUG rather than parsed -- that feed no longer exists on this side.
 `_handle_line` distinguishes them
 by that key's presence before parsing, rather than trying each parser in
 turn and falling back on failure -- a genuinely malformed line of any kind
@@ -48,19 +51,18 @@ import time
 from types import TracebackType
 from typing import Self
 
+from collector.arg_read_broker import ArgReadBroker
 from collector.cache import (
-    CockpitSwitchCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
     SightServoCache,
     Spu8Cache,
     TelemetryCache,
+    WatchedArgsCache,
     WorldObjectsCache,
 )
 from schema import (
-    CockpitSwitchParseError,
-    CockpitSwitchState,
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
     PetrovichWheelParseError,
@@ -73,6 +75,8 @@ from schema import (
     Spu8Sample,
     TelemetryParseError,
     TelemetrySample,
+    WatchedArgsParseError,
+    WatchedArgsState,
     WorldObjectParseError,
     WorldObjectsSnapshot,
 )
@@ -97,7 +101,13 @@ logger = logging.getLogger(__name__)
 #: reshape, the dropped `sight_az`/`sight_elev` fields, the three new
 #: lamp fields, and the new `sight_servo` status line -- see `Export.
 #: lua`'s own matching comment on `EXPORT_SCRIPT_VERSION`.
-EXPECTED_EXPORT_VERSION = "2026-10-22c"
+#: Bumped again 2026-10-24 (`plans/effector-sequences/plan.md` Stage 4) for
+#: a **non-additive** reshape: `push_cockpit_switch_state` and its wire
+#: key "missl_pw" are removed entirely (an old `Export.lua`'s cockpit-
+#: switch line is now dropped at DEBUG rather than parsed), replaced by
+#: two new inbound ops (`watch_args`, `read_args`) and two new line kinds
+#: (`"watch_id"`, `"read_id"`).
+EXPECTED_EXPORT_VERSION = "2026-10-24"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -157,11 +167,21 @@ class CollectorServer:
         # without a Spu8Cache simply drops "net1" lines.
         spu8_cache: Spu8Cache | None = None,
         # Same optional-cache reasoning again: a collector without a
-        # CockpitSwitchCache simply drops "missl_pw" lines.
-        cockpit_switch_cache: CockpitSwitchCache | None = None,
-        # Same optional-cache reasoning again: a collector without a
         # SightServoCache simply drops "servo_mode" lines.
         sight_servo_cache: SightServoCache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # WatchedArgsCache simply drops "watch_id" lines -- replaces
+        # cockpit_switch_cache above (`plans/effector-sequences/plan.md`
+        # Stage 4, decided "remove").
+        watched_args_cache: WatchedArgsCache | None = None,
+        # Not optional, unlike every cache above -- a collector with no
+        # `ArgReadBroker` simply drops "read_id" lines (the one-shot read
+        # reply has nowhere to go without it), same posture as a `None`
+        # optional cache, but this one is always constructed by `__main__.
+        # py` alongside the broker's own `read()` caller (`api.server`'s
+        # `/query/read_args` handler), so it is kept required rather than
+        # adding a fourth way to express "not configured".
+        arg_read_broker: ArgReadBroker | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
@@ -171,7 +191,8 @@ class CollectorServer:
         self._petrovich_wheel_cache = petrovich_wheel_cache
         self._ptt_cache = ptt_cache
         self._spu8_cache = spu8_cache
-        self._cockpit_switch_cache = cockpit_switch_cache
+        self._watched_args_cache = watched_args_cache
+        self._arg_read_broker = arg_read_broker
         self._sight_servo_cache = sight_servo_cache
         self._host = host
         self._port = port
@@ -333,6 +354,13 @@ class CollectorServer:
                     reported,
                     EXPECTED_EXPORT_VERSION,
                 )
+            # `plans/effector-sequences/plan.md` Stage 4: a version line
+            # means a new Export.lua session (mission start/restart, or a
+            # reconnect) whose watched set was reset -- clearing turns the
+            # cache's stale pre-restart line into `None`, which is what
+            # tells body-layer to re-send its `watch_args` install.
+            if self._watched_args_cache is not None:
+                self._watched_args_cache.clear()
             return
 
         if "objects" in data:
@@ -404,18 +432,39 @@ class CollectorServer:
             return
 
         if "missl_pw" in data:
-            # Ahead of the telemetry fallthrough for the same reason the
-            # "ptt"/"net1" branches above are.
+            # That feed no longer exists on this side (`plans/
+            # effector-sequences/plan.md` Stage 4, decided "remove") --
+            # an old deployed Export.lua's cockpit-switch line is dropped
+            # at DEBUG rather than misreported as malformed telemetry,
+            # same posture as every other VERSION-MISMATCH-era removal.
+            logger.debug(
+                "dropping cockpit-switch line from an old Export.lua: %r", line
+            )
+            return
+
+        if "watch_id" in data:
+            # `plans/effector-sequences/plan.md` Stage 4 -- the continuous
+            # watched-args feed, replacing the cockpit-switch line above.
+            # Ahead of the telemetry fallthrough for the same reason every
+            # other named kind above is.
             try:
-                cockpit_switch_sample = CockpitSwitchState.from_dict(
+                watched_sample = WatchedArgsState.from_dict(
                     data, received_wall_clock_s=time.time()
                 )
-            except CockpitSwitchParseError:
-                logger.warning("dropping malformed cockpit-switch line: %r", line)
+            except WatchedArgsParseError:
+                logger.warning("dropping malformed watched-args line: %r", line)
                 return
-            logger.debug("parsed cockpit-switch sample: %r", cockpit_switch_sample)
-            if self._cockpit_switch_cache is not None:
-                self._cockpit_switch_cache.push(cockpit_switch_sample)
+            logger.debug("parsed watched-args sample: %r", watched_sample)
+            if self._watched_args_cache is not None:
+                self._watched_args_cache.push(watched_sample)
+            return
+
+        if "read_id" in data:
+            # The one-shot read reply (S4.2) -- routed straight to the
+            # broker, never cached, since it answers exactly one waiting
+            # `ArgReadBroker.read()` call and nothing else ever reads it.
+            if self._arg_read_broker is not None:
+                self._arg_read_broker.handle_reply_line(data)
             return
 
         if "servo_mode" in data:

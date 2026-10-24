@@ -65,12 +65,19 @@ is opened and run on its own background thread the same way as
 direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
 reads.
 
-A `CockpitSwitchCache` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1) is
-constructed the same way as `spu8_cache` -- fed by `CollectorServer` from
-Export.lua's "missl_pw" lines, served by `GET /cockpit_switch/latest`. Its
-write side (`POST /command/cockpit_switch`) reuses `command_sender`
-(above), since both channels target `Export.lua`'s one inbound command
-listener.
+A `WatchedArgsCache` + `ArgReadBroker` pair (`plans/effector-sequences/
+plan.md` Stage 4) replaces the former `CockpitSwitchCache` (decided,
+"remove"). `WatchedArgsCache` is constructed the same way as `spu8_cache`
+-- fed by `CollectorServer` from Export.lua's "watch_id" lines, served by
+`GET /watched_args/latest`; its install side (`POST /command/watch_args`)
+reuses `command_sender` (above). `ArgReadBroker` is different in kind from
+every cache here: it is not fed by `CollectorServer` passively, it *drives*
+a UDP send (also via `command_sender`) and then blocks the calling
+`POST /query/read_args` HTTP handler thread until `CollectorServer`'s own
+connection thread calls `handle_reply_line` on the matching "read_id" TCP
+reply -- so both halves of this request/reply pair, and the single
+`ArgReadBroker` instance connecting them, are shared between the collector
+and API server exactly as `WatchedArgsCache` is.
 
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
@@ -91,9 +98,9 @@ import time
 from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
+from collector.arg_read_broker import ArgReadBroker
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
-    CockpitSwitchCache,
     F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
@@ -104,6 +111,7 @@ from collector.cache import (
     Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
+    WatchedArgsCache,
     WorldObjectsCache,
 )
 from collector.command_sender import DEFAULT_HOST as COMMAND_DEFAULT_HOST
@@ -338,13 +346,15 @@ def main() -> None:
     audio_sender = AudioPlaybackSender(gate_state=spu8_cache.gate_state)
     audio_sender.open()
 
-    # Same shape as spu8_cache above -- the 9K113 cockpit-switch state
-    # feed (plans/9k113-effectors/plan.md, BL-B66 Stage 1). Reuses
-    # command_sender (above) to write, since both channels target
-    # Export.lua's one inbound command listener.
-    cockpit_switch_cache = CockpitSwitchCache()
+    # `plans/effector-sequences/plan.md` Stage 4 -- replaces the former
+    # cockpit_switch_cache. Reuses command_sender (above) for the install
+    # side (POST /command/watch_args); the one-shot read side
+    # (POST /query/read_args) is arg_read_broker below, which also drives
+    # command_sender directly (its own send_read_args).
+    watched_args_cache = WatchedArgsCache()
+    arg_read_broker = ArgReadBroker(command_sender)
     # `[[BL-B80]]` v2 -- the DCS-slave servo's own status feed, a second
-    # cache from cockpit_switch_cache above (see `schema.sight_servo`'s
+    # cache from watched_args_cache above (see `schema.sight_servo`'s
     # own "Departure, stated").
     sight_servo_cache = SightServoCache()
 
@@ -355,8 +365,9 @@ def main() -> None:
         petrovich_wheel_cache,
         ptt_cache=ptt_cache,
         spu8_cache=spu8_cache,
-        cockpit_switch_cache=cockpit_switch_cache,
         sight_servo_cache=sight_servo_cache,
+        watched_args_cache=watched_args_cache,
+        arg_read_broker=arg_read_broker,
         host=args.host,
         port=args.port,
     )
@@ -382,8 +393,9 @@ def main() -> None:
         look_direction_sender=look_direction_sender,
         emitter_tracker=emitter_tracker,
         mission_start_cache=mission_start_cache,
-        cockpit_switch_cache=cockpit_switch_cache,
+        watched_args_cache=watched_args_cache,
         sight_servo_cache=sight_servo_cache,
+        arg_read_broker=arg_read_broker,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
