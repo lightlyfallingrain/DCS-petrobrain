@@ -106,3 +106,43 @@
   batches above) **and then Stage 4** — the generic low-rate/on-demand switch readback (R7),
   BL-B90's own last stage, not deferred. No merge yet: the user decides when, after (at least) this
   card's flight.
+
+  **Stage 4 — readback by need (option B) — built, reviewed, DoD-passed, 2026-10-24**
+  (`feature/effector-sequences-stage4`, tip `59722228`,
+  `plans/effector-sequences/dod-check-stage4.md`). Replaces the per-frame switch-position push
+  (`push_cockpit_switch_state`, 9 args/frame) with two readback classes: a synchronous **one-shot**
+  read per sequence run (at run start and after each wait row, via `POST /query/read_args` →
+  the collector's `ArgReadBroker` → `Export.lua` answering the same frame) for sequence-watched
+  switches, and a small **continuously-polled** set (`REQUIRED_POLLED_ARGS` 886/898/960, union
+  `polled.toml`, config not code) for the three args Petrovich's own code reads every poll.
+  `EffectorRunState.assumed_writes` lets a later trigger's row see an earlier trigger's same-poll
+  write without rereading DCS; an unknown self-check readback writes only when the effector is
+  `absolute_write` (confirmed only for `default_2_position_tumb`), otherwise skips with a WARNING
+  rather than risk a blind write. `GET /cockpit_switch/latest` and `CockpitSwitchState` are
+  removed. Security plan review required one change (finiteness/type validation on the one-shot
+  response, mirroring the continuous feed's existing guard) — implemented on both the collector
+  and body-layer sides, closed before implementation; security deep analysis APPROVED, no
+  findings; performance review APPROVED (MONITOR on two bounded, already-documented risks: the
+  synchronous HTTP-thread block capped at 8 outstanding × 0.25 s, and up to N sequential blocking
+  reads in one `advance()` call if every shipped trigger fired at once, which none does). Reviewer
+  required two fixes on first pass (the test-fake "rewrite" was a relocated adapter rather than
+  the call-site rewrite the plan/user's "rewrite" decision specified; `body-layer/CLAUDE.md`'s
+  BL-B90 paragraph was stale) — both resolved and verified by mutation on re-review; **APPROVED**.
+  Mechanical checks (ruff format/check, mypy --strict, pytest, Lua syntax) pass clean in both
+  `aircraft-layer` (608 tests) and `body-layer` (2650 passed, 4 xfailed), re-confirmed
+  independently by DoD. #needs-flight — the re-flight card
+  (`docs/acceptance/2026-10-23-bl-b90-sequences-reflight.md`) is updated for Stage 4 (branch
+  `feature/effector-sequences-stage4`, Export.lua redeploy, revised block 2/3/5 expectations, new
+  blocks 7-8 for collector-restart and mission-restart) but has not been flown — nothing here has
+  been verified against a real cockpit yet, only built and reviewed. **On branch
+  `feature/effector-sequences-stage4`, pending the user's re-flight, then merge** — same posture
+  as Stage 3 before it: no merge until the user decides, after at least this card's flight.
+
+  **Milestone-completion question**: Stage 4's completion closes BL-B90's own stage list (R7/R15
+  REVISED was explicitly this milestone's last stage) — once flown and merged, BL-B90 itself is
+  done, not just this batch. It sharpens one thing for the next milestone: `polled.toml`'s
+  config-driven continuous set is now the natural home for 962 (launch-permission lamp) and the
+  weapons-bar args whenever `BL-B67` gains a reader for them — `body-layer/ROADMAP/BL-B67.md` now
+  names this choice explicitly, so that entry does not have to rediscover the mechanism. It also
+  establishes the one-shot-read seam (`POST /query/read_args`) that `BL-B95`'s eventual scripted
+  `effector(name):get` would reuse directly, before any scripting work begins.
