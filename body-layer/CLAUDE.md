@@ -29,13 +29,10 @@ changes faster than this doc gets touched.
 
 **The surface is *commands*, not "F10 commands."** `CrewConsole.handle_command`
 (`plans/voice-command-completeness/plan.md` Stage 1, renamed from `handle_f10_command`) is the
-single dispatcher for every player-issued command token, reached from three input surfaces: the
-DCS F10 radio menu, a spoken voice command, and a committed confirm-band answer. The F10 menu is
-one legacy transport into that dispatcher, not the concept it names — per user direction
-2026-09-19, voice is primary and the F10 menu "may go stale" once it is retired; the transport
-names (`F10CommandQueue`, `get_f10_commands`, `--f10-commands`) stay as-is deliberately (see that
-plan's Decision 4) since they describe the F10 radio-menu transport specifically, which is real
-and still running, and renaming code scheduled for deletion buys nothing.
+single dispatcher for every player-issued command token, reached from two input surfaces: a
+spoken voice command and a committed confirm-band answer. The F10 radio menu was a third, legacy
+transport into that dispatcher — removed entirely by `BL-B96`
+(`plans/default-crew-pipeline/plan.md`); voice is now the only player-command transport.
 
 ## Tech stack
 
@@ -113,70 +110,32 @@ Omitting `../world-model/src` from `PYTHONPATH` fails immediately at startup wit
 transitively via `perception.association`), not a delayed failure once a poll needs elevation
 data — both path entries are required from the first line.
 
-Add `--console` (PB-2 Stage 3, extended by Stage 4) to run the belief-consuming pipeline instead
-of the plain text logger: both sources are built at `emit_mode="every_poll"` and fed into a
-`belief.contacts.ContactStore` (`ingest` + `tick`) each poll, per Stage 3's fix for source-level
-debounce starving the belief layer's decay/lifecycle logic of continuity. `main()` runs that poll
-loop on a background daemon thread and drives an interactive `belief.console.Console` REPL over
-stdin in the foreground — type `contacts`, `show <id>`, `history <id>`, `find <text>`,
-`watch <id>` / `unwatch <id>`, or `stats` and press enter. The REPL reads `ConsolePerceptionRunner.
-last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
+**The crew pipeline is the only thing `body.py` does — there is no mode flag to select it.**
+(`BL-B96`, `plans/default-crew-pipeline/plan.md`.) Both perception sources are built at
+`emit_mode="every_poll"` and fed into a `belief.contacts.ContactStore` (`ingest` + `tick`) each
+poll; `main()` runs that poll loop on a background daemon thread and drives the interactive
+`CrewConsole` REPL over stdin in the foreground. Speech out (`POST /speak`) and speech in
+(`GET /transcripts/poll`) are always on, both through one `AudioAdapterClient` built from the now-
+required `--audio-adapter-url` (`parser.error` if omitted, same posture as
+`--aircraft-layer-url`). The F10 radio menu and the in-cockpit text overlay — both previously
+opt-in transports into the same `CrewConsole.handle_command`/speech funnel — were removed
+entirely by `BL-B96`; voice is the only player-command transport and the only output channel.
 
-Add `--overlay` alongside `--console` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) to also
-mirror belief lifecycle events (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) to a DCS
-in-cockpit text overlay via the same `--aircraft-layer-url` instance's `POST /text/push` — no
-separate URL/flag needed. Defaults off; without it, behavior is unchanged. See
-`aircraft-layer/WORKFLOW.md`'s "Deploy the overlay Hook script" section for the DCS-side half of
-this channel — UNVERIFIED against a live DCS session as of authorship.
+`--speech-log PATH` writes one JSON line per recognised transcript: what was heard, the seven
+recognition fields, and what was done about it (`act`/`confirm`/`say_again`/`fallthrough`, plus
+the acted token). **It exists because an utterance matching no command was previously
+unobservable** — it fell through to escalation, and the default brain client does nothing, so the
+single most useful case for debugging recognition left no trace anywhere. Matched utterances are
+logged too: a false fire is only findable by seeing what he actually acted on. **Defaults on**
+(`DEFAULT_SPEECH_LOG_PATH`, `logs/speech.jsonl`, created if absent) even without the flag, since an
+ordinary sortie is exactly when the data this log exists for gets produced — `--no-speech-log`
+opts back out; an explicit `--speech-log` always wins. Unbuffered, unlike the detection trace —
+speech is a handful of rows per sortie, and the row most worth having is the one immediately
+before something went wrong, which a buffer would still be holding when the process was killed to
+investigate.
 
-`--overlay` also combines with `--crew-text` (`plans/overlay-speech-callouts/plan.md`): instead of
-the lifecycle-event mirror above, it pushes every line `CrewConsole` speaks — readbacks, contact
-reports, drained lifecycle events, and injected urgent calls (prefixed `"!! "` on the pushed
-overlay copy only, never on the printed/stdout copy) — verbatim, i.e. exactly what a crew member
-would actually say, a radio-callout feed rather than a debug mirror. `--console` and `--crew-text`
-stay mutually exclusive with each other; `--overlay` is valid alongside either.
-
-Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`, vocabulary widened
-by `plans/f10-command-vocabulary/plan.md`) to poll and dispatch player-selected DCS F10 radio-menu
-commands — the 15-token scan/watch/cancel vocabulary (`Scan` -> `Ahead`/`Left`/`Right`/`Full`/eight
-compass `Bearing` items, `Watch` -> `Nearest`/`Nearest Air Defence`, `Cancel Task`) — through `CrewConsole.
-handle_command`, the same output funnel typed/spoken text already goes through. Only meaningful
-with `--crew-text`; defaults off, a true no-op when absent, same additive posture as `--overlay`.
-See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
-section for the DCS-side half of this channel (including its `autoexec.cfg` opt-in) — UNVERIFIED
-against a live DCS session as of authorship.
-
-Add `--speech-audio --audio-adapter-url URL` alongside `--crew-text` (BL-10 first slice, `plans/
-tts-voice-output/plan.md`) to synthesize and play every line `CrewConsole` speaks via a running
-`audio-adapter` instance's `POST /speak` — the same lines `--overlay` mirrors to the in-cockpit text
-overlay, pushed through the identical `_print` funnel, just to a different sink/process. Only
-meaningful with `--crew-text`; `--speech-audio` requires `--audio-adapter-url` (`parser.error` if
-omitted); defaults off, a true no-op when absent, same additive posture as `--overlay`/
-`--f10-commands`. `--overlay` and `--speech-audio` are independent and combine freely. See
-`audio-adapter/CLAUDE.md` for how to run that process, including its own `--target local` no-other-
-subproject-needed dev path.
-
-Add `--speech-input --audio-adapter-url URL` alongside `--crew-text` (Stage 3, `plans/
-inbound-speech/plan.md`) to poll and dispatch recognised speech transcripts through
-`CrewConsole.handle_transcript` — the inbound counterpart to `--speech-audio`'s outbound path,
-polling the same `audio-adapter` instance's `GET /transcripts/poll` instead of pushing to
-`POST /speak`. Independent of `--speech-audio` (a separate concern, audio in vs. audio out) —
-both share one `AudioAdapterClient` instance when both are set, but either works alone. Only
-meaningful with `--crew-text`; `--speech-input` requires `--audio-adapter-url`; defaults off, a
-true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-adapter` run with
-`--whisper-model` for `GET /transcripts/poll` to ever have anything to drain — see
-`audio-adapter/CLAUDE.md`.
-
-Add `--speech-log PATH` alongside `--crew-text --speech-input` to write one JSON line per
-recognised transcript: what was heard, the seven recognition fields, and what was done about it
-(`act`/`confirm`/`say_again`/`fallthrough`, plus the acted token). **It exists because an utterance
-matching no command was previously unobservable** — it fell through to escalation, and the default
-brain client does nothing, so the single most useful case for debugging recognition left no trace
-anywhere. Matched utterances are logged too: a false fire is only findable by seeing what he
-actually acted on. `parser.error`s without both flags; defaults off, a true no-op when absent, same
-additive posture as `--detection-trace`. Unbuffered, unlike the detection trace — speech is a
-handful of rows per sortie, and the row most worth having is the one immediately before something
-went wrong, which a buffer would still be holding when the process was killed to investigate.
+The other per-run debug logs below (`--detection-trace`, `--group-trace`, `--slew-trace`,
+`--mission-memory`, `--belief-truth-log`) default off and are a true no-op when absent.
 
 **Voice-latency instrumentation (`plans/voice-latency-instrumentation/plan.md`).** A per-utterance
 `correlation_id`, minted by `audio-adapter`'s capture process at PTT release, now rides the whole
@@ -193,24 +152,22 @@ Reduce `--latency-log` (audio-adapter, both its capture and server processes) to
 `--speech-log`/`--belief-truth-log` with `tools/join_voice_latency.py` for the joined per-utterance
 timeline — see that script's own module docstring for how to read one.
 
-Add `--detection-trace PATH` alongside `--console` or `--crew-text` (BL-9, `plans/
-bl9-debug-visualization/plan.md`) to write a per-poll, per-object naked-eye visibility-gate trace
-(JSONL) to `PATH` — the answer to "why did Petrovich not see that" after a flight: which of
-`check_visibility`'s three gates (cockpit mask / angular-size-or-range-cap / terrain LOS) decided
-each `LoGetWorldObjects` candidate's fate, at what true range/bearing, plus (once admitted) which
-`Contact` it was folded into. Reduce a raw trace with `body-layer/tools/
-summarize_detection_trace.py PATH` for the actual flight-debrief table (first-admitted range per
-object, and the never-admitted-but-in-FOV list) — the raw JSONL is not meant to be read directly.
-`parser.error`s if passed without `--console` or `--crew-text` (there is nothing to join against
-belief without one of those poll loops); defaults off, a true no-op when absent, same additive
-posture as `--overlay`/`--f10-commands`. Only the naked-eye channel is traced — the scope/hybrid
-channel has no geometric gate chain to instrument (a real HelperAI detection either exists or it
-doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in this codebase
-deliberately allowed to hold both ground truth and belief at once, and is read-only against
-`ContactStore` — see that module's own docstring for the boundary this preserves.
+Add `--detection-trace PATH` (BL-9, `plans/bl9-debug-visualization/plan.md`) to write a per-poll,
+per-object naked-eye visibility-gate trace (JSONL) to `PATH` — the answer to "why did Petrovich
+not see that" after a flight: which of `check_visibility`'s three gates (cockpit mask /
+angular-size-or-range-cap / terrain LOS) decided each `LoGetWorldObjects` candidate's fate, at
+what true range/bearing, plus (once admitted) which `Contact` it was folded into. Reduce a raw
+trace with `body-layer/tools/summarize_detection_trace.py PATH` for the actual flight-debrief
+table (first-admitted range per object, and the never-admitted-but-in-FOV list) — the raw JSONL is
+not meant to be read directly. Defaults off, a true no-op when absent, same additive posture as
+every other per-run log. Only the naked-eye channel is traced — the scope/hybrid channel has no
+geometric gate chain to instrument (a real HelperAI detection either exists or it doesn't). The
+join itself (`src/detection_trace_writer.py`) is the one module in this codebase deliberately
+allowed to hold both ground truth and belief at once, and is read-only against `ContactStore` —
+see that module's own docstring for the boundary this preserves.
 
-Add `--slew-trace PATH` alongside `--crew-text` (`BL-B66` Stage 4b, extended by `[[BL-B80]]` v2,
-`plans/9k113-sight-pointing/plan.md`) to write one JSON line per poll to `PATH`: desired (body) vs.
+Add `--slew-trace PATH` (`BL-B66` Stage 4b, extended by `[[BL-B80]]` v2, `plans/
+9k113-sight-pointing/plan.md`) to write one JSON line per poll to `PATH`: desired (body) vs.
 actual 9K113 sight aim, the simulated `SightHead`'s own world-frame state (mode, world direction,
 goal, aim source), and — when `GET /sight_servo/latest` has a sample — the DCS-slave servo's mode/
 error/stall status. **874/876 are no longer a position readback** (v1's `actual_*_source` column is
@@ -219,10 +176,8 @@ data for `[[BL-B80]]`'s rate-loop tuning, not a user-facing feature. `src/
 sight_trace_writer.py` is the writer; reduce with `.claude/skills/sortie-log-triage`, which also
 reads `Export.lua`'s own per-**frame** companion log (`aircraft_layer_slew_debug.flag` →
 `aircraft_layer_slew_trace.log`, a different flag from the general `DEBUG` one, since this writes
-every frame rather than a handful of one-shot dumps). `parser.error`s if passed without
-`--crew-text` (the guidance-unit power-up/OBSERV write-through this writer reads only runs on that
-poll loop, unlike `--detection-trace`'s `--console`-or-`--crew-text` either/or above); defaults
-off, a true no-op when absent, same additive posture as every other per-run log.
+every frame rather than a handful of one-shot dumps). Defaults off, a true no-op when absent, same
+additive posture as every other per-run log.
 
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
@@ -242,12 +197,10 @@ was given.
 **On any failure to resolve the new theatre's store** — no `--world-model-dir` given, an unknown
 theatre, a store that is not built, fails to open, or fails the built-region mismatch guard — the
 old store is dropped (never kept running against the wrong theatre) and body-layer enters a loud
-refusal mode: perception stops, and every player command (crew-text, F10, voice) is answered with
-exactly `"system error, world model not loaded"` (user direction, 2026-10-19 — "wrong terrain model
-is as useless as not terrain model" / "on error loud refusal is better") until the next mission
-(re)start resolves successfully. `--console` has no `CrewConsole` to refuse commands on, so on that
-path a failed switch only stops perception, silently from the pilot's perspective — expected, since
-`--console` is a debug harness, not the flight path.
+refusal mode: perception stops, and every player voice command is answered with exactly `"system
+error, world model not loaded"` (user direction, 2026-10-19 — "wrong terrain model is as useless
+as not terrain model" / "on error loud refusal is better") until the next mission (re)start
+resolves successfully.
 
 **Per-mission log files (Decision 5).** `--detection-trace`/`--belief-truth-log`/`--mission-memory`/
 `--speech-log`/`--group-trace`/`--slew-trace` each roll to a *fresh* stamped filename (same
@@ -380,9 +333,10 @@ break without noticing.
   top-level import. Both modules' docstrings say so. What survives is the first sentence — the naked
   eye is the default — and `/invariant-check` now holds the rest mechanically: it fails if an
   assignment to `BINOCULAR_RANGE_MULTIPLIER` reappears anywhere in `src/`.
-- **New CLI flags are additive and a true no-op when absent.** Every flag added since `--overlay`
-  follows it: defaults off, unchanged behaviour without it, `parser.error` for a missing companion
-  argument. Keep that posture.
+- **New CLI flags are additive and a true no-op when absent.** Every per-run debug log flag
+  (`--detection-trace`, `--group-trace`, `--slew-trace`, `--speech-log`, ...) follows this posture:
+  defaults off, unchanged behaviour without it, `parser.error` for a missing companion argument.
+  Keep it.
 - **Everything must be testable without a live DCS session or a running collector** — `plans/body-layer/plan.md`
   §2's hard design requirement, not a nice-to-have. See `## Testing` above.
 - **Module independence**: the world-model seam is an in-process import and is the sole sanctioned
@@ -521,8 +475,7 @@ Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory
 
 Surfaces and transports:
 
-- `src/belief/console.py` — line parser + pretty-printer over `tools.py`, owning no belief logic; also `format_event_for_overlay`.
-- `src/belief/crew_console.py` — `CrewConsole`, and `handle_command` is the single dispatcher for **every** player command token (F10 menu, voice, confirm-band answer). See `## What this is` on why the F10 names persist.
+- `src/belief/crew_console.py` — `CrewConsole`, and `handle_command` is the single dispatcher for **every** player command token (voice, confirm-band answer; the F10 menu was a third, now-removed transport, see `## What this is`).
 - `src/belief/utterance.py`, `src/belief/speech.py`, `src/belief/escalation.py` — what he says and when: utterance shaping, event→template routing, escalation to the brain.
 - `src/belief/voice_commands.py` — speech-transcript recognition to command tokens.
 - `src/belief/brain_client.py`, `src/belief/brain_reply.py` — the brain-layer HTTP seam and structured-reply handling.

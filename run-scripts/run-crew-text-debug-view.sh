@@ -3,10 +3,6 @@ pushd ../body-layer/
 PYTHONPATH=src:../world-model/src .venv/bin/python -m body --aircraft-layer-url http://$DCS_COLLECTOR_IP:7791 \
     --theatre Syria \
     --world-model-db ../world-model/data/world-model/syria-full.sqlite \
-    --speech-audio \
-    --speech-input \
-    --crew-text \
-    --f10-commands \
     --audio-adapter-url http://$AUDIO_ADAPTER_IP:7795 \
     --speech-log logs/dcs-speech.jsonl \
     --eyesight-view \
