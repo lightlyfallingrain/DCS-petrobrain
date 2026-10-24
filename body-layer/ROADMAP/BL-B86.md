@@ -62,3 +62,9 @@
   below 3.6 km if the nose is up. This does not change BL-B86's own fix (still open, still the same
   needed decision) — it only means a future fix sized against "the ~4 km band" should be sized
   against boresight depression, not AGL.
+
+
+  **2026-10-25, user:** *"4km AGL it practically never. Helicoters do not fly that high. Assume
+  normal operation at 50 - 800 m AGL, with 1000 - 2000 m AGL being possible but rare. 2000+ m AGL
+  do not even consider."* This defect only appears above ~3.6 km, so it is outside the operating
+  envelope. It is folded into `[[BL-B89]]` only as far as that design fixes it for free.
