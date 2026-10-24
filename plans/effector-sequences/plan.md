@@ -27,9 +27,13 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R11 | Curated registry + sequence files at `body-layer/config/effectors.toml` / `body-layer/config/effector-sequences/*.md` | **`body-layer/config/sequences/`** — `effectors.toml`, `*.md` sequence files, and the generated `switch-reference.md` all live there; the raw dump stays at `body-layer/config/effectors-raw.toml` | User, 2026-10-23: first "sequence files ... go to body-layer/sequences/", then corrected mid-Stage-1 to "body-layer/config/sequences is better" |
 | R12 | Takeoff rows carry an explicit `<effector> != on` self-condition (D3/R5) | **The engine itself skips a switch row whose effector's OBSERVED readback already equals the row's target value** — no write, no step delay, no speech — for *every* trigger, not only takeoff; the takeoff file's self-conditions are removed as redundant. If that readback is still unknown after `EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (an absolute-value write is harmless if the switch was already there) — this is the opposite of an explicit `condition` cell's unknown-timeout, which *skips* (D3, unchanged). Explicit `condition` cells are reserved for genuine cross-switch dependencies, which no shipped file needs this cut. | User, 2026-10-23, verbatim: *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that switch is already in set position, so no action. I'll use the conditions for real this-depends-on-some-other-condition cases."* Reversible (main loop's own call on the unknown-timeout writing rather than skipping) — flagged in `implementation.md`. |
 | R13 | One flat registry + sequences directory, a device/cmd/arg collision drops *both* entries (D5) | **Per-aircraft layout**: `config/sequences/<aircraft-dir>/effectors.toml`, `.../switch-reference.md`, `.../copilot-<trigger>.md` (the `mi-24p-` filename prefix drops now the directory carries it); the raw dump moves to `config/effectors-raw/<aircraft-dir>.toml`. `<aircraft-dir>` is a sequence file's own `aircraft` header value, lower-cased (`Mi-24P` → `mi-24p`) — stated once, in `effector_registry.aircraft_dir_name`, and never re-derived elsewhere. The loader loads one registry per aircraft directory; a sequence file resolves effectors only against its own aircraft's registry, and an `aircraft` header that does not map to the directory it was found in is a file error (D5-collected, not fatal); each aircraft directory is independent — a bad registry in one disables only that aircraft's sequences, never another's. **Collision rule also changes**: the *first* curated entry (TOML file order) to claim a `(device, cmd, arg)` triple wins; every later one is rejected with a non-fatal error naming the triple and the winner — not "drop both" (superseded, see below). | User, 2026-10-23, verbatim: *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at this time, better to be ready now."* Shape (directory names, filename-prefix drop) is the main loop's own reversible choice, logged in `implementation.md`. |
+| R15 REVISED | R15 below: one continuous watched set = sequence args ∪ code args | **Two readback classes** (user, option B, 2026-10-24): sequence switches get a **synchronous one-shot read** (`POST /query/read_args` → collector broker → `Export.lua` answers in the same frame) at run start and after each wait row. R12/D3 resolve against that snapshot plus engine-wide `assumed_writes`, and an unknown never blind-writes a non-absolute effector. Only `(886, 898, 960)` stay polled through `watch_args` at 5 Hz, a fixed set that sequence files cannot grow. | *"the number of switches that we use will increase ... sequences can flip any switch. Most of them we really only need a few times per flight"*; then ***"B"*** (explore-notes, "Stage 4 decisions, 2026-10-24"). |
 | R15 | Stage 4 = "design as 2026-10-21, corrected for reduction" (one paragraph, not specified) | **Specified, 2026-10-24 — see "Stage 4 — watched-args readback (spec)"**. The fixed per-frame `push_cockpit_switch_state` line (9 args) is **retired whole**, lamps included; body-layer declares one watched set (sequence-file args ∪ three code-consumer args), `Export.lua` reads only those inside its existing 5 Hz export tick, raw values, change-gated, echoing a content-derived `watch_id` so body-layer knows when to re-send. `/cockpit_switch/latest` and `CockpitSwitchState` are removed; the new feed reuses Stage 2's `"args"` map shape so `effector_engine` does not change. | User, 2026-10-23 (explore-notes "Readback rate and scope"); *"Go ahead with BL-B90 last stage"*, 2026-10-24. Per-arg consumer audit in the spec: no consumer of that line reads it faster than body-layer's 1 Hz poll, and the two args the Lua servo needs per frame (886/898) it already reads itself. |
 | R14 | Five triggers (`takeoff`/`observ-on`/`observ-off`/`weapons-arm`/`weapons-safe`), each `cardinality="every_time"` | **Two more**, `mission-start`/`mission-start-in-air`, both `cardinality="once"` (per mission) — fired by `logger.py`'s poll block once it has a *fresh* post-restart ownship sample (never the stale pre-restart one `GET /telemetry/latest` may still be serving), per D2's "mission (re)start re-runs the runner `__init__`" for the pending-flag fields this adds. **`TAKEOFF` no longer fires on an air start** — only a real observed ground→air transition fires it now; the air-start case fires `MISSION_START`/`MISSION_START_IN_AIR` instead. **A body-layer process start/restart against an already-running mission fires neither** (unchanged: `_check_for_new_mission`'s pre-existing first-poll rule already refused to treat that as a reset). No sequence file ships for either new trigger this cut — a trigger with no loaded file fires into nothing. | User, 2026-10-23, verbatim: *"Add trigger for mission-start that fires once at every mission start and separate for mission-start-in-air that fires once at mission start only if airborne (AGL > 10 m)"*; *"No, only real takeoffs"*; *"No, only real mission starts"* (explore-notes, "Two new triggers: mission start"). |
 
+- **2026-10-24 (later) — Stage 4 revised to option B** (R15 REVISED, plan only), at `0a87e516`,
+  after the user's answers to Decisions 4–6: "Stage 4 — readback by need". The first spec is kept
+  in place, marked superseded.
 - **2026-10-24 — Stage 4 specified** (R15, plan only), at `5b33b7b7`: "Stage 4 — watched-args
   readback (spec)". Three new Decisions items (4–6), all with recommendations.
 
@@ -572,6 +576,11 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
 | `crew_console.config_error_pending` | startup (D5); internal drain | SPU-8 `gate_open` observed `True` and not silenced | spoken once, flag `False`; mission reset leaves it alone (D6) |
 | all of `EffectorRunState` | runner `__init__` | mission (re)start | fresh; nothing carried (D11) |
 
+**Stage 4 supersedes three rows above**: the two per-row "readback `None` → waiting-since" rows,
+and `GuidanceUnitState.*_observed` "refreshed before `advance`" as the engine's input. The engine
+now waits once per snapshot, and reads only its own one-shot reads plus `assumed_writes`. See
+"Co-moving Fields (Stage 4, revised)". The rows stay as the Stage 2 record.
+
 ---
 
 ## Affected Modules / Files
@@ -646,15 +655,346 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
    on"/"Observ off"; "weapons armed"/"weapons safe"; one air start → no "Guidance unit ready" at
    spawn; one deliberately broken sequence file (typo in an effector name) → console banner at
    start, the error line once the intercom is on, everything else still works. ~10 minutes.
-4. **Stage 4 — watched-args readback, BL-B90's last stage.** Spec, stages 4a–4d and tests:
-   "Stage 4 — watched-args readback (spec)" below. Built **before** Stage 3's card is flown (user,
+4. **Stage 4 — readback by need, BL-B90's last stage.** Spec: "Stage 4 — readback by need
+   (spec, revised 2026-10-24 — option B)" below. Sub-stages 4a–4d follow the first spec's §4.7:
+   **4a** also builds `ArgReadBroker` and `POST /query/read_args`; **4b** also builds
+   `read_args`; **4c** also builds the engine snapshot, `assumed_writes` and `absolute_write`. Built **before** Stage 3's card is flown (user,
    2026-10-24: *"Go ahead with BL-B90 last stage"*), so a single card on the Stage 4 branch covers
    both. Its own batch: one performance pass and one security pass after 4c. Needs an `Export.lua`
    redeploy on the Windows DCS machine.
 
 ---
 
-## Stage 4 — watched-args readback (spec, 2026-10-24)
+## Stage 4 — readback by need (spec, revised 2026-10-24 — option B)
+
+**This replaces the first Stage 4 spec** (kept below, marked superseded). The user, on that spec's
+Decision 4 (explore-notes, "Stage 4 decisions, 2026-10-24"):
+
+> *"can be fixed set, but take into account that the number of switches that we use will
+> increase. Also the sequences can flip any switch. Most of them we really only need a few times
+> per flight. ... Then there'd be certain switches or light where we need to know the state and
+> those get polled."* Then, offered A (write and assume success, drop R12) or B (read the
+> trigger's own switches once when it fires, keep R12): ***"B"***.
+
+So there are **two readback classes, and they never mix**:
+
+```mermaid
+flowchart LR
+  subgraph body-layer
+    E[effector engine<br/>run starts / after a wait row] -->|"POST /query/read_args<br/>{args}"| Q
+    P[poll block 1 Hz] -->|"GET /watched_args/latest"| W
+    P -.->|"re-send if not confirmed<br/>POST /command/watch_args"| WA
+  end
+  subgraph collector
+    Q[ArgReadBroker<br/>req id + wait ≤ 0.25 s] -->|UDP read_args| X
+    WA[watch_args forward] -->|UDP watch_args| X
+    W[WatchedArgsCache<br/>cleared on export_version]
+  end
+  subgraph Export.lua
+    X[command listener<br/>every frame] -->|"read now, reply same frame<br/>{read_id, values}"| Q
+    X -->|install fixed set| T[5 Hz tick:<br/>886 / 898 / 960 only]
+    T -->|"{watch_id, watched} on change"| W
+  end
+```
+
+| Class | Which args | Read how | Who uses it | Grows with sequence switches? |
+|---|---|---|---|---|
+| **One-shot (new)** | each trigger file's own effectors and condition effectors | once at run start, and again after each wait row; synchronous through the collector | the engine's R12 self-check and D3 conditions | **No per-tick cost.** A file with more switches makes its one read longer, on a trigger the pilot causes |
+| **Continuous (the first spec's `watch_args`, narrowed)** | fixed `READBACK_ARGS = (886, 898, 960)` | the existing 5 Hz tick, change-gated | `home_phase`, `SightHead.mode`, `sight_ready` and the ready edge | **No.** Code constants only; a test pins that sequence files cannot add to it |
+
+### S4.1 Which args stop being read per frame
+
+All nine on `push_cockpit_switch_state`'s line, unchanged from the first spec's audit (§4.1 below,
+still valid): no consumer of that line samples it faster than body-layer's 1 Hz poll, and the slew
+servo reads 886/898 itself in Lua. What changes is where each one goes:
+
+| Arg | Before | After |
+|---|---|---|
+| 773, 761, 885, 955 (takeoff) | per frame | **one-shot**, when `takeoff` (or any file using them) runs |
+| 673 (weapons bar) | per frame | **one-shot**, when `weapons-arm`/`weapons-safe` runs |
+| 886 (OBSERV) | per frame | **continuous** (code consumer) and also in the observ-on/off one-shot reads |
+| 898, 960 (lamps) | per frame | **continuous** (code consumers) |
+| 962 (launch perm) | per frame | **not read**. No reader; BL-B67 adds it to `READBACK_ARGS` |
+
+`weapon_safety_observed` and `launch_perm_observed` on `GuidanceUnitState` therefore stay `None`.
+They have no reader; their docstrings say so, and BL-B67 decides which class each joins.
+
+### S4.2 The one-shot read
+
+**Synchronous at the collector, not an async ticket.** `POST /query/read_args {"args": [773, 761,
+885, 955]}` returns `200 {"t": <model time>, "values": {"773": 1.0, ...}}`. On timeout it returns
+`504`, and when no Export peer is connected it returns `503`. An async design (request id now,
+poll for the reply later) would delay a single-row "Observ on" switch flip by one full poll
+(about 1 s) past today's timing. Synchronous costs about one DCS frame plus the LAN round trip, and
+the collector is the one process holding both sockets, so the correlation belongs there.
+
+- **Collector `ArgReadBroker`** (new, `collector/arg_read_broker.py`):
+  - It mints `read_id` = 12 random hex characters (`secrets.token_hex(6)`), registers a
+    `threading.Event` slot, and sends UDP `{"op":"read_args","read_id":"…","args":[…]}` through
+    `CommandSender`.
+  - It waits up to **`ARG_READ_TIMEOUT_S = 0.25`**, a plain literal (a transport bound, not
+    Petrovich behaviour; about 15 frames at 60 fps).
+  - **At most 8 reads may be outstanding at once**; a ninth gets `503`. A late or unknown `read_id`
+    reply is dropped at DEBUG.
+  - The collector's TCP line handler fills the slot from a `"read_id"` line. The handler thread and
+    the API thread meet only through the broker's lock and `Event`.
+- **Export.lua `handle_read_args_command`** keeps no state.
+  - It parses the op with the **same `parse_arg_list`** the watch op uses, under the first spec's
+    bounds: ≤ 64 args, each 0..4095, whole-op reject. `read_id` is `[%w_]{1,16}`.
+  - It reads each arg **in the same frame** (one `GetDevice(0)` and a `pcall` per arg; a failed
+    read is omitted, never 0) and sends `{"t","read_id","values"}` on the TCP client. If `client`
+    is `nil` it drops the request, and the broker times out.
+  - It answers **at most `MAX_READS_PER_FRAME = 4`** read ops per frame; any further ones are
+    dropped with `debug_log`. This bounds what a LAN caller can make one frame spend, since the
+    command drain loop is otherwise unbounded. The collector POST is the LAN-exposed end.
+- **body-layer** `AircraftLayerClient.read_args(args) -> dict[str, float]` raises
+  `AircraftLayerError` on any non-200, matching `write_cockpit_switch`. Its HTTP timeout stays the
+  client's default 2.0 s, but the collector answers within about 0.3 s either way.
+
+### S4.3 How the engine uses it (`belief.effector_engine`)
+
+**Each run carries a snapshot**, taken when the run starts, and taken again after each wait row
+(a wait row exists so that time passes, so what follows it should see the state after the wait,
+e.g. a gyro that has now aligned):
+
+- `SequenceFile.read_args: frozenset[int]` is computed at load: every switch row's effector `.arg`
+  ∪ every condition effector's `.arg`. Yes, a condition that names another switch is included. A
+  file whose set exceeds 64 is a **D5 file error** (collected, the file ignored). That ties the wire
+  bound to a load-time check instead of a runtime surprise.
+- `_RunCursor` gains `snapshot: Mapping[str, float] | None`, `snapshot_sim: float | None` and
+  `read_first_attempt_sim: float | None`. **It loses `condition_waiting_since_sim` and
+  `self_waiting_since_sim`.** The wait now happens once per snapshot, at run level, instead of once
+  per row.
+- **In `advance`, at a cursor whose `snapshot is None`** (run start, a D1 pending restart, after a
+  wait row):
+  1. Call `client.read_args(sorted(sequence.read_args))`. On success, `snapshot = values` and
+     `snapshot_sim = now_sim`, then continue into the rows **in the same poll**, so "Observ on"
+     writes this poll, as today.
+  2. On `AircraftLayerError`, set `read_first_attempt_sim` if it is unset, then **break** (the
+     trigger holds and retries next poll; other triggers proceed).
+  3. If `now_sim - read_first_attempt_sim >= EFFECTOR_CONDITION_READBACK_WAIT_S`, then WARNING
+     ("no switch readback for trigger X after 5.0 s"), `snapshot = {}` (every arg unknown) and
+     continue. **The tunable's key, value and bounds are unchanged** (no `tuning.toml` breakage),
+     and so is its meaning: how long the engine waits for readback before acting on not having it.
+     Its `#:` first sentence is reworded to say "per snapshot", and the **rendered**
+     `defaults.toml` must be checked.
+- **The value a row sees** for arg *a*: if the engine-level `assumed_writes[a]` (below) was written
+  at `sim >= cursor.snapshot_sim`, use it; otherwise use `snapshot.get(str(a))`; otherwise unknown.
+- **Assumed success** (the user's *"Assumes success. No switch position read required"*, which is
+  how a write is treated once B has done its read):
+  - `EffectorRunState` gains `assumed_writes: Mapping[int, tuple[float, float]]` (arg → (raw,
+    sim)). Every successful write records into it, and that **covers every running run**, not only
+    the writer.
+  - Why the `>=`: two triggers in the same poll can see trigger A's write UDP and trigger B's read
+    land in the same Export frame, write then read, and the read returns the pre-animation value.
+    Animations ramp in about 0.1 s and polls are 1 s apart, so a write from an earlier poll is
+    settled before any later read (Risks).
+  - This also makes a file that writes the same switch twice correct: the second row sees the
+    first row's value, not the stale snapshot.
+- **Per-row resolution once the snapshot exists** (D3/R12, unchanged in outcome):
+
+| Row part | Known, satisfied / matches | Known, not satisfied / differs | Unknown |
+|---|---|---|---|
+| explicit `condition` | proceed to self-check | skip row | **skip** (D3, unchanged) |
+| self-check, **absolute-position** effector | skip (R12) | write | **write** (R12, unchanged) |
+| self-check, **any other** effector | skip | write | **skip + WARNING**: never a blind write |
+
+- **Non-idempotent effectors.** For a toggle or a momentary button, a "write" changes state
+  relative to where it is, so writing on unknown could flip it the wrong way or press it twice.
+  - `EffectorDef` gains `shape: str` (copied from the raw dump's element, so the provenance
+    survives) and the derived `absolute_write: bool`.
+  - **`absolute_write` is true only for `default_2_position_tumb`**, the one helper shape whose
+    `performClickableAction(cmd, value)` is confirmed live as an absolute set: all six shipped
+    effectors, BL-B66.
+  - Every other shape (buttons, covers, springloaded, 3-position, multiposition, axes) counts as
+    **not absolute until verified**. The allowlist widens one shape at a time, each widening with an
+    `aircraft-layer/research/` note.
+  - Every shipped row is unaffected. This is a fail-safe for the user's *"sequences can flip any
+    switch"*, not new reach: sequencing buttons (press + release) is not designed here.
+- **D1 and D9 interactions.**
+  - D1: a pending restart starts a new run with `snapshot = None`, so it reads again. A second fire
+    while running still only marks it pending, so no extra read.
+  - D9: a failed write leaves the snapshot and `assumed_writes` untouched (nothing is assumed), and
+    the row retries next poll against the same snapshot. A read failure blocks only its own
+    trigger, never a later trigger's write to a different effector. The D9 "same effector already
+    failed this poll" hold is unchanged.
+  - Fire order also orders the reads, so in one poll each read follows every write from earlier
+    triggers in fire order.
+- **`advance` loses its `readback` parameter.** The poll block's `effector_readback` disappears;
+  the engine gets its readback only from its own reads.
+- **Mission reset (D11)**: `assumed_writes` and every cursor are dropped, as the rest of
+  `EffectorRunState` already is.
+
+### S4.4 The continuous set, narrowed
+
+The first spec's §4.2–4.5 mechanism, which holds unchanged **except for its contents**:
+
+- `watched_args(...)` from the first spec is **deleted**. The set is the code constant
+  `sight_effector.READBACK_ARGS = (886, 898, 960)`. `watch_id_for(READBACK_ARGS)` is computed at
+  import, and so is constant.
+- Keeping the op for a three-arg constant set, rather than hard-coding the three in `Export.lua`,
+  is worth it because adding 962 for BL-B67 is then a body-layer edit, with no `Export.lua`
+  redeploy and no version bump.
+- Everything else from §4.2–4.5 stands: content `watch_id`, replace-not-merge, raw values with the
+  `>= 0.5` threshold moved to `refresh_readback`, the reconnect full snapshot, `LuaExportStop`
+  resets, the collector clearing its cache on `export_version`, body-layer re-sending when
+  unconfirmed every 2.0 sim-s, the "not confirmed after 10 s" WARNING, the stale-id-is-unknown
+  rule, and the runner field as an ordinary init field.
+- `refresh_readback` reads `"886"`, `"898"` and `"960"`. The 673/962 branches are deleted rather
+  than left reading keys that will never arrive.
+
+### S4.5 Wire and version
+
+Version **`2026-10-24`**, one bump for the whole stage. `Export.lua` now has two new inbound ops
+(`watch_args`, `read_args`) and two new line kinds (`"watch_id"`, `"read_id"`). The `missl_pw` line
+is removed. The collector branches on `"read_id"` and `"watch_id"`, and drops `missl_pw` at DEBUG.
+`/cockpit_switch/latest`, `CockpitSwitchState` and its cache are removed (decided, item 6). The
+new LAN routes are `POST /query/read_args`, `POST /command/watch_args` and `GET
+/watched_args/latest`. Add both POSTs to `AC-B11`. `test_export_lua_constants_parity.py` also
+covers `MAX_READS_PER_FRAME`.
+
+### Co-moving Fields (Stage 4, revised)
+
+**Construction sites to grep and paste** into the handoff: `_RunCursor(` must stay inside
+`fire_trigger` and `advance`'s pending restart only. `EffectorRunState(` keeps its single runner
+`default_factory` site. `WatchedArgsState(` has one site, `from_dict`.
+
+| Field | Written by | Transition | Must hold true immediately after |
+|---|---|---|---|
+| `cursor.snapshot` / `snapshot_sim` | internal | run start, or D1 pending restart | `None` → this poll attempts a read before any row |
+| `cursor.snapshot` | internal | `read_args` succeeds | `= values`, `snapshot_sim = now_sim`; rows evaluated this same poll |
+| `cursor.read_first_attempt_sim` | internal | `read_args` fails | set once; cursor holds; other triggers proceed |
+| `cursor.snapshot` | internal | wait expired with no read | `= {}`; WARNING once; rows resolve by the Unknown column |
+| `cursor.snapshot` | internal | a `WaitRow` completes | `None`, `read_first_attempt_sim = None` → re-read before the next row |
+| `assumed_writes[arg]` | internal | successful write | `= (raw, now_sim)`; seen by **every** running run whose `snapshot_sim <= now_sim` |
+| `assumed_writes[arg]` | internal | failed write | unchanged (D9) |
+| `commanded_values[E]` | internal | successful write | unchanged rule (D9) |
+| all of `EffectorRunState` | runner `__init__` | mission (re)start | fresh: no cursors, no snapshots, no `assumed_writes` (D11) |
+| `ArgReadBroker` slot | collector | reply line, or 0.25 s | `Event` set and value stored, or the slot removed with `504`; a late reply finds no slot and is dropped |
+| continuous-set rows | — | — | the first spec's table (below), **minus** "desired set = union of sequence args": it is now `READBACK_ARGS` |
+
+### S4.6 Compatibility (deltas from §4.6)
+
+- **Old `Export.lua` + new collector + new body-layer**: every `read_args` answers `504`. Each run
+  waits 5 s and then resolves as unknown: shipped absolute rows **write**, and conditions skip.
+  In practice takeoff still powers up, about 5 s late, and Observ on/off are delayed 5 s. The
+  continuous set also never confirms, so `sight_ready` stays False. Named by VERSION MISMATCH, the
+  "not confirmed" WARNING, and now also "no switch readback for trigger X".
+- **Old collector**: `/query/read_args` 404 → `AircraftLayerError` → the same 5 s path.
+
+### S4.7 Tests (deltas from §4.8; everything there not mentioned here stands)
+
+**Lua**: L1 now covers the shared `parse_arg_list`. Add **L5 `handle_read_args_command`'s pure
+core** `build_read_reply_line(t, read_id, args, values)`: valid JSON, failed reads omitted. Add
+**L6**, the per-frame read-op counter, as a pure `admit_read(count) -> bool`; *mutation*: no cap.
+
+**aircraft-layer**:
+- A8: the broker against a fake sender that "replies" on a thread: success, timeout → 504, a late
+  reply dropped, a 9th concurrent → 503. *Mutation*: no timeout (the test bounds its own wall
+  time).
+- A9: `POST /query/read_args` validation, the same cases as A4.
+- A1–A7 stand, for the continuous feed.
+
+**body-layer pure** (`test_effector_engine.py`):
+- E1: a read succeeds → rows run **the same poll**. *Mutation*: break after the read.
+- E2: the read fails, then succeeds before 5 s → writes once it arrives. Fails for ≥ 5 s → the
+  absolute row writes, the explicit-condition row skips, the non-absolute row skips with a WARNING.
+  *Mutations*: blind write for non-absolute; reset `read_first_attempt_sim` on every failure.
+- E3: a wait row → a second read. *Mutation*: keep the old snapshot.
+- E4: `assumed_writes` beats an older snapshot and loses to a newer one. In the same-poll case,
+  trigger A writes 886=1 and trigger B's read returns 886=0, and B sees 1. *Mutations*: `>` instead
+  of `>=`; per-run assumed writes.
+- E5: a file writing the same switch on then off → both rows write.
+- E6: D9: a failed write leaves `assumed_writes` unchanged and retries against the same snapshot.
+- E7: `SequenceFile.read_args` includes condition effectors; a 65-arg file is a D5 error.
+- E8: `absolute_write` is true for `default_2_position_tumb` only. *Mutation*: default to true.
+
+**body-layer continuous**: B1 becomes "`READBACK_ARGS` is exactly (886, 898, 960) and **loading
+extra sequence files does not change the watched set or `watch_id`**". *Mutation*: union in
+sequence args. B2–B4 and P1–P4, P6 stand.
+
+**Real poll loop**: Stage 2's (a)–(h) migrated. The fake now answers `read_args` from a dict and
+records each call. (b) becomes **"second takeoff: exactly one `read_args` with the four takeoff
+args, zero writes, nothing spoken"**. Add (i): an "Observ on" switch write lands in the **same
+poll** as the command (latency parity). (e) becomes "`read_args` raising for 3 polls, then
+answering → writes after the answer".
+
+### S4.8 Performance claim (recomputed)
+
+| | Before | After |
+|---|---|---|
+| Per frame (~125 fps measured) | 9 reads + 9 `GetDevice(0)` + 9 closures, ~1,125 reads/s | **0** switch reads |
+| Continuous | — | 3 reads per 5 Hz tick: **15 reads/s** (~75× fewer), constant as sequence files grow |
+| One-shot | — | one read per run start or wait row, of that file's own args: takeoff 4, observ 1, weapons 1. A flight with ~10 trigger fires is on the order of **20–40 reads per flight** |
+
+The ask was that switch count can grow without per-frame or per-tick cost. Here it grows only the
+size of a read the pilot's own action causes. The claim is checkable by reading the diff;
+frame-time measurement does not exist here.
+
+### S4.9 Acceptance card changes (replaces §4.9's list)
+
+One card, `feature/effector-sequences-stage4`, covers Stages 3 and 4, as §4.9 already says.
+Branch, redeploy and version-line edits as before. Block by block:
+
+- **Block 1 (cold takeoff)**: also the first one-shot read. Same expectation: four flips about 1 s
+  apart.
+- **Block 2 (second takeoff) is now the "read, all match" check**: nothing flips, nothing is
+  spoken. With the debug flag, `aircraft_layer_debug.log` shows one `read_args` with 4 args at
+  liftoff.
+- **Block 3 (Observ / weapons)**: the switch should move **as promptly as before**. A ~1 s or ~5 s
+  lag is a Stage 4 finding (synchronous path broken, or falling back to the timeout).
+- **Block 5 (one switch hand-pulled before takeoff) is the decisive one-shot check**: exactly that
+  switch flips back. It passes only if the read returns real values at the moment of the fire.
+- **Block 7 (collector restart in flight)** now tests the **continuous** set: "Observ on" is still
+  accepted afterwards (`sight_ready` from 960). **Add**: then say "Observ off" / "Observ on" once,
+  which exercises a one-shot read through the restarted collector.
+- **Block 8 (mission restart)**: unchanged.
+- The bisection note stands.
+
+### S4.10 Risks (revised)
+
+- **Synchronous read on the poll thread.** The worst case is 0.25 s per read when Export is not
+  answering (loading, stalled frame), and only while a trigger is starting. It can be up to 7 in
+  one poll if every trigger fires at once, which no shipped flow does. Bounded, rare, and visible
+  as WARNINGs.
+- **The same-poll write-then-read race** relies on switch animations (~0.1 s, measured on these
+  switches) being shorter than the 1 s poll gap. A switch with a long animation (a guarded cover)
+  could read mid-ramp on the *next* poll. Not an issue for any shipped effector; revisit when the
+  absolute allowlist widens.
+- **The snapshot can go stale inside a long stretch with no wait row**: a pilot moves a switch
+  after the fire and before its row. The worst cases: an absolute write puts it back (what the
+  sequence wants), or a condition evaluated on fire-time state. The wait-row re-read is the
+  intended tool for a file that needs a later check.
+- **The non-absolute allowlist is conservative**: it has one shape. A user-written sequence on a
+  3-position switch will *skip* when its read fails, where an absolute write would have been
+  harmless. That costs safety margin, never correctness, and widening needs only a research note.
+- Carried from §4.11: the test-fake migration (now decided, item 5) and 962 for BL-B67.
+- **The same-poll rule is unverified against DCS internals in one respect**: that
+  `performClickableAction` followed by `get_argument_value` in one frame returns the pre-write
+  value. The plan handles either answer (assumed writes win in that case, and are equal to the
+  read otherwise), so it is not decisive. No investigator pass.
+
+### S4.11 Second-order effect (revised)
+
+Sequence files can now grow to any number of switches at no standing cost. The one-shot read is
+the natural backing for `BL-B95`'s `effector(name):get` (a script's get is exactly a one-shot
+read), so that seam already exists before scripting arrives. `BL-B67` decides, per field, whether
+962 and the weapons bar are continuous (`READBACK_ARGS`) or read at need.
+
+---
+
+## Stage 4 — first spec, SUPERSEDED (2026-10-24, `fc0e6454`) — kept for the record
+
+> **Superseded by "Stage 4 — readback by need" above** (user, Decision 4 → option B). Still valid
+> and referenced from the revised spec: §4.1 (the per-arg audit), §4.2–4.5 (the `watch_args`
+> mechanism, now used for the fixed three-arg set only), §4.6 (compatibility table), §4.7, §4.8
+> (tests A1–A7, B2–B4, P1–P4, P6, L1–L4), §4.10. **No longer valid**: the watched set as the union
+> of sequence-file args (§4.5 first bullet, B1, P1's "8-arg set"), the engine reading the
+> continuous feed (§4.2 "effector_engine does not change"), §4.9's card list and the performance
+> figures (S4.8/S4.9 replace them), and §4.11's 2.0 s ↔ 5 s coupling (the engine no longer waits
+> on the continuous feed).
+
+### (first spec) Stage 4 — watched-args readback
 
 **Goal.** Switch positions leave `Export.lua`'s per-frame work. Body-layer declares the set of
 args it actually needs. `Export.lua` reads only those, inside its existing 5 Hz export tick, and
@@ -1076,7 +1416,9 @@ narrows one thing: anything that needs a switch edge faster than 200 ms must now
 - **Never modify the DCS installation (Stage 4).** `Export.lua` lives in Saved Games, not the
   install, and the new op only *reads* args. The one new inbound path is shape-validated three
   times (body-layer, collector, Lua), bounded (≤ 64 args, each ≤ 4095), and can only choose
-  *which* args are read, never run anything.
+  *which* args are read, never run anything. **Revised spec**: two read ops (`watch_args`,
+  `read_args`), both under the same bounds. `read_args` is also capped at 4 per frame and 8
+  outstanding at the collector.
 - **No new abstraction without removed duplication.** Engine + data replace five hand-written
   write blocks; the error line reuses `_print`, the drain shape and the SPU-8 gate.
 - **Provenance.** The raw dump records DCS build and input hashes; curated entries never copy a
@@ -1144,7 +1486,13 @@ first consumer of the say-only row and of event-driven (not pilot-driven) trigge
    `fix/guidance-ready-edge`, merged to `main` (explore-notes: *"there's already a note somewhere
    to say it on change to ready. Use that"* — BL-B80 decision 2), independently of this plan's own
    Stage 2. Nothing further needed here.
-4. **Stage 4: is "when they are needed" which switches, or also when in the flight?** The plan reads
+4. **Decided 2026-10-24, option B, which redirected the recommendation below** (explore-notes,
+   "Stage 4 decisions, 2026-10-24"): *"can be fixed set, but take into account that the number of
+   switches that we use will increase. Also the sequences can flip any switch. Most of them we
+   really only need a few times per flight."*, then ***"B"***: sequence switches are read once when
+   their trigger fires, and only a small fixed set is polled. Specified in "Stage 4 — readback by
+   need". The original question and recommendation, kept: **Stage 4: is "when they are needed"
+   which switches, or also when in the flight?** The plan reads
    *"query a set of switches when they are needed, not everything"* as **which**: the args that
    some loaded file or code reader actually uses (8 today), declared once per process. The other
    reading is a set that changes with flight phase (e.g. the takeoff switches only on the ground).
@@ -1152,13 +1500,15 @@ first consumer of the say-only row and of event-driven (not pilot-driven) trigge
    by phase would put an unknown-readback gap (a re-send round trip) exactly where a sequence is
    about to read it. The protocol already supports re-declaring, so a per-phase set later is a
    body-layer-only change. Say if you meant the per-phase reading.
-5. **Stage 4 rewrites existing tests (AGENTS.md escalation rule).** Retiring the fixed feed means
+5. **Decided 2026-10-24, as recommended: *"rewrite"*.** **Stage 4 rewrites existing tests
+   (AGENTS.md escalation rule).** The fakes also gain a `read_args` answer dict (S4.7). Retiring the fixed feed means
    the ~28 places in `test_logger.py` that set the fake's `cockpit_switch_state` (named booleans
    such as `{"ready_lamp": True}`) move to the arg-keyed shape (`{"watch_id": …, "args": {"960":
    1.0}}`). The change is mechanical; what each test asserts does not change. **Recommend the
    rewrite.** The alternative, a body-layer adapter that rebuilds the old named dict from the new
    map, exists only to spare test edits and leaves two readback shapes in the code.
-6. **Stage 4 removes `GET /cockpit_switch/latest` outright, with no fallback.** Recommend yes: only
+6. **Decided 2026-10-24, as recommended: *"remove"*.** **Stage 4 removes `GET
+   /cockpit_switch/latest` outright, with no fallback.** Recommend yes: only
    body-layer read it, and a stale `Export.lua` is named by two warnings (4.6). If you would rather
    keep the old feed working for one release as a rollback path, that costs a dual readback path
    in body-layer. Say so before 4c.
