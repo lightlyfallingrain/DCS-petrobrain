@@ -35,11 +35,10 @@ each switch's settable range (discrete/continuous/`—`/`unknown`) if you want t
 2. **Re-copy `Export.lua`** (Stage 4 changed the wire format — this is the reverse of the earlier
    Stages 1-2 card, which needed no redeploy):
    ```
-   copy aircraft-layer\dcs-export\Export.lua "$DCS_SAVED_GAMES_PATH\Scripts\Export.lua"
+   copy aircraft-layer\dcs-export\Export.lua "%DCS_SAVED_GAMES_PATH%\Scripts\Export.lua"
    ```
-   `$DCS_SAVED_GAMES_PATH` is your own DCS Saved Games folder (normally
-   `%USERPROFILE%\Saved Games\DCS`, or `...\DCS.openbeta` on an Open Beta install) — use whichever
-   one your own DCS install actually uses, per `aircraft-layer/WORKFLOW.md`'s "Deploy Export.lua".
+   Run from the repo root in `cmd`. `DCS_SAVED_GAMES_PATH` is the environment variable already set
+   on the DCS box for your DCS Saved Games folder.
 3. Restart the collector:
    ```
    cd aircraft-layer\src
