@@ -90,3 +90,60 @@ sites, tuning rendered output, mission-start/autoexec.cfg relocation, backlog ob
 the rewritten threading test, server.py route removal, aircraft_client.py). All three subprojects'
 format/lint/type/test commands and `invariant-check`/`command-map-check` were re-run directly in
 this review, not taken from the implementation report.
+
+---
+
+### Re-review of 6c63719d
+
+Scope: this commit only — the fix commit applying required fix 1 and the three optional items from
+the review above. Parent `d7d406ad` is the reviewed state; this re-review does not re-walk the
+whole feature diff.
+
+**Required fix 1 (command-map F10 claim).** `git show 6c63719d -- docs/status/
+petrovich-commands.html` confirms all three things the review asked for: the three `.f10`-badge
+`<span>` elements (legend, card 3 "Search", card 4 "Watch a contact") are gone, the card-3 caption's
+"F10 has ahead/left/right/full and the compass points." clause is gone, and the now-dead `.f10` CSS
+rule is gone too (not asked for explicitly, but correct — a declared rule with no remaining user is
+exactly the kind of leftover this project's "prune the comment" standard objects to, applied here to
+CSS rather than a comment). Header date updated to 2026-10-25. `grep -i f10 docs/status/
+petrovich-commands.html` (re-run directly, not taken from `implementation.md`'s word) finds nothing.
+`python3 .claude/scripts/command-map-check.py` exits 0, "command map current (67 tokens)" — and per
+the review's own finding this check was never sufficient on its own for this fix, so the direct
+grep is the actual evidence, with the check only confirming the token manifest side wasn't
+disturbed. Design otherwise unchanged: no other section, card, or script block touched. **Fix
+verified.**
+
+**Optional items (3).** All three applied as described, and none reaches beyond prose/docstring/
+comment text — confirmed by reading `git show 6c63719d` for each file in full: `audio_sender.py`
+(1 line, module docstring), `watched_args.py` (1 line, class docstring), `voice_repl.py` (1 line,
+module docstring), `vocabulary.py` (module docstring + the `LEGACY_F10_TOKENS` `#:` comment, both
+tense/wording only — the token tuple's *values* are untouched, matching the plan's Decision the
+review itself cited). No code line, no `TOKENS`/`LEGACY_F10_TOKENS`/`PHRASES` content, and no test
+changed in this commit. The `vocabulary.py` `#:` comment edit does not touch any `tuning.py`
+constant (this file is `audio-adapter`, which has no tuning loader), so the "check the rendered
+`defaults.toml`" rule doesn't apply here — correctly not invoked.
+
+**Checks, re-run directly in this worktree** (not taken from `implementation.md`'s report):
+
+| subproject | ruff format --check | ruff check | mypy --strict | pytest |
+|---|---|---|---|---|
+| aircraft-layer | pass (72 files) | pass | pass (25 files) | 581 passed |
+| audio-adapter | pass (31 files) | pass | pass (16 files) | 349 passed, 2 skipped |
+| body-layer | pass (183 files) | pass | not re-run (not asked; untouched by this commit's own diff beyond two docstring lines) | 2576 passed, 4 xfailed (full suite, not just `-k voice`) |
+
+All match `implementation.md`'s "Checks (re-run after the fixes)" section's counts exactly.
+`command-map-check.py` exits 0 as above.
+
+#### Re-review Verdict
+
+**APPROVED.** The one required fix is correctly and completely applied (verified by direct grep,
+not by re-trusting the mechanical check that the original review specifically said was
+insufficient here), all three optional items are genuinely prose/docstring/comment-only with no
+behaviour or token-set change, and all three subprojects' own checks pass clean when re-run
+directly. Clear to proceed to DoD.
+
+#### Re-review Confidence
+
+Full read of the commit diff (`git show 6c63719d`, all 6 files) against both the required fix's
+exact wording in `review.md` and `implementation.md`'s "Review fixes" account of it; all checks
+re-run directly rather than taken on the implementation report's word.
