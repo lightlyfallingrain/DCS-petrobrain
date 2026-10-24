@@ -19,13 +19,12 @@ raises so its caller decides how to degrade" shape.
 
 `get_transcripts` (`plans/inbound-speech/plan.md` Stage 3) is this
 seam's first *inbound* read -- `GET /transcripts/poll` drains
-`audio-adapter`'s `TranscriptQueue`, so, mirroring `AircraftLayerClient.
-get_f10_commands`'s own precedent for a drain-on-poll endpoint, its empty
-state is `[]`, not `None`. It still raises `AudioAdapterError` on
-transport/parse failure, the same posture as `push_speech` -- **not** a
-swallow-and-return-`[]` posture, since `logger.py`'s poll loop is the
-place that decides to log-and-continue, not this client (same division
-`aircraft_client.get_f10_commands` already draws)."""
+`audio-adapter`'s `TranscriptQueue`, so its empty state is `[]`, not
+`None` (the response is always a JSON list, never `null`). It still
+raises `AudioAdapterError` on transport/parse failure, the same posture
+as `push_speech` -- **not** a swallow-and-return-`[]` posture, since
+`body.py`'s poll loop is the place that decides to log-and-continue, not
+this client."""
 
 from __future__ import annotations
 

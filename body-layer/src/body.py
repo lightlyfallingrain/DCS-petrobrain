@@ -102,7 +102,7 @@ detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
 `scan_area` command is currently pending (`_active_gaze`) and assigns the
 resulting `perception.gaze.ScanPlan` onto whichever of `self.sources` is a
 `NakedEyePerceptionSource` (`_apply_active_gaze`), every poll, before the
-sources are polled -- this is what makes an F10 "scan left" command change
+sources are polled -- this is what makes a spoken "scan left" command change
 what Petrovich can actually see, not just register a belief-level attention
 area. No command pending means `perception.gaze.FREE_SCAN_PLAN` (2C's
 default o'clock scan loop, not "no restriction" any more) -- see
@@ -2624,42 +2624,19 @@ def _mark_target_fn(
     return mark_target
 
 
-def _poll_f10_commands(
-    aircraft_client: AircraftLayerClient, crew_console: CrewConsole, now_sim: float
-) -> None:
-    """Drains pending F10 radio-menu selections (`plans/f10-crew-commands/
-    plan.md`) and dispatches each through `CrewConsole.handle_command`
-    -- the same post-`tick()` hook point `drain_events` already uses.
-    Wrapped in its own `try`/`except AircraftLayerError` (log-and-continue),
-    the same per-call isolation shape the BL-2.5 overlay-push loop already
-    uses, so one failed poll never stops the loop."""
-    try:
-        commands = aircraft_client.get_f10_commands()
-    except AircraftLayerError:
-        logger.warning("F10 command poll failed (continuing)", exc_info=True)
-        return
-    for command in commands:
-        token = command.get("command")
-        if isinstance(token, str):
-            crew_console.handle_command(token, now_sim)
-
-
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
 ) -> None:
     """Drains pending recognised-speech transcripts (`plans/inbound-speech/
     plan.md` Stage 3) and dispatches each through `CrewConsole.
-    handle_transcript` -- the same per-poll dispatch shape `_poll_f10_
-    commands` already uses for its own drain-on-GET endpoint. Wrapped in
+    handle_transcript`. Wrapped in
     its own `try`/`except AudioAdapterError` (log-and-continue), so one
     failed poll never stops the loop.
 
     Each item is validated field-by-field against `transcript_queue.
     TranscriptEvent.to_dict`'s eight-field shape before dispatch -- a
     malformed/partial item (a schema mismatch, not an expected runtime
-    state) is skipped rather than raising, the same defensive posture
-    `_poll_f10_commands`'s `isinstance` check already takes on its own,
-    simpler payload. `t_wall` (wall-clock time the adapter recognised the
+    state) is skipped rather than raising. `t_wall` (wall-clock time the adapter recognised the
     clip) is intentionally not threaded into `handle_transcript` --
     `now_sim` is this poll's own DCS sim time, the same clock every other
     dispatch path in this loop already uses. `slots` (`plans/
@@ -2896,7 +2873,6 @@ def _run_crew_text_poll_loop(
     world_model_db: Path,
     poll_interval_s: float,
     stop_event: threading.Event,
-    f10_commands_enabled: bool = False,
     speech_client: AudioAdapterClient | None = None,
     speech_input_enabled: bool = False,
     detection_trace_path: Path | None = None,
@@ -2925,10 +2901,7 @@ def _run_crew_text_poll_loop(
     call per poll: `crew_console.drain_events` speaks whatever lifecycle
     events this poll's `tick()` newly surfaced, the same hook point
     `--overlay`'s mirroring uses in `ConsolePerceptionRunner.run_once`
-    itself. `f10_commands_enabled` (`--f10-commands`, `plans/
-    f10-crew-commands/plan.md`) additionally polls/dispatches pending F10
-    radio-menu selections each cycle via `_poll_f10_commands` -- defaults
-    off, a true no-op when unset. `speech_input_enabled` (BL-B96: always
+    itself. `speech_input_enabled` (BL-B96: always
     `True` in `main()`'s own wiring; the parameter stays for tests that
     want it off) polls `speech_client.get_transcripts()` via `_poll_
     transcripts` -- `speech_client` is non-`None` whenever `main()` builds
@@ -3037,10 +3010,9 @@ def _run_crew_text_poll_loop(
         next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # One log-and-continue guard around the whole poll body, not
-            # just the HTTP calls inside `_poll_f10_commands`/
-            # `_poll_transcripts` (those catch their own transport errors
-            # and nothing else -- the `CrewConsole` dispatch that follows
-            # each one is outside their `try`).
+            # just the HTTP call inside `_poll_transcripts` (it catches its
+            # own transport errors and nothing else -- the `CrewConsole`
+            # dispatch that follows is outside its `try`).
             #
             # **The failure this prevents is silent and costs a whole
             # sortie.** This runs on a daemon thread, so an exception
@@ -3666,10 +3638,6 @@ def _run_crew_text_poll_loop(
                     # DebugPrintBrainClient, both of which return [].
                     crew_console.drain_brain(runner.last_t_sim)
                     commands_before = crew_console.commands_handled
-                    if f10_commands_enabled:
-                        _poll_f10_commands(
-                            aircraft_client, crew_console, runner.last_t_sim
-                        )
                     if speech_input_enabled and speech_client is not None:
                         _poll_transcripts(
                             speech_client, crew_console, runner.last_t_sim
@@ -4246,18 +4214,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--f10-commands",
-        action="store_true",
-        help=(
-            "poll and dispatch player-selected DCS F10 radio-menu commands "
-            "(watch nearest / scan forward / cancel task) through "
-            "CrewConsole.handle_command -- plans/f10-crew-commands/"
-            "plan.md. Only meaningful with --crew-text; defaults off, a "
-            "true no-op when absent. Reuses the same --aircraft-layer-url "
-            "instance, no separate URL needed."
-        ),
-    )
-    parser.add_argument(
         "--brain-client",
         choices=("http", "debug", "null"),
         default="debug",
@@ -4669,7 +4625,6 @@ def main() -> None:
             world_model_db,
             args.poll_interval_s,
             stop_event,
-            args.f10_commands,
             audio_adapter_client,
             True,  # speech_input_enabled -- BL-B96: always on
             args.detection_trace,
