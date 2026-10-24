@@ -68,7 +68,8 @@ related; that is not yet checked. The logs and the branch flown are not yet in h
 - **Wording: option C.** Shown three mocks: A, silence until he really sees it; B, *"Lost it behind
   the ridge, 9 o'clock"*; C, *"Behind the ridge, 9 o'clock"* said once, when the target leaves the
   cockpit-frame mask but terrain still hides it. The user: *"option C, because I still get info on
-  where it's believed to be"*.
+  where it's believed to be"*. Asked whether "ridge" can be said truthfully for any terrain:
+  *"ridge/hill/any terrrain -> "ridge""*. So it is always "ridge".
 - **History.** *"yes, had visual, lost when I turned away and flew mehind ridge, a minute or so"*.
 - **Logs.** The detection trace is *"a 200 MB detection trace, too large"*, so this is diagnosed
   from code without it.
