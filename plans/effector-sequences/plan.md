@@ -27,10 +27,16 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R11 | Curated registry + sequence files at `body-layer/config/effectors.toml` / `body-layer/config/effector-sequences/*.md` | **`body-layer/config/sequences/`** — `effectors.toml`, `*.md` sequence files, and the generated `switch-reference.md` all live there; the raw dump stays at `body-layer/config/effectors-raw.toml` | User, 2026-10-23: first "sequence files ... go to body-layer/sequences/", then corrected mid-Stage-1 to "body-layer/config/sequences is better" |
 | R12 | Takeoff rows carry an explicit `<effector> != on` self-condition (D3/R5) | **The engine itself skips a switch row whose effector's OBSERVED readback already equals the row's target value** — no write, no step delay, no speech — for *every* trigger, not only takeoff; the takeoff file's self-conditions are removed as redundant. If that readback is still unknown after `EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (an absolute-value write is harmless if the switch was already there) — this is the opposite of an explicit `condition` cell's unknown-timeout, which *skips* (D3, unchanged). Explicit `condition` cells are reserved for genuine cross-switch dependencies, which no shipped file needs this cut. | User, 2026-10-23, verbatim: *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that switch is already in set position, so no action. I'll use the conditions for real this-depends-on-some-other-condition cases."* Reversible (main loop's own call on the unknown-timeout writing rather than skipping) — flagged in `implementation.md`. |
 | R13 | One flat registry + sequences directory, a device/cmd/arg collision drops *both* entries (D5) | **Per-aircraft layout**: `config/sequences/<aircraft-dir>/effectors.toml`, `.../switch-reference.md`, `.../copilot-<trigger>.md` (the `mi-24p-` filename prefix drops now the directory carries it); the raw dump moves to `config/effectors-raw/<aircraft-dir>.toml`. `<aircraft-dir>` is a sequence file's own `aircraft` header value, lower-cased (`Mi-24P` → `mi-24p`) — stated once, in `effector_registry.aircraft_dir_name`, and never re-derived elsewhere. The loader loads one registry per aircraft directory; a sequence file resolves effectors only against its own aircraft's registry, and an `aircraft` header that does not map to the directory it was found in is a file error (D5-collected, not fatal); each aircraft directory is independent — a bad registry in one disables only that aircraft's sequences, never another's. **Collision rule also changes**: the *first* curated entry (TOML file order) to claim a `(device, cmd, arg)` triple wins; every later one is rejected with a non-fatal error naming the triple and the winner — not "drop both" (superseded, see below). | User, 2026-10-23, verbatim: *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at this time, better to be ready now."* Shape (directory names, filename-prefix drop) is the main loop's own reversible choice, logged in `implementation.md`. |
-| R15 REVISED | R15 below: one continuous watched set = sequence args ∪ code args | **Two readback classes** (user, option B, 2026-10-24): sequence switches get a **synchronous one-shot read** (`POST /query/read_args` → collector broker → `Export.lua` answers in the same frame) at run start and after each wait row. R12/D3 resolve against that snapshot plus engine-wide `assumed_writes`, and an unknown never blind-writes a non-absolute effector. Only `(886, 898, 960)` stay polled through `watch_args` at 5 Hz, a fixed set that sequence files cannot grow. | *"the number of switches that we use will increase ... sequences can flip any switch. Most of them we really only need a few times per flight"*; then ***"B"*** (explore-notes, "Stage 4 decisions, 2026-10-24"). |
+| R15 REVISED | R15 below: one continuous watched set = sequence args ∪ code args | **Two readback classes** (user, option B, 2026-10-24): sequence switches get a **synchronous one-shot read** (`POST /query/read_args` → collector broker → `Export.lua` answers in the same frame) at run start and after each wait row. R12/D3 resolve against that snapshot plus engine-wide `assumed_writes`, and an unknown never blind-writes a non-absolute effector. Only `(886, 898, 960)` stay polled through `watch_args` at 5 Hz, a fixed set that sequence files cannot grow. **Amended the same day**: the polled set is per-aircraft config (`polled.toml`) ∪ code-required args (S4.4a), and the one-shot reply is validated before use (S4.2). | *"the number of switches that we use will increase ... sequences can flip any switch. Most of them we really only need a few times per flight"*; then ***"B"***; then *"Better add a config for which effectors need constant updates. The list will likely grow."* (explore-notes, "Stage 4 decisions, 2026-10-24"). Security: `security-stage4-plan.md`. |
 | R15 | Stage 4 = "design as 2026-10-21, corrected for reduction" (one paragraph, not specified) | **Specified, 2026-10-24 — see "Stage 4 — watched-args readback (spec)"**. The fixed per-frame `push_cockpit_switch_state` line (9 args) is **retired whole**, lamps included; body-layer declares one watched set (sequence-file args ∪ three code-consumer args), `Export.lua` reads only those inside its existing 5 Hz export tick, raw values, change-gated, echoing a content-derived `watch_id` so body-layer knows when to re-send. `/cockpit_switch/latest` and `CockpitSwitchState` are removed; the new feed reuses Stage 2's `"args"` map shape so `effector_engine` does not change. | User, 2026-10-23 (explore-notes "Readback rate and scope"); *"Go ahead with BL-B90 last stage"*, 2026-10-24. Per-arg consumer audit in the spec: no consumer of that line reads it faster than body-layer's 1 Hz poll, and the two args the Lua servo needs per frame (886/898) it already reads itself. |
 | R14 | Five triggers (`takeoff`/`observ-on`/`observ-off`/`weapons-arm`/`weapons-safe`), each `cardinality="every_time"` | **Two more**, `mission-start`/`mission-start-in-air`, both `cardinality="once"` (per mission) — fired by `logger.py`'s poll block once it has a *fresh* post-restart ownship sample (never the stale pre-restart one `GET /telemetry/latest` may still be serving), per D2's "mission (re)start re-runs the runner `__init__`" for the pending-flag fields this adds. **`TAKEOFF` no longer fires on an air start** — only a real observed ground→air transition fires it now; the air-start case fires `MISSION_START`/`MISSION_START_IN_AIR` instead. **A body-layer process start/restart against an already-running mission fires neither** (unchanged: `_check_for_new_mission`'s pre-existing first-poll rule already refused to treat that as a reset). No sequence file ships for either new trigger this cut — a trigger with no loaded file fires into nothing. | User, 2026-10-23, verbatim: *"Add trigger for mission-start that fires once at every mission start and separate for mission-start-in-air that fires once at mission start only if airborne (AGL > 10 m)"*; *"No, only real takeoffs"*; *"No, only real mission starts"* (explore-notes, "Two new triggers: mission start"). |
 
+- **2026-10-24 (amendment, at `0cf145b3`)**: the polled set moves from the code constant
+  `READBACK_ARGS` to per-aircraft `config/sequences/<aircraft-dir>/polled.toml`, with the
+  code-required args always unioned in (S4.4a; user: *"Better add a config for which effectors need
+  constant updates. The list will likely grow."*). The one-shot read reply is validated on both
+  sides (S4.2; `security-stage4-plan.md` required change 1). Bookkeeping becomes an explicit
+  Implementer step (4e).
 - **2026-10-24 (later) — Stage 4 revised to option B** (R15 REVISED, plan only), at `0a87e516`,
   after the user's answers to Decisions 4–6: "Stage 4 — readback by need". The first spec is kept
   in place, marked superseded.
@@ -661,7 +667,22 @@ now waits once per snapshot, and reads only its own one-shot reads plus `assumed
    `read_args`; **4c** also builds the engine snapshot, `assumed_writes` and `absolute_write`. Built **before** Stage 3's card is flown (user,
    2026-10-24: *"Go ahead with BL-B90 last stage"*), so a single card on the Stage 4 branch covers
    both. Its own batch: one performance pass and one security pass after 4c. Needs an `Export.lua`
-   redeploy on the Windows DCS machine.
+   redeploy on the Windows DCS machine. **4a/4c also build the S4.2 reply validation**
+   (`parse_arg_values` in the collector, re-validation in `read_args`), **and 4c builds
+   `polled.toml`, its loader and `REQUIRED_POLLED_ARGS` (S4.4a).**
+
+   **4e — bookkeeping, done by the Implementer in the same branch (not left to the main loop):**
+   - `aircraft-layer/ROADMAP/AC-B11.md`: add `POST /command/watch_args` and `POST
+     /query/read_args` to the list of POST handlers with the unbounded `Content-Length` read.
+   - `body-layer/ROADMAP/BL-B67.md`: one line saying 962 (launch permission) and 673 (weapons bar)
+     are no longer read continuously after BL-B90 Stage 4, so BL-B67 chooses for each whether it
+     goes in `polled.toml` (plus `REQUIRED_POLLED_ARGS` if code reads it) or is read at need.
+   - `aircraft-layer/CLAUDE.md`: replace the `cockpit_switch` readback paragraph (`GET
+     /cockpit_switch/latest`, args 773/761/…) with the two new readback paths, and the API list in
+     "Structure".
+   - `body-layer/config/sequences/triggers.md`, or the sequence-file docs wherever the format is
+     described: one sentence saying a file's switches are read once at run start and after each
+     wait row.
 
 ---
 
@@ -700,7 +721,7 @@ flowchart LR
 | Class | Which args | Read how | Who uses it | Grows with sequence switches? |
 |---|---|---|---|---|
 | **One-shot (new)** | each trigger file's own effectors and condition effectors | once at run start, and again after each wait row; synchronous through the collector | the engine's R12 self-check and D3 conditions | **No per-tick cost.** A file with more switches makes its one read longer, on a trigger the pilot causes |
-| **Continuous (the first spec's `watch_args`, narrowed)** | fixed `READBACK_ARGS = (886, 898, 960)` | the existing 5 Hz tick, change-gated | `home_phase`, `SightHead.mode`, `sight_ready` and the ready edge | **No.** Code constants only; a test pins that sequence files cannot add to it |
+| **Continuous (the first spec's `watch_args`, narrowed)** | `polled.toml` ∪ code-required (886, 898, 960); S4.4a | the existing 5 Hz tick, change-gated | `home_phase`, `SightHead.mode`, `sight_ready` and the ready edge, plus anything listed later | **Only by config edit.** A test pins that sequence files cannot add to it |
 
 ### S4.1 Which args stop being read per frame
 
@@ -714,7 +735,7 @@ servo reads 886/898 itself in Lua. What changes is where each one goes:
 | 673 (weapons bar) | per frame | **one-shot**, when `weapons-arm`/`weapons-safe` runs |
 | 886 (OBSERV) | per frame | **continuous** (code consumer) and also in the observ-on/off one-shot reads |
 | 898, 960 (lamps) | per frame | **continuous** (code consumers) |
-| 962 (launch perm) | per frame | **not read**. No reader; BL-B67 adds it to `READBACK_ARGS` |
+| 962 (launch perm) | per frame | **not read**. No reader; BL-B67 adds it to `polled.toml` (and to `REQUIRED_POLLED_ARGS` if code reads it) |
 
 `weapon_safety_observed` and `launch_perm_observed` on `GuidanceUnitState` therefore stay `None`.
 They have no reader; their docstrings say so, and BL-B67 decides which class each joins.
@@ -750,6 +771,24 @@ the collector is the one process holding both sockets, so the correlation belong
 - **body-layer** `AircraftLayerClient.read_args(args) -> dict[str, float]` raises
   `AircraftLayerError` on any non-200, matching `write_cockpit_switch`. Its HTTP timeout stays the
   client's default 2.0 s, but the collector answers within about 0.3 s either way.
+- **The reply is validated on both sides before it can become `cursor.snapshot`** (security plan
+  review `security-stage4-plan.md`, required change 1). The rules are the same as
+  `WatchedArgsState.from_dict`'s:
+  - `values` must be an object;
+  - it has ≤ 64 keys;
+  - every key is a decimal string in 0..4095, and is one of the args *requested*;
+  - every value is a non-bool `int`/`float` with `math.isfinite`.
+
+  The two sides:
+  - **Collector**: one validator per side. `schema/watched_args.py` exposes a module-level
+    `parse_arg_values(raw) -> dict[int, float]` that both `WatchedArgsState.from_dict` and the
+    broker's `"read_id"` line parser call. A bad reply line is dropped at WARNING, and the waiting
+    request times out to `504`.
+  - **body-layer**: `read_args` re-validates the HTTP body, because the collector's response is
+    still a trust boundary (the review's attacker class 1, a compromised dependency). Anything
+    failing raises `AircraftLayerError`, which the engine already treats as a failed read (retry,
+    then the 5 s unknown path). **A NaN must never reach `_matches`**: `abs(NaN - t) < g` is
+    `False`, so it would read as "differs" and write.
 
 ### S4.3 How the engine uses it (`belief.effector_engine`)
 
@@ -829,12 +868,16 @@ e.g. a gyro that has now aligned):
 
 The first spec's §4.2–4.5 mechanism, which holds unchanged **except for its contents**:
 
-- `watched_args(...)` from the first spec is **deleted**. The set is the code constant
-  `sight_effector.READBACK_ARGS = (886, 898, 960)`. `watch_id_for(READBACK_ARGS)` is computed at
-  import, and so is constant.
-- Keeping the op for a three-arg constant set, rather than hard-coding the three in `Export.lua`,
-  is worth it because adding 962 for BL-B67 is then a body-layer edit, with no `Export.lua`
-  redeploy and no version bump.
+- `watched_args(...)` from the first spec is **deleted**, and so is the hard-coded
+  `READBACK_ARGS` from the first revision of this section (superseded, below). The set comes from
+  **config**, per S4.4a. It is computed once at startup with `watch_id_for(...)` and is constant
+  for the process.
+- Keeping the op, rather than hard-coding the args in `Export.lua`, is now required rather than
+  merely convenient: the user expects the polled list to grow by **config edit**, with no
+  `Export.lua` redeploy and no version bump.
+- **Superseded wording (first revision of S4.4, same day)**: *"The set is the code constant
+  `sight_effector.READBACK_ARGS = (886, 898, 960)`."* Replaced by S4.4a after the user's *"Better
+  add a config for which effectors need constant updates. The list will likely grow."*
 - Everything else from §4.2–4.5 stands: content `watch_id`, replace-not-merge, raw values with the
   `>= 0.5` threshold moved to `refresh_readback`, the reconnect full snapshot, `LuaExportStop`
   resets, the collector clearing its cache on `export_version`, body-layer re-sending when
@@ -842,6 +885,76 @@ The first spec's §4.2–4.5 mechanism, which holds unchanged **except for its c
   rule, and the runner field as an ordinary init field.
 - `refresh_readback` reads `"886"`, `"898"` and `"960"`. The 673/962 branches are deleted rather
   than left reading keys that will never arrive.
+
+### S4.4a Which args are polled: `config/sequences/<aircraft-dir>/polled.toml`
+
+User, 2026-10-24: *"Better add a config for which effectors need constant updates. The list will
+likely grow."*
+
+**A sibling file, not a section of `effectors.toml`.** Three reasons:
+
+- `effectors.toml` is the registry of **writable** controls. Every entry resolves a
+  `source_element` to device/cmd/arg. An indicator such as the READY lamp (960) has no element,
+  device or cmd, so putting it there would give the registry loader a second entry kind to branch
+  on.
+- D5's finest-honest-grain rule: a typo in the polled list must not be able to disable the
+  registry, and therefore every sequence. As its own file, a bad `polled.toml` degrades only
+  polling.
+- R13 already makes the directory per-aircraft, so one more file there is the existing layout, not
+  a new one.
+
+Shipped Mi-24P file:
+
+```toml
+# Cockpit state polled continuously (5 Hz) for Petrovich's own use.
+# Everything a sequence file touches is read once, when its trigger fires -- do not list those here
+# unless something needs them all the time. Max 64 args in total, including code-required ones.
+
+# Clickable controls, by their effectors.toml name.
+effectors = ["observ"]                 # 886 OBSERV -- home_phase follows it
+
+# Indicators: not clickable, so not in effectors.toml. By DCS arg number, with a name.
+[indicators.align_lamp]
+arg = 898                              # L5 gyro alignment -- sight head caged -> free
+[indicators.ready_lamp]
+arg = 960                              # guidance unit READY -- sight_ready, "Guidance unit ready"
+```
+
+**Loader**: `belief.effector_registry.load_polled_config(aircraft_dir, registry) -> (PolledSet,
+errors)`, next to the registry loader that already resolves the aircraft directory (R13).
+`PolledSet` is `{arg: name}`.
+
+- An effector name resolves through that aircraft's registry to its `.arg`.
+- An indicator gives its `arg` directly. It must be an `int` (not bool) in 0..4095, and its name
+  must be `[a-z0-9_]+` and must not clash with an effector name.
+- Each bad entry is a collected D5 error: an unknown effector, a missing, out-of-range or non-int
+  arg, a duplicate name, or a clashing name. The entry is dropped, and the others stay.
+- If the file is unreadable or not TOML, the whole config is ignored and only the code-required
+  args are polled. That is a D5 error.
+- D5 errors get **the existing banner and the existing one audio line** (the same
+  `config_error_pending` flag); no new line.
+- A missing file is not an error: required-only, with an INFO log.
+
+**Code-required args, always unioned in.** `sight_effector.REQUIRED_POLLED_ARGS = {886:
+"home_phase", 898: "SightHead.mode", 960: "sight_ready"}` is declared beside its readers. Each
+value is the reason, which the warning prints.
+
+- Final set = required ∪ config, ordered required first, then config file order.
+- **If the config omits a required arg**: one startup WARNING naming the arg and its reason, e.g.
+  *"polled.toml does not list arg 960 (sight_ready); polling it anyway because code reads it"*.
+  It is a warning, **not a D5 error**: no banner and no audio line. The behaviour is already
+  correct, so the warning just keeps the file honest as a reference.
+- **Cap 64 in total.** If the union exceeds it, the overflow config entries (taken from the end of
+  the file) are dropped as D5 errors. Required args are never dropped.
+
+**Reference**: no generated reference, and `switch-reference.md` is unchanged. `polled.toml` is a
+handful of lines and is its own reference, and the startup log line *"polling N args: observ(886),
+align_lamp(898), ready_lamp(960)"* shows the resolved set, which is the thing worth checking.
+Adding a "polled" column to the generated switch reference would make the generator read a
+second config file in order to decorate 500 rows, where three are polled.
+
+**Sequence files still never change the polled set.** The loader takes `polled.toml` and the
+registry, never the sequence files, so this holds by construction and is pinned by test C6.
 
 ### S4.5 Wire and version
 
@@ -871,7 +984,7 @@ covers `MAX_READS_PER_FRAME`.
 | `commanded_values[E]` | internal | successful write | unchanged rule (D9) |
 | all of `EffectorRunState` | runner `__init__` | mission (re)start | fresh: no cursors, no snapshots, no `assumed_writes` (D11) |
 | `ArgReadBroker` slot | collector | reply line, or 0.25 s | `Event` set and value stored, or the slot removed with `504`; a late reply finds no slot and is dropped |
-| continuous-set rows | — | — | the first spec's table (below), **minus** "desired set = union of sequence args": it is now `READBACK_ARGS` |
+| continuous-set rows | — | — | the first spec's table (below), **minus** "desired set = union of sequence args": it is now `REQUIRED_POLLED_ARGS` ∪ `polled.toml` (S4.4a), resolved once at startup |
 
 ### S4.6 Compatibility (deltas from §4.6)
 
@@ -909,9 +1022,32 @@ core** `build_read_reply_line(t, read_id, args, values)`: valid JSON, failed rea
 - E7: `SequenceFile.read_args` includes condition effectors; a 65-arg file is a D5 error.
 - E8: `absolute_write` is true for `default_2_position_tumb` only. *Mutation*: default to true.
 
-**body-layer continuous**: B1 becomes "`READBACK_ARGS` is exactly (886, 898, 960) and **loading
-extra sequence files does not change the watched set or `watch_id`**". *Mutation*: union in
-sequence args. B2–B4 and P1–P4, P6 stand.
+- **E9 (security required change 1)**: `AircraftLayerClient.read_args` against a fake HTTP body
+  raises `AircraftLayerError` for each of these: a NaN, `inf`, `-inf` or `true` value; a key
+  `"abc"`, `"-1"` or `"4096"`; a key not in the request; 65 keys; `values` not an object. The engine
+  then treats the read as failed: no write this poll, then the timeout path. *Mutation*: drop
+  `math.isfinite` (a NaN value must still raise; without the guard it reaches `_matches` and
+  writes). **A10**, the same cases at the collector's `parse_arg_values` on a `"read_id"` line
+  (dropped, request → `504`), mirroring A1's `isfinite` mutation.
+
+**body-layer continuous / polled config** (`test_polled_config.py`, plus the B tests):
+- **C1 union with required**: a config listing only `ready_lamp` gives {886, 898, 960}, with
+  required first. *Mutation*: config-only set.
+- **C2 omitted required**: that same config logs exactly one WARNING naming 886 and 898 with their
+  reasons; `config_error_pending` stays False and no banner appears (caplog plus the flag).
+  *Mutation*: treat it as a D5 error.
+- **C3 bad entries**: an unknown effector, an indicator arg of 5000, `true` or `"960"`, a duplicate
+  name, an indicator named like an effector. Each is collected, the other entries are kept, the
+  banner and the audio flag are set. *Mutation*: raise instead of collect.
+- **C4**: unreadable TOML → required-only plus a D5 error. A missing file → required-only, no
+  error.
+- **C5 cap**: 64 total with 3 required; a config of 63 others drops the last 2 config entries with
+  errors and keeps all required. *Mutation*: truncate from the front.
+- **C6 sequence files never change the polled set** (B1, carried): loading extra sequence files
+  changes neither the set nor `watch_id`. *Mutation*: union in sequence args.
+- **C7 shipped file**: resolves to exactly {886, 898, 960} with no warning and no error.
+
+B2–B4 and P1–P4, P6 stand. In P1, the startup send carries the config-derived set.
 
 **Real poll loop**: Stage 2's (a)–(h) migrated. The fake now answers `read_args` from a dict and
 records each call. (b) becomes **"second takeoff: exactly one `read_args` with the four takeoff
@@ -979,7 +1115,9 @@ Branch, redeploy and version-line edits as before. Block by block:
 Sequence files can now grow to any number of switches at no standing cost. The one-shot read is
 the natural backing for `BL-B95`'s `effector(name):get` (a script's get is exactly a one-shot
 read), so that seam already exists before scripting arrives. `BL-B67` decides, per field, whether
-962 and the weapons bar are continuous (`READBACK_ARGS`) or read at need.
+962 and the weapons bar are continuous (`polled.toml`) or read at need. Because `polled.toml` is
+config, the polled list can grow (the user's *"the list will likely grow"*) without touching
+`Export.lua` or any code that does not read the new arg.
 
 ---
 
