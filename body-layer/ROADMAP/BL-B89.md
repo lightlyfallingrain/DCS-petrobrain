@@ -24,3 +24,9 @@
   glance-away. **Pointing (user, 2026-10-20):** o'clock or compass bearing, with an optional
   distance, for now. Landmarks, waypoints and player-set marks come later: *"yes, absolutely, once
   we get them in reliably. Not quite there yet."*
+
+  **Explored 2026-10-25** (`plans/9k113-scan-procedure/explore-notes.md`, verbatim). Wide near
+  band 1.5–4 km, not 0.5. Sectors: ahead alternates −30…+10° / −10…+30°, left −60…0°, right
+  0…+60°, a commanded o'clock is that sector. The naked-eye sweep is a required pause in the sight
+  scan. Pointing at a known place is stage 2 of this item. `[[BL-B86]]` is folded in. Built in code.
+  Queued after `[[BL-B96]]`.
