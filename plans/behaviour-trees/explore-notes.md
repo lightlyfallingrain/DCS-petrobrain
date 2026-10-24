@@ -158,3 +158,84 @@ So:
 > That's also much more like real scripting than just tables. Maybe use .lua then?*
 >
 > *Do not design anything yet, but evaluate my idea."*
+
+Main loop's evaluation, in short: a good direction, closer to the existing code than trees. The one
+thing it does not give for free is arbitration (several handlers wanting one sight, one voice), so
+priority, resource claims, pre-emption and resume belong in the engine. Lua for logic, because
+coroutines make "do, wait, do" plain code. Cost: the `lupa` dependency, weaker load-time checking,
+and a need for offline replay testing.
+
+### The user's answer and API sketch, 2026-10-24 (verbatim)
+
+> *"Tables are good for cockpit switches, they are like checklists. For behaviour, I'd want
+> scripting language like lua."*
+
+> *I vision somehting like:*
+>
+> *- fixed set of functions to call*
+> *- set of effector names (exists) action names (does not exist) and both fixed triggers from code
+>   (partially exists) and custom triggers from script.*
+
+```
+setup()
+    .aircraft(<mi-24p>)
+    .role(<copilot>)   ; copilot, pilot, crew, wignman, any   (crew = pilot or copilot)
+    .trigger(<trigger-name>)
+
+effector(<effector-name>)
+    .get()
+    .set(<value>)
+    .increment(<value>)  ; degative value decrements
+
+param(<param-name>)
+    .get()
+    .set()  ; some params would be read-only
+
+action(<action-name>)
+    .arg(<arg-name>)
+        .get()
+        .set(<value>)
+    .start()
+    .stop()
+    .pause()
+    .continue()
+
+trigger(<trigger-name>)
+    .register()
+    .fire()
+    .listen()
+        .then(<function to execute>)
+; some mechanism for trigger().playerCommand("scan *").listen().then(scanFunction) <- would need the full text as param to scanFunction
+
+speak()
+    .ics("<text to speak>")
+    .radio("<text to speak>")
+
+interrupt(<interrupt-name>)  ; interrupts are triggers, same things apply except interrupt gets priority
+```
+
+> *That'd allow*
+
+```
+setup().aircraft(mi-24p).role(copilot)
+
+trigger(start-navigation).register() ; this script may fire this trigger
+trigger(take-off).listen().then(takeOffActions)
+trigger(take-off-clearance).listen().then(takeOffClearanceActions)
+
+function takeOffActions() {
+  effector(missilePower).set(on)   ; or maybe effector.executeSequence(sequence-name)
+  effector(guidanceUnit).set(on)
+  if (timeOfDay != day) {
+    effector(domeLight).set(red)
+  }
+
+  trigger(start-navigation).fire()
+}
+
+function takeOffClearanceActions() {
+  speak("Commander, we are cleared for take-off")
+}
+```
+
+> *"Something along those lines. Not exact, just ideas and pseudocode."*
