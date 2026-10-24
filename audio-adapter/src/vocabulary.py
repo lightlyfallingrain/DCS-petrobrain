@@ -279,6 +279,18 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # body-layer side rather than four.
         "radio_check",
         "greeting",
+        # "where is it?" (`plans/attack-run-los/plan.md` F3) -- a plain,
+        # slot-free phrase, matching `drop_target`/`disengage`'s own
+        # posture. **Voice only** (Decision 3, user: "voice only") --
+        # like `observ_on`/`observ_off`/`weapons_armed`/`weapons_safe`
+        # above, there is no F10 menu equivalent and body-layer's
+        # `handle_line`/`_handle_utterance` typed-console surface does
+        # not recognise it either (that plan's own Decision 3). The
+        # body-layer side already dispatches this token
+        # (`DISPATCHED_COMMAND_TOKENS`); this entry is what makes it
+        # recognisable from speech. **Unbenched**, like every token
+        # added here without a re-recorded corpus.
+        "where_is_it",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -653,6 +665,13 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "good evening petrovich",
         "good night petrovich",
     ),
+    # "where is it?" (`plans/attack-run-los/plan.md` F3) -- three
+    # phrasings, the pilot's own stated form plus two obvious variants
+    # (no filler articles, per this module's own "what this speaker
+    # actually says" rule -- "where is target", not "where is the
+    # target"), matching `mark_here`/`mark_target`'s own "a couple of
+    # plausible ways to say it" posture for a new, unbenched command.
+    "where_is_it": ("where is it", "where is target", "where is it now"),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a

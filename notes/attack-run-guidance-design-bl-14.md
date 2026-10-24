@@ -88,6 +88,26 @@
   nothing about resolvability changed there. The general shape: when a register narrates a
   transition, name the condition as the thing that actually matters to the listener, not as
   whatever happened to be true on the tick before.
+
+  **Correction, 2026-10-24 (`BL-B97`): `cause == "too_far"` was the wrong resolvability signal, not
+  an instance of the general shape above.** A stale `"obstructed"` verdict ages out to `"unknown"`
+  after `ATTACK_TARGET_LOS_MAX_AGE_S` (1.5s); `"unknown"` is not `"too_far"`, so the old register
+  read that as "regained sight" and spoke "Eyes on" with no fresh look at all — exactly the sortie-
+  reported bug. The register is now keyed on `tier != 1` (a genuine fresh naked-eye look) instead.
+  The general principle still holds — key a transition on what the listener actually cares about —
+  the earlier bullet simply misidentified which field *was* that condition. `cause` answers "why is
+  there no look right now," `tier` answers "is there a look right now"; the register needs the
+  second question, and conflating "resolvability" with "not currently too-far" is what let the bug
+  through three review passes.
+- **A transition's rendered text differing from the steady-state text for the same cause makes a
+  text-equality suppression veto fire once more than it looks like it should.** `_should_emit`
+  suppresses a repeat only when the new text equals the last spoken text; a losing/regaining-sight
+  transition line (`"Behind the ridge, ..."` / `"Eyes on, ..."`) is deliberately worded differently
+  from the ordinary steady-state qualified phrase for the same cause (`"..., obstructed."`), so the
+  tick immediately after a transition still speaks once more before the suppression actually takes
+  hold — not a bug, just a consequence of the veto being text-equality rather than cause-equality.
+  Already present for the pre-existing `"too_far"` transition; worth knowing before reading a
+  sortie's speech log and wondering why a transition produces two lines close together.
 - **A docstring's "X and Y together is not reachable in practice, because Z" is a claim pinned to
   whatever makes Z true today, and a feature that changes Z can make the claim false the moment it
   ships — silently, because "unreachable" is exactly why nobody wrote a test for the combination.**

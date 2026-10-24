@@ -102,6 +102,7 @@ import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attack_run import decide as decide_attack_run
+from belief.attack_run import query as query_attack_run
 from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_reply import validate_brain_reply
@@ -136,6 +137,7 @@ from belief.speech import (
     render_group_report,
     render_lost_contact,
     render_no_contact,
+    render_no_target,
     render_no_view,
     render_radio_check,
     render_readback,
@@ -918,6 +920,14 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "step",
         "engage",
         "disengage",
+        # "where is it?" (`plans/attack-run-los/plan.md` F3) -- one of
+        # the two documented no-return exceptions
+        # (`NO_RETURN_VALUE_COMMAND_TOKENS`): `_handle_where_is_it`
+        # always returns `[]` by design, the real readback spoken later
+        # by `drain_where_is_it` once the poll loop supplies the inputs
+        # (`AttackRunState`/`OwnshipState`/the resolving optic) this
+        # class cannot reach synchronously.
+        "where_is_it",
         # `BL-B64` Stage 2, direction §6 -- "Observ on"/"Observ off".
         # `_handle_observ_on`/`_handle_observ_off` always return a
         # one-line readback unconditionally, so neither needs the
@@ -958,7 +968,9 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
 #: something`'s own exemption list, pulled out as a named constant so the
 #: test and `handle_command`'s early-return branches read the same
 #: definition rather than two independently-maintained lists of two.
-NO_RETURN_VALUE_COMMAND_TOKENS: frozenset[str] = frozenset({"stop_talking", "silence"})
+NO_RETURN_VALUE_COMMAND_TOKENS: frozenset[str] = frozenset(
+    {"stop_talking", "silence", "where_is_it"}
+)
 
 
 def _active_tasks_by_kind(tasks: list[PendingIntent]) -> list[PendingIntent]:
@@ -1160,6 +1172,17 @@ class CrewConsole:
     #: dispatch, same convention as `observ_transition`, and
     #: consumed-and-cleared by the poll loop the moment it is applied.
     weapon_safety_transition: Literal["armed", "safe"] | None = None
+    #: "Where is it?"'s one-shot signal to `logger.py`'s poll loop
+    #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
+    #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
+    #: the resolving optic all live on `logger.ConsolePerceptionRunner`, not
+    #: here, so this class leaves a narrow instruction instead of computing
+    #: or speaking the answer synchronously (`_handle_where_is_it`'s own
+    #: docstring). Reset to `False` at the top of every `handle_command`
+    #: dispatch, same convention as `attack_run_transition`/`observ_
+    #: transition`, and consumed-and-cleared by the poll loop's `drain_
+    #: where_is_it` the moment it is applied.
+    where_is_it_requested: bool = False
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `overlay_client`/`speech_client`: `None` is a true no-op.
@@ -1911,6 +1934,9 @@ class CrewConsole:
         # Same reset, same reason, for the weapons safety bar
         # (`weapon_safety_transition`'s own docstring).
         self.weapon_safety_transition = None
+        # Same reset, same reason, for "where is it?"
+        # (`where_is_it_requested`'s own docstring).
+        self.where_is_it_requested = False
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -1986,6 +2012,8 @@ class CrewConsole:
             lines = self._handle_engage(now_sim, slots)
         elif token == "disengage":
             lines = self._handle_disengage()
+        elif token == "where_is_it":
+            lines = self._handle_where_is_it()
         elif token == "mark_here":
             lines = self._handle_mark_here(now_sim)
         elif token == "mark_target":
@@ -2909,6 +2937,25 @@ class CrewConsole:
         self.attack_run_transition = "disengage"
         return [render_attack_run_off().text]
 
+    def _handle_where_is_it(self) -> list[str]:
+        """ "Where is it?" (`plans/attack-run-los/plan.md` F3) -- the
+        pilot's own words: *"Add command 'where is it?' that gives me an
+        update during an attack run based on A) seeing the target B)
+        current belief ... use the standard attack run guidance phrase,
+        just trigger it on that command."* `AttackRunState`/the current
+        `OwnshipState`/the resolving optic all live on `logger.
+        ConsolePerceptionRunner`, not here (the same division `attack_
+        run_transition`'s own docstring states), so this handler cannot
+        compute or speak the answer synchronously -- it only sets the
+        one-shot signal `drain_where_is_it` (`logger.py`'s poll loop)
+        consumes, the same shape `_handle_engage`/`_handle_disengage`
+        already use for a runner-level effect, except here the signal
+        gates the *entire* readback, not a side effect alongside an
+        immediate one. Always `[]` -- one of `NO_RETURN_VALUE_COMMAND_
+        TOKENS`' two documented exceptions."""
+        self.where_is_it_requested = True
+        return []
+
     def _handle_observ_on(self) -> list[str]:
         """ "Observ on" -- `BL-B64` Stage 2, direction §6: *"OBSERV ON only
         on pilot command."* Leaves `observ_transition` for the poll loop
@@ -3091,6 +3138,60 @@ class CrewConsole:
         # re-fires immediately once the geometry (or the now-unchanged
         # comparison) says to.
         return state
+
+    def drain_where_is_it(
+        self,
+        attack_run_state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: Optic | None = None,
+    ) -> list[str]:
+        """Speaks "where is it?"'s answer (`plans/attack-run-los/plan.md`
+        F3) -- called from `logger.py`'s poll loop right beside `drain_
+        attack_run`, consuming `self.where_is_it_requested` the same way
+        the three existing one-shot signals are consumed (read, act,
+        set back to `False`).
+
+        **Decision 1: the gate is "is a target selected," not "is a run
+        engaged."** `attack_run_state is None` (disengaged, or never
+        engaged) no longer refuses on its own -- the user's own words,
+        *"if target is set, then answer. If no target ... then say 'No
+        target'"*. An engaged run's own per-contact memory (held-terrain
+        flag, remembered tier-2 altitude) is reused when present; an
+        unengaged query gets a throwaway, memoryless `AttackRunState`,
+        the same fail-open posture a brand-new `engage` would start
+        from. **Answering never engages or alters the run** -- the
+        throwaway instance (when constructed) is discarded immediately
+        after this call, never stored anywhere, and `attack_run.query`
+        itself never writes `state` either way."""
+        target_task = self._active_attack_target_task()
+        if target_task is None or target_task.contact_id is None:
+            lines = [render_no_target().text]
+            self._print(lines, now_sim)
+            return lines
+        contact = self.store.contact(target_task.contact_id)
+        if contact is None:
+            lines = [render_lost_contact().text]
+            self._print(lines, now_sim)
+            return lines
+        group = self.store.group_for_contact(contact.id)
+        state = (
+            attack_run_state
+            if attack_run_state is not None
+            else AttackRunState(last_contact_id=contact.id)
+        )
+        speech = query_attack_run(
+            state,
+            now_sim=now_sim,
+            ownship=ownship,
+            contact=contact,
+            group=group,
+            resolving_optic=resolving_optic,
+        )
+        lines = [speech.text]
+        self._print(lines, now_sim)
+        return lines
 
     def _handle_scan(
         self,

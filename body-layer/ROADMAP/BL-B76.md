@@ -160,3 +160,23 @@
 
   Related: `[[BL-B70]]` (implements §8 against this dead input), `[[BL-14]]`, `[[X-B29]]` (the live
   LOS feed), `[[AC-8]]`/`[[WM-W2]]` (its availability).
+
+  ### 2026-10-24 — `plans/attack-run-los/plan.md` answers the register half of step 3, narrower than framed
+
+  Step 3 asked whether the attack run should read the live gate outcome rather than the stored
+  contact. `plans/attack-run-los/plan.md`'s F2 fix does **not** change that — still `Contact.
+  live_los_clear` via `_no_look_cause`, unchanged. What it changes is a different, adjacent defect
+  found while fixing the sortie-reported "eyes on" bug: the loss/regain *register*
+  (`AttackRunState.last_spoken_unresolved`) was keyed on `cause == "too_far"`, so a stale
+  `"obstructed"` verdict decaying to `"unknown"` once `ATTACK_TARGET_LOS_MAX_AGE_S` elapsed read as
+  "regained sight" with no fresh look at all. Re-keyed on `tier != 1` instead.
+
+  **Decision 2 adds a further mitigation, not a resolution, to this entry's own open question.** A
+  new `AttackRunState.terrain_blocked_held` flag holds a fresh `"obstructed"` verdict's consequence
+  (the `", obstructed"` qualifier, and the new `"Behind the ridge, ..."` losing-sight line) across
+  that verdict's own freshness window ageing out, until a genuine tier-1 look supersedes it. This
+  narrows but does not close the risk this entry's Step 2 exists to measure: if `Contact.
+  live_los_clear` never actually reads `False` in live play (this entry's own open question —
+  rejected at admission, never updating the stored contact), the hold has nothing to latch onto and
+  the `"unknown"` fail-open path still dominates exactly as before. **Step 2's mountainous-sortie
+  measurement is unchanged and still the thing that answers this.**

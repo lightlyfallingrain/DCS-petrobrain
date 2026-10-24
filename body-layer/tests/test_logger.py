@@ -4540,6 +4540,139 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
     assert captured["resolving_optic"] is not runner.optic_state.guidance_optic
 
 
+# -- `plans/attack-run-los/plan.md` F3 -- "where is it?"'s poll-loop
+# wiring: `drain_where_is_it` is called right beside `drain_attack_run`,
+# consuming and clearing `crew_console.where_is_it_requested` so it does
+# not re-fire on the next poll. ------------------------------------------
+
+
+def _where_is_it_wiring_runner_and_console(
+    aircraft_client: FakeConsoleAircraftClient,
+) -> tuple[ConsolePerceptionRunner, CrewConsole]:
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    return runner, crew_console
+
+
+def _drive_where_is_it_spy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: FakeConsoleAircraftClient,
+) -> list[object]:
+    """Drives the real `_run_crew_text_poll_loop` with `run_once` replaced
+    by a no-op (same harness shape as `test_crew_text_poll_loop_passes_
+    the_used_optic_not_the_guidance_grant` above), with `crew_console.
+    drain_where_is_it` replaced by a spy that records the `state`
+    argument it was called with. Returns the list of recorded states --
+    length 1 if the call happened exactly once and the flag did not
+    re-fire on a later poll."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    monkeypatch.setattr(runner, "run_once", lambda: None)
+    calls: list[object] = []
+    done = threading.Event()
+
+    def spy_drain_where_is_it(
+        state: object,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+    ) -> list[str]:
+        calls.append(state)
+        done.set()
+        return ["Lined up."]
+
+    monkeypatch.setattr(crew_console, "drain_where_is_it", spy_drain_where_is_it)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        assert done.wait(timeout=5.0), (
+            "drain_where_is_it was never called -- the hand-set poll "
+            "state did not reach the call site under test"
+        )
+        # One more poll's worth of time, to prove the flag does not
+        # re-fire once cleared.
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    return calls
+
+
+def test_crew_text_poll_loop_drains_where_is_it_with_an_engaged_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`runner.attack_run_state` set (a run is engaged): `drain_where_
+    is_it` is called with that same state object -- the live, per-
+    contact state, not a throwaway one -- and `where_is_it_requested`
+    clears so it does not re-fire on the next poll."""
+    from belief.attack_run import AttackRunState
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    runner, crew_console = _where_is_it_wiring_runner_and_console(aircraft_client)
+    runner.attack_run_state = AttackRunState()
+    crew_console.where_is_it_requested = True
+
+    calls = _drive_where_is_it_spy(
+        tmp_path, monkeypatch, runner, crew_console, aircraft_client
+    )
+
+    assert calls == [runner.attack_run_state]
+    assert crew_console.where_is_it_requested is False
+
+
+def test_crew_text_poll_loop_drains_where_is_it_with_no_engaged_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: `runner.attack_run_state is None` (disengaged, or
+    never engaged) must not stop the poll loop from calling `drain_
+    where_is_it` at all -- the gate is "is a target selected," which
+    `drain_where_is_it` itself decides, not "is a run engaged." The loop
+    always calls it whenever the flag is set, passing through whatever
+    `runner.attack_run_state` happens to be, `None` included."""
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    runner, crew_console = _where_is_it_wiring_runner_and_console(aircraft_client)
+    assert runner.attack_run_state is None
+    crew_console.where_is_it_requested = True
+
+    calls = _drive_where_is_it_spy(
+        tmp_path, monkeypatch, runner, crew_console, aircraft_client
+    )
+
+    assert calls == [None]
+    assert crew_console.where_is_it_requested is False
+
+
 # -- `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the real poll
 # loop detects a genuine mission (re)start and resets belief/mission
 # memory. The per-class completeness guarantee (every field not in a

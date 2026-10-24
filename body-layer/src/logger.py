@@ -4044,6 +4044,23 @@ def _run_crew_text_poll_loop(
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
                         )
+                        # `plans/attack-run-los/plan.md` F3 -- "where is
+                        # it?"'s one-shot signal, consumed right beside
+                        # `drain_attack_run` above with the same inputs
+                        # (`runner.attack_run_state`/`runner.
+                        # last_ownship_state`/`runner.optic`): a true
+                        # no-op whenever `crew_console.where_is_it_
+                        # requested` is `False`, since `drain_where_is_it`
+                        # itself clears the flag inline (`_handle_where_
+                        # is_it`'s own one-shot-signal shape).
+                        if crew_console.where_is_it_requested:
+                            crew_console.drain_where_is_it(
+                                runner.attack_run_state,
+                                runner.last_t_sim,
+                                runner.last_ownship_state,
+                                resolving_optic=runner.optic,
+                            )
+                            crew_console.where_is_it_requested = False
                         # `[[BL-B80]]` v2: send the head's current world
                         # goal every poll while `sight_head.mode ==
                         # "free"` -- idle included, since the idle sight
