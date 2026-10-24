@@ -104,3 +104,98 @@ handling, `watched_args.py`, and the bookkeeping files (AC-B11, BL-B67, `aircraf
 (not just read), not just the implementer's own report. `test_logger.py`'s ~40 call sites were
 read in diff form and cross-checked against the plan's explicit text, not independently re-derived
 from scratch line by line.
+
+## Re-review (2026-10-24)
+
+Branch `feature/effector-sequences-stage4`, checked out detached at `b5fce2fdfbe6cce2d56a84dc9538947216e8a377`
+("Review fixes: rewrite test_logger.py call sites, update BL-B90 doc") — the worktree's own branch
+(`1d02e5e1`) had diverged, so per dispatch instructions I checked out the named tip detached. Tree
+was clean before and after.
+
+Diff reviewed: `4997764e..b5fce2fd` (the reviewed tip at `4997764e`'s own review commit to this
+tip), 4 files: test_logger.py, body-layer/CLAUDE.md, plan.md, implementation.md. No production code
+touched (`src/`, `dcs-export/` both empty in this diff) — confirmed by `git diff --name-only`
+restricted to those paths.
+
+### Fix 1: the adapter is gone, call sites rewritten
+
+`_GROUND_TRUTH_RAW_ARG` and `_merged_raw_args` are both deleted; grepped the whole file for
+`cockpit_switch_state`/`_merged_raw_args`/`_GROUND_TRUTH_RAW_ARG` — the one hit left
+(line 914) is a historical comment ("the old `get_cockpit_switch_state_latest`'s `None` default"),
+not a live reference. The fake's own field is now `raw_args: dict[str, float]`, string-arg-keyed
+exactly as the real wire carries it, and every call site I diffed drives it directly
+(`{"960": 1.0}`, `{"886": 0.0, "673": 0.0}`, etc.) — no named-boolean literal or translation
+survives.
+
+Verified the one outlier literal's dropped keys (`"t"`, `"received_wall_clock_s"`, `"observe_on"`,
+`"weapons_armed"`) by hand against `git show 5da55c71:body-layer/tests/test_logger.py`'s old
+`_merged_raw_args`: for that literal (`test_slew_trace_is_written_from_the_real_poll_loop`'s second
+`cockpit_switch_state` assignment), the old translation produced `{886: 1.0, 673: 0.0, 898: 1.0}`
+(`"t"`/`"received_wall_clock_s"` were never in `_GROUND_TRUTH_RAW_ARG` at all, so they never
+reached `merged`). The new literal is `{"886": 1.0, "898": 1.0}` — 673 (`weapons_armed`, value
+0.0) is dropped. Checked the test body itself (read in full, not skimmed): it asserts only on
+OBSERV (886, via the `(7, 3002, ...)` writes) and the alignment lamp (898, via `sight_head.mode`);
+arg 673 is never read back or asserted on anywhere in that test. The drop is correct — a dead
+literal, not a weakened assertion.
+
+Mutation spot-check (not just read): patched the fake's `get_watched_args_latest` to return
+`"args": {}` unconditionally (discarding `self.raw_args`) and ran the three guidance-unit-lamp
+tests (`test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_loop`,
+`test_guidance_unit_ready_is_silent_on_a_warm_air_start_through_the_real_poll_loop`,
+`test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_poll_loop`) — all three
+failed red for the stated reason (`sight_ready`/`crew_console.sight_ready` never became `True`,
+since the continuous feed now always reports no args). Restored from a `cp` backup taken before
+the mutation; confirmed by `shasum` that the restored file is byte-identical to the pre-mutation
+tip. This closes the loop the plan's own wording was checking for: the rewritten call sites are
+load-bearing on the real `raw_args`/`get_watched_args_latest` path, not vestigial.
+
+**Verdict on Fix 1: resolved as specified.** The call sites drive the arg-keyed shape directly;
+no adapter remains in any form.
+
+### Fix 2: `body-layer/CLAUDE.md`'s BL-B90 paragraph
+
+Read the diff and cross-checked each new claim against the code:
+
+- One-shot reads at run start / after each wait row, `assumed_writes` engine-wide keyed by arg,
+  `absolute_write` confirmed-shape-only — matches `effector_engine.py` (`EffectorRunState.
+  assumed_writes`) and `effector_registry.py` (`_ABSOLUTE_WRITE_SHAPES = frozenset({"default_2_
+  position_tumb"})`, `EffectorDef.absolute_write`).
+- `polled.toml` + `REQUIRED_POLLED_ARGS` union, required-first ordering, 64-arg cap, bad-entry/
+  missing-required-arg severity split — matches `sight_effector.REQUIRED_POLLED_ARGS` and
+  `effector_registry.load_polled_config`/`PolledSet`.
+- `EFFECTOR_CONDITION_READBACK_WAIT_S`'s "per snapshot" wording — checked the **rendered**
+  `config/defaults.toml`, not the source comment: its first sentence reads "How long a run waits,
+  per snapshot (Stage 4: once at run start, once again after each wait row), for `client.
+  read_args` to succeed..." — matches.
+- The now-corrected `sight_effector.py` bullet ("untouched by BL-B90" removed, replaced with the
+  raw-`"args"`-map/`REQUIRED_POLLED_ARGS` note) matches the real diff of that module in the Stage
+  4 commit.
+
+**Verdict on Fix 2: resolved as specified.**
+
+### Optional refinement applied
+
+`plan.md`'s `test_export_lua_constants_parity.py`/`MAX_READS_PER_FRAME` claim is corrected in
+place, superseded rather than deleted, pointing at `TestAdmitRead` in `test_watched_args_lua.py` —
+matches where the review found the real coverage.
+
+### Checks run (this pass, independently)
+
+- `body-layer`: `ruff format --check`, `ruff check` (`src tests tools`): clean. `mypy src`: clean,
+  74 files. `mypy tools`: clean, 10 files. `pytest tests -q`: 2650 passed, 4 xfailed — matches the
+  implementer's reported counts.
+- `aircraft-layer` (untouched this round, re-run anyway per the dispatch instruction to check both
+  subprojects): `ruff format --check`, `ruff check` (`src tests`): clean. `mypy src`: clean, 28
+  files. `pytest tests -q`: 608 passed.
+
+## Verdict
+
+APPROVED
+
+## Review Confidence
+
+Full read of this round's diff (4 files). Both required fixes verified by reading the code they
+reference, not just the prose describing them, plus one live mutation against the actual
+checked-out `test_logger.py` (not just the implementer's own report) confirming the rewritten call
+sites are load-bearing. All four subprojects' checks (format/lint/type/test for both
+aircraft-layer and body-layer) re-run independently rather than trusted from `implementation.md`.
