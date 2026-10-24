@@ -37,14 +37,19 @@ You also need a **built world-model `.sqlite`** for the terrain
 line-of-sight gate — see `world-model/RUN.md`. Point `--world-model-db` at a
 region whose coverage includes wherever you are flying.
 
-## 2. Run the perception logger
+## 2. Run the crew session
+
+`body.py` is always the crew session — there is no mode flag to select it. It
+polls perception and belief, and speech in/out are always on through a
+running `audio-adapter` instance (see `audio-adapter/CLAUDE.md`).
 
 **macOS (zsh)**
 
 ```zsh
 cd body-layer
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
+PYTHONPATH=src:../world-model/src .venv/bin/python -m body \
   --aircraft-layer-url http://192.168.1.50:7791 \
+  --audio-adapter-url http://127.0.0.1:7795 \
   --theatre Syria \
   --world-model-db ../world-model/data/syria-full.sqlite
 ```
@@ -54,15 +59,16 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
 ```bat
 cd body-layer
 set PYTHONPATH=src;..\world-model\src
-.venv\Scripts\python -m logger ^
+.venv\Scripts\python -m body ^
   --aircraft-layer-url http://192.168.1.50:7791 ^
+  --audio-adapter-url http://127.0.0.1:7795 ^
   --theatre Syria ^
   --world-model-db ..\world-model\data\syria-full.sqlite
 ```
 
 Two things that will bite:
 
-- **The venv interpreter is not optional.** Plain `python -m logger` fails with
+- **The venv interpreter is not optional.** Plain `python -m body` fails with
   `ModuleNotFoundError: No module named 'pyproj'` once it reaches the
   world-model import chain. Either use the `.venv/bin/python` prefix or
   `source .venv/bin/activate` first (`.venv\Scripts\activate.bat` on Windows).
@@ -73,14 +79,18 @@ Two things that will bite:
 
 | flag | required | meaning |
 |---|---|---|
-| `--aircraft-layer-url` | yes | base URL of the aircraft-layer LAN API |
-| `--theatre` | yes | DCS theatre name, for lat/lon → DCS x/z conversion |
-| `--world-model-db` | yes | path to a built region `.sqlite` |
+| `--aircraft-layer-url` | yes (unless `--print-tuning`) | base URL of the aircraft-layer LAN API |
+| `--audio-adapter-url` | yes (unless `--print-tuning`) | base URL of a running `audio-adapter` instance — speech in/out are always on (`BL-B96`) |
+| `--theatre` | one of these two pairs | DCS theatre name, for lat/lon → DCS x/z conversion — together with `--world-model-db` |
+| `--world-model-db` | one of these two pairs | path to a built region `.sqlite` — together with `--theatre` |
+| `--mission-understanding` | one of these two pairs | mission-interpreter `--emit-compact` JSON artifact — together with `--world-model-dir`, derives `--theatre` and the store path from it instead |
+| `--world-model-dir` | one of these two pairs | directory of per-theatre `<theatre.lower()>-full.sqlite` stores |
 | `--poll-interval-s` | no | seconds between poll ticks |
 
-`--world-model-db` became required in PB-1.5: the naked-eye channel's terrain
-LOS gate needs elevation data. Older notes showing a two-argument command are
-out of date.
+Exactly one of the two theatre/store pairs above must be given — `--theatre`/
+`--world-model-db` wins unchanged if both pairs are present. The naked-eye
+channel's terrain LOS gate needs a built world-model region for elevation
+data; there is no default and no way to run without one.
 
 ### The debug logs get a new filename every run
 
@@ -139,14 +149,14 @@ member is worse.
 
 ## 3. Reading the output
 
-One flat text line per observation, tagged by source:
+The crew session speaks through the running `audio-adapter` instance and
+takes voice commands back through it — there is no console/text-log mode to
+read instead (removed by `BL-B96`, `plans/default-crew-pipeline/plan.md`).
+`--speech-log` (on by default, see above) is the record of every recognised
+transcript and what was done about it; the per-run debug logs in the section
+above (`--detection-trace` etc.) are the record of everything else.
 
-```
-source=petrovich_detection_associated observation_id=... bearing_deg=45.0 range_m=2100 classification_raw=OP_ARMORED ...
-source=naked_eye_visual_filtered      observation_id=... bearing_deg=60.0 range_m=1800 classification_raw=OP_TRUCK ...
-```
-
-Two detection channels run side by side:
+Two detection channels run side by side underneath belief:
 
 - **`petrovich_detection_associated`** — the scope channel. Gated on real
   HelperAI indication text, so it only fires when Petrovich's sight is on and
@@ -198,7 +208,7 @@ a short script; there is no CLI.
 **`ModuleNotFoundError: No module named 'pyproj'`** — you used system Python
 instead of the venv interpreter. See step 2.
 
-**`ModuleNotFoundError: No module named 'logger'` / `'perception'`** —
+**`ModuleNotFoundError: No module named 'body'` / `'perception'`** —
 `PYTHONPATH` is unset or missing an entry. On Windows the separator is `;`.
 
 **Connection refused / timeouts** — the aircraft-layer collector is not running

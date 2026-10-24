@@ -47,7 +47,7 @@ from aircraft_client import AircraftLayerClient
 #: with a warning (never a D5 error) if `polled.toml` omits one. Declared
 #: beside its readers: `"home_phase"`/`"SightHead.mode"`/`"sight_ready"`
 #: each name the one consumer that needs this arg every poll regardless
-#: of what any sequence file does (`logger.py`'s `home_phase` derivation,
+#: of what any sequence file does (`body.py`'s `home_phase` derivation,
 #: `belief.sight_head.SightHead.mode`, and `sight_ready()` below).
 REQUIRED_POLLED_ARGS: Final[dict[int, str]] = {
     886: "home_phase",
@@ -81,7 +81,7 @@ class GuidanceUnitState:
 
     `observ_observed`/`weapon_safety_observed` are the cockpit's own
     telemetry readback for OBSERV. and the weapons safety bar.
-    `observ_observed` is a `REQUIRED_POLLED_ARGS` member (`logger.py`'s
+    `observ_observed` is a `REQUIRED_POLLED_ARGS` member (`body.py`'s
     poll loop derives `OpticState.home_phase` from it every poll).
     `weapon_safety_observed` **has no reader as of Stage 4** (`plans/
     effector-sequences/plan.md`): arg 673 is no longer polled by any
@@ -131,7 +131,7 @@ def write_sight_target(
     "Wire (sight_target)" section). **No raw command-unit conversion
     here** -- v1's degree<->raw conversions are removed; the wire itself
     now carries degrees, and `Export.lua`'s own servo converts internally.
-    Called once per poll by `logger.py` while the sight head is `free`,
+    Called once per poll by `body.py` while the sight head is `free`,
     **not** rate-limited here -- Export.lua's setpoint tracks the head via
     the same rate-limit function, from the same start, so it needs no
     resync (the plan's "Why goal, not head position, on the wire").
@@ -174,10 +174,10 @@ def refresh_readback(
 
     `readback_args` is the `"args"` map `GET /watched_args/latest`
     carries (same shape Stage 2's `cockpit_switch` feed used, preserved
-    so `logger.py`'s poll block changes only *which* client call feeds
+    so `body.py`'s poll block changes only *which* client call feeds
     this function, not this function's own signature). `None` (no sample
     yet, or the latest sample's `watch_id` does not match what body-layer
-    currently wants installed -- `logger.py`'s own check, not this
+    currently wants installed -- `body.py`'s own check, not this
     function's) leaves every field unchanged, same posture every field
     in this class already takes."""
     if readback_args is None:

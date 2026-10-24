@@ -7,35 +7,27 @@ sample to stdout for manual verification (plan stage 2); that dump is kept
 (`--dump-interval`) since it's still useful for watching the pipeline without
 a separate HTTP client.
 
-A `TextOverlaySender` (`plans/dcs-text-panel-output/plan.md`, BL-2.5) is also
-constructed here and handed to `TelemetryAPIServer` so `POST /text/push` can
-forward lines to the in-cockpit overlay Hook script over loopback UDP -- the
-one inbound/write path on this otherwise read-only pipeline. A
-`CommandSender` (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) is
-constructed the same way for `POST /command/petrovich_search`, this
-pipeline's second inbound/write path.
-
-An `F10CommandReceiver` (`plans/f10-crew-commands/plan.md`) is also opened
-here and run on its own background thread, feeding an `F10CommandQueue`
-that `GET /f10_commands/poll` drains -- the first channel running the
-opposite direction (Hook script -> collector, not collector -> Hook/
-Export.lua) alongside the two write paths above.
+A `CommandSender` (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) is
+constructed here and handed to `TelemetryAPIServer` for `POST /command/
+petrovich_search`, this pipeline's first inbound/write path (`BL-B96`
+removed the original first, `TextOverlaySender`/`POST /text/push`).
 
 An `AudioPlaybackSender` (BL-10 first slice, `plans/tts-voice-output/
-plan.md`) is constructed the same way as `text_sender`/`command_sender`
-for `POST /audio/play`, this pipeline's third inbound/write path -- unlike
-those two, it has no host/port (it plays audio directly on this box via
+plan.md`) is constructed the same way as `command_sender`
+for `POST /audio/play`, this pipeline's second inbound/write path -- unlike
+that one, it has no host/port (it plays audio directly on this box via
 `winsound`, no loopback UDP peer involved).
 
 A `UnitVelocityReceiver` (`plans/movement-detection/plan.md` Stage 1) is
 opened and run on its own background thread the same way, feeding a
-`UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the second
-channel running the Hook-to-collector direction (after the F10 one above).
+`UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the first
+channel running the opposite direction (Hook script -> collector, not
+collector -> Hook/Export.lua).
 
 A `LineOfSightReceiver` (`plans/dcs-driven-los/plan.md`, X-B29) is opened and
 run on its own background thread the same way as `unit_velocity_receiver`,
 feeding a `LineOfSightCache` that `GET /line_of_sight/latest` reads -- the
-third channel running the Hook-to-collector direction. A `LookDirectionSender`
+second channel running the Hook-to-collector direction. A `LookDirectionSender`
 is constructed the same way as `command_sender` for `POST /command/
 look_direction`, this pipeline's fifth inbound/write path -- unlike
 `command_sender` (which targets `Export.lua`'s inbound listener), this one
@@ -44,7 +36,7 @@ only reachable from the mission-scripting state, not Export's).
 
 A `FiringEventsReceiver`/`EmitterTracker` pair (`plans/emitter-visibility/
 plan.md` Stage B, `AC-B8`) is opened and run on its own background thread
-the same way as `line_of_sight_receiver` -- the fourth channel running the
+the same way as `line_of_sight_receiver` -- the third channel running the
 Hook-to-collector direction. Unlike every other feed above, the thing fed
 by the receiver is not a `*Cache` but a small stateful machine
 (`collector.firing_receiver.EmitterTracker`) that latches/watchdogs raw
@@ -61,7 +53,7 @@ before each queued line plays (Stage 3).
 
 A `MissionStartReceiver` (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1)
 is opened and run on its own background thread the same way as
-`unit_velocity_receiver` -- the fifth channel running the Hook-to-collector
+`unit_velocity_receiver` -- the fourth channel running the Hook-to-collector
 direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
 reads.
 
@@ -80,9 +72,8 @@ reply -- so both halves of this request/reply pair, and the single
 and API server exactly as `WatchedArgsCache` is.
 
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
-       [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
+       [--api-port PORT]
        [--command-host HOST] [--command-port PORT]
-       [--f10-host HOST] [--f10-port PORT]
        [--unit-velocity-host HOST] [--unit-velocity-port PORT]
        [--mission-start-host HOST] [--mission-start-port PORT]
        [--dump-interval SECONDS] [--debug]
@@ -101,7 +92,6 @@ from api.server import TelemetryAPIServer
 from collector.arg_read_broker import ArgReadBroker
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
-    F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
     PetrovichIndicationCache,
@@ -122,9 +112,6 @@ from collector.command_sender import (
     CommandSender,
     LookDirectionSender,
 )
-from collector.f10_command_receiver import DEFAULT_HOST as F10_DEFAULT_HOST
-from collector.f10_command_receiver import DEFAULT_PORT as F10_DEFAULT_PORT
-from collector.f10_command_receiver import F10CommandReceiver
 from collector.firing_receiver import DEFAULT_HOST as FIRING_DEFAULT_HOST
 from collector.firing_receiver import DEFAULT_PORT as FIRING_DEFAULT_PORT
 from collector.firing_receiver import EmitterTracker, FiringEventsReceiver
@@ -139,9 +126,6 @@ from collector.mission_start_receiver import (
 )
 from collector.mission_start_receiver import MissionStartReceiver
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
-from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
-from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
-from collector.text_sender import TextOverlaySender
 from collector.unit_velocity_receiver import DEFAULT_HOST as UNIT_VELOCITY_DEFAULT_HOST
 from collector.unit_velocity_receiver import DEFAULT_PORT as UNIT_VELOCITY_DEFAULT_PORT
 from collector.unit_velocity_receiver import UnitVelocityReceiver
@@ -162,17 +146,6 @@ def main() -> None:
         "--api-port", type=int, default=API_DEFAULT_PORT, help="Mac-facing LAN API port"
     )
     parser.add_argument(
-        "--text-overlay-host",
-        default=TEXT_OVERLAY_DEFAULT_HOST,
-        help="in-cockpit overlay Hook script listener host (loopback)",
-    )
-    parser.add_argument(
-        "--text-overlay-port",
-        type=int,
-        default=TEXT_OVERLAY_DEFAULT_PORT,
-        help="in-cockpit overlay Hook script listener port",
-    )
-    parser.add_argument(
         "--command-host",
         default=COMMAND_DEFAULT_HOST,
         help="Export.lua's inbound command listener host (loopback)",
@@ -182,17 +155,6 @@ def main() -> None:
         type=int,
         default=COMMAND_DEFAULT_PORT,
         help="Export.lua's inbound command listener port",
-    )
-    parser.add_argument(
-        "--f10-host",
-        default=F10_DEFAULT_HOST,
-        help="F10 radio-menu Hook script's UDP sender host (loopback)",
-    )
-    parser.add_argument(
-        "--f10-port",
-        type=int,
-        default=F10_DEFAULT_PORT,
-        help="F10 radio-menu Hook script's UDP sender port",
     )
     parser.add_argument(
         "--unit-velocity-host",
@@ -272,21 +234,8 @@ def main() -> None:
     world_objects_cache = WorldObjectsCache()
     petrovich_indication_cache = PetrovichIndicationCache()
     petrovich_wheel_cache = PetrovichWheelCache()
-    text_sender = TextOverlaySender(
-        host=args.text_overlay_host, port=args.text_overlay_port
-    )
-    text_sender.open()
     command_sender = CommandSender(host=args.command_host, port=args.command_port)
     command_sender.open()
-    f10_command_queue = F10CommandQueue()
-    f10_command_receiver = F10CommandReceiver(
-        f10_command_queue, host=args.f10_host, port=args.f10_port
-    )
-    f10_command_receiver.open()
-    f10_command_receiver_thread = threading.Thread(
-        target=f10_command_receiver.serve_forever, daemon=True
-    )
-    f10_command_receiver_thread.start()
     unit_velocity_cache = UnitVelocityCache()
     unit_velocity_receiver = UnitVelocityReceiver(
         unit_velocity_cache, host=args.unit_velocity_host, port=args.unit_velocity_port
@@ -381,10 +330,8 @@ def main() -> None:
         host=args.api_host,
         port=args.api_port,
         petrovich_indication_cache=petrovich_indication_cache,
-        text_sender=text_sender,
         petrovich_wheel_cache=petrovich_wheel_cache,
         command_sender=command_sender,
-        f10_command_queue=f10_command_queue,
         audio_sender=audio_sender,
         unit_velocity_cache=unit_velocity_cache,
         ptt_cache=ptt_cache,
@@ -411,9 +358,7 @@ def main() -> None:
     finally:
         api.close()
         collector.close()
-        text_sender.close()
         command_sender.close()
-        f10_command_receiver.close()
         audio_sender.close()
         unit_velocity_receiver.close()
         line_of_sight_receiver.close()

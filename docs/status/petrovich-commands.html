@@ -25,7 +25,6 @@ header p{margin:.35rem 0 0;color:var(--muted);max-width:68ch}
 .k{font-family:var(--mono);font-size:.8rem;border:1px solid var(--line);padding:1px 7px}
 .k.pill{border-radius:999px}.k.hex{clip-path:polygon(12% 0,88% 0,100% 50%,88% 100%,12% 100%,0 50%);padding:1px 12px;background:var(--line);border:0;color:var(--fg)}
 .badge{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--new);background:var(--newbg);padding:2px 7px;border-radius:3px;white-space:nowrap}
-.f10{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 6px;border-radius:3px}
 section{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px 18px;min-width:0;display:grid;gap:8px}
 section h2{font-family:var(--display);font-weight:700;font-size:1.15rem;letter-spacing:.04em;text-transform:uppercase;margin:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 section h2 .n{font-family:var(--mono);color:var(--accent);font-weight:500}
@@ -40,7 +39,7 @@ footer{color:var(--muted);font-size:.8rem}
 <div class="wrap">
 <header>
   <h1>Petrovich Command Map</h1>
-  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-24. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
+  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-25. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
 </header>
 
 <div class="legend">
@@ -49,7 +48,6 @@ footer{color:var(--muted);font-size:.8rem}
   <span><span class="k">ahead · left</span> pick one</span>
   <span>- - → optional</span>
   <span><span class="badge">new</span> added since the previous update</span>
-  <span><span class="f10">F10</span> also in the radio menu</span>
 </div>
 
 <section>
@@ -82,8 +80,8 @@ flowchart LR
 
 <div class="grid2">
 <section>
-  <h2><span class="n">3</span> Search <span class="f10">F10</span></h2>
-  <p class="note">Points Petrovich's search. Clock and bearing are relative to the nose and to north respectively. F10 has ahead/left/right/full and the compass points.</p>
+  <h2><span class="n">3</span> Search</h2>
+  <p class="note">Points Petrovich's search. Clock and bearing are relative to the nose and to north respectively.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   S(["scan"]) --> A["ahead · left · right"]
@@ -98,7 +96,7 @@ flowchart LR
 </section>
 
 <section>
-  <h2><span class="n">4</span> Watch a contact <span class="f10">F10</span></h2>
+  <h2><span class="n">4</span> Watch a contact</h2>
   <p class="note">Watching makes him report that contact's movement and range changes unprompted. “Follow” with slots picks the best match.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
@@ -182,7 +180,7 @@ flowchart LR
 <footer>Source: <code>audio-adapter/src/vocabulary.py</code> (PHRASES and the slot word lists). Phrasings shown are the ones the recogniser is tuned toward; close variants may also match. Kept current by <code>.claude/scripts/command-map-check.py</code>, run at every merge.</footer>
 <script type="application/json" id="command-map-manifest">
 {
- "vocabulary_sha256": "68b35c3f8c77398f96de06faf838de5dd46b12b1ef5fe8018c1f358d1256e364",
+ "vocabulary_sha256": "bf0d9fd1bd6e7fb32b5df44b7320d4e1b4c19f9991ff20aa5c3dd2264a96d864",
  "cards": {
   "wake_petrovich": 1,
   "cancel_nevermind": 1,

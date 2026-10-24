@@ -30,3 +30,11 @@
   reasoning that gates [[BL-8]] on real flights). No live-DCS acceptance in this milestone's own DoD —
   the whole point is to enable the next sortie; that sortie is the acceptance test and feeds the
   autonomous half. Next-milestone impact: none on the BL-x sequence.
+
+**Obsolete note, 2026-10-24 (`BL-B96`, `plans/default-crew-pipeline/plan.md`):** the F10 menu this
+entry widened to 15 tokens was removed entirely, along with the Hook script, the collector-side
+receiver/queue, and body-layer's `--f10-commands` flag. The vocabulary/geometry/wiring work this
+entry did (ownship-relative sectors, `scan_area` task registration via `belief.tools.scan_area`)
+survives as the voice-command dispatcher's own logic -- only the F10 radio-menu *transport* into
+it is gone. This entry stays `[x]` done and its ID is not reused, per root `CLAUDE.md`'s "Numbers
+are never reused" rule; it records what was true and merged on 2026-09-16.

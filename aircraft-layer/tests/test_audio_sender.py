@@ -155,9 +155,8 @@ def test_urgent_preempted_lines_are_never_played() -> None:
 
 # --- queue bound (2026-09-26 performance review) ----------------------------
 #
-# Parity with collector.cache.F10CommandQueue: a producer bug (or just a
-# long, dense-traffic sortie) must not grow this queue -- and its backing
-# temp .wav files -- without limit.
+# A producer bug (or just a long, dense-traffic sortie) must not grow this
+# queue -- and its backing temp .wav files -- without limit.
 
 
 def test_queue_is_bounded_and_drops_the_oldest_queued_line() -> None:

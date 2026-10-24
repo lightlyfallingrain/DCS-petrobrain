@@ -42,11 +42,7 @@ expect (`TelemetrySample.to_dict()`/`WorldObjectsSnapshot.to_dict()`/
 `PetrovichIndicationSample.to_dict()`'s shapes, per `aircraft-layer/src/
 schema/`). A key absent from a frame (or the frame value `None`) serves
 JSON `null` for that endpoint on that poll, matching the real aircraft
-layer's "collector cache still empty" contract.
-
-`POST /text/push` (the overlay write path) is deliberately not implemented
--- this plan's fixture never sets `ConsolePerceptionRunner.overlay_client`,
-so no test exercises it."""
+layer's "collector cache still empty" contract."""
 
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ effort/value flag).
 
 **Writer is driven by belief-state transitions, not by percepts or
 callouts** (Decision 3): `step` is called once per poll, from
-`_mission_memory_step` in `logger.py`, after `ContactStore.tick()` has
+`_mission_memory_step` in `body.py`, after `ContactStore.tick()` has
 settled this poll's belief and before any speech is drained.
 
 **`Contact.last_percept` is not read here.** That field's own docstring
@@ -429,7 +429,7 @@ class FiredOnTracker:
     """Per-shooter suppression state for the `fired_on` rule (Decision 3,
     Stage 3). Owned by the poll loop -- one instance per run, passed into
     every `step` call, the same lifetime `MissionMemory` itself has in
-    `logger.py`'s two poll loops. Deliberately **not** state on
+    `body.py`'s two poll loops. Deliberately **not** state on
     `MissionMemory`: it is this one admission rule's own bookkeeping,
     not a property of the store."""
 
@@ -513,11 +513,11 @@ def step(
     fired_on_tracker: FiredOnTracker | None = None,
 ) -> None:
     """Run every admission rule, once, over every current contact. Called
-    once per poll by `logger._mission_memory_step`, after
+    once per poll by `body._mission_memory_step`, after
     `ContactStore.tick()` -- see module docstring.
 
     `fired_on_tracker` is `None` only in a test that does not care about
-    the `fired_on` rule -- every real caller (`logger.py`'s two poll
+    the `fired_on` rule -- every real caller (`body.py`'s two poll
     loops) owns one `FiredOnTracker` for the run's lifetime and always
     passes it."""
     phase_info = to_phase_info(phase)

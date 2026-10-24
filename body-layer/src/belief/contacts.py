@@ -1094,7 +1094,7 @@ class ContactStore:
         pose, returning how many were updated (0 when none are registered,
         the overwhelmingly common case).
 
-        Called once per telemetry tick from `logger.py`'s `Runner.run_once`,
+        Called once per telemetry tick from `body.py`'s `Runner.run_once`,
         *before* `ingest`/`tick`, so the same tick's contacts are judged
         against a fresh projection rather than the previous tick's
         (`plans/f10-command-vocabulary/plan.md` D2). Fixed ground areas are

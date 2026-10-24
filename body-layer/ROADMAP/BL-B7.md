@@ -17,3 +17,9 @@
   behaviour split into the follow-ups below. History: `plans/f10-crew-commands/` (plan, review,
   dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
   surface that [[BL-10]]'s audio transport can follow.
+
+**Obsolete note, 2026-10-24 (`BL-B96`, `plans/default-crew-pipeline/plan.md`):** the F10 command
+channel described above -- the Hook script, `F10CommandReceiver`/`F10CommandQueue`, `GET
+/f10_commands/poll`, and body-layer's `--f10-commands` flag -- was removed entirely. Voice is now
+the only player-command transport. This entry stays `[x]` done and its ID is not reused, per root
+`CLAUDE.md`'s "Numbers are never reused" rule; it records what was true and merged on 2026-09-13.

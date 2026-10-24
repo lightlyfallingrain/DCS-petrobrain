@@ -2,16 +2,16 @@
 bl5a-text-mode-crew-interaction/plan.md` Stage 4), simulating the player-
 facing text channel a real SRS transport will eventually replace (PB-7/PB-8).
 
-**Deliberately not an extension of `belief.console.Console`.** That module's
-own docstring is explicit that it is a developer debug tool -- one command
-maps to one `belief.tools` call, terse and tool-shaped, not conversational.
-`CrewConsole` is the opposite kind of surface: it runs typed sentences
-through `belief.utterance.parse_utterance`'s grammar instead of fixed verbs,
-and it speaks *proactively* (`drain_events`) in a way the debug console never
-does. See the plan's "Module boundary" decision for the full argument.
-Both `--console` and `--crew-text` stay available on `logger.py` side by
-side (mutually exclusive with each other this milestone, per the plan's
-resolved decision).
+**Deliberately not an extension of `belief.console.Console`** (that module,
+and the `--console` debug mode that drove it, were removed entirely by
+`BL-B96`, `plans/default-crew-pipeline/plan.md` -- its own docstring was
+explicit that it was a developer debug tool, one command mapping to one
+`belief.tools` call, terse and tool-shaped, not conversational).
+`CrewConsole` is the opposite kind of surface and is now the only one:
+it runs typed sentences through `belief.utterance.parse_utterance`'s
+grammar instead of fixed verbs, and it speaks *proactively* (`drain_events`)
+in a way the debug console never did. See the plan's "Module boundary"
+decision for the full argument.
 
 **Dispatch.** `handle_line` sends one typed line through `parse_utterance`.
 A `"handled"` disposition acts directly (`belief.tools.set_attention` or
@@ -22,9 +22,8 @@ handle_player_utterance`, which this milestone's stand-in `BrainClient`s
 never turn into spoken output (see `escalation.py`'s module docstring) --
 consistent with §3.5's "if the brain does nothing, body says nothing."
 
-**`drain_events`.** Called from the same poll-loop hook point BL-2.5's
-`--overlay` already uses (after each `ContactStore.tick()`), it delegates
-to `self.scheduler.tick` (`belief.callouts.CalloutScheduler`, `plans/
+**`drain_events`.** Called once per poll, after each `ContactStore.tick()`,
+it delegates to `self.scheduler.tick` (`belief.callouts.CalloutScheduler`, `plans/
 callout-scheduling/plan.md`) rather than rendering every currently-
 unacknowledged event itself. The scheduler picks **at most one** thing to
 say per call -- re-rendered from current belief the instant it is chosen,
@@ -34,13 +33,15 @@ was decided true. See `belief.callouts`' own module docstring for the full
 design (speech-time scheduling, sim-time occupancy, report-space
 aggregation).
 
-**`handle_command`.** `plans/f10-crew-commands/plan.md`'s second,
-non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
-loop drains player-selected DCS F10 radio-menu tokens
-(`aircraft_client.get_f10_commands`) and dispatches each one here, through
-the same `_print` funnel `handle_line`/`drain_events` already use --
-`CrewConsole` has no separate "what F10 says" path to keep in sync with
-what typed/spoken output produces.
+**`handle_command`.** The single dispatcher for every player command
+token, through the same `_print` funnel `handle_line`/`drain_events`
+already use. Originally `plans/f10-crew-commands/plan.md`'s second,
+non-text input surface for DCS F10 radio-menu tokens; that transport
+(`aircraft_client.get_f10_commands`, the Hook script, the collector-side
+receiver/queue) was removed entirely by `BL-B96` -- voice is now the only
+transport that reaches this method, and `CrewConsole` still has no
+separate "what the transport says" path to keep in sync with typed/spoken
+output.
 
 **Watch is a cancellable standing mode, coexisting with scan.**
 (`plans/watch-as-standing-mode/plan.md`, fixing a 2026-09-21 sortie finding:
@@ -53,7 +54,7 @@ registers a `belief.tasks.PendingIntent` of kind `"watch_contact"`
 `scan_area`, watching does not "succeed" or "time out" -- it just persists
 until cancelled. It is independent of `scan_area`'s own task, so scan and
 watch can be commanded and cancelled without either disturbing the other
-(`logger._active_gaze` only ever reads `scan_area` tasks). Because one F10
+(`body._active_gaze` only ever reads `scan_area` tasks). Because one F10
 "Cancel Task" item has no vocabulary to say *which* standing mode to end,
 `_handle_cancel_task` cancels every currently-governing kind at once
 (`_active_tasks_by_kind`) rather than guessing -- see that method's own
@@ -72,16 +73,16 @@ detector exists.
 nothing is spoken while silenced, not even an urgent threat callout, a
 deliberate choice made after showing the user the consequence in those
 terms. One fixed word acknowledges the command (`speech.render_silence_ack`),
-then nothing else until a real command -- F10/voice token, or a free-text
+then nothing else until a real command -- a spoken token, or a free-text
 utterance the grammar actually resolves -- ends it; stray speech recognised
 as nothing does not. See `_handle_silence`'s own docstring for the full
 account, including why `self.silenced` gates `_print`'s `speech_client` push
-alone, never `output`/`overlay_client`.
+alone, never `output`.
 
 **On the ground, Petrovich does not scan** (`plans/radio-check/plan.md`,
 `[[BL-B82]]`, user direction 2026-10-19, replacing the `plans/
 spu8-intercom/plan.md` Stage 5 on-ground silence default above). The gate
-itself lives in `logger.py`'s two poll loops (ownship AGL against
+itself lives in `body.py`'s two poll loops (ownship AGL against
 `ON_GROUND_AGL_THRESHOLD_M`, below), not here -- this class only answers
 for it: `self.on_ground`, set every poll the same way `enrichment` is,
 makes `handle_command` answer any `_LOOK_COMMAND_TOKENS` member with
@@ -99,7 +100,7 @@ from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
 
 import tuning
-from aircraft_client import AircraftLayerClient, AircraftLayerError
+from aircraft_client import AircraftLayerClient
 from belief.attack_run import AttackRunState
 from belief.attack_run import decide as decide_attack_run
 from belief.attack_run import query as query_attack_run
@@ -178,6 +179,7 @@ from belief.voice_commands import (
     classify_response,
     classify_yes_no,
 )
+from connection_reporter import ConnectionReporter
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
@@ -188,7 +190,7 @@ from perception.source import OwnshipState
 #: ground: perception stops and a look command is refused rather than
 #: dispatched -- too high false-grounds him during genuine low-level/NOE
 #: flight, too low lets him scan while the aircraft is still sitting on
-#: the ramp. Used by `logger.py`'s two poll loops and by
+#: the ramp. Used by `body.py`'s two poll loops and by
 #: `CrewConsole.on_ground`/`_LOOK_COMMAND_TOKENS` above. A guessed
 #: placeholder pending live-flight calibration -- same
 #: debt class as `mission_phase.WAYPOINT_CAPTURE_RADIUS_M` -- since no
@@ -213,7 +215,7 @@ ON_GROUND_AGL_THRESHOLD_M: Final[float] = tuning.real(
 #: which would claim an action that did not happen.
 _NOTHING_TO_STOP: str = "nothing to stop"
 
-#: Printed once at session startup (`logger.py`'s `main()`), mirroring
+#: Printed once at session startup (`body.py`'s `main()`), mirroring
 #: `belief.console.HELP_TEXT`'s role for the debug console.
 HELP_TEXT = """\
 Petrovich crew session -- type naturally, e.g.:
@@ -273,13 +275,6 @@ def _match_radio_check_or_greeting(
         return "greeting", {"time_of_day": time_of_day}
     return None
 
-
-#: Prepended to the overlay-pushed copy of an urgent (`bypass_gate=True`)
-#: line only -- see `CrewConsole._print`'s docstring and `plans/
-#: overlay-speech-callouts/plan.md`'s resolved "Urgent-call visual
-#: prominence" decision. `TextOverlaySender` has no color/bold mechanism,
-#: so a plain text prefix is the only available distinction.
-_URGENT_OVERLAY_PREFIX = "!! "
 
 #: `scan_ahead`/`scan_left`/`scan_right`/`scan_full` -> `belief.attention.
 #: RelativeSector` -- the ownship-relative half of the F10 scan vocabulary
@@ -503,7 +498,7 @@ _CLOCK_SCAN_TOKENS: dict[str, int] = {
 #: `watch_nearest_air_defence`/`follow` -- the user's own two named
 #: examples ("watch", "scan forward") plus the one other token that shares
 #: their job exactly: `follow` is the one command that immediately raises
-#: binoculars onto a target (`logger.py`'s "any command lowers binoculars"
+#: binoculars onto a target (`body.py`'s "any command lowers binoculars"
 #: glue reads `CrewConsole.last_command_target_contact_id`, which only
 #: `follow` sets). Deliberately **excludes** `select_target`/`engage`/
 #: `step`/every `report*` token -- those only read *existing* belief
@@ -1040,7 +1035,7 @@ WORLD_MODEL_NOT_LOADED_REFUSAL: Final[str] = "system error, world model not load
 #: shot spoken line for "at least one effector sequence/registry file
 #: failed to load at startup," held until the SPU-8 intercom gate reads
 #: open (`drain_config_error`). Same "verbatim user wording" posture as
-#: `WORLD_MODEL_NOT_LOADED_REFUSAL`; the console banner (`logger.py`'s
+#: `WORLD_MODEL_NOT_LOADED_REFUSAL`; the console banner (`body.py`'s
 #: startup) is the primary channel for the actual file/reason detail --
 #: this line is only the pilot-facing heads-up that something is wrong.
 CONFIG_ERROR_LINE: Final[str] = (
@@ -1078,9 +1073,8 @@ class CrewConsole:
     #: same guard as `belief.tools`'/`belief.console`'s own `enrichment`.
     enrichment: EnrichmentContext | None = None
     #: BL-6's `Console.aircraft_client` equivalent (`plans/
-    #: bl6-commands-inspect-adapt/plan.md`), wired by `logger.py`'s
-    #: `main()` in the `--crew-text` branch for parity with `--console`'s
-    #: own wiring. Read by `_handle_scan` (`plans/f10-command-vocabulary/
+    #: bl6-commands-inspect-adapt/plan.md`), wired by `body.py`'s
+    #: `main()`. Read by `_handle_scan` (`plans/f10-command-vocabulary/
     #: plan.md` Stage 6) to fire the live `trigger_petrovich_search` call
     #: after a scan's `PendingIntent` is registered -- `None` (the default)
     #: means a scan still registers belief-state, it just never fires a
@@ -1089,10 +1083,9 @@ class CrewConsole:
     #: BL-6's `belief.tasks.TaskStore` (`plans/f10-crew-commands/plan.md`,
     #: mirroring `aircraft_client`'s own reserved-field pattern above) --
     #: `_handle_scan`'s registration call and `_handle_cancel_task` are
-    #: this field's readers. `logger.py`'s `--crew-text` branch wires this
-    #: to the same `ConsolePerceptionRunner.tasks` instance its poll loop
-    #: already ticks (`TaskStore.tick`), the same store `--console`'s
-    #: `Console.tasks` reads/mutates. `None` (the default) means every
+    #: this field's readers. `body.py`'s `main()` wires this to the same
+    #: `ConsolePerceptionRunner.tasks` instance its poll loop already
+    #: ticks (`TaskStore.tick`). `None` (the default) means every
     #: `scan_*` token reports "no task store configured" and "Cancel Task"
     #: always reports "no pending task", rather than raising.
     tasks: TaskStore | None = None
@@ -1100,16 +1093,16 @@ class CrewConsole:
     #: commanded-mark path, injected as plain closures rather than a
     #: `mission_memory.store.MissionMemory` field: Decision 1's import
     #: direction forbids any module in `belief/` (this one included) from
-    #: importing `mission_memory` at all, so `logger.py` (which sits
+    #: importing `mission_memory` at all, so `body.py` (which sits
     #: outside `belief/` and may import both) builds these two closures
     #: over the live `MissionMemory` instance its poll loop writes
     #: observed entries into, and this console only ever sees a plain
     #: `str` readback in return -- the same "inject a callable, the caller
     #: builds it" shape `transcript_log`/`speech_log_sink` already use
     #: above. `mark_here_fn` takes `now_sim`; `mark_target_fn` takes
-    #: `(contact_id, now_sim)`. `None` (the default, for every surface
-    #: that is not `--crew-text`) means both mark commands report "no
-    #: mission memory configured" rather than raising.
+    #: `(contact_id, now_sim)`. `None` (the default, when a test builds a
+    #: `CrewConsole` without wiring it) means both mark commands report
+    #: "no mission memory configured" rather than raising.
     mark_here_fn: Callable[[float], str] | None = None
     mark_target_fn: Callable[[str, float], str] | None = None
     #: How many player commands this console has dispatched, F10 or spoken
@@ -1132,14 +1125,14 @@ class CrewConsole:
     #: resolved its target to. Reset to `None` at the top of every
     #: `handle_command` dispatch (the only surface `_handle_follow` is
     #: reachable from) so a stale value from an earlier `follow` can never
-    #: leak into an unrelated later command's evaluation. `logger.py`'s
+    #: leak into an unrelated later command's evaluation. `body.py`'s
     #: "any command lowers binoculars" glue block reads this alongside
     #: `OpticState.look_contact_id` to decide whether the just-dispatched
     #: `follow` named the contact already being glassed -- if so, the look
     #: continues rather than being lowered and immediately re-pointed at
     #: the same target.
     last_command_target_contact_id: str | None = None
-    #: `engage`/`disengage`'s one-shot signal to `logger.py`'s poll loop
+    #: `engage`/`disengage`'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run/plan.md` Decision 2, Stage 5's wiring) --
     #: `AttackRunState` itself lives on `logger.ConsolePerceptionRunner`
     #: (beside `optic_state`), not on this class, the same division
@@ -1151,7 +1144,7 @@ class CrewConsole:
     #: loop the moment it is applied, so a command that is never repeated
     #: does not re-fire every poll thereafter.
     attack_run_transition: Literal["engage", "disengage"] | None = None
-    #: "Observ on"/"Observ off"'s one-shot signal to `logger.py`'s poll
+    #: "Observ on"/"Observ off"'s one-shot signal to `body.py`'s poll
     #: loop -- `BL-B64` Stage 2, direction §6 (`docs/concept/9K113.md`'s
     #: "Observ" glossary: *"Turn on OBSERV in guidance unit, tell pilot
     #: 'Observ on'"*). The same division `attack_run_transition` already
@@ -1172,7 +1165,7 @@ class CrewConsole:
     #: dispatch, same convention as `observ_transition`, and
     #: consumed-and-cleared by the poll loop the moment it is applied.
     weapon_safety_transition: Literal["armed", "safe"] | None = None
-    #: "Where is it?"'s one-shot signal to `logger.py`'s poll loop
+    #: "Where is it?"'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
     #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
     #: the resolving optic all live on `logger.ConsolePerceptionRunner`, not
@@ -1185,7 +1178,7 @@ class CrewConsole:
     where_is_it_requested: bool = False
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
-    #: `overlay_client`/`speech_client`: `None` is a true no-op.
+    #: `speech_client`: `None` is a true no-op.
     #:
     #: **It exists because an unmatched utterance was previously
     #: unobservable.** A transcript that matched no command fell through to
@@ -1195,33 +1188,34 @@ class CrewConsole:
     #: are logged too: false fires are only findable by seeing what he
     #: *did* act on.
     transcript_log: Callable[[dict[str, object]], None] | None = None
-    #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
-    #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
-    #: None-means-no-op pattern exactly. **Deliberately a separate field
-    #: from `aircraft_client` above** -- that field is reserved for a
-    #: different purpose (live search-trigger commands, per its own
-    #: docstring) and has no reader today; this one is read by `_print`
-    #: every time `CrewConsole` produces spoken text. `logger.py`'s
-    #: `--crew-text` branch wires this to the same `AircraftLayerClient`
-    #: instance already used for telemetry when `--overlay` is passed, no
-    #: separate URL/flag needed, matching `--console --overlay`'s own
-    #: wiring.
-    overlay_client: AircraftLayerClient | None = None
     #: Spoken-audio sink (BL-10 first slice, `plans/tts-voice-output/
-    #: plan.md`), mirroring `overlay_client`'s None-means-no-op pattern
-    #: exactly -- a third, separate optional field read by `_print`
-    #: alongside `overlay_client` every time `CrewConsole` produces spoken
-    #: text. `bypass_gate` (already computed for the overlay `"!! "`
+    #: plan.md`), `None`-means-no-op -- a second, separate optional field
+    #: read by `_print`
+    #: every time `CrewConsole` produces spoken text. `bypass_gate` (already computed for the overlay `"!! "`
     #: prefix) is threaded straight through as `push_speech`'s `urgent`
     #: argument -- no new signal invented, matching the plan's Decision 3.
-    #: `logger.py`'s `--crew-text --speech-audio` branch wires this to a
-    #: `belief.audio_client.AudioAdapterClient` built from `--audio-adapter-url`,
-    #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
-    #: different process, a different URL).
+    #: `body.py`'s `main()` always builds and wires one (BL-B96: speech
+    #: in/out are unconditional), from a `belief.audio_client.
+    #: AudioAdapterClient` built from the now-required `--audio-adapter-url`.
     speech_client: AudioAdapterClient | None = None
+    #: Warn-and-keep-trying state machine for an unreachable audio
+    #: adapter (`plans/default-crew-pipeline/plan.md`, BL-B96 Stage 4,
+    #: user direction: "warn and keep trying ... as with a bad config
+    #: file"). `None` (the default, every test that doesn't care about
+    #: this) falls back to the pre-BL-B96 posture: a full traceback
+    #: logged on every failed push. When `body.py`'s `main()` sets this,
+    #: the *same* `connection_reporter.ConnectionReporter` instance is
+    #: shared with `_poll_transcripts`'s own failure/success reporting
+    #: (`main()` constructs exactly one, for exactly this reason) --
+    #: without that sharing, a push failure and a poll failure for the
+    #: same underlying outage would each independently announce
+    #: "disconnected", and a success on either path would silence the
+    #: other's still-true "disconnected" state. See that class's own
+    #: docstring for why state is tri-valued and transition-only.
+    audio_adapter_reporter: ConnectionReporter | None = None
 
     #: Optional callback invoked for every line this console speaks, with
-    #: `(line, urgent)` -- `logger` wires it to `belief_truth_log.
+    #: `(line, urgent)` -- `body` wires it to `belief_truth_log.
     #: BeliefTruthLogWriter.write_speech` so what Petrovich says lands on
     #: the same timeline as the belief-versus-truth rows (user,
     #: 2026-09-25: "then all the information would be in one log file").
@@ -1230,8 +1224,8 @@ class CrewConsole:
     #: module lives in `belief/` and `belief_truth_log` imports *from*
     #: `belief/` -- holding the writer here would close that loop. The
     #: callback keeps the dependency pointing one way, and matches the
-    #: optional-sink shape `output`/`overlay_client`/`speech_client`
-    #: already use. `logger` supplies a closure that can read the current
+    #: optional-sink shape `output`/`speech_client`
+    #: already use. `body` supplies a closure that can read the current
     #: gaze and optic at call time, which is the part that makes these
     #: rows answer "what was he looking at when he said that".
     #:
@@ -1270,7 +1264,7 @@ class CrewConsole:
     #: `drain_events` delegates to. One scheduler per `CrewConsole`
     #: (per-session occupancy state), mirroring every other optional-sink
     #: field above in spirit though it is never `None`: unlike
-    #: `overlay_client`/`speech_client`, scheduling applies to *every*
+    #: `speech_client`, scheduling applies to *every*
     #: sink (the plan's Decision 1 -- "One crew voice, one channel"), so
     #: there is no no-op state for this field to have.
     scheduler: CalloutScheduler = field(default_factory=CalloutScheduler)
@@ -1324,7 +1318,7 @@ class CrewConsole:
         default_factory=list, repr=False
     )
     #: `BL-B87` -- whether the one-time overflow warning below has already
-    #: fired. Logged once rather than once per drop (mirroring `logger.py`'s
+    #: fired. Logged once rather than once per drop (mirroring `body.py`'s
     #: `_warn_live_los_coverage_gap_once` edge-trigger shape): under a
     #: sustained flood this list sits at `_MAX_PENDING_POSITIONAL_REPLIES`
     #: continuously, so "log on every drop" would flood the log for the rest
@@ -1341,9 +1335,9 @@ class CrewConsole:
     #: choice: he was shown the risk in those terms (silenced near a
     #: friendly airbase, a Shilka opens up and says nothing) and chose
     #: absolute over "urgent still gets through" anyway. `output`
-    #: (printed/crew-text) and `overlay_client` are deliberately **not**
+    #: (printed/crew-text) is deliberately **not**
     #: gated on this flag -- the use case is audio ("during radio
-    #: traffic"), so the text/overlay surfaces keep working; only spoken
+    #: traffic"), so the text surface keeps working; only spoken
     #: audio goes quiet. `self.scheduler` keeps ticking normally while
     #: this is `True` (`drain_events` is unconditional) so belief events
     #: are still chosen, rendered and consumed at the scheduler's own
@@ -1351,7 +1345,7 @@ class CrewConsole:
     #: dumped the moment silence ends, it is simply never voiced.
     silenced: bool = field(default=False, repr=False)
 
-    #: `BL-15` Stage 3 -- set by `logger._enter_refusal_mode` when a
+    #: `BL-15` Stage 3 -- set by `body._enter_refusal_mode` when a
     #: mission-start event's live theatre could not be resolved to a
     #: loaded world-model store (unknown theatre, missing/unbuilt store, a
     #: failed open, a mismatched built region, or no `--world-model-dir`
@@ -1359,7 +1353,7 @@ class CrewConsole:
     #: this class dispatches (`handle_command`, `handle_line`,
     #: `handle_transcript`) is answered with the fixed
     #: `WORLD_MODEL_NOT_LOADED_REFUSAL` line instead of being acted on --
-    #: see `_refusal_response`. Cleared by `logger._maybe_switch_theatre`
+    #: see `_refusal_response`. Cleared by `body._maybe_switch_theatre`
     #: the next time a mission (re)start resolves its theatre
     #: successfully; never cleared by `reset_for_new_mission` passing it
     #: through (it resets to `False` with the rest of per-mission state,
@@ -1369,11 +1363,11 @@ class CrewConsole:
     #: theatre still fails to resolve).
     refused: bool = field(default=False, repr=False)
 
-    #: `[[BL-B82]]` -- refreshed every poll (`logger.py`, the same place
+    #: `[[BL-B82]]` -- refreshed every poll (`body.py`, the same place
     #: `enrichment` is refreshed) from `ownship.alt_agl_m <=
     #: ON_GROUND_AGL_THRESHOLD_M`. Read by `handle_command` to refuse a
     #: `_LOOK_COMMAND_TOKENS` member with "Unable, on the ground." --
-    #: perception itself is gated in `logger.py`'s poll loops, not here;
+    #: perception itself is gated in `body.py`'s poll loops, not here;
     #: this field only decides what `handle_command` answers. Defaults to
     #: `True` (reviewer, `plans/radio-check/review.md`, 2026-10-19): before
     #: the first telemetry poll resolves this from real `OwnshipState`,
@@ -1383,12 +1377,12 @@ class CrewConsole:
     on_ground: bool = field(default=True, repr=False)
 
     #: `BL-B66` Stage 3 (`plans/9k113-effectors/plan.md` §3) -- refreshed
-    #: every poll (`logger.py`, the same place `on_ground`/`enrichment`
+    #: every poll (`body.py`, the same place `on_ground`/`enrichment`
     #: are refreshed) from `belief.sight_effector.sight_ready(runner.
     #: guidance_unit_state)`. Read by `_handle_observ_on` to refuse an
     #: OBSERV-on request with `render_unable("GUIDANCE_NOT_READY")` while
     #: the guidance unit has not finished powering up -- perception/the
-    #: power-up sequencer itself is driven in `logger.py`, not here; this
+    #: power-up sequencer itself is driven in `body.py`, not here; this
     #: field only decides what `_handle_observ_on` answers. Defaults to
     #: `False` (not `on_ground`'s `True`): before the first poll resolves
     #: this from real `GuidanceUnitState`, "not ready" is the safe
@@ -1396,7 +1390,7 @@ class CrewConsole:
     sight_ready: bool = field(default=False, repr=False)
 
     #: `plans/effector-sequences/plan.md` D5/D6 -- set at startup (by
-    #: `logger.py`'s config-loading step) when at least one effector
+    #: `body.py`'s config-loading step) when at least one effector
     #: registry/sequence file failed to load; drained by `drain_config_
     #: error` the first poll the SPU-8 intercom gate reads open. **Not**
     #: in `reset_for_new_mission`'s preserved-field list below in the
@@ -1414,10 +1408,10 @@ class CrewConsole:
         survive the reset -- the shared `store`/`tasks` references (their
         own `reset_for_new_mission()` must already have run before this
         call, via `_reset_mission_state`'s explicit ordering, the same
-        reasoning as `logger.ConsolePerceptionRunner.reset_for_new_
+        reasoning as `body.ConsolePerceptionRunner.reset_for_new_
         mission`), the injected collaborators (`brain_client`, `output`,
         `aircraft_client`, `mark_here_fn`, `mark_target_fn`, `transcript_
-        log`, `overlay_client`, `speech_client`, `speech_log_sink`), and
+        log`, `speech_client`, `speech_log_sink`), and
         `silenced` -- whether a pilot's deliberate mute should survive a
         mission restart is an open product question (see the plan's
         "Decisions Requiring User Input"); until decided, this preserves it
@@ -1435,7 +1429,7 @@ class CrewConsole:
         default -- see `refused`'s own field docstring for why resetting
         it here is correct even though a mission (re)start is exactly the
         event that might need to set it right back. `on_ground` resetting
-        to `True` is harmless either way: `logger._check_for_new_mission`
+        to `True` is harmless either way: `body._check_for_new_mission`
         re-evaluates it from live telemetry the very next poll, same as
         `enrichment`."""
         self.__init__(  # type: ignore[misc]
@@ -1447,7 +1441,6 @@ class CrewConsole:
             mark_here_fn=self.mark_here_fn,
             mark_target_fn=self.mark_target_fn,
             transcript_log=self.transcript_log,
-            overlay_client=self.overlay_client,
             speech_client=self.speech_client,
             speech_log_sink=self.speech_log_sink,
             silenced=self.silenced,
@@ -1513,8 +1506,8 @@ class CrewConsole:
         """Speak at most one currently-unacknowledged event, chosen and
         rendered fresh from current belief by `self.scheduler.tick`
         (`belief.callouts.CalloutScheduler`, see that module's docstring
-        and `_print`'s docstring). Called once per poll from `logger.py`'s
-        `--crew-text` loop, after `ContactStore.tick()`.
+        and `_print`'s docstring). Called once per poll from `body.py`'s
+        poll loop, after `ContactStore.tick()`.
 
         Passes the current attack-run target's contact id, if any
         (`plans/attack-run/plan.md` Decision 5), so the scheduler can
@@ -1659,7 +1652,7 @@ class CrewConsole:
         voice-latency-instrumentation/plan.md`) -- the F8 2026-10-20
         sortie's finding (*"current information, not old. Though the real
         problem here is the many second delay"*). Called once per poll from
-        `logger.py`, alongside `drain_events`/`drain_brain`.
+        `body.py`, alongside `drain_events`/`drain_brain`.
 
         Entries are checked in queued order, and a spoken entry's own
         `_print` call can itself re-claim the channel (`note_reply`) --
@@ -1696,13 +1689,13 @@ class CrewConsole:
         poll_replies()`, revalidates each reply against *current* belief
         (D4) and speaks the result, and, first, speaks D8's deterministic
         "stand by" for any escalation that has been outstanding too long.
-        Called once per poll from `logger.py`'s `--crew-text` loop,
-        alongside `drain_events`/`_poll_f10_commands`/`_poll_transcripts`
-        -- the established pattern for pulling asynchronous input into
-        this loop without ever blocking it (`belief.brain_client.
+        Called once per poll from `body.py`'s poll loop, alongside
+        `drain_events`/`_poll_transcripts` -- the established pattern for
+        pulling asynchronous input into this loop without ever blocking
+        it (`belief.brain_client.
         BrainLayerClient.handle`'s own docstring is where the
         never-blocks guarantee actually lives; this method is a plain
-        synchronous poll, like the other three).
+        synchronous poll, like the other two).
 
         **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
         `self.brain_client.poll_replies()` is still drained -- a reply
@@ -1734,10 +1727,10 @@ class CrewConsole:
             replies = self.brain_client.poll_replies()
         except Exception:
             # division: a poll failure here degrades to log-and-continue,
-            # the same per-call isolation `_poll_f10_commands`/
-            # `_poll_transcripts` (logger.py) already give their own
-            # clients, applied here to the one client owned by this class
-            # instead of by the poll-loop function.
+            # the same per-call isolation `_poll_transcripts` (body.py)
+            # already gives its own client, applied here to the one
+            # client owned by this class instead of by the poll-loop
+            # function.
             logger.warning("brain reply poll failed (continuing)", exc_info=True)
             return []
         lines: list[str] = []
@@ -1881,13 +1874,14 @@ class CrewConsole:
     ) -> list[str]:
         """Dispatches one player-issued command token -- originally F10
         radio-menu selections only (`plans/f10-crew-commands/plan.md`),
-        this is now the single dispatcher for every input surface that
-        resolves to a token: `logger.py`'s `--crew-text --f10-commands`
-        poll loop (`aircraft_client.get_f10_commands`), a voice `"act"`
-        disposition (`_act_on_voice_decision`), and a committed confirm-band
-        answer (`handle_transcript`). Renamed from `handle_f10_command`
+        now the single dispatcher for every input surface that resolves
+        to a token: a voice `"act"` disposition (`_act_on_voice_decision`)
+        and a committed confirm-band answer (`handle_transcript`). The F10
+        radio-menu transport (`aircraft_client.get_f10_commands`, the Hook
+        script, the collector-side receiver/queue) was removed entirely by
+        `BL-B96`. Renamed from `handle_f10_command`
         (`plans/voice-command-completeness/plan.md` Stage 1, Decision 4) --
-        the F10 radio menu is the transport being retired, not the concept
+        the F10 radio menu was the transport being retired, not the concept
         this method dispatches, which voice already shared with it.
 
         **`DISPATCHED_COMMAND_TOKENS`** (module-level, below) is the
@@ -1954,7 +1948,7 @@ class CrewConsole:
         # `[[BL-B82]]`: a look command on the ground is heard and
         # understood -- it already ended silence, above, like any other
         # command -- but not dispatched; perception is not running
-        # (`logger.py`'s poll-loop gate), so a `scan`/`watch`/`follow`
+        # (`body.py`'s poll-loop gate), so a `scan`/`watch`/`follow`
         # here would register a task that can never be fulfilled. This is
         # the "unable", not "say again", half of that distinction: the
         # command was heard fine, it just cannot be done right now.
@@ -2631,7 +2625,7 @@ class CrewConsole:
     def _handle_mark_here(self, now_sim: float) -> list[str]:
         """`mark here` (`plans/bl8-mission-memory/plan.md` Decision 6) --
         mark ownship's current position. `self.mark_here_fn` is
-        `logger.py`'s own closure over the live `mission_memory.store.
+        `body.py`'s own closure over the live `mission_memory.store.
         MissionMemory`; this console never imports that package directly
         (`mark_here_fn`'s own field docstring)."""
         if self.mark_here_fn is None:
@@ -2947,7 +2941,7 @@ class CrewConsole:
         ConsolePerceptionRunner`, not here (the same division `attack_
         run_transition`'s own docstring states), so this handler cannot
         compute or speak the answer synchronously -- it only sets the
-        one-shot signal `drain_where_is_it` (`logger.py`'s poll loop)
+        one-shot signal `drain_where_is_it` (`body.py`'s poll loop)
         consumes, the same shape `_handle_engage`/`_handle_disengage`
         already use for a runner-level effect, except here the signal
         gates the *entire* readback, not a side effect alongside an
@@ -2959,7 +2953,7 @@ class CrewConsole:
     def _handle_observ_on(self) -> list[str]:
         """ "Observ on" -- `BL-B64` Stage 2, direction §6: *"OBSERV ON only
         on pilot command."* Leaves `observ_transition` for the poll loop
-        (`logger.py`, which owns `OpticState.home_phase`) rather than
+        (`body.py`, which owns `OpticState.home_phase`) rather than
         mutating state this class cannot reach -- see that field's own
         docstring. Entering OBSERV does not itself point the sight or
         change what Petrovich is looking through this instant: the phase
@@ -2993,7 +2987,7 @@ class CrewConsole:
     def _handle_weapons_armed(self) -> list[str]:
         """ "weapons armed" -- `BL-B66` Stage 4 (`plans/9k113-effectors/
         plan.md` §4/Co-moving Fields). Leaves `weapon_safety_transition`
-        for the poll loop (`logger.py`, which owns the real cockpit
+        for the poll loop (`body.py`, which owns the real cockpit
         write), the same one-shot-signal shape `observ_transition` already
         has. Converges on the same field `_handle_engage` already sets --
         an attack run started while already armed is a harmless re-write,
@@ -3038,12 +3032,12 @@ class CrewConsole:
         guidance request at all, so testing against it mis-measures a
         live binocular look as the naked eye's own (narrower) range. User
         direction, 2026-10-16: "actual behavior must measure by used
-        optic." The caller (`logger.py`'s poll loop) passes its own
-        `runner.optic` -- the same value `logger._apply_active_gaze` just
+        optic." The caller (`body.py`'s poll loop) passes its own
+        `runner.optic` -- the same value `body._apply_active_gaze` just
         assigned onto `source.optic` for this poll, i.e. the optic
         `perception.visibility.check_visibility` actually resolved this
         tick's percepts against -- read *after* this same poll's
-        `decide_optic` call (`logger.py`'s own ordering comment on
+        `decide_optic` call (`body.py`'s own ordering comment on
         `requested_optic`/`drain_attack_run`), passed straight through to
         `belief.attack_run.decide`'s own `resolving_optic`. `None` (its
         default) for a caller with no optic ladder, read by `decide` as
@@ -3148,7 +3142,7 @@ class CrewConsole:
         resolving_optic: Optic | None = None,
     ) -> list[str]:
         """Speaks "where is it?"'s answer (`plans/attack-run-los/plan.md`
-        F3) -- called from `logger.py`'s poll loop right beside `drain_
+        F3) -- called from `body.py`'s poll loop right beside `drain_
         attack_run`, consuming `self.where_is_it_requested` the same way
         the three existing one-shot signals are consumed (read, act,
         set back to `False`).
@@ -3472,8 +3466,8 @@ class CrewConsole:
         def _render(render_now_sim: float) -> list[str]:
             # `self.enrichment` is re-checked here, not only above: this
             # closure may run on a later poll than the one that validated
-            # it, and `--crew-text`'s own loud-refusal mode (`BL-15` Stage
-            # 3) can null it out in between -- `_report_scope`'s own
+            # it, and the crew session's own loud-refusal mode (`BL-15`
+            # Stage 3) can null it out in between -- `_report_scope`'s own
             # `assert self.enrichment is not None` would otherwise fire on
             # a state this method's caller never actually saw.
             if self.enrichment is None:
@@ -3811,14 +3805,14 @@ class CrewConsole:
                 still-active task *per kind*, not literally every non-cancelled
                 task ever created.** Superseding a scan with a newer one (or a
                 watch with a newer one) does not retroactively cancel the earlier
-                task -- `logger._active_gaze` already only honours the newest
+                task -- `body._active_gaze` already only honours the newest
                 `scan_area` task via its own "most recent wins" tie-break, and an
                 older, superseded task of either kind is inert but not `cancelled`.
                 Treating every merely-inert task as "active" would make one Cancel
                 Task press cancel a whole session's worth of stale scans, so this
                 groups active tasks by `kind` and keeps only each group's newest
                 (`_active_tasks_by_kind`) -- exactly the selection
-                `logger._active_gaze` already uses for gaze, generalised to any
+                `body._active_gaze` already uses for gaze, generalised to any
                 kind.
 
                 **That selection now decides only what the readback NAMES. What
@@ -3826,7 +3820,7 @@ class CrewConsole:
                 (2026-09-25, user, after flying it).** Cancelling only each kind's
                 newest task *resurrected* the one it had superseded: an older
                 `scan_area` is inert precisely because a newer one outranks it in
-                `logger._active_gaze`'s "most recent wins" tie-break, so cancelling
+                `body._active_gaze`'s "most recent wins" tie-break, so cancelling
                 the newer one promotes the older one straight back into governing
                 the gaze. He said "cancel", confirmed "cancel everything", heard
                 both current modes named -- and an earlier "scan south" was still
@@ -3849,7 +3843,7 @@ class CrewConsole:
                 list by the time a player heard it and said "Cancel Task," which
                 produced the sortie's "'nothing to stop'" finding. `TaskStore.
                 cancel` itself is fixed the same way, so cancelling a resolved task
-                here now genuinely ends its mode (`logger._active_gaze` stops
+                here now genuinely ends its mode (`body._active_gaze` stops
                 honouring it), not just a bookkeeping no-op. A `watch_contact` task
                 never leaves `"pending"` on its own (`TaskStore.tick` skips any task
                 with no `area`), so this same "active" definition covers it too
@@ -3911,7 +3905,8 @@ class CrewConsole:
         the routine queue and stops in-flight playback exactly as
         `play_audio(..., urgent=True)` already did, just without the
         enqueue that used to carry the acknowledgement. Without
-        `speech_client` configured (no `--speech-audio`), there is nothing
+        `speech_client` configured (a test built `CrewConsole` without
+        wiring one -- `main()` always does now, BL-B96), there is nothing
         to interrupt and this is a true no-op -- the same
         None-means-no-op posture every other `speech_client` use already
         has."""
@@ -4366,29 +4361,22 @@ class CrewConsole:
         correlation_id: str | None = None,
     ) -> None:
         """Prints each line to `output` (unchanged) and, when
-        `overlay_client`/`speech_client` are configured, pushes the same
-        line to the in-cockpit text overlay (`AircraftLayerClient.
-        push_text_line`, `POST /text/push`) and/or the TTS audio pipeline
+        `speech_client` is configured, pushes the same
+        line to the TTS audio pipeline
         (`AudioAdapterClient.push_speech`, `POST /speak` -- BL-10 first
         slice, `plans/tts-voice-output/plan.md`) -- the single funnel
         point every path that produces spoken text (`handle_line`,
-        `drain_events`) already goes through, so neither sink needs a
+        `drain_events`) already goes through, so that sink needs no
         separate "what to push and when" logic to write or desync from
-        what's printed. Each push is wrapped in its own
-        `try/except`, mirroring `logger.ConsolePerceptionRunner.run_once`'s
-        BL-2.5 push loop's degrade-on-failure shape: a failed push must not
-        raise, must not stop the remaining lines in this batch from being
-        printed/pushed/spoken, and must not stop the other sink's own push
-        for the same line.
+        what's printed. The push is wrapped in its own
+        `try/except`: a failed push must not
+        raise and must not stop the remaining lines in this batch from being
+        printed/pushed/spoken.
 
         `bypass_gate` (True only for an injected urgent call, per `plans/
-        overlay-speech-callouts/plan.md`'s resolved decision) prepends
-        `_URGENT_OVERLAY_PREFIX` to the *pushed* overlay line only -- the
-        `output` print path stays exactly the text `belief.speech`
-        produced, since this is an overlay-display concern, not a change
-        to what was spoken/printed generally. For `speech_client`,
-        `bypass_gate` is threaded straight through as `push_speech`'s
-        `urgent` argument instead (plan Decision 3/4: no new signal
+        overlay-speech-callouts/plan.md`'s resolved decision) is threaded
+        straight through as `push_speech`'s
+        `urgent` argument (plan Decision 3/4: no new signal
         invented -- an injected urgent call is the only line that ever
         sets it, and the aircraft-layer's `AudioPlaybackSender` is what
         actually preempts routine playback for it).
@@ -4408,9 +4396,9 @@ class CrewConsole:
 
         **`self.silenced` gates `speech_client` only** (`plans/
         silence-command/plan.md`, user direction 2026-10-04) -- `output`
-        and `overlay_client` are untouched by it, since the use case is
+        is untouched by it, since the use case is
         audio specifically ("during radio traffic", "near a friendly
-        airbase"); the crew-text/overlay surfaces keep working. The gate
+        airbase"); the crew-text surface keeps working. The gate
         applies regardless of `bypass_gate`: an injected urgent call is
         suppressed exactly like a routine line while silenced -- this
         project's own chosen reading of "absolute silence," not an
@@ -4444,17 +4432,6 @@ class CrewConsole:
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
-            if self.overlay_client is not None:
-                overlay_line = (
-                    f"{_URGENT_OVERLAY_PREFIX}{line}" if bypass_gate else line
-                )
-                try:
-                    self.overlay_client.push_text_line(overlay_line)
-                except AircraftLayerError:
-                    logger.warning(
-                        "overlay push failed for crew-text line (continuing)",
-                        exc_info=True,
-                    )
             push_sent_wall: float | None = None
             push_acked_wall: float | None = None
             push_duration_s: float | None = None
@@ -4465,11 +4442,23 @@ class CrewConsole:
                     self.speech_client.push_speech(
                         line, urgent=bypass_gate, correlation_id=correlation_id
                     )
-                except AudioAdapterError:
-                    logger.warning(
-                        "speech push failed for crew-text line (continuing)",
-                        exc_info=True,
-                    )
+                except AudioAdapterError as exc:
+                    # BL-B96 Stage 4: audio-adapter unreachable is now the
+                    # default-path case (speech is unconditional), not a
+                    # rare opt-in failure -- report through the shared
+                    # reporter (warn-once-on-transition) instead of a full
+                    # traceback on every push, which would flood the log
+                    # the moment a sortie starts before audio-adapter does.
+                    if self.audio_adapter_reporter is not None:
+                        self.audio_adapter_reporter.report_failure(exc)
+                    else:
+                        logger.warning(
+                            "speech push failed for crew-text line (continuing)",
+                            exc_info=True,
+                        )
+                else:
+                    if self.audio_adapter_reporter is not None:
+                        self.audio_adapter_reporter.report_success()
                 push_duration_s = time.monotonic() - t0
                 push_acked_wall = time.time()
             if self.speech_log_sink is not None:

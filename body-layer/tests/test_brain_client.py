@@ -305,14 +305,14 @@ def test_unreachable_brain_logs_one_line_without_traceback(
     unreachable or malformed-reply server elsewhere in this suite leaves
     its own `_poll_loop` daemon thread running forever (nothing stops a
     `daemon=True` thread -- see `_run_plain_logger_main_for_n_polls`'s
-    docstring in `tests/test_logger.py`), retrying on its own clock and
+    docstring in `tests/test_body.py`), retrying on its own clock and
     logging via the *same* `belief.brain_client` logger name -- so an
     unfiltered `caplog.records[0]` can be a stray record from a
     completely different, already-leaked client instance (one whose
     failure carries a traceback, e.g. `test_invalid_reply_still_logs_a_
     traceback`'s), not this test's own connection-refused one. Logger
     name alone cannot discriminate between two instances of the same
-    client class, unlike `BL-B92`'s fix on `test_logger.py`'s
+    client class, unlike `BL-B92`'s fix on `test_body.py`'s
     `_ConnectionReporter` tests (one logger, one call site) -- thread
     identity can.
 

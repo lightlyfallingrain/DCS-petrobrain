@@ -52,7 +52,7 @@ class MissionMemory:
         self._struck_by: dict[int, int] = {}
         self._latest_live: dict[str, int] = {}
         self._lock = threading.Lock()
-        #: Set by `log.MissionMemoryLogWriter.write` via `logger.py`'s
+        #: Set by `log.MissionMemoryLogWriter.write` via `body.py`'s
         #: wiring -- `None` (the default) means every append simply holds
         #: in memory, which is what every Stage 1 test exercises.
         self._sink: Callable[[Entry], None] | None = None

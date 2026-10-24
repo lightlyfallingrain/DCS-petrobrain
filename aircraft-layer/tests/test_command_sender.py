@@ -1,9 +1,7 @@
 """Tests for `collector.command_sender.CommandSender` -- BL-6 (`plans/
-bl6-commands-inspect-adapt/plan.md`). Mirrors `test_text_sender.py`'s
-structure, except the "send to a closed port" case: unlike
-`TextOverlaySender.send_line`, `CommandSender.send_command` is documented
-to raise on a clearly-failed send rather than swallow it (see the module
-docstring's asymmetry note)."""
+bl6-commands-inspect-adapt/plan.md`). `CommandSender.send_command` is
+documented to raise on a clearly-failed send rather than swallow it (see
+the module docstring's asymmetry note)."""
 
 from __future__ import annotations
 
@@ -68,10 +66,9 @@ def test_send_command_opens_socket_lazily_if_not_opened() -> None:
 class _FailingSocket:
     """A `socket.socket` stand-in whose `sendto` always raises `OSError` --
     used to exercise `send_command`'s raise-on-failure path deterministically
-    (unlike `TextOverlaySender`, a real closed-port UDP send does not
-    reliably raise synchronously, see `test_text_sender.py`'s own comment on
-    that -- so this asymmetric behavior needs a direct failure injection,
-    not a real socket, to test at all)."""
+    (a real closed-port UDP send does not reliably raise synchronously, so
+    this needs a direct failure injection, not a real socket, to test at
+    all)."""
 
     def sendto(self, payload: bytes, address: tuple[str, int]) -> int:
         raise OSError("simulated send failure")

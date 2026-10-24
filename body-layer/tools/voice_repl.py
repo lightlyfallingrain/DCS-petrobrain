@@ -7,15 +7,15 @@ verb_anchored, ambiguous}` and decides what to do with it. This script builds
 a `CrewConsole` over an empty `ContactStore` and drops you into its REPL, so
 the act/confirm/say-again bands can be exercised by typing.
 
-It exists because the obvious route -- `python -m logger --crew-text` -- needs
-`--aircraft-layer-url`, `--theatre` and `--world-model-db`, all three
-required, which means a running aircraft layer and therefore the Windows box.
-That would gate a behaviour that has no hardware in it on hardware being
-available, the same wrong dependency `tools/speak_samples.py` was written to
-avoid.
+It exists because the obvious route -- `python -m body` -- needs
+`--aircraft-layer-url`, `--theatre`/`--world-model-db`, and (BL-B96)
+`--audio-adapter-url`, all required, which means a running aircraft layer
+and therefore the Windows box. That would gate a behaviour that has no
+hardware in it on hardware being available, the same wrong dependency
+`tools/speak_samples.py` was written to avoid.
 
 Needs both `PYTHONPATH` entries and this subproject's own interpreter, same
-as the live logger -- `belief.tasks` reaches `perception.geometry`, which
+as `body.py` -- `belief.tasks` reaches `perception.geometry`, which
 imports the world-model seam, which pulls in `pyproj`. What it does *not* need
 is a running aircraft layer, a world-model database, or a theatre:
 

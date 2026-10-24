@@ -14,8 +14,7 @@ contacts.Contact` inside the task's area was observed after the task was
 created), `failed` (nothing confirmed by `deadline_sim`), or is still
 `pending`. This module has **no DCS I/O** -- the live trigger that (per the
 plan's newer half) actually makes Petrovich search lives one layer up, in
-`console.py`'s `scan-area` handler, the same place BL-2.5 wired the overlay
-push rather than inside `tools.py`.
+`crew_console.py`'s `scan-area` handler, not inside `tools.py`.
 
 **A `watch_contact` task has no success/timeout lifecycle at all** --
 watching a contact does not "succeed" (there is nothing to confirm beyond
@@ -59,7 +58,7 @@ created over a relative-sector area (`ahead`/`left`/`right`/`full`) does
 not judge contacts against a fixed circle frozen at command-time ownship
 position -- its success predicate genuinely means "was a contact seen
 inside the sector at *some* tick since the task was created," because the
-sector itself tracks ownship's nose via `logger.py`'s per-tick
+sector itself tracks ownship's nose via `body.py`'s per-tick
 `ContactStore.reproject_relative_areas` call. That is a different
 predicate from the fixed-ground-area case, where "inside the area" has one
 fixed meaning for the task's whole life -- and it has a structural
@@ -73,24 +72,18 @@ re-resolves the *live* area by id first (`ContactStore.get_area
 (task.area.id)`), falling back to the captured reference only if that id is
 no longer registered.
 
-That fallback is reachable, just not from anything a scan command does.
-`tools.cancel_task` cancels the task before removing its area, so the id
-stays live for as long as that task is pending -- but `cancel_task` is not
-the only way an area leaves the store. `tools.unwatch_area` (reached from
-`belief.console`'s `unwatch-area <id>` developer command) calls
-`ContactStore.remove_area` directly with no task awareness at all, and will
-happily strip the area out from under a still-`pending` scan task. The
-fallback then degrades to the captured reference, which for an
-ownship-anchored area means an unprojected one: a permissive circle at the
-position ownship held when the scan was ordered. That is exactly the
-too-permissive completion check this id-resolution exists to prevent, so
-the degradation is graceful only in the sense that it does not crash.
-
-Do not tighten `unwatch_area` into task-awareness on this note alone --
-it is a pre-existing `--console`-only debug path, and no F10 or crew-text
-command can reach it. It is written down because the honest statement is
-"reachable from one debug command, with a known bad-but-bounded outcome",
-not "cannot happen".
+That fallback is reachable in principle, just not from anything a scan
+command does, and not currently from any player-facing command surface at
+all: `tools.unwatch_area` calls `ContactStore.remove_area` directly with no
+task awareness, which would strip an area out from under a still-`pending`
+scan task, but its one caller was `belief.console`'s `unwatch-area <id>`
+developer command, deleted by `BL-B96` (`plans/default-crew-pipeline/
+plan.md`) along with the rest of the `--console` debug mode. As of that
+removal `unwatch_area` is reachable only from `tests/test_tools.py`'s own
+direct calls, not from `CrewConsole` or voice. Recorded so a future command
+surface that exposes it again knows the degradation this fallback exists
+to bound, rather than this becoming "cannot happen" by nobody having
+reason to look.
 
 Two views of the same object silently drifting apart is a recurring failure
 mode in this codebase (see notes/) -- the fallback above is a safety net,

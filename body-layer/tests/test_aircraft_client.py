@@ -30,10 +30,6 @@ _PETROVICH_WHEEL_BODY = {
     "received_wall_clock_s": 1000.0,
     "fields": {"state": "SEARCHING"},
 }
-_F10_COMMANDS_BODY = [
-    {"command": "watch_nearest", "received_wall_clock_s": 999.0},
-    {"command": "cancel_task", "received_wall_clock_s": 1000.0},
-]
 _SPU8_STATE_BODY = {
     "t": 123.5,
     "received_wall_clock_s": 1000.0,
@@ -55,7 +51,6 @@ _WATCHED_ARGS_BODY = {
 
 
 def _make_handler(
-    pushed_lines: list[str],
     triggered_searches: list[str] | None = None,
     watch_args_calls: list[tuple[str, list[int]]] | None = None,
     read_args_response: object | None = None,
@@ -76,8 +71,6 @@ def _make_handler(
                 self._respond(200, _PETROVICH_INDICATION_BODY)
             elif self.path == "/petrovich_wheel/latest":
                 self._respond(200, _PETROVICH_WHEEL_BODY)
-            elif self.path == "/f10_commands/poll":
-                self._respond(200, _F10_COMMANDS_BODY)
             elif self.path == "/spu8/state":
                 self._respond(200, _SPU8_STATE_BODY)
             elif self.path == "/watched_args/latest":
@@ -94,12 +87,7 @@ def _make_handler(
                 self._respond(404, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path == "/text/push":
-                length = int(self.headers.get("Content-Length", "0") or "0")
-                body = json.loads(self.rfile.read(length))
-                pushed_lines.append(body["text"])
-                self._respond(200, {"ok": True})
-            elif self.path == "/command/petrovich_search":
+            if self.path == "/command/petrovich_search":
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 body = json.loads(self.rfile.read(length))
                 triggered_searches.append(body["mode"])
@@ -135,7 +123,7 @@ def _make_handler(
 
 @pytest.fixture
 def server_url() -> Iterator[str]:
-    httpd = HTTPServer(("127.0.0.1", 0), _make_handler([]))
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler())
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -147,23 +135,9 @@ def server_url() -> Iterator[str]:
 
 
 @pytest.fixture
-def server_url_with_pushed_lines() -> Iterator[tuple[str, list[str]]]:
-    pushed_lines: list[str] = []
-    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(pushed_lines))
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{httpd.server_port}", pushed_lines
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-        thread.join(timeout=5)
-
-
-@pytest.fixture
 def server_url_with_triggered_searches() -> Iterator[tuple[str, list[str]]]:
     triggered_searches: list[str] = []
-    httpd = HTTPServer(("127.0.0.1", 0), _make_handler([], triggered_searches))
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(triggered_searches))
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -222,24 +196,6 @@ def test_get_json_raises_on_invalid_json_body(server_url: str) -> None:
         client._get_json("/not-json")
 
 
-def test_push_text_line_posts_to_text_push(
-    server_url_with_pushed_lines: tuple[str, list[str]],
-) -> None:
-    server_url, pushed_lines = server_url_with_pushed_lines
-    client = AircraftLayerClient(base_url=server_url)
-
-    client.push_text_line("CONTACT_DETECTED: BMP-2, observed, currently visible.")
-
-    assert pushed_lines == ["CONTACT_DETECTED: BMP-2, observed, currently visible."]
-
-
-def test_push_text_line_raises_on_unreachable_host() -> None:
-    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
-
-    with pytest.raises(AircraftLayerError):
-        client.push_text_line("hello")
-
-
 def test_get_petrovich_wheel_latest_returns_parsed_dict(server_url: str) -> None:
     client = AircraftLayerClient(base_url=server_url)
 
@@ -264,21 +220,6 @@ def test_trigger_petrovich_search_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.trigger_petrovich_search("boresight")
-
-
-def test_get_f10_commands_returns_parsed_list(server_url: str) -> None:
-    client = AircraftLayerClient(base_url=server_url)
-
-    result = client.get_f10_commands()
-
-    assert result == _F10_COMMANDS_BODY
-
-
-def test_get_f10_commands_raises_on_unreachable_host() -> None:
-    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
-
-    with pytest.raises(AircraftLayerError):
-        client.get_f10_commands()
 
 
 def test_get_spu8_state_latest_returns_parsed_dict(server_url: str) -> None:
@@ -309,7 +250,7 @@ def server_url_with_watch_args_calls() -> Iterator[
     tuple[str, list[tuple[str, list[int]]]]
 ]:
     calls: list[tuple[str, list[int]]] = []
-    httpd = HTTPServer(("127.0.0.1", 0), _make_handler([], watch_args_calls=calls))
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(watch_args_calls=calls))
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -342,7 +283,7 @@ def test_set_watch_args_raises_on_unreachable_host() -> None:
 def _read_args_server(response: object, status: int = 200) -> Iterator[str]:
     httpd = HTTPServer(
         ("127.0.0.1", 0),
-        _make_handler([], read_args_response=response, read_args_status=status),
+        _make_handler(read_args_response=response, read_args_status=status),
     )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

@@ -81,9 +81,8 @@ TaskStore.create`) -- the same "one command, two existing registries"
 pattern `watch_area` itself already established for areas alone. **This
 function stays pure/DCS-I/O free**, per the project's hard testability
 requirement -- it never triggers a real Petrovich search; that live
-trigger is `console.py`'s `scan-area` handler's job (the same "wire the
-live effect one layer up" split BL-2.5 drew for the overlay push, not
-inside `tools.py`). Every description below must therefore be read
+trigger is `crew_console.py`'s `scan-area` handler's job (wire the
+live effect one layer up, not inside `tools.py`). Every description below must therefore be read
 together with the tool registry's (`tool_api.py`) explicit caveat: this
 tool asks Petrovich to search and reports whether something relevant was
 subsequently observed in the named area -- it never aims him at a bearing,

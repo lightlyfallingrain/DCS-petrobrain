@@ -1,102 +1,52 @@
-"""PB-1's actual deliverable: a text-only perception logger. PB-2 Stage 3
-(`plans/pb2-contact-memory/plan.md`) adds a second, belief-consuming mode
-behind `--console`.
-
-Polls ownship telemetry from the aircraft layer plus whatever
-`PerceptionSource`s it is given, and prints each `Observation` as one flat
-text line (`t_sim`, aircraft position, `source`, classification,
-`bearing_deg`, `range_m`) -- no LLM, no contact memory, no association.
-That's BL-2/PB-2.
-
-`PerceptionLogger` itself is written entirely against `perception.source.
-PerceptionSource`, so it does not know or care which concrete tier(s) are
-behind it -- per `plans/pb1-perception-logger/plan.md` stage 5. `main()`
-below is the one place that plugs in concrete tiers
-(`perception.hybrid_source.HybridPerceptionSource` and, per
-`plans/pb1.5-naked-eye-detection/plan.md` stage 3,
-`perception.naked_eye_source.NakedEyePerceptionSource`) and drives the poll
-loop -- kept as thin CLI wiring, separate from `PerceptionLogger`'s own
-tier-agnostic logic.
+"""The crew session's poll loop and CLI entrypoint. Polls ownship telemetry
+from the aircraft layer plus whatever `PerceptionSource`s it is given,
+feeds every `Observation` into a `belief.contacts.ContactStore`
+(`ConsolePerceptionRunner`), and drives `belief.crew_console.CrewConsole` --
+the player-facing crew session -- on top of it. `main()` is the one place
+that plugs in concrete tiers (`perception.hybrid_source.
+HybridPerceptionSource` and `perception.naked_eye_source.
+NakedEyePerceptionSource`) and drives the poll loop, kept as thin CLI
+wiring, separate from `ConsolePerceptionRunner`'s own tier-agnostic logic.
 
 **Two sources, no `CompositePerceptionSource`** (PB-1.5 plan's Affected
-Modules section, a local/reversible decision): `PerceptionLogger` holds a
-plain `list[PerceptionSource]`, polls each every tick, and concatenates the
-returned `Observation`s before formatting/printing --
-`PerceptionSource.poll()` already returns `list[Observation]`, so no new
-type is needed to combine multiple sources' output. Revisit only if a third
-source or real fusion logic (that plan's Decision #3) makes a composite
-class earn its keep.
+Modules section, a local/reversible decision): `main()` builds a plain
+`list[PerceptionSource]`, polled every tick and concatenated before
+ingestion -- `PerceptionSource.poll()` already returns `list[Observation]`,
+so no new type is needed to combine multiple sources' output. Revisit only
+if a third source or real fusion logic (that plan's Decision #3) makes a
+composite class earn its keep.
 
-**`--console` (PB-2 Stage 3, extended by Stage 4)**: the plain text-logger
-path above is unchanged and stays the default -- both sources still built at
-their `emit_mode="on_change"` default. `--console` instead builds both
-sources at `emit_mode="every_poll"` (Stage 3's fix for the Interface
-confirmation section's gap 2: source-level debounce starves the belief layer
-of the continuity `belief.decay`'s certainty ladder needs) and drives
-`ConsolePerceptionRunner`, which ingests+ticks a `belief.contacts.
-ContactStore` each poll instead of formatting text lines, printing a
-periodic contact/observation-count line.
+**The belief-consuming poll loop (PB-2 Stage 3, extended by Stage 4)**:
+both sources are built at `emit_mode="every_poll"` (Stage 3's fix for the
+Interface confirmation section's gap 2: source-level debounce starves the
+belief layer of the continuity `belief.decay`'s certainty ladder needs) and
+drive `ConsolePerceptionRunner`, which ingests+ticks a `belief.contacts.
+ContactStore` each poll, printing a periodic contact/observation-count
+line.
 
-Stage 4 adds the real `belief.console.Console` REPL on top of that poll
-loop: `main()` runs `ConsolePerceptionRunner.run_once()` on a background
-daemon thread (`_run_console_poll_loop`) while the foreground thread reads
-commands from stdin and dispatches them into `Console.handle_line`, against
-the same `ContactStore` the poll loop is filling. `ConsolePerceptionRunner.
-last_t_sim` is the seam between the two: the poll thread updates it every
-poll, the REPL thread reads it as `now_sim` for whatever command the user
-just typed. This is deliberately the simplest wiring that lets a live
-operator type `contacts`/`show <id>`/etc. while telemetry keeps flowing --
-not a claim of hardened concurrency, appropriate for a single-user debug
-console over an in-memory store.
+`main()` runs `ConsolePerceptionRunner.run_once()` on a background daemon
+thread (`_run_crew_text_poll_loop`) while the foreground thread drives
+`CrewConsole`'s own REPL against the same `ContactStore` the poll loop is
+filling. `ConsolePerceptionRunner.last_t_sim` is the seam between the two:
+the poll thread updates it every poll, the REPL thread reads it as
+`now_sim` for whatever command the user just typed.
 
-**Stage 6 fix (live acceptance testing finding, `plans/pb2-contact-memory/
-implementation.md` "Stage 6 findings")**: `_run_console_poll_loop` opens its
-own `world_model_conn` (via `open_world_model`) and builds its own `sources`
-(via `_build_sources`) *on the poll thread itself*, rather than receiving a
-`ConsolePerceptionRunner` whose `sources` already hold a connection opened
-on `main()`'s thread. `sqlite3.Connection`s are thread-affine by default
-(`check_same_thread=True`, and `open_world_model` never overrides that) --
-a connection opened on one thread and queried from another raises
-`sqlite3.ProgrammingError` on first use. The plain (non-`--console`) path
-never hit this because connection-open, `_build_sources`, and the poll loop
-all stay on the single main thread there; only `--console`'s background
-poll thread crosses a thread boundary with the connection. `main()` still
-constructs `ConsolePerceptionRunner` up front with an empty `sources` list
--- its `store`/`output`/`last_t_sim` fields are safe to share across
-threads (Stage 4 reviewer-confirmed), only `sources` (and the connection it
-holds) needed to move.
-
-**REPL-thread enrichment fix (BL-5 live acceptance testing finding,
-`plans/bl5-tool-api/debug.md`)**: BL-3 re-introduced the same thread-affinity
-bug Stage 6 fixed above, in a second field Stage 6 didn't cover.
-`ConsolePerceptionRunner.enrichment` is built on the poll thread and holds
-*that thread's* `world_model_conn`; `_run_console_repl` used to copy it
-straight into `console.enrichment`, so any enrichment-aware command
-(`situation`/`position`/`place`/`show`/`contacts`/`find`) run from the REPL
-thread queried the poll thread's connection and raised
-`sqlite3.ProgrammingError`. `_run_console_repl` now lazily builds its own
-REPL-thread-local `sqlite3.Connection`/`EnrichmentContext` (mirroring Stage
-6's "build it on the thread that uses it" precedent) instead of reading
-`runner.enrichment` at all -- see that function's own docstring for the
-full reasoning, including the accepted cost of a second connection/cache.
-
-**`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`; extended by
-`plans/overlay-speech-callouts/plan.md`)**: only meaningful alongside
-`--console` or `--crew-text`. With `--console`, `main()` passes the same
-`AircraftLayerClient` instance as `ConsolePerceptionRunner.overlay_client`,
-so every newly materialised lifecycle event
-(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) is mirrored to the
-in-cockpit text overlay via `POST /text/push`. With `--crew-text`, `main()`
-instead passes it as `CrewConsole.overlay_client`, so every line
-`CrewConsole` speaks (readbacks, contact reports, drained lifecycle events,
-and injected urgent calls prefixed `"!! "`) is pushed verbatim -- a radio-
-callout feed, not the lifecycle-event mirror `--console --overlay` carries.
-Defaults off -- a true no-op when absent, since the relevant
-`overlay_client` field stays `None` and neither path touches the
-aircraft-layer client for this purpose. `PerceptionLogger`'s plain
-(non-`--console`/`--crew-text`) per-`Observation` stream deliberately does
-not get this wiring (line-noise vs. signal tradeoff, see the BL-2.5 plan's
-"Deliberately not modified" section).
+**Thread-affine `sqlite3.Connection` (live acceptance testing finding,
+`plans/pb2-contact-memory/implementation.md` "Stage 6 findings"; BL-5 live
+acceptance testing finding, `plans/bl5-tool-api/debug.md`)**:
+`_run_crew_text_poll_loop` opens its own `world_model_conn` (via
+`open_world_model`) and builds its own `sources` (via `_build_sources`) *on
+the poll thread itself*, since `sqlite3.Connection`s are thread-affine by
+default (`check_same_thread=True`, and `open_world_model` never overrides
+that) -- a connection opened on one thread and queried from another raises
+`sqlite3.ProgrammingError` on first use. `main()` still constructs
+`ConsolePerceptionRunner` up front with an empty `sources` list -- its
+`store`/`output`/`last_t_sim` fields are safe to share across threads, only
+`sources` (and the connection it holds) needs to move. The same applies to
+`ConsolePerceptionRunner.enrichment`, built on the poll thread and holding
+*that thread's* `world_model_conn`: the REPL side builds its own REPL-
+thread-local `sqlite3.Connection`/`EnrichmentContext` instead of reading
+`runner.enrichment` at all.
 
 **`--mission-understanding PATH` (BL-7, `plans/bl7-mission-phase-relevance/
 plan.md`)**: optional. When given, `main()` calls `belief.mission_phase.
@@ -106,48 +56,35 @@ Python import of mission-interpreter's own code, per root `CLAUDE.md`'s
 module-independence rule) and constructs one `belief.mission_phase.
 MissionPhaseTracker`, held alongside (not inside) `EnrichmentContext` --
 mission phase isn't world-model/ownship-shaped state, it has its own
-lifecycle. The *same* tracker instance is threaded into whichever
-`ConsolePerceptionRunner` is built (`--console` or `--crew-text`) and, for
-`--console`, into `Console` too. `ConsolePerceptionRunner.run_once` is the
-only place that ever mutates it (`.update()`, poll thread); `Console`'s
-`situation` command only ever reads it (`.current_phase()`, REPL thread) --
-the same write-thread/read-thread split `EnrichmentContext.ownship`
-already uses, deliberately, to avoid reproducing this codebase's recurring
-sqlite thread-affinity defect class (BL-2 Stage 6, BL-5) in a new field.
-Omitted (default `None`): a true no-op, `get_situation`'s `mission_phase`
-fact is absent entirely, same as before this milestone. Only meaningful
-with `--console` (`get_situation`'s only caller); harmless but otherwise
-unused with `--crew-text` or the plain logger path.
+lifecycle. The *same* tracker instance is threaded into `ConsolePerceptionRunner`
+(`.update()`, poll thread) and into `get_situation`'s `mission_phase` fact
+(`.current_phase()`, REPL thread) -- the same write-thread/read-thread split
+`EnrichmentContext.ownship` already uses, deliberately, to avoid
+reproducing this codebase's recurring sqlite thread-affinity defect class
+in a new field. Omitted (default `None`): a true no-op, `get_situation`'s
+`mission_phase` fact is absent entirely.
 
-**`--crew-text` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`;
-`--overlay` combination added by `plans/overlay-speech-callouts/plan.md`)**:
-runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
-instead of `--console`'s developer debug REPL. Reuses the exact same
-`ConsolePerceptionRunner` poll-loop machinery Stage 4/6 already built
-(`_run_crew_text_poll_loop` mirrors `_run_console_poll_loop` byte-for-byte
-except for a few extra calls: after each `runner.run_once()`, it applies
+**The player-facing crew session (BL-5a,
+`plans/bl5a-text-mode-crew-interaction/plan.md`)**: runs `belief.
+crew_console.CrewConsole`. After each `runner.run_once()`, it applies
 whatever `engage`/`disengage` transition the previous poll's command
 dispatch left and calls `crew_console.drain_attack_run(...)`
 **immediately before** the next call (`plans/attack-run/plan.md` Stage 5,
 Decision 1 -- a guidance line wins the tick by being drained first), then
 `crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
-events get spoken through `belief.speech.route_event`, the same hook point
-`--console --overlay` uses for its own mirroring, then (`plans/
+events get spoken through `belief.speech.route_event`, then (`plans/
 voice-latency-instrumentation/plan.md` Stage 6) `crew_console.
 drain_pending_positional_replies(runner.last_t_sim)` so any positional
 readback deferred while the channel was modeled busy gets spoken once it
 clears, and (`plans/brain-layer/plan.md`) `crew_console.drain_brain(runner.
 last_t_sim)` right after it, so whatever the brain has decided since the
 last poll gets drained, revalidated against current belief (D4), and
-spoken. **Mutually exclusive
-with `--console` only** (`--overlay` is valid alongside either) -- running
-the debug console and the crew session against the same `ContactStore`
-concurrently is not a validated interaction. `--brain-client http|debug|
-null` selects which `belief.escalation.BrainClient` handles escalated
-utterances -- `http` (`plans/brain-layer/plan.md`, requires `--brain-url`)
-talks to a real `brain-layer` instance and speaks its replies; `debug`,
-the default, prints escalations to stderr for session visibility; `null`
-is silent. `debug`/`null` never produce spoken output.
+spoken. `--brain-client http|debug|null` selects which `belief.escalation.
+BrainClient` handles escalated utterances -- `http` (`plans/brain-layer/
+plan.md`, requires `--brain-url`) talks to a real `brain-layer` instance
+and speaks its replies; `debug`, the default, prints escalations to stderr
+for session visibility; `null` is silent. `debug`/`null` never produce
+spoken output.
 
 **Gaze steers the naked-eye channel (slice 2B, `plans/
 detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
@@ -155,7 +92,7 @@ detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
 `scan_area` command is currently pending (`_active_gaze`) and assigns the
 resulting `perception.gaze.ScanPlan` onto whichever of `self.sources` is a
 `NakedEyePerceptionSource` (`_apply_active_gaze`), every poll, before the
-sources are polled -- this is what makes an F10 "scan left" command change
+sources are polled -- this is what makes a spoken "scan left" command change
 what Petrovich can actually see, not just register a belief-level attention
 area. No command pending means `perception.gaze.FREE_SCAN_PLAN` (2C's
 default o'clock scan loop, not "no restriction" any more) -- see
@@ -163,28 +100,18 @@ default o'clock scan loop, not "no restriction" any more) -- see
 split this now resolves to. `ConsolePerceptionRunner.scan_plan` keeps that
 same resolved value visible after `run_once` returns.
 
-**Gaze is shown on the overlay, not just applied (cones 2C sortie finding,
-"show where Petrovich is looking")**: `_run_console_poll_loop` and
-`_run_crew_text_poll_loop` both call `_push_gaze_line` after every
-`run_once()`, whenever their respective overlay client (`runner.
-overlay_client` for `--console --overlay`, `crew_console.overlay_client` for
-`--crew-text --overlay`) is set -- a read of `runner.scan_plan` via
-`perception.gaze.gaze_at`, pushed only when the resolved o'clock cone
-changes so it does not crowd out the overlay's real content on every poll.
-A pure display of existing state, same posture as the lifecycle-event
-mirror already on this hook point: it changes nothing about detection.
-
-**`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
-only meaningful alongside `--crew-text` (a true no-op otherwise, same
-additive posture as `--overlay`/`--f10-commands`). When set, `main()`
-builds a `belief.audio_client.AudioAdapterClient` from `--audio-adapter-url`
-(required together with `--speech-audio`) and passes it as `CrewConsole.
-speech_client`, so every line `CrewConsole` speaks is also synthesized and
-made audible via `audio-adapter`'s `POST /speak` -- the same lines
-`--crew-text --overlay` mirrors to the in-cockpit text overlay, pushed
-through the identical `_print` funnel, just to a different sink and a
-different process (`audio-adapter`, not the aircraft layer). `--overlay` and
-`--speech-audio` are independent and combine freely.
+**Speech in and out are always on (BL-10 first slice, `plans/
+tts-voice-output/plan.md`; Stage 3, `plans/inbound-speech/plan.md`;
+unconditional as of `plans/default-crew-pipeline/plan.md`, BL-B96)**:
+`main()` builds one `belief.audio_client.AudioAdapterClient` from the now-
+required `--audio-adapter-url` and passes it as `CrewConsole.speech_client`,
+so every line `CrewConsole` speaks is synthesized and made audible via
+`audio-adapter`'s `POST /speak`. The poll loop also polls/dispatches recognised speech
+transcripts via the same client's `GET /transcripts/poll`, through
+`CrewConsole.handle_transcript`. If `audio-adapter` is unreachable, start-
+up and the poll loop continue regardless -- see `ConnectionReporter` and
+the "Audio adapter unreachable" note below; Petrovich simply stays silent
+until it answers.
 """
 
 from __future__ import annotations
@@ -214,7 +141,6 @@ from belief.attention import (
 )
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
-from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
@@ -266,6 +192,7 @@ from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
+from connection_reporter import ConnectionReporter
 from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
@@ -351,7 +278,7 @@ logger = logging.getLogger(__name__)
 #: well under a second) and short enough that case (1) still self-heals
 #: within the same sortie.
 MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
-    "logger.MISSION_START_RESOLVE_FALLBACK_S",
+    "body.MISSION_START_RESOLVE_FALLBACK_S",
     30.0,
     lo=5.0,
     hi=120.0,
@@ -359,87 +286,22 @@ MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
 )
 
 
-def format_observation_line(ownship: OwnshipState, observation: Observation) -> str:
-    """Render one `Observation` as PB-1's flat-text log line. `source` is
-    included (PB-1.5) so a reader can tell which channel -- Hybrid's real
-    HelperAI-gated detection or the naked-eye visibility filter -- produced
-    a given line, now that more than one `PerceptionSource` can be polled
-    per tick."""
-    return (
-        f"t_sim={observation.t_sim:.2f} "
-        f"aircraft=({ownship.x:.1f}, {ownship.z:.1f}, {ownship.alt_m:.1f}) "
-        f"source={observation.source} "
-        f"classification={observation.classification_raw} "
-        f"bearing_deg={observation.bearing_deg:.1f} "
-        f"range_m={observation.range_m:.0f}"
-    )
-
-
-@dataclass
-class PerceptionLogger:
-    """Ties an `AircraftLayerClient` (for ownship state) and one or more
-    `PerceptionSource`s (for observations) into the PB-1 poll loop.
-
-    `run_once` returns the formatted lines it printed rather than only
-    printing them, so tests can assert on output without capturing stdout.
-    """
-
-    aircraft_client: AircraftLayerClient
-    sources: list[PerceptionSource]
-    output: TextIO | None = None
-
-    def run_once(self) -> list[str]:
-        """Poll ownship telemetry once, poll every source in `sources` for
-        observations as of that telemetry's `t_sim`, and print/return one
-        formatted line per observation (concatenated across sources, in
-        `sources` order). Returns an empty list (prints nothing) if the
-        aircraft layer has no telemetry yet -- absence reported as absence,
-        not a fabricated poll."""
-        telemetry = self.aircraft_client.get_telemetry_latest()
-        if telemetry is None:
-            return []
-        ownship = OwnshipState.from_telemetry_dict(telemetry)
-        # `[[BL-B82]]`: Petrovich does not scan while on the ground --
-        # every time, not only before the first takeoff -- so no source is
-        # polled at all this tick. See `ConsolePerceptionRunner.run_once`'s
-        # identical gate for the full reasoning.
-        observations = (
-            [
-                observation
-                for source in self.sources
-                for observation in source.poll(ownship.t_sim, ownship)
-            ]
-            if ownship.alt_agl_m > ON_GROUND_AGL_THRESHOLD_M
-            else []
-        )
-        lines = [format_observation_line(ownship, obs) for obs in observations]
-        if self.output is not None:
-            for line in lines:
-                print(line, file=self.output)
-        return lines
-
-
 @dataclass
 class ConsolePerceptionRunner:
-    """PB-2 Stage 3's belief-consuming poll loop, mirroring
-    `PerceptionLogger`'s own split between testable core logic and `main()`'s
-    thin CLI wiring. `sources` are expected to already be constructed at
-    `emit_mode="every_poll"` (`main()`'s job, not this class's) -- unlike
-    `PerceptionLogger`, this class does not care what emission mode its
-    sources use, it only ingests+ticks whatever they return.
+    """The crew session's belief-consuming poll loop. `sources` are expected
+    to already be constructed at `emit_mode="every_poll"` (`main()`'s job,
+    not this class's).
 
-    Stage 4 replaces this class's caller with the real `belief.console`
-    REPL; `run_once` returns the poll's `Observation`s (mirroring
-    `PerceptionLogger.run_once`'s return-what-was-produced shape) so a
-    future console can drive the same loop without re-deriving it.
+    `run_once` returns the poll's `Observation`s so a REPL/console can drive
+    the same loop without re-deriving it.
     """
 
     aircraft_client: AircraftLayerClient
-    #: Defaults to empty -- Stage 6's `--console` wiring constructs this
-    #: runner on the main thread before `sources` (and the sqlite connection
-    #: they hold) exist, then has the poll thread populate this field with
+    #: Defaults to empty -- `main()` constructs this runner on the main
+    #: thread before `sources` (and the sqlite connection they hold)
+    #: exist, then has the poll thread populate this field with
     #: its own thread-local sources once it starts (see module docstring's
-    #: "Stage 6 fix"). Tests that don't care about thread-affinity still pass
+    #: thread-affinity note). Tests that don't care about thread-affinity still pass
     #: `sources` explicitly, same as before.
     sources: list[PerceptionSource] = field(default_factory=list)
     store: ContactStore = field(default_factory=ContactStore)
@@ -452,25 +314,18 @@ class ConsolePerceptionRunner:
     tasks: TaskStore = field(default_factory=TaskStore)
     output: TextIO | None = None
     last_t_sim: float | None = None
-    #: In-cockpit text overlay mirror (BL-2.5, `--overlay`), mirroring
-    #: `output`'s optional-sink pattern exactly. `None` (the default) is a
-    #: true no-op -- `run_once` never touches the aircraft-layer client for
-    #: this purpose unless it is set. When set, `main()` passes the *same*
-    #: `AircraftLayerClient` instance already used for telemetry -- there is
-    #: no separate URL/CLI argument, `POST /text/push` lives on the exact
-    #: aircraft-layer instance `--aircraft-layer-url` already points at.
-    overlay_client: AircraftLayerClient | None = None
     #: `--group-trace` (`BL-12` Stage 1, amendment A4). `None` (the
-    #: default) is a true no-op, the same posture as `overlay_client`
-    #: above -- `run_once` passes this straight through to `ContactStore.
-    #: tick`'s own `group_trace_sink` keyword, which already defaults to
-    #: `None`, so nothing changes for a run that never sets this field.
+    #: default) is a true no-op -- `run_once` passes this straight through
+    #: to `ContactStore.tick`'s own `group_trace_sink` keyword, which
+    #: already defaults to `None`, so nothing changes for a run that never
+    #: sets this field.
     group_trace_sink: Callable[[Mapping[str, object]], None] | None = None
     #: BL-3's world-model connection/theatre (`plans/bl3-world-enrichment/
-    #: plan.md` step 6), set once by `_run_console_poll_loop` at the same
+    #: plan.md` step 6), set once by `_run_crew_text_poll_loop` at the same
     #: point it already builds `sources` -- both need the same thread-local
-    #: `sqlite3.Connection` (see the Stage 6 fix above), so `enrichment`
-    #: cannot be constructed by `main()` on the main thread either.
+    #: `sqlite3.Connection` (see the module docstring's thread-affinity
+    #: note), so `enrichment` cannot be constructed by `main()` on the main
+    #: thread either.
     world_model_conn: sqlite3.Connection | None = None
     theatre: str | None = None
     #: Updated every poll (mirrors `last_t_sim`) -- not otherwise consumed
@@ -480,12 +335,13 @@ class ConsolePerceptionRunner:
     #: future non-enrichment consumer.
     last_ownship_state: OwnshipState | None = None
     #: Built lazily on the first poll that has both real telemetry and a
-    #: `world_model_conn`/`theatre` (i.e. always, once `_run_console_poll_
+    #: `world_model_conn`/`theatre` (i.e. always, once `_run_crew_text_poll_
     #: loop` has set those two), then updated in place every poll after --
     #: `EnrichmentContext.ownship` is mutable specifically so the same
     #: `WorldEnrichmentCache` persists across polls (see that dataclass's
-    #: own docstring). `_run_console_repl` reads this field fresh before
-    #: every console command.
+    #: own docstring). Poll-thread-local -- `_run_crew_text_repl` never
+    #: reads this field (BL-B96 fix: it builds its own REPL-thread-local
+    #: connection/cache instead, see that function's own docstring for why).
     enrichment: EnrichmentContext | None = None
     #: BL-7's mission-phase tracker (`plans/bl7-mission-phase-relevance/
     #: plan.md`), built once by `main()` (a plain JSON file load, not a
@@ -737,7 +593,6 @@ class ConsolePerceptionRunner:
             store=self.store,
             tasks=self.tasks,
             output=self.output,
-            overlay_client=self.overlay_client,
             group_trace_sink=self.group_trace_sink,
             world_model_conn=self.world_model_conn,
             theatre=self.theatre,
@@ -748,31 +603,18 @@ class ConsolePerceptionRunner:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
         print one minimal contact/observation-count line. Returns an empty
-        list (prints nothing) if the aircraft layer has no telemetry yet,
-        mirroring `PerceptionLogger.run_once`.
+        list (prints nothing) if the aircraft layer has no telemetry yet.
 
         `last_t_sim` is updated on every successful poll (Stage 4) -- the
-        REPL loop in `main()` reads it as the `now_sim` for whatever console
-        command the operator just typed, since the REPL has no telemetry
-        feed of its own.
+        REPL loop in `main()` reads it as the `now_sim` for whatever command
+        the operator just typed, since the REPL has no telemetry feed of
+        its own.
 
         `self.tasks.tick(self.store, ...)` (BL-6) runs immediately after
         `self.store.tick(...)`, the same poll-loop hook point -- a
         `scan_area` task's success check reads `self.store`'s freshly
         ticked contacts, so it must run after that tick, not before or
-        independently scheduled.
-
-        If `overlay_client` is set (BL-2.5), every lifecycle event newly
-        appended by this call's `tick()` is formatted
-        (`belief.console.format_event_for_overlay`) and pushed
-        (`AircraftLayerClient.push_text_line`) to the in-cockpit overlay,
-        one push per event. Each push is wrapped in its own try/except --
-        this is the one place a defensive try/except is load-bearing rather
-        than cosmetic (`plans/dcs-text-panel-output/plan.md` Risks &
-        Unknowns): a failed push (DCS not running, network hiccup) must
-        degrade to "no overlay line for this event," never stop the poll
-        loop, drop the observations already collected this poll, or skip
-        pushing the remaining events in the same batch."""
+        independently scheduled."""
         telemetry = self.aircraft_client.get_telemetry_latest()
         if telemetry is None:
             return []
@@ -824,7 +666,7 @@ class ConsolePerceptionRunner:
         # truth for gaze (`perception.gaze.gaze_at`), the Lua side never
         # re-derives it. A push failure degrades to "the Hook script keeps
         # querying whatever wedge it last had" (or its own default), never
-        # stops the poll loop -- same posture as the overlay push below.
+        # stops the poll loop.
         gaze_for_look_direction = gaze_at(ownship.t_sim, self.scan_plan)
         look_direction = (
             _hour_for_gaze(gaze_for_look_direction),
@@ -1038,7 +880,6 @@ class ConsolePerceptionRunner:
         # head` were both finalised earlier this same `run_once` call.
         if is_sight_tier and self.sight_head.mode == "free":
             self.last_sight_look_sim = ownship.t_sim
-        events_before = len(self.store.events)
         # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
         # hand at this call site; `ContactStore.tick`'s sixth block (range
         # crossings) is a no-op without it. The seventh block (engagement)
@@ -1052,20 +893,6 @@ class ConsolePerceptionRunner:
         )
         self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
-        if self.overlay_client is not None:
-            new_events = self.store.events[events_before:]
-            for event in new_events:
-                text = format_event_for_overlay(
-                    self.store, event, ownship.t_sim, self.enrichment
-                )
-                try:
-                    self.overlay_client.push_text_line(text)
-                except AircraftLayerError:
-                    logger.warning(
-                        "overlay push failed for event %s (continuing)",
-                        event.id,
-                        exc_info=True,
-                    )
         if self.output is not None:
             print(
                 f"t_sim={ownship.t_sim:.2f} "
@@ -1702,7 +1529,7 @@ def _apply_active_gaze(
     # `BL-B64` Stage 2, direction §6 -- the 1 s hand movement. `None`
     # (the default) on every pre-existing `OpticState`, so this is a
     # true no-op until the pilot's "Observ on"/"Observ off" command sets
-    # it (`logger.py`'s poll loop).
+    # it (`body.py`'s poll loop).
     suppressed_until_sim = (
         optic_state.hands_busy_until_sim if optic_state is not None else None
     )
@@ -1715,56 +1542,6 @@ def _apply_active_gaze(
     return updated_state
 
 
-def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
-    """One short overlay line naming where Petrovich is currently looking
-    and whether that is free scan or a commanded sector (cones 2C sortie
-    finding, "show where Petrovich is looking" -- the pilot could not judge
-    the scan loop at all without this). `gaze.label` is always an o'clock
-    hour under `gaze_at` (`"11_oclock"`, `perception.gaze.Gaze`'s own
-    docstring: a label meant for exactly this kind of debug/trace display),
-    reformatted here rather than branched on. A `commanded_legs`-only plan
-    (Stage 5: a bare o'clock hour, or a compass-sector scan converted to
-    relative legs) has no single sector name to speak -- it says "commanded
-    scan" rather than naming a sector, since the sector-naming detail lives
-    on `AttentionArea`/`crew_console.py`'s own readback, not here."""
-    where = gaze.label.replace("_oclock", " o'clock")
-    if scan_plan.commanded_sector is not None:
-        return (
-            f"Petrovich: looking {where} (commanded {scan_plan.commanded_sector} scan)"
-        )
-    if scan_plan.commanded_legs is not None:
-        return f"Petrovich: looking {where} (commanded scan)"
-    return f"Petrovich: looking {where} (free scan)"
-
-
-def _push_gaze_line(
-    overlay_client: AircraftLayerClient,
-    scan_plan: ScanPlan,
-    t_sim: float,
-    last_gaze_label: str | None,
-) -> str | None:
-    """Pushes one overlay line naming Petrovich's current gaze
-    (`_format_gaze_line`) when it has changed since the last push, and
-    returns the label to compare against next poll -- called from both
-    `_run_console_poll_loop` and `_run_crew_text_poll_loop`. Deliberately
-    only pushes on change: the focus cone holds for `perception.gaze.
-    FOCUS_DWELL_S` (2 s), well above a typical 1 s poll interval, so pushing
-    unconditionally would repeat the same line on most polls and crowd out
-    the overlay's real content (lifecycle/contact-report lines, an
-    `AutoScrollText` log, not a single-line display -- see
-    `petrobrain-overlay-hook.lua`'s own docstring). Same per-push isolation
-    as every other overlay push in this file: a failed push is logged and
-    swallowed, never allowed to stop the poll loop."""
-    gaze = gaze_at(t_sim, scan_plan)
-    if gaze.label == last_gaze_label:
-        return last_gaze_label
-    try:
-        overlay_client.push_text_line(_format_gaze_line(scan_plan, gaze))
-    except AircraftLayerError:
-        logger.warning("gaze overlay push failed (continuing)", exc_info=True)
-    return gaze.label
-
-
 def _warn_live_los_coverage_gap_once(
     sources: list[PerceptionSource], already_warned: bool
 ) -> bool:
@@ -1772,13 +1549,15 @@ def _warn_live_los_coverage_gap_once(
     (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) and
     logs a one-time warning via the standing `logging.getLogger(__name__)`
     channel the first time `no_verdict` becomes nonzero -- called from
-    both `_run_console_poll_loop` and `_run_crew_text_poll_loop`.
+    `_run_crew_text_poll_loop`.
 
-    **Not `_push_gaze_line`'s log-on-change shape, deliberately** -- that
-    function's earlier revision copied it and that was the bug (review
-    round 1, `plans/bl11-stage4-fail-closed/review.md`). `_push_gaze_line`
-    repeats on a *label* that can hold steady at a repeating value, so
-    "changed since last call" is a real steady-state guard. `no_verdict`
+    **Not a log-on-change shape, deliberately** -- an earlier revision of
+    this function copied that shape from a sibling overlay-pushing
+    function (since removed, `BL-B96`) and that was the bug (review
+    round 1, `plans/bl11-stage4-fail-closed/review.md`). Log-on-change
+    works for a value that can hold steady at a repeating value, so
+    "changed since last call" is a real steady-state guard there.
+    `no_verdict`
     is cumulative for the process lifetime, so under a continuously dead
     feed it is strictly greater than whatever was last logged on every
     single poll -- there is no steady state for a monotonically
@@ -1800,9 +1579,7 @@ def _warn_live_los_coverage_gap_once(
 
     Returns `True` once the warning has fired (unchanged from
     `already_warned=True` on every later call), so the caller's local
-    carries forward to the next poll -- the same "carry a local across
-    polls" pattern `_push_gaze_line` uses for `last_gaze_label`, applied
-    to a different trigger condition."""
+    carries the already-fired state forward to the next poll."""
     if already_warned:
         return True
     for source in sources:
@@ -1870,13 +1647,12 @@ def _render_eyesight_frame(
 ) -> str | None:
     """One `--eyesight-view` frame for the poll that just ran (`todo/
     todo.md`'s "Added 2026-09-25 (user)" entry) -- `None` before the first
-    successful poll (`runner.last_ownship_state`/`last_t_sim` still unset),
-    the same "nothing to show yet" guard `_push_gaze_line` already uses.
+    successful poll (`runner.last_ownship_state`/`last_t_sim` still unset).
 
     `trace_records` must be a snapshot taken *before* `--detection-trace`'s
     own `DetectionTraceWriter.write_poll` clears the shared
     `DetectionTraceCollector` this poll fed into `NakedEyePerceptionSource`
-    -- both poll loops call this ahead of that write, never after, so a
+    -- the poll loop calls this ahead of that write, never after, so a
     frame always reflects this poll's own ground truth, not an empty
     collector. Only the naked-eye channel is traced at all (`--detection-
     trace`'s own module docstring), so the ground-truth half of a frame is
@@ -2042,11 +1818,10 @@ def _build_sources(
     trace_sink: DetectionTraceCollector | None = None,
     forest_occlusion: bool = False,
 ) -> list[PerceptionSource]:
-    """Construct both concrete tiers at a given `emit_mode` -- shared by
-    `main()`'s plain-logger path (`"on_change"`) and `--console`/
-    `--crew-text` paths (`"every_poll"`) so the two never drift apart on
-    which tiers are wired in, only on their emission mode and what
-    consumes their output.
+    """Construct both concrete tiers at a given `emit_mode` --
+    `main()`'s crew-text poll loop always builds at `"every_poll"`
+    (`"on_change"` remains a tested capability of this function, not
+    currently used by any production caller).
 
     `trace_sink` (BL-9, `--detection-trace`) is additive, defaults to
     `None`, and is only ever wired into `NakedEyePerceptionSource` -- the
@@ -2174,41 +1949,6 @@ def _is_connection_loss(exc: BaseException) -> bool:
     return isinstance(exc.__cause__, (urllib.error.URLError, OSError))
 
 
-class _ConnectionReporter:
-    """One line when the aircraft layer goes away, one when it comes back,
-    and nothing in between.
-
-    The poll loop retries every `poll_interval_s`, so an unreachable
-    collector used to print a fresh traceback every second for as long as
-    it stayed down -- thousands of identical stack traces burying anything
-    real. The pilot needs to know the state changed, not to be told the
-    same fact once a second (user direction, 2026-10-02).
-
-    State is tri-valued on purpose: `None` means nothing has been reported
-    yet, so the first successful poll announces "connected" rather than
-    staying silent on the grounds that nothing broke.
-    """
-
-    def __init__(self, label: str = "aircraft layer") -> None:
-        self._label = label
-        self._connected: bool | None = None
-
-    def report_failure(self, exc: BaseException) -> None:
-        """Log `disconnected` on the transition only; later failures are
-        silent until a success resets the state."""
-        if self._connected is False:
-            return
-        self._connected = False
-        logger.warning("%s disconnected (%s)", self._label, exc)
-
-    def report_success(self) -> None:
-        """Log `connected` on the transition, including the first one."""
-        if self._connected is True:
-            return
-        self._connected = True
-        logger.info("%s connected", self._label)
-
-
 def _mission_memory_step(
     memory: MissionMemory,
     runner: ConsolePerceptionRunner,
@@ -2217,10 +1957,10 @@ def _mission_memory_step(
     phase: MissionPhaseInfo | None,
     fired_on_tracker: FiredOnTracker,
 ) -> None:
-    """BL-8's writer, called once per poll from both poll loops, **after**
-    `runner.run_once()` (belief is settled; `ContactStore.tick()` has
-    already materialised this poll's events) and, in the `--crew-text`
-    loop, **before** `crew_console.drain_events` -- `mission_memory.
+    """BL-8's writer, called once per poll from the crew-session poll
+    loop, **after** `runner.run_once()` (belief is settled;
+    `ContactStore.tick()` has already materialised this poll's events)
+    and **before** `crew_console.drain_events` -- `mission_memory.
     admission`'s module docstring states the same ordering, and this is
     the one call site responsible for keeping it (plan Decision 3).
 
@@ -2275,18 +2015,18 @@ def _reset_mission_state(
     stale `store`/`tasks` objects -- reassigning the field, not clearing
     its contents.
 
-    `crew_console` is `None` for `--console` (the debug REPL path, which
-    has no `CrewConsole` at all, only `belief.console.Console` -- built on
-    the REPL thread, not shared with this poll loop) -- a true no-op for
-    that one call, same "optional collaborator, None is a no-op" shape as
-    every other optional field in this codebase.
+    `crew_console` is `Optional` so a caller with no production command
+    surface to reset can pass `None` for a true no-op -- same "optional
+    collaborator, None is a no-op" shape as every other optional field in
+    this codebase. `main()`'s own poll loop always has a real
+    `CrewConsole` and never takes this branch.
 
     `fired_on_tracker` defaults to `None` so every existing test calling
     this with the original three-argument shape is unaffected (same
     reasoning `_check_for_new_mission`'s own `world_model_dir`/`trace_sink`/
     `forest_occlusion` defaults give, see that function's docstring) --
     `None` only arises if a future caller genuinely has no tracker to
-    reset, since both of `logger.py`'s own poll loops always build one.
+    reset, since both of `body.py`'s own poll loops always build one.
     Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
     `FiredOnTracker` predates `BL-15` and was not brought under this
     mechanism when it was built -- see its own `reset_for_new_mission`
@@ -2324,9 +2064,10 @@ def _enter_refusal_mode(
     must rebuild it against the *new* connection, not silently keep serving
     stale enrichment computed from a closed one.
 
-    `crew_console` is `None` for `--console` (no production command surface
-    to refuse on that debug path) -- a true no-op for that one call, same
-    shape as `_reset_mission_state`'s own."""
+    `crew_console` is `Optional`, same shape as `_reset_mission_state`'s
+    own -- `None` is a true no-op for a caller with no production command
+    surface to refuse on. `main()`'s own poll loop always has a real
+    `CrewConsole` and never takes this branch."""
     if runner.world_model_conn is not None:
         runner.world_model_conn.close()
     runner.world_model_conn = None
@@ -2384,7 +2125,7 @@ def _maybe_switch_theatre(
     plan's original "keep the old store and log loudly" default.
 
     On success: builds the new sources at this runner's own emit mode
-    (`"every_poll"`, the only mode either poll loop built a runner
+    (`"every_poll"`, the only mode the poll loop builds a runner
     against), closes the *old* connection only after the new one is
     confirmed open and sources are already pointed at it, and clears
     `crew_console.refused` if it was set -- the next successful mission
@@ -2513,9 +2254,8 @@ def _check_for_new_mission(
     `MISSION_START_RESOLVE_FALLBACK_S` elapses, once that bounded fallback
     fires instead (dropping the in-air classification rather than guessing
     it from a stale sample; see that poll block's own comment). Not done
-    here: this function (and `--console`'s
-    debug REPL, which calls it with no `CrewConsole` at all) has no
-    ownship sample of its own to decide freshness or airborne-ness from.
+    here: this function has no ownship sample of its own to decide
+    freshness or airborne-ness from.
 
     **Does nothing on the very first poll of a process**, even if a
     sequence is already present (the collector may already hold a mission-
@@ -2548,8 +2288,8 @@ def _check_for_new_mission(
 
     **An unreachable collector is skipped silently, not logged here.**
     This is the one aircraft-layer call that runs *before* `run_once()`
-    in both poll loops, so with the collector down it used to print a
-    full traceback every poll -- the exact spew `_ConnectionReporter`
+    in the poll loop, so with the collector down it used to print a
+    full traceback every poll -- the exact spew `ConnectionReporter`
     exists to prevent. `run_once()`'s own telemetry read hits the same
     dead host a moment later and reports the transition once ("aircraft
     layer disconnected"), so a second message here would only repeat it.
@@ -2632,7 +2372,7 @@ def _reroll_run_logs(
     DetectionTraceWriter | None, BeliefTruthLogWriter | None, SightTraceWriter | None
 ]:
     """`BL-15` Stage 1 user decision 5 ("per mission", not a marker line in
-    whatever log happened to be open): called once from each poll loop,
+    whatever log happened to be open): called once from the poll loop,
     immediately after `_check_for_new_mission` reports it performed a
     reset, re-stamps every per-run log that is actually enabled to a fresh
     filename (`run_log_paths.per_run_log_path`, the same mechanism
@@ -2684,16 +2424,14 @@ def _reroll_run_logs(
       new file, which only makes sense once a reset has actually happened
       (this function is never called otherwise).
 
-    `crew_console is None` for `--console` (no `CrewConsole`, so no
-    `speech_log_sink`/`transcript_log` to re-wire -- `_reroll_one`'s
-    `speech-log` branch is skipped entirely for that caller, same "None is
-    a no-op" shape as `_reset_mission_state`'s own `crew_console`
-    handling).
+    `crew_console` is `Optional`: a caller with no `CrewConsole` has no
+    `speech_log_sink`/`transcript_log` to re-wire, so `None` skips
+    `_reroll_one`'s `speech-log` branch entirely, same "None is a no-op"
+    shape as `_reset_mission_state`'s own `crew_console` handling.
+    `main()`'s own poll loop always has a real `CrewConsole`.
 
     `slew_trace_writer`/`slew_trace_base` (`BL-B66` Stage 4b) are the same
-    "open file handle, close before replacing" shape `trace_writer` is --
-    `--console` passes neither (always `None`), the same reason it passes
-    no `speech_log_base`.
+    "open file handle, close before replacing" shape `trace_writer` is.
 
     A directory that has since become unwritable degrades that one log to
     "stop writing it for the rest of this mission" with a line on stderr
@@ -2814,350 +2552,19 @@ def _mark_target_fn(
     return mark_target
 
 
-def _run_console_poll_loop(
-    runner: ConsolePerceptionRunner,
-    aircraft_client: AircraftLayerClient,
-    theatre: str,
-    world_model_db: Path,
-    poll_interval_s: float,
-    stop_event: threading.Event,
-    detection_trace_path: Path | None = None,
-    eyesight_view: bool = False,
-    eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
-    belief_truth_log_path: Path | None = None,
-    forest_occlusion: bool = False,
-    mission_memory_path: Path | None = None,
-    world_model_dir: Path | None = None,
-    detection_trace_base: Path | None = None,
-    belief_truth_log_base: Path | None = None,
-    group_trace_base: Path | None = None,
-    mission_memory_base: Path | None = None,
-) -> None:
-    """Stage 4's background poll thread, fixed in Stage 6: opens
-    `world_model_conn` and builds `runner.sources` here, on this thread, then
-    keeps calling `runner.run_once()` (which fills `runner.store` and updates
-    `runner.last_t_sim`) until `stop_event` is set -- see module docstring's
-    "Stage 6 fix" for why the connection can't be built by the caller and
-    handed in. Closes the connection when the loop stops.
-
-    `detection_trace_path` (BL-9, `--detection-trace`) is additive and
-    defaults to `None` -- unset, this function's behavior is unchanged.
-    When set, builds a `DetectionTraceCollector` and wires it into
-    `_build_sources` (so `NakedEyePerceptionSource` records into it), then
-    writes each poll's buffered records to `detection_trace_path` via
-    `DetectionTraceWriter` immediately after `runner.run_once()` -- after
-    `ingest`/`tick` have already run against this poll's `Observation`s, so
-    the write can never influence what was ingested.
-
-    `forest_occlusion` (`--forest-occlusion`, `plans/forest-occlusion/
-    plan.md` Stage 2) is additive and defaults to `False` -- unset, this
-    function's behavior is unchanged. Passed straight through to
-    `_build_sources`, which constructs the `ForestOcclusion` instance (see
-    that function's own docstring).
-
-    `eyesight_view` (`--eyesight-view`, `todo/todo.md`'s "Added 2026-09-25
-    (user)" entry) and `belief_truth_log_path` (`--belief-truth-log`, that
-    same entry's 2026-09-26 follow-up) are the same additive-no-op-when-
-    unset shape: all three need the one `DetectionTraceCollector` this
-    function builds whenever *any* of them is set, each reads it in turn
-    (frame render, then the truth-log join, in that order -- neither
-    mutates it), and finally either `DetectionTraceWriter.write_poll`
-    clears it (when `--detection-trace` is also active) or this function
-    clears it itself (`trace_collector.records.clear()`) -- exactly one
-    clear per poll, always after every reader has had its turn, so no
-    reader ever sees a stale or already-cleared collector.
-
-    `mission_memory_path` (`--mission-memory`, BL-8) builds its own
-    `mission_memory.store.MissionMemory` for this poll thread's whole
-    run -- `_mission_memory_step` is called once per poll, same additive-
-    no-op-when-unset shape as every flag above; the store is unconditional
-    (nothing reads it back yet in `--console`'s own REPL, Stage 5 is what
-    wires the query surface) but the JSONL sink is built only when the
-    path is set.
-
-    `world_model_dir` (`BL-15` Stage 3) enables runtime theatre switching
-    in `_check_for_new_mission` -- `None` (unset) means a mission-start
-    event naming a different theatre than `theatre` above enters refusal
-    mode rather than attempting to resolve a new store, since there is
-    nowhere to resolve one from. `detection_trace_base`/`belief_truth_log_
-    base`/`group_trace_base`/`mission_memory_base` (Decision 5) are each
-    log's pre-stamp path, threaded through so a mission (re)start can
-    re-roll them to a fresh per-mission filename (`_reroll_run_logs`) --
-    `None` for a log that was never enabled, same no-op shape as every
-    other optional path in this function."""
-    world_model_conn = open_world_model(world_model_db)
-    trace_collector = (
-        DetectionTraceCollector()
-        if (
-            detection_trace_path is not None
-            or eyesight_view
-            or belief_truth_log_path is not None
-        )
-        else None
-    )
-    trace_writer = (
-        DetectionTraceWriter(detection_trace_path)
-        if detection_trace_path is not None
-        else None
-    )
-    belief_truth_writer = (
-        BeliefTruthLogWriter(belief_truth_log_path)
-        if belief_truth_log_path is not None
-        else None
-    )
-    mission_memory = MissionMemory()
-    if mission_memory_path is not None:
-        mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
-    fired_on_tracker = FiredOnTracker()
-    try:
-        runner.sources = _build_sources(
-            aircraft_client,
-            theatre,
-            world_model_conn,
-            emit_mode="every_poll",
-            trace_sink=trace_collector,
-            forest_occlusion=forest_occlusion,
-        )
-        # BL-3: same thread-affinity reasoning as `sources` above -- the
-        # `EnrichmentContext` `run_once` lazily builds needs this same
-        # connection, so it must be handed the connection, not build its own.
-        runner.world_model_conn = world_model_conn
-        runner.theatre = theatre
-        last_gaze_label: str | None = None
-        live_los_warned = False
-        connection = _ConnectionReporter()
-        # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
-        # the work -- see `_wait_for_next_tick`.
-        next_tick = time.monotonic() + poll_interval_s
-        while not stop_event.is_set():
-            # Same log-and-continue guard as `_run_crew_text_poll_loop`'s,
-            # and for the same reason -- see that function for the full
-            # argument. This loop is `--console`'s, the debug harness
-            # rather than the flight path, but the failure mode is
-            # identical: a daemon thread that dies silently and leaves a
-            # REPL answering questions against a store nothing updates any
-            # more. Guarding one loop and not its twin is exactly the
-            # asymmetry a later reader would take for a deliberate
-            # distinction.
-            try:
-                # `BL-15` Stage 1: detect a genuine DCS mission (re)start
-                # and reset belief/mission memory before this poll's
-                # `run_once()` ingests anything against stale state. No
-                # `CrewConsole` exists on this path (`--console` builds
-                # `belief.console.Console` instead, on the REPL thread, not
-                # shared with this poll loop) -- `_check_for_new_mission`'s
-                # own docstring on why `None` here is a true no-op.
-                # Stage 3/Decision 5: re-resolve theatre and re-roll the
-                # per-run logs only when a reset actually fired.
-                if _check_for_new_mission(
-                    runner,
-                    None,
-                    mission_memory,
-                    aircraft_client,
-                    world_model_dir=world_model_dir,
-                    trace_sink=trace_collector,
-                    forest_occlusion=forest_occlusion,
-                    fired_on_tracker=fired_on_tracker,
-                ):
-                    trace_writer, belief_truth_writer, _ = _reroll_run_logs(
-                        runner,
-                        None,
-                        mission_memory,
-                        trace_writer=trace_writer,
-                        belief_truth_writer=belief_truth_writer,
-                        detection_trace_base=detection_trace_base,
-                        belief_truth_log_base=belief_truth_log_base,
-                        speech_log_base=None,
-                        group_trace_base=group_trace_base,
-                        mission_memory_base=mission_memory_base,
-                    )
-                runner.run_once()
-                if trace_collector is not None:
-                    if eyesight_view:
-                        frame = _render_eyesight_frame(
-                            runner,
-                            list(trace_collector.records),
-                            eyesight_view_radius_m,
-                        )
-                        if frame is not None:
-                            _print_eyesight_frame(frame)
-                    if (
-                        belief_truth_writer is not None
-                        and runner.last_ownship_state is not None
-                    ):
-                        belief_truth_writer.write_poll(
-                            trace_collector,
-                            runner.store,
-                            runner.last_ownship_state,
-                            attack_run_target_contact_id=(
-                                runner.attack_run_state.last_contact_id
-                                if runner.attack_run_state is not None
-                                else None
-                            ),
-                        )
-                    if trace_writer is not None:
-                        trace_writer.write_poll(trace_collector, runner.store)
-                    else:
-                        trace_collector.records.clear()
-                live_los_warned = _warn_live_los_coverage_gap_once(
-                    runner.sources, live_los_warned
-                )
-                if runner.overlay_client is not None and runner.last_t_sim is not None:
-                    last_gaze_label = _push_gaze_line(
-                        runner.overlay_client,
-                        runner.scan_plan,
-                        runner.last_t_sim,
-                        last_gaze_label,
-                    )
-                if runner.last_t_sim is not None:
-                    # BL-8: after `run_once()` has settled this poll's
-                    # belief -- `_mission_memory_step`'s own docstring on
-                    # why this placement.
-                    phase = (
-                        runner.mission_phase_tracker.current_phase()
-                        if runner.mission_phase_tracker is not None
-                        else None
-                    )
-                    # `BL-15` Stage 3: `runner.theatre`, not the closed-over
-                    # `theatre` parameter -- a successful theatre switch
-                    # (`_maybe_switch_theatre`) updates `runner.theatre` in
-                    # place, and the local parameter above is only this
-                    # poll loop's *initial* value, never reassigned.
-                    assert runner.theatre is not None
-                    _mission_memory_step(
-                        mission_memory,
-                        runner,
-                        runner.last_t_sim,
-                        runner.theatre,
-                        phase,
-                        fired_on_tracker,
-                    )
-                connection.report_success()
-            except Exception as exc:
-                if _is_connection_loss(exc):
-                    connection.report_failure(exc)
-                else:
-                    logger.exception("console poll cycle failed; continuing")
-            next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
-    finally:
-        _log_live_los_coverage_summary(runner.sources)
-        if trace_writer is not None:
-            trace_writer.close()
-        if belief_truth_writer is not None:
-            belief_truth_writer.close()
-        world_model_conn.close()
-
-
-def _run_console_repl(
-    runner: ConsolePerceptionRunner,
-    console: Console,
-    world_model_db: Path,
-    theatre: str,
-) -> None:
-    """Stage 4's foreground REPL: reads one command per line from stdin and
-    dispatches it into `console`, using `runner.last_t_sim` (set by the
-    background poll thread) as `now_sim`. Before the first successful poll,
-    `last_t_sim` is `None` and commands run against `now_sim=0.0` -- an
-    empty store either way, so this only affects how an immediately-typed
-    command's (nonexistent) elapsed-time fields would read, not correctness.
-
-    **BL-5 live-acceptance fix**: this used to sync `console.enrichment`
-    straight from `runner.enrichment` (BL-3's field, built by the poll
-    thread and holding *that thread's* `sqlite3.Connection`). Any
-    enrichment-aware command (`situation`/`position`/`place`, or `show`/
-    `contacts`/`find` once BL-3 landed) then ran a query against that
-    connection from this thread -- `sqlite3.Connection` is thread-affine
-    (see the module docstring's "Stage 6 fix" for the same bug class on
-    `sources`), so this raised `sqlite3.ProgrammingError` the first time a
-    user actually typed one of those commands. BL-3 shipped after Stage 6's
-    fix and re-introduced the same class of bug in a second field the
-    Stage 6 fix didn't cover.
-
-    The fix mirrors Stage 6's own precedent exactly: build the resource on
-    the thread that uses it. This function now opens its own
-    `sqlite3.Connection` (`repl_conn`) and `EnrichmentContext`
-    (`repl_enrichment`), lazily, the first time `runner.last_ownship_state`
-    is available (mirroring `ConsolePerceptionRunner.run_once`'s own lazy
-    build of `runner.enrichment`) -- `console.enrichment` is populated from
-    this REPL-thread-local context, never from `runner.enrichment`.
-    `repl_enrichment.ownship` is refreshed from `runner.last_ownship_state`
-    before every command, the same "read a plain attribute across the
-    thread boundary" pattern `last_t_sim` above already uses safely (only
-    `sqlite3.Connection`s are thread-affine, not ordinary attribute reads).
-
-    This does mean two separate `sqlite3.Connection`s and two separate
-    `belief.enrichment.WorldEnrichmentCache`s (poll thread's and REPL
-    thread's) rather than one shared connection/cache -- a real but
-    accepted cost: each cache recomputes independently on its own thread's
-    first touch of a given contact, never produces incorrect results.
-    Routing REPL-thread enrichment reads through the poll thread instead
-    (a single shared connection/cache) was considered and rejected as
-    disproportionate complexity (a lock/queue-based cross-thread call) for
-    a single-user debug console.
-
-    Exits on EOF (e.g. Ctrl-D) or `KeyboardInterrupt`. Closes `repl_conn`
-    (if ever opened) on exit."""
-    repl_conn: sqlite3.Connection | None = None
-    repl_enrichment: EnrichmentContext | None = None
-    try:
-        for line in sys.stdin:
-            now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
-            if runner.last_ownship_state is not None:
-                if repl_conn is None:
-                    repl_conn = open_world_model(world_model_db)
-                if repl_enrichment is None:
-                    repl_enrichment = EnrichmentContext(
-                        conn=repl_conn,
-                        theatre=theatre,
-                        ownship=runner.last_ownship_state,
-                    )
-                else:
-                    repl_enrichment.ownship = runner.last_ownship_state
-            console.enrichment = repl_enrichment
-            console.handle_line(line, now_sim=now_sim)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if repl_conn is not None:
-            repl_conn.close()
-
-
-def _poll_f10_commands(
-    aircraft_client: AircraftLayerClient, crew_console: CrewConsole, now_sim: float
-) -> None:
-    """Drains pending F10 radio-menu selections (`plans/f10-crew-commands/
-    plan.md`) and dispatches each through `CrewConsole.handle_command`
-    -- the same post-`tick()` hook point `drain_events` already uses.
-    Wrapped in its own `try`/`except AircraftLayerError` (log-and-continue),
-    the same per-call isolation shape the BL-2.5 overlay-push loop already
-    uses, so one failed poll never stops the loop."""
-    try:
-        commands = aircraft_client.get_f10_commands()
-    except AircraftLayerError:
-        logger.warning("F10 command poll failed (continuing)", exc_info=True)
-        return
-    for command in commands:
-        token = command.get("command")
-        if isinstance(token, str):
-            crew_console.handle_command(token, now_sim)
-
-
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
 ) -> None:
     """Drains pending recognised-speech transcripts (`plans/inbound-speech/
     plan.md` Stage 3) and dispatches each through `CrewConsole.
-    handle_transcript` -- the same per-poll dispatch shape `_poll_f10_
-    commands` already uses for its own drain-on-GET endpoint. Wrapped in
+    handle_transcript`. Wrapped in
     its own `try`/`except AudioAdapterError` (log-and-continue), so one
     failed poll never stops the loop.
 
     Each item is validated field-by-field against `transcript_queue.
     TranscriptEvent.to_dict`'s eight-field shape before dispatch -- a
     malformed/partial item (a schema mismatch, not an expected runtime
-    state) is skipped rather than raising, the same defensive posture
-    `_poll_f10_commands`'s `isinstance` check already takes on its own,
-    simpler payload. `t_wall` (wall-clock time the adapter recognised the
+    state) is skipped rather than raising. `t_wall` (wall-clock time the adapter recognised the
     clip) is intentionally not threaded into `handle_transcript` --
     `now_sim` is this poll's own DCS sim time, the same clock every other
     dispatch path in this loop already uses. `slots` (`plans/
@@ -3168,12 +2575,26 @@ def _poll_transcripts(
     `correlation_id` (`plans/voice-latency-instrumentation/plan.md` Stage 3)
     is the ninth field `TranscriptEvent.to_dict` now carries -- threaded
     through the same way, `None` allowed (an older capture process, or a
-    direct `curl`, never supplied one)."""
+    direct `curl`, never supplied one).
+
+    **BL-B96 Stage 4**: a failed/successful poll reports through
+    `crew_console.audio_adapter_reporter` (the same instance `CrewConsole.
+    _print`'s push path reports through) instead of logging a full
+    traceback every failed poll -- `audio-adapter` unreachable is now the
+    default-path case (speech is unconditional), not a rare opt-in
+    failure, so the old `exc_info=True` posture would flood the log the
+    moment a sortie starts before `audio-adapter` does. `None` (every
+    test that doesn't wire one) falls back to the old noisy behaviour."""
     try:
         transcripts = audio_client.get_transcripts()
-    except AudioAdapterError:
-        logger.warning("transcript poll failed (continuing)", exc_info=True)
+    except AudioAdapterError as exc:
+        if crew_console.audio_adapter_reporter is not None:
+            crew_console.audio_adapter_reporter.report_failure(exc)
+        else:
+            logger.warning("transcript poll failed (continuing)", exc_info=True)
         return
+    if crew_console.audio_adapter_reporter is not None:
+        crew_console.audio_adapter_reporter.report_success()
     for item in transcripts:
         transcript = item.get("transcript")
         confidence = item.get("confidence")
@@ -3269,9 +2690,8 @@ def _load_effector_config() -> tuple[
 ]:
     """Loads the effector registry/sequence files for this runtime's own
     aircraft (`belief.effector_engine.AIRCRAFT`), `plans/
-    effector-sequences/plan.md` D5. Called once at `--crew-text` startup,
-    before `_run_crew_text_poll_loop` ever runs -- `--console` has no
-    `CrewConsole` to drive a trigger from at all, so it never calls this.
+    effector-sequences/plan.md` D5. Called once at `main()` startup,
+    before `_run_crew_text_poll_loop` ever runs.
 
     Every loader underneath is itself non-fatal on bad content (`belief.
     effector_registry.load_registry`/`belief.effector_sequences.
@@ -3381,7 +2801,6 @@ def _run_crew_text_poll_loop(
     world_model_db: Path,
     poll_interval_s: float,
     stop_event: threading.Event,
-    f10_commands_enabled: bool = False,
     speech_client: AudioAdapterClient | None = None,
     speech_input_enabled: bool = False,
     detection_trace_path: Path | None = None,
@@ -3402,41 +2821,33 @@ def _run_crew_text_poll_loop(
     effector_registry: Mapping[str, EffectorDef] | None = None,
     polled_args: Sequence[int] | None = None,
 ) -> None:
-    """`--crew-text`'s background poll thread -- identical to
-    `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
-    Connection`, see that function's docstring / module docstring's "Stage 6
-    fix"), plus one extra call per poll: `crew_console.drain_events` speaks
-    whatever lifecycle events this poll's `tick()` newly surfaced, the same
-    hook point `--overlay`'s mirroring uses in `ConsolePerceptionRunner.
-    run_once` itself. `f10_commands_enabled` (`--f10-commands`, `plans/
-    f10-crew-commands/plan.md`) additionally polls/dispatches pending F10
-    radio-menu selections each cycle via `_poll_f10_commands` -- defaults
-    off, a true no-op when unset. `speech_input_enabled` (`--speech-input`,
-    `plans/inbound-speech/plan.md` Stage 3) is the same additive-no-op-when-
-    unset shape, polling `speech_client.get_transcripts()` via `_poll_
-    transcripts` -- `speech_client` is only ever non-`None` here when
-    `speech_input_enabled` is set (`main()`'s own wiring), but both are
-    still checked so this function has no implicit dependency on how its
-    caller constructs them. `detection_trace_path` (BL-9, `--detection-
-    trace`), `eyesight_view`/`eyesight_view_radius_m` (`--eyesight-view`),
-    `belief_truth_log_path` (`--belief-truth-log`), and `forest_occlusion`
-    (`--forest-occlusion`) mirror `_run_console_poll_loop`'s own wiring
-    exactly -- see that function's docstring for all four. `mission_memory_
-    path` (`--mission-memory`, BL-8) is the same shape too -- see that
-    function's own paragraph on it.
+    """The crew session's background poll thread: opens `world_model_conn`
+    and builds `runner.sources` here, on this thread (`sqlite3.Connection`s
+    are thread-affine -- see the module docstring's thread-affinity note),
+    then keeps calling `runner.run_once()` (which fills `runner.store` and
+    updates `runner.last_t_sim`) until `stop_event` is set, plus one extra
+    call per poll: `crew_console.drain_events` speaks whatever lifecycle
+    events this poll's `tick()` newly surfaced. `speech_input_enabled` (BL-B96: always
+    `True` in `main()`'s own wiring; the parameter stays for tests that
+    want it off) polls `speech_client.get_transcripts()` via `_poll_
+    transcripts` -- `speech_client` is non-`None` whenever `main()` builds
+    this loop, but both are still checked so this function has no implicit
+    dependency on how its caller constructs them. `detection_trace_path`
+    (BL-9, `--detection-trace`), `eyesight_view`/`eyesight_view_radius_m`
+    (`--eyesight-view`), `belief_truth_log_path` (`--belief-truth-log`),
+    and `forest_occlusion` (`--forest-occlusion`) are each additive and
+    default to a true no-op when unset.
 
     `world_model_dir`/`detection_trace_base`/`belief_truth_log_base`/
     `group_trace_base`/`mission_memory_base` (`BL-15` Stage 3/Decision 5)
-    mirror `_run_console_poll_loop`'s own identical parameters -- see that
-    function's docstring. `speech_log_base` is this loop's own addition
-    (no `--console` twin, since `--console` has no `CrewConsole`/
-    `transcript_log` to re-wire): the pre-stamp path for `--speech-log`,
-    so a mission (re)start also re-rolls `crew_console.transcript_log` to
-    a fresh per-mission speech log. `slew_trace_path`/`slew_trace_base`
-    (`--slew-trace`, `BL-B66` Stage 4b) are the same "this loop's own
-    addition" shape as `speech_log_base` and for the same reason: the
-    takeoff/power-up/OBSERV wiring this writer reads only runs here, never
-    in `--console`.
+    are each log's pre-stamp path, threaded through so a mission (re)start
+    can re-roll them to a fresh per-mission filename (`_reroll_run_logs`)
+    -- `None` for a log that was never enabled. `speech_log_base` is the
+    pre-stamp path for `--speech-log`, so a mission (re)start also
+    re-rolls `crew_console.transcript_log` to a fresh per-mission speech
+    log. `slew_trace_path`/`slew_trace_base` (`--slew-trace`, `BL-B66`
+    Stage 4b) are the same shape, for the takeoff/power-up/OBSERV wiring
+    this writer reads, which only runs on this loop.
 
     `effector_sequences`/`effector_registry` (`plans/effector-sequences/
     plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
@@ -3517,24 +2928,22 @@ def _run_crew_text_poll_loop(
         )
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
-        last_gaze_label: str | None = None
         live_los_warned = False
-        connection = _ConnectionReporter()
+        connection = ConnectionReporter(logger)
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
         next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # One log-and-continue guard around the whole poll body, not
-            # just the HTTP calls inside `_poll_f10_commands`/
-            # `_poll_transcripts` (those catch their own transport errors
-            # and nothing else -- the `CrewConsole` dispatch that follows
-            # each one is outside their `try`).
+            # just the HTTP call inside `_poll_transcripts` (it catches its
+            # own transport errors and nothing else -- the `CrewConsole`
+            # dispatch that follows is outside its `try`).
             #
             # **The failure this prevents is silent and costs a whole
             # sortie.** This runs on a daemon thread, so an exception
             # escaping here kills the thread without killing the process:
-            # the REPL keeps accepting input, the overlay keeps its last
-            # frame, and perception, belief and speech are simply dead from
+            # the REPL keeps accepting input, and perception, belief and
+            # speech are simply dead from
             # that moment on, with a stderr traceback as the only symptom.
             # Nothing in the cockpit says so. A skipped poll, by contrast,
             # costs one cycle at the configured poll rate
@@ -3558,9 +2967,8 @@ def _run_crew_text_poll_loop(
             try:
                 # `BL-15` Stage 1: detect a genuine DCS mission (re)start
                 # and reset belief/mission memory before this poll's
-                # `run_once()` ingests anything against stale state --
-                # same ordering as `_run_console_poll_loop`'s own call,
-                # except this path has a real `CrewConsole` to reset too.
+                # `run_once()` ingests anything against stale state,
+                # including the real `CrewConsole`.
                 # Stage 3/Decision 5: re-resolve theatre and re-roll the
                 # per-run logs only when a reset actually fired.
                 if _check_for_new_mission(
@@ -4129,8 +3537,10 @@ def _run_crew_text_poll_loop(
                         else None
                     )
                     # `BL-15` Stage 3: `runner.theatre`, not the closed-over
-                    # `theatre` parameter -- see `_run_console_poll_loop`'s
-                    # identical note.
+                    # `theatre` parameter -- a successful theatre switch
+                    # (`_maybe_switch_theatre`) updates `runner.theatre` in
+                    # place, and the local parameter above is only this
+                    # poll loop's *initial* value, never reassigned.
                     assert runner.theatre is not None
                     _mission_memory_step(
                         mission_memory,
@@ -4153,10 +3563,6 @@ def _run_crew_text_poll_loop(
                     # DebugPrintBrainClient, both of which return [].
                     crew_console.drain_brain(runner.last_t_sim)
                     commands_before = crew_console.commands_handled
-                    if f10_commands_enabled:
-                        _poll_f10_commands(
-                            aircraft_client, crew_console, runner.last_t_sim
-                        )
                     if speech_input_enabled and speech_client is not None:
                         _poll_transcripts(
                             speech_client, crew_console, runner.last_t_sim
@@ -4195,13 +3601,6 @@ def _run_crew_text_poll_loop(
                             runner.optic_state = lower_binoculars(
                                 runner.optic_state, runner.last_t_sim
                             )
-                    if crew_console.overlay_client is not None:
-                        last_gaze_label = _push_gaze_line(
-                            crew_console.overlay_client,
-                            runner.scan_plan,
-                            runner.last_t_sim,
-                            last_gaze_label,
-                        )
                 connection.report_success()
             except Exception as exc:
                 # Deliberately bare-ish: anything at all, because the
@@ -4227,18 +3626,59 @@ def _run_crew_text_poll_loop(
 
 
 def _run_crew_text_repl(
-    runner: ConsolePerceptionRunner, crew_console: CrewConsole
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    world_model_db: Path,
+    theatre: str,
 ) -> None:
-    """`--crew-text`'s foreground REPL -- identical shape to
-    `_run_console_repl`, dispatching into `CrewConsole.handle_line` instead
-    of `belief.console.Console.handle_line`."""
+    """The crew session's foreground REPL: reads one line at a time from
+    stdin and dispatches it into `CrewConsole.handle_line`.
+
+    **BL-B96 fix (found while porting a `--console`-path regression test
+    rather than discarding it, confirmed by grep: `_run_crew_text_repl` had
+    zero direct tests before)**: this used to copy `crew_console.enrichment`
+    straight from `runner.enrichment` -- `ConsolePerceptionRunner.
+    enrichment` is built by the poll thread (a separate real thread from
+    this REPL loop) and holds *that thread's* `sqlite3.Connection`, which is
+    thread-affine. Any enrichment-aware command run from this thread then
+    queried that connection and raised `sqlite3.ProgrammingError` -- exactly
+    the same bug class the old `--console` REPL was fixed for (BL-5,
+    `plans/bl5-tool-api/debug.md`), just never ported to this twin. BL-B96
+    makes this the *only* REPL, and `--crew-text` unconditional, so this
+    bug's blast radius goes from "only when `--console` was used" to
+    "every player-issued report command touching terrain" -- worth fixing
+    now rather than carrying forward.
+
+    Mirrors the old `--console` REPL's own fix exactly: build a REPL-
+    thread-local `sqlite3.Connection`/`EnrichmentContext`, lazily, the first
+    time `runner.last_ownship_state` is available, and refresh its
+    `ownship` from that field before every command rather than reading
+    `runner.enrichment` at all. Two separate connections/caches (poll
+    thread's and REPL thread's) rather than one shared one -- the same
+    accepted cost the old fix took, for the same reason."""
+    repl_conn: sqlite3.Connection | None = None
+    repl_enrichment: EnrichmentContext | None = None
     try:
         for line in sys.stdin:
             now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
-            crew_console.enrichment = runner.enrichment
+            if runner.last_ownship_state is not None:
+                if repl_conn is None:
+                    repl_conn = open_world_model(world_model_db)
+                if repl_enrichment is None:
+                    repl_enrichment = EnrichmentContext(
+                        conn=repl_conn,
+                        theatre=theatre,
+                        ownship=runner.last_ownship_state,
+                    )
+                else:
+                    repl_enrichment.ownship = runner.last_ownship_state
+            crew_console.enrichment = repl_enrichment
             crew_console.handle_line(line, now_sim=now_sim)
     except KeyboardInterrupt:
         pass
+    finally:
+        if repl_conn is not None:
+            repl_conn.close()
 
 
 DEFAULT_SPEECH_LOG_PATH = Path("logs/speech.jsonl")
@@ -4248,19 +3688,18 @@ def _resolve_speech_log_path(
     *,
     speech_log: Path | None,
     no_speech_log: bool,
-    crew_text: bool,
-    speech_input: bool,
 ) -> Path | None:
     """Decide what `--speech-log` should end up pointing at, after
-    argparse's own mutual-exclusivity/requires checks have already run.
+    argparse's own mutual-exclusivity check has already run.
 
-    An ordinary sortie (`--crew-text --speech-input`, no explicit
-    `--speech-log`, no `--no-speech-log`) gets `DEFAULT_SPEECH_LOG_PATH`
-    without the user having to remember a flag -- that is precisely when
-    the garbled-transcript data this file exists for gets produced.
-    `--no-speech-log` opts back out; an explicit `--speech-log` always
-    wins (already validated by the caller to require `--crew-text
-    --speech-input`).
+    An ordinary sortie (no explicit `--speech-log`, no `--no-speech-log`)
+    gets `DEFAULT_SPEECH_LOG_PATH` without the user having to remember a
+    flag -- that is precisely when the garbled-transcript data this file
+    exists for gets produced. `--no-speech-log` opts back out; an explicit
+    `--speech-log` always wins. (BL-B96: the crew session and speech
+    input are both unconditional now, so this no longer gates on a
+    `--crew-text`/`--speech-input` pair -- every run is "an ordinary
+    sortie" in that sense.)
 
     Directory creation happens at startup, once, rather than per write --
     so an unwritable location degrades to no log (reported on stderr)
@@ -4295,8 +3734,6 @@ def _resolve_speech_log_path(
     if speech_log is not None:
         return speech_log
     if no_speech_log:
-        return None
-    if not (crew_text and speech_input):
         return None
     try:
         DEFAULT_SPEECH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -4459,7 +3896,7 @@ def _resolve_group_trace_log_path(
     own `time.time()` call when `when` is `None`, a handful of
     nanoseconds away from `_per_run_log_paths`'s own default stamp rather
     than bit-for-bit identical. Both calls happen within the same `main()`
-    invocation before either poll loop starts, so the two timestamps never
+    invocation before the poll loop starts, so the two timestamps never
     disagree at the second resolution `RUN_STAMP_FORMAT` actually renders
     at, in practice -- and an explicit `when` (what every test above
     passes) makes the two identical by construction regardless."""
@@ -4549,13 +3986,14 @@ def _configure_logger_for_main() -> None:
     is `WARNING` (30) -- `logger.warning(...)` calls printed by accident
     of that fallback, but every `logger.info(...)` call, including the
     coverage summary's unconditional `0/N` line, was silently dropped on
-    every real sortie. All three entry points (`--console`, `--crew-text`,
-    and the plain-logger `else:` branch) share this one module-level
-    `logger`, so configuring it once here covers all three.
+    every real sortie. `_configure_logger_for_main()` runs once,
+    unconditionally, at the top of `main()`, before any flag is read, so
+    this covers the one remaining entry point regardless of which flags
+    are given.
 
     **Deliberately scoped to this module's own logger instance, never
     `logging.basicConfig`/the root logger.** `main()` is this subproject's
-    own standalone entrypoint (`python -m logger ...`), so touching
+    own standalone entrypoint (`python -m body ...`), so touching
     logging configuration here is defensible -- but a global
     `basicConfig` call would do two things this fix does not want: clobber
     a host application's own logging setup if this module were ever
@@ -4566,7 +4004,7 @@ def _configure_logger_for_main() -> None:
     fix exists to close in the opposite direction. Named loggers
     (`logging.getLogger(__name__)`) are independent of each other unless
     one's name is a dotted child of another's; `"logger"` (this module's
-    `__name__` when run via `python -m logger`) is not a parent of
+    `__name__` when run via `python -m body`) is not a parent of
     `"perception.hybrid_source"` or `"belief.crew_console"`, so this call
     cannot reach them.
 
@@ -4585,13 +4023,13 @@ def _configure_logger_for_main() -> None:
 
 
 def main() -> None:
-    """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
-    ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
-    fixed interval against a real `HybridPerceptionSource` and (PB-1.5)
-    `NakedEyePerceptionSource` until interrupted. Not exercised by automated
-    tests (a live/replay-loop driver, same posture as
+    """CLI entrypoint: `python -m body --aircraft-layer-url ... --theatre
+    ... --world-model-db ...` -- polls `ConsolePerceptionRunner.run_once()`
+    on a fixed interval against a real `HybridPerceptionSource` and
+    (PB-1.5) `NakedEyePerceptionSource` until interrupted. Not exercised
+    by automated tests (a live/replay-loop driver, same posture as
     `aircraft-layer/src/collector/__main__.py`'s own untested `main()`);
-    `PerceptionLogger`'s, `HybridPerceptionSource`'s, and
+    `ConsolePerceptionRunner`'s, `HybridPerceptionSource`'s, and
     `NakedEyePerceptionSource`'s own logic is.
 
     First line is `_configure_logger_for_main()` -- see its own docstring
@@ -4668,44 +4106,6 @@ def main() -> None:
         help="seconds between poll ticks",
     )
     parser.add_argument(
-        "--console",
-        action="store_true",
-        help=(
-            "run the belief-consuming pipeline (both sources at "
-            "emit_mode='every_poll', ingested+ticked into a belief.contacts."
-            "ContactStore) and an interactive belief.console REPL over "
-            "stdin instead of the plain on_change text logger -- PB-2 "
-            "Stage 3/4"
-        ),
-    )
-    parser.add_argument(
-        "--overlay",
-        action="store_true",
-        help=(
-            "mirror text to the in-cockpit text overlay via the aircraft "
-            "layer's POST /text/push -- BL-2.5, extended by overlay-speech-"
-            "callouts. With --console, mirrors belief lifecycle events "
-            "(CONTACT_DETECTED/LOST/REACQUIRED). With --crew-text, mirrors "
-            "every line CrewConsole speaks (readbacks, contact reports, "
-            "lifecycle lines, urgent calls prefixed '!! ') -- a radio-"
-            "callout feed, not the lifecycle-event mirror. Meaningless "
-            "without --console or --crew-text; defaults off, a true no-op "
-            "when absent. Reuses the same --aircraft-layer-url instance, "
-            "no separate URL needed."
-        ),
-    )
-    parser.add_argument(
-        "--crew-text",
-        action="store_true",
-        help=(
-            "run the player-facing crew session (belief.crew_console."
-            "CrewConsole) instead of the plain on_change text logger -- "
-            "BL-5a. Mutually exclusive with --console; combine with "
-            "--overlay to also mirror spoken crew text to the in-cockpit "
-            "overlay (overlay-speech-callouts)."
-        ),
-    )
-    parser.add_argument(
         "--mission-understanding",
         type=Path,
         default=None,
@@ -4715,20 +4115,7 @@ def main() -> None:
             "given, loaded once at startup and used to track live mission "
             "phase against ownship position, surfaced via get_situation's "
             "'situation' command. Omitted (default): no phase data, "
-            "unchanged from before this milestone. Only meaningful with "
-            "--console."
-        ),
-    )
-    parser.add_argument(
-        "--f10-commands",
-        action="store_true",
-        help=(
-            "poll and dispatch player-selected DCS F10 radio-menu commands "
-            "(watch nearest / scan forward / cancel task) through "
-            "CrewConsole.handle_command -- plans/f10-crew-commands/"
-            "plan.md. Only meaningful with --crew-text; defaults off, a "
-            "true no-op when absent. Reuses the same --aircraft-layer-url "
-            "instance, no separate URL needed."
+            "unchanged from before this milestone."
         ),
     )
     parser.add_argument(
@@ -4737,7 +4124,7 @@ def main() -> None:
         default="debug",
         help=(
             "which belief.escalation.BrainClient handles escalated "
-            "utterances under --crew-text -- 'http' (plans/brain-layer/"
+            "utterances -- 'http' (plans/brain-layer/"
             "plan.md) talks to a running brain-layer instance over "
             "--brain-url and speaks real replies; 'debug' (default) "
             "prints escalations to stderr and never speaks; 'null' is "
@@ -4753,36 +4140,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--speech-audio",
-        action="store_true",
-        help=(
-            "synthesize and play every line CrewConsole speaks via "
-            "audio-adapter's POST /speak -- BL-10 first slice, plans/"
-            "tts-voice-output/plan.md. Only meaningful with --crew-text; "
-            "defaults off, a true no-op when absent. Requires "
-            "--audio-adapter-url."
-        ),
-    )
-    parser.add_argument(
-        "--speech-input",
-        action="store_true",
-        help=(
-            "poll and dispatch recognised speech transcripts via "
-            "audio-adapter's GET /transcripts/poll -- Stage 3, plans/"
-            "inbound-speech/plan.md. Only meaningful with --crew-text; "
-            "defaults off, a true no-op when absent. Requires "
-            "--audio-adapter-url. Independent of --speech-audio (audio "
-            "out) -- pass both to hear Petrovich act on and read back a "
-            "spoken command end to end."
-        ),
-    )
-    parser.add_argument(
         "--audio-adapter-url",
         default=None,
         help=(
-            "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
-            "together with --speech-audio and/or --speech-input, unused "
-            "otherwise"
+            "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- "
+            "required (BL-B96: speech in/out are always on). If the "
+            "adapter is unreachable at startup or at any point during the "
+            "sortie, body-layer warns once and keeps trying -- everything "
+            "else (perception, belief, voice-command dispatch, mission "
+            "memory) runs unaffected; Petrovich simply stays silent until "
+            "it answers."
         ),
     )
     parser.add_argument(
@@ -4795,8 +4162,7 @@ def main() -> None:
             "about it (act/confirm/say_again/fallthrough). The answer to "
             "'why did nothing happen when I said that': an utterance matching "
             "no command otherwise reaches only the brain-layer stand-in, "
-            "which does nothing. Only meaningful with --crew-text "
-            f"--speech-input, where it defaults on ({DEFAULT_SPEECH_LOG_PATH}, "
+            f"which does nothing. Defaults on ({DEFAULT_SPEECH_LOG_PATH}, "
             "created if absent, appended across sorties) even without this "
             "flag -- pass it only to log somewhere else. See --no-speech-log "
             "to suppress the default instead."
@@ -4806,9 +4172,8 @@ def main() -> None:
         "--no-speech-log",
         action="store_true",
         help=(
-            "suppress --speech-log's default sink. Only meaningful with "
-            "--crew-text --speech-input (a no-op otherwise, same as the "
-            "default it suppresses); mutually exclusive with --speech-log."
+            "suppress --speech-log's default sink; mutually exclusive "
+            "with --speech-log."
         ),
     )
     parser.add_argument(
@@ -4820,9 +4185,7 @@ def main() -> None:
             "(JSONL) to this path -- BL-9, plans/bl9-debug-visualization/"
             "plan.md. Answers 'why did Petrovich not see that' after a "
             "flight: reduce it with body-layer/tools/"
-            "summarize_detection_trace.py. Only meaningful with --console "
-            "or --crew-text (there is nothing to join against belief "
-            "without one of those poll loops); defaults off, a true no-op "
+            "summarize_detection_trace.py. Defaults off, a true no-op "
             "when absent."
         ),
     )
@@ -4839,9 +4202,7 @@ def main() -> None:
             "only way D5's rarity claim and BL-B50's lapse condition "
             "(membership flipping on consecutive ticks) are checkable from "
             "an actual sortie rather than from a wrong spoken line in "
-            "flight. Only meaningful with --console or --crew-text (there "
-            "is nothing to join against belief without one of those poll "
-            "loops); defaults off, a true no-op when absent."
+            "flight. Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4854,10 +4215,8 @@ def main() -> None:
             "('readback' or 'model'), the error, OBSERV commanded/"
             "observed, and optic mode -- BL-B66 Stage 4b, plans/"
             "9k113-effectors/plan.md. Data for BL-B80's rate-loop "
-            "tuning; reduce with .claude/skills/sortie-log-triage. Only "
-            "meaningful with --crew-text (the guidance-unit power-up/"
-            "OBSERV write-through only runs on that poll loop); defaults "
-            "off, a true no-op when absent."
+            "tuning; reduce with .claude/skills/sortie-log-triage. "
+            "Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4868,11 +4227,10 @@ def main() -> None:
             "at and with what, redrawn every poll -- a debug/calibration "
             "instrument (todo/todo.md's 'Added 2026-09-25 (user)' entry), "
             "deliberately allowed to show ground truth alongside belief "
-            "(see eyesight_view.py's module docstring). Only meaningful "
-            "with --console or --crew-text; defaults off, a true no-op "
-            "when absent. Offline: body-layer/tools/eyesight_replay.py "
-            "replays a --detection-trace JSONL file with no live DCS "
-            "session at all."
+            "(see eyesight_view.py's module docstring). Defaults off, a "
+            "true no-op when absent. Offline: body-layer/tools/"
+            "eyesight_replay.py replays a --detection-trace JSONL file "
+            "with no live DCS session at all."
         ),
     )
     parser.add_argument(
@@ -4899,9 +4257,8 @@ def main() -> None:
             "plan.md. An append-only, per-sortie record of what Petrovich "
             "saw/marked/was shot at, written from settled belief after "
             "every poll's ContactStore.tick(); the in-flight read half is "
-            "in-memory only and not wired by this flag. Only meaningful "
-            "with --console or --crew-text; defaults off, a true no-op "
-            "when absent."
+            "in-memory only and not wired by this flag. Defaults off, a "
+            "true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4920,8 +4277,7 @@ def main() -> None:
             "(believed range beyond the naked-eye channel's own detection "
             "cap, or a position error far beyond the contact's own stated "
             "uncertainty) -- see belief_truth_log.py's module docstring. "
-            "Only meaningful with --console or --crew-text; defaults off, "
-            "a true no-op when absent."
+            "Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4956,35 +4312,13 @@ def main() -> None:
         parser.error(
             "--aircraft-layer-url is required (omit only together with --print-tuning)"
         )
-
-    if args.crew_text and args.console:
-        parser.error("--crew-text is mutually exclusive with --console")
-    if args.speech_audio and args.audio_adapter_url is None:
-        parser.error("--speech-audio requires --audio-adapter-url")
-    if args.speech_input and args.audio_adapter_url is None:
-        parser.error("--speech-input requires --audio-adapter-url")
+    if args.audio_adapter_url is None:
+        parser.error(
+            "--audio-adapter-url is required (omit only together with "
+            "--print-tuning) -- BL-B96: speech in/out are always on"
+        )
     if args.speech_log is not None and args.no_speech_log:
         parser.error("--speech-log is mutually exclusive with --no-speech-log")
-    if args.speech_log is not None and not (args.crew_text and args.speech_input):
-        parser.error(
-            "--speech-log requires --crew-text --speech-input (there are no "
-            "transcripts to log without them)"
-        )
-    if args.detection_trace is not None and not (args.console or args.crew_text):
-        parser.error("--detection-trace requires --console or --crew-text")
-    if args.group_trace is not None and not (args.console or args.crew_text):
-        parser.error("--group-trace requires --console or --crew-text")
-    if args.eyesight_view and not (args.console or args.crew_text):
-        parser.error("--eyesight-view requires --console or --crew-text")
-    if args.belief_truth_log is not None and not (args.console or args.crew_text):
-        parser.error("--belief-truth-log requires --console or --crew-text")
-    if args.mission_memory is not None and not (args.console or args.crew_text):
-        parser.error("--mission-memory requires --console or --crew-text")
-    if args.slew_trace is not None and not args.crew_text:
-        parser.error(
-            "--slew-trace requires --crew-text (the guidance-unit power-up/"
-            "OBSERV write-through only runs on that poll loop)"
-        )
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
@@ -5059,8 +4393,6 @@ def main() -> None:
     args.speech_log = _resolve_speech_log_path(
         speech_log=args.speech_log,
         no_speech_log=args.no_speech_log,
-        crew_text=args.crew_text,
-        speech_input=args.speech_input,
     )
 
     # `BL-15` Stage 1 decision 5 ("per mission", not a marker line):
@@ -5132,192 +4464,100 @@ def main() -> None:
     if mission_data is not None:
         mission_phase_tracker = MissionPhaseTracker(data=mission_data)
 
-    if args.crew_text:
-        brain_client: BrainClient
-        if args.brain_client == "http":
-            brain_client = BrainLayerClient(base_url=args.brain_url)
-        elif args.brain_client == "debug":
-            brain_client = DebugPrintBrainClient()
-        else:
-            brain_client = NullBrainClient()
-        crew_runner = ConsolePerceptionRunner(
-            aircraft_client=aircraft_client,
-            output=None,
-            mission_phase_tracker=mission_phase_tracker,
-            group_trace_sink=(
-                GroupTraceLogWriter(args.group_trace).write
-                if args.group_trace is not None
-                else None
-            ),
-        )
-        # One AudioAdapterClient instance, shared by whichever of --speech-
-        # audio (push_speech, outbound) / --speech-input (get_transcripts,
-        # inbound) are set -- both hit the same audio-adapter process at
-        # the same --audio-adapter-url, so there is no reason to construct
-        # two. CrewConsole.speech_client only takes it when --speech-audio
-        # is actually set (audio *output* is its own concern, independent
-        # of whether speech input is also wired).
-        audio_adapter_client = (
-            AudioAdapterClient(base_url=args.audio_adapter_url)
-            if (args.speech_audio or args.speech_input)
+    brain_client: BrainClient
+    if args.brain_client == "http":
+        brain_client = BrainLayerClient(base_url=args.brain_url)
+    elif args.brain_client == "debug":
+        brain_client = DebugPrintBrainClient()
+    else:
+        brain_client = NullBrainClient()
+    crew_runner = ConsolePerceptionRunner(
+        aircraft_client=aircraft_client,
+        output=None,
+        mission_phase_tracker=mission_phase_tracker,
+        group_trace_sink=(
+            GroupTraceLogWriter(args.group_trace).write
+            if args.group_trace is not None
             else None
-        )
-        # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
-        # loaded once here, before `CrewConsole` exists, so a bad
-        # registry/sequence file can set `config_error_pending` at
-        # construction time rather than needing a second mutation after
-        # the fact. `--console` never calls this (no `CrewConsole` to
-        # drive a trigger from, and no poll loop that fires one either).
-        (
+        ),
+    )
+    # BL-B96: speech in (`get_transcripts`) and out (`push_speech`) are
+    # both always on now, so exactly one `AudioAdapterClient` is always
+    # built -- no more "only if --speech-audio/--speech-input" branching.
+    audio_adapter_client = AudioAdapterClient(base_url=args.audio_adapter_url)
+    # BL-B96 Stage 4 (user direction: "warn and keep trying ... as with a
+    # bad config file"): one shared ConnectionReporter for the audio
+    # adapter, covering both CrewConsole._print's push path and
+    # _poll_transcripts' poll path -- see CrewConsole.audio_adapter_
+    # reporter's own docstring for why this must be the *same* instance,
+    # not one per path.
+    audio_adapter_reporter = ConnectionReporter(logger, label="audio adapter")
+    # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
+    # loaded once here, before `CrewConsole` exists, so a bad
+    # registry/sequence file can set `config_error_pending` at
+    # construction time rather than needing a second mutation after
+    # the fact.
+    (
+        effector_sequences_by_key,
+        effector_registry_entries,
+        had_config_errors,
+        polled_args_set,
+    ) = _load_effector_config()
+    crew_console = CrewConsole(
+        store=crew_runner.store,
+        brain_client=brain_client,
+        output=sys.stdout,
+        aircraft_client=aircraft_client,
+        tasks=crew_runner.tasks,
+        speech_client=audio_adapter_client,
+        audio_adapter_reporter=audio_adapter_reporter,
+        transcript_log=(
+            SpeechLogWriter(args.speech_log).write
+            if args.speech_log is not None
+            else None
+        ),
+        config_error_pending=had_config_errors,
+    )
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            crew_runner,
+            crew_console,
+            aircraft_client,
+            theatre,
+            world_model_db,
+            args.poll_interval_s,
+            stop_event,
+            audio_adapter_client,
+            True,  # speech_input_enabled -- BL-B96: always on
+            args.detection_trace,
+            args.eyesight_view,
+            args.eyesight_view_radius_m,
+            args.belief_truth_log,
+            args.forest_occlusion,
+            args.mission_memory,
+            args.world_model_dir,
+            detection_trace_base,
+            belief_truth_log_base,
+            speech_log_base,
+            group_trace_base,
+            mission_memory_base,
+            args.slew_trace,
+            slew_trace_base,
             effector_sequences_by_key,
             effector_registry_entries,
-            had_config_errors,
-            polled_args_set,
-        ) = _load_effector_config()
-        crew_console = CrewConsole(
-            store=crew_runner.store,
-            brain_client=brain_client,
-            output=sys.stdout,
-            aircraft_client=aircraft_client,
-            tasks=crew_runner.tasks,
-            overlay_client=aircraft_client if args.overlay else None,
-            speech_client=audio_adapter_client if args.speech_audio else None,
-            transcript_log=(
-                SpeechLogWriter(args.speech_log).write
-                if args.speech_log is not None
-                else None
-            ),
-            config_error_pending=had_config_errors,
-        )
-        stop_event = threading.Event()
-        poll_thread = threading.Thread(
-            target=_run_crew_text_poll_loop,
-            args=(
-                crew_runner,
-                crew_console,
-                aircraft_client,
-                theatre,
-                world_model_db,
-                args.poll_interval_s,
-                stop_event,
-                args.f10_commands,
-                audio_adapter_client if args.speech_input else None,
-                args.speech_input,
-                args.detection_trace,
-                args.eyesight_view,
-                args.eyesight_view_radius_m,
-                args.belief_truth_log,
-                args.forest_occlusion,
-                args.mission_memory,
-                args.world_model_dir,
-                detection_trace_base,
-                belief_truth_log_base,
-                speech_log_base,
-                group_trace_base,
-                mission_memory_base,
-                args.slew_trace,
-                slew_trace_base,
-                effector_sequences_by_key,
-                effector_registry_entries,
-                polled_args_set.args,
-            ),
-            daemon=True,
-        )
-        poll_thread.start()
-        print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
-        try:
-            _run_crew_text_repl(crew_runner, crew_console)
-        finally:
-            stop_event.set()
-            poll_thread.join()
-    elif args.console:
-        # Stage 6 fix: no world_model_conn opened here -- the poll thread
-        # opens its own (see _run_console_poll_loop / module docstring's
-        # "Stage 6 fix"), since sqlite3 connections are thread-affine and
-        # this runner's sources are consumed only on that thread.
-        console_runner = ConsolePerceptionRunner(
-            aircraft_client=aircraft_client,
-            output=None,
-            overlay_client=aircraft_client if args.overlay else None,
-            mission_phase_tracker=mission_phase_tracker,
-            group_trace_sink=(
-                GroupTraceLogWriter(args.group_trace).write
-                if args.group_trace is not None
-                else None
-            ),
-        )
-        stop_event = threading.Event()
-        poll_thread = threading.Thread(
-            target=_run_console_poll_loop,
-            args=(
-                console_runner,
-                aircraft_client,
-                theatre,
-                world_model_db,
-                args.poll_interval_s,
-                stop_event,
-                args.detection_trace,
-                args.eyesight_view,
-                args.eyesight_view_radius_m,
-                args.belief_truth_log,
-                args.forest_occlusion,
-                args.mission_memory,
-                args.world_model_dir,
-                detection_trace_base,
-                belief_truth_log_base,
-                group_trace_base,
-                mission_memory_base,
-            ),
-            daemon=True,
-        )
-        poll_thread.start()
-        console = Console(
-            store=console_runner.store,
-            tasks=console_runner.tasks,
-            output=sys.stdout,
-            aircraft_client=aircraft_client,
-            mission_phase_tracker=mission_phase_tracker,
-        )
-        print(HELP_TEXT, file=sys.stdout)
-        try:
-            _run_console_repl(console_runner, console, world_model_db, theatre)
-        finally:
-            stop_event.set()
-            poll_thread.join()
-    else:
-        world_model_conn = open_world_model(world_model_db)
-        # Built outside the try so `finally`'s summary call always has a
-        # valid (possibly empty) list to read, even if `_build_sources`/
-        # `PerceptionLogger(...)` itself raised before `perception_logger`
-        # would otherwise have been bound -- same reasoning as
-        # `ConsolePerceptionRunner.sources`'s `default_factory=list` in the
-        # other two poll loops (see `_run_console_poll_loop`'s `finally:`).
-        sources: list[PerceptionSource] = []
-        try:
-            sources = _build_sources(
-                aircraft_client,
-                theatre,
-                world_model_conn,
-                emit_mode="on_change",
-                forest_occlusion=args.forest_occlusion,
-            )
-            perception_logger = PerceptionLogger(
-                aircraft_client=aircraft_client,
-                sources=sources,
-                output=sys.stdout,
-            )
-            live_los_warned = False
-            while True:
-                perception_logger.run_once()
-                live_los_warned = _warn_live_los_coverage_gap_once(
-                    sources, live_los_warned
-                )
-                time.sleep(args.poll_interval_s)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            _log_live_los_coverage_summary(sources)
-            world_model_conn.close()
+            polled_args_set.args,
+        ),
+        daemon=True,
+    )
+    poll_thread.start()
+    print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
+    try:
+        _run_crew_text_repl(crew_runner, crew_console, world_model_db, theatre)
+    finally:
+        stop_event.set()
+        poll_thread.join()
 
 
 if __name__ == "__main__":

@@ -148,7 +148,7 @@ instead of `(GATE_GROWTH_RATE_MPS * T) ** 2` once per `T`-second gap --
 summing `n` squared pieces of a fixed budget is always less than squaring
 the whole budget, so recovery time scaled as roughly `1 / poll_interval_s`
 and grew without bound as poll rate increased (measured: ~47s at
-`logger._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at 0.05s), even though the
+`body._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at 0.05s), even though the
 review that approved this branch's own guards had verified only a
 single-gap ~20s recovery.
 

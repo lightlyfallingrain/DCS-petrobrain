@@ -264,7 +264,7 @@ def believed_markers_from_contacts(
     areas: Sequence[AttentionArea] | None = None,
 ) -> list[BeliefMarker]:
     """`BeliefMarker`s for a live `belief.contacts.ContactStore.contacts`
-    snapshot -- the real-time path (`logger.py`'s poll loop), which always
+    snapshot -- the real-time path (`body.py`'s poll loop), which always
     has an actual `Contact.last_position`/`cardinality`/`classification`
     to read, so this is the accurate source; the offline replay path
     (`believed_markers_from_trace_rows`) is a documented approximation of

@@ -62,9 +62,9 @@ from schema.firing import FiringEventBatch, FiringParseError, FiringRawEvent
 logger = logging.getLogger(__name__)
 
 #: Loopback only, same reasoning as every other channel in this module. An
-#: eighth, distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
-#: `text_sender.DEFAULT_PORT` (7792), `command_sender.DEFAULT_PORT` (7793),
-#: `f10_command_receiver.DEFAULT_PORT` (7794),
+#: distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
+#: 7792 (formerly `text_sender.TextOverlaySender`, retired by `BL-B96`), `command_sender.DEFAULT_PORT` (7793),
+#: 7794 (formerly the F10 command channel, retired by `BL-B96`),
 #: `unit_velocity_receiver.DEFAULT_PORT` (7795),
 #: `line_of_sight_receiver.DEFAULT_PORT` (7796),
 #: `command_sender.LOOK_DIRECTION_DEFAULT_PORT` (7797), and this one (7798).
@@ -177,9 +177,8 @@ class EmitterTracker:
     Thread safety: both are called from different threads in the real
     wiring (the receiver's background thread ingests, the API server's
     request-handling threads read) -- `dict` mutation/iteration under the
-    GIL is the same "effectively atomic enough" posture
-    `F10CommandQueue.drain_all`'s own docstring already accepts for this
-    codebase; no lock is taken."""
+    GIL is treated as "effectively atomic enough" for this codebase;
+    no lock is taken."""
 
     def __init__(self) -> None:
         self._active: dict[str, ActiveEmitter] = {}

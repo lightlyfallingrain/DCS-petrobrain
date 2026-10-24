@@ -1,14 +1,11 @@
-"""Tests for `logger.PerceptionLogger`/`format_observation_line` and (PB-2
-Stage 3) `logger.ConsolePerceptionRunner`.
+"""Tests for `body.ConsolePerceptionRunner` and the crew session's poll
+loop/CLI wiring.
 
 Uses fake `AircraftLayerClient`-shaped objects and fake `PerceptionSource`s
 -- concrete tiers exist now (`HybridPerceptionSource`,
-`NakedEyePerceptionSource`), but `PerceptionLogger` itself is written
-entirely against the `PerceptionSource` protocol and doesn't need a real one
-to demonstrate its own poll/format/print logic, or (PB-1.5) that it polls
-and concatenates more than one source correctly. `ConsolePerceptionRunner`
-is tested the same way, against a real `belief.contacts.ContactStore` (no
-fake needed -- it's already pure/fixture-testable per `test_contacts.py`).
+`NakedEyePerceptionSource`), but `ConsolePerceptionRunner` is tested
+against a real `belief.contacts.ContactStore` (no fake needed -- it's
+already pure/fixture-testable per `test_contacts.py`).
 """
 
 from __future__ import annotations
@@ -28,14 +25,12 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
-from support.mock_aircraft_layer import MockAircraftLayerServer
 
-import logger as logger_module
+import body as body_module
 from aircraft_client import AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
-from belief.console import Console
 from belief.contacts import ContactStore
 from belief.crew_console import CONFIG_ERROR_LINE, CrewConsole
 from belief.effector_engine import (
@@ -53,25 +48,21 @@ from belief.mission_phase import (
 )
 from belief.sight_effector import GuidanceUnitState
 from belief.tasks import TaskStore
-from logger import (
+from body import (
     _SIGHT_WIDE_SEARCH_FAR_M,
     DEFAULT_SPEECH_LOG_PATH,
     LOOK_DIRECTION_FOV_HALF_DEG,
     MISSION_START_RESOLVE_FALLBACK_S,
     ConsolePerceptionRunner,
-    PerceptionLogger,
     _active_gaze,
     _apply_active_gaze,
     _build_sources,
     _commanded_or_default_sector,
-    _format_gaze_line,
     _log_live_los_coverage_summary,
     _poll_transcripts,
-    _push_gaze_line,
     _resolve_speech_log_path,
-    _run_console_poll_loop,
-    _run_console_repl,
     _run_crew_text_poll_loop,
+    _run_crew_text_repl,
     _search_sweep,
     _sight_in_regard_sweep,
     _sight_out_of_regard_sweep,
@@ -79,7 +70,6 @@ from logger import (
     _split_sector_by_regard,
     _to_body_relative_steps,
     _warn_live_los_coverage_gap_once,
-    format_observation_line,
     main,
 )
 from mission_memory.admission import FiredOnTracker
@@ -176,127 +166,6 @@ def _make_observation(
     )
 
 
-def test_format_observation_line_includes_all_pb1_fields() -> None:
-    ownship = OwnshipState.from_telemetry_dict(_telemetry_dict())
-    observation = _make_observation(ownship)
-
-    line = format_observation_line(ownship, observation)
-
-    assert "t_sim=200.00" in line
-    assert "aircraft=(5000.0, 8000.0, 350.0)" in line
-    assert "source=proxy_heuristic" in line
-    assert "classification=BMP" in line
-    assert "bearing_deg=32.0" in line
-    assert "range_m=3100" in line
-
-
-def test_run_once_returns_empty_when_no_telemetry_yet() -> None:
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(None),  # type: ignore[arg-type]
-        sources=[FakeSource([])],
-    )
-
-    assert logger.run_once() == []
-
-
-def test_run_once_formats_and_returns_lines_for_each_observation() -> None:
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    observations = [_make_observation(ownship)]
-
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource(observations)],
-    )
-
-    lines = logger.run_once()
-
-    assert len(lines) == 1
-    assert "classification=BMP" in lines[0]
-
-
-def test_run_once_prints_to_configured_output() -> None:
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    observations = [_make_observation(ownship)]
-    output = io.StringIO()
-
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource(observations)],
-        output=output,
-    )
-
-    logger.run_once()
-
-    assert "classification=BMP" in output.getvalue()
-
-
-def test_run_once_polls_every_source_and_concatenates_observations() -> None:
-    # PB-1.5: PerceptionLogger.sources is a plain list, polled and
-    # concatenated in order -- no CompositePerceptionSource abstraction
-    # (plans/pb1.5-naked-eye-detection/plan.md's Affected Modules section).
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    hybrid_observation = _make_observation(
-        ownship, id="OBS_hybrid", source="petrovich_detection_associated"
-    )
-    naked_eye_observation = _make_observation(
-        ownship, id="OBS_naked_eye", source="naked_eye_visual_filtered"
-    )
-
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[
-            FakeSource([hybrid_observation]),
-            FakeSource([naked_eye_observation]),
-        ],
-    )
-
-    lines = logger.run_once()
-
-    assert len(lines) == 2
-
-
-def test_run_once_polls_no_source_while_on_the_ground() -> None:
-    """`[[BL-B82]]`: ownship at or below `ON_GROUND_AGL_THRESHOLD_M` ->
-    no source is polled at all, so a source that *would* have produced an
-    observation this tick is simply never asked."""
-    telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    observations = [_make_observation(ownship)]
-
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource(observations)],
-    )
-
-    assert logger.run_once() == []
-
-
-def test_run_once_resumes_polling_once_above_the_ground_threshold() -> None:
-    """The gate is evaluated fresh every poll, not a one-shot latch --
-    the same source produces nothing on the ground and something once
-    ownship climbs."""
-    ground_telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
-    airborne_telemetry = {**_telemetry_dict(), "altitude_agl_m": 500.0}
-    ownship = OwnshipState.from_telemetry_dict(airborne_telemetry)
-    observations = [_make_observation(ownship)]
-    source = FakeSource(observations)
-
-    logger = PerceptionLogger(
-        aircraft_client=FakeAircraftClient(ground_telemetry),  # type: ignore[arg-type]
-        sources=[source],
-    )
-    assert logger.run_once() == []
-
-    logger.aircraft_client._telemetry = airborne_telemetry  # type: ignore[attr-defined]
-    lines = logger.run_once()
-
-    assert len(lines) == 1
-    assert "classification=BMP" in lines[0]
-
-
 def test_console_runner_returns_empty_when_no_telemetry_yet() -> None:
     runner = ConsolePerceptionRunner(
         aircraft_client=FakeAircraftClient(None),  # type: ignore[arg-type]
@@ -326,8 +195,7 @@ def test_console_runner_ingests_observations_into_its_store() -> None:
 
 def test_console_runner_ingests_nothing_while_on_the_ground() -> None:
     """`[[BL-B82]]`: no source is polled this tick, so nothing is ingested
-    -- a source producing an observation this poll is simply never asked,
-    the same gate `PerceptionLogger.run_once` applies."""
+    -- a source producing an observation this poll is simply never asked."""
     telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
     ownship = OwnshipState.from_telemetry_dict(telemetry)
     observations = [_make_observation(ownship)]
@@ -426,44 +294,10 @@ def test_console_runner_tracks_last_t_sim_for_the_repl() -> None:
     assert runner.last_t_sim == ownship.t_sim
 
 
-class FakeOverlayClient:
-    """A `push_text_line`-only double (BL-2.5). `fail_on` names texts that
-    raise `AircraftLayerError` instead of recording -- used to exercise
-    `ConsolePerceptionRunner.run_once`'s per-push isolation."""
-
-    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
-        self.pushed: list[str] = []
-        self._fail_on = fail_on
-
-    def push_text_line(self, text: str) -> None:
-        if text in self._fail_on:
-            raise AircraftLayerError("simulated push failure")
-        self.pushed.append(text)
-
-
-def test_console_runner_without_overlay_client_pushes_nothing() -> None:
-    # --overlay defaults off: overlay_client stays None, a true no-op --
-    # run_once must behave exactly as before, no AttributeError, no
-    # aircraft-layer call attempted for this purpose.
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-
-    runner = ConsolePerceptionRunner(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource([_make_observation(ownship)])],
-    )
-
-    runner.run_once()
-
-    assert runner.overlay_client is None
-    assert len(runner.store.events) == 1  # the event still fires...
-    # ...it is simply never mirrored anywhere, which is exactly the point.
-
-
 def test_console_runner_group_trace_sink_defaults_to_none_and_is_a_true_noop() -> None:
     """`--group-trace` (`BL-12` amendment A4): `group_trace_sink` defaults
-    to `None`, the same posture as `overlay_client` above, and `run_once`
-    must not fail passing it straight through to `ContactStore.tick`."""
+    to `None`, and `run_once` must not fail passing it straight through to
+    `ContactStore.tick`."""
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
 
@@ -509,213 +343,6 @@ def test_console_runner_threads_group_trace_sink_into_store_tick() -> None:
     runner.run_once()
 
     assert tick_kwargs == [fake_sink]
-
-
-def test_console_runner_pushes_one_line_per_newly_materialized_event() -> None:
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    overlay_client = FakeOverlayClient()
-
-    runner = ConsolePerceptionRunner(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource([_make_observation(ownship, classification_raw="BMP")])],
-        overlay_client=overlay_client,  # type: ignore[arg-type]
-    )
-
-    runner.run_once()
-
-    (contact,) = runner.store.contacts
-    (event,) = runner.store.events
-    assert event.kind == "CONTACT_DETECTED"
-    assert overlay_client.pushed == [
-        f"{contact.id}: CONTACT_DETECTED, {contact.last_class_raw}, observed, currently visible."
-    ]
-
-
-def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
-    """The plan's one load-bearing try/except (Risks & Unknowns): a failed
-    push for one event must not stop the poll loop, must not drop the
-    observations already collected this poll, and must not skip pushing the
-    remaining events in the same batch. Two distinct-class observations in
-    one poll are guaranteed to become two separate contacts
-    (association_over_time's class-incompatibility gate), so both fire
-    CONTACT_DETECTED in the same `tick()` call -- exactly the "remaining
-    events in the same batch" case.
-
-    Contact ids are predicted rather than read back after the fact
-    (`ContactStore._new_contact_id` is a monotonic per-store counter
-    starting at 1, and this test uses a single fresh store -- `CONTACT_1`
-    for the batch's first observation, `CONTACT_2` for its second, `CONTACT_3`
-    for the follow-up poll's one observation), since `fail_on` must be
-    configured before the call that assigns those ids.
-
-    **The follow-up poll's observation is given its own, distinct
-    bearing/range (BL-12 Stage 3, 2026-10-12)** -- every other call here
-    shares `_make_observation`'s default position by convenience, which
-    this test does not care about (it is testing push-failure isolation,
-    not ambiguity resolution), but Stage 3 does: at the shared default
-    position, "Mi-8 helicopter" resolves to no `op_class`
-    (`object_model.profile_for` does not recognise the keyword), so it is
-    class-*unknown* rather than incompatible against both `CONTACT_1`
-    (BMP-2) and `CONTACT_2` (Ural truck) -- genuinely ambiguous between
-    them. Those two, at the same shared position, cluster into one group
-    on the first poll's `tick()`, so Stage 3 branch 2 would fold this
-    observation onto the nearest of them instead of founding `CONTACT_3`,
-    which is not what this test is checking and would make the second
-    assertion below fail for a reason unrelated to overlay-push
-    isolation. A distinct position keeps the two questions separate."""
-    telemetry = _telemetry_dict()
-    ownship = OwnshipState.from_telemetry_dict(telemetry)
-    failing_text = "CONTACT_1: CONTACT_DETECTED, BMP-2, observed, currently visible."
-    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
-    observations = [
-        _make_observation(ownship, id="OBS_bmp", classification_raw="BMP-2"),
-        _make_observation(ownship, id="OBS_truck", classification_raw="Ural truck"),
-    ]
-
-    runner = ConsolePerceptionRunner(
-        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        sources=[FakeSource(observations)],
-        overlay_client=overlay_client,  # type: ignore[arg-type]
-    )
-
-    returned = runner.run_once()
-
-    # Both observations were still collected and ingested -- a failed push
-    # for the first event's line did not drop anything already gathered
-    # this poll.
-    assert returned == observations
-    assert len(runner.store.contacts) == 2
-    assert len(runner.store.events) == 2
-    assert runner.last_t_sim == ownship.t_sim
-    # The failing push never landed; the *other* event in the same batch
-    # still got pushed -- the failure did not skip the rest of the batch.
-    assert overlay_client.pushed == [
-        "CONTACT_2: CONTACT_DETECTED, Ural truck, observed, currently visible."
-    ]
-
-    # The next poll's pushes proceed normally -- one failure does not wedge
-    # the overlay client for subsequent polls.
-    runner.sources = [
-        FakeSource(
-            [
-                _make_observation(
-                    ownship,
-                    id="OBS_2",
-                    classification_raw="Mi-8 helicopter",
-                    bearing_deg=200.0,
-                    range_m=9000.0,
-                )
-            ]
-        )
-    ]
-    runner.run_once()
-    assert overlay_client.pushed == [
-        "CONTACT_2: CONTACT_DETECTED, Ural truck, observed, currently visible.",
-        "CONTACT_3: CONTACT_DETECTED, Mi-8 helicopter, observed, currently visible.",
-    ]
-
-
-# --- Cones 2C sortie finding: "show where Petrovich is looking" ------------
-#
-# The pilot could not judge two of the acceptance card's four blocks without
-# this -- `_format_gaze_line`/`_push_gaze_line` are the overlay-facing read
-# of `perception.gaze.gaze_at`, wired into both poll loops' existing
-# per-poll overlay hook point.
-
-
-def test_format_gaze_line_names_the_oclock_hour_in_free_scan() -> None:
-    gaze = gaze_at(0.0, FREE_SCAN_PLAN)  # t_sim=0 -> SCAN_PLAN[0] == 12
-    assert gaze.label == "12_oclock"
-
-    line = _format_gaze_line(FREE_SCAN_PLAN, gaze)
-
-    assert line == "Petrovich: looking 12 o'clock (free scan)"
-
-
-def test_format_gaze_line_names_the_commanded_sector() -> None:
-    plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
-    gaze = gaze_at(0.0, plan)  # left's own legs start at 11 o'clock
-
-    line = _format_gaze_line(plan, gaze)
-
-    assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
-
-
-def test_format_gaze_line_names_a_commanded_legs_scan_generically() -> None:
-    # A `commanded_legs`-only plan (Stage 5: a bare o'clock hour, or a
-    # converted compass scan) has no single sector name to speak.
-    plan = ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=(1,))
-    gaze = gaze_at(0.0, plan)
-
-    line = _format_gaze_line(plan, gaze)
-
-    assert line == "Petrovich: looking 1 o'clock (commanded scan)"
-
-
-def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
-    overlay_client = FakeOverlayClient()
-
-    # t_sim=0.0 and t_sim=1.0 both fall in FOCUS_DWELL_S's first 2 s window
-    # (12 o'clock) -- the second call must not push a duplicate line.
-    label_after_first = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-    label_after_second = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        1.0,
-        label_after_first,  # type: ignore[arg-type]
-    )
-
-    assert label_after_first == "12_oclock"
-    assert label_after_second == label_after_first
-    assert overlay_client.pushed == ["Petrovich: looking 12 o'clock (free scan)"]
-
-
-def test_push_gaze_line_pushes_again_when_the_cone_changes() -> None:
-    overlay_client = FakeOverlayClient()
-
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-    # FOCUS_DWELL_S is 2.0 s -- t_sim=2.0 has stepped to the next cone (11).
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        2.0,
-        label,  # type: ignore[arg-type]
-    )
-
-    assert label == "11_oclock"
-    assert overlay_client.pushed == [
-        "Petrovich: looking 12 o'clock (free scan)",
-        "Petrovich: looking 11 o'clock (free scan)",
-    ]
-
-
-def test_push_gaze_line_failure_is_isolated_and_still_advances_the_label() -> None:
-    # Same per-push isolation as the lifecycle-event overlay pushes: a
-    # failed gaze push must not raise, and the dedup label must still
-    # advance so a later successful push isn't suppressed by a stale label.
-    failing_text = "Petrovich: looking 12 o'clock (free scan)"
-    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
-
-    label = _push_gaze_line(
-        overlay_client,
-        FREE_SCAN_PLAN,
-        0.0,
-        None,  # type: ignore[arg-type]
-    )
-
-    assert label == "12_oclock"
-    assert overlay_client.pushed == []
 
 
 def test_console_runner_run_once_updates_scan_plan() -> None:
@@ -809,7 +436,7 @@ def test_console_runner_without_mission_phase_tracker_is_a_no_op() -> None:
     assert runner.mission_phase_tracker is None
 
 
-# --- Stage 6 regression: real sqlite3.Connection across the --console poll
+# --- Stage 6 regression: real sqlite3.Connection across the crew-text poll
 # thread boundary -----------------------------------------------------------
 #
 # Every other test in this module (and in test_naked_eye_source.py /
@@ -820,10 +447,14 @@ def test_console_runner_without_mission_phase_tracker_is_a_no_op() -> None:
 # used in that same thread`) was never caught by the suite. This section
 # builds a real (empty-grid) world-model `.sqlite` with world-model's own
 # `store.writer.open_for_build`, drives it through the actual
-# `_run_console_poll_loop` `main()` uses for `--console` on a real background
+# `_run_crew_text_poll_loop` `main()` uses on a real background
 # thread, and lets `NakedEyePerceptionSource` genuinely reach
 # `line_of_sight_clear` -> `sample_grid` -> a real sqlite query on that
-# thread -- the exact call chain from the traceback.
+# thread -- the exact call chain from the traceback. (The console-path
+# version of this section's own direct thread-local-connection test was
+# deleted by BL-B96 as a duplicate of `test_crew_text_poll_loop_logs_the_
+# coverage_summary_in_its_finally_block` below, which already drives the
+# same real sqlite3.Connection/thread combination to completion.)
 
 
 def _console_telemetry_dict() -> dict[str, Any]:
@@ -1066,7 +697,7 @@ def _real_effector_config() -> tuple[dict[tuple[str, str, str], Any], dict[str, 
     wrong reason."""
     global _real_effector_config_cache
     if _real_effector_config_cache is None:
-        sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+        sequences, registry, had_errors, _polled = body_module._load_effector_config()
         assert not had_errors, "the real committed effector config has load errors"
         _real_effector_config_cache = (sequences, registry)
     return _real_effector_config_cache
@@ -1114,69 +745,28 @@ def test_build_sources_forest_defaults_off() -> None:
     assert naked_eye.forest is None
 
 
-def test_console_poll_loop_uses_a_thread_local_world_model_connection(
-    tmp_path: Path,
-) -> None:
-    """Regression test for the live-sortie finding: before the fix,
-    `main()` opened `world_model_conn` on the main thread and handed it to
-    `ConsolePerceptionRunner.sources`, which the background poll thread then
-    queried -- `sqlite3.ProgrammingError` on the first poll that reached
-    `NakedEyePerceptionSource`'s visibility check. `_run_console_poll_loop`
-    now opens the connection and builds `sources` on the poll thread itself,
-    so this must complete cleanly and actually ingest the T-72 observation
-    into the store."""
-    db_path = tmp_path / "region.sqlite"
-    conn = open_for_build(db_path)  # real schema, no grid rows needed --
-    conn.close()  # sample_grid's query is what must succeed thread-locally,
-    # not any particular grid content.
-
-    aircraft_client = FakeConsoleAircraftClient(
-        _console_telemetry_dict(), {"objects": [_t72_world_object()]}
-    )
-    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
-    stop_event = threading.Event()
-
-    # A long poll interval so exactly one run_once() completes: the test
-    # thread stops the loop the moment it observes last_t_sim, well before
-    # the poll thread's stop_event.wait(...) would let a second poll start.
-    poll_thread = threading.Thread(
-        target=_run_console_poll_loop,
-        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
-    )
-    poll_thread.start()
-    try:
-        deadline = time.monotonic() + 5.0
-        while runner.last_t_sim is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-    finally:
-        stop_event.set()
-        poll_thread.join(timeout=5.0)
-
-    assert not poll_thread.is_alive()
-    assert runner.last_t_sim == 200.0
-    assert len(runner.store.observations) == 1
-    (observation,) = runner.store.observations.values()
-    assert observation.source == "naked_eye_visual_filtered"
-
-
 # --- BL-5 live acceptance regression: the REPL thread must not read
 # enrichment through the poll thread's `sqlite3.Connection` -----------------
 #
 # `ConsolePerceptionRunner.enrichment` (BL-3) is built on the poll thread and
-# holds that thread's `world_model_conn`. Before the fix, `_run_console_repl`
-# copied it straight into `Console.enrichment`, so any enrichment-aware
-# command (`situation`/`position`/`place`/`show`/`contacts`/`find`) run from
-# the REPL thread queried the poll thread's connection and raised
-# `sqlite3.ProgrammingError` -- the exact live-sortie crash
-# (`plans/bl5-tool-api/debug.md`). This drives the real
-# `_run_console_poll_loop` on a background thread (same as the Stage 6 test
-# above) and `_run_console_repl` on the calling thread (a *different* real
-# thread than the poll loop, via pytest's own test thread), feeding it a
-# `situation` command through a monkeypatched `sys.stdin` -- exactly the
-# "situation" command the user typed live.
+# holds that thread's `world_model_conn`. Before the fix, the old `--console`
+# REPL copied it straight into its own `enrichment` field, so any
+# enrichment-aware command run from the REPL thread queried the poll
+# thread's connection and raised `sqlite3.ProgrammingError` -- the exact
+# live-sortie crash (`plans/bl5-tool-api/debug.md`).
+#
+# BL-B96 removed `--console`, leaving `_run_crew_text_repl` as the only
+# surviving REPL driver -- and, until this test was ported from the
+# deleted console-path version rather than simply dropped (confirmed by
+# grep: `_run_crew_text_repl` had zero direct tests before), it did the
+# exact same `crew_console.enrichment = runner.enrichment` assignment the
+# pre-fix `--console` REPL did, and failed this test with the exact same
+# `sqlite3.ProgrammingError` the moment it was run for real. `body.py`'s
+# `_run_crew_text_repl` now carries the same thread-local-connection fix
+# the old `--console` REPL had -- see its own docstring.
 
 
-def test_repl_thread_builds_its_own_enrichment_connection(
+def test_crew_text_repl_thread_reading_enrichment_does_not_crash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_path = tmp_path / "region.sqlite"
@@ -1187,10 +777,22 @@ def test_repl_thread_builds_its_own_enrichment_connection(
         _console_telemetry_dict(), {"objects": [_t72_world_object()]}
     )
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    output = io.StringIO()
+    crew_console = CrewConsole(
+        store=runner.store, output=output, aircraft_client=aircraft_client
+    )
     stop_event = threading.Event()
     poll_thread = threading.Thread(
-        target=_run_console_poll_loop,
-        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
     )
     poll_thread.start()
     try:
@@ -1199,22 +801,25 @@ def test_repl_thread_builds_its_own_enrichment_connection(
             time.sleep(0.02)
         assert runner.last_ownship_state is not None  # poll completed once
 
-        output = io.StringIO()
-        console = Console(store=runner.store, output=output)
-        monkeypatch.setattr("sys.stdin", io.StringIO("situation\nposition\n"))
+        # The real naked-eye pipeline's first-ever contact in a fresh store
+        # is deterministically "CONTACT_1" (same numbering the mock-flight
+        # fixture test relies on). `status`/`watch` are both enrichment-
+        # reading report commands (`tests/test_crew_console.py` uses the
+        # same two tokens for the same reason).
+        monkeypatch.setattr(
+            "sys.stdin", io.StringIO("status CONTACT_1\nwatch CONTACT_1\n")
+        )
 
-        # Before the fix, this raised sqlite3.ProgrammingError -- the poll
-        # thread's connection was read from this (different) thread.
-        _run_console_repl(runner, console, db_path, "Syria")
+        # If this REPL thread ever reads the poll thread's connection
+        # (the pre-fix `--console` bug class), this raises
+        # sqlite3.ProgrammingError on a different thread than opened it.
+        _run_crew_text_repl(runner, crew_console, db_path, "Syria")
     finally:
         stop_event.set()
         poll_thread.join(timeout=5.0)
 
     assert not poll_thread.is_alive()
-    lines = output.getvalue().strip().splitlines()
-    assert len(lines) == 2
-    for line in lines:
-        assert "requires live ownship telemetry" not in line
+    assert output.getvalue().strip() != ""
 
 
 def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
@@ -1395,8 +1000,8 @@ class TestSightInRegardSweepElevation:
     ) -> tuple[
         list[tuple[float, float]], list[tuple[float, float]], list[tuple[float, float]]
     ]:
-        """The same three in-regard legs `PerceptionLogger.run_once` builds
-        (`logger.py`'s `sight_wide_search=`/`sight_narrow_near_search=`/
+        """The same three in-regard legs `body.py`'s poll loop builds
+        (its `sight_wide_search=`/`sight_narrow_near_search=`/
         `sight_narrow_far_search=` wiring) -- same near/far edges, so this
         exercises the real production geometry, not a synthetic stand-in."""
         from belief.optic_policy import (
@@ -1792,7 +1397,7 @@ class TestSightWideSearchFarM:
         own unconditional computation already has), so no `SIGHTING`
         dwell needs to be set up to observe it -- a default runner's very
         first poll already makes the call."""
-        real_sweep = logger_module._sight_in_regard_sweep
+        real_sweep = body_module._sight_in_regard_sweep
         captured_far_m: list[float] = []
 
         def spy(
@@ -1802,7 +1407,7 @@ class TestSightWideSearchFarM:
                 captured_far_m.append(far_m)
             return real_sweep(*args, optic=optic, far_m=far_m, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(logger_module, "_sight_in_regard_sweep", spy)
+        monkeypatch.setattr(body_module, "_sight_in_regard_sweep", spy)
 
         runner = ConsolePerceptionRunner(
             aircraft_client=FakeAircraftClient(_telemetry_dict()),  # type: ignore[arg-type]
@@ -2793,6 +2398,34 @@ def test_poll_transcripts_failed_poll_degrades_without_raising() -> None:
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
 
 
+def test_poll_transcripts_reports_failure_and_recovery_through_the_shared_reporter(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """BL-B96 Stage 4: with a real `ConnectionReporter` wired (`main()`'s
+    own posture, not the `None`-fallback the test above exercises), a
+    failed poll reports through it -- once, on the transition -- instead
+    of a full traceback, and a later successful poll announces recovery."""
+    console = CrewConsole(store=ContactStore())
+    console.audio_adapter_reporter = body_module.ConnectionReporter(
+        body_module.logger, label="audio adapter"
+    )
+    client = FakeSpeechInputClient(should_fail=True)
+
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+        client.should_fail = False
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+
+    messages = [
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
+    ]
+    assert messages == [
+        "audio adapter disconnected (poll failed (test double))",
+        "audio adapter connected",
+    ], messages
+
+
 def test_poll_transcripts_skips_malformed_items() -> None:
     console = CrewConsole(store=ContactStore())
     client = FakeSpeechInputClient(
@@ -2827,6 +2460,10 @@ class _RecordingCrewConsole:
         #: `calls` so every existing assertion on that tuple (transcript/
         #: token/slots only) keeps working unchanged.
         self.correlation_ids: list[str | None] = []
+        #: BL-B96 Stage 4: `_poll_transcripts` reads this field on both its
+        #: success and failure paths -- `None` is the true-no-op fallback
+        #: every test not exercising the reporter itself expects.
+        self.audio_adapter_reporter: body_module.ConnectionReporter | None = None
 
     def handle_transcript(
         self,
@@ -2965,7 +2602,7 @@ def test_a_player_command_lowers_the_binoculars() -> None:
     asks "did the player ask for anything just now" by comparing
     `CrewConsole.commands_handled` across one poll iteration, then lowers
     the binoculars if it changed. Reproduces that exact conditional (see
-    `logger._run_crew_text_poll_loop`) rather than checking the counter and
+    `body._run_crew_text_poll_loop`) rather than checking the counter and
     `lower_binoculars` as two unrelated facts, which is what let the real
     D4 gap (only `handle_command` incremented the counter -- a typed or
     voice-fallthrough free-form request did not) go uncaught: a resolvable
@@ -3155,7 +2792,7 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert lines == ["Observ off."]
     assert console.observ_transition == "off"
 
-    # ...and the poll loop's own drain block (logger.py) is what actually
+    # ...and the poll loop's own drain block (body.py) is what actually
     # touches `optic_state` -- reproduced verbatim rather than invoking the
     # whole runner.
     if console.observ_transition == "off":
@@ -3203,7 +2840,7 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     lamp lights, with no special-casing needed (the cap and `SightHead.
     mode` are derived from the identical `align_observed`/`observ_
     observed` inputs, so they can never disagree)."""
-    import logger as logger_module
+    import body as body_module
     from belief.optic_policy import OpticDecision, OpticState
     from perception.optics import BINOCULAR_OPTIC
 
@@ -3227,7 +2864,7 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     runner.run_once()
 
@@ -3292,7 +2929,7 @@ def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_ai
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=50.0, look_elevation_deg=0.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     actual_az: list[float | None] = []
     for heading_deg in (0.0, 0.0, 30.0):
@@ -3351,7 +2988,7 @@ def test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     runner.run_once()  # poll 1: admitted through the sight
     assert runner.sight_head.aim_source == "belief"
@@ -3418,7 +3055,7 @@ def _f4_poll(
         runner.last_ownship_state,
         resolving_optic=runner.optic,
     )
-    logger_module._mission_memory_step(
+    body_module._mission_memory_step(
         memory, runner, runner.last_t_sim, runner.theatre, None, fired_on_tracker
     )
     crew_console.drain_events(runner.last_t_sim)
@@ -3531,7 +3168,7 @@ def _f4_scenario(
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
     db_path = tmp_path / f"region-leak-{leak_seen_aim}.sqlite"
     open_for_build(db_path).close()
-    world_model_conn = logger_module.open_world_model(db_path)
+    world_model_conn = body_module.open_world_model(db_path)
     runner = ConsolePerceptionRunner(
         aircraft_client=aircraft_client,  # type: ignore[arg-type]
         sources=[source],  # type: ignore[list-item]
@@ -3548,8 +3185,8 @@ def _f4_scenario(
     crew_console = CrewConsole(
         store=runner.store,
         tasks=runner.tasks,
-        mark_here_fn=logger_module._mark_here_fn(memory, runner),
-        mark_target_fn=logger_module._mark_target_fn(memory, runner),
+        mark_here_fn=body_module._mark_here_fn(memory, runner),
+        mark_target_fn=body_module._mark_target_fn(memory, runner),
     )
     output = io.StringIO()
     crew_console.output = output
@@ -3568,7 +3205,7 @@ def _f4_scenario(
             optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
         )
 
-    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
 
     utterances: list[str] = []
     aim_sources: list[str] = []
@@ -3679,51 +3316,25 @@ class TestF4DifferentialNoLeak:
 # timestamp" should not require the pilot to remember a flag) ------------
 
 
-def test_speech_log_defaults_on_with_crew_text_and_speech_input(
+def test_speech_log_defaults_on_an_ordinary_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """BL-B96: the crew session and speech input are both unconditional
+    now, so an ordinary run (no explicit `--speech-log`, no
+    `--no-speech-log`) always gets the default -- no flag pair to gate on
+    any more (the old 'without --crew-text --speech-input' negative test
+    has nothing left to exercise and is dropped, not ported)."""
     monkeypatch.chdir(tmp_path)
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=False)
     assert resolved == DEFAULT_SPEECH_LOG_PATH
     assert (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).is_dir()
-
-
-def test_speech_log_does_not_default_without_crew_text_and_speech_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    # Neither flag.
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=False, speech_input=False
-        )
-        is None
-    )
-    # Only one of the two.
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=True, speech_input=False
-        )
-        is None
-    )
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=False, speech_input=True
-        )
-        is None
-    )
-    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
 
 
 def test_no_speech_log_suppresses_the_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=True, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=True)
     assert resolved is None
     assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
 
@@ -3733,9 +3344,7 @@ def test_explicit_speech_log_wins_over_the_default(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     explicit = tmp_path / "elsewhere" / "speech.jsonl"
-    resolved = _resolve_speech_log_path(
-        speech_log=explicit, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=explicit, no_speech_log=False)
     assert resolved == explicit
     # No default-path directory creation happens on the explicit-path route.
     assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
@@ -3755,9 +3364,7 @@ def test_speech_log_default_degrades_to_none_when_directory_is_unwritable(
 
     monkeypatch.setattr(Path, "mkdir", _boom)
 
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=False)
 
     assert resolved is None
     assert "speech-log" in capsys.readouterr().err
@@ -3781,8 +3388,6 @@ def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
             "Syria",
             "--world-model-db",
             str(tmp_path / "wm.sqlite"),
-            "--crew-text",
-            "--speech-input",
             "--audio-adapter-url",
             "http://127.0.0.1:7795",
             "--speech-log",
@@ -3836,7 +3441,13 @@ def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["logger", "--aircraft-layer-url", "http://127.0.0.1:7791"],
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
+        ],
     )
 
     with pytest.raises(SystemExit):
@@ -3860,6 +3471,8 @@ def test_main_rejects_mission_understanding_without_world_model_dir(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
         ],
@@ -3904,6 +3517,8 @@ def test_main_rejects_world_model_db_theatre_mismatch(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--theatre",
             "Syria",
             "--world-model-db",
@@ -3981,7 +3596,7 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
         )
 
     monkeypatch.setattr(
-        logger_module, "open_world_model", _fail_if_open_world_model_called
+        body_module, "open_world_model", _fail_if_open_world_model_called
     )
 
     monkeypatch.setattr(
@@ -3991,6 +3606,8 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
             "--world-model-dir",
@@ -4034,6 +3651,8 @@ def test_main_gives_clean_error_for_unbuilt_theatre_store(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
             "--world-model-dir",
@@ -4118,12 +3737,12 @@ def test_an_unwritable_speech_log_says_so_once_and_keeps_the_command_working(
 # --- the poll thread must survive a raising dispatch -----------------------
 
 
-def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
+def test_crew_text_poll_loop_survives_a_raising_poll_and_keeps_going(
     tmp_path: pathlib.Path,
 ) -> None:
     """The poll loop runs on a *daemon* thread, so an exception escaping it
     kills the thread without killing the process: the REPL keeps accepting
-    input, the overlay holds its last frame, and perception/belief/speech
+    input, and perception/belief/speech
     are dead for the rest of the sortie with only a stderr traceback to say
     so. Nothing in the cockpit reports it.
 
@@ -4134,9 +3753,13 @@ def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
     Found by the security pass on `plans/watch-reporting/`
     (`security-review.md`); pre-existing rather than introduced there, and
     unreachable through today's narrow wire path, which is exactly why no
-    existing test covered it.
+    existing test covered it. Ported from the deleted `--console`-path
+    version of this test (BL-B96 removed `--console`) -- no crew-text
+    equivalent of this guard existed before, confirmed by grep, even
+    though `_run_crew_text_poll_loop` has its own identical `except
+    Exception` guard.
 
-    Drives the real `_run_console_poll_loop` on a real thread, with a
+    Drives the real `_run_crew_text_poll_loop` on a real thread, with a
     `run_once` that raises on its first call and succeeds afterwards, and
     asserts the second poll actually happened -- not merely that the thread
     is still alive, which a loop that had exited cleanly would also
@@ -4150,6 +3773,7 @@ def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
         _console_telemetry_dict(), {"objects": [_t72_world_object()]}
     )
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
 
     real_run_once = runner.run_once
     calls: list[int] = []
@@ -4169,8 +3793,16 @@ def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
     stop_event = threading.Event()
 
     poll_thread = threading.Thread(
-        target=_run_console_poll_loop,
-        args=(runner, aircraft_client, "Syria", db_path, 0.01, stop_event),
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
     )
     poll_thread.start()
     try:
@@ -4207,9 +3839,14 @@ def test_all_three_trace_consumers_see_one_polls_records(
     every poll for a whole sortie while nobody could see it.
 
     The module-level tests cover each consumer against fakes. This drives
-    the real `_run_console_poll_loop` on a real thread with all three
-    enabled at once and asserts each one actually received the poll — the
-    only arrangement that fails if the branches are reordered."""
+    the real `_run_crew_text_poll_loop` (ported from the deleted
+    `--console`-path version of this test -- BL-B96 removed `--console`,
+    and no crew-text equivalent of this real-thread ordering proof existed
+    before, confirmed by grep; `_run_crew_text_poll_loop`'s own body has
+    the identical collector-clear ordering, so the risk this test guards
+    is equally live there) on a real thread with all three enabled at once
+    and asserts each one actually received the poll — the only
+    arrangement that fails if the branches are reordered."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -4221,11 +3858,20 @@ def test_all_three_trace_consumers_see_one_polls_records(
         _console_telemetry_dict(), {"objects": [_t72_world_object()]}
     )
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
     stop_event = threading.Event()
 
     poll_thread = threading.Thread(
-        target=_run_console_poll_loop,
-        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
         kwargs={
             "detection_trace_path": trace_path,
             "eyesight_view": True,
@@ -4292,7 +3938,7 @@ def test_warn_live_los_coverage_gap_once_fires_exactly_once_under_continuous_gro
     `>= 1` -- `>= 1` is what the pre-fix flood already satisfies."""
     source = _naked_eye_source_stub()
     warned = False
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         for no_verdict in range(1, 11):
             source.live_los_coverage.no_verdict = no_verdict
             warned = _warn_live_los_coverage_gap_once([source], warned)
@@ -4309,7 +3955,7 @@ def test_warn_live_los_coverage_gap_once_never_fires_while_no_verdict_stays_zero
     must never log the transition warning, across many polls."""
     source = _naked_eye_source_stub()
     warned = False
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         for _ in range(10):
             warned = _warn_live_los_coverage_gap_once([source], warned)
 
@@ -4327,7 +3973,7 @@ def test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy(
     source.live_los_coverage.evaluated = 7
     source.live_los_coverage.no_verdict = 0
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         _log_live_los_coverage_summary([source])
 
     messages = [r.getMessage() for r in caplog.records]
@@ -4336,59 +3982,21 @@ def test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy(
     ], messages
 
 
-def test_console_poll_loop_logs_the_coverage_summary_in_its_finally_block(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """`_run_console_poll_loop`'s own teardown, not a direct call: drives
-    a real poll with a candidate carrying no `unit_name` (no live-LOS
-    join key), so gate 4 rejects it fail-closed and `no_verdict` becomes
-    1 -- then stops the loop and asserts the summary line landed with the
-    real totals, proving it runs from `finally:` and not just when called
-    directly."""
-    db_path = tmp_path / "region.sqlite"
-    conn = open_for_build(db_path)
-    conn.close()
-
-    aircraft_client = FakeConsoleAircraftClient(
-        _console_telemetry_dict(), {"objects": [_t72_world_object_no_live_verdict()]}
-    )
-    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
-    stop_event = threading.Event()
-
-    poll_thread = threading.Thread(
-        target=_run_console_poll_loop,
-        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
-    )
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
-        poll_thread.start()
-        try:
-            deadline = time.monotonic() + 5.0
-            while runner.last_t_sim is None and time.monotonic() < deadline:
-                time.sleep(0.02)
-        finally:
-            stop_event.set()
-            poll_thread.join(timeout=5.0)
-
-    assert not poll_thread.is_alive()
-    summaries = [
-        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
-    ]
-    assert summaries == [
-        "live LOS coverage: 1/1 gate-4 evaluations had no live verdict this sortie"
-    ], summaries
-
-
 def test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Same proof as the console-loop test above, for
-    `_run_crew_text_poll_loop`'s own `finally:` -- the two loops share no
-    code path for this, each wires the summary call independently, and
-    the review's blast-radius lesson (`plans/bl11-stage4-fail-closed/
-    review.md`) is exactly that a fix applied to one loop and not its
-    twin goes unnoticed."""
+    """Proof for `_run_crew_text_poll_loop`'s own `finally:` -- drives a
+    real poll with a candidate carrying no `unit_name` (no live-LOS join
+    key), so gate 4 rejects it fail-closed and `no_verdict` becomes 1,
+    then stops the loop and asserts the summary line landed with the real
+    totals, proving it runs from `finally:` and not just when called
+    directly. (This loop's own `--console` twin, which shared no code
+    path for this and wired the summary call independently, was deleted
+    by BL-B96 -- the review's blast-radius lesson, `plans/
+    bl11-stage4-fail-closed/review.md`, is exactly that a fix applied to
+    one loop and not its twin goes unnoticed, which is why this test
+    exists in its own right rather than as a lone proof.)"""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -4412,7 +4020,7 @@ def test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block(
             stop_event,
         ),
     )
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         poll_thread.start()
         try:
             deadline = time.monotonic() + 5.0
@@ -4458,7 +4066,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
     replaced with a spy (not a stub of `decide`'s own logic -- that is
     covered directly by `test_attack_run.py`'s `resolving_optic` tests)
     so this test asserts exactly one thing: the value crossing the
-    `logger.py`/`crew_console.py` boundary.
+    `body.py`/`crew_console.py` boundary.
 
     Confirmed to fail for the stated reason: reverting the call site
     to `resolving_optic=runner.optic_state.guidance_optic` makes
@@ -4904,10 +4512,10 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     coincidence, not something `--randomly-seed` alone pins, which is why
     reruns of the same seed did not reproduce it deterministically.
     """
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_failure(dead)
         reporter.report_failure(dead)
         reporter.report_failure(dead)
@@ -4917,7 +4525,7 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     messages = [
         record.getMessage()
         for record in caplog.records
-        if record.name == logger_module.__name__
+        if record.name == body_module.__name__
     ]
     assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
@@ -4941,13 +4549,13 @@ def test_connection_reporter_announces_the_first_connection(
     (a leaked `BrainLayerClient` daemon thread elsewhere in the suite
     logs via a different logger that also propagates to root).
     """
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_success()
 
     messages = [
-        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
     ]
     assert messages == ["aircraft layer connected"], messages
 
@@ -4961,10 +4569,10 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
     Filters to this module's own logger -- `BL-B92`, see
     `test_connection_reporter_says_disconnected_once_then_connected_once`'s
     docstring for why an unfiltered `caplog.records` is order-dependent."""
-    reporter = logger_module._ConnectionReporter()
+    reporter = body_module.ConnectionReporter(body_module.logger)
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
-    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
         reporter.report_failure(dead)
         reporter.report_success()
         reporter.report_failure(dead)
@@ -4972,7 +4580,7 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
         reporter.report_success()
 
     messages = [
-        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
     ]
     assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
@@ -4997,10 +4605,10 @@ def test_only_a_dead_socket_counts_as_connection_loss() -> None:
     timed_out.__cause__ = TimeoutError("timed out")
     bad_json = AircraftLayerError("invalid JSON from http://host/x: line 1")
 
-    assert logger_module._is_connection_loss(refused) is True
-    assert logger_module._is_connection_loss(timed_out) is True
-    assert logger_module._is_connection_loss(bad_json) is False
-    assert logger_module._is_connection_loss(ValueError("something else")) is False
+    assert body_module._is_connection_loss(refused) is True
+    assert body_module._is_connection_loss(timed_out) is True
+    assert body_module._is_connection_loss(bad_json) is False
+    assert body_module._is_connection_loss(ValueError("something else")) is False
 
 
 # --- _wait_for_next_tick (BL-11 Stage 1) ---------------------------------
@@ -5013,11 +4621,11 @@ def test_wait_for_next_tick_sleeps_only_the_remainder_of_the_interval(
     after the work, so a 1.0 s setting with 0.33 s of work realised 1.33 s.
     Sleeping to a deadline means the wait absorbs the work."""
     waits: list[float] = []
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 100.33)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 100.33)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == [pytest.approx(0.67)]
     assert next_tick == pytest.approx(102.0)
@@ -5028,11 +4636,11 @@ def test_wait_for_next_tick_does_not_sleep_when_the_work_overran(
 ) -> None:
     """An overrunning poll gets no sleep at all -- it is already late."""
     waits: list[float] = []
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 101.4)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 101.4)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == []
     assert next_tick == pytest.approx(102.4)
@@ -5050,11 +4658,11 @@ def test_wait_for_next_tick_drops_missed_ticks_rather_than_queueing_them(
     reads the latest telemetry rather than a backlog."""
     waits: list[float] = []
     # Four intervals past a 1.0 s deadline.
-    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 105.0)
+    monkeypatch.setattr(body_module.time, "monotonic", lambda: 105.0)
     stop_event = threading.Event()
     monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
 
-    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+    next_tick = body_module._wait_for_next_tick(stop_event, 101.0, 1.0)
 
     assert waits == []
     # 106.0, not 102.0: the three skipped ticks are gone, and the next poll
@@ -5069,7 +4677,7 @@ def test_wait_for_next_tick_returns_immediately_when_stopping() -> None:
     stop_event.set()
 
     started = time.monotonic()
-    logger_module._wait_for_next_tick(stop_event, started + 5.0, 5.0)
+    body_module._wait_for_next_tick(stop_event, started + 5.0, 5.0)
 
     assert time.monotonic() - started < 1.0
 
@@ -5083,7 +4691,7 @@ def test_no_stale_five_hertz_claims_remain_in_src() -> None:
     `perception/motion.py` is deliberately exempt: its 5 Hz claim is a
     *behavioural* assumption about object arrival rate, tracked as
     `BL-B34`, not a statement about this loop's own rate."""
-    src = Path(logger_module.__file__).parent
+    src = Path(body_module.__file__).parent
     offenders = sorted(
         str(path.relative_to(src))
         for path in src.rglob("*.py")
@@ -5094,150 +4702,83 @@ def test_no_stale_five_hertz_claims_remain_in_src() -> None:
     assert offenders == []
 
 
-# -- Live LOS coverage logging, plain-logger entry point
+# -- Live LOS coverage logging, real crew-text poll loop
 # (`plans/bl11-stage4-fail-closed/implementation.md` round 3, Security's
 # advisory finding) -----------------------------------------------------
+#
+# This section used to drive `main()`'s plain-logger `else:` branch
+# (neither `--console` nor `--crew-text`), which had no extracted
+# `_run_*_poll_loop` function of its own, via a `sys.argv`-monkeypatched
+# `main()` call. BL-B96 removed that branch entirely; `_run_crew_text_
+# poll_loop`'s own finally-block proof already exists above
+# (`test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_
+# block`), so only the WARNING-transition half is ported here, directly
+# against the real poll loop rather than through `main()`.
 
 
-def _run_plain_logger_main_for_n_polls(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    url: str,
-    n_polls: int,
+def test_crew_text_poll_loop_warns_on_the_live_los_coverage_gap_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Drives `main()`'s bare `else:` branch (no `--console`/`--crew-text`)
-    through exactly `n_polls` iterations of its `while True:` loop, then
-    stops it the same way a real operator does -- `KeyboardInterrupt` --
-    by rebinding the `time` name inside `logger` module's own namespace
-    (not the real `time` module's `sleep` attribute) to a stand-in that
-    raises on the `n_polls`-th call rather than actually sleeping.
-
-    **Deliberately not `monkeypatch.setattr(logger_module.time, "sleep",
-    ...)`** -- that mutates the real, process-wide `time` module, so any
-    *other* thread calling `time.sleep` during this test (e.g. a leftover
-    `belief.brain_client.BrainLayerClient` daemon poll thread from an
-    earlier test in the same pytest session, still retry-backoff-sleeping
-    because nothing stops a `daemon=True` thread) gets an unrelated
-    `KeyboardInterrupt` raised inside it too -- observed as a
-    `PytestUnhandledThreadExceptionWarning` the first time this was tried.
-    Rebinding `logger_module.time` itself only changes what `logger.py`'s
-    own `time.sleep(...)` call resolves to; every other module's `import
-    time` still gets the real one.
-
-    `main()` itself is not restructured; this calls it exactly as the CLI
-    would, the same `sys.argv`-monkeypatch pattern
-    `test_main_rejects_neither_theatre_pair_nor_mission_understanding`
-    already uses elsewhere in this file for `main()`'s argparse path --
-    extended here to also drive the loop body, since the plain-logger
-    branch has no extracted `_run_*_poll_loop` function of its own to call
-    directly (unlike `--console`/`--crew-text`)."""
+    """Security's advisory finding, ported to the real `_run_crew_text_
+    poll_loop` (the plain-logger branch this was first written against is
+    gone -- see the section comment above): drives two real polls against
+    a single frame with no `"line_of_sight"` key at all (the feed-absent
+    cause, `naked_eye_source._resolve_live_los_by_object_id`'s
+    `line_of_sight is None` branch) and a world object with no
+    `unit_name` either, so gate 4 rejects it fail-closed on both polls.
+    The transition fires on poll 1 (`no_verdict` 0 -> 1) and must not fire
+    again on poll 2 (`no_verdict` 1 -> 2, not a zero-to-nonzero
+    transition) -- asserts exactly one record, not `>= 1`, the same
+    distinction the pure-function test above makes for the same reason."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "logger",
-            "--aircraft-layer-url",
-            url,
-            "--theatre",
-            "Syria",
-            "--world-model-db",
-            str(db_path),
-        ],
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object_no_live_verdict()]}
     )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
 
-    real_time = time
+    real_run_once = runner.run_once
+    calls: list[int] = []
+    second_poll_done = threading.Event()
 
-    class _RaiseAfterNSleeps:
-        """Stands in for the `time` module as seen from inside `logger.py`
-        only -- every other attribute `main()` touches before reaching the
-        poll loop (`time.time()`, for `_per_run_log_paths`'s stamping)
-        delegates to the real module unchanged; only `sleep` is faked."""
+    def counting_run_once() -> list[Observation]:
+        result = real_run_once()
+        calls.append(len(calls))
+        if len(calls) >= 2:
+            second_poll_done.set()
+        return result
 
-        def __init__(self) -> None:
-            self._calls = 0
+    runner.run_once = counting_run_once  # type: ignore[method-assign]
+    stop_event = threading.Event()
 
-        def sleep(self, _seconds: float) -> None:
-            self._calls += 1
-            if self._calls >= n_polls:
-                raise KeyboardInterrupt
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
+        poll_thread.start()
+        try:
+            assert second_poll_done.wait(timeout=10.0), (
+                "the poll loop did not complete two cycles in time"
+            )
+        finally:
+            stop_event.set()
+            poll_thread.join(timeout=5.0)
 
-        def __getattr__(self, name: str) -> object:
-            return getattr(real_time, name)
-
-    monkeypatch.setattr(logger_module, "time", _RaiseAfterNSleeps())
-    logger_module.main()
-
-
-def test_plain_logger_path_warns_on_the_live_los_coverage_gap_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Security's advisory finding: `main()`'s plain-logger `else:` branch
-    (reached with neither `--console` nor `--crew-text`) shares
-    `_build_sources` with the two instrumented poll loops, so it is
-    subject to the identical fail-closed gate 4 -- but before this fix,
-    nothing in this branch ever called `_warn_live_los_coverage_gap_once`
-    at all, so a dead live-LOS feed here produced no signal whatsoever,
-    not even delayed. Drives two polls against a single frame with no
-    `"line_of_sight"` key at all (the feed-absent cause, `naked_eye_source.
-    _resolve_live_los_by_object_id`'s `line_of_sight is None` branch) and
-    a world object with no `unit_name` either, so gate 4 rejects it
-    fail-closed on both polls. The transition fires on poll 1
-    (`no_verdict` 0 -> 1) and must not fire again on poll 2 (`no_verdict`
-    1 -> 2, not a zero-to-nonzero transition) -- asserts exactly one
-    record, not `>= 1`, the same distinction round 2's pure-function test
-    makes for the same reason."""
-    frames = [
-        {
-            "telemetry": _console_telemetry_dict(),
-            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
-        }
-    ]
-    server = MockAircraftLayerServer(frames)
-    url = server.start()
-    try:
-        with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
-            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
-    finally:
-        server.stop()
-
+    assert not poll_thread.is_alive()
     warnings = [r for r in caplog.records if "live LOS coverage gap" in r.getMessage()]
     assert len(warnings) == 1, warnings
-
-
-def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Same finding, the other half: before this fix, this branch's
-    `finally:` only closed `world_model_conn` -- a dead feed here was
-    silent in the strongest sense this whole plan exists to prevent, not
-    even summarised post-flight. Same two-poll drive as the warning test
-    above (one frame, no live-LOS feed at all, held across both polls by
-    `MockAircraftLayerServer`'s "holds at the last frame" semantics), so
-    the accumulated totals are `evaluated=2, no_verdict=2` by the time
-    `KeyboardInterrupt` unwinds into `finally:`."""
-    frames = [
-        {
-            "telemetry": _console_telemetry_dict(),
-            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
-        }
-    ]
-    server = MockAircraftLayerServer(frames)
-    url = server.start()
-    try:
-        with caplog.at_level(logging.INFO, logger=logger_module.__name__):
-            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
-    finally:
-        server.stop()
-
-    summaries = [
-        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
-    ]
-    assert summaries == [
-        "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
-    ], summaries
 
 
 # -- Logging visibility under the real, unconfigured default (`plans/
@@ -5247,34 +4788,35 @@ def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
 # that hid this defect from four review rounds. These two prove the two
 # log lines are visible with *no* level override at all, i.e. under
 # whatever `main()` itself configures (`_configure_logger_for_main`), the
-# same way a real operator running `python -m logger ...` would see
+# same way a real operator running `python -m body ...` would see
 # them. ------------------------------------------------------------------
 
 
 def test_log_live_los_coverage_summary_is_visible_under_default_logging_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """No `caplog.at_level` anywhere in this test -- `capsys` captures
     whatever actually lands on the real `sys.stderr` stream, which is
     exactly what the DoD's repro ran against directly
-    (`PYTHONPATH=... python -c "logger.logger.info(...)"`). Same two-poll
-    drive as `test_plain_logger_path_logs_the_coverage_summary_in_its_
-    finally_block` above, so the expected totals are identical; the only
-    difference is the absence of a level override, which is the point."""
-    frames = [
-        {
-            "telemetry": _console_telemetry_dict(),
-            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
-        }
-    ]
-    server = MockAircraftLayerServer(frames)
-    url = server.start()
-    try:
-        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
-    finally:
-        server.stop()
+    (`PYTHONPATH=... python -c "logger.logger.info(...)"`).
+
+    `_configure_logger_for_main()` runs unconditionally at the top of
+    `main()`, before `main()` builds anything else, so this calls it
+    directly and then the real logging function, rather than driving a
+    full `main()` CLI invocation (BL-B96 removed the plain-logger `else:`
+    branch this test used to drive via `_run_plain_logger_main_for_n_
+    polls`; the surviving crew-session path blocks on real `sys.stdin`
+    inside `_run_crew_text_repl`, which that helper's `KeyboardInterrupt`-
+    from-`time.sleep` trick -- raised on the *background* poll thread --
+    cannot unblock, so porting this to drive through `main()` again is not
+    a like-for-like substitution; testing the two real functions this
+    config call is actually for proves the same property)."""
+    source = _naked_eye_source_stub()
+    source.live_los_coverage.evaluated = 2
+    source.live_los_coverage.no_verdict = 2
+
+    body_module._configure_logger_for_main()
+    body_module._log_live_los_coverage_summary([source])
 
     stderr = capsys.readouterr().err
     assert (
@@ -5284,8 +4826,6 @@ def test_log_live_los_coverage_summary_is_visible_under_default_logging_config(
 
 
 def test_live_los_coverage_gap_warning_is_visible_under_default_logging_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The transition warning's half of the same proof. This one worked
@@ -5293,19 +4833,14 @@ def test_live_los_coverage_gap_warning_is_visible_under_default_logging_config(
     `WARNING` threshold -- nothing pinned that it stays visible once
     `_configure_logger_for_main` starts managing this logger's level and
     handler explicitly, so this is a regression guard for the fix itself,
-    not only a test of pre-existing behaviour."""
-    frames = [
-        {
-            "telemetry": _console_telemetry_dict(),
-            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
-        }
-    ]
-    server = MockAircraftLayerServer(frames)
-    url = server.start()
-    try:
-        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
-    finally:
-        server.stop()
+    not only a test of pre-existing behaviour. See the test above for why
+    this calls `_configure_logger_for_main()` directly rather than driving
+    a full `main()` CLI invocation, post-BL-B96."""
+    source = _naked_eye_source_stub()
+    source.live_los_coverage.no_verdict = 1  # 0 -> nonzero fires the warning
+
+    body_module._configure_logger_for_main()
+    body_module._warn_live_los_coverage_gap_once([source], False)
 
     stderr = capsys.readouterr().err
     assert "live LOS coverage gap" in stderr, stderr
@@ -6695,7 +6230,7 @@ def test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff(
             "effector_registry": effector_registry,
         },
     )
-    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=body_module.__name__):
         poll_thread.start()
         try:
             deadline = time.monotonic() + 5.0
@@ -6930,7 +6465,7 @@ def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
 
 
 def test_load_effector_config_round_trips_the_real_committed_files() -> None:
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is False
     assert set(registry) == {
@@ -6955,10 +6490,8 @@ def test_load_effector_config_logs_the_unverified_effector(
 ) -> None:
     """Stage 1 review follow-up: `EffectorDef.unverified` (`cplr_distr`)
     had no consumer at all -- surfaced as one startup `INFO` line."""
-    with caplog.at_level(logging.INFO, logger="logger"):
-        _sequences, registry, _had_errors, _polled = (
-            logger_module._load_effector_config()
-        )
+    with caplog.at_level(logging.INFO, logger="body"):
+        _sequences, registry, _had_errors, _polled = body_module._load_effector_config()
 
     assert registry["cplr_distr"].unverified is True
     assert any(
@@ -6992,12 +6525,12 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
         ),
     }
     monkeypatch.setattr(
-        logger_module,
+        body_module,
         "load_registries_by_aircraft",
         lambda: fake_registries_by_aircraft,
     )
     monkeypatch.setattr(
-        logger_module,
+        body_module,
         "load_sequences",
         lambda *_args, **_kwargs: (
             {},
@@ -7005,7 +6538,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
         ),
     )
 
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is True
     assert registry == fake_registry
@@ -7019,12 +6552,12 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
 def test_load_effector_config_missing_own_aircraft_directory_is_an_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(logger_module, "load_registries_by_aircraft", dict)
+    monkeypatch.setattr(body_module, "load_registries_by_aircraft", dict)
     monkeypatch.setattr(
-        logger_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
+        body_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
     )
 
-    sequences, registry, had_errors, _polled = logger_module._load_effector_config()
+    sequences, registry, had_errors, _polled = body_module._load_effector_config()
 
     assert had_errors is True
     assert registry == {}

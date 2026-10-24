@@ -10,6 +10,7 @@ explicitly."""
 
 from __future__ import annotations
 
+import logging
 import math
 import socket
 import sqlite3
@@ -57,6 +58,7 @@ from belief.voice_commands import (
     CONFIRM_LATE_ANSWER_GRACE_S,
     CONFIRM_WINDOW_S,
 )
+from connection_reporter import ConnectionReporter
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
@@ -67,27 +69,9 @@ from perception.source import (
 )
 
 
-class FakeOverlayClient:
-    """A `push_text_line`-only double, mirroring `tests/test_logger.py`'s
-    own `FakeOverlayClient` (BL-2.5) -- kept as a small local copy rather
-    than a shared helper module, per this project's per-test-file fixture
-    convention. `fail_on` names texts that raise `AircraftLayerError`
-    instead of recording, used to exercise `CrewConsole._print`'s per-push
-    isolation."""
-
-    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
-        self.pushed: list[str] = []
-        self._fail_on = fail_on
-
-    def push_text_line(self, text: str) -> None:
-        if text in self._fail_on:
-            raise AircraftLayerError("simulated push failure")
-        self.pushed.append(text)
-
-
 class FakeSpeechClient:
-    """A `push_speech`/`stop`-only double, mirroring `FakeOverlayClient`
-    above -- used to exercise `CrewConsole.speech_client` (BL-10 first
+    """A `push_speech`/`stop`-only double -- used to exercise
+    `CrewConsole.speech_client` (BL-10 first
     slice, `plans/tts-voice-output/plan.md`, `stop` added `plans/
     inbound-speech/plan.md` Stage 3 follow-up). Records `(text, urgent)`
     pairs so tests can assert `bypass_gate` was threaded through as
@@ -197,9 +181,7 @@ class _FakeDescription:
 def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
     """`plans/f10-crew-commands/plan.md`'s `_nearest_contact_id` needs a
     real `EnrichmentContext` to read `facts["relative_now"]["range_m"]`
-    through -- mirrors `test_console.py`'s own `_enrichment_context` helper
-    (kept as a local copy per this project's per-test-file fixture
-    convention, same as `FakeOverlayClient` above): `describe_position` is
+    through: `describe_position` is
     stubbed to a fixed settlement, `project_terrain_aware` is a no-op
     passthrough of the observer position it is given, so a contact's
     projected world position is exactly its most recent observation's
@@ -423,27 +405,34 @@ def _make_because_valid_for_d10(
 def test_drain_brain_speaks_stand_by_once_at_the_threshold() -> None:
     """`plans/brain-layer/plan.md` D8, and the plan's own Stage 1
     acceptance criterion: "stand by" is spoken once, not repeatedly, once
-    an escalation has been outstanding for `STAND_BY_AFTER_S`."""
+    an escalation has been outstanding for `STAND_BY_AFTER_S`.
+
+    `_speak_stand_by_if_due` speaks through `_print` directly rather than
+    returning the line from `drain_brain` (see that method's own
+    docstring) -- `speech_client` is the observable proof, not the return
+    value."""
     from belief.crew_console import STAND_BY_AFTER_S
 
     store = ContactStore()
     brain_client = _CapturingBrainClient()
-    overlay = FakeOverlayClient()
+    speech_client = FakeSpeechClient()
     console = CrewConsole(
-        store=store, brain_client=brain_client, overlay_client=overlay
+        store=store,
+        brain_client=brain_client,
+        speech_client=speech_client,  # type: ignore[arg-type]
     )
 
     console.handle_line("should we go north of the ridge?", now_sim=0.0)
 
     console.drain_brain(now_sim=STAND_BY_AFTER_S - 0.1)
-    assert "Stand by." not in overlay.pushed
+    assert "Stand by." not in [text for text, _urgent in speech_client.pushed]
 
     console.drain_brain(now_sim=STAND_BY_AFTER_S)
-    assert overlay.pushed.count("Stand by.") == 1
+    assert [text for text, _urgent in speech_client.pushed].count("Stand by.") == 1
 
     # Still outstanding on a later poll -- must not speak it again.
     console.drain_brain(now_sim=STAND_BY_AFTER_S + 5.0)
-    assert overlay.pushed.count("Stand by.") == 1
+    assert [text for text, _urgent in speech_client.pushed].count("Stand by.") == 1
 
 
 def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None:
@@ -455,10 +444,7 @@ def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None
     store = _two_ambiguous_bmp_contacts()
     contact_id = store.contacts[0].id
     brain_client = _CapturingBrainClient()
-    overlay = FakeOverlayClient()
-    console = CrewConsole(
-        store=store, brain_client=brain_client, overlay_client=overlay
-    )
+    console = CrewConsole(store=store, brain_client=brain_client)
 
     console.handle_line("watch that bmp", now_sim=0.0)
     assert len(brain_client.payloads) == 1
@@ -482,7 +468,6 @@ def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None
     lines = console.drain_brain(now_sim=1.0)
 
     assert lines == ["Lost him."]
-    assert overlay.pushed == ["Lost him."]
 
 
 def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
@@ -748,7 +733,7 @@ def test_drain_brain_tick_rate_unaffected_by_a_wedged_brain() -> None:
     not just `BrainLayerClient.poll_replies()`'s own unit-level guarantee
     (`test_brain_client.py`) -- since `drain_brain` is what the shared
     crew-text poll thread actually calls once per tick alongside
-    `drain_events`/`_poll_f10_commands`/`_poll_transcripts`. Before the
+    `drain_events`/`_poll_transcripts`. Before the
     fix, this exact scenario cost 5015ms per call, every call."""
     with _WedgedBrainServer() as server:
         brain_client = BrainLayerClient(base_url=server.base_url, poll_timeout_s=5.0)
@@ -870,9 +855,8 @@ def test_act_reports_no_such_contact_for_a_reference_that_has_since_vanished() -
     """`belief.utterance.parse_utterance` only ever resolves a reference to
     a contact id that exists in the store at parse time, so `_act`'s
     "no such contact" branches are defensive rather than reachable through
-    `handle_line` alone (mirrors `belief.console.format_event_for_overlay`'s
-    own defensive fallback for a similarly-impossible-in-practice case) --
-    exercised directly here so the defensive code itself stays correct."""
+    `handle_line` alone -- exercised directly here so the defensive code
+    itself stays correct."""
     from belief.utterance import PartialParse
 
     console = CrewConsole(store=ContactStore())
@@ -904,137 +888,12 @@ def test_console_prints_to_its_configured_output() -> None:
     assert output.getvalue() == "test call\n"
 
 
-def test_no_overlay_push_when_overlay_client_is_unset() -> None:
-    # overlay_client defaults to None: a true no-op, no AttributeError, no
-    # push attempted -- existing no-op default, asserted explicitly here.
-    store = ContactStore()
-    console = CrewConsole(store=store)
-    lines = console.handle_line("!inject-urgent CONTACT_1 test call", now_sim=0.0)
-    assert lines == ["test call"]
-
-
-def test_readback_pushes_to_overlay() -> None:
-    store = ContactStore()
-    store.ingest(
-        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
-        now_sim=0.0,
-    )
-    store.tick(now_sim=0.0)
-    contact_id = store.contacts[0].id
-
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
-
-    assert lines == [f"Watching {contact_id}."]
-    assert overlay_client.pushed == [f"Watching {contact_id}."]
-
-
-def test_contact_report_pushes_to_overlay() -> None:
-    store = ContactStore()
-    store.ingest(
-        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
-        now_sim=0.0,
-    )
-    store.tick(now_sim=0.0)
-    contact_id = store.contacts[0].id
-
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    lines = console.handle_line(f"status {contact_id}", now_sim=0.0)
-
-    assert len(lines) == 1
-    assert overlay_client.pushed == lines
-
-
-def test_drained_lifecycle_event_pushes_to_overlay() -> None:
-    store = ContactStore()
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    store.ingest(
-        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
-        now_sim=0.0,
-    )
-    store.tick(now_sim=0.0)
-
-    spoken = console.drain_events(now_sim=0.0)
-
-    assert len(spoken) == 1
-    assert overlay_client.pushed == spoken
-
-
-def test_urgent_call_pushes_to_overlay_with_prefix_but_prints_unprefixed() -> None:
-    import io
-
-    store = ContactStore()
-    overlay_client = FakeOverlayClient()
-    output = io.StringIO()
-    console = CrewConsole(
-        store=store,
-        output=output,
-        overlay_client=overlay_client,  # type: ignore[arg-type]
-    )
-
-    lines = console.handle_line(
-        "!inject-urgent CONTACT_1 Missile launch, 9 o'clock! Break right!",
-        now_sim=0.0,
-    )
-
-    assert lines == ["Missile launch, 9 o'clock! Break right!"]
-    assert output.getvalue() == "Missile launch, 9 o'clock! Break right!\n"
-    assert overlay_client.pushed == ["!! Missile launch, 9 o'clock! Break right!"]
-
-
-def test_inject_urgent_usage_message_is_not_prefixed_when_pushed() -> None:
-    store = ContactStore()
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    lines = console.handle_line("!inject-urgent CONTACT_1", now_sim=0.0)
-
-    assert lines == ["usage: !inject-urgent <contact_id> <text>"]
-    assert overlay_client.pushed == ["usage: !inject-urgent <contact_id> <text>"]
-
-
-def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaining_lines() -> (
-    None
-):
-    store = ContactStore()
-    store.ingest(
-        [
-            _observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2"),
-        ],
-        now_sim=0.0,
-    )
-    store.tick(now_sim=0.0)
-    contact_id = store.contacts[0].id
-    detected_line = "BMP-2."
-
-    overlay_client = FakeOverlayClient(fail_on=frozenset({detected_line}))
-    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    # drain_events would normally push one line for the CONTACT_DETECTED
-    # event above; make that push fail and confirm it degrades silently.
-    spoken = console.drain_events(now_sim=0.0)
-    assert spoken == [detected_line]
-    assert overlay_client.pushed == []  # the one push failed, nothing recorded
-
-    # A second, unrelated push in a later call must still go through --
-    # one failed push must not disable the sink for subsequent lines.
-    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
-    assert overlay_client.pushed == [f"Watching {contact_id}."]
-    assert lines == [f"Watching {contact_id}."]
-
-
 # -- speech_client (BL-10 first slice, plans/tts-voice-output/plan.md) ------
 
 
 def test_no_speech_push_when_speech_client_is_unset() -> None:
     # speech_client defaults to None: a true no-op, no AttributeError, no
-    # push attempted -- mirrors overlay_client's own no-op default.
+    # push attempted.
     store = ContactStore()
     console = CrewConsole(store=store)
     lines = console.handle_line("!inject-urgent CONTACT_1 test call", now_sim=0.0)
@@ -1087,14 +946,13 @@ def test_urgent_call_pushes_to_speech_client_as_urgent() -> None:
     )
 
     assert lines == ["Missile launch, 9 o'clock! Break right!"]
-    # Unlike the overlay sink (which gets a "!! " text prefix), the speech
-    # sink gets the *unmodified* text with urgent=True -- bypass_gate is
-    # threaded straight through as push_speech's urgent argument, not
-    # encoded into the text (plan Decision 3).
+    # The speech sink gets the *unmodified* text with urgent=True --
+    # bypass_gate is threaded straight through as push_speech's urgent
+    # argument, not encoded into the text (plan Decision 3).
     assert speech_client.pushed == [("Missile launch, 9 o'clock! Break right!", True)]
 
 
-def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay() -> (
+def test_failed_speech_push_degrades_without_raising_and_recovers_on_the_next_line() -> (
     None
 ):
     store = ContactStore()
@@ -1106,19 +964,16 @@ def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay(
     contact_id = store.contacts[0].id
     detected_line = "BMP-2."
 
-    overlay_client = FakeOverlayClient()
     speech_client = FakeSpeechClient(fail_on=frozenset({detected_line}))
     console = CrewConsole(
         store=store,
-        overlay_client=overlay_client,  # type: ignore[arg-type]
         speech_client=speech_client,  # type: ignore[arg-type]
     )
 
-    # The speech push fails, but the overlay push for the same line must
-    # still succeed -- one sink's failure must not block another's.
+    # The speech push fails, but drain_events must still return the line
+    # and must not raise.
     spoken = console.drain_events(now_sim=0.0)
     assert spoken == [detected_line]
-    assert overlay_client.pushed == [detected_line]
     assert speech_client.pushed == []
 
     # A second, unrelated push in a later call must still go through --
@@ -1126,6 +981,45 @@ def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay(
     lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
     assert speech_client.pushed == [(f"Watching {contact_id}.", False)]
     assert lines == [f"Watching {contact_id}."]
+
+
+def test_speech_push_failure_reports_through_the_shared_reporter_and_recovers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """BL-B96 Stage 4 (user direction: "warn and keep trying ... as with a
+    bad config file"): with `audio_adapter_reporter` wired (`body.py`'s own
+    posture, not the `None`-fallback the test above exercises), a failed
+    push reports through it once, on the transition, rather than a full
+    traceback -- and the *same* reporter instance is what `_poll_
+    transcripts` reports through too (not asserted here, see `test_body.
+    py`'s own test for that half), which is the entire reason this must be
+    shared rather than built fresh per call site."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    detected_line = "BMP-2."
+
+    speech_client = FakeSpeechClient(fail_on=frozenset({detected_line}))
+    reporter = ConnectionReporter(logging.getLogger("body"), label="audio adapter")
+    console = CrewConsole(
+        store=store,
+        speech_client=speech_client,  # type: ignore[arg-type]
+        audio_adapter_reporter=reporter,
+    )
+
+    with caplog.at_level(logging.INFO, logger="body"):
+        console.drain_events(now_sim=0.0)  # the failing push
+        speech_client._fail_on = frozenset()  # adapter recovers
+        console.handle_line("radio check", now_sim=0.0)  # any later push
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "body"]
+    assert messages == [
+        "audio adapter disconnected (simulated push failure)",
+        "audio adapter connected",
+    ], messages
 
 
 # -- handle_command (plans/f10-crew-commands/plan.md) -------------------
@@ -1163,17 +1057,6 @@ def test_stop_talking_calls_speech_client_stop_not_push_speech() -> None:
     assert speech_client.stop_calls == 1
 
 
-def test_stop_talking_pushes_nothing_to_the_overlay() -> None:
-    """No line, no overlay push, no `"!! "` prefix -- `_print` is never
-    called for this token at all."""
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    console.handle_command("stop_talking", now_sim=0.0)
-
-    assert overlay_client.pushed == []
-
-
 def test_stop_talking_interrupt_failure_does_not_raise() -> None:
     """A failed interrupt call degrades silently -- same per-sink isolation
     posture as every other `speech_client` use in `_print`, even though
@@ -1206,17 +1089,6 @@ def test_silence_speaks_one_word_acknowledgement_then_goes_quiet() -> None:
     assert console.silenced is True
 
 
-def test_silence_pushes_nothing_to_the_overlay_differently_than_speech() -> None:
-    """The acknowledgement is spoken *and* shown -- `silence` gates only
-    the audio sink, never the overlay, even for its own ack."""
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
-
-    console.handle_command("silence", now_sim=0.0)
-
-    assert overlay_client.pushed == ["Quiet."]
-
-
 def test_silence_does_not_call_speech_client_stop() -> None:
     """`silence` and `stop_talking` answer different questions -- silence
     must not reach for the interrupt-only call `stop_talking` owns."""
@@ -1231,15 +1103,12 @@ def test_silence_does_not_call_speech_client_stop() -> None:
 def test_silence_suppresses_a_drained_callout_that_would_otherwise_be_spoken() -> None:
     store = ContactStore()
     speech_client = FakeSpeechClient()
-    overlay_client = FakeOverlayClient()
     console = CrewConsole(
         store=store,
         speech_client=speech_client,  # type: ignore[arg-type]
-        overlay_client=overlay_client,  # type: ignore[arg-type]
     )
     console.handle_command("silence", now_sim=0.0)
     speech_client.pushed.clear()
-    overlay_client.pushed.clear()
 
     # Well clear of the ack's own `CalloutScheduler.busy_until_sim` budget
     # (`note_reply` still runs unconditionally -- see `_print`'s docstring
@@ -1256,9 +1125,6 @@ def test_silence_suppresses_a_drained_callout_that_would_otherwise_be_spoken() -
     # simply never voiced.
     assert len(spoken) == 1
     assert speech_client.pushed == []
-    # The text/overlay surfaces are untouched by silence (decision:
-    # the use case is audio, so crew-text/overlay keep working).
-    assert overlay_client.pushed == [spoken[0]]
 
 
 def test_silence_suppresses_an_injected_urgent_call_too() -> None:
@@ -1275,8 +1141,8 @@ def test_silence_suppresses_an_injected_urgent_call_too() -> None:
         now_sim=1.0,
     )
 
-    # The line is still produced (the overlay/text path, and the return
-    # value, are unaffected by silence) -- only the audio push is gated.
+    # The line is still produced (the text path and the return value are
+    # unaffected by silence) -- only the audio push is gated.
     assert lines == ["Missile launch, 9 o'clock! Break right!"]
     assert speech_client.pushed == []
 
@@ -1562,19 +1428,18 @@ def test_not_refused_by_default_dispatches_normally() -> None:
 # "(a)"): `drain_events`/`drain_brain` must not speak proactively while ----
 # `refused` either -- constructed directly against a non-empty store/ -----
 # pending-escalation state, bypassing the reset-always-precedes-refusal ----
-# call graph `logger.py` happens to give today, so these do not depend on ---
+# call graph `body.py` happens to give today, so these do not depend on ---
 # that invariant holding. -----------------------------------------------
 
 
 def test_refused_drain_events_speaks_nothing_against_a_non_empty_store() -> None:
     """A real, unacknowledged `CONTACT_DETECTED` event is present (built
-    directly on the store, not via `logger.py`'s reset-then-refuse call
+    directly on the store, not via `body.py`'s reset-then-refuse call
     graph) and `console.refused` is set directly -- proves the guard is a
     property of `CrewConsole` itself, not a consequence of the store
     always being empty by the time refusal is reached."""
     store = ContactStore()
-    overlay = FakeOverlayClient()
-    console = CrewConsole(store=store, overlay_client=overlay)
+    console = CrewConsole(store=store)
     store.ingest(
         [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
         now_sim=0.0,
@@ -1585,7 +1450,6 @@ def test_refused_drain_events_speaks_nothing_against_a_non_empty_store() -> None
     spoken = console.drain_events(now_sim=0.0)
 
     assert spoken == []
-    assert overlay.pushed == []
 
 
 def test_refused_drain_events_consumes_rather_than_leaves_the_event_queued() -> None:
@@ -1610,7 +1474,7 @@ def test_refused_drain_events_consumes_rather_than_leaves_the_event_queued() -> 
 
 def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> None:
     """A real escalation is outstanding and a reply for it is queued
-    (built directly, not via `logger.py`'s call graph) -- `console.refused`
+    (built directly, not via `body.py`'s call graph) -- `console.refused`
     set directly must stop both D8's "stand by" and the reply's own
     readback/confirm/pick action, not merely suppress the returned lines
     while still running `_handle_brain_reply`'s side effects
@@ -1619,11 +1483,8 @@ def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> No
 
     store = ContactStore()
     brain_client = _CapturingBrainClient()
-    overlay = FakeOverlayClient()
     tasks = TaskStore()
-    console = CrewConsole(
-        store=store, brain_client=brain_client, overlay_client=overlay, tasks=tasks
-    )
+    console = CrewConsole(store=store, brain_client=brain_client, tasks=tasks)
     console.handle_line("scan somethinggarbled", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
     brain_client.replies_to_return = [
@@ -1636,7 +1497,6 @@ def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> No
     lines = console.drain_brain(now_sim=STAND_BY_AFTER_S + 5.0)
 
     assert lines == []
-    assert overlay.pushed == []
     assert console._pending_confirmation is None
 
 
@@ -2255,26 +2115,6 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
     assert resolved_task1 is not None and resolved_task1.status == "cancelled"
 
 
-def test_handle_command_pushes_to_overlay_via_the_print_funnel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _RecordingAircraftClient()
-    overlay_client = FakeOverlayClient()
-    console = CrewConsole(
-        store=ContactStore(),
-        tasks=TaskStore(),
-        enrichment=_enrichment_context(monkeypatch),
-        aircraft_client=client,  # type: ignore[arg-type]
-        overlay_client=overlay_client,  # type: ignore[arg-type]
-    )
-    console.on_ground = False
-
-    lines = console.handle_command("scan_ahead", now_sim=0.0)
-
-    assert lines == ["Scanning ahead."]
-    assert overlay_client.pushed == ["Scanning ahead."]
-
-
 def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2642,7 +2482,7 @@ def test_cancel_task_cancels_superseded_tasks_too_so_none_resurrect(
     reasoning that a superseded scan is not "currently governing" and so
     should not be swept up. That reasoning had the consequence backwards.
     A superseded `scan_area` is inert *precisely because* a newer one
-    outranks it in `logger._active_gaze`'s most-recent-wins tie-break --
+    outranks it in `body._active_gaze`'s most-recent-wins tie-break --
     so cancelling only the newest **promotes the older one straight back
     into steering the gaze**.
 
@@ -4226,7 +4066,7 @@ def test_follow_with_no_qualifiers_says_again() -> None:
 
 
 # --- Stage 4 (plans/sortie-2026-09-26-fixes/plan.md, Fix C): --------------
-# command-dependent lowering. `logger.py` reads `commands_handled`/
+# command-dependent lowering. `body.py` reads `commands_handled`/
 # `last_command_target_contact_id` to decide whether to lower the
 # binoculars -- these tests pin the `CrewConsole`-side facts that decision
 # rests on: what actually increments `commands_handled`, and what
@@ -4276,10 +4116,10 @@ def test_say_again_does_not_burn_the_optic_interrupt() -> None:
 
 def test_follow_records_its_resolved_target(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_handle_follow` sets `last_command_target_contact_id` to the
-    contact it resolved -- the fact `logger.py`'s glue block reads to
+    contact it resolved -- the fact `body.py`'s glue block reads to
     decide whether a `follow` continued an in-progress look. Confirmed
     directly against `CrewConsole` state, independent of `OpticState`
-    (that half is `logger.py`'s own concern, see `test_logger.py`)."""
+    (that half is `body.py`'s own concern, see `test_body.py`)."""
     store = ContactStore()
     store.ingest(
         [
@@ -5354,7 +5194,7 @@ def test_engage_with_no_selection_starts_the_run_via_slots(
 ) -> None:
     """`engage <what> <where>` (Decision 15) -- selects exactly as
     `select_target` does, then sets `attack_run_transition` to signal the
-    poll loop (`logger.py`'s own wiring, not exercised by this test)."""
+    poll loop (`body.py`'s own wiring, not exercised by this test)."""
     store = ContactStore()
     store.ingest(
         [
@@ -5509,7 +5349,7 @@ def test_where_is_it_with_no_target_selected_says_no_target() -> None:
     exact wording: *"if no target ... then say 'No target'"*. The token
     sets `where_is_it_requested` and returns `[]` immediately
     (`NO_RETURN_VALUE_COMMAND_TOKENS`); the real answer is spoken by
-    `drain_where_is_it`, called the way `logger.py`'s poll loop calls it
+    `drain_where_is_it`, called the way `body.py`'s poll loop calls it
     -- right after `handle_command`, with `runner.attack_run_state`
     (`None` here, since no run was ever engaged)."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
@@ -5839,7 +5679,7 @@ def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
     assert console.scheduler.busy_until_sim > 0.0
     printed_after_engage = output.getvalue()
 
-    # The poll loop's own first tick after `engage` (`logger.py`): a fresh
+    # The poll loop's own first tick after `engage` (`body.py`): a fresh
     # `AttackRunState()`, drained immediately, same `now_sim` the readback
     # was spoken at -- the channel is still busy.
     busy_state = console.drain_attack_run(
@@ -5877,7 +5717,7 @@ def test_drain_attack_run_ends_the_run_after_drop_target(
     task was gone -- the engaged flag then survived to wrongly claim the
     gaze for whatever was selected next. `drain_attack_run` must treat
     "the standing task is gone" exactly like the vanished-contact branch:
-    return `None`, which is what `logger.py` assigns straight onto
+    return `None`, which is what `body.py` assigns straight onto
     `runner.attack_run_state`, clearing `attack_run_engaged`."""
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()

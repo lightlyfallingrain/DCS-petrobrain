@@ -23,8 +23,8 @@ dropped as stale or vanished). No pre-rendered text is ever stored.
 **Occupancy is modelled in sim time, never wall clock.** A real
 playback-completion signal was rejected outright (see the plan's "Replay
 determinism" section): it would have to come back from the Windows box
-through `audio-adapter`, does not exist when `--speech-audio` is off, and is
-unreproducible under replay -- `body-layer` replays recorded streams and sim
+through `audio-adapter`, does not exist when no audio adapter is reachable,
+and is unreproducible under replay -- `body-layer` replays recorded streams and sim
 time is authoritative there, never wall clock.
 `estimate_speech_duration_s` is a pure function of the rendered string, so
 every piece of this module's state is a sim-time float or an id set derived

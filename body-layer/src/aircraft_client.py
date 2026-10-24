@@ -15,23 +15,14 @@ collector's cache is still empty -- not an error, Export.lua may not have
 connected or DCS may not be running a mission -- and this client passes
 that through as `None` rather than raising.
 
-`push_text_line` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) is this
-client's one write call, the aircraft layer's only inbound/write path
-(`POST /text/push`). Unlike the `get_*` methods above, a failure here
-(network error, non-200, invalid JSON) raises `AircraftLayerError` rather
-than being swallowed -- this client call is between two processes that are
-both expected to be reachable when body-layer runs with `--overlay`, so a
-push failure is meaningful information for the caller
-(`logger.ConsolePerceptionRunner`'s per-push try/except is where that
-meaning gets consumed, so one failed push never stops the poll loop).
-
 `trigger_petrovich_search`/`get_petrovich_wheel_latest` (BL-6, `plans/
-bl6-commands-inspect-adapt/plan.md`) are this milestone's second
-inbound/write path and its matching read. `trigger_petrovich_search`
-follows `push_text_line`'s raise-on-failure posture, not the `get_*`
-methods' swallow-and-return-`None` one -- per the plan's explicit
-asymmetry note on `aircraft-layer/src/collector/command_sender.py`: unlike
-`/text/push`'s opaque display string, a dropped search command is a real
+bl6-commands-inspect-adapt/plan.md`) are this milestone's first
+inbound/write path (`BL-B96` removed the original first, `push_text_line`/
+`POST /text/push`) and its matching read. `trigger_petrovich_search`
+raises `AircraftLayerError` on failure rather than swallowing it, not the
+`get_*` methods' swallow-and-return-`None` posture -- per the plan's explicit
+asymmetry note on `aircraft-layer/src/collector/command_sender.py`: a
+dropped search command is a real
 behavioral gap the caller needs to know about, not an expected "listener
 absent" state. `get_petrovich_wheel_latest` is an ordinary `get_*` read
 (swallows nothing itself, `None` on an empty cache) mirroring
@@ -59,19 +50,11 @@ follows `trigger_petrovich_search`'s raise-on-failure posture, not the
 push is a real coverage gap (the query cone can go stale, plan SS9c), not
 an opaque display string to swallow.
 
-`get_f10_commands` (`plans/f10-crew-commands/plan.md`) is this seam's
-first *inbound* read -- `GET /f10_commands/poll` drains the aircraft
-layer's F10-command queue, so unlike every other `get_*` method here, its
-empty state is `[]`, not `None` (the response is always a JSON list, never
-`null`). It still raises `AircraftLayerError` on transport/parse failure,
-the same posture as every other `get_*` -- only the *empty* state differs
-from the `/latest`-style endpoints.
-
 `get_mission_start_latest` (`plans/bl15-mission-start/plan.md`, BL-15
 Stage 1) is this seam's `GET /mission_start/latest` counterpart to
 `get_line_of_sight_latest` above -- same "not an error" empty-cache
 posture (no `onSimulationStart` has fired yet this collector process's
-lifetime, the ordinary state before a mission ever loads). `logger.py`'s
+lifetime, the ordinary state before a mission ever loads). `body.py`'s
 `_check_for_new_mission` is the one caller, comparing the returned
 `sequence` against the last one it saw to detect a genuine mission
 (re)start -- this client does no comparison or interpretation itself, same
@@ -91,10 +74,10 @@ responsibility as the velocity and LOS feeds.
 
 `write_cockpit_switch` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1)
 is this seam's write side for the generic cockpit-switch channel. It
-follows `push_text_line`/`trigger_petrovich_search`'s raise-on-failure
+follows `trigger_petrovich_search`'s raise-on-failure
 posture, not the `get_*` methods' swallow-and-return-`None` one -- a
 dropped cockpit-switch write is a real behavioral gap (a 9K113 power-up
-switch silently not thrown), not an opaque display string to swallow. It
+switch silently not thrown), not a state to swallow. It
 takes a raw `device`/`cmd`/`value` triple and performs **no validation
 and no allow-list check** of its own -- `belief.sight_effector` is the
 one module above this client that knows which device/cmd numbers mean
@@ -152,7 +135,7 @@ pure pass-through now rather than a conversion site.
 `get_spu8_state_latest` (`plans/effector-sequences/plan.md` D6, BL-B90
 Stage 2) is this seam's `GET /spu8/state` counterpart to `get_cockpit_
 switch_state_latest` -- same "not an error" empty-cache posture. Its one
-caller is `CrewConsole.drain_config_error` via `logger.py`'s poll loop,
+caller is `CrewConsole.drain_config_error` via `body.py`'s poll loop,
 reading `gate_open` to decide whether the intercom is up before speaking
 the one-shot "bad sequence file" error line (D6: *"once the intercom is
 up"*).
@@ -386,7 +369,7 @@ class AircraftLayerClient:
         """`POST /command/cockpit_switch` -> writes any clickable cockpit
         control (`aircraft-layer/src/collector/command_sender.py`'s
         `CommandSender.send_cockpit_switch`, BL-B66 Stage 1). Raises
-        `AircraftLayerError` on any failure, mirroring `push_text_line`/
+        `AircraftLayerError` on any failure, mirroring
         `trigger_petrovich_search` -- see the module docstring for why."""
         self._post_json(
             "/command/cockpit_switch",
@@ -448,14 +431,6 @@ class AircraftLayerClient:
             {"hour": hour, "fov_half_deg": fov_half_deg},
         )
 
-    def push_text_line(self, text: str) -> None:
-        """`POST /text/push` -> pushes one line to the in-cockpit overlay
-        (`aircraft-layer/src/collector/text_sender.py`, BL-2.5). Raises
-        `AircraftLayerError` on any failure -- see the module docstring for
-        why this call, unlike the `get_*` methods above, does not swallow
-        failure."""
-        self._post_json("/text/push", {"text": text})
-
     def get_petrovich_wheel_latest(self) -> dict[str, Any] | None:
         """`GET /petrovich_wheel/latest` -> the most recent
         `list_indication(10)` (Petrovich's AI-Wheel state) sample as a dict
@@ -478,29 +453,11 @@ class AircraftLayerClient:
         to start a search (`aircraft-layer/src/collector/command_sender.py`,
         BL-6): `"forward"` for `SRCH FWD` (long press), `"boresight"` for
         `SRCH BRST` (short press). Raises `AircraftLayerError` on any
-        failure, mirroring `push_text_line` -- **not** the `get_*` methods'
+        failure -- **not** the `get_*` methods'
         swallow-and-return-`None` posture, since a dropped search command is
         a real behavioral gap the caller needs to know about (see the
         module docstring)."""
         self._post_json("/command/petrovich_search", {"mode": mode})
-
-    def get_f10_commands(self) -> list[dict[str, Any]]:
-        """`GET /f10_commands/poll` -> drains the aircraft layer's F10
-        radio-menu command queue (`aircraft-layer/src/collector/
-        f10_command_receiver.py`, `plans/f10-crew-commands/plan.md`),
-        returning every pending selection as a list of dicts (see
-        `aircraft-layer/src/schema/f10_command.py`'s `F10CommandEvent.
-        to_dict`, i.e. `{"command", "received_wall_clock_s"}`), oldest
-        first. Returns `[]` when nothing is pending -- see the module
-        docstring for why this is `[]`, not `None`, unlike the `get_*`
-        methods above. Raises `AircraftLayerError` on any transport/parse
-        failure, same as every other `get_*` method."""
-        result = self._get_json("/f10_commands/poll")
-        if not isinstance(result, list):
-            raise AircraftLayerError(
-                f"expected a JSON list from /f10_commands/poll, got {type(result).__name__}"
-            )
-        return result
 
     def _get_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"

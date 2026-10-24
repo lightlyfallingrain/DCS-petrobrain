@@ -308,7 +308,7 @@ from perception.visibility import LiveLosCoverage, VisibilityResult, check_visib
 #:
 #: **The rest of his tiering then falls out of this one number, with no
 #: extra mechanism**, because the cap is per *poll* and the live poll
-#: interval is 1 s (`logger._DEFAULT_POLL_INTERVAL_S`):
+#: interval is 1 s (`body._DEFAULT_POLL_INTERVAL_S`):
 #:
 #: | groups present | polls to admit | elapsed | his description |
 #: |---|---|---|---|
@@ -480,7 +480,7 @@ class NakedEyePerceptionSource:
     #: true no-op, same posture as `trace_sink`: `check_visibility`'s
     #: gate 5 never fires when this is `None`, so constructing this source
     #: without a `ForestOcclusion` is behaviour-identical to before this
-    #: field existed. `logger.py`'s `--forest-occlusion` flag (default
+    #: field existed. `body.py`'s `--forest-occlusion` flag (default
     #: off) is the only thing that ever supplies one.
     forest: ForestOcclusion | None = None
     #: `"on_change"` (default) is the per-object debounce, resolved at
@@ -506,7 +506,7 @@ class NakedEyePerceptionSource:
     #: gate 4 of `check_visibility` now rejects a candidate with no live
     #: LOS verdict rather than falling back to world-model's offline
     #: primitive, so a dead live-LOS feed would otherwise be silently
-    #: indistinguishable from an empty sky. `logger.py`'s poll loop reads
+    #: indistinguishable from an empty sky. `body.py`'s poll loop reads
     #: this after every `poll()` call and logs when `no_verdict` is
     #: nonzero. Not settable at construction (`init=False`) -- there is
     #: exactly one correct value, a fresh counter, so no caller should be
@@ -519,7 +519,7 @@ class NakedEyePerceptionSource:
     #: needs no state at all, module docstring point 1 of the plan's "hard
     #: parts"). `FREE_SCAN_PLAN` (the default) is the o'clock scan loop,
     #: not "no restriction" -- there is no unrestricted `ScanPlan` any more
-    #: (2C's whole point). `logger.py`'s poll loop is the only writer,
+    #: (2C's whole point). `body.py`'s poll loop is the only writer,
     #: assigning a new `ScanPlan` each tick from whatever ownship-relative
     #: scan sector is currently commanded (`FREE_SCAN_PLAN` again when
     #: nothing is commanded) -- the same single-assignment,
@@ -529,7 +529,7 @@ class NakedEyePerceptionSource:
     scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
 
     #: The instrument this poll looks through (`plans/binocular-optic/
-    #: plan.md` Stage 1). Assigned per poll by `logger._apply_active_gaze`
+    #: plan.md` Stage 1). Assigned per poll by `body._apply_active_gaze`
     #: alongside `scan_plan`, from the same resolution, for the same
     #: reason: the *decision* to raise binoculars reads beliefs, which
     #: `perception` may not import, so belief resolves and perception
@@ -541,7 +541,7 @@ class NakedEyePerceptionSource:
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
     #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
-    #: §7) -- assigned per poll by `logger._apply_active_gaze` alongside
+    #: §7) -- assigned per poll by `body._apply_active_gaze` alongside
     #: `optic`, from the same resolution: the sight's own *actual* pointing
     #: direction, built from `OpticState.actual_aim_azimuth_deg` (never
     #: belief's desired aim -- an instantly-teleporting cone would be an
@@ -550,7 +550,7 @@ class NakedEyePerceptionSource:
     #: by construction) -- `association.filter_player_bubble`'s own
     #: docstring on why that guards the whole added branch at zero cost.
     sight_cone: SightCone | None = None
-    #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `logger._apply_active_
+    #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `body._apply_active_
     #: gaze` whenever `OpticState.hands_busy_until_sim` is active this poll
     #: (`BL-B64` Stage 2, direction §6's "1 s hand movement") -- `poll()`
     #: below returns `[]` immediately while `now_sim` is still under this,
@@ -607,7 +607,7 @@ class NakedEyePerceptionSource:
         this clears each dedup/counter attribute directly instead. Does
         **not** touch `scan_plan`/`optic`/`sight_cone`/`suppressed_until_sim`
         -- those are per-poll fields the poll loop overwrites every tick
-        (`logger._apply_active_gaze`), not mission-scoped state that would
+        (`body._apply_active_gaze`), not mission-scoped state that would
         otherwise leak across a restart. `peripheral_stimulus_ids` is the
         same shape (the attention-capture channel that would ever write it
         does not exist yet -- it stays its construction-time default

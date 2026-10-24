@@ -9,7 +9,7 @@ Drives a real `NakedEyePerceptionSource` (monkeypatched the same way
 `test_naked_eye_source.py` does -- no live DCS/world-model needed) across a
 simulated 60 s at 1 Hz, feeding every poll's `Observation`s into a real
 `belief.contacts.ContactStore` (`ingest` + `tick`, mirroring how
-`logger.py`'s `--console` pipeline drives the two together). This is the
+`body.py`'s poll loop drives the two together). This is the
 one test in this stage that exercises source + belief together, rather than
 either module in isolation.
 """
@@ -133,8 +133,8 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run_pipeline(emit_mode: str) -> tuple[ContactStore, list[float]]:
     """Poll a stationary, continuously-visible naked-eye candidate once per
     second for `_SIMULATED_DURATION_S`, ingesting+ticking each poll's
-    observations into a fresh `ContactStore` (mirroring how `logger.py`'s
-    `--console` pipeline drives a source and the store together). Returns
+    observations into a fresh `ContactStore` (mirroring how `body.py`'s
+    poll loop drives a source and the store together). Returns
     the store plus the sim-times at which a poll actually emitted."""
     world_objects = {"objects": [_world_object(1, lat_deg=500.0, lon_deg=0.0)]}
     client = FakeAircraftClient(world_objects)

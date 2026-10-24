@@ -123,7 +123,7 @@ The entries are in the order they were written, which is roughly perception → 
   stops receiving percepts and decays through the existing `OBSERVED_WINDOW_S`/
   `POSITION_HALF_LIFE_S`/`LOST_THRESHOLD_S` ladder — no new decay constant (Decision 5). Wired into
   `NakedEyePerceptionSource` only (`forest: ForestOcclusion | None = None`, Stage 2) via
-  `logger.py`'s `--forest-occlusion`/`--no-forest-occlusion` (`argparse.BooleanOptionalAction`,
+  `body.py`'s `--forest-occlusion`/`--no-forest-occlusion` (`argparse.BooleanOptionalAction`,
   default off) — `None` is a true no-op, same posture as `trace_sink`/`live_los_coverage`.
 - `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md` slice 1, per-tier multipliers
   by slice 2A `plans/detection-cones-slice2/plan.md` / `body-layer/research/2026-09-21-slice2-model-
@@ -265,7 +265,7 @@ The entries are in the order they were written, which is roughly perception → 
   with its cluster's member `object_id`s and the emitted `Observation.id` once clustering/emission
   are done — see `detection_trace.py`'s own Structure entry. `forest: perception.forest.
   ForestOcclusion | None = None` (`plans/forest-occlusion/plan.md` Stage 2) is constructed by
-  `logger._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
+  `body._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
   `check_visibility` call this poll, alongside `trace_sink` — `None` (the default) is a true no-op.
   `_build_observation` populates `Observation.relative_direction` (`plans/attack-run/plan.md`
   Decision 16, Stage 2) only when the emitted cluster's `live_los_clear is True` — truth-to-truth
@@ -478,7 +478,7 @@ The entries are in the order they were written, which is roughly perception → 
   *current* ownship position — never cached, since ownship moves every poll), `motion_when_seen`
   (direction derived from a contact's two most recent distinct implied positions, `None` when fewer
   exist). `EnrichmentContext` bundles `conn`/`theatre`/`ownship`/the cache and is the one object
-  threaded through `tools.py`/`console.py`/`logger.py` above. `semantic_facts_for` (osm-landcover-
+  threaded through `tools.py`/`console.py`/`body.py` above. `semantic_facts_for` (osm-landcover-
   optimization, `plans/osm-landcover-optimization/plan.md` Design D7) reads world-model's newer
   `SettlementInfo`/`WaterInfo.subtype` for wording ("a built-up area" for an unnamed built-up
   settlement; "a river"/"a lake"/"a reservoir" for unnamed water) and appends two more facts after
@@ -584,11 +584,11 @@ The entries are in the order they were written, which is roughly perception → 
   value — the two paths deliberately disagree, reviewed and pinned
   (`test_speech.py::test_group_composition_clause_folds_op_groupsomething_into_undifferentiated`),
   not a bug to fix here.
-- `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
+- `src/body.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete
   `HybridPerceptionSource` and (PB-1.5) `NakedEyePerceptionSource` and drives the poll loop
-  (`python -m logger --aircraft-layer-url ... --theatre ... --world-model-db ...` — see
+  (`python -m body --aircraft-layer-url ... --theatre ... --world-model-db ...` — see
   "Running the live logger" above; `--world-model-db` is required by `NakedEyePerceptionSource`'s
   terrain LOS gate) — untested by design, same posture as `aircraft-layer/src/collector/
   __main__.py`'s own live-process entrypoint. PB-2 Stage 3 adds `ConsolePerceptionRunner` and a
@@ -665,6 +665,19 @@ The entries are in the order they were written, which is roughly perception → 
   a readback while Petrovich kept free-scanning. `run_once` passes `ownship.heading_true_deg`; test
   call sites default it to `0.0`. `_search_sweep`/`_format_gaze_line` stay gated on `commanded_
   sector` alone for the binocular band, extended only for the debug overlay's own label.
+
+  **Obsolete note, 2026-10-24 (`BL-B96`, `plans/default-crew-pipeline/plan.md`):** the above
+  narrates `body.py`'s evolution up to and including the `--console`/`--overlay`/`--crew-text`/
+  `--f10-commands`/`--speech-audio`/`--speech-input` mode-flag era and is kept as the historical
+  record of how each piece arrived. `BL-B96` deleted every one of those flags along with the
+  plain-text-logger `else:` branch and the `--console` REPL/poll-loop pair they names above
+  (`_run_console_poll_loop`/`_run_console_repl`, `belief.console.Console`,
+  `format_event_for_overlay`, `overlay_client`, `push_text_line`, `get_f10_commands`,
+  `_poll_f10_commands`): the crew session described from `--crew-text` onward is now the only
+  thing `main()` does, unconditionally, and speech in/out are always on through the now-required
+  `--audio-adapter-url`. `body-layer/CLAUDE.md`'s "## Commands" section is the current reference;
+  this entry is not rewritten in place because the sequence of *why* each piece was added is
+  still the right account of how the module got here.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`GAZE`/`COCKPIT_MASK`/`OPTIC_FOV`/
   `RANGE_OR_SIZE`/`TERRAIN_LOS`/`FOREST`/`ADMITTED`/`PLAYER_BUBBLE` — `FOREST` added `plans/
   forest-occlusion/plan.md` Stage 1, the answer to "lost in forest" vs. "lost to terrain LOS" a
@@ -699,7 +712,7 @@ The entries are in the order they were written, which is roughly perception → 
   file, and clears the collector. **Read-only and one-directional** — it never calls anything
   that mutates `ContactStore`, and no ground-truth field is ever passed into `ContactStore.
   ingest`/`Percept`/`Contact`; `belief/percept.py`'s structural no-omniscience boundary is
-  untouched. Deliberately sits beside `logger.py`, not inside `perception/` or `belief/` — neither
+  untouched. Deliberately sits beside `body.py`, not inside `perception/` or `belief/` — neither
   package gains an import because of this module. Buffers `DEFAULT_FLUSH_EVERY_N_POLLS` (5) polls'
   worth before flushing, so disk I/O never sits on the poll loop's own critical path.
 
@@ -722,7 +735,7 @@ The entries are in the order they were written, which is roughly perception → 
   sortie ever flown and the 2026-10-05 analysis had to seek to byte offset 2,448,471,603 to find
   that flight. **Timestamping rather than truncate-on-open is the decision here**: truncating also
   removes the seeking and is shorter, but silently destroys the previous flight's log, which the
-  user reads after landing. Applied at the CLI boundary by `logger._per_run_log_paths` (one stamp
+  user reads after landing. Applied at the CLI boundary by `body._per_run_log_paths` (one stamp
   shared by all three logs, so a sortie's files are recognisable as a set), never inside a writer —
   a writer handed an exact path still writes exactly there, which is what keeps them testable and
   lets `tools/` read a named file.
@@ -892,7 +905,7 @@ The entries are in the order they were written, which is roughly perception → 
   `ATTACK_RUN_ELEVATION_GATE_DEG`/`ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the word tables are
   declared here, the single source of truth Decision 11 REVISED calls for. `CrewConsole.
   drain_attack_run` (Stage 3) is this module's one caller — **wired into
-  `logger._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
+  `body._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
   every poll once `ConsolePerceptionRunner.attack_run_state` is non-`None` (set by `engage`, via
   `CrewConsole.attack_run_transition`'s one-shot signal — this class cannot replace `runner.
   attack_run_state` directly, so it leaves an instruction for the poll loop instead); as of Stage
@@ -974,7 +987,7 @@ The entries are in the order they were written, which is roughly perception → 
   (`rebuild_struck_by`), tested against both the in-memory store and a genuine JSONL round-trip.
 - `src/mission_memory/admission.py` — the `group`/`air_defence`/`fired_on` admission rules
   (Decision 3). **Driven by belief-state transitions, not by percepts or callouts** — `step` is
-  called once per poll from `logger._mission_memory_step`, after `ContactStore.tick()` has settled
+  called once per poll from `body._mission_memory_step`, after `ContactStore.tick()` has settled
   that poll's belief and before any speech is drained. `_seen_how` reads `Contact.sighting_spans
   [-1].source` for `SeenHow.optic`, deliberately never `Contact.last_percept` (that field's own
   docstring names `belief.attack_run` as its one sanctioned reader outside `Contact`'s pulled-on
@@ -1009,7 +1022,7 @@ The entries are in the order they were written, which is roughly perception → 
   grep-enforced against `src/belief/*.py` by `tests/test_mission_memory_import_direction.py`,
   mutation-tested by the Reviewer (injecting an import into `contacts.py` fails it immediately).
   `crew_console.py`'s need to trigger a write without importing `mission_memory` (Decision 6's
-  tension with Decision 1) is resolved by **closure injection in `logger.py`** — the same pattern
+  tension with Decision 1) is resolved by **closure injection in `body.py`** — the same pattern
   `speech_log_sink` already uses — rather than carving a second exception.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
   session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
@@ -1017,14 +1030,14 @@ The entries are in the order they were written, which is roughly perception → 
   speaks proactively, neither of which `Console` does — see the plan's "Module boundary" decision).
   `handle_line` dispatches a `"handled"` parse to `belief.tools.set_attention`/`describe_contact` +
   a `belief.speech` template, and an `"escalated"` one to `handle_player_utterance` (silent, since
-  neither stand-in `BrainClient` speaks). `drain_events` (called from `logger.py`'s `--crew-text`
+  neither stand-in `BrainClient` speaks). `drain_events` (called from `body.py`'s `--crew-text`
   poll loop after each `tick()`) runs `store.unacknowledged_events` through `route_event` — reading
   the unacknowledged queue directly rather than tracking a separate high-water mark works because
   `route_event` itself acknowledges any event it renders, so a handled kind drops out on the next
   call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
   `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
   bypass-gate/urgent-call path — not a production intent or a real detector.
-  `drain_brain(now_sim)` (`plans/brain-layer/plan.md` BR-1, called from `logger.py`'s
+  `drain_brain(now_sim)` (`plans/brain-layer/plan.md` BR-1, called from `body.py`'s
   `--crew-text` poll loop right after `drain_events`) drains `brain_client.poll_replies()`,
   speaks D8's deterministic "stand by" (`STAND_BY_AFTER_S`, once per outstanding escalation, via
   `_speak_stand_by_if_due`), runs the reply through D10's validator
@@ -1059,7 +1072,7 @@ The entries are in the order they were written, which is roughly perception → 
   an injected urgent call, never a routine readback/contact report/lifecycle line) gets a `"!! "`
   prefix on the *pushed* overlay copy only — `output`'s printed copy stays exactly the text
   `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
-  was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
+  was spoken. `body.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
   `speech_client: AudioAdapterClient | None` (BL-10 first slice, `plans/tts-voice-output/plan.md`) is
   a third, separate optional-sink field, read by the same `_print` funnel alongside
@@ -1067,11 +1080,11 @@ The entries are in the order they were written, which is roughly perception → 
   argument instead of a text prefix (no new signal invented, an injected urgent call is the only
   line that ever sets it), and a failed speech push is caught by its own `try`/`except
   AudioAdapterError`, independent of `overlay_client`'s own try/except for the same line — one
-  sink's failure never blocks the other's push. `logger.py`'s `--crew-text --speech-audio` branch
+  sink's failure never blocks the other's push. `body.py`'s `--crew-text --speech-audio` branch
   wires this to a `belief.audio_client.AudioAdapterClient` built from `--audio-adapter-url`.
   `tasks: TaskStore | None` + `handle_command` (`plans/f10-crew-commands/plan.md`, vocabulary
   widened to 15 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
-  `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
+  `CrewConsole`'s second, non-text input surface: `body.py`'s `--crew-text --f10-commands` poll
   loop drains player-selected DCS F10 radio-menu tokens (`aircraft_client.get_f10_commands`,
   `GET /f10_commands/poll`) and dispatches each through `handle_command`, the same `_print`
   funnel `handle_line`/`drain_events` already use, via two lookup tables (`_RELATIVE_SCAN_TOKENS`,
@@ -1090,7 +1103,7 @@ The entries are in the order they were written, which is roughly perception → 
   still-`pending` task in `self.tasks`, regardless of source) non-hollow in `--crew-text` sessions
   for the first time. Each scan speaks a fixed readback (`speech.render_scan_readback`,
   `"Scanning <sector label>."`). `tasks` mirrors `aircraft_client`'s own reserved-field pattern;
-  `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
+  `body.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
   ticks. `stop_talking` (Stage 3, `plans/inbound-speech/plan.md`; revised by that plan's Stage 3
   follow-up, user direction 2026-09-20 — "no readback or confirmation, just stop talking... more
   of a debug tool than crew feature") is `handle_command`'s one token with **no readback at
@@ -1178,7 +1191,7 @@ The entries are in the order they were written, which is roughly perception → 
   poll-loop runner, not this class (mirroring `OpticState`'s own split) — so each sets `self.
   attack_run_transition` (`"engage"`/`"disengage"`, reset to `None` at the top of every `handle_
   command` dispatch, the same convention `last_command_target_contact_id` follows) as a one-shot
-  instruction logger.py's poll loop consumes and clears. `_handle_disengage` clears the phase only
+  instruction body.py's poll loop consumes and clears. `_handle_disengage` clears the phase only
   ("stop the run, keep the watch," Decision 2) — the standing `attack_target` task, and the
   selection it represents, survives; `drop_target`/the existing cancel path are the separate
   commands that end the selection. `drain_events` now also reads `_active_attack_target_task()`'s
@@ -1271,8 +1284,8 @@ The entries are in the order they were written, which is roughly perception → 
   `AttentionArea.relative_clock_hour` is set instead. `_describe_task_for_speech`/`_describe_token_
   for_confirm` gained matching branches so cancel/confirm wording names the hour the same way the
   other two families already do. **Stage 5 also fixes the measured pre-existing defect that a
-  compass scan never steered gaze at all** — see `perception/gaze.py`'s and `logger.py`'s own
-  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `logger._active_gaze`'s
+  compass scan never steered gaze at all** — see `perception/gaze.py`'s and `body.py`'s own
+  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `body._active_gaze`'s
   absolute→relative conversion). The nine new tokens are **unbenched**, same cost class as
   `cancel_scan`/`cancel_watch` before 2026-09-23.
 - `src/perception/gaze.py` — `ScanPlan` (module docstring: pure per-`t_sim` `gaze_at`), unchanged
@@ -1282,7 +1295,7 @@ The entries are in the order they were written, which is roughly perception → 
   **the architect's own generalisation, deliberately not a wider `RelativeSector` literal**: a
   single o'clock hour (`scan_clock_1`) is a one-leg `commanded_legs` tuple, exactly as `ahead`
   already degenerates to one leg under `commanded_sector`, and an absolute compass scan converts to
-  its current-heading-relative legs the same way (see `logger.py`'s entry). `legs_within_wedge(
+  its current-heading-relative legs the same way (see `body.py`'s entry). `legs_within_wedge(
   center_azimuth_deg, half_width_deg)` is the new public helper this conversion needs: every o'clock
   hour whose own gaze center falls within a wedge, ordered by signed offset (a left-to-right sweep)
   — `_SECTOR_LEGS`'s per-sector tables generalised to an arbitrary wedge. `gaze_at` picks
@@ -1296,7 +1309,7 @@ The entries are in the order they were written, which is roughly perception → 
   same debt class as `visibility.py`'s tier constants) and is **monotonic**: phase progression
   never decrements even if ownship temporarily drifts back outside a waypoint's capture radius
   after being captured once. Pure in-memory state (ints/tuples, no sqlite/thread-unsafe object),
-  written only from `logger.py`'s poll thread (`.update()`) and read-only from the REPL/`Console`
+  written only from `body.py`'s poll thread (`.update()`) and read-only from the REPL/`Console`
   thread (`.current_phase()`) — deliberately mirrors `EnrichmentContext.ownship`'s existing
   cross-thread split to avoid this codebase's own recurring sqlite thread-affinity defect class
   (BL-2 Stage 6, BL-5). `load_mission_understanding` raises `ValueError` on schema violation,
@@ -1307,7 +1320,7 @@ The entries are in the order they were written, which is roughly perception → 
   becomes a **tie-breaker only** under attention rank in `_highest_attention_contact`
   (`_select_from_tier` helper — never overrides a higher attention level, only orders within one).
   `Console.mission_phase_tracker` threads the tracker to `get_situation`'s real call site.
-  `logger.py` gains `--mission-understanding PATH` to load it. `key_locations` (MI-6's
+  `body.py` gains `--mission-understanding PATH` to load it. `key_locations` (MI-6's
   `CompactLocation`) carries no position field, so relevance can only be scored against route
   waypoints, not named mission-critical areas — a real, documented gap, not worked around.
 - `tools/speak_samples.py` — a dev acceptance aid, not a test: renders sample crew callouts through

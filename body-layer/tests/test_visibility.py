@@ -1301,7 +1301,7 @@ def test_gaze_gate_runs_before_the_cockpit_mask() -> None:
 
 def test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope() -> None:
     """`gaze=None` (the default, and what `NakedEyePerceptionSource`/
-    `logger.py` assign when no scan command is pending) applies no
+    `body.py` assign when no scan command is pending) applies no
     restriction at all -- a candidate 100 deg off the nose (inside the
     cockpit mask's 130 deg rear cutoff, but outside `FULL_GAZE`'s own 90
     deg half-width) is still admitted. This is what makes 2B's default

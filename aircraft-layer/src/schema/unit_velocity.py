@@ -2,11 +2,12 @@
 
 `petrobrain-mission-telemetry-hook.lua` polls `Object.getVelocity()` for
 every unit and static object, once a second, via `net.dostring_in(
-"scripting", ...)` -- the same bridge `petrobrain-f10-commands-hook.lua` has
+"scripting", ...)` -- the same bridge `petrobrain-f10-commands-hook.lua`
+(the F10 command channel's Hook script, retired by `BL-B96`) had
 polled at 1 Hz since 2026-09-13 (`aircraft-layer/research/
 2026-09-22-mission-bridge-already-shipping.md`). `dostring_in` can only
 return one simple scalar across the Hook/mission-scripting boundary (the
-same constraint `petrobrain-f10-commands-hook.lua`'s own `POLL_CODE` works
+same constraint that script's own `POLL_CODE` worked
 around), so the mission-scripting snippet packs everything into one compact
 string:
 
@@ -185,8 +186,7 @@ def _parse_entry(entry: str) -> UnitVelocitySample:
     # rsplit rather than split: a unit_name is not expected to contain a
     # colon, but DCS mission-editor names are free text and this keeps a
     # stray colon in the name from misaligning the trailing numeric fields
-    # -- the same defensive posture `f10_command_receiver.py` takes toward
-    # untrusted Hook-side strings.
+    # -- a defensive posture toward untrusted Hook-side strings.
     #
     # **Format disambiguated by field count, not by a version marker**
     # (`AC-B7`). Try the new 6-field shape first (`rsplit(":", 5)`): it

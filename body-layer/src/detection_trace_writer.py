@@ -17,7 +17,7 @@ field is ever passed into `ContactStore.ingest`, `Percept`, or any
 enforces is untouched.
 
 `perception/` gains no import of `belief/` from this change (this module
-sits beside `logger.py`, not inside either package); `belief/` gains no
+sits beside `body.py`, not inside either package); `belief/` gains no
 import of this module or of `detection_trace.py` -- the no-omniscience
 invariant holds for Petrovich exactly as before. Deliberately kept a
 single, narrow, read-only file, since it is the one place this permission
@@ -117,7 +117,7 @@ class DetectionTraceWriter:
 
         `flush` above early-returns once the writer is disabled, so buffered
         data that cannot be written surfaces from `close()` instead. The
-        poll loop calls this from its `finally:` block (`logger.py`), so an
+        poll loop calls this from its `finally:` block (`body.py`), so an
         unguarded `OSError` here is a traceback on shutdown in exactly the
         full-disk scenario this stage exists to make legible -- and the
         `_fail` line has already said what went wrong."""

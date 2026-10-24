@@ -1,7 +1,7 @@
 """Collector-side player for the audio-playback channel (BL-10 first slice,
 `plans/tts-voice-output/plan.md` stages 2/4/5).
 
-Unlike `text_sender.py`/`command_sender.py` (UDP datagrams to a DCS-side
+Unlike `command_sender.py` (UDP datagrams to a DCS-side
 listener), this sender plays audio **directly on the Windows box** via the
 stdlib `winsound` module -- no DCS process involvement needed for this
 channel, per the plan's recon (`audio-adapter/research/2026-09-17-tts-audio-
@@ -9,7 +9,7 @@ transport-recon.md`): the collector alone can play a WAV file.
 
 **Queueing/preemption (plan Decision 4), decided here, not in
 `audio-adapter` or `body-layer`.** `winsound` (like any audio API) plays one
-sound at a time, and `logger.py`'s `--crew-text` poll loop can emit several
+sound at a time, and `body.py`'s poll loop can emit several
 lines in one poll -- garbled overlapping speech is worse than a short queue
 delay, so routine lines queue FIFO and play in order. A single background
 worker thread draining a `queue.Queue` of temp `.wav` paths naturally
@@ -23,13 +23,11 @@ contact report (plan Decision 3's `bypass_gate` framing on the body-layer
 side).
 
 **The queue is bounded (`_MAX_QUEUE_LEN`), dropping the oldest queued line
-on overflow** (2026-09-26 performance review) -- added as parity with
-`collector.cache.F10CommandQueue`, this codebase's other queue of the same
-risk class, which was already bounded with the same reasoning: a producer
-bug or a long, dense-traffic sortie must not grow this queue (and its
-backing temp `.wav` files on disk) without limit. Oldest-dropped, not
-newest-rejected, because a stale queued callout is worth less than a fresh
-one -- see `_enqueue`.
+on overflow** (2026-09-26 performance review): a producer bug or a long,
+dense-traffic sortie must not grow this queue (and its backing temp
+`.wav` files on disk) without limit. Oldest-dropped, not newest-rejected,
+because a stale queued callout is worth less than a fresh one -- see
+`_enqueue`.
 
 **SPU-8 gating and volume (`plans/spu8-intercom/plan.md` Stage 3)** are
 both consulted at one point: immediately before `self._player.play(path)`,
@@ -139,8 +137,9 @@ class WavPlayer(Protocol):
 #: Bounded so a producer bug (or simply a long, dense-traffic sortie) cannot
 #: grow this queue -- and its backing temp `.wav` files on disk -- without
 #: limit (2026-09-26 performance review, "Audio playback queue has no upper
-#: bound, unlike its F10 sibling"). Mirrors `collector.cache.F10CommandQueue`'s
-#: `_MAX_QUEUE_LEN` reasoning and value: generous relative to any plausible
+#: bound, unlike its F10 sibling" -- that sibling, `collector.cache.
+#: F10CommandQueue`, was itself removed by `BL-B96`). Same `_MAX_QUEUE_LEN`
+#: value and reasoning that queue had: generous relative to any plausible
 #: callout rate (seconds of speech per line), so this is insurance against a
 #: bug, not a limit ever expected to bind in normal use.
 _MAX_QUEUE_LEN = 64
@@ -309,7 +308,7 @@ else:
 class AudioPlaybackSender:
     """Owns a background worker thread + `queue.Queue` of temp `.wav`
     paths, playing them one at a time via a `WavPlayer`. Mirrors
-    `TextOverlaySender`/`CommandSender`'s open()/close() lifecycle shape,
+    `CommandSender`'s open()/close() lifecycle shape,
     though the underlying resource here is a thread, not a socket."""
 
     def __init__(
@@ -342,8 +341,7 @@ class AudioPlaybackSender:
         and interrupts in-flight playback before this file is enqueued
         (plan Decision 4) -- otherwise it joins the FIFO queue behind
         whatever is already queued. Never raises: a failure to write the
-        temp file is logged and the line is dropped, matching
-        `TextOverlaySender.send_line`'s never-raises posture (plan
+        temp file is logged and the line is dropped (plan
         Decision 5 -- playback is best-effort, display-equivalent output,
         not a verifiable command).
 
@@ -385,9 +383,7 @@ class AudioPlaybackSender:
         method's own never-raises/never-hangs posture. `urgent=True`
         already clears the whole queue via `interrupt()` above before
         reaching here, so this bound is only ever exercised by a flood of
-        routine lines outpacing playback -- mirrors
-        `collector.cache.F10CommandQueue`'s oldest-dropped overflow policy
-        and its reasoning."""
+        routine lines outpacing playback."""
         while True:
             try:
                 self._queue.put_nowait((path, correlation_id))

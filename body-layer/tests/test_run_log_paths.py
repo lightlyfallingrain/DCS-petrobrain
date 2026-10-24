@@ -1,4 +1,4 @@
-"""Tests for `run_log_paths` and `logger._per_run_log_paths` -- `BL-11`
+"""Tests for `run_log_paths` and `body._per_run_log_paths` -- `BL-11`
 Stage 5's per-run log filenames.
 
 Both halves are tested: the pure stamping helper, and the wiring that
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-import logger as logger_module
+import body as body_module
 from run_log_paths import RUN_STAMP_FORMAT, per_run_log_path, run_stamp
 
 #: 2026-10-06 14:35:00 local time, as epoch seconds -- built through
@@ -75,7 +75,7 @@ def test_all_three_logs_share_one_stamp(tmp_path: Path) -> None:
     directory pytest was started from, and the repo root does not gitignore
     one."""
     logs = tmp_path / "logs"
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=logs / "trace.jsonl",
         belief_truth_log=logs / "truth.jsonl",
         speech_log=logs / "speech.jsonl",
@@ -90,7 +90,7 @@ def test_all_three_logs_share_one_stamp(tmp_path: Path) -> None:
 def test_unset_log_paths_stay_none() -> None:
     """All three logs are off by default, so `None` must survive the roll
     rather than becoming a path that then gets opened."""
-    assert logger_module._per_run_log_paths(
+    assert body_module._per_run_log_paths(
         detection_trace=None,
         belief_truth_log=None,
         speech_log=None,
@@ -101,7 +101,7 @@ def test_unset_log_paths_stay_none() -> None:
 def test_a_single_configured_log_rolls_without_inventing_the_others(
     tmp_path: Path,
 ) -> None:
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=None,
         belief_truth_log=tmp_path / "truth.jsonl",
         speech_log=None,
@@ -123,7 +123,7 @@ def test_the_resolved_parent_directory_is_created(tmp_path: Path) -> None:
     logs = tmp_path / "logs" / "nested"
     assert not logs.exists()
 
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=logs / "trace.jsonl",
         belief_truth_log=logs / "truth.jsonl",
         speech_log=logs / "speech.jsonl",
@@ -149,7 +149,7 @@ def test_an_uncreatable_directory_disables_only_that_log(
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("")
 
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=blocker / "trace.jsonl",
         belief_truth_log=tmp_path / "ok" / "truth.jsonl",
         speech_log=None,
@@ -178,7 +178,7 @@ def test_a_path_with_no_filename_degrades_rather_than_raising(
 
     No `tmp_path` here, and none is needed: the raise happens before the
     `mkdir`, so nothing is created wherever pytest was started."""
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=Path(given),
         belief_truth_log=None,
         speech_log=None,
@@ -205,7 +205,7 @@ def test_an_unresolvable_tilde_user_degrades_rather_than_raising(
     returned `None` only after creating `~sgotz/` would still be wrong."""
     monkeypatch.chdir(tmp_path)
 
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=Path("~nosuchuser12345/trace.jsonl"),
         belief_truth_log=None,
         speech_log=None,
@@ -238,7 +238,7 @@ def test_a_stamp_time_outside_the_platform_clock_degrades_rather_than_raising(
     one."""
     monkeypatch.chdir(tmp_path)
 
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=Path("logs/trace.jsonl"),
         belief_truth_log=None,
         speech_log=None,
@@ -270,7 +270,7 @@ def test_a_tilde_path_lands_under_the_home_directory(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(cwd)
 
-    trace, truth, speech = logger_module._per_run_log_paths(
+    trace, truth, speech = body_module._per_run_log_paths(
         detection_trace=Path("~/trace.jsonl"),
         belief_truth_log=None,
         speech_log=None,
@@ -287,14 +287,14 @@ def test_a_tilde_path_lands_under_the_home_directory(
 
 
 def test_group_trace_none_stays_none() -> None:
-    assert logger_module._resolve_group_trace_log_path(None, when=_WHEN) is None
+    assert body_module._resolve_group_trace_log_path(None, when=_WHEN) is None
 
 
 def test_group_trace_rolls_and_creates_its_parent(tmp_path: Path) -> None:
     logs = tmp_path / "logs"
     assert not logs.exists()
 
-    rolled = logger_module._resolve_group_trace_log_path(
+    rolled = body_module._resolve_group_trace_log_path(
         logs / "group-trace.jsonl", when=_WHEN
     )
 
@@ -310,7 +310,7 @@ def test_group_trace_degrades_rather_than_raising(
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("")
 
-    rolled = logger_module._resolve_group_trace_log_path(
+    rolled = body_module._resolve_group_trace_log_path(
         blocker / "group-trace.jsonl", when=_WHEN
     )
 
@@ -323,14 +323,14 @@ def test_group_trace_degrades_rather_than_raising(
 
 
 def test_mission_memory_none_stays_none() -> None:
-    assert logger_module._resolve_mission_memory_log_path(None, when=_WHEN) is None
+    assert body_module._resolve_mission_memory_log_path(None, when=_WHEN) is None
 
 
 def test_mission_memory_rolls_and_creates_its_parent(tmp_path: Path) -> None:
     logs = tmp_path / "logs"
     assert not logs.exists()
 
-    rolled = logger_module._resolve_mission_memory_log_path(
+    rolled = body_module._resolve_mission_memory_log_path(
         logs / "mission-memory.jsonl", when=_WHEN
     )
 
@@ -346,7 +346,7 @@ def test_mission_memory_degrades_rather_than_raising(
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("")
 
-    rolled = logger_module._resolve_mission_memory_log_path(
+    rolled = body_module._resolve_mission_memory_log_path(
         blocker / "mission-memory.jsonl", when=_WHEN
     )
 

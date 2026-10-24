@@ -1,6 +1,5 @@
 """Tests for `collector.unit_velocity_receiver.UnitVelocityReceiver` --
-`plans/movement-detection/plan.md` Stage 1. Mirrors
-`test_f10_command_receiver.py`'s pattern of exercising a real loopback UDP
+`plans/movement-detection/plan.md` Stage 1. Exercises a real loopback UDP
 socket."""
 
 from __future__ import annotations

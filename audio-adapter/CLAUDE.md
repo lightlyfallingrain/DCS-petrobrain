@@ -50,8 +50,9 @@ exception).
   always-available-regardless-of-selector property it has to satisfy.
 
 **Inbound speech (Slice 3, `plans/inbound-speech/plan.md`, Stages 1-3 landed)**: recognises the
-same 15-token scan/watch/cancel command vocabulary `body-layer`'s F10 command path already
-dispatches, spoken instead of clicked. Stage 1 was a **stop/go gate** (99.2% top-1 on the user's
+same 15-token scan/watch/cancel command vocabulary `body-layer`'s `CrewConsole.handle_command`
+already dispatches (originally reached via the DCS F10 radio menu, now removed by `BL-B96` --
+voice is the only transport), spoken instead of clicked. Stage 1 was a **stop/go gate** (99.2% top-1 on the user's
 own corpus, `research/2026-09-19-corpus-bench-results.md` — cleared) before any capture/transit/
 PTT wiring was built; Stage 2 added the matcher (`command_matcher.py`); Stage 3 wires it to HTTP:
 `POST /transcribe` (a base64 WAV in, `WhisperCliEngine.transcribe` -> `command_matcher.
@@ -258,7 +259,7 @@ consume.
   its own base64 field.
 - `src/audio_adapter/__main__.py`'s CLI wiring (`argparse`, `main()` itself) has **no automated
   test** — a live-process entrypoint, same untested-by-design posture as
-  `aircraft-layer/src/collector/__main__.py`'s and `body-layer/src/logger.py`'s own `main()`s.
+  `aircraft-layer/src/collector/__main__.py`'s and `body-layer/src/body.py`'s own `main()`s.
   Verified manually via the `curl`/`afplay` command above. **`LocalPlaybackSink` used to live in
   that same file and inherited this exemption by co-location, not by actually being untestable**
   (review, `plans/inbound-speech/plan.md` Stage 3 follow-up, 2026-09-20) — it is ordinary

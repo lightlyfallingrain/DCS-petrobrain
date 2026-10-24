@@ -26,7 +26,7 @@ it is the plan's own period.
 detected, at what class, at what range -- and `perception` may not import
 `belief` (`perception/source.py`'s module docstring). `gaze.py` resolved
 this exact tension already and its resolution is reused verbatim: belief
-decides, `logger` hands perception a frozen value per poll, perception
+decides, `body` hands perception a frozen value per poll, perception
 owns the act. `decide` is a pure function of its inputs, so replay stays
 deterministic for the same reason `gaze_at` does.
 """
@@ -593,7 +593,7 @@ class OpticState:
     #: exactly when no fixed look is commanded, mirroring `look_azimuth_
     #: deg`'s own contract. Advanced by `advance_sight_aim` at the one
     #: place `OpticDecision`'s desired aim becomes a `Gaze`
-    #: (`logger._apply_active_gaze`) -- carried here, not computed inside
+    #: (`body._apply_active_gaze`) -- carried here, not computed inside
     #: `gaze_at`, because `gaze_at` must stay a pure function of `t_sim`
     #: alone for replay determinism, which is exactly what this class's own
     #: "frozen and replaced rather than mutated" rule protects. Today
@@ -614,7 +614,7 @@ class OpticState:
     #: Which phase `decide` treats as *home* -- `SCANNING` (default) or
     #: `SIGHTING` -- `BL-B64` Stage 2, plan §13, direction §6/§9/§13a.
     #: Set to `SIGHTING` only by the pilot's own "Observ on" command
-    #: (`logger.py`'s poll loop, mirroring `lower_binoculars`'s own
+    #: (`body.py`'s poll loop, mirroring `lower_binoculars`'s own
     #: external-caller shape) and back to `SCANNING` by "Observ off" **or**
     #: by a violent manoeuvre (`SIGHT_STEADY_RATE_LIMIT_DEG_S`) -- never by
     #: `lower_binoculars` itself, which must leave this field alone (§13a's
@@ -644,7 +644,7 @@ class OpticState:
     #: already asks "am I home".
     home_phase: OpticPhase = OpticPhase.SCANNING
     #: Set by any cockpit action that touches the sight (the pilot's
-    #: "Observ on"/"Observ off" command, `logger.py`'s poll loop) to
+    #: "Observ on"/"Observ off" command, `body.py`'s poll loop) to
     #: `now_sim + HANDS_BUSY_DURATION_S` -- while `now_sim` is still below
     #: this, `decide` suppresses every optic's observations (`OpticDecision.
     #: suppressed`) rather than advancing any phase logic, direction §6's
@@ -699,7 +699,7 @@ class OpticDecision:
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
     #: `True` while `OpticState.hands_busy_until_sim` is active -- `BL-B64`
-    #: Stage 2, direction §6. `_apply_active_gaze` (`logger.py`) reads this
+    #: Stage 2, direction §6. `_apply_active_gaze` (`body.py`) reads this
     #: to suppress `NakedEyePerceptionSource` entirely for the poll, rather
     #: than assigning any particular optic -- `optic` is still populated on
     #: this branch (as `UNAIDED_OPTIC`) only because the field is not
@@ -719,7 +719,7 @@ def advance_sight_aim(
     *desired* one, one poll at a time -- `plans/9k113-sight/plan.md` §15a,
     direction §12/§12a. Called from the one conversion point where
     `OpticDecision`'s desired aim becomes the `Gaze`/cone perception
-    actually uses (`logger._apply_active_gaze`), so a future controller
+    actually uses (`body._apply_active_gaze`), so a future controller
     replaces this function's body without moving that call site.
 
     **A pure pass-through**, `actual := desired` instantly -- *permanently*
@@ -729,7 +729,7 @@ def advance_sight_aim(
     removed** -- those args echo the *demand*, not a position (confirmed
     by probe runs 1-10, `docs/acceptance/2026-10-22-9k113-ai-latency-
     probe.md`), and the sight's own actual aim is now `belief.sight_head.
-    SightHead`'s own simulated body direction, read by `logger._apply_
+    SightHead`'s own simulated body direction, read by `body._apply_
     active_gaze` directly rather than through this function at all.
 
     `actual_azimuth_deg`/`actual_elevation_deg` (the prior poll's own
@@ -798,7 +798,7 @@ def search_pattern(
 
     `center_azimuth_deg` (Stage 2 of the same plan) shifts every generated
     azimuth by this amount -- `0.0` (the default) is a true no-op for every
-    caller that predates it, including `logger._search_sweep`'s own
+    caller that predates it, including `body._search_sweep`'s own
     unsplit, free-scan-excluded sweep. Needed once a caller sweeps a
     sub-span with a genuinely non-zero centre (the in-regard/out-of-regard
     halves a commanded sector splits into), where sweeping symmetrically
@@ -944,7 +944,7 @@ def is_steady(
     `rate_limit_deg_s` defaults to `STEADY_RATE_LIMIT_DEG_S` (binoculars'
     own threshold), kept as a parameter rather than a second copy of this
     function so `[[BL-B64]]` Stage 2 can reuse it for the sight's own,
-    higher `SIGHT_STEADY_RATE_LIMIT_DEG_S` (`logger.py`'s poll loop calls
+    higher `SIGHT_STEADY_RATE_LIMIT_DEG_S` (`body.py`'s poll loop calls
     this twice per poll, once per threshold)."""
     if len(attitude_samples) < 2:
         return True
@@ -1648,7 +1648,7 @@ def _force_observ_off(
     `_start_glance_away` (a scheduled break, OBSERV stays on), this drops
     `home_phase` back to `SCANNING` -- the standing mode itself ends, not
     just the current dwell, same as the pilot commanding "Observ off"
-    (`logger.py`'s poll loop sets `home_phase` the same way; this is the
+    (`body.py`'s poll loop sets `home_phase` the same way; this is the
     one path that does it from inside `decide` itself, because a violated
     rate limit is read every poll, not dispatched as a command)."""
     state_with_mode_off = replace(state, home_phase=OpticPhase.SCANNING)
@@ -1781,7 +1781,7 @@ def _enter_binocular_search(
 
 def _idle_sight_rest(state: OpticState) -> tuple[OpticState, OpticDecision]:
     """The defensive fallback for when no search leg has anything to step
-    through at all. **Never reached in production**: `logger._commanded_
+    through at all. **Never reached in production**: `body._commanded_
     or_default_sector` always yields a non-empty in-regard span (Stage 2's
     own geometry argument -- every named `RelativeSector`, and the
     synthesized default, straddles or contains azimuth 0), so `_idle_
@@ -1922,7 +1922,7 @@ def _decide_sighting(
 
     The four `sight_*_search` sequences (`plans/9k113-narrow-search/
     plan.md` Stage 3) are the idle branch's own active search cycle --
-    `logger.py` computes them fresh every poll from the commanded-or-
+    `body.py` computes them fresh every poll from the commanded-or-
     default sector (the same way `search` is computed for `SCANNING`-at-
     home) and threads them through `decide`/`_decide_without_guidance`
     unchanged; all four default to empty, a true no-op for every
@@ -2165,7 +2165,7 @@ def _decide_without_guidance(
     a true no-op for every pre-existing caller, exactly like `group_
     salient`/`forest` elsewhere in this codebase. It is `steady`'s sibling
     at the sight's own, higher rate limit (`SIGHT_STEADY_RATE_LIMIT_DEG_S`)
-    -- `logger.py`'s poll loop calls `is_steady` twice per poll, once per
+    -- `body.py`'s poll loop calls `is_steady` twice per poll, once per
     threshold, and only the `SIGHTING` branch below ever reads this one.
     `steady` itself is unaffected: `GLASSING`/`SEARCHING` still gate on the
     binocular threshold exactly as before, since neither is reachable
@@ -2193,7 +2193,7 @@ def _decide_without_guidance(
     if state.hands_busy_until_sim is not None and now_sim < state.hands_busy_until_sim:
         # The 1 s hand movement (`BL-B64` Stage 2, direction §6) -- no
         # phase advances, no look is picked, and the caller
-        # (`logger._apply_active_gaze`) suppresses every optic's
+        # (`body._apply_active_gaze`) suppresses every optic's
         # observations for this poll. `None` on every pre-existing
         # `OpticState`, so this branch is unreachable before this entry.
         return state, OpticDecision(optic=UNAIDED_OPTIC, suppressed=True)
@@ -2282,7 +2282,7 @@ def _decide_without_guidance(
 
     if state.phase is OpticPhase.SIGHTING:
         if state.home_phase is not OpticPhase.SIGHTING:
-            # A pilot's "Observ off" (`logger.py`'s poll loop) drains into
+            # A pilot's "Observ off" (`body.py`'s poll loop) drains into
             # `home_phase` alone, one poll lagged, the same shape `_force_
             # observ_off` already uses in the other direction (a violated
             # `sight_steady`). Nothing inside `_decide_sighting` ever reads
@@ -2590,7 +2590,7 @@ def decide(
     `guidance_request` (`plans/attack-run-sortie-fixes/plan.md` §6/§7)
     defaults to `None` -- a true no-op for every pre-existing caller,
     exactly like `sight_steady`/`group_salient`/`forest` elsewhere in this
-    module. `logger.py`'s poll loop sets it from `AttackRunState.
+    module. `body.py`'s poll loop sets it from `AttackRunState.
     requested_optic` whenever an attack run is engaged; `belief.attack_
     run.decide` is the only producer of that value.
 
@@ -2648,7 +2648,7 @@ def look_target_for(
 
     `pitch_deg`/`bank_deg` both default to `0.0` -- a true no-op for every
     pre-existing call site, mirroring `perception.source.OwnshipState`'s
-    own default convention. `logger._look_targets` is the one caller with
+    own default convention. `body._look_targets` is the one caller with
     a real ownship to hand, and passes `ownship.pitch_deg`/`ownship.
     bank_deg`.
 

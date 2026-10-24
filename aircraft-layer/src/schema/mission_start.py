@@ -5,8 +5,8 @@
 a local sequence counter, attempts to read the live mission's `theatre`
 string, and sends one UDP datagram per mission (re)start to
 `collector.mission_start_receiver.MissionStartReceiver` over loopback --
-unlike the F10 command channel, this is a one-shot push per mission start,
-not a per-frame drained queue, so there is no per-poll Lua-side timer here.
+this is a one-shot push per mission start, not a per-frame drained
+queue, so there is no per-poll Lua-side timer here.
 
 Wire format, one JSON object per datagram, no newline needed (datagram
 framing already provides it):
@@ -24,7 +24,8 @@ a schema that already allows `null` means Stage 1 can ship before that
 resolution lands, and Stage 3's theatre-switching logic treats `null` as "no
 new theatre information this (re)start" rather than a parse failure.
 
-**No DCS model-time field**, same stated exception as `f10_command.py`'s:
+**No DCS model-time field**, the same stated exception the removed F10
+command channel (`BL-B96`) once carried:
 the Hook script would need extra, unverified mission-scripting API access
 to stamp a sim-clock value onto this event, not worth adding for a
 one-shot signal whose receiver (body-layer) only cares about wall-clock

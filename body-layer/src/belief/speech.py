@@ -100,8 +100,7 @@ omitted entirely (not "unknown") when `relative_now` is absent -- no
 enrichment supplied, same absent-not-null convention `tools.py` itself uses.
 Range is rounded to the nearest 0.5 km with no trailing `.0` (`_format_
 range_km`, e.g. `5.0 -> "5"`, `1.5 -> "1.5"`). The semantic fragment is the
-highest-confidence `belief.enrichment.SemanticFact` among `facts["semantic"]`,
-mirroring `belief.console.format_event_for_overlay`'s own selection
+highest-confidence `belief.enrichment.SemanticFact` among `facts["semantic"]`
 (`max(..., key=lambda fact: fact["confidence"])`); omitted when
 `facts["semantic"]` is absent/empty. **`landmark-words-no-names` (F7
 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the fragment is
@@ -2011,8 +2010,8 @@ def _contact_report_text(
     is absent, the semantic fragment omitted when `facts["semantic"]` is
     absent/empty, both the module's existing absent-not-null convention. The
     semantic fragment picks the highest-confidence `belief.enrichment.
-    SemanticFact`, mirroring `belief.console.format_event_for_overlay`'s own
-    selection (`max(semantic, key=lambda fact: fact["confidence"])`).
+    SemanticFact`
+    (`max(semantic, key=lambda fact: fact["confidence"])`).
 
     **`facts["terrain_qualifier"]` (`plans/terrain-feature-probing/plan.md`
     Revision 3, Decision 5), when present, replaces the semantic-fragment

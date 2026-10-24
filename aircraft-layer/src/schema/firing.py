@@ -5,8 +5,9 @@
 the `"scripting"` mission state (the same bridge every other Hook script
 in this module already uses), accumulates events in-state as they arrive,
 and drains the accumulated batch once a second -- the same registration/
-poll split `petrobrain-f10-commands-hook.lua` established, extended with an
-event *handler* rather than a player-driven queue. The closed probe
+poll split the F10 command channel's Hook script (retired by `BL-B96`)
+established, extended with an event *handler* rather than a player-driven
+queue. The closed probe
 (`docs/acceptance/2026-09-24-damage-and-firing-probes.md`, flown and
 closed 2026-09-25) already confirmed `world.addEventHandler` is reachable
 from that state and that a ground gun unit's `S_EVENT_SHOOTING_START`

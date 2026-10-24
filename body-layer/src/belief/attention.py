@@ -46,7 +46,7 @@ held when the player pressed the button.
 Both kinds are the same frozen dataclass, and `area_contains` stays a pure
 absolute-geometry predicate for both. The difference lives entirely outside
 this module: an ownship-anchored area additionally carries its
-`relative_sector`, and `logger.py`'s telemetry tick re-projects it -- new
+`relative_sector`, and `body.py`'s telemetry tick re-projects it -- new
 `center`, new absolute `wedge_deg` -- via `project_relative_area` below,
 before the same tick's contacts are judged against it. That re-projection
 is the *only* thing that makes a relative area track ownship; nothing here
@@ -222,7 +222,7 @@ def project_relative_area(
 
     This is the single function that makes a relative area track ownship;
     see D2 in `plans/f10-command-vocabulary/plan.md` for why the tracking
-    lives here and on `logger.py`'s tick rather than inside
+    lives here and on `body.py`'s tick rather than inside
     `area_contains`."""
     if area.relative_sector is not None:
         relative_center, half_width = _RELATIVE_SECTOR_WEDGE_DEG[area.relative_sector]

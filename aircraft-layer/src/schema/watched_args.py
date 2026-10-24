@@ -108,7 +108,7 @@ class WatchedArgsState:
     installed) means `values` must be treated as unknown by the caller,
     never read against the wrong set (`collector.cache.WatchedArgsCache`'s
     own clear-on-`export_version` handles the restart case; the id mismatch
-    itself is `logger.py`'s own poll-block check, not this schema's job)."""
+    itself is `body.py`'s own poll-block check, not this schema's job)."""
 
     dcs_model_time_s: float
     received_wall_clock_s: float

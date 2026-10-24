@@ -292,7 +292,7 @@ class AttackRunState:
     guidance_request_for`'s own hysteresis, not the naive per-tick lookup)
     -- `decide` updates it every non-`MASKED` tick and threads it into
     `OpticDecision` via `optic_policy.decide`'s `guidance_request`
-    keyword (`logger.py`'s poll loop). **Frozen on a `MASKED` tick**
+    keyword (`body.py`'s poll loop). **Frozen on a `MASKED` tick**
     (guard 1, §7's "do not re-evaluate while masked"): the field is only
     ever touched after the `cause == "masked"` early return below, so a
     tick that returns there leaves it exactly as it was, which is what
@@ -604,7 +604,7 @@ def _no_look_cause(
     below threads through `runner.optic` instead -- `logger.
     ConsolePerceptionRunner`'s own record of which optic's `source.optic`
     assignment this poll's percepts were actually filtered through
-    (`logger._apply_active_gaze`'s `optic = decision.optic`) -- defaulting
+    (`body._apply_active_gaze`'s `optic = decision.optic`) -- defaulting
     to `UNAIDED_OPTIC` when the caller passes nothing (no optic ladder at
     all, e.g. a direct test). **User direction, 2026-10-16, asked directly
     whether the naked-eye-only range test was a test artefact or real
@@ -830,7 +830,7 @@ def decide(
     parameter was named `granted_optic` and wired to `OpticState.
     guidance_optic`, which reads `None` through all of ordinary glassing
     (`OpticPhase.GLASSING` with no standing guidance request) -- the
-    caller (`logger.py`'s poll loop, via `drain_attack_run`) now threads
+    caller (`body.py`'s poll loop, via `drain_attack_run`) now threads
     through `runner.optic` itself: the same value `logger.
     _apply_active_gaze` just assigned onto `source.optic` for this poll,
     i.e. the optic `perception.visibility.check_visibility` actually
@@ -908,7 +908,7 @@ def decide(
     path produced the re-point (`select target`, `engage <what> <where>`
     while already engaged, or any future caller) -- resetting at a call
     site instead would have to be repeated at every such path and was
-    exactly the gap this finding describes (`logger.py`'s own reset only
+    exactly the gap this finding describes (`body.py`'s own reset only
     fires on an explicit `engage` transition, never on a bare
     reselection). The reset clears `last_known_target_alt_m` (closes the
     reported bug: the new target's elevation can no longer be computed

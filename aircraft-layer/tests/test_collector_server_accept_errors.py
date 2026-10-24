@@ -132,9 +132,9 @@ def test_close_during_a_blocked_accept_ends_the_loop_cleanly(
     was just closed") ends the loop without logging it as a failure --
     `close()` sets `self._shutting_down` before it closes the socket, so
     `serve_forever`'s `except` clause classifies this as intended shutdown
-    rather than an unexpected failure, exactly like
-    `F10CommandReceiver.serve_forever`'s own close()-during-recvfrom
-    shutdown path.
+    rather than an unexpected failure, exactly like every other receiver
+    in this codebase's own close()-during-recvfrom shutdown path (e.g.
+    `UnitVelocityReceiver.serve_forever`).
 
     Run several times in a row with fresh server instances rather than
     once: an earlier version of this guard classified shutdown correctly

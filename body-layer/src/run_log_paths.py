@@ -18,10 +18,10 @@ these after landing. Two sorties in one evening would leave only the
 second, with nothing to say the first had ever been recorded. A new name
 per run costs disk the user can see and delete.
 
-Applied at the CLI boundary (`logger.main`), not inside the writers: a
+Applied at the CLI boundary (`body.main`), not inside the writers: a
 writer handed an exact path still writes exactly there, which is what keeps
 them straightforward to test and what lets `tools/` read a specific file.
-That boundary (`logger._per_run_log_paths`) is also where `~` gets expanded
+That boundary (`body._per_run_log_paths`) is also where `~` gets expanded
 and the resolved path's parent directory gets created -- `per_run_log_path`
 below renames and nothing more, and the writers `open(..., "a")` unguarded,
 so the `mkdir` has to happen between them or a missing `logs/` is a startup
