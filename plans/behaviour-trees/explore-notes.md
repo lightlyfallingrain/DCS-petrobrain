@@ -143,3 +143,18 @@ So:
   "when" decisions kept out of the action code, so a later move to trees is a refactor and not a
   rewrite. Recorded in root `CLAUDE.md`, "Behaviour as actions and params".
 - Existing hard-coded behaviour stays as it is.
+
+## 2026-10-24: the user's alternative, an event-driven system (evaluation asked, not designed)
+
+> *"Further thoughts on the behaviour trees. I think we're better off expanding the effector table
+> solution. That's already like a branch of a tree.*
+>
+> *Petrobrain would do better with an event driven system. Expand effector tables to define
+> Petrovitch actions, not only cockpit effector. Add custom triggers that files can register and
+> fire. Others can use them as triggers. That'd give us an event driven system.
+> If's and while loops.*
+>
+> *That'd get us far.
+> That's also much more like real scripting than just tables. Maybe use .lua then?*
+>
+> *Do not design anything yet, but evaluate my idea."*
