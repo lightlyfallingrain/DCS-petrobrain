@@ -1,8 +1,11 @@
 # BL-B90 — Configurable cockpit effector sequences
 
-- [~] **BL-B90 — Move cockpit switch sequences out of code into startup-loaded files: a named
-  effector registry plus one sequence file per (aircraft, role, trigger).** #status/in-progress
-  (`feature/effector-sequences`) Concept `docs/concept/configurable-cockpit-effector.md`; explore
+- [x] **BL-B90 — Move cockpit switch sequences out of code into startup-loaded files: a named
+  effector registry plus one sequence file per (aircraft, role, trigger).** #status/done
+  #needs-flight **Merged to `main` 2026-10-24 (`888a4f01`)**, Stages 0-4, at user direction
+  (*"merge all of effector-sequences to main"*), before the re-flight card was fully flown; card
+  results still owed (https://claude.ai/artifact/HLSWLq5CT4Rm5ZbM62m8bi, now flown from `main`).
+  Stage 4 needs `Export.lua` (wire version `2026-10-24`) redeployed on the DCS machine. Concept `docs/concept/configurable-cockpit-effector.md`; explore
   pass 2026-10-21, `plans/effector-sequences/explore-notes.md`; **planned 2026-10-21,
   `plans/effector-sequences/plan.md`**; started 2026-10-23 — plan revision for BL-B80 v2 first,
   then Stage 0 (the switch-list generator).
