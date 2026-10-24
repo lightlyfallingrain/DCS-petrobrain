@@ -80,3 +80,12 @@ related; that is not yet checked. The logs and the branch flown are not yet in h
 > target B) current belief*
 > *- use the standard attack run guidance phrase, just trigger it on that command. Nothing else
 > needed."*
+
+**Plan decisions, 2026-10-24** (on `plans/attack-run-los/plan.md`, verbatim):
+
+- **Outside an attack run.** The plan proposed *"Unable, no attack run."* The user: *"if target is
+  set, then answer. If no target (and therefore no attack run either) then say "No target""*.
+- **Behind the ridge is held until he sees it again.** The main loop proposed that a fresh
+  terrain-blocked verdict keeps the target "behind the ridge" until a real look, rather than
+  decaying to silent "unknown". The user: *"agreed"*.
+- **Command surface.** *"voice only"*.
