@@ -3403,51 +3403,25 @@ class TestF4DifferentialNoLeak:
 # timestamp" should not require the pilot to remember a flag) ------------
 
 
-def test_speech_log_defaults_on_with_crew_text_and_speech_input(
+def test_speech_log_defaults_on_an_ordinary_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """BL-B96: the crew session and speech input are both unconditional
+    now, so an ordinary run (no explicit `--speech-log`, no
+    `--no-speech-log`) always gets the default -- no flag pair to gate on
+    any more (the old 'without --crew-text --speech-input' negative test
+    has nothing left to exercise and is dropped, not ported)."""
     monkeypatch.chdir(tmp_path)
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=False)
     assert resolved == DEFAULT_SPEECH_LOG_PATH
     assert (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).is_dir()
-
-
-def test_speech_log_does_not_default_without_crew_text_and_speech_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    # Neither flag.
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=False, speech_input=False
-        )
-        is None
-    )
-    # Only one of the two.
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=True, speech_input=False
-        )
-        is None
-    )
-    assert (
-        _resolve_speech_log_path(
-            speech_log=None, no_speech_log=False, crew_text=False, speech_input=True
-        )
-        is None
-    )
-    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
 
 
 def test_no_speech_log_suppresses_the_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=True, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=True)
     assert resolved is None
     assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
 
@@ -3457,9 +3431,7 @@ def test_explicit_speech_log_wins_over_the_default(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     explicit = tmp_path / "elsewhere" / "speech.jsonl"
-    resolved = _resolve_speech_log_path(
-        speech_log=explicit, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=explicit, no_speech_log=False)
     assert resolved == explicit
     # No default-path directory creation happens on the explicit-path route.
     assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
@@ -3479,9 +3451,7 @@ def test_speech_log_default_degrades_to_none_when_directory_is_unwritable(
 
     monkeypatch.setattr(Path, "mkdir", _boom)
 
-    resolved = _resolve_speech_log_path(
-        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
-    )
+    resolved = _resolve_speech_log_path(speech_log=None, no_speech_log=False)
 
     assert resolved is None
     assert "speech-log" in capsys.readouterr().err
@@ -3505,8 +3475,6 @@ def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
             "Syria",
             "--world-model-db",
             str(tmp_path / "wm.sqlite"),
-            "--crew-text",
-            "--speech-input",
             "--audio-adapter-url",
             "http://127.0.0.1:7795",
             "--speech-log",
@@ -3560,7 +3528,13 @@ def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["logger", "--aircraft-layer-url", "http://127.0.0.1:7791"],
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
+        ],
     )
 
     with pytest.raises(SystemExit):
@@ -3584,6 +3558,8 @@ def test_main_rejects_mission_understanding_without_world_model_dir(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
         ],
@@ -3628,6 +3604,8 @@ def test_main_rejects_world_model_db_theatre_mismatch(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--theatre",
             "Syria",
             "--world-model-db",
@@ -3715,6 +3693,8 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
             "--world-model-dir",
@@ -3758,6 +3738,8 @@ def test_main_gives_clean_error_for_unbuilt_theatre_store(
             "logger",
             "--aircraft-layer-url",
             "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
             "--mission-understanding",
             str(mission_understanding_path),
             "--world-model-dir",

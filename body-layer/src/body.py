@@ -118,17 +118,21 @@ overlay_client` (`--overlay`) is set -- a read of `runner.scan_plan` via
 changes so it does not crowd out the overlay's real content on every poll.
 A pure display of existing state: it changes nothing about detection.
 
-**`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
-only meaningful alongside `--crew-text` (a true no-op otherwise, same
-additive posture as `--overlay`/`--f10-commands`). When set, `main()`
-builds a `belief.audio_client.AudioAdapterClient` from `--audio-adapter-url`
-(required together with `--speech-audio`) and passes it as `CrewConsole.
-speech_client`, so every line `CrewConsole` speaks is also synthesized and
-made audible via `audio-adapter`'s `POST /speak` -- the same lines
-`--crew-text --overlay` mirrors to the in-cockpit text overlay, pushed
-through the identical `_print` funnel, just to a different sink and a
-different process (`audio-adapter`, not the aircraft layer). `--overlay` and
-`--speech-audio` are independent and combine freely.
+**Speech in and out are always on (BL-10 first slice, `plans/
+tts-voice-output/plan.md`; Stage 3, `plans/inbound-speech/plan.md`;
+unconditional as of `plans/default-crew-pipeline/plan.md`, BL-B96)**:
+`main()` builds one `belief.audio_client.AudioAdapterClient` from the now-
+required `--audio-adapter-url` and passes it as `CrewConsole.speech_client`,
+so every line `CrewConsole` speaks is synthesized and made audible via
+`audio-adapter`'s `POST /speak` -- the same lines `--overlay` mirrors to
+the in-cockpit text overlay, pushed through the identical `_print` funnel,
+just to a different sink and a different process (`audio-adapter`, not the
+aircraft layer). The poll loop also polls/dispatches recognised speech
+transcripts via the same client's `GET /transcripts/poll`, through
+`CrewConsole.handle_transcript`. If `audio-adapter` is unreachable, start-
+up and the poll loop continue regardless -- see `_ConnectionReporter` and
+the "Audio adapter unreachable" note below; Petrovich simply stays silent
+until it answers.
 """
 
 from __future__ import annotations
@@ -313,11 +317,11 @@ class ConsolePerceptionRunner:
     """
 
     aircraft_client: AircraftLayerClient
-    #: Defaults to empty -- Stage 6's `--console` wiring constructs this
-    #: runner on the main thread before `sources` (and the sqlite connection
-    #: they hold) exist, then has the poll thread populate this field with
+    #: Defaults to empty -- `main()` constructs this runner on the main
+    #: thread before `sources` (and the sqlite connection they hold)
+    #: exist, then has the poll thread populate this field with
     #: its own thread-local sources once it starts (see module docstring's
-    #: "Stage 6 fix"). Tests that don't care about thread-affinity still pass
+    #: thread-affinity note). Tests that don't care about thread-affinity still pass
     #: `sources` explicitly, same as before.
     sources: list[PerceptionSource] = field(default_factory=list)
     store: ContactStore = field(default_factory=ContactStore)
@@ -1615,7 +1619,7 @@ def _warn_live_los_coverage_gap_once(
     (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) and
     logs a one-time warning via the standing `logging.getLogger(__name__)`
     channel the first time `no_verdict` becomes nonzero -- called from
-    both `_run_console_poll_loop` and `_run_crew_text_poll_loop`.
+    `_run_crew_text_poll_loop`.
 
     **Not `_push_gaze_line`'s log-on-change shape, deliberately** -- that
     function's earlier revision copied it and that was the bug (review
@@ -1719,7 +1723,7 @@ def _render_eyesight_frame(
     `trace_records` must be a snapshot taken *before* `--detection-trace`'s
     own `DetectionTraceWriter.write_poll` clears the shared
     `DetectionTraceCollector` this poll fed into `NakedEyePerceptionSource`
-    -- both poll loops call this ahead of that write, never after, so a
+    -- the poll loop calls this ahead of that write, never after, so a
     frame always reflects this poll's own ground truth, not an empty
     collector. Only the naked-eye channel is traced at all (`--detection-
     trace`'s own module docstring), so the ground-truth half of a frame is
@@ -1885,11 +1889,10 @@ def _build_sources(
     trace_sink: DetectionTraceCollector | None = None,
     forest_occlusion: bool = False,
 ) -> list[PerceptionSource]:
-    """Construct both concrete tiers at a given `emit_mode` -- shared by
-    `main()`'s plain-logger path (`"on_change"`) and `--console`/
-    `--crew-text` paths (`"every_poll"`) so the two never drift apart on
-    which tiers are wired in, only on their emission mode and what
-    consumes their output.
+    """Construct both concrete tiers at a given `emit_mode` --
+    `main()`'s crew-text poll loop always builds at `"every_poll"`
+    (`"on_change"` remains a tested capability of this function, not
+    currently used by any production caller).
 
     `trace_sink` (BL-9, `--detection-trace`) is additive, defaults to
     `None`, and is only ever wired into `NakedEyePerceptionSource` -- the
@@ -2060,10 +2063,10 @@ def _mission_memory_step(
     phase: MissionPhaseInfo | None,
     fired_on_tracker: FiredOnTracker,
 ) -> None:
-    """BL-8's writer, called once per poll from both poll loops, **after**
-    `runner.run_once()` (belief is settled; `ContactStore.tick()` has
-    already materialised this poll's events) and, in the `--crew-text`
-    loop, **before** `crew_console.drain_events` -- `mission_memory.
+    """BL-8's writer, called once per poll from the crew-session poll
+    loop, **after** `runner.run_once()` (belief is settled;
+    `ContactStore.tick()` has already materialised this poll's events)
+    and **before** `crew_console.drain_events` -- `mission_memory.
     admission`'s module docstring states the same ordering, and this is
     the one call site responsible for keeping it (plan Decision 3).
 
@@ -2118,11 +2121,11 @@ def _reset_mission_state(
     stale `store`/`tasks` objects -- reassigning the field, not clearing
     its contents.
 
-    `crew_console` is `None` for `--console` (the debug REPL path, which
-    has no `CrewConsole` at all, only `belief.console.Console` -- built on
-    the REPL thread, not shared with this poll loop) -- a true no-op for
-    that one call, same "optional collaborator, None is a no-op" shape as
-    every other optional field in this codebase.
+    `crew_console` is `Optional` so a caller with no production command
+    surface to reset can pass `None` for a true no-op -- same "optional
+    collaborator, None is a no-op" shape as every other optional field in
+    this codebase. `main()`'s own poll loop always has a real
+    `CrewConsole` and never takes this branch.
 
     `fired_on_tracker` defaults to `None` so every existing test calling
     this with the original three-argument shape is unaffected (same
@@ -2167,9 +2170,10 @@ def _enter_refusal_mode(
     must rebuild it against the *new* connection, not silently keep serving
     stale enrichment computed from a closed one.
 
-    `crew_console` is `None` for `--console` (no production command surface
-    to refuse on that debug path) -- a true no-op for that one call, same
-    shape as `_reset_mission_state`'s own."""
+    `crew_console` is `Optional`, same shape as `_reset_mission_state`'s
+    own -- `None` is a true no-op for a caller with no production command
+    surface to refuse on. `main()`'s own poll loop always has a real
+    `CrewConsole` and never takes this branch."""
     if runner.world_model_conn is not None:
         runner.world_model_conn.close()
     runner.world_model_conn = None
@@ -2227,7 +2231,7 @@ def _maybe_switch_theatre(
     plan's original "keep the old store and log loudly" default.
 
     On success: builds the new sources at this runner's own emit mode
-    (`"every_poll"`, the only mode either poll loop built a runner
+    (`"every_poll"`, the only mode the poll loop builds a runner
     against), closes the *old* connection only after the new one is
     confirmed open and sources are already pointed at it, and clears
     `crew_console.refused` if it was set -- the next successful mission
@@ -2356,9 +2360,8 @@ def _check_for_new_mission(
     `MISSION_START_RESOLVE_FALLBACK_S` elapses, once that bounded fallback
     fires instead (dropping the in-air classification rather than guessing
     it from a stale sample; see that poll block's own comment). Not done
-    here: this function (and `--console`'s
-    debug REPL, which calls it with no `CrewConsole` at all) has no
-    ownship sample of its own to decide freshness or airborne-ness from.
+    here: this function has no ownship sample of its own to decide
+    freshness or airborne-ness from.
 
     **Does nothing on the very first poll of a process**, even if a
     sequence is already present (the collector may already hold a mission-
@@ -2391,7 +2394,7 @@ def _check_for_new_mission(
 
     **An unreachable collector is skipped silently, not logged here.**
     This is the one aircraft-layer call that runs *before* `run_once()`
-    in both poll loops, so with the collector down it used to print a
+    in the poll loop, so with the collector down it used to print a
     full traceback every poll -- the exact spew `_ConnectionReporter`
     exists to prevent. `run_once()`'s own telemetry read hits the same
     dead host a moment later and reports the transition once ("aircraft
@@ -2475,7 +2478,7 @@ def _reroll_run_logs(
     DetectionTraceWriter | None, BeliefTruthLogWriter | None, SightTraceWriter | None
 ]:
     """`BL-15` Stage 1 user decision 5 ("per mission", not a marker line in
-    whatever log happened to be open): called once from each poll loop,
+    whatever log happened to be open): called once from the poll loop,
     immediately after `_check_for_new_mission` reports it performed a
     reset, re-stamps every per-run log that is actually enabled to a fresh
     filename (`run_log_paths.per_run_log_path`, the same mechanism
@@ -2527,16 +2530,14 @@ def _reroll_run_logs(
       new file, which only makes sense once a reset has actually happened
       (this function is never called otherwise).
 
-    `crew_console is None` for `--console` (no `CrewConsole`, so no
-    `speech_log_sink`/`transcript_log` to re-wire -- `_reroll_one`'s
-    `speech-log` branch is skipped entirely for that caller, same "None is
-    a no-op" shape as `_reset_mission_state`'s own `crew_console`
-    handling).
+    `crew_console` is `Optional`: a caller with no `CrewConsole` has no
+    `speech_log_sink`/`transcript_log` to re-wire, so `None` skips
+    `_reroll_one`'s `speech-log` branch entirely, same "None is a no-op"
+    shape as `_reset_mission_state`'s own `crew_console` handling.
+    `main()`'s own poll loop always has a real `CrewConsole`.
 
     `slew_trace_writer`/`slew_trace_base` (`BL-B66` Stage 4b) are the same
-    "open file handle, close before replacing" shape `trace_writer` is --
-    `--console` passes neither (always `None`), the same reason it passes
-    no `speech_log_base`.
+    "open file handle, close before replacing" shape `trace_writer` is.
 
     A directory that has since become unwritable degrades that one log to
     "stop writing it for the rest of this mission" with a line on stderr
@@ -2804,9 +2805,8 @@ def _load_effector_config() -> tuple[
 ]:
     """Loads the effector registry/sequence files for this runtime's own
     aircraft (`belief.effector_engine.AIRCRAFT`), `plans/
-    effector-sequences/plan.md` D5. Called once at `--crew-text` startup,
-    before `_run_crew_text_poll_loop` ever runs -- `--console` has no
-    `CrewConsole` to drive a trigger from at all, so it never calls this.
+    effector-sequences/plan.md` D5. Called once at `main()` startup,
+    before `_run_crew_text_poll_loop` ever runs.
 
     Every loader underneath is itself non-fatal on bad content (`belief.
     effector_registry.load_registry`/`belief.effector_sequences.
@@ -2937,41 +2937,38 @@ def _run_crew_text_poll_loop(
     effector_registry: Mapping[str, EffectorDef] | None = None,
     polled_args: Sequence[int] | None = None,
 ) -> None:
-    """`--crew-text`'s background poll thread -- identical to
-    `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
-    Connection`, see that function's docstring / module docstring's "Stage 6
-    fix"), plus one extra call per poll: `crew_console.drain_events` speaks
-    whatever lifecycle events this poll's `tick()` newly surfaced, the same
-    hook point `--overlay`'s mirroring uses in `ConsolePerceptionRunner.
-    run_once` itself. `f10_commands_enabled` (`--f10-commands`, `plans/
+    """The crew session's background poll thread: opens `world_model_conn`
+    and builds `runner.sources` here, on this thread (`sqlite3.Connection`s
+    are thread-affine -- see the module docstring's thread-affinity note),
+    then keeps calling `runner.run_once()` (which fills `runner.store` and
+    updates `runner.last_t_sim`) until `stop_event` is set, plus one extra
+    call per poll: `crew_console.drain_events` speaks whatever lifecycle
+    events this poll's `tick()` newly surfaced, the same hook point
+    `--overlay`'s mirroring uses in `ConsolePerceptionRunner.run_once`
+    itself. `f10_commands_enabled` (`--f10-commands`, `plans/
     f10-crew-commands/plan.md`) additionally polls/dispatches pending F10
     radio-menu selections each cycle via `_poll_f10_commands` -- defaults
-    off, a true no-op when unset. `speech_input_enabled` (`--speech-input`,
-    `plans/inbound-speech/plan.md` Stage 3) is the same additive-no-op-when-
-    unset shape, polling `speech_client.get_transcripts()` via `_poll_
-    transcripts` -- `speech_client` is only ever non-`None` here when
-    `speech_input_enabled` is set (`main()`'s own wiring), but both are
-    still checked so this function has no implicit dependency on how its
-    caller constructs them. `detection_trace_path` (BL-9, `--detection-
-    trace`), `eyesight_view`/`eyesight_view_radius_m` (`--eyesight-view`),
-    `belief_truth_log_path` (`--belief-truth-log`), and `forest_occlusion`
-    (`--forest-occlusion`) mirror `_run_console_poll_loop`'s own wiring
-    exactly -- see that function's docstring for all four. `mission_memory_
-    path` (`--mission-memory`, BL-8) is the same shape too -- see that
-    function's own paragraph on it.
+    off, a true no-op when unset. `speech_input_enabled` (BL-B96: always
+    `True` in `main()`'s own wiring; the parameter stays for tests that
+    want it off) polls `speech_client.get_transcripts()` via `_poll_
+    transcripts` -- `speech_client` is non-`None` whenever `main()` builds
+    this loop, but both are still checked so this function has no implicit
+    dependency on how its caller constructs them. `detection_trace_path`
+    (BL-9, `--detection-trace`), `eyesight_view`/`eyesight_view_radius_m`
+    (`--eyesight-view`), `belief_truth_log_path` (`--belief-truth-log`),
+    and `forest_occlusion` (`--forest-occlusion`) are each additive and
+    default to a true no-op when unset.
 
     `world_model_dir`/`detection_trace_base`/`belief_truth_log_base`/
     `group_trace_base`/`mission_memory_base` (`BL-15` Stage 3/Decision 5)
-    mirror `_run_console_poll_loop`'s own identical parameters -- see that
-    function's docstring. `speech_log_base` is this loop's own addition
-    (no `--console` twin, since `--console` has no `CrewConsole`/
-    `transcript_log` to re-wire): the pre-stamp path for `--speech-log`,
-    so a mission (re)start also re-rolls `crew_console.transcript_log` to
-    a fresh per-mission speech log. `slew_trace_path`/`slew_trace_base`
-    (`--slew-trace`, `BL-B66` Stage 4b) are the same "this loop's own
-    addition" shape as `speech_log_base` and for the same reason: the
-    takeoff/power-up/OBSERV wiring this writer reads only runs here, never
-    in `--console`.
+    are each log's pre-stamp path, threaded through so a mission (re)start
+    can re-roll them to a fresh per-mission filename (`_reroll_run_logs`)
+    -- `None` for a log that was never enabled. `speech_log_base` is the
+    pre-stamp path for `--speech-log`, so a mission (re)start also
+    re-rolls `crew_console.transcript_log` to a fresh per-mission speech
+    log. `slew_trace_path`/`slew_trace_base` (`--slew-trace`, `BL-B66`
+    Stage 4b) are the same shape, for the takeoff/power-up/OBSERV wiring
+    this writer reads, which only runs on this loop.
 
     `effector_sequences`/`effector_registry` (`plans/effector-sequences/
     plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
@@ -3093,9 +3090,8 @@ def _run_crew_text_poll_loop(
             try:
                 # `BL-15` Stage 1: detect a genuine DCS mission (re)start
                 # and reset belief/mission memory before this poll's
-                # `run_once()` ingests anything against stale state --
-                # same ordering as `_run_console_poll_loop`'s own call,
-                # except this path has a real `CrewConsole` to reset too.
+                # `run_once()` ingests anything against stale state,
+                # including the real `CrewConsole`.
                 # Stage 3/Decision 5: re-resolve theatre and re-roll the
                 # per-run logs only when a reset actually fired.
                 if _check_for_new_mission(
@@ -3664,8 +3660,10 @@ def _run_crew_text_poll_loop(
                         else None
                     )
                     # `BL-15` Stage 3: `runner.theatre`, not the closed-over
-                    # `theatre` parameter -- see `_run_console_poll_loop`'s
-                    # identical note.
+                    # `theatre` parameter -- a successful theatre switch
+                    # (`_maybe_switch_theatre`) updates `runner.theatre` in
+                    # place, and the local parameter above is only this
+                    # poll loop's *initial* value, never reassigned.
                     assert runner.theatre is not None
                     _mission_memory_step(
                         mission_memory,
@@ -3824,19 +3822,18 @@ def _resolve_speech_log_path(
     *,
     speech_log: Path | None,
     no_speech_log: bool,
-    crew_text: bool,
-    speech_input: bool,
 ) -> Path | None:
     """Decide what `--speech-log` should end up pointing at, after
-    argparse's own mutual-exclusivity/requires checks have already run.
+    argparse's own mutual-exclusivity check has already run.
 
-    An ordinary sortie (`--crew-text --speech-input`, no explicit
-    `--speech-log`, no `--no-speech-log`) gets `DEFAULT_SPEECH_LOG_PATH`
-    without the user having to remember a flag -- that is precisely when
-    the garbled-transcript data this file exists for gets produced.
-    `--no-speech-log` opts back out; an explicit `--speech-log` always
-    wins (already validated by the caller to require `--crew-text
-    --speech-input`).
+    An ordinary sortie (no explicit `--speech-log`, no `--no-speech-log`)
+    gets `DEFAULT_SPEECH_LOG_PATH` without the user having to remember a
+    flag -- that is precisely when the garbled-transcript data this file
+    exists for gets produced. `--no-speech-log` opts back out; an explicit
+    `--speech-log` always wins. (BL-B96: the crew session and speech
+    input are both unconditional now, so this no longer gates on a
+    `--crew-text`/`--speech-input` pair -- every run is "an ordinary
+    sortie" in that sense.)
 
     Directory creation happens at startup, once, rather than per write --
     so an unwritable location degrades to no log (reported on stderr)
@@ -3871,8 +3868,6 @@ def _resolve_speech_log_path(
     if speech_log is not None:
         return speech_log
     if no_speech_log:
-        return None
-    if not (crew_text and speech_input):
         return None
     try:
         DEFAULT_SPEECH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -4035,7 +4030,7 @@ def _resolve_group_trace_log_path(
     own `time.time()` call when `when` is `None`, a handful of
     nanoseconds away from `_per_run_log_paths`'s own default stamp rather
     than bit-for-bit identical. Both calls happen within the same `main()`
-    invocation before either poll loop starts, so the two timestamps never
+    invocation before the poll loop starts, so the two timestamps never
     disagree at the second resolution `RUN_STAMP_FORMAT` actually renders
     at, in practice -- and an explicit `when` (what every test above
     passes) makes the two identical by construction regardless."""
@@ -4125,9 +4120,10 @@ def _configure_logger_for_main() -> None:
     is `WARNING` (30) -- `logger.warning(...)` calls printed by accident
     of that fallback, but every `logger.info(...)` call, including the
     coverage summary's unconditional `0/N` line, was silently dropped on
-    every real sortie. All three entry points (`--console`, `--crew-text`,
-    and the plain-logger `else:` branch) share this one module-level
-    `logger`, so configuring it once here covers all three.
+    every real sortie. `_configure_logger_for_main()` runs once,
+    unconditionally, at the top of `main()`, before any flag is read, so
+    this covers the one remaining entry point regardless of which flags
+    are given.
 
     **Deliberately scoped to this module's own logger instance, never
     `logging.basicConfig`/the root logger.** `main()` is this subproject's
@@ -4257,16 +4253,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--crew-text",
-        action="store_true",
-        help=(
-            "run the player-facing crew session (belief.crew_console."
-            "CrewConsole) instead of the plain on_change text logger -- "
-            "BL-5a. Combine with --overlay to also mirror spoken crew "
-            "text to the in-cockpit overlay (overlay-speech-callouts)."
-        ),
-    )
-    parser.add_argument(
         "--mission-understanding",
         type=Path,
         default=None,
@@ -4297,7 +4283,7 @@ def main() -> None:
         default="debug",
         help=(
             "which belief.escalation.BrainClient handles escalated "
-            "utterances under --crew-text -- 'http' (plans/brain-layer/"
+            "utterances -- 'http' (plans/brain-layer/"
             "plan.md) talks to a running brain-layer instance over "
             "--brain-url and speaks real replies; 'debug' (default) "
             "prints escalations to stderr and never speaks; 'null' is "
@@ -4313,36 +4299,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--speech-audio",
-        action="store_true",
-        help=(
-            "synthesize and play every line CrewConsole speaks via "
-            "audio-adapter's POST /speak -- BL-10 first slice, plans/"
-            "tts-voice-output/plan.md. Only meaningful with --crew-text; "
-            "defaults off, a true no-op when absent. Requires "
-            "--audio-adapter-url."
-        ),
-    )
-    parser.add_argument(
-        "--speech-input",
-        action="store_true",
-        help=(
-            "poll and dispatch recognised speech transcripts via "
-            "audio-adapter's GET /transcripts/poll -- Stage 3, plans/"
-            "inbound-speech/plan.md. Only meaningful with --crew-text; "
-            "defaults off, a true no-op when absent. Requires "
-            "--audio-adapter-url. Independent of --speech-audio (audio "
-            "out) -- pass both to hear Petrovich act on and read back a "
-            "spoken command end to end."
-        ),
-    )
-    parser.add_argument(
         "--audio-adapter-url",
         default=None,
         help=(
-            "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
-            "together with --speech-audio and/or --speech-input, unused "
-            "otherwise"
+            "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- "
+            "required (BL-B96: speech in/out are always on). If the "
+            "adapter is unreachable at startup or at any point during the "
+            "sortie, body-layer warns once and keeps trying -- everything "
+            "else (perception, belief, voice-command dispatch, mission "
+            "memory) runs unaffected; Petrovich simply stays silent until "
+            "it answers."
         ),
     )
     parser.add_argument(
@@ -4355,8 +4321,7 @@ def main() -> None:
             "about it (act/confirm/say_again/fallthrough). The answer to "
             "'why did nothing happen when I said that': an utterance matching "
             "no command otherwise reaches only the brain-layer stand-in, "
-            "which does nothing. Only meaningful with --crew-text "
-            f"--speech-input, where it defaults on ({DEFAULT_SPEECH_LOG_PATH}, "
+            f"which does nothing. Defaults on ({DEFAULT_SPEECH_LOG_PATH}, "
             "created if absent, appended across sorties) even without this "
             "flag -- pass it only to log somewhere else. See --no-speech-log "
             "to suppress the default instead."
@@ -4366,9 +4331,8 @@ def main() -> None:
         "--no-speech-log",
         action="store_true",
         help=(
-            "suppress --speech-log's default sink. Only meaningful with "
-            "--crew-text --speech-input (a no-op otherwise, same as the "
-            "default it suppresses); mutually exclusive with --speech-log."
+            "suppress --speech-log's default sink; mutually exclusive "
+            "with --speech-log."
         ),
     )
     parser.add_argument(
@@ -4380,9 +4344,7 @@ def main() -> None:
             "(JSONL) to this path -- BL-9, plans/bl9-debug-visualization/"
             "plan.md. Answers 'why did Petrovich not see that' after a "
             "flight: reduce it with body-layer/tools/"
-            "summarize_detection_trace.py. Only meaningful with --console "
-            "or --crew-text (there is nothing to join against belief "
-            "without one of those poll loops); defaults off, a true no-op "
+            "summarize_detection_trace.py. Defaults off, a true no-op "
             "when absent."
         ),
     )
@@ -4399,9 +4361,7 @@ def main() -> None:
             "only way D5's rarity claim and BL-B50's lapse condition "
             "(membership flipping on consecutive ticks) are checkable from "
             "an actual sortie rather than from a wrong spoken line in "
-            "flight. Only meaningful with --console or --crew-text (there "
-            "is nothing to join against belief without one of those poll "
-            "loops); defaults off, a true no-op when absent."
+            "flight. Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4414,10 +4374,8 @@ def main() -> None:
             "('readback' or 'model'), the error, OBSERV commanded/"
             "observed, and optic mode -- BL-B66 Stage 4b, plans/"
             "9k113-effectors/plan.md. Data for BL-B80's rate-loop "
-            "tuning; reduce with .claude/skills/sortie-log-triage. Only "
-            "meaningful with --crew-text (the guidance-unit power-up/"
-            "OBSERV write-through only runs on that poll loop); defaults "
-            "off, a true no-op when absent."
+            "tuning; reduce with .claude/skills/sortie-log-triage. "
+            "Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4428,11 +4386,10 @@ def main() -> None:
             "at and with what, redrawn every poll -- a debug/calibration "
             "instrument (todo/todo.md's 'Added 2026-09-25 (user)' entry), "
             "deliberately allowed to show ground truth alongside belief "
-            "(see eyesight_view.py's module docstring). Only meaningful "
-            "with --console or --crew-text; defaults off, a true no-op "
-            "when absent. Offline: body-layer/tools/eyesight_replay.py "
-            "replays a --detection-trace JSONL file with no live DCS "
-            "session at all."
+            "(see eyesight_view.py's module docstring). Defaults off, a "
+            "true no-op when absent. Offline: body-layer/tools/"
+            "eyesight_replay.py replays a --detection-trace JSONL file "
+            "with no live DCS session at all."
         ),
     )
     parser.add_argument(
@@ -4459,9 +4416,8 @@ def main() -> None:
             "plan.md. An append-only, per-sortie record of what Petrovich "
             "saw/marked/was shot at, written from settled belief after "
             "every poll's ContactStore.tick(); the in-flight read half is "
-            "in-memory only and not wired by this flag. Only meaningful "
-            "with --console or --crew-text; defaults off, a true no-op "
-            "when absent."
+            "in-memory only and not wired by this flag. Defaults off, a "
+            "true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4480,8 +4436,7 @@ def main() -> None:
             "(believed range beyond the naked-eye channel's own detection "
             "cap, or a position error far beyond the contact's own stated "
             "uncertainty) -- see belief_truth_log.py's module docstring. "
-            "Only meaningful with --console or --crew-text; defaults off, "
-            "a true no-op when absent."
+            "Defaults off, a true no-op when absent."
         ),
     )
     parser.add_argument(
@@ -4516,33 +4471,13 @@ def main() -> None:
         parser.error(
             "--aircraft-layer-url is required (omit only together with --print-tuning)"
         )
-
-    if args.speech_audio and args.audio_adapter_url is None:
-        parser.error("--speech-audio requires --audio-adapter-url")
-    if args.speech_input and args.audio_adapter_url is None:
-        parser.error("--speech-input requires --audio-adapter-url")
+    if args.audio_adapter_url is None:
+        parser.error(
+            "--audio-adapter-url is required (omit only together with "
+            "--print-tuning) -- BL-B96: speech in/out are always on"
+        )
     if args.speech_log is not None and args.no_speech_log:
         parser.error("--speech-log is mutually exclusive with --no-speech-log")
-    if args.speech_log is not None and not (args.crew_text and args.speech_input):
-        parser.error(
-            "--speech-log requires --crew-text --speech-input (there are no "
-            "transcripts to log without them)"
-        )
-    if args.detection_trace is not None and not args.crew_text:
-        parser.error("--detection-trace requires --crew-text")
-    if args.group_trace is not None and not args.crew_text:
-        parser.error("--group-trace requires --crew-text")
-    if args.eyesight_view and not args.crew_text:
-        parser.error("--eyesight-view requires --crew-text")
-    if args.belief_truth_log is not None and not args.crew_text:
-        parser.error("--belief-truth-log requires --crew-text")
-    if args.mission_memory is not None and not args.crew_text:
-        parser.error("--mission-memory requires --crew-text")
-    if args.slew_trace is not None and not args.crew_text:
-        parser.error(
-            "--slew-trace requires --crew-text (the guidance-unit power-up/"
-            "OBSERV write-through only runs on that poll loop)"
-        )
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
@@ -4617,8 +4552,6 @@ def main() -> None:
     args.speech_log = _resolve_speech_log_path(
         speech_log=args.speech_log,
         no_speech_log=args.no_speech_log,
-        crew_text=args.crew_text,
-        speech_input=args.speech_input,
     )
 
     # `BL-15` Stage 1 decision 5 ("per mission", not a marker line):
@@ -4690,103 +4623,94 @@ def main() -> None:
     if mission_data is not None:
         mission_phase_tracker = MissionPhaseTracker(data=mission_data)
 
-    if args.crew_text:
-        brain_client: BrainClient
-        if args.brain_client == "http":
-            brain_client = BrainLayerClient(base_url=args.brain_url)
-        elif args.brain_client == "debug":
-            brain_client = DebugPrintBrainClient()
-        else:
-            brain_client = NullBrainClient()
-        crew_runner = ConsolePerceptionRunner(
-            aircraft_client=aircraft_client,
-            output=None,
-            mission_phase_tracker=mission_phase_tracker,
-            group_trace_sink=(
-                GroupTraceLogWriter(args.group_trace).write
-                if args.group_trace is not None
-                else None
-            ),
-        )
-        # One AudioAdapterClient instance, shared by whichever of --speech-
-        # audio (push_speech, outbound) / --speech-input (get_transcripts,
-        # inbound) are set -- both hit the same audio-adapter process at
-        # the same --audio-adapter-url, so there is no reason to construct
-        # two. CrewConsole.speech_client only takes it when --speech-audio
-        # is actually set (audio *output* is its own concern, independent
-        # of whether speech input is also wired).
-        audio_adapter_client = (
-            AudioAdapterClient(base_url=args.audio_adapter_url)
-            if (args.speech_audio or args.speech_input)
+    brain_client: BrainClient
+    if args.brain_client == "http":
+        brain_client = BrainLayerClient(base_url=args.brain_url)
+    elif args.brain_client == "debug":
+        brain_client = DebugPrintBrainClient()
+    else:
+        brain_client = NullBrainClient()
+    crew_runner = ConsolePerceptionRunner(
+        aircraft_client=aircraft_client,
+        output=None,
+        mission_phase_tracker=mission_phase_tracker,
+        group_trace_sink=(
+            GroupTraceLogWriter(args.group_trace).write
+            if args.group_trace is not None
             else None
-        )
-        # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
-        # loaded once here, before `CrewConsole` exists, so a bad
-        # registry/sequence file can set `config_error_pending` at
-        # construction time rather than needing a second mutation after
-        # the fact.
-        (
+        ),
+    )
+    # BL-B96: speech in (`get_transcripts`) and out (`push_speech`) are
+    # both always on now, so exactly one `AudioAdapterClient` is always
+    # built -- no more "only if --speech-audio/--speech-input" branching.
+    audio_adapter_client = AudioAdapterClient(base_url=args.audio_adapter_url)
+    # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
+    # loaded once here, before `CrewConsole` exists, so a bad
+    # registry/sequence file can set `config_error_pending` at
+    # construction time rather than needing a second mutation after
+    # the fact.
+    (
+        effector_sequences_by_key,
+        effector_registry_entries,
+        had_config_errors,
+        polled_args_set,
+    ) = _load_effector_config()
+    crew_console = CrewConsole(
+        store=crew_runner.store,
+        brain_client=brain_client,
+        output=sys.stdout,
+        aircraft_client=aircraft_client,
+        tasks=crew_runner.tasks,
+        overlay_client=aircraft_client if args.overlay else None,
+        speech_client=audio_adapter_client,
+        transcript_log=(
+            SpeechLogWriter(args.speech_log).write
+            if args.speech_log is not None
+            else None
+        ),
+        config_error_pending=had_config_errors,
+    )
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            crew_runner,
+            crew_console,
+            aircraft_client,
+            theatre,
+            world_model_db,
+            args.poll_interval_s,
+            stop_event,
+            args.f10_commands,
+            audio_adapter_client,
+            True,  # speech_input_enabled -- BL-B96: always on
+            args.detection_trace,
+            args.eyesight_view,
+            args.eyesight_view_radius_m,
+            args.belief_truth_log,
+            args.forest_occlusion,
+            args.mission_memory,
+            args.world_model_dir,
+            detection_trace_base,
+            belief_truth_log_base,
+            speech_log_base,
+            group_trace_base,
+            mission_memory_base,
+            args.slew_trace,
+            slew_trace_base,
             effector_sequences_by_key,
             effector_registry_entries,
-            had_config_errors,
-            polled_args_set,
-        ) = _load_effector_config()
-        crew_console = CrewConsole(
-            store=crew_runner.store,
-            brain_client=brain_client,
-            output=sys.stdout,
-            aircraft_client=aircraft_client,
-            tasks=crew_runner.tasks,
-            overlay_client=aircraft_client if args.overlay else None,
-            speech_client=audio_adapter_client if args.speech_audio else None,
-            transcript_log=(
-                SpeechLogWriter(args.speech_log).write
-                if args.speech_log is not None
-                else None
-            ),
-            config_error_pending=had_config_errors,
-        )
-        stop_event = threading.Event()
-        poll_thread = threading.Thread(
-            target=_run_crew_text_poll_loop,
-            args=(
-                crew_runner,
-                crew_console,
-                aircraft_client,
-                theatre,
-                world_model_db,
-                args.poll_interval_s,
-                stop_event,
-                args.f10_commands,
-                audio_adapter_client if args.speech_input else None,
-                args.speech_input,
-                args.detection_trace,
-                args.eyesight_view,
-                args.eyesight_view_radius_m,
-                args.belief_truth_log,
-                args.forest_occlusion,
-                args.mission_memory,
-                args.world_model_dir,
-                detection_trace_base,
-                belief_truth_log_base,
-                speech_log_base,
-                group_trace_base,
-                mission_memory_base,
-                args.slew_trace,
-                slew_trace_base,
-                effector_sequences_by_key,
-                effector_registry_entries,
-                polled_args_set.args,
-            ),
-            daemon=True,
-        )
-        poll_thread.start()
-        print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
-        try:
-            _run_crew_text_repl(crew_runner, crew_console, world_model_db, theatre)
-        finally:
-            stop_event.set()
-            poll_thread.join()
+            polled_args_set.args,
+        ),
+        daemon=True,
+    )
+    poll_thread.start()
+    print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
+    try:
+        _run_crew_text_repl(crew_runner, crew_console, world_model_db, theatre)
+    finally:
+        stop_event.set()
+        poll_thread.join()
 
 
 if __name__ == "__main__":
