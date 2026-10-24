@@ -239,3 +239,23 @@ function takeOffClearanceActions() {
 ```
 
 > *"Something along those lines. Not exact, just ideas and pseudocode."*
+
+Main loop's response (a Lua rendering with a scan handler and an interrupt): the sketch's boundary
+is right; `register()` enables load-time checking; `pause()`/`continue()` match round 3's resume.
+Gaps raised:
+
+1. scripts must read Petrovich's belief only, never DCS truth (the `Percept` boundary);
+2. waiting and completion (coroutines, `done()`, succeeded/failed);
+3. interrupts need a priority and the resources they claim (sight, voice, hands, later controls),
+   which gives both pre-empt and concurrent kinds;
+4. several scripts on one trigger;
+5. player commands as parsed slots plus raw text, not a glob;
+6. `speak():radio` needs SRS; writable params are shared script state, kept apart from belief
+   params.
+
+### Answers, 2026-10-24
+
+- **Mission scripts add to the common one, never replace it.** *"add to common"*.
+- **Audience: the user now, any user later.** *"for now, only me. Eventually, any user who wishes to
+  use it could write their own."* So the sandbox and the load-time checks must eventually hold for
+  strangers' scripts (fits the public open-source intent), but they need not be hardened for that yet.
