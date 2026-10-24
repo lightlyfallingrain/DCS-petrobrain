@@ -6,10 +6,10 @@ Decision 4/5).
 directly on this machine -- `afplay` on macOS/Linux, `winsound` on Windows
 (`local_playback.make_local_sink`'s platform dispatch, Decision 2/6). This
 is both the fastest way to iterate on voice/wording quality and the
-permanent guaranteed-deliverable local-dev path body-layer's
-`--speech-audio` flag needs to be testable without a live Windows/DCS
-session, per `body-layer/CLAUDE.md`'s "testable without a live DCS session"
-requirement.
+permanent guaranteed-deliverable local-dev path body-layer's crew session
+(speech out is unconditional, `BL-B96`) needs to be testable without a
+live Windows/DCS session, per `body-layer/CLAUDE.md`'s "testable without a
+live DCS session" requirement.
 
 `--target aircraft-layer` instead POSTs the WAV to a running aircraft-layer
 collector's `POST /audio/play`, which plays it through `winsound` on the
