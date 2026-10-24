@@ -41,8 +41,10 @@
 
   - The mission-start Hook (BL-15) reuses the F10-commands Hook's `autoexec.cfg` opt-in
     (`aircraft-layer/CLAUDE.md`). Removing F10 must not remove mission-start detection.
-  - What happens at startup when the audio adapter is not reachable, now that speech is no longer
-    opt-in. This is a decision for the user; nothing above settles it.
+  - **Audio adapter unreachable at startup: decided 2026-10-24, warn and keep trying.** Offered
+    "warn and keep trying" (a loud console banner; Petrovich silent until the adapter comes up;
+    everything else runs, as with a bad config file) against "refuse to start". The user: *"Warn
+    and keep trying"*.
   - The `BL-B7`/`BL-B8`/`BL-B9` F10 backlog entries become obsolete. They get a note, not
     deletion; IDs are never reused.
   - Sequenced **after** `feature/attack-run-los` merges, because both touch `logger.py` and
