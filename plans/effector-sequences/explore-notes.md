@@ -176,6 +176,13 @@ The user's answers to the Stage 4 plan's Decisions 4–6:
 
   So there are two classes: sequence switches, which are written without continuous polling, and a
   small set of state switches and lamps, which are polled. The conflict with R12 (skip a row whose
-  switch is already set) was raised back to the user.
+  switch is already set) was raised back to the user, as two options:
+
+  - **A.** Write and assume success. R12's skip is dropped, so second takeoffs repeat the
+    `petrovich-says` lines and the step spacing.
+  - **B.** Read the trigger's own switches **once, when the trigger fires**, then write only the
+    ones that differ. R12 is kept. A small fixed set of state switches and lamps is still polled.
+
+  **User: *"B"*.**
 - **Decision 5 (test fakes): rewrite.** *"rewrite"*.
 - **Decision 6 (old feed): remove.** *"remove"*.
