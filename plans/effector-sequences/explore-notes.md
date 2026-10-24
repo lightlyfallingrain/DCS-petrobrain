@@ -184,5 +184,11 @@ The user's answers to the Stage 4 plan's Decisions 4–6:
     ones that differ. R12 is kept. A small fixed set of state switches and lamps is still polled.
 
   **User: *"B"*.**
+- **Polled set comes from config, not code.** On the revised plan's hard-coded
+  `READBACK_ARGS = (886, 898, 960)`: *"Better add a config for which effectors need constant
+  updates. The list will likely grow."* The main loop added a guard, which the user did not object
+  to: the args that code itself reads (886, 898, 960) are always polled, with a startup warning if
+  the config omits them. The config names indicators (e.g. the READY lamp, which is not clickable)
+  by arg number as well as switches by effector name.
 - **Decision 5 (test fakes): rewrite.** *"rewrite"*.
 - **Decision 6 (old feed): remove.** *"remove"*.
