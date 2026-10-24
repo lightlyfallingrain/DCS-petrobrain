@@ -23,13 +23,11 @@ contact report (plan Decision 3's `bypass_gate` framing on the body-layer
 side).
 
 **The queue is bounded (`_MAX_QUEUE_LEN`), dropping the oldest queued line
-on overflow** (2026-09-26 performance review) -- added as parity with
-`collector.cache.F10CommandQueue`, this codebase's other queue of the same
-risk class, which was already bounded with the same reasoning: a producer
-bug or a long, dense-traffic sortie must not grow this queue (and its
-backing temp `.wav` files on disk) without limit. Oldest-dropped, not
-newest-rejected, because a stale queued callout is worth less than a fresh
-one -- see `_enqueue`.
+on overflow** (2026-09-26 performance review): a producer bug or a long,
+dense-traffic sortie must not grow this queue (and its backing temp
+`.wav` files on disk) without limit. Oldest-dropped, not newest-rejected,
+because a stale queued callout is worth less than a fresh one -- see
+`_enqueue`.
 
 **SPU-8 gating and volume (`plans/spu8-intercom/plan.md` Stage 3)** are
 both consulted at one point: immediately before `self._player.play(path)`,
@@ -139,8 +137,9 @@ class WavPlayer(Protocol):
 #: Bounded so a producer bug (or simply a long, dense-traffic sortie) cannot
 #: grow this queue -- and its backing temp `.wav` files on disk -- without
 #: limit (2026-09-26 performance review, "Audio playback queue has no upper
-#: bound, unlike its F10 sibling"). Mirrors `collector.cache.F10CommandQueue`'s
-#: `_MAX_QUEUE_LEN` reasoning and value: generous relative to any plausible
+#: bound, unlike its F10 sibling" -- that sibling, `collector.cache.
+#: F10CommandQueue`, was itself removed by `BL-B96`). Same `_MAX_QUEUE_LEN`
+#: value and reasoning that queue had: generous relative to any plausible
 #: callout rate (seconds of speech per line), so this is insurance against a
 #: bug, not a limit ever expected to bind in normal use.
 _MAX_QUEUE_LEN = 64
@@ -385,9 +384,7 @@ class AudioPlaybackSender:
         method's own never-raises/never-hangs posture. `urgent=True`
         already clears the whole queue via `interrupt()` above before
         reaching here, so this bound is only ever exercised by a flood of
-        routine lines outpacing playback -- mirrors
-        `collector.cache.F10CommandQueue`'s oldest-dropped overflow policy
-        and its reasoning."""
+        routine lines outpacing playback."""
         while True:
             try:
                 self._queue.put_nowait((path, correlation_id))

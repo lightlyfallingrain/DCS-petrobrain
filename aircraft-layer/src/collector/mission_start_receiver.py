@@ -15,7 +15,7 @@ MissionStartEvent.from_dict`):
 
 A malformed or unparseable datagram is dropped and logged at debug level,
 never crashes the receive loop -- same defensive posture as
-`F10CommandReceiver._handle_datagram`/`UnitVelocityReceiver._handle_datagram`."""
+`UnitVelocityReceiver._handle_datagram`."""
 
 from __future__ import annotations
 
@@ -32,9 +32,9 @@ from schema import MissionStartEvent, MissionStartParseError
 logger = logging.getLogger(__name__)
 
 #: Loopback only, same reasoning as every other channel in this module.
-#: A ninth, distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
+#: A distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
 #: `text_sender.DEFAULT_PORT` (7792), `command_sender.DEFAULT_PORT` (7793),
-#: `f10_command_receiver.DEFAULT_PORT` (7794),
+#: 7794 (formerly the F10 command channel, retired by `BL-B96`),
 #: `unit_velocity_receiver.DEFAULT_PORT` (7795),
 #: `line_of_sight_receiver.DEFAULT_PORT` (7796),
 #: `command_sender.LOOK_DIRECTION_DEFAULT_PORT` (7797),

@@ -1,11 +1,12 @@
 """Collector-side receiver for the unit-velocity channel
 (`plans/movement-detection/plan.md` Stage 1).
 
-Structurally mirrors `f10_command_receiver.F10CommandReceiver` -- the second
-Hook-to-collector inbound direction (the first was the F10 command channel):
+The first Hook-to-collector inbound-direction channel still in this
+codebase (`BL-B96` removed the F10 command channel, which was the
+original first one this structurally mirrored):
 `petrobrain-mission-telemetry-hook.lua` sends one UDP datagram per poll (1 Hz)
 to this receiver over loopback, carrying the whole poll's unit-velocity
-snapshot rather than one event per datagram like the F10 channel. Same
+snapshot rather than one event per datagram. Same
 open()/serve_forever()/close() lifecycle, meant to run on its own background
 thread (`collector/__main__.py`).
 
@@ -16,7 +17,7 @@ UnitVelocitySnapshot.from_wire`):
 
 A malformed or unparseable datagram is dropped and logged at debug level,
 never crashes the receive loop -- same defensive posture as
-`F10CommandReceiver._handle_datagram` and `collector.server._handle_line`."""
+`collector.server._handle_line`."""
 
 from __future__ import annotations
 
@@ -33,9 +34,10 @@ from schema.unit_velocity import UnitVelocityParseError, UnitVelocitySnapshot
 logger = logging.getLogger(__name__)
 
 #: Loopback only, same reasoning as every other channel in this module.
-#: A fifth, distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
+#: A distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
 #: `text_sender.DEFAULT_PORT` (7792), `command_sender.DEFAULT_PORT` (7793),
-#: `f10_command_receiver.DEFAULT_PORT` (7794), and this one (7795).
+#: 7794 (formerly the F10 command channel, retired by `BL-B96`), and this
+#: one (7795).
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7795
 
@@ -44,8 +46,7 @@ _RECV_BUFFER_SIZE = 65536
 
 class UnitVelocityReceiver:
     """Accepts unit-velocity snapshot datagrams from the mission-telemetry
-    Hook script and pushes valid ones into a `UnitVelocityCache`. Structurally
-    mirrors `F10CommandReceiver`'s open()/serve_forever()/close() shape."""
+    Hook script and pushes valid ones into a `UnitVelocityCache`."""
 
     def __init__(
         self,
@@ -91,8 +92,7 @@ class UnitVelocityReceiver:
 
     def serve_forever(self) -> None:
         """Receive datagrams and push valid ones until `close()` is called
-        from another thread -- same shutdown shape as
-        `F10CommandReceiver.serve_forever`."""
+        from another thread."""
         if self._socket is None:
             raise RuntimeError("call open() before serve_forever()")
         while True:

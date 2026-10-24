@@ -84,21 +84,6 @@ the body/brain process, on either Windows or Mac (compute topology note in
   interrupting playback with no new audio to acknowledge it -- rather than
   needing to push an audio line just to reach the interrupt mechanism.
 
-- `GET /f10_commands/poll` -> drains the collector's `F10CommandQueue`
-  (`plans/f10-crew-commands/plan.md`) and returns every pending F10
-  radio-menu selection as a JSON list, oldest first (`[]` if none pending,
-  never `null` -- unlike every `/latest` endpoint above, this response is
-  always a list). **Documented exception to every other endpoint's
-  idempotent-read contract**: this one mutates collector-local queue state
-  on every call, so it assumes exactly one poller (body-layer's
-  `--crew-text --f10-commands`) -- a second concurrent poller would
-  silently steal commands from the first. The queue defaults to a fresh,
-  never-populated one (same optional-cache-defaults-to-empty pattern as
-  `world_objects_cache`/`petrovich_indication_cache`/`petrovich_wheel_cache`
-  above), so this endpoint always answers `200 []` rather than `503` when
-  unconfigured -- there is no live effector here to be "not configured,"
-  only an always-valid, possibly-empty queue.
-
 - `GET /ptt/state` -> the pilot's push-to-talk trigger, or `null` before it
   has moved at all (`plans/inbound-speech/plan.md` Stage 5). A pure,
   idempotent read of a *state*, not a queue: the capture process polls it
@@ -285,7 +270,6 @@ from collector.arg_read_broker import (
 )
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
-    F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
     PetrovichIndicationCache,
@@ -333,7 +317,6 @@ _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
 _COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
 _QUERY_READ_ARGS_PATH = "/query/read_args"
 _COMMAND_SIGHT_TARGET_PATH = "/command/sight_target"
-_F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
 
@@ -512,16 +495,11 @@ def _handle_petrovich_wheel_latest(
     return None if sample is None else sample.to_dict()
 
 
-def _handle_f10_commands_poll(queue: F10CommandQueue) -> list[dict[str, Any]]:
-    return [event.to_dict() for event in queue.drain_all()]
-
-
 def _make_handler(
     cache: TelemetryCache,
     world_objects_cache: WorldObjectsCache,
     petrovich_indication_cache: PetrovichIndicationCache,
     petrovich_wheel_cache: PetrovichWheelCache,
-    f10_command_queue: F10CommandQueue,
     text_sender: TextOverlaySender | None,
     command_sender: CommandSender | None,
     audio_sender: AudioPlaybackSender | None,
@@ -587,9 +565,6 @@ def _make_handler(
                 self._respond_json(
                     200, _handle_petrovich_wheel_latest(petrovich_wheel_cache)
                 )
-                return
-            if path == _F10_COMMANDS_POLL_PATH:
-                self._respond_json(200, _handle_f10_commands_poll(f10_command_queue))
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -1114,7 +1089,6 @@ class TelemetryAPIServer:
         text_sender: TextOverlaySender | None = None,
         petrovich_wheel_cache: PetrovichWheelCache | None = None,
         command_sender: CommandSender | None = None,
-        f10_command_queue: F10CommandQueue | None = None,
         audio_sender: AudioPlaybackSender | None = None,
         unit_velocity_cache: UnitVelocityCache | None = None,
         ptt_cache: PttCache | None = None,
@@ -1128,13 +1102,13 @@ class TelemetryAPIServer:
         arg_read_broker: ArgReadBroker | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
-        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
-        # `spu8_cache` default to a fresh, never-populated cache/queue
+        # `petrovich_wheel_cache`/`unit_velocity_cache`/
+        # `spu8_cache` default to a fresh, never-populated cache
         # rather than being required -- keeps every existing
         # `TelemetryAPIServer(cache, host=..., port=...)` call site (tests
-        # included) working unchanged; the corresponding `/latest` (or
-        # `/f10_commands/poll`) endpoint on such a server just always
-        # answers `null` (or `[]`), same as an empty cache would -- and
+        # included) working unchanged; the corresponding `/latest`
+        # endpoint on such a server just always
+        # answers `null`, same as an empty cache would -- and
         # `/ptt/state`'s served `"intercom"` correctly reads as fail-safe-
         # closed (plan Decision 3) against a never-populated `Spu8Cache`.
         # `text_sender`/`command_sender`/`audio_sender` default to `None`
@@ -1156,9 +1130,6 @@ class TelemetryAPIServer:
             petrovich_wheel_cache
             if petrovich_wheel_cache is not None
             else PetrovichWheelCache()
-        )
-        self._f10_command_queue = (
-            f10_command_queue if f10_command_queue is not None else F10CommandQueue()
         )
         self._unit_velocity_cache = (
             unit_velocity_cache
@@ -1232,7 +1203,6 @@ class TelemetryAPIServer:
                 self._world_objects_cache,
                 self._petrovich_indication_cache,
                 self._petrovich_wheel_cache,
-                self._f10_command_queue,
                 self._text_sender,
                 self._command_sender,
                 self._audio_sender,

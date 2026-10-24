@@ -15,12 +15,6 @@ one inbound/write path on this otherwise read-only pipeline. A
 constructed the same way for `POST /command/petrovich_search`, this
 pipeline's second inbound/write path.
 
-An `F10CommandReceiver` (`plans/f10-crew-commands/plan.md`) is also opened
-here and run on its own background thread, feeding an `F10CommandQueue`
-that `GET /f10_commands/poll` drains -- the first channel running the
-opposite direction (Hook script -> collector, not collector -> Hook/
-Export.lua) alongside the two write paths above.
-
 An `AudioPlaybackSender` (BL-10 first slice, `plans/tts-voice-output/
 plan.md`) is constructed the same way as `text_sender`/`command_sender`
 for `POST /audio/play`, this pipeline's third inbound/write path -- unlike
@@ -29,13 +23,14 @@ those two, it has no host/port (it plays audio directly on this box via
 
 A `UnitVelocityReceiver` (`plans/movement-detection/plan.md` Stage 1) is
 opened and run on its own background thread the same way, feeding a
-`UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the second
-channel running the Hook-to-collector direction (after the F10 one above).
+`UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the first
+channel running the opposite direction (Hook script -> collector, not
+collector -> Hook/Export.lua).
 
 A `LineOfSightReceiver` (`plans/dcs-driven-los/plan.md`, X-B29) is opened and
 run on its own background thread the same way as `unit_velocity_receiver`,
 feeding a `LineOfSightCache` that `GET /line_of_sight/latest` reads -- the
-third channel running the Hook-to-collector direction. A `LookDirectionSender`
+second channel running the Hook-to-collector direction. A `LookDirectionSender`
 is constructed the same way as `command_sender` for `POST /command/
 look_direction`, this pipeline's fifth inbound/write path -- unlike
 `command_sender` (which targets `Export.lua`'s inbound listener), this one
@@ -44,7 +39,7 @@ only reachable from the mission-scripting state, not Export's).
 
 A `FiringEventsReceiver`/`EmitterTracker` pair (`plans/emitter-visibility/
 plan.md` Stage B, `AC-B8`) is opened and run on its own background thread
-the same way as `line_of_sight_receiver` -- the fourth channel running the
+the same way as `line_of_sight_receiver` -- the third channel running the
 Hook-to-collector direction. Unlike every other feed above, the thing fed
 by the receiver is not a `*Cache` but a small stateful machine
 (`collector.firing_receiver.EmitterTracker`) that latches/watchdogs raw
@@ -61,7 +56,7 @@ before each queued line plays (Stage 3).
 
 A `MissionStartReceiver` (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1)
 is opened and run on its own background thread the same way as
-`unit_velocity_receiver` -- the fifth channel running the Hook-to-collector
+`unit_velocity_receiver` -- the fourth channel running the Hook-to-collector
 direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
 reads.
 
@@ -82,7 +77,6 @@ and API server exactly as `WatchedArgsCache` is.
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
-       [--f10-host HOST] [--f10-port PORT]
        [--unit-velocity-host HOST] [--unit-velocity-port PORT]
        [--mission-start-host HOST] [--mission-start-port PORT]
        [--dump-interval SECONDS] [--debug]
@@ -101,7 +95,6 @@ from api.server import TelemetryAPIServer
 from collector.arg_read_broker import ArgReadBroker
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
-    F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
     PetrovichIndicationCache,
@@ -122,9 +115,6 @@ from collector.command_sender import (
     CommandSender,
     LookDirectionSender,
 )
-from collector.f10_command_receiver import DEFAULT_HOST as F10_DEFAULT_HOST
-from collector.f10_command_receiver import DEFAULT_PORT as F10_DEFAULT_PORT
-from collector.f10_command_receiver import F10CommandReceiver
 from collector.firing_receiver import DEFAULT_HOST as FIRING_DEFAULT_HOST
 from collector.firing_receiver import DEFAULT_PORT as FIRING_DEFAULT_PORT
 from collector.firing_receiver import EmitterTracker, FiringEventsReceiver
@@ -182,17 +172,6 @@ def main() -> None:
         type=int,
         default=COMMAND_DEFAULT_PORT,
         help="Export.lua's inbound command listener port",
-    )
-    parser.add_argument(
-        "--f10-host",
-        default=F10_DEFAULT_HOST,
-        help="F10 radio-menu Hook script's UDP sender host (loopback)",
-    )
-    parser.add_argument(
-        "--f10-port",
-        type=int,
-        default=F10_DEFAULT_PORT,
-        help="F10 radio-menu Hook script's UDP sender port",
     )
     parser.add_argument(
         "--unit-velocity-host",
@@ -278,15 +257,6 @@ def main() -> None:
     text_sender.open()
     command_sender = CommandSender(host=args.command_host, port=args.command_port)
     command_sender.open()
-    f10_command_queue = F10CommandQueue()
-    f10_command_receiver = F10CommandReceiver(
-        f10_command_queue, host=args.f10_host, port=args.f10_port
-    )
-    f10_command_receiver.open()
-    f10_command_receiver_thread = threading.Thread(
-        target=f10_command_receiver.serve_forever, daemon=True
-    )
-    f10_command_receiver_thread.start()
     unit_velocity_cache = UnitVelocityCache()
     unit_velocity_receiver = UnitVelocityReceiver(
         unit_velocity_cache, host=args.unit_velocity_host, port=args.unit_velocity_port
@@ -384,7 +354,6 @@ def main() -> None:
         text_sender=text_sender,
         petrovich_wheel_cache=petrovich_wheel_cache,
         command_sender=command_sender,
-        f10_command_queue=f10_command_queue,
         audio_sender=audio_sender,
         unit_velocity_cache=unit_velocity_cache,
         ptt_cache=ptt_cache,
@@ -413,7 +382,6 @@ def main() -> None:
         collector.close()
         text_sender.close()
         command_sender.close()
-        f10_command_receiver.close()
         audio_sender.close()
         unit_velocity_receiver.close()
         line_of_sight_receiver.close()

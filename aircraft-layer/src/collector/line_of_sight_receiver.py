@@ -2,8 +2,9 @@
 (`plans/dcs-driven-los/plan.md`, X-B29).
 
 Structurally mirrors `unit_velocity_receiver.UnitVelocityReceiver` -- the
-third Hook-to-collector inbound direction (after F10 commands and unit
-velocity): `petrobrain-line-of-sight-hook.lua` sends one UDP datagram per
+second Hook-to-collector inbound-direction channel (after unit
+velocity; `BL-B96` removed the original first, the F10 command channel):
+`petrobrain-line-of-sight-hook.lua` sends one UDP datagram per
 poll (1 Hz) to this receiver over loopback, carrying the whole poll's
 line-of-sight snapshot. Same open()/serve_forever()/close() lifecycle, run
 on its own background thread (`collector/__main__.py`).
@@ -34,9 +35,9 @@ from schema.line_of_sight import LineOfSightParseError, LineOfSightSnapshot
 logger = logging.getLogger(__name__)
 
 #: Loopback only, same reasoning as every other channel in this module. A
-#: sixth, distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
+#: distinct loopback port: `collector.server.DEFAULT_PORT` (7790),
 #: `text_sender.DEFAULT_PORT` (7792), `command_sender.DEFAULT_PORT` (7793),
-#: `f10_command_receiver.DEFAULT_PORT` (7794),
+#: 7794 (formerly the F10 command channel, retired by `BL-B96`),
 #: `unit_velocity_receiver.DEFAULT_PORT` (7795), and this one (7796).
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7796

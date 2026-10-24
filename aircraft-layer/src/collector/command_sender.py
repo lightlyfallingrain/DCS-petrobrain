@@ -317,10 +317,10 @@ class CommandSender:
 #: there, not in the Export state Export.lua runs in), so it is a
 #: Hook-script-owned socket, structurally like `petrobrain-overlay-hook.
 #: lua`'s inbound listener, not Export.lua's (`plans/dcs-driven-los/
-#: plan.md` SS9a). A seventh, distinct loopback port: `collector.server.
+#: plan.md` SS9a). A distinct loopback port: `collector.server.
 #: DEFAULT_PORT` (7790), `text_sender.DEFAULT_PORT` (7792), this module's
-#: own `DEFAULT_PORT` (7793), `f10_command_receiver.DEFAULT_PORT` (7794),
-#: `unit_velocity_receiver.DEFAULT_PORT` (7795),
+#: own `DEFAULT_PORT` (7793), 7794 (formerly the F10 command channel,
+#: retired by `BL-B96`), `unit_velocity_receiver.DEFAULT_PORT` (7795),
 #: `line_of_sight_receiver.DEFAULT_PORT` (7796), and this one (7797).
 LOOK_DIRECTION_DEFAULT_HOST = "127.0.0.1"
 LOOK_DIRECTION_DEFAULT_PORT = 7797

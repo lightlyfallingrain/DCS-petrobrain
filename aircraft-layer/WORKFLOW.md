@@ -60,73 +60,6 @@ window never appears, or `dcs.log` shows a Lua error tagged
 `PetrobrainOverlay`, that is exactly what Stage 2's live check is for; this
 deploy step alone does not confirm the script actually works.
 
-## Deploy the F10 commands Hook script (Windows box, once per change)
-
-**Menu registration and delivery live-confirmed 2026-09-13** (`plans/
-f10-crew-commands/plan.md` Stage 4); the individual commands' behaviour still
-needs work -- built on the live
-recon in `aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md`
-(Findings 7-11), which did confirm `net.dostring_in("scripting", ...)`
-registering an F10 item and draining selections back out. Copy:
-
-- `aircraft-layer/dcs-export/petrobrain-f10-commands-hook.lua` ->
-  `Saved Games\DCS\Scripts\Hooks\petrobrain-f10-commands-hook.lua`
-
-Same discipline as `Export.lua`/the overlay Hook script: the repo copy is
-canonical, never edit the deployed copy in place. Like the overlay Hook
-script, this loads once into the GUI Lua state at DCS **application**
-startup, not per-mission -- restart DCS (not just the mission) after
-copying for a change to take effect.
-
-**Requires an `autoexec.cfg` opt-in**, without which registration silently
-fails (`net.dostring_in` returns `("Invalid state name", false)` for every
-state). Create/edit `Saved Games\DCS\Config\autoexec.cfg`:
-
-```
-net.allow_dostring_in = { "scripting" }
-```
-
-That single line is sufficient -- **live-confirmed 2026-09-13** (DCS 2.9.29.27278, Stage 4):
-with only it in `autoexec.cfg`, `dcs.log` showed `registration -> ok=true result=registered` and
-the F10 -> Other -> Petrovich menu appeared. No `net.allow_unsafe_api` entry is needed; the
-broader opt-in from the research doc's probe run 2 (`allow_unsafe_api = { "userhooks", "gui" }`
-plus six `allow_dostring_in` states) was a superset, not a requirement. This is a user-machine config change
-that applies to every DCS session and every installed Hook script, ED-
-labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the
-overlay/search-trigger channels).
-
-This registers a menu tree under **F10 -> Other -> Petrovich** (widened from
-the original three flat items to 15 tokens by `plans/
-f10-command-vocabulary/plan.md`'s D4 menu tree): **Scan** -> Ahead / Left /
-Right / Full / **Bearing** -> North/Northeast/East/Southeast/South/
-Southwest/West/Northwest, **Watch** -> Nearest/Nearest Air Defence, and **Cancel Task**.
-Selecting one sends one UDP datagram to loopback port 7794 -- distinct from
-Export.lua's listener (7790), the overlay Hook's listener (7792), and
-Export.lua's inbound command listener (7793) -- picked up by the
-collector's `F10CommandReceiver` and served from `GET /f10_commands/poll`
-(see "Run
-the collector" below). If the menu never appears, or `dcs.log` shows no
-`PetrobrainF10Commands` lines (or shows a registration failure), that is
-exactly what Stage 4's live check is for; this deploy step alone does not
-confirm the script actually works.
-
-**No-DCS-required manual check** (once the collector is running, see "Run
-the collector" below): send a datagram by hand and confirm
-`--crew-text --f10-commands` reacts, without needing DCS or the Hook
-script running at all --
-
-```
-python3 -c "import socket, json; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'command': 'scan_ahead'}).encode(), ('127.0.0.1', 7794))"
-```
-
-(swap `'scan_ahead'` for any other token in `collector.f10_command_receiver.
-ALLOWED_COMMANDS` -- `scan_left`/`scan_right`/`scan_full`/`scan_bearing_n`/
-.../`watch_nearest`/`cancel_task` -- to exercise the rest). This is the
-cheapest possible correctness check for the
-whole collector -> `GET /f10_commands/poll` -> body-layer path before ever
-touching the live Hook script -- see `plans/f10-crew-commands/plan.md`
-Stage 2.
-
 ## Deploy the mission-start Hook script (Windows box, once per change)
 
 `plans/bl15-mission-start/plan.md`, BL-15 Stage 1. Unverified against a live DCS session as of
@@ -140,12 +73,22 @@ Same discipline as every other Hook script here: the repo copy is canonical, nev
 deployed copy in place. Loads once into the GUI Lua state at DCS **application** startup, not
 per-mission — restart DCS (not just the mission) after copying for a change to take effect.
 
-**No `autoexec.cfg` opt-in beyond what the F10-commands Hook already requires.** This script uses
-the same `net.dostring_in("scripting", ...)` bridge at the same `onSimulationStart` callback the
-F10-commands Hook already registers at; if that Hook's `net.allow_dostring_in = { "scripting" }`
-line is already in `Saved Games\DCS\Config\autoexec.cfg`, nothing further is needed. If this script
-is deployed on its own without the F10-commands Hook, add that line (see "Deploy the F10 commands
-Hook script" above).
+**Requires an `autoexec.cfg` opt-in**, without which registration silently fails (`net.dostring_in`
+returns `("Invalid state name", false)` for every state) -- this script uses `net.dostring_in(
+"scripting", ...)` at the same `onSimulationStart` callback the retired F10-commands Hook (removed
+by `BL-B96`) used to register at, and this paragraph is now that opt-in's one canonical home. Create/edit
+`Saved Games\DCS\Config\autoexec.cfg`:
+
+```
+net.allow_dostring_in = { "scripting" }
+```
+
+That single line is sufficient -- **live-confirmed 2026-09-13** (DCS 2.9.29.27278, via the retired
+F10-commands Hook's own Stage 4 check): with only it in `autoexec.cfg`, `dcs.log` showed
+`registration -> ok=true result=registered`. No `net.allow_unsafe_api` entry is needed. This is a
+user-machine config change that applies to every DCS session and every installed Hook script,
+ED-labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the overlay/search-trigger
+channels).
 
 This registers no F10 menu — it is a one-shot push per mission (re)start, not a drained queue.
 Each `onSimulationStart` firing sends one UDP datagram
@@ -210,8 +153,8 @@ work:
 
 - **`winsound` does not exist on Linux.** Spoken-audio playback is a Windows-stdlib call, so a
   native-WSL collector loses Petrovich's voice entirely.
-- **Four channels are UDP, and WSL2's `localhostForwarding` is TCP-only.** F10 commands and unit
-  velocity arrive from the Hook scripts over UDP; the text overlay and the Petrovich search command
+- **Several channels are UDP, and WSL2's `localhostForwarding` is TCP-only.** Unit
+  velocity arrives from the Hook scripts over UDP; the text overlay and the Petrovich search command
   leave over UDP. Export.lua's TCP feed would forward fine and *everything else would silently stop
   arriving* — a failure that presents as "movement detection broke", not as a networking
   misconfiguration. Windows 11 23H2+'s `networkingMode=mirrored` does fix UDP in both directions,
@@ -243,13 +186,6 @@ The collector also constructs an `AudioPlaybackSender` unconditionally (BL-10 fi
 this box via `winsound` rather than sending anywhere. This is the other end of
 `audio-adapter --target aircraft-layer`'s `POST /audio/play` call (see
 `audio-adapter/CLAUDE.md`).
-
-The collector also opens an `F10CommandReceiver` — a **listener**, not a
-sender, the reverse direction of `TextOverlaySender`/`CommandSender` above —
-on loopback UDP port 7794 by default (`--f10-host`/`--f10-port` to
-override), the other end of the "Deploy the F10 commands Hook script"
-section above. Selections it receives are served from
-`GET /f10_commands/poll` (see "Query from the Mac" below).
 
 Add `--debug` for per-line DEBUG logging (received/parsed telemetry), or
 `--dump-interval N` to change how often the latest sample prints to stdout
@@ -326,20 +262,8 @@ built with an `audio_sender` (should not happen via `python -m collector`, which
 one). Normally called by `audio-adapter --target aircraft-layer`, not by hand — see
 `audio-adapter/CLAUDE.md`'s own run command for the full TTS-to-audible-speech path.
 
-```
-curl http://<windows-box-lan-ip>:7791/f10_commands/poll
-```
-
-Drains and returns every F10 radio-menu selection received since the last
-poll (see "Deploy the F10 commands Hook script" above), oldest first, as a
-JSON list — `[]` if none pending, never `null` (unlike every `/latest`
-endpoint above, this response is always a list). **Mutates state on every
-call** — unlike every other endpoint on this API, a second concurrent
-poller would silently steal selections from the first; body-layer's
-`--crew-text --f10-commands` is meant to be the only poller.
-
 These write/inbound paths (`/text/push`, `/command/petrovich_search`,
-`/audio/play`, and this F10 poll's Hook-to-collector feed) are the only
+`/audio/play`) are the only
 parts of this API that are not plain read-only telemetry — everything else
 remains read-only.
 
