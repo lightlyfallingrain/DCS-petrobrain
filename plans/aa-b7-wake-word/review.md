@@ -91,3 +91,97 @@ file, the body-layer routing chain it depends on (`voice_commands.classify_respo
 and a targeted stale-doc grep. Verified the end-to-end brain-routing claim by reading body-layer
 code rather than running a live probe (no DCS/brain dependency in that path, so reading is
 sufficient evidence). One mutation check performed on the core guard.
+
+---
+
+## Re-review, 2026-10-25 — `6aa3ad67` (`BL-B100`: `parse_utterance` strips the leading vocative)
+
+Reviewed on top of `da1eafd7` (the AA-B7 routing fix above, already reviewed + DoD-passed at
+`8c07487f`). This is the body-layer-side follow-up DoD found and the user asked built on the same
+branch: once AA-B7 sends a wake-prefixed transmission to the brain as free text, body-layer's own
+`parse_utterance` still rejected it (start-anchored patterns), so a wake-prefixed contact question
+got "Unable, no such command." instead of an answer.
+
+### What changed
+
+`body-layer/src/belief/utterance.py`: `_VOCATIVE_PREFIX = re.compile(r"^(?:hey\W+)?petrovi?t?ch\W*", re.IGNORECASE)`,
+applied once (`count=1`) to `text.strip()` before the `_PATTERNS` loop. Two new tests in
+`test_utterance.py` (leading wake word handled; trailing "petrovich" left alone and the reference
+fails to resolve instead). Doc updates to `BL-B100.md` and `AA-B7.md` recording the fix and what is
+still open ("where are we?").
+
+### Checks performed
+
+- **Regex correctness/over-match.** Anchored at `^`, so it can only ever strip at the very start of
+  the string — no risk of eating a contact reference or any other word mid-sentence (the second new
+  test, `test_wake_word_later_in_the_sentence_is_left_alone`, pins exactly this: a *trailing*
+  "petrovich" is left as part of the reference text, which then fails to resolve and escalates,
+  rather than being silently swallowed). `petrovi?t?ch` matches both of whisper's observed
+  spellings (`petrovich`/`petrovitch`) plus two non-words (`petrovch`/`petrovtch`) that cost
+  nothing since they never occur in practice. "petroch"/"Petrovna"/similar near-words do not match
+  (the required `petrov` stem is absent). `\W*` after the stem correctly eats the comma/space/
+  exclamation between the name and the question in all four of the first test's phrasings.
+- **Mutation check.** Reverted the `_VOCATIVE_PREFIX.sub` line to the old `text.strip()` and reran
+  `test_utterance.py`: `test_leading_wake_word_is_not_part_of_the_question` goes red (`'escalated'
+  == 'handled'`), confirming the new test is load-bearing, not vacuous. Restored; full suite green
+  again (verified via `git status --porcelain` showing no diff after restoring).
+- **Brain escalation still gets the original transcript.** Read `_handle_utterance`: `parse =
+  parse_utterance(self.store, transcript, now_sim)` strips only internally for its own matching;
+  the `PlayerUtterance`/`EscalationPayload` built right after still carries the original `transcript`
+  parameter, vocative and all. Confirmed live (not just by reading) — see end-to-end run below.
+- **`_match_radio_check_or_greeting` (checked in `handle_line` *before* `_handle_utterance`/
+  `parse_utterance`) is correctly left untouched, not a gap.** Traced the voice path: for live voice,
+  "radio check"/"good morning Petrovich" without a leading wake word are matched directly by
+  audio-adapter's `command_matcher` and never reach this body-layer grammar at all. A **wake-prefixed**
+  "Petrovich, radio check" is, by AA-B7's own explicit 2026-10-25 user decision ("'[hey,
+  ]Petrovich' at start is intentionally the keyword that means free text for the brain"), never a
+  command attempt — it is meant to reach the brain as free text, same as any other wake-prefixed
+  phrase, and the previous review already traced this exact routing chain and approved it. So the
+  fact that `_match_radio_check_or_greeting`'s own pattern doesn't see past a leading vocative is
+  consistent with the design, not a defect this commit should have also fixed. (I initially read
+  this as a gap and verified it live before concluding it is not — see "End-to-end" below.)
+- **End-to-end, via the real production entry point** (`CrewConsole.handle_transcript`, not just
+  `parse_utterance` directly), run against this worktree's venv:
+  - `handle_transcript("Petrovich, where is <contact>?", verb_anchored=False, ...)` → `["BMP-2."]`
+    — resolves `describe_contact` correctly, matching card A14's intent.
+  - `handle_transcript("Petrovich, where are we?", verb_anchored=False, ...)` → `[]`, with the
+    pending escalation's transcript preserved verbatim as `"Petrovich, where are we?"` — correctly
+    still open, exactly as `BL-B100.md`/`AA-B7.md` now say.
+  - `handle_transcript("Petrovich, radio check", verb_anchored=False, ...)` → `[]`, escalated to
+    the brain with the transcript preserved — the AA-B7-intended behaviour, not a BL-B100 defect.
+- **Tuning.** `_VOCATIVE_PREFIX` is a regex, not a bounded scalar (no `real`/`whole`/`sequence`/
+  `table` shape fits a pattern), so it correctly stays a plain module constant rather than going
+  through `tuning.py` — confirmed it is absent from `config/defaults.toml` and
+  `test_tuning_defaults_toml.py` still passes (no staleness).
+- **Vocabulary/STT prompt.** No new spoken word or phrasing introduced (this is a body-layer parse
+  fix, not a vocabulary change); `audio-adapter/src/vocabulary.py` untouched by this commit, so no
+  action needed there.
+- **Comment pruning.** No comment removed by this diff — the `_VOCATIVE_PREFIX` docstring-comment
+  and the `BL-B100.md`/`AA-B7.md` updates are purely additive, and the superseded status line in
+  `BL-B100.md` (`[ ]` → `[~]`) keeps the original text rather than deleting it, consistent with
+  "supersession is marked, not deleted."
+- **Scope.** Matches the plan exactly: one grammar fix, in the one place ("the grammar is the thing
+  that cannot see past the name"), no wire change, console-typed lines get it for free as a side
+  effect of sharing the same function — no more, no less.
+- **Checks**: `ruff format --check`, `ruff check`, `mypy --strict` (run from inside `body-layer/`),
+  all clean; `pytest body-layer/tests -q` → 2659 passed, 4 xfailed.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- None beyond what the earlier pass already flagged (the `cancel_nevermind` wake-prefixed case,
+  still untested but accepted as correct-and-low-priority).
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read — the changed source file, both new tests (plus a mutation check on the core one), the
+two updated ROADMAP entries, and the full call chain from `CrewConsole.handle_transcript` down
+through `handle_line`/`_handle_utterance`/`parse_utterance`. Verified end-to-end against a live
+`CrewConsole` in this worktree's own venv (three transcripts: a contact question, "where are we?",
+and a wake-prefixed "radio check") rather than relying on the unit tests alone. Perf and security
+passes skipped per user direction for this commit.
