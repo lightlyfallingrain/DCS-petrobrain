@@ -308,6 +308,20 @@ def render_readback(attention_level: Attention, contact_id: str) -> OutgoingSpee
     return OutgoingSpeech(text=text, template="readback")
 
 
+def render_point_readback(where_label: str) -> OutgoingSpeech:
+    """`look <where>`'s own readback (`plans/9k113-scan-procedure/
+    plan-stage2.md`, "The sweep itself": "a short acknowledgement naming
+    the place") -- `"Two o'clock."`/`"North."`, deliberately not `render_
+    scan_readback`'s `"Scanning <where>."` wording: `look` is its own
+    verb, not a `scan` synonym (that split is the whole point of this
+    vocabulary surface), so echoing `scan`'s own phrasing back would
+    misname which command just ran. `where_label` is capitalized the same
+    way `render_clear` capitalizes its own direction label -- `crew_
+    console.py` owns picking the label, this function only formats it."""
+    capitalized = where_label[:1].upper() + where_label[1:]
+    return OutgoingSpeech(text=f"{capitalized}.", template="readback")
+
+
 def render_scan_readback(sector_label: str) -> OutgoingSpeech:
     """The F10 "Scan" family's readback (`plans/f10-command-vocabulary/
     plan.md` Stage 6) -- fixed phrasing, mirroring `render_readback`'s "fast
@@ -460,6 +474,16 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # of the project's "say again" vs "unable" distinction, same shape as
     # `ON_GROUND` above.
     "GUIDANCE_NOT_READY": "Unable, guidance unit not ready.",
+    # `look <where>` issued while an attack run is engaged (`plans/
+    # 9k113-scan-procedure/plan-stage2.md`, "Attack-run interaction",
+    # approved 2026-10-25) -- the sight is already committed to the run's
+    # own target and nothing a `look` could ask for would be allowed to
+    # displace it (`optic_policy._apply_guidance`'s own sight-ceiling
+    # re-check would override it the very next poll regardless). Heard
+    # and understood, not doable right now -- the "unable" half of the
+    # project's "say again" vs "unable" distinction, same shape as
+    # `ON_GROUND`/`GUIDANCE_NOT_READY` above.
+    "ATTACK_RUN_ENGAGED": "Unable, attack run.",
 }
 
 

@@ -97,7 +97,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Final, Literal, TextIO
+from typing import Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient
@@ -123,6 +123,13 @@ from belief.escalation import (
     DebugPrintBrainClient,
     handle_player_utterance,
 )
+from belief.optic_policy import (
+    POINT_DISTANCE_BAND_HALF_KM,
+    POINT_READY_TIMEOUT_S,
+    BoundedSightLook,
+)
+from belief.optic_policy import SIGHT_SEARCH_NEAR_M as _POINT_NEAR_M
+from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _POINT_FAR_M
 from belief.speech import (
     UrgentCall,
     _contact_report_text,
@@ -140,6 +147,7 @@ from belief.speech import (
     render_no_contact,
     render_no_target,
     render_no_view,
+    render_point_readback,
     render_radio_check,
     render_readback,
     render_report,
@@ -181,7 +189,12 @@ from belief.voice_commands import (
 )
 from connection_reporter import ConnectionReporter
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
-from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
+from perception.gaze import (
+    RELATIVE_SECTORS,
+    SECTOR_WEDGE_DEG,
+    clock_wedge_body_relative,
+    compass_wedge_body_relative,
+)
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
 from perception.optics import Optic
 from perception.source import OwnshipState
@@ -514,6 +527,55 @@ _LOOK_COMMAND_TOKENS: frozenset[str] = frozenset(
         "watch_nearest",
         "watch_nearest_air_defence",
         "follow",
+        # `look <where>` (`plans/9k113-scan-procedure/plan-stage2.md`) --
+        # the explicit 9K113 request shares the same "on the ground,
+        # perception is not running" refusal every other look command
+        # already gets.
+        "point",
+    }
+)
+
+#: `plans/9k113-scan-procedure/plan-stage2.md`'s "Supersession" table --
+#: every command class whose dispatch must replace or cancel a pending-
+#: on-OBSERV or already-running `look <where>`. `handle_command` sets
+#: `point_request_transition = "clear"` for any of these *before*
+#: token-specific dispatch runs, so `_start_point`'s own "start" write
+#: (for a second `look`) lands after it in the same call -- a clear
+#: immediately followed by a start, net effect "replace" (the plan's own
+#: "one write" framing).
+#:
+#: **Every scan/look token** (sector/bearing/clock families, `point`
+#: itself) **plus the explicitly task-changing/destructive tokens** the
+#: plan's table names: `cancel_task`/`cancel_scan`/`cancel_watch` (cancel
+#: outright), `watch_nearest`/`watch_nearest_air_defence`/`follow`/
+#: `select_target`/`engage`/`disengage`/`drop_target`/`step`
+#: (task-changing -> replace/cancel). **Deliberately excludes**
+#: `observ_on`/`observ_off`/`weapons_armed`/`weapons_safe` (run normally,
+#: no dispatch-level cancel -- `observ_off` already tears a running
+#: bounded look down as a side effect of `optic_policy._back_to_home`'s
+#: own `[[BL-B98]]` rule, not because this set says so), `report`/
+#: `describe`/`where_is_it`/`mark_here`/`mark_target` (pure queries/
+#: mission-memory writes, no task-state change), and `silence` (gates
+#: `_print` only, named and settled 2026-10-25 -- the plan's one flagged
+#: case, not a default).
+_POINT_LOOK_SUPERSEDING_TOKENS: frozenset[str] = frozenset(
+    set(_RELATIVE_SCAN_TOKENS)
+    | set(_BEARING_SCAN_TOKENS)
+    | set(_CLOCK_SCAN_TOKENS)
+    | {
+        "scan_bearing_deg",
+        "point",
+        "cancel_task",
+        "cancel_scan",
+        "cancel_watch",
+        "watch_nearest",
+        "watch_nearest_air_defence",
+        "follow",
+        "select_target",
+        "engage",
+        "disengage",
+        "drop_target",
+        "step",
     }
 )
 
@@ -637,6 +699,20 @@ class _PendingPositionalReply:
     correlation_id: str | None
     queued_since_sim: float
     render: Callable[[float], list[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class PendingPointRequest:
+    """A `look <where>` queued while OBSERV was off, confirmed on, and now
+    waiting for the sight to actually become usable (`plans/
+    9k113-scan-procedure/plan-stage2.md`'s "State" section) -- `slots` are
+    the original command's own parsed `where`/`distance_km` slots,
+    carried across the wait exactly as `PendingConfirmation.slots` carries
+    them across the confirm round trip. `requested_sim` is `POINT_READY_
+    TIMEOUT_S`'s own clock."""
+
+    slots: dict[str, int | str]
+    requested_sim: float
 
 
 #: `descriptor_verdict`'s three outcomes. Named rather than booleans
@@ -1389,6 +1465,72 @@ class CrewConsole:
     #: assumption to refuse OBSERV-on under.
     sight_ready: bool = field(default=False, repr=False)
 
+    #: `plans/9k113-scan-procedure/plan-stage2.md`, "Attack-run
+    #: interaction" -- refreshed every poll (`body.py`, the same place
+    #: `on_ground`/`sight_ready` are), from `runner.attack_run_state is
+    #: not None` (the same test `_active_gaze`'s own `attack_run_engaged`
+    #: already uses). Read by `_start_point` to refuse a `look <where>`
+    #: with `render_unable("ATTACK_RUN_ENGAGED")` while a run is engaged
+    #: -- the attack run's own gaze claim already wins the sight once a
+    #: decision is made (`optic_policy._apply_guidance`); this field only
+    #: decides whether a new `look` command is *accepted* at all. Defaults
+    #: to `False` (not `on_ground`'s `True`): before the first poll
+    #: resolves this from real `AttackRunState`, no run can plausibly be
+    #: engaged yet.
+    attack_run_engaged: bool = field(default=False, repr=False)
+
+    #: `plans/9k113-scan-procedure/plan-stage2.md`, "What 'ready' means"
+    #: -- refreshed every poll (`body.py`, the same place `sight_ready` is)
+    #: from `runner.optic_state.home_phase is OpticPhase.SIGHTING`. Read by
+    #: `drain_pending_point_request` alongside `sight_ready` -- the main
+    #: loop's own resolution of the plan's "ready" ambiguity is to wait
+    #: for *both*: the lamp (`sight_ready`) is already checked
+    #: synchronously, before a point request is ever queued, at
+    #: `_handle_observ_on`; this field is the one poll of lag still
+    #: outstanding once that lamp is lit (`decide()`'s own phase cycle
+    #: moves `home_phase` into `SIGHTING` at its *next* phase boundary).
+    #: Defaults to `False`, the safe "not yet" assumption before the first
+    #: poll resolves it from real `OpticState`.
+    sight_phase_is_sighting: bool = field(default=False, repr=False)
+
+    #: `plans/9k113-scan-procedure/plan-stage2.md`'s "State" section -- a
+    #: `look <where>` queued while OBSERV was off, confirmed on, and now
+    #: waiting for `sight_ready`/`sight_phase_is_sighting` both to hold.
+    #: Drained once per poll by `drain_pending_point_request`, the same
+    #: deferred-action shape `_pending_positional_replies` already
+    #: follows. At most one may be pending at a time -- a later `look`
+    #: command supersedes it via the ordinary `point_request_transition`
+    #: path, same as it would a running bounded look (the plan's own "at
+    #: most one of `pending_point_request`/the active bounded-look state
+    #: is set at a time" invariant).
+    pending_point_request: PendingPointRequest | None = field(default=None, repr=False)
+
+    #: `plans/9k113-scan-procedure/plan-stage2.md` -- the one-shot signal
+    #: `body.py` sets (`OpticState.point_clear_label`, forwarded the same
+    #: poll it is read) when a bounded `look` just completed `POINT_
+    #: SWEEP_COUNT` traversals with nothing found. Drained (spoken) by
+    #: `drain_pending_point_clear`, the same per-poll shape `drain_
+    #: pending_positional_replies` already has.
+    pending_point_clear: str | None = field(default=None, repr=False)
+
+    #: `plans/9k113-scan-procedure/plan-stage2.md`'s "Supersession" --
+    #: a one-shot signal `handle_command`/`drain_pending_point_request`
+    #: set for `body.py` to apply to `runner.optic_state.bounded_look`,
+    #: the one field this class cannot reach directly (it is owned by
+    #: `body.ConsolePerceptionRunner`, not `CrewConsole`). `None` (the
+    #: default, and the common case) means "nothing to apply this poll" --
+    #: mirrors `attack_run_transition`/`observ_transition`/`weapon_safety_
+    #: transition`'s own one-shot-signal shape. `"clear"` replaces
+    #: `bounded_look` with `None` (a superseding command); a
+    #: `BoundedSightLook` instance replaces it with that value (a new
+    #: bounded look starting) -- the two are set from the same attribute
+    #: because a *start* always implies a *clear* of whatever was running
+    #: before it, so the last write in one dispatch is the only one that
+    #: needs to reach `body.py`.
+    point_request_transition: Literal["clear"] | BoundedSightLook | None = field(
+        default=None, repr=False
+    )
+
     #: `plans/effector-sequences/plan.md` D5/D6 -- set at startup (by
     #: `body.py`'s config-loading step) when at least one effector
     #: registry/sequence file failed to load; drained by `drain_config_
@@ -1956,6 +2098,17 @@ class CrewConsole:
             lines = [render_unable("ON_GROUND").text]
             self._print(lines, now_sim, correlation_id=correlation_id)
             return lines
+        # `plans/9k113-scan-procedure/plan-stage2.md`'s "Supersession" --
+        # set unconditionally for every member of the table, *before*
+        # token-specific dispatch, so a second `look`/`point` command's
+        # own "start" write (inside `_start_point` below) lands after this
+        # "clear" in the same call and wins (last write to the same
+        # attribute). A true no-op when nothing was pending/running --
+        # `body.py` only applies this if `point_request_transition` is
+        # not `None`, and clearing an already-`None` `bounded_look` costs
+        # nothing.
+        if token in _POINT_LOOK_SUPERSEDING_TOKENS:
+            self.point_request_transition = "clear"
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
             bearing_degrees = None
@@ -2006,6 +2159,8 @@ class CrewConsole:
             lines = self._handle_engage(now_sim, slots)
         elif token == "disengage":
             lines = self._handle_disengage()
+        elif token == "point":
+            lines = self._handle_point(now_sim, slots, correlation_id=correlation_id)
         elif token == "where_is_it":
             lines = self._handle_where_is_it()
         elif token == "mark_here":
@@ -3187,6 +3342,180 @@ class CrewConsole:
         self._print(lines, now_sim)
         return lines
 
+    def _point_slots_label(self, slots: dict[str, int | str]) -> str:
+        """The spoken place name for `point`'s already-resolved `where`
+        slot (`plans/9k113-scan-procedure/plan-stage2.md`: "renders the
+        same way the sector/clock/bearing labels already do elsewhere").
+        Exactly one of `relative`/`clock`/`sector` is present -- `command_
+        matcher._where_slot_count`'s own guard already rejected a
+        transcript naming more than one before this is ever reached."""
+        relative = slots.get("relative")
+        if isinstance(relative, str):
+            return _RELATIVE_SCAN_LABELS[cast(RelativeSector, relative)]
+        clock = slots.get("clock")
+        if isinstance(clock, int):
+            return f"{_CLOCK_REPORT_LABELS[clock]} o'clock"
+        sector_word = slots.get("sector")
+        if isinstance(sector_word, str):
+            return _SECTOR_SCAN_LABELS[_SECTOR_FOR_WORD[sector_word]]
+        raise AssertionError("_point_slots_label called with no where slot")
+
+    def _start_point(
+        self,
+        slots: dict[str, int | str],
+        now_sim: float,
+        correlation_id: str | None = None,
+    ) -> list[str]:
+        """Dispatches an already-OBSERV-gated `look <where>` -- `plans/
+        9k113-scan-procedure/plan-stage2.md`'s "State" section. Called
+        either immediately (`_handle_point`, OBSERV already on) or from
+        `drain_pending_point_request` once a deferred request's wait
+        clears; the two paths must produce an identical result (the
+        plan's own Co-moving Fields requirement), which this single
+        function call-site guarantees by construction.
+
+        **Which branch runs differs by which `where`-slot fired** -- the
+        plan's own structural change, not a detail. `relative` reuses the
+        *existing* commanded-sector dispatch (`_handle_scan`, exactly
+        `scan left`'s own task registration) with the point-style
+        readback substituted in; `clock`/`sector` (compass) starts the
+        new bounded search via `point_request_transition` instead (no
+        `ScanPlan`/task at all -- the wedge is carried on `OpticState.
+        bounded_look`, applied by `body.py`)."""
+        label = self._point_slots_label(slots)
+        readback_text = render_point_readback(label).text
+        relative = slots.get("relative")
+        if isinstance(relative, str):
+            return self._handle_scan(
+                now_sim,
+                relative_sector=cast(RelativeSector, relative),
+                sector_label=label,
+                readback_text=readback_text,
+            )
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+        heading_true_deg = self.enrichment.ownship.heading_true_deg
+        clock = slots.get("clock")
+        sector_word = slots.get("sector")
+        if isinstance(clock, int):
+            center_deg, half_width_deg = clock_wedge_body_relative(clock)
+        elif isinstance(sector_word, str):
+            absolute_bearing_deg = _SECTOR_CENTER_DEG[_SECTOR_FOR_WORD[sector_word]]
+            center_deg, half_width_deg = compass_wedge_body_relative(
+                absolute_bearing_deg, heading_true_deg
+            )
+        else:
+            return [render_say_again().text]
+        distance_km = slots.get("distance_km")
+        if isinstance(distance_km, int):
+            # `plans/9k113-scan-procedure/plan-stage2.md`, "The sweep
+            # itself": a stated distance narrows the search to a band
+            # around it instead of the wedge's own full near-to-far reach.
+            near_m = max((distance_km - POINT_DISTANCE_BAND_HALF_KM) * 1000.0, 0.0)
+            far_m = (distance_km + POINT_DISTANCE_BAND_HALF_KM) * 1000.0
+        else:
+            near_m, far_m = _POINT_NEAR_M, _POINT_FAR_M
+        self.point_request_transition = BoundedSightLook(
+            center_azimuth_deg=center_deg,
+            half_width_deg=half_width_deg,
+            near_m=near_m,
+            far_m=far_m,
+            label=label,
+        )
+        return [readback_text]
+
+    def _handle_point(
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None,
+        correlation_id: str | None = None,
+    ) -> list[str]:
+        """`look`/`sight`/`what is [at] <where>` -- the explicit 9K113
+        request (`plans/9k113-scan-procedure/plan-stage2.md`). `slots`
+        `None` means the point-slot branch anchored a verb but resolved
+        no `where`/`distance_km` slot at all (`command_matcher.py`'s own
+        "say again" shape for an unresolved slotted token) -- never
+        reached in practice today (`match_transcript` only ever returns
+        `token="point"` alongside a non-`None` `slots`), handled anyway
+        for the same defensive reason every other slotted handler checks
+        it.
+
+        **Attack-run refusal, checked first** (approved 2026-10-25,
+        "Attack-run interaction"): the sight is already committed to the
+        run's own target, and nothing a `look` could ask for would be
+        allowed to displace it -- `optic_policy._apply_guidance` would
+        silently override it the very next poll even if queued, so this
+        refuses outright rather than accepting a request that could never
+        take effect.
+
+        **OBSERV gating** (`BL-B64`'s "OBSERV ON only on pilot command"):
+        an explicit `look` is itself the pilot's own OBSERV-on decision,
+        so OBSERV already on dispatches immediately; OBSERV off asks via
+        the confirm band (`PendingConfirmation.observ_request`, see
+        `handle_transcript`'s own affirm branch) rather than refusing."""
+        if self.attack_run_engaged:
+            return [render_unable("ATTACK_RUN_ENGAGED").text]
+        if slots is None:
+            return [render_say_again().text]
+        if self.sight_phase_is_sighting:
+            return self._start_point(slots, now_sim, correlation_id=correlation_id)
+        self._pending_confirmation = PendingConfirmation(
+            token=None,
+            description="need observ",
+            pending_since_sim=now_sim,
+            observ_request=slots,
+        )
+        self._confirmation_expired_sim = None
+        return [render_confirm_request("need observ").text]
+
+    def drain_pending_point_request(self, now_sim: float) -> list[str]:
+        """Drains a `look <where>` deferred while OBSERV was off and now
+        confirmed on (`plans/9k113-scan-procedure/plan-stage2.md`'s
+        "State" section) -- called once per poll from `body.py`, alongside
+        `drain_events`/`drain_pending_positional_replies`/`drain_brain`.
+
+        Waits for *both* `sight_ready` (the power-up lamp -- already
+        checked synchronously at `_handle_observ_on`, before OBSERV is
+        even allowed to transition, so by the time a request is queued
+        this is normally already `True`) **and** `sight_phase_is_sighting`
+        (`decide()`'s own phase cycle catching up to `home_phase`, the one
+        poll of lag genuinely still outstanding) -- the main loop's own
+        resolution of the plan's "ready" ambiguity. `POINT_READY_TIMEOUT_S`
+        is the backstop against something else intervening (e.g. a
+        violated `sight_steady` forcing OBSERV back off) between the
+        affirm and the next phase boundary."""
+        if self.refused or self.pending_point_request is None:
+            return []
+        if not (self.sight_ready and self.sight_phase_is_sighting):
+            pending = self.pending_point_request
+            if now_sim - pending.requested_sim > POINT_READY_TIMEOUT_S:
+                self.pending_point_request = None
+                lines = [render_unable("GUIDANCE_NOT_READY").text]
+                self._print(lines, now_sim)
+                return lines
+            return []
+        pending = self.pending_point_request
+        self.pending_point_request = None
+        lines = self._start_point(pending.slots, now_sim)
+        self._print(lines, now_sim)
+        return lines
+
+    def drain_pending_point_clear(self, now_sim: float) -> list[str]:
+        """Speaks a bounded `look`'s "<where> clear." once `body.py` sets
+        `pending_point_clear` from `OpticState.point_clear_label`
+        (`plans/9k113-scan-procedure/plan-stage2.md`'s "The sweep
+        itself") -- called once per poll alongside `drain_pending_point_
+        request`. Reuses `render_clear` verbatim, the same "<direction>,
+        clear." the `report` family already speaks for an empty answer --
+        not a new wording."""
+        if self.refused or self.pending_point_clear is None:
+            return []
+        label = self.pending_point_clear
+        self.pending_point_clear = None
+        lines = [render_clear(label).text]
+        self._print(lines, now_sim)
+        return lines
+
     def _handle_scan(
         self,
         now_sim: float,
@@ -3195,6 +3524,7 @@ class CrewConsole:
         sector: Sector | None = None,
         relative_sector: RelativeSector | None = None,
         relative_clock_hour: int | None = None,
+        readback_text: str | None = None,
     ) -> list[str]:
         """Registers a real `belief.tasks.PendingIntent` via `belief.tools.
         scan_area`, with `center`/`radius_m`/`reason` all fixed (ownship's
@@ -3241,7 +3571,14 @@ class CrewConsole:
         `self.tasks` (to register the task) -- returns a plain one-line
         message without raising when either is unset, the same graceful-
         degradation shape `_handle_watch_nearest` already follows for a
-        missing `enrichment`."""
+        missing `enrichment`.
+
+        **`readback_text`** (`plans/9k113-scan-procedure/plan-stage2.md`)
+        overrides `render_scan_readback`'s own "Scanning <where>." wording
+        -- `_start_point`'s own `relative`-slot reuse of this method's task
+        registration, which needs the point-style "<Where>." readback
+        instead (`look` is its own verb, not a `scan` synonym). `None`
+        (every other caller) is the existing behaviour, unchanged."""
         if self.enrichment is None:
             return ["no world-model connection configured"]
         if self.tasks is None:
@@ -3263,6 +3600,8 @@ class CrewConsole:
             relative_sector=relative_sector,
             relative_clock_hour=relative_clock_hour,
         )
+        if readback_text is not None:
+            return [readback_text]
         return [render_scan_readback(sector_label).text]
 
     def _handle_slotted_report(
@@ -4031,6 +4370,32 @@ class CrewConsole:
                 answer = classify_yes_no(transcript, token is not None)
                 self._pending_confirmation = None
                 self._confirmation_expired_sim = None
+                # `plans/9k113-scan-procedure/plan-stage2.md`'s "OBSERV-off
+                # confirm flow" -- `"observ on"` itself, spoken during the
+                # confirm window, also counts as the "yes" for *this*
+                # pending-confirmation kind only: `classify_yes_no`'s own
+                # rule 2 ("a resolved command token is never an answer")
+                # would otherwise read it as `"other"` (it resolves the
+                # real `observ_on` token) and silently drop the pending
+                # look. Scoped to `pending.observ_request is not None` so
+                # every other confirm kind's `classify_yes_no` behaviour
+                # is unchanged.
+                if pending.observ_request is not None and (
+                    answer == "affirm" or token == "observ_on"
+                ):
+                    lines = self.handle_command(
+                        "observ_on", now_sim, correlation_id=correlation_id
+                    )
+                    if self.sight_ready:
+                        # `_handle_observ_on` (via `handle_command` above)
+                        # did not itself refuse (`GUIDANCE_NOT_READY`) --
+                        # queue the deferred look to start once the phase
+                        # cycle actually reaches `SIGHTING` (`drain_
+                        # pending_point_request`'s own docstring).
+                        self.pending_point_request = PendingPointRequest(
+                            slots=pending.observ_request, requested_sim=now_sim
+                        )
+                    return lines
                 if answer == "affirm":
                     if pending.contact_pick is not None:
                         # `plans/brain-layer/plan.md` D4's "confirm the

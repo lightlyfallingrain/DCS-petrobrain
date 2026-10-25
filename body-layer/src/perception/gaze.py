@@ -491,6 +491,18 @@ def compass_wedge_body_relative(
     return center_deg, COMPASS_SECTOR_HALF_WIDTH_DEG
 
 
+def clock_wedge_body_relative(clock_hour: int) -> tuple[float, float]:
+    """A body-relative `(center_deg, half_width_deg)` wedge for one
+    o'clock hour -- `plans/9k113-scan-procedure/plan-stage2.md`, the
+    `look <o'clock>` bounded point's own wedge. A thin public wrapper
+    over `_gaze_for_clock_hour` (this module's own private geometry) so a
+    caller outside this module (`belief.crew_console`) can ask for the
+    wedge without reaching for a private name -- the identical reasoning
+    `SECTOR_WEDGE_DEG`'s own "public alias" comment gives."""
+    gaze = _gaze_for_clock_hour(clock_hour)
+    return gaze.center_azimuth_deg, gaze.half_width_deg
+
+
 def legs_within_wedge(
     center_azimuth_deg: float, half_width_deg: float
 ) -> tuple[int, ...]:

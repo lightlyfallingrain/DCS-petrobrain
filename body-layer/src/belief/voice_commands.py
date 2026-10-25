@@ -369,6 +369,17 @@ class PendingConfirmation:
     pending_since_sim: float
     slots: dict[str, int | str] | None = None
     contact_pick: tuple[str, PartialParse] | None = None
+    #: `plans/9k113-scan-procedure/plan-stage2.md`'s "OBSERV-off confirm
+    #: flow" -- a third, mutually-exclusive payload: a `look <where>`
+    #: issued while OBSERV is off, waiting on the confirm band's own
+    #: "Need observ, confirm?" rather than a command token to re-dispatch
+    #: as-is. `token` is meaningless when this is set (`belief.
+    #: crew_console.CrewConsole.handle_transcript`'s affirm branch checks
+    #: this before `contact_pick`/`token`) -- carries the original `look`
+    #: command's own parsed `where`/`distance_km` slots across the
+    #: confirm round trip, unchanged, the same way `slots` carries
+    #: `scan_bearing_deg`/`follow`'s qualifiers across it today.
+    observ_request: dict[str, int | str] | None = None
 
 
 Disposition = Literal["fallthrough", "confirm", "say_again", "act"]
