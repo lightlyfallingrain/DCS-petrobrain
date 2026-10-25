@@ -69,10 +69,10 @@ Shown a mock exchange (*"Sight two o'clock, three kilometres."* → *"Two o'cloc
 *"Contact, two o'clock, three k."* → narrow → *"Two tanks."*, or *"Nothing at two o'clock."*) and
 asked five questions. Answers, verbatim:
 
-1. **Words.** *"\"Sight\", \"look [at]\", \"what is [at]\""*
+1. **Words.** *""Sight", "look [at]", "what is [at]""*
 2. **No distance given.** *"near to far"*
 3. **How long, and when nothing is there.** *"two proper sweeps of the area -> if nothing, say
-   \"<where> clear\" and continue what the previous action was"*
+   "<where> clear" and continue what the previous action was"*
 4. **Something found.** *"report, then go back to scanning. target count makes no difference, report
    as usual"*
 5. **During an attack run.** *"during attack run, keep the sight on the attack runs target. If
