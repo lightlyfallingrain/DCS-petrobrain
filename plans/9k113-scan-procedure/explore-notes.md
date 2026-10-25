@@ -135,3 +135,17 @@ special "cancel the look first" rule of its own, because `observ_off` already te
 as a side effect of the existing `[[BL-B98]]` rule (aim resets to boresight, `home_phase` leaves
 `SIGHTING`), not because this command class was taught to cancel it. See "Supersession" in
 `plan-stage2.md` for the full command-class table and the one case flagged there (`silence`).
+
+### Stage 2 plan decisions, 2026-10-25 (verbatim)
+
+Answering `plan-stage2.md`'s "Decisions Requiring User Input":
+
+> *"Correction: look x o'clock. -> scan not in line, but that 30 deg sector near to far. S shape
+> when needed by FOV.*
+> *1 - approved / 2 - approved / 3 - approved / 4 - yes"*
+
+So: `look <o'clock>` is **not** a sweep along the hour's centre line; it is a 9K113 scan of that
+hour's 30° sector, near to far, in an S shape where the sight's field of view is narrower than the
+sector. (1) `look` during an attack run is refused, `"unable, attack run"`. (2) `silence` does not
+cancel a look. (3) "no" to the OBSERV confirm cancels the look silently. (4) one `look` command
+covers sectors and places.
