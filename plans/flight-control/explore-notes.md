@@ -76,8 +76,8 @@ value.
 
 - `docs/concept/long-term-high-level-plans.md:6-9`. The copilot's secondary role is *"fly the
   helicopter"*, and *"while controlling the aircraft, copilot cannot use optics"*. Lines 11-33
-  cover Petrovich-as-pilot as the second goal, and line 49 suggests *"could use DCS AI as much as
-  possible to do the flying"*. **The user has now reversed that line (below).**
+  cover Petrovich-as-pilot as the second goal. (Line 49's *"could use DCS AI as much as possible to
+  do the flying"* is in the **Wingbrain** section, about an AI wingman, so it does not bear on this.)
 - `aircraft-layer/research/mi24p-command-surface.md` §8 documents the flight axis write path:
   `LoSetCommand` 2001 pitch, 2002 roll, 2003 rudder, 2004 collective (inverted per ED's comment),
   and 2022-2024 trim. It notes that nothing in the architecture does this yet, and nothing about it
@@ -124,6 +124,31 @@ handing off to the SAU channels.
 4. **No dependence on ED's AI flying.** Petrobrain replaces it.
 5. **Manoeuvres such as "break left" are later.** They are examples of the scripting surface, not
    first-build scope.
+
+## Second round (2026-10-25)
+
+**Handover in the middle of a turn.**
+> *"keep the turn going, that is what I mean by maintaining current state"*
+
+**Stick input while Petrovich has the controls.**
+> *"only spoken. I cannot disable my joystick in flight (other that disconnecting the wire) and if I
+> unintentionally move it, it must be ignored."*
+
+**Vocabulary.** The mock had the right shape. The user's forms:
+> *"turn [x deg] left/right" "turn heading 3 1 5" "hold 200 m [radar/barometric]" "speed 2 2 0"*
+
+**Terrain.**
+> *"the one who flies is responsbile to avoid terrain. Due to limitations of data from DCS, I will
+> still have responsibility of proper guidance via commands to avoid hitting terrain/buildings/etc.
+> But Petrovich must autonomoulty do terrain avoidance based on current AGL, and if data is
+> available flight path elevation (defer that bit)."*
+
+**Timing.**
+> *"Do not start yet, leave this a concept. We'll finish the 9K113 work first and some other
+> things. Write roadmap item(s)."*
+
+Filed as `[[BL-16]]` (the milestone, deferred) and `[[BL-B101]]` (the flight-path-elevation
+look-ahead, deferred).
 
 ## Open: needs measuring before a plan
 

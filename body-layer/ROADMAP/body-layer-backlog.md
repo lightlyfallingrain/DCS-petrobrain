@@ -139,6 +139,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B98]] — 9K113 sight returns to dead-ahead after a glance-away instead of staying at its last position (done, folded into BL-B89)
 - [[BL-B99]] — Petrovich POV debug view: optic FOV and detections in angle space (done, merged `7796206d`)
 - [[BL-B100]] — a wake-prefixed question still defeats `parse_utterance`'s own grammar (found during `[[AA-B7]]` DoD, 2026-10-25)
+- [[BL-B101]] — terrain avoidance from flight-path elevation while Petrovich flies (deferred, split from [[BL-16]])
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
