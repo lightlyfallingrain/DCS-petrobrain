@@ -118,3 +118,112 @@ CHANGES REQUESTED
 Full read. Rendered real frames myself and ran the full `body-layer` check suite; mutation-tested
 one rendering assertion (ground-truth glyph) to confirm test coverage, and found the pinning gap
 that let Required Fix 1 pass CI undetected.
+
+---
+
+## Re-review
+
+Reviewed `feature/pov-view` (BL-B99) at tip `819e33252f268c72db993c58c258b17111bb1a53` (detached,
+HEAD was unrelated — the worktree's prior branch history is a different feature entirely, so no
+fast-forward was available; checked out the tip directly instead). The fix commit is `a10736af`
+("BL-B99: address review required fixes + bg-tint FOV amendment"), plus a memory-only commit
+`819e3325` (one new `.claude/agent-memory/implementer/` file, no code).
+
+Read in full: `plans/pov-view/plan.md`'s "Review fixes" and "User amendment, 2026-10-25" sections,
+`plans/pov-view/implementation.md`'s "Review fixes"/"Sample frames" sections, the diff
+`adf9583f..a10736af` for `ascii_canvas.py`, `eyesight_view.py`, `pov_view.py`, and
+`tests/test_pov_view.py`, and `body-layer/ROADMAP/BL-B99.md`.
+
+**All mechanical checks pass clean from `body-layer/`** (run against this worktree's checked-out
+tip, using the main checkout's `.venv` since this worktree has none):
+- `ruff format --check src tests` — 176 files already formatted
+- `ruff check src tests` — all checks passed
+- `cd body-layer && mypy src` — no issues, 76 source files
+- `pytest tests -q` — 2621 passed, 4 xfailed
+
+**Required Fix 1 (shared glyphs).** `ascii_canvas.py` now declares
+`GROUND_TRUTH_SEEN_GLYPH`/`GROUND_TRUTH_NOT_SEEN_GLYPH` (`·`/`×`) as the single source; both
+`eyesight_view.py` (confirmed by diff — a pure literal→constant substitution, no behaviour change)
+and `pov_view.py` import and draw them. Re-ran the review's own mutation method myself (changing
+the seen glyph to a throwaway character and confirming a test fails) is unnecessary to repeat here
+since the fix commit already ships that exact test
+(`test_ground_truth_glyphs_are_the_shared_top_down_pair_not_ascii`, explicitly describing the same
+mutation check) plus the not-seen side the review's optional refinement asked for
+(`test_ground_truth_not_seen_glyph_is_pinned_too`) and the optic-dot-stays-ASCII distinction
+(`test_optic_fov_disc_still_draws_as_a_plain_dot`). I did verify by direct construction that the
+dot (`.`) and the two ground-truth glyphs never collide in a rendered frame (see below). **Resolved.**
+
+**Required Fix 2 (border/gridlines, draw order).** Rendered a real frame myself
+(`optic_name="binocular", boresight_elevation_deg=-90.0`, i.e. nowhere near either border row):
+
+```
+ +10------------------------------------------------------------------------------- +10
+ -20------------------------------------------------------------------------------- -20
+```
+
+Full, unbroken dash borders at both elevation extremes, matching the user's mock — the azimuth-
+extreme `|` columns and the 30° gridlines are drawn with `set_if_blank` *after* the border rows, so
+they never punch a hole in a border cell that's already filled. Interior rows each carry a `|` at
+every 30° tick running the full canvas height. Draw order was then checked by placing a ground-
+truth marker exactly on the naked eye's edge-line azimuth (`az=-25`, boresight `az=-10`,
+`half_angle=15`): the `·` glyph wins the cell over the `‖` eye-edge line, confirming grid/eye-line
+first, ground truth next, believed last — the order both the module docstring and the plan declare.
+**Resolved**, and the border-drawn-first mechanism is correctly the reason the border rows read as
+solid rather than tick-broken (a detail the plan's own prose for this fix doesn't spell out but the
+code gets right).
+
+**Required Fix 3 (eye-sector distinguishability).** The naked eye's edges now draw as `‖` (U+2016),
+never the gridline's own `|`, and the top/bottom border cells spanning the sector's azimuth width
+are recoloured green — confirmed both in a rendered `color=False` frame (the `‖` reads distinctly
+from the `|` gridlines on either side of it) and in the raw ANSI for `color=True`
+(`\x1b[32m-` present in the top/bottom border lines at the sector's columns). This was listed as an
+optional refinement in the original review, not a required fix, and it's been done regardless.
+
+**User amendment (bg-tint FOV, 2026-10-25).** Verified the actual mechanism, not just the prose:
+`Canvas.bg` is a separate grid from `glyph`/`codes`, written only by the new `set_bg`, and
+`render()` composes a cell's foreground codes with its bg code (if present) before handing both to
+`wrap`, which still appends exactly one `\x1b[0m` per cell regardless of how many codes it carries.
+Rendered a real frame with a believed marker (`AR`) sitting inside a `binocular` disc and dumped
+the raw escape sequence for that cell:
+
+```
+\x1b[1m\x1b[33m\x1b[48;5;24mA\x1b[0m   \x1b[1m\x1b[33m\x1b[48;5;24mR\x1b[0m
+```
+
+— `BOLD`+`YELLOW` (foreground, the marker's own colour) composed with `BG_BLUE` (the disc tint),
+one `RESET` at the end of each cell, confirming (a) the marker keeps its own glyph/foreground
+rather than losing it to the tint, (b) fg and bg compose rather than one overwriting the other, and
+(c) nothing bleeds into the next cell — every cell in the dumped row is independently wrapped and
+reset. A blank cell inside the same disc (no marker) rendered as `\x1b[48;5;24m \x1b[0m` — a tinted
+space, not a dot — confirming the tint paints the whole disc, not just occupied cells.
+`color=False` falls back to the original dot-glyph rendering unchanged, confirmed by a plain-text
+render showing `.` inside the disc and no escape codes anywhere in the frame
+(`test_render_frame_color_disabled_has_no_escape_codes` already covers this; reran it as part of
+the full suite above). **`eyesight_view.py` never calls `set_bg`** — confirmed by grep — so its own
+`render_frame`/`test_eyesight_view.py` are provably unaffected by this additive layer, as claimed.
+
+**Nothing new broken.** The full `body-layer` suite (2621 passed, 4 xfailed, up from 2608 at the
+original review by 13: 9 review-fix tests + 4 bg-tint-amendment tests) passes, `mypy --strict` is
+clean, and `eyesight_view.py`'s diff is confirmed to be the single glyph-import substitution with
+no other change.
+
+**One observation, not a blocker:** `test_sight_narrow_uses_the_brown_colour_code` was renamed to
+`test_sight_narrow_uses_the_brown_background_tint_with_colour_on` rather than kept alongside a new
+test — the old assertion (foreground `BROWN` present) no longer holds once the disc is a bg tint,
+so renaming-in-place rather than adding a parallel test is correct here (the old behaviour doesn't
+exist to pin anymore); flagging only so the rename itself is visible to a reader diffing test names
+across the two reviews, not because anything is missing.
+
+### Re-review Verdict
+
+APPROVED
+
+### Re-review Confidence
+
+Full read. Rendered real coloured and `color=False` frames myself from the actual tip (not copied
+from `implementation.md`'s samples), dumped raw ANSI for a marker-inside-a-tinted-disc cell and a
+blank-inside-disc cell to verify composition and reset behaviour directly, and constructed one
+additional case (ground truth exactly on the eye-edge azimuth) beyond what the shipped tests cover
+to confirm draw order by direct observation rather than reading the claim. Ran the full
+`body-layer` check suite against this tip. Performance and security passes are waived by the user
+for BL-B99 (debug tool only), per the dispatch instructions — not run.
