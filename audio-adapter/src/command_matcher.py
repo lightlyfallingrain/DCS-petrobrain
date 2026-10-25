@@ -108,6 +108,23 @@ from vocabulary import (
     report_verbs,
 )
 
+#: `point`'s own verbs (`plans/9k113-scan-procedure/plan-stage2.md`,
+#: "Vocabulary design") -- `"look"`/`"sight"`, fuzzy-matched for the same
+#: reason every other slotted token's verb is: `verb` here is already a
+#: possibly-misheard first word. `"what"` is handled separately (`_WHAT_
+#: VERB` below) rather than added here, since it is not one of `look`/
+#: `sight`'s own synonyms -- it anchors `"what is at <where>"` and must
+#: fall through unchanged to `"what do you see"` (`report_all`) when no
+#: `where` slot fires, which a shared verb list would not distinguish.
+_POINT_VERBS: tuple[str, ...] = ("look", "sight")
+
+#: `"what [is at] <where>"`'s own anchor word -- deliberately not folded
+#: into `_POINT_VERBS` (that tuple's own comment). Ordered after every
+#: other slotted branch so `"what do you see"`'s own zero-slot fall-
+#: through to the phrase table (where it already resolves to `report_all`)
+#: is reached exactly as it was before this branch existed.
+_WHAT_VERB = "what"
+
 #: The floor `_phrase_match_ratio`'s word-sequence score must clear for a
 #: phrase to be a candidate at all. **Measured, not guessed**: this is the
 #: exact figure `tools/stt_bench.py`'s own `_MATCH_CUTOFF` uses, and that
@@ -625,6 +642,31 @@ def _parse_greeting_slots(text: str) -> dict[str, int | str] | None:
     return {"time_of_day": time_of_day}
 
 
+def _parse_point_slots(text: str) -> dict[str, int | str] | None:
+    """`look|sight [<o'clock>|<compass>|<relative>] [<n> km]` / `what is
+    [at] <where>`'s four slots (`plans/9k113-scan-procedure/plan-stage2.md`,
+    "Vocabulary design") -- the same four `where`/`distance_km` slot
+    parsers `follow`/`report`/`select_target`/`engage` already use,
+    reused verbatim for the identical combinatorial reason. `None` when
+    none of the four resolves -- a bare `"look"`/`"sight"` with no slot at
+    all falls through to the ordinary phrase table, the same shape every
+    other slotted token's unresolved form takes."""
+    slots: dict[str, int | str] = {}
+    relative = parse_relative_word(text)
+    if relative is not None:
+        slots["relative"] = relative
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    sector = parse_sector_word(text)
+    if sector is not None:
+        slots["sector"] = sector
+    distance_km = parse_range_km(text)
+    if distance_km is not None:
+        slots["distance_km"] = distance_km
+    return slots if slots else None
+
+
 def _where_slot_count(slots: dict[str, int | str]) -> int:
     """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
     transcript named the direction twice in incompatible frames
@@ -789,6 +831,46 @@ def match_transcript(text: str) -> MatchResult:
                 match_ratio=1.0,
                 verb_anchored=True,
                 slots=greeting_slots,
+            )
+
+    # `look`/`sight` (`plans/9k113-scan-procedure/plan-stage2.md`), tried
+    # before the generic phrase table for the identical reason the
+    # slotted branches above are -- a clock-only "look two o'clock" would
+    # otherwise collide with "report two o'clock"/"scan two o'clock"
+    # under the word-sequence score. No other verb here overlaps `look`/
+    # `sight`, so there is no collision to order against, but the
+    # ordering is kept consistent with the others. A bare `"look"`/
+    # `"sight"` with no recognised `where`/`distance_km` word parses to
+    # no slots here (`_parse_point_slots` returns `None`) and falls
+    # through to the phrase table, where it resolves to nothing (neither
+    # is a recorded bare phrasing of any other token) -- the "say again"
+    # shape every other slotted token's unresolved form takes.
+    if any(
+        difflib.SequenceMatcher(None, verb, point_verb).ratio() >= VERB_FLOOR
+        for point_verb in _POINT_VERBS
+    ):
+        point_slots = _parse_point_slots(text)
+        if point_slots is not None:
+            if _where_slot_count(point_slots) > 1:
+                return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+            return MatchResult(
+                token="point", match_ratio=1.0, verb_anchored=True, slots=point_slots
+            )
+
+    # `"what [is at] <where>"` (`plans/9k113-scan-procedure/plan-stage2.md`)
+    # -- a second, `"what"`-anchored entry point into the same point-slot
+    # parser, deliberately not merged into `_POINT_VERBS` (that tuple's
+    # own comment). A `where` slot resolves to `point`; none resolves
+    # ("what do you see") falls through unchanged to the ordinary phrase
+    # table, where it still lands on `report_all` exactly as before this
+    # branch existed.
+    if difflib.SequenceMatcher(None, verb, _WHAT_VERB).ratio() >= VERB_FLOOR:
+        what_slots = _parse_point_slots(text)
+        if what_slots is not None:
+            if _where_slot_count(what_slots) > 1:
+                return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+            return MatchResult(
+                token="point", match_ratio=1.0, verb_anchored=True, slots=what_slots
             )
 
     heard_words = tuple(words)

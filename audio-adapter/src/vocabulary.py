@@ -286,6 +286,19 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # recognisable from speech. **Unbenched**, like every token
         # added here without a re-recorded corpus.
         "where_is_it",
+        # `look|sight [<o'clock>|<compass>|<relative>] [<n> km]` / `what is
+        # [at] <where>` (`plans/9k113-scan-procedure/plan-stage2.md`,
+        # BL-B89 Stage 2) -- an explicit request for the 9K113, distinct
+        # from `scan`'s own optic-agnostic sector command (`scan <where>`
+        # keeps choosing eyes/binoculars/9K113 on its own; `look`/`sight`
+        # always means the sight). `clock`/`sector`/`relative`/
+        # `distance_km` are all parsed slots
+        # (`command_matcher.py`'s point-slot branch), never enumerated here
+        # -- the same combinatorial reason `follow`/`report` are slotted.
+        # One token for both the sector form (`relative`) and the bounded
+        # point form (`clock`/compass `sector`), per the plan's "one
+        # token, dispatch on which slot fired."
+        "point",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -403,9 +416,18 @@ TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS + ROUTING_TOKENS
 #: costs recording time and widens the error surface while contributing
 #: no recognition coverage at all.
 PHRASES: dict[str, tuple[str, ...]] = {
-    "scan_ahead": ("scan ahead", "look ahead"),
-    "scan_left": ("scan left", "look left"),
-    "scan_right": ("scan right", "look right"),
+    # **`look` is no longer an alias of `scan`** (`plans/
+    # 9k113-scan-procedure/plan-stage2.md`, user direction: *"Let's
+    # reserve 'scan <direction>' for scanning. 'Look' for 9K113 scan."*).
+    # `"look ahead"`/`"look left"`/`"look right"` used to live here;
+    # removed, not left as a second phrasing -- they now resolve to the
+    # `point` token's `relative` slot instead (`command_matcher.py`'s
+    # point-slot branch), which sets `ScanPlan.commanded_sector` through
+    # the identical mechanism these three tokens already drive, just under
+    # a distinct, 9K113-only vocabulary surface.
+    "scan_ahead": ("scan ahead",),
+    "scan_left": ("scan left",),
+    "scan_right": ("scan right",),
     "scan_full": ("scan full", "full scan", "scan all around"),
     "scan_bearing_n": ("scan north",),
     "scan_bearing_ne": ("scan northeast",),
@@ -667,6 +689,21 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # target"), matching `mark_here`/`mark_target`'s own "a couple of
     # plausible ways to say it" posture for a new, unbenched command.
     "where_is_it": ("where is it", "where is target", "where is it now"),
+    # `point`'s own verbs -- the slots (`clock`/`sector`/`relative`/
+    # `distance_km`) are parsed (`command_matcher.py`'s point-slot
+    # branch), never enumerated here, the same `follow`/`report`-style
+    # posture. **These two single-word entries exist only so `"look"`/
+    # `"sight"` reach `VERB_ANCHOR_WORDS` (derived from each phrase's
+    # first word, `command_matcher._derive_verb_anchor_words`) and `to_
+    # prompt()`'s whisper bias** (`recognised_words`) -- unused for
+    # matching itself, since every real `point` phrase is slot-resolved
+    # before the generic phrase table is ever reached (`plans/
+    # 9k113-scan-procedure/plan-stage2.md`'s "Vocabulary design").
+    # `"what"` is deliberately not a third entry here -- it already
+    # anchors via the existing `"what do you see"` phrasing on
+    # `report_all`, and giving it its own verb-anchor branch is
+    # `command_matcher.py`'s job (that module's own comment on why).
+    "point": ("look", "sight"),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
