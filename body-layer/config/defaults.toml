@@ -96,6 +96,21 @@ GUIDANCE_OPTIC_MIN_INTERVAL_S = 10.0
 # source: belief/optic_policy.py:HANDS_BUSY_DURATION_S
 HANDS_BUSY_DURATION_S = 1.0
 
+# A spoken distance narrows the bounded point search to a band this many kilometres either side of the stated range, instead of the wedge's own full near-to-far reach (`plans/9k113-scan-procedure/plan-stage2.md`, "The sweep itself", second bullet).
+# status: judgement | range: 0.25 .. 3.0
+# source: belief/optic_policy.py:POINT_DISTANCE_BAND_HALF_KM
+POINT_DISTANCE_BAND_HALF_KM = 1.0
+
+# How long a confirmed-on-OBSERV deferred `look <where>` waits for the sight to actually become usable (`home_phase is SIGHTING`) before giving up (`plans/9k113-scan-procedure/plan-stage2.md`, "What 'ready' means") -- a backstop, not the ordinary wait: the lamp (`sight_ready`) is already checked synchronously before this point is ever queued, so the ordinary case is one poll until the phase cycle catches up.
+# status: judgement | range: 2.0 .. 30.0
+# source: belief/optic_policy.py:POINT_READY_TIMEOUT_S
+POINT_READY_TIMEOUT_S = 5.0
+
+# `look <o'clock>`/`look <compass>`'s own bounded search (`plans/9k113-scan-procedure/plan-stage2.md`, "The sweep itself") -- how many complete traversals of the commanded wedge's own step list before reporting "<where> clear" and resuming.
+# status: judgement | range: 1.0 .. 5.0
+# source: belief/optic_policy.py:POINT_SWEEP_COUNT
+POINT_SWEEP_COUNT = 2
+
 # How long the brief naked-eye glance away from the sight lasts, mirroring `SCAN_CYCLE_PERIOD_S`'s role as the home phase's own dwell boundary -- but here the *interruption's* duration, not the home phase's: direction §9's "inverted dwell shape" (plan §13) swaps which phase is home and which is the bounded break, so the breaks' own timescale inverts with it -- brief here, where `MAX_LOOK_S` (the old break, now unused while OBSERV is on) was the long one.
 # status: judgement | range: 1.0 .. 15.0
 # source: belief/optic_policy.py:SIGHT_GLANCE_AWAY_S

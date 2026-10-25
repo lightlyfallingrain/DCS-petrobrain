@@ -358,6 +358,60 @@ SIGHT_SEARCH_FAR_M: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: `look <o'clock>`/`look <compass>`'s own bounded search (`plans/
+#: 9k113-scan-procedure/plan-stage2.md`, "The sweep itself") -- how many
+#: complete traversals of the commanded wedge's own step list before
+#: reporting "<where> clear" and resuming. **2, the explore notes'
+#: verbatim answer** ("two proper sweeps of the area"), not a derived
+#: value. Too low risks missing a contact the S-shape's own alternating
+#: rows have not yet reached on a single pass; too high makes a genuinely
+#: empty wedge take a long time to report clear. `lo=1` (a single sweep
+#: is still a meaningful answer, just a faster one) and `hi=5` (beyond
+#: that the "bounded" search starts to resemble the idle cycle's own
+#: open-ended one, defeating the point of giving it a bound at all).
+POINT_SWEEP_COUNT: Final[int] = tuning.whole(
+    "belief.optic_policy.POINT_SWEEP_COUNT", 2, lo=1, hi=5, status="judgement"
+)
+
+#: How long a confirmed-on-OBSERV deferred `look <where>` waits for the
+#: sight to actually become usable (`home_phase is SIGHTING`) before
+#: giving up (`plans/9k113-scan-procedure/plan-stage2.md`, "What 'ready'
+#: means") -- a backstop, not the ordinary wait: the lamp (`sight_ready`)
+#: is already checked synchronously before this point is ever queued, so
+#: the ordinary case is one poll until the phase cycle catches up. A
+#: starting value comfortably above a handful of polls, in case something
+#: else (a violated `sight_steady`) intervenes between the affirm and the
+#: next phase boundary. `lo=2.0` (below a couple of polls this would fire
+#: on perfectly ordinary lag) and `hi=30.0` (beyond that the pilot has
+#: long since moved on, and holding the request any longer just delays
+#: the "unable" they should have heard already).
+POINT_READY_TIMEOUT_S: Final[float] = tuning.real(
+    "belief.optic_policy.POINT_READY_TIMEOUT_S",
+    5.0,
+    lo=2.0,
+    hi=30.0,
+    status="judgement",
+)
+
+#: A spoken distance narrows the bounded point search to a band this many
+#: kilometres either side of the stated range, instead of the wedge's own
+#: full near-to-far reach (`plans/9k113-scan-procedure/plan-stage2.md`,
+#: "The sweep itself", second bullet). A starting value, not a
+#: measurement -- a kilometre either side is comfortably wider than a
+#: pilot's own range estimate is likely to be wrong by, without
+#: re-widening the band back out to the unbounded reach it is meant to
+#: narrow. `lo=0.25` (below that a slightly-off range estimate would
+#: search past where the contact actually is) and `hi=3.0` (beyond that
+#: the band is not meaningfully narrower than "near to far" and the
+#: distance slot buys nothing).
+POINT_DISTANCE_BAND_HALF_KM: Final[float] = tuning.real(
+    "belief.optic_policy.POINT_DISTANCE_BAND_HALF_KM",
+    1.0,
+    lo=0.25,
+    hi=3.0,
+    status="judgement",
+)
+
 #: BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that
 #: thrashes at the boundary would be worse than one that never
 #: de-escalates at all") -- a *fraction* of the lower rung's own presence
@@ -503,6 +557,33 @@ class LookTarget:
 #: `home_phase is SIGHTING` branch), not as a fourth leg of this cycle,
 #: so it never needs representing here at all.
 SightSearchLeg = Literal["wide_near", "wide_far", "narrow_far_sweep"]
+
+
+@dataclass(frozen=True)
+class BoundedSightLook:
+    """A `look <o'clock>`/`look <compass>`'s own standing state (`plans/
+    9k113-scan-procedure/plan-stage2.md`'s "State" section) -- a fixed
+    wedge and range band, searched for a bounded number of complete
+    traversals (`POINT_SWEEP_COUNT`) before reporting "<where> clear" and
+    resuming whatever the idle cycle/task was already doing. **A wedge, not
+    a point** -- `(center_azimuth_deg, half_width_deg)`, the exact shape
+    `_sight_commanded_sector` already expresses a commanded sector in, per
+    the plan's own "what it must not be: a single aim line" instruction.
+
+    `sweeps_completed` is reset only at creation; it survives an
+    interrupting look (a found contact does not consume a sweep, the
+    plan's own "The sweep itself" section) because nothing but `_advance_
+    bounded_look`'s own completion branch ever increments it."""
+
+    center_azimuth_deg: float
+    half_width_deg: float
+    near_m: float
+    far_m: float
+    #: The spoken place name ("Two o'clock.", "North.") -- threaded
+    #: through to `OpticState.point_clear_label` on natural completion, so
+    #: `body.py` can render "<where> clear." without recomputing it.
+    label: str
+    sweeps_completed: int = 0
 
 
 @dataclass(frozen=True)
@@ -702,6 +783,26 @@ class OpticState:
     #: `SCANNING`/`GLASSING`/`SEARCHING`-at-home, which have their own,
     #: unrelated, single-optic sweeps.
     sight_search_leg: SightSearchLeg = "wide_near"
+
+    #: A `look <o'clock>`/`look <compass>` currently active, or `None`
+    #: (`plans/9k113-scan-procedure/plan-stage2.md`'s "State" section).
+    #: Checked by `_decide_sighting`'s idle branch *before* the ordinary
+    #: `sight_search_leg` cycle -- while set, the bounded wedge/band is
+    #: searched in its place, the cycle's own legs left untouched so they
+    #: resume exactly where they were once this clears (`_advance_bounded_
+    #: look`'s own docstring). `None` on every pre-existing `OpticState`,
+    #: so this is a true no-op for every caller that never sets it.
+    bounded_look: BoundedSightLook | None = None
+    #: One-shot signal: `bounded_look` just completed its own `POINT_
+    #: SWEEP_COUNT` traversals with nothing found, and `body.py` owes the
+    #: pilot "<label> clear." -- the place name, or `None` the rest of the
+    #: time. Cleared by `body.py` the same poll it is read (the same
+    #: one-shot convention `hands_busy_until_sim` already follows), so it
+    #: is never left set across more than one poll. **Not set** when
+    #: `bounded_look` clears for any other reason (OBSERV off,
+    #: supersession by a new command) -- those are not "nothing found",
+    #: and must not announce as if they were.
+    point_clear_label: str | None = None
 
     #: `BL-B71`'s standing guidance grant -- the optic `attack_run`'s
     #: request is currently overriding every other optic decision with,
@@ -1623,6 +1724,14 @@ def _back_to_home(
             pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
+            # `plans/9k113-scan-procedure/plan-stage2.md`'s Co-moving
+            # Fields table: OBSERV going off (home_phase leaving SIGHTING,
+            # the only branch that reaches this `replace`) tears a
+            # bounded point look down the same way it nulls the aim --
+            # a true no-op whenever `bounded_look` was already `None`
+            # (every pre-existing caller, and this branch whenever the
+            # cause is something other than OBSERV).
+            bounded_look=None,
         ),
         OpticDecision(optic=_HOME_OPTIC[state.home_phase]),
     )
@@ -1873,6 +1982,84 @@ def _enter_binocular_search(
     )
 
 
+def _advance_bounded_look(
+    state: OpticState, now_sim: float, steps: Sequence[tuple[float, float]]
+) -> tuple[OpticState, bool]:
+    """One poll of a `look <o'clock>`/`look <compass>` bounded search --
+    `plans/9k113-scan-procedure/plan-stage2.md`'s "The sweep itself".
+    `steps` is `body.py`'s own fresh-every-poll generation of the active
+    `bounded_look`'s wedge/band (the same pattern `_idle_sight_search`'s
+    three `sight_*_search` sequences already follow), never read from
+    `state` itself.
+
+    Returns `(new_state, finished)` -- `finished=True` means the caller
+    (`_decide_sighting`) must hand off to the ordinary idle search this
+    same poll, either because the bounded look just completed its
+    `POINT_SWEEP_COUNT` traversals (in which case `new_state.point_clear_
+    label` carries the place name to announce) or because `steps` came
+    back empty (the commanded wedge/band generated nothing to search --
+    not expected for a forward-hemisphere wedge, but handled the same
+    defensive way `_idle_sight_rest` is for the three-leg cycle, with no
+    announcement: an empty search answered nothing, which is not the same
+    claim as "searched it and it was clear").
+
+    Reuses `state.look_started_sim` as this sweep's own per-traversal
+    clock, exactly the way `_idle_sight_search` reuses it for a search
+    leg -- and for the identical reason, this field is cleared whenever an
+    interrupting look starts (`_decide_sighting`'s look-selection branch)
+    and only ever set from inside this function or `_idle_sight_search`,
+    so there is never a second writer to disagree with. A look that
+    interrupts a bounded search therefore clears this clock; resuming here
+    restarts the *current* traversal from its first step (never losing
+    `sweeps_completed`, which this function alone advances) rather than
+    resuming mid-step -- a deliberately simpler "resume" than the idle
+    cycle's own leg-position tracking, since the plan's own correctness
+    requirement is "a found contact does not consume a sweep," not
+    "resumes at the exact same step."
+    """
+    bounded = state.bounded_look
+    assert bounded is not None
+    if not steps:
+        return replace(state, bounded_look=None, look_started_sim=None), True
+    leg_started_sim = (
+        state.look_started_sim if state.look_started_sim is not None else now_sim
+    )
+    index = int((now_sim - leg_started_sim) // SEARCH_STEP_S)
+    if index >= len(steps):
+        sweeps_completed = bounded.sweeps_completed + 1
+        if sweeps_completed >= POINT_SWEEP_COUNT:
+            return (
+                replace(
+                    state,
+                    bounded_look=None,
+                    look_started_sim=None,
+                    point_clear_label=bounded.label,
+                ),
+                True,
+            )
+        azimuth, elevation = steps[0]
+        return (
+            replace(
+                state,
+                bounded_look=replace(bounded, sweeps_completed=sweeps_completed),
+                look_started_sim=now_sim,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+            ),
+            False,
+        )
+    azimuth, elevation = steps[index]
+    return (
+        replace(
+            state,
+            look_azimuth_deg=azimuth,
+            look_elevation_deg=elevation,
+            look_started_sim=leg_started_sim,
+        ),
+        False,
+    )
+
+
 def _idle_sight_rest(state: OpticState) -> tuple[OpticState, OpticDecision]:
     """The defensive fallback for when no search leg has anything to step
     through at all. **Never reached in production**: `body._commanded_
@@ -2013,6 +2200,7 @@ def _decide_sighting(
     sight_wide_near_search: Sequence[tuple[float, float]] = (),
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
+    sight_point_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -2163,6 +2351,38 @@ def _decide_sighting(
     ]
     chosen = choose_sighting_look(worth_looking)
     if chosen is None:
+        if state.bounded_look is not None:
+            # `look <o'clock>`/`look <compass>` is active (`plans/
+            # 9k113-scan-procedure/plan-stage2.md`) -- step its own bounded
+            # search in place of the ordinary idle cycle, checked first so
+            # a standing bounded look is not silently pre-empted by the
+            # three-leg cycle underneath it. A found target already
+            # returned above (`chosen is not None`), so a look never
+            # interrupts here without clearing `look_started_sim`
+            # (`_advance_bounded_look`'s own docstring) -- this branch is
+            # reached only when nothing is worth a closer look at all.
+            new_state, finished = _advance_bounded_look(
+                state, now_sim, sight_point_search
+            )
+            if finished:
+                return _idle_sight_search(
+                    new_state,
+                    now_sim,
+                    targets,
+                    sight_wide_near_search=sight_wide_near_search,
+                    sight_wide_far_search=sight_wide_far_search,
+                    sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
+                )
+            assert new_state.look_azimuth_deg is not None
+            assert new_state.look_elevation_deg is not None
+            return (
+                new_state,
+                OpticDecision(
+                    optic=SIGHT_WIDE_OPTIC,
+                    look_azimuth_deg=new_state.look_azimuth_deg,
+                    look_elevation_deg=new_state.look_elevation_deg,
+                ),
+            )
         # Nothing worth a closer look: step through the idle search cycle
         # instead of resting with no aim (`plans/9k113-narrow-search/
         # plan.md` Stage 3, closing F5's defect).
@@ -2245,6 +2465,7 @@ def _decide_without_guidance(
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
+    sight_point_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
     `BL-B71`, renamed and kept otherwise unchanged so that the public
@@ -2418,6 +2639,7 @@ def _decide_without_guidance(
             sight_wide_near_search=sight_wide_near_search,
             sight_wide_far_search=sight_wide_far_search,
             sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
+            sight_point_search=sight_point_search,
         )
 
     # state.phase must be SCANNING here (the only phase not already
@@ -2702,6 +2924,7 @@ def decide(
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
+    sight_point_search: Sequence[tuple[float, float]] = (),
     guidance_request: Optic | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through --
@@ -2736,6 +2959,7 @@ def decide(
         sight_wide_far_search=sight_wide_far_search,
         sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
         sight_out_of_regard_search=sight_out_of_regard_search,
+        sight_point_search=sight_point_search,
     )
     if decision.suppressed:
         return new_state, decision

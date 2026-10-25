@@ -465,6 +465,32 @@ def _gaze_for_clock_hour(clock_hour: int) -> Gaze:
     )
 
 
+#: Half the spacing between adjacent `SECTOR_WORDS`-style compass points
+#: (45 deg apart, `audio-adapter`'s `vocabulary.SECTOR_WORDS`) -- the
+#: sight's own compass-bearing wedge half-width (`plans/
+#: 9k113-scan-procedure/plan-stage2.md`, "Compass bearing width: 45 deg,
+#: not 30 deg -- by the same derivation the o'clock wedge already uses").
+#: `FOCUS_CONE_HALF_WIDTH_DEG` (15.0, half of the 30-degree o'clock
+#: spacing) is the one o'clock-hour reading of the identical idea; this
+#: is the compass-point reading of it, not a second, independent
+#: judgement call.
+COMPASS_SECTOR_HALF_WIDTH_DEG: Final[float] = 22.5
+
+
+def compass_wedge_body_relative(
+    absolute_bearing_deg: float, heading_true_deg: float
+) -> tuple[float, float]:
+    """A body-relative `(center_deg, half_width_deg)` wedge centred on an
+    absolute compass bearing -- `plans/9k113-scan-procedure/plan-stage2.md`,
+    the `look <compass>` bounded point's own wedge, by the identical
+    true-to-body-relative conversion `body._active_gaze` already applies
+    to a compass-absolute `scan north`/`scan bearing 320` (subtract
+    heading, wrap to [-180, 180)). A pure function of its two inputs, no
+    ownship/DCS dependency beyond the heading already passed in."""
+    center_deg = (absolute_bearing_deg - heading_true_deg + 180.0) % 360.0 - 180.0
+    return center_deg, COMPASS_SECTOR_HALF_WIDTH_DEG
+
+
 def legs_within_wedge(
     center_azimuth_deg: float, half_width_deg: float
 ) -> tuple[int, ...]:
