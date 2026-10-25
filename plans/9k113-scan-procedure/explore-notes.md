@@ -62,3 +62,21 @@ in only as far as it falls out of the design naturally: no special handling and 
 It was, so it is declined, not folded in. One residue carries into this plan: the altitude at which
 a band empties moves with pitch, and nose-up lowers it. Test the scan at a nose-up attitude within
 50–800 m AGL.
+
+## Stage 2 — pointing at a known place, 2026-10-25
+
+Shown a mock exchange (*"Sight two o'clock, three kilometres."* → *"Two o'clock."* → wide look →
+*"Contact, two o'clock, three k."* → narrow → *"Two tanks."*, or *"Nothing at two o'clock."*) and
+asked five questions. Answers, verbatim:
+
+1. **Words.** *"\"Sight\", \"look [at]\", \"what is [at]\""*
+2. **No distance given.** *"near to far"*
+3. **How long, and when nothing is there.** *"two proper sweeps of the area -> if nothing, say
+   \"<where> clear\" and continue what the previous action was"*
+4. **Something found.** *"report, then go back to scanning. target count makes no difference, report
+   as usual"*
+5. **During an attack run.** *"during attack run, keep the sight on the attack runs target. If
+   OBSERV OFF, then eyesight/binoculars on the target."*
+
+Already settled earlier (2026-10-20): the place is an o'clock or a compass bearing, with an optional
+distance; landmarks, waypoints and player marks come later.
