@@ -1,8 +1,8 @@
 # BL-B96 — The crew pipeline is the default: no mode flags, F10 and overlay removed, `logger` renamed `body`
 
-- [ ] **BL-B96 — Make the player-facing crew session, with speech in and out, what body-layer
+- [x] **BL-B96 — Make the player-facing crew session, with speech in and out, what body-layer
   simply does. Remove the `--console` REPL mode, the F10 radio menu and the text overlay entirely,
-  and rename the `logger` module to `body`.** #status/open Filed 2026-10-24 at user direction,
+  and rename the `logger` module to `body`.** #status/done #needs-flight Filed 2026-10-24 at user direction,
   reading `logger --help`.
 
   > *"help text for logger says*
@@ -49,3 +49,19 @@
     deletion; IDs are never reused.
   - Sequenced **after** `feature/attack-run-los` merges, because both touch `logger.py` and
     `crew_console.py`.
+
+**Done, merged to `main` 2026-10-25 (`af9254d5`, branch `feature/default-crew-pipeline`).**
+Crew-text, speech-audio and speech-input always on; `--console`, F10 command input and the text
+overlay removed in both layers; `logger.py` → `body.py`; unreachable audio adapter warns and keeps
+trying (`connection_reporter.py`); `--audio-adapter-url` required. Tuning key renamed
+`logger.MISSION_START_RESOLVE_FALLBACK_S` → `body.MISSION_START_RESOLVE_FALLBACK_S` (an old-name
+override in a local `config/tuning.toml` now only warns). Command map F10 badges dropped.
+Review APPROVED, light security+performance APPROVED, DoD PASS
+(`plans/default-crew-pipeline/{review,security-perf,dod-check}.md`).
+
+`#needs-flight`: delete the stale F10/overlay Hook `.lua`/`.dlg` from Saved Games `Scripts\Hooks\`;
+restart the collector; run `body.py` with `--audio-adapter-url`; confirm speech out and in work with
+no flags and the connection warning appears/clears. Watch item (`security-perf.md`, not a defect):
+an adapter that times out rather than refuses stalls each poll tick up to 5 s.
+
+Milestone check: does not change BL-B89 or any downstream assumption.
