@@ -1031,6 +1031,13 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "radio_check",
         "greeting",
+        # `look`/`sight`/`what is [at] <where>` (`plans/
+        # 9k113-scan-procedure/plan-stage2.md`) -- `_handle_point` always
+        # returns a refusal/confirm-question/readback line unconditionally
+        # (`render_unable`/`render_confirm_request`/`render_point_
+        # readback`/`render_say_again`), never `[]`. No no-return-value
+        # exemption needed.
+        "point",
     }
 )
 
@@ -3392,17 +3399,18 @@ class CrewConsole:
                 sector_label=label,
                 readback_text=readback_text,
             )
-        if self.enrichment is None:
-            return ["no world-model connection configured"]
-        heading_true_deg = self.enrichment.ownship.heading_true_deg
         clock = slots.get("clock")
         sector_word = slots.get("sector")
         if isinstance(clock, int):
+            # No heading needed -- the o'clock wedge is already
+            # body-relative by construction.
             center_deg, half_width_deg = clock_wedge_body_relative(clock)
         elif isinstance(sector_word, str):
+            if self.enrichment is None:
+                return ["no world-model connection configured"]
             absolute_bearing_deg = _SECTOR_CENTER_DEG[_SECTOR_FOR_WORD[sector_word]]
             center_deg, half_width_deg = compass_wedge_body_relative(
-                absolute_bearing_deg, heading_true_deg
+                absolute_bearing_deg, self.enrichment.ownship.heading_true_deg
             )
         else:
             return [render_say_again().text]

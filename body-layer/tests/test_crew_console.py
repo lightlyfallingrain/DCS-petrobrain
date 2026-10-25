@@ -36,6 +36,7 @@ from belief.crew_console import (
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
+    PendingPointRequest,
     _describe_token_for_confirm,
     _nearest_sector,
 )
@@ -43,6 +44,7 @@ from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
+from belief.optic_policy import BoundedSightLook
 from belief.percept import Percept
 from belief.speech import (
     group_membership_state,
@@ -5497,6 +5499,277 @@ def test_observ_transition_is_reset_at_the_top_of_every_dispatch() -> None:
     assert console.observ_transition is None
 
 
+# -- plans/9k113-scan-procedure/plan-stage2.md (BL-B89 Stage 2) ----------
+
+
+def test_point_clock_observ_already_on_starts_bounded_look() -> None:
+    """OBSERV already on (`sight_phase_is_sighting`) dispatches
+    immediately -- `look two o'clock` queues a `BoundedSightLook` via
+    `point_request_transition` for `body.py` to apply, and speaks the
+    point-style readback, not `scan`'s own "Scanning ..." wording."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+
+    lines = console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+
+    assert lines == ["Two o'clock."]
+    assert isinstance(console.point_request_transition, BoundedSightLook)
+    assert console.point_request_transition.center_azimuth_deg == pytest.approx(60.0)
+    assert console.point_request_transition.label == "two o'clock"
+
+
+def test_point_relative_reuses_scan_dispatch_with_point_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`look left` sets `ScanPlan.commanded_sector` through the identical
+    `_handle_scan`/`scan_area` path `scan left` already uses -- the plan's
+    own "one write, never two competing writers" -- but with the point-
+    style readback, not `render_scan_readback`'s "Scanning left."."""
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+
+    lines = console.handle_command("point", now_sim=0.0, slots={"relative": "left"})
+
+    assert lines == ["Left."]
+    assert len(console.tasks.tasks) == 1
+    assert console.tasks.tasks[0].kind == "scan_area"
+
+
+def test_point_compass_sector_resolves_wedge_from_heading() -> None:
+    """`look north` with ownship on a heading of 0 -> body-relative
+    center 0.0 (dead ahead), 45 deg half-width -- the compass-wedge
+    helper's own derivation, not the o'clock one."""
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship()
+        ),
+    )
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+
+    lines = console.handle_command("point", now_sim=0.0, slots={"sector": "north"})
+
+    assert lines == ["North."]
+    assert isinstance(console.point_request_transition, BoundedSightLook)
+    assert console.point_request_transition.center_azimuth_deg == pytest.approx(0.0)
+    assert console.point_request_transition.half_width_deg == pytest.approx(22.5)
+
+
+def test_point_with_distance_narrows_the_band() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+
+    lines = console.handle_command(
+        "point", now_sim=0.0, slots={"clock": 2, "distance_km": 3}
+    )
+
+    assert lines == ["Two o'clock."]
+    assert isinstance(console.point_request_transition, BoundedSightLook)
+    assert console.point_request_transition.near_m == pytest.approx(2_000.0)
+    assert console.point_request_transition.far_m == pytest.approx(4_000.0)
+
+
+def test_point_during_attack_run_is_refused() -> None:
+    """Approved 2026-10-25, "Attack-run interaction": the sight is
+    already committed to the run's own target."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.attack_run_engaged = True
+    console.sight_phase_is_sighting = True
+
+    lines = console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+
+    assert lines == ["Unable, attack run."]
+    assert console.pending_point_request is None
+
+
+def test_point_observ_off_asks_then_yes_queues_the_deferred_look() -> None:
+    """OBSERV off -> "Need observ, confirm?" -> "yes" -> `_handle_observ_
+    on` runs exactly once and, since `sight_ready` holds, queues a
+    `PendingPointRequest` with the original slots."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_ready = True
+    assert console.sight_phase_is_sighting is False
+
+    lines = console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    assert lines == ["Need observ, confirm?"]
+    assert console._pending_confirmation is not None
+    assert console._pending_confirmation.observ_request == {"clock": 2}
+
+    affirm_lines = console.handle_transcript(
+        "yes",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+    assert affirm_lines == ["Observ on."]
+    assert console.observ_transition == "on"
+    assert console.pending_point_request is not None
+    assert console.pending_point_request.slots == {"clock": 2}
+    assert console._pending_confirmation is None
+
+
+def test_point_observ_off_no_cancels_silently() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    assert console._pending_confirmation is not None
+
+    lines = console.handle_transcript(
+        "no",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+    assert lines == []
+    assert console._pending_confirmation is None
+    assert console.pending_point_request is None
+
+
+def test_point_observ_off_saying_observ_on_also_counts_as_yes() -> None:
+    """`classify_yes_no`'s own rule 2 ("a resolved command token is never
+    an answer") would otherwise swallow this -- `"observ on"` resolves to
+    the real `observ_on` token, scoped exception for this one pending-
+    confirmation kind only."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_ready = True
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    assert console._pending_confirmation is not None
+
+    lines = console.handle_transcript(
+        "observ on",
+        confidence=0.9,
+        token="observ_on",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+    assert lines == ["Observ on."]
+    assert console.pending_point_request is not None
+    assert console._pending_confirmation is None
+
+
+def test_point_observ_off_guidance_not_ready_drops_no_pending_request() -> None:
+    """If `_handle_observ_on` itself refuses (`sight_ready` false), the
+    look is simply dropped -- nothing to wait for."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    assert console.sight_ready is False
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+
+    lines = console.handle_transcript(
+        "yes",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+    assert lines == ["Unable, guidance unit not ready."]
+    assert console.pending_point_request is None
+
+
+def test_drain_pending_point_request_waits_for_sighting_phase() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.pending_point_request = PendingPointRequest(
+        slots={"clock": 2}, requested_sim=0.0
+    )
+
+    assert console.drain_pending_point_request(now_sim=0.5) == []
+    assert console.pending_point_request is not None
+
+    console.sight_ready = True
+    console.sight_phase_is_sighting = True
+    lines = console.drain_pending_point_request(now_sim=1.0)
+    assert lines == ["Two o'clock."]
+    assert console.pending_point_request is None
+
+
+def test_drain_pending_point_clear_speaks_render_clear() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.pending_point_clear = "two o'clock"
+
+    lines = console.drain_pending_point_clear(now_sim=0.0)
+
+    assert lines == ["Two o'clock, clear."]
+    assert console.pending_point_clear is None
+
+
+def test_a_new_scan_command_supersedes_a_running_point_request() -> None:
+    """`plans/9k113-scan-procedure/plan-stage2.md`'s "Supersession" --
+    any scan/look command clears `point_request_transition`, applied by
+    `body.py` to `OpticState.bounded_look`."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    assert isinstance(console.point_request_transition, BoundedSightLook)
+
+    console.handle_command("scan_left", now_sim=1.0)
+    assert console.point_request_transition == "clear"
+
+
+def test_cancel_scan_cancels_a_running_point_request() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+
+    console.handle_command("cancel_scan", now_sim=1.0)
+    assert console.point_request_transition == "clear"
+
+
+def test_silence_does_not_cancel_a_running_point_request() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    started = console.point_request_transition
+    assert isinstance(started, BoundedSightLook)
+
+    console.handle_command("silence", now_sim=1.0)
+    assert console.point_request_transition is started
+
+
+def test_report_does_not_cancel_a_running_point_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    console.on_ground = False
+    console.sight_phase_is_sighting = True
+    console.handle_command("point", now_sim=0.0, slots={"clock": 2})
+    started = console.point_request_transition
+    assert isinstance(started, BoundedSightLook)
+
+    console.handle_command("report_all", now_sim=1.0)
+    assert console.point_request_transition is started
+
+
 def test_drain_attack_run_is_noop_while_not_engaged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -5524,6 +5797,7 @@ def test_drain_attack_run_is_noop_while_not_engaged(
         enrichment=_enrichment_context(monkeypatch),
         output=None,
     )
+    console.on_ground = False
     console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
 
     result = console.drain_attack_run(None, now_sim=1.0, ownship=_ownship(x=0.0, z=0.0))
@@ -5558,6 +5832,7 @@ def test_drain_attack_run_ends_the_run_when_the_contact_record_vanishes(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     contact_id = store.contacts[0].id
     task = attack_target_task(store, tasks, contact_id, now_sim=0.0)
     assert task is not None
@@ -5624,6 +5899,7 @@ def test_drain_attack_run_reoffers_the_line_once_the_channel_frees() -> None:
 
     output = io.StringIO()
     console = CrewConsole(store=store, tasks=tasks, output=output)
+    console.on_ground = False
     # Well inside `ATTACK_RUN_RELATIVE_MAX_AGE_S` (2.0 s) of the percept's
     # own `t_sim=0.0` -- this test is about occupancy, not staleness, so
     # the busy window is kept short enough that the percept is still
@@ -5670,6 +5946,7 @@ def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
         enrichment=_enrichment_context(monkeypatch),
         output=output,
     )
+    console.on_ground = False
 
     engage_lines = console.handle_command("engage", now_sim=0.0, slots=None)
 
@@ -5730,6 +6007,7 @@ def test_drain_attack_run_ends_the_run_after_drop_target(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("engage", now_sim=0.0, slots=None)
 
     console.handle_command("drop_target", now_sim=1.0)
@@ -5759,6 +6037,7 @@ def test_drain_attack_run_ends_the_run_after_the_generic_cancel_task(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("engage", now_sim=0.0, slots=None)
 
     console.handle_command("cancel_task", now_sim=1.0)
@@ -5939,6 +6218,7 @@ def test_slotted_report_band_filters_rather_than_sorts(
     "filter, not sort" checkable."""
     store = _three_banded_contacts()
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, band="near") == {"OP_ARMORED"}
     assert _in_scope(console, band="medium") == {"OP_TRUCK"}
@@ -5969,6 +6249,7 @@ def test_slotted_report_band_boundary_is_lower_inclusive(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, band="near") == set()
     assert _in_scope(console, band="medium") == {"OP_ARMORED"}
@@ -6017,6 +6298,7 @@ def test_slotted_report_descriptor_excludes_only_a_known_wrong_class(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     # The dot keeps its raw class word ("ground"); it is in scope for
     # *every* descriptor, which is the whole point of the middle verdict.
@@ -6047,6 +6329,7 @@ def test_slotted_report_descriptor_can_empty_the_answer(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, descriptor="ship") == set()
     assert console.handle_command(
@@ -6094,6 +6377,7 @@ def test_slotted_report_group_descriptor_keeps_its_cardinality_meaning(
         "OP_TO5UNITS", established_sim=0.0
     )
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, descriptor="group") == {"OP_INFANTRY"}
     # The class word decides nothing here: `report armor` admits the
@@ -6144,6 +6428,7 @@ def test_slotted_report_relative_uses_the_same_wedge_table_as_scan(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, relative="ahead") == {"OP_ARMORED"}
     assert _in_scope(console, relative="right") == {"OP_TRUCK"}
@@ -6181,6 +6466,7 @@ def test_every_relative_sector_is_inside_the_cockpit_mask(
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     for relative in RELATIVE_SECTORS:
         # Reset between iterations (`plans/voice-latency-instrumentation/
         # plan.md` Stage 6): the previous relative's own readback would
@@ -6228,6 +6514,7 @@ def test_slotted_report_clock_filter_spans_one_hour_either_side(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, clock=3) == {"OP_ARMORED"}
     assert _in_scope(console, clock=2) == {"OP_ARMORED"}
@@ -6286,6 +6573,7 @@ def test_slotted_report_combines_a_where_and_a_how_far(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, clock=2, band="near") == {"OP_ARMORED"}
     # Each slot is doing its own share of the narrowing: drop either one
@@ -6330,6 +6618,7 @@ def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
     assert later > OBSERVED_WINDOW_S
     store.tick(now_sim=later)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert _in_scope(console, later, clock=2) == {"OP_ARMORED"}
     lines = console.handle_command("report", now_sim=later, slots={"clock": 2})
@@ -6365,6 +6654,7 @@ def test_slotted_report_summary_does_not_leak_an_out_of_scope_group_member(
     assert len(store.groups) == 1, "fixture must reproduce the cohering group"
     assert len(store.groups[0].member_contact_ids) == 3
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     lines = console.handle_command(
         "report", now_sim=0.0, slots={"clock": 2, "band": "near"}
@@ -6400,6 +6690,7 @@ def test_slotted_report_band_label_follows_the_query_then_the_furthest(
     note (`plans/voice-latency-instrumentation/plan.md` Stage 6)."""
     store = _three_banded_contacts()
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert (
         "inside 2 kilometres"
@@ -6464,6 +6755,7 @@ def test_slotted_report_freshness_window_is_the_decay_modules_own(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     fresh = console.handle_command(
         "report", now_sim=OBSERVED_WINDOW_S - 1.0, slots={"clock": 2}
@@ -6557,6 +6849,7 @@ def test_descriptor_score_maps_the_shared_verdict_onto_its_weights(
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     assert (
         console._descriptor_score(
             "armor", _facts_with_classification("class", "OP_ARMORED")
