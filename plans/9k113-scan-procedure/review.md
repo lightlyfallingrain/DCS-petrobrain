@@ -109,3 +109,41 @@ binocular-entry functions, `body.py`'s new `_sight_commanded_sector` and both sw
 new altitude-edge-case tests myself to confirm the assertions match real output rather than reading
 them as given; ran the full mechanical check suite (format/lint/mypy×2/pytest) directly from
 `body-layer/` using the main checkout's venv (this worktree has none).
+
+---
+
+### Re-review of 4c9d2321
+
+Fast-forwarded this worktree from `e9fb4a2b` to the named tip `4c9d23212539f4ea89e3a312412f4066c0e1641d`
+(`4c9d2321`'s parent is `b1e868bd`, the review commit above — clean ancestor fast-forward, no
+divergence). Scope: confirm the two Required Fixes only, per the original verdict's own note that
+re-review "can be light."
+
+- **Required Fix 1 (docstring).** `git diff b1e868bd 4c9d2321 -- body-layer/src/belief/optic_policy.py`
+  shows both edits land entirely inside existing `"""..."""` blocks — no code line touched, confirmed
+  by inspecting the diff directly rather than trusting the implementer's claim. `_enter_binocular_search`'s
+  docstring now states the measured truth (sole call site reached only after `_start_glance_away`
+  nulls both aim fields, so it resumes dead ahead on every entry, not at the sight's last position)
+  and cites `[[BL-B98]]`. `_back_to_home`'s docstring (the optional half) is also corrected, with the
+  same caveat and citation. Both read as accurate against the code and against `implementation.md`'s
+  own "Notable Discoveries." Fixed as required.
+- **Required Fix 2 (BL-B89.md supersession).** The "`[[BL-B86]]` is folded in" line is kept verbatim
+  inside a quote, not deleted, with a **Superseded** marker and the reversal's own quote
+  (*"if B86's only thing is the high alt scan then reject it"*) attached — matches root `CLAUDE.md`'s
+  "supersession is marked, not deleted" exactly. Fixed as required.
+- **BL-B98 well-formedness.** `.claude/scripts/mint-id.sh --list` confirms `BL-B98` is the current
+  highest `BL-B` id (not reused, not off-by-one), the file is indexed in `body-layer-backlog.md`,
+  and the entry's quoted acceptance line — *"1 - eyes/binocular when beyond 9K113 limits. Leave
+  9K113 at last position."* — matches `docs/acceptance/2026-10-20-sortie-feedback.md` line 140
+  verbatim (checked by `grep`, not re-typed from memory).
+- **Mechanical checks**, run from this worktree's `body-layer/` using the main checkout's venv
+  (worktree has none): `ruff check` clean, `ruff format --check` clean (183 files), `mypy src`
+  clean (strict, 74 files), `pytest tests -q` → 2587 passed, 4 xfailed — identical counts to the
+  implementer's own post-fix run, consistent with a docstring-only change.
+
+No new findings. Both Required Fixes are correctly and narrowly applied; no scope drift, no
+code-line changes smuggled in alongside the docstring prose.
+
+### Verdict (re-review)
+
+APPROVED
