@@ -1,7 +1,8 @@
 # AA-B7 — The wake word anchors as a command verb, so "Petrovich, …" gets "say again"
 
-- [~] **AA-B7 — A transmission that begins with the wake word must reach the brain as free speech;
-  today it is answered "say again".** #status/in-review #needs-flight Sortie feedback F2,
+- [x] **AA-B7 — A transmission that begins with the wake word must reach the brain as free speech;
+  today it is answered "say again".** #status/done #needs-flight Merged 2026-10-25 (`47219b3a`, branch
+  `fix/aa-b7-wake-word-routing`). Sortie feedback F2,
   `docs/acceptance/2026-10-20-sortie-feedback.md`. Sequenced by the user: *"F2 - after 9K113 fixes
   are merged"* — the 9K113 work (`[[BL-B89]]`) merged 2026-10-25, so this is due.
 
