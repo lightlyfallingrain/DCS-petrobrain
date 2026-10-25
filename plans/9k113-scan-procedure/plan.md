@@ -243,6 +243,15 @@ Implementer is not starting from nothing when it is picked up:
 This is deliberately underspecified relative to Stage 1 — it is the next plan, not a stub inside
 this one.
 
+**Performance and security debt carried into this stage.** The `[[BL-B98]]` fix folded into Stage
+1 (`01a6fadd`, reviewed `47c8e96d` APPROVED) shipped with both passes waived by user direction
+(2026-10-25: *"this should be a small fix, skip perf and sec now, do them with stage 2 code"*).
+Stage 2's own performance and security passes must cover that fix's code too — `_start_glance_away`'s
+removed nulling and `body.py`'s `run_once` OBSERV-off-edge aim reset — not just whatever Stage 2
+itself adds. This is not `#needs-flight`-shaped debt (nothing here needs a live DCS session to
+clear); it is a deferred review pass, and ends when Stage 2's batch runs Performance Reviewer and
+Security over the combined diff.
+
 ---
 
 ## Co-moving Fields
