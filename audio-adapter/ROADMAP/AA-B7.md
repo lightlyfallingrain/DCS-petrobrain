@@ -81,3 +81,7 @@
   matching pattern even unprefixed; there is no ownship-position question in body's deterministic
   grammar or in the brain's closed `PICK`/`ASK`/`CONFIRM`/`UNABLE` reply vocabulary at all. Tracked
   as `[[BL-B100]]`, not fixed here — out of this entry's stated scope ("No body-layer change").
+
+  **Update, same day:** `[[BL-B100]]` fixed on this branch at the user's direction — body-layer's
+  `parse_utterance` now strips the leading name, so `"Petrovich, where is mark one?"` describes the
+  contact. Fly A14 with a contact question; `"where are we?"` still has no answer.
