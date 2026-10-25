@@ -71,3 +71,13 @@
 
   **Open (flight):** "Petrovich, where are we?" is answered by the brain in his own words (card
   A14). Needs body-layer's `--brain-url` pointed at the Mac.
+
+  **Found by DoD, 2026-10-25 — card A14 will not pass against this literal sentence even with
+  `--brain-url` fixed.** The routing fix above is verified correct (it reaches brain escalation,
+  not "say again"), but the escalated transcript is never stripped of the wake-word prefix, and
+  `belief.utterance.parse_utterance`'s patterns are start-anchored: `"Petrovich, where is mark
+  one?"` still fails to match (`matched_intent=None`), so the brain answers `"Unable, no such
+  command."` — a different wrong answer, not the intended one. `"Petrovich, where are we?"` has no
+  matching pattern even unprefixed; there is no ownship-position question in body's deterministic
+  grammar or in the brain's closed `PICK`/`ASK`/`CONFIRM`/`UNABLE` reply vocabulary at all. Tracked
+  as `[[BL-B100]]`, not fixed here — out of this entry's stated scope ("No body-layer change").
