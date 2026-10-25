@@ -57,12 +57,20 @@ already used on prior 9K113 sorties, unchanged by this feature.
 
 1. **UNVERIFIED** — Start DCS, take an air start in the Mi-24P, straight and level, 300-500 m AGL
    to begin (you'll go lower and higher for specific checks below).
-2. **UNVERIFIED** — Run the power-up sequence (MISSILE POWER, CPLR DISTR, Sight Power, ЩО PWR),
-   then say **"Observ on."** Confirm the sight begins its idle search (it should start sweeping
+2. **UNVERIFIED** — Get the 9K113 ready the usual way: after an air start, wait for Petrovich's
+   "Guidance unit ready" (or run the power-up yourself if it does not come), then say
+   **"Observ on."** Confirm the sight begins its idle search (it should start sweeping
    `wide_near` first).
-3. **UNVERIFIED** — Start body-layer with your usual `--crew-text` launch command. No new flags
-   are required for this feature — the three-leg cycle and new sector tables are always on, not
-   behind a flag.
+3. **Verified on the Mac (`--help`), UNVERIFIED in flight** — start body-layer the normal way, on
+   the Mac, from the repo root:
+
+   ```sh
+   cd run-scripts && ./run-body-layer.sh
+   ```
+
+   No new flags for this feature. Since BL-B96 (on `main`, and on this branch) there is no
+   `--crew-text`; speech in/out is always on and `--audio-adapter-url` is required, which the
+   script already passes.
 
 ## Flight blocks
 
