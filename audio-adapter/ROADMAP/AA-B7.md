@@ -1,7 +1,7 @@
 # AA-B7 — The wake word anchors as a command verb, so "Petrovich, …" gets "say again"
 
-- [ ] **AA-B7 — A transmission that begins with the wake word must reach the brain as free speech;
-  today it is answered "say again".** #status/open #needs-flight Sortie feedback F2,
+- [~] **AA-B7 — A transmission that begins with the wake word must reach the brain as free speech;
+  today it is answered "say again".** #status/in-review #needs-flight Sortie feedback F2,
   `docs/acceptance/2026-10-20-sortie-feedback.md`. Sequenced by the user: *"F2 - after 9K113 fixes
   are merged"* — the 9K113 work (`[[BL-B89]]`) merged 2026-10-25, so this is due.
 
@@ -37,13 +37,51 @@
   - `[[AA-B4]]` — anchor a verb on sentence position, not the word alone. The same log also anchors
     `"Eta-Chron."` and `"Check it."`. A fix here may fall out of AA-B4, or AA-B4 may build on it;
     decide in the plan.
-  - `[[BL-B52]]` — the wake word strips a report's slots.
+  - `[[BL-B52]]` — the wake word strips a report's slots. Closed by this decision: a prefixed
+    `report` now goes to the brain, so there are no slots to lose.
   - The same flight, separately: body-layer on Windows logged `background brain reply poll failed
     (retrying)` / connection refused, because the brain runs on the Mac. Correctly routed speech
     also needs body-layer's `--brain-url` pointed at the Mac.
 
-  ## Not yet explored
+  ## Decided (user, 2026-10-25)
 
-  The intended routing is written in `vocabulary.py`, so the fix's direction is clear. What is not
-  settled is the edge: does `"Petrovich, scan left"` still run the command, or go to the brain?
-  Ask before building.
+  Asked whether `"Petrovich, scan left"` still runs the command:
+
+  > A. "[hey, ]Petrovich" at start is intentionally the keyword that means free text for the brain.
+  > Petrovich later in the sentence does not trigger that.
+
+  ## Fix (branch `fix/aa-b7-wake-word-routing`)
+
+  `command_matcher.match_transcript` checks the opening word(s) before verb anchoring: `petrovich`
+  or `hey petrovich` (after filler is stripped, so "um, Petrovich" counts) returns
+  `verb_anchored=False`, which body-layer's `classify_response` already routes to the brain. No
+  body-layer change. The name is fuzzy-matched at `WAKE_FLOOR` = 0.8 — admits whisper's
+  `petrovitch`, rejects `petro`/`petrol`/`pedro`; not yet measured on the user's voice.
+
+  | said | before | after |
+  |---|---|---|
+  | "Petrovich, where are we?" | say again | brain |
+  | "Petrovich, scan left" | say again | brain |
+  | "Petrovich, report left" | `report`, slots lost | brain |
+  | "scan left, Petrovich" | `scan_left` | `scan_left` |
+  | "good morning Petrovich" | greeting | greeting |
+
+  Not decided by this fix: `[[AA-B4]]` (positional anchoring) is untouched; it still matters for
+  unprefixed speech like `"Eta-Chron."`.
+
+  **Open (flight):** "Petrovich, where are we?" is answered by the brain in his own words (card
+  A14). Needs body-layer's `--brain-url` pointed at the Mac.
+
+  **Found by DoD, 2026-10-25 — card A14 will not pass against this literal sentence even with
+  `--brain-url` fixed.** The routing fix above is verified correct (it reaches brain escalation,
+  not "say again"), but the escalated transcript is never stripped of the wake-word prefix, and
+  `belief.utterance.parse_utterance`'s patterns are start-anchored: `"Petrovich, where is mark
+  one?"` still fails to match (`matched_intent=None`), so the brain answers `"Unable, no such
+  command."` — a different wrong answer, not the intended one. `"Petrovich, where are we?"` has no
+  matching pattern even unprefixed; there is no ownship-position question in body's deterministic
+  grammar or in the brain's closed `PICK`/`ASK`/`CONFIRM`/`UNABLE` reply vocabulary at all. Tracked
+  as `[[BL-B100]]`, not fixed here — out of this entry's stated scope ("No body-layer change").
+
+  **Update, same day:** `[[BL-B100]]` fixed on this branch at the user's direction — body-layer's
+  `parse_utterance` now strips the leading name, so `"Petrovich, where is mark one?"` describes the
+  contact. Fly A14 with a contact question; `"where are we?"` still has no answer.

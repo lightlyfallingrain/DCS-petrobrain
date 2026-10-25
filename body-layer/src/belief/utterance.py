@@ -163,6 +163,15 @@ _PATTERNS: tuple[_PatternRow, ...] = (
 
 _LITERAL_CONTACT_ID = re.compile(r"^CONTACT_\d+$", re.IGNORECASE)
 
+#: A leading "[hey] Petrovich" and its punctuation (`[[BL-B100]]`). Since
+#: `[[AA-B7]]` that prefix is what sends a transmission here rather than to
+#: the command matcher, so every voiced question that reaches this parser
+#: may carry it -- and `_PATTERNS` are start-anchored. Addressing him is
+#: not part of the question. Exact spellings only (whisper's two observed
+#: ones); audio-adapter's fuzzy `WAKE_FLOOR` also routes near-misses like
+#: "Petrowich", which this does not strip.
+_VOCATIVE_PREFIX = re.compile(r"^(?:hey\W+)?petrovi?t?ch\W*", re.IGNORECASE)
+
 _FILLER_PREFIXES: tuple[str, ...] = ("that ", "the ", "a ", "an ")
 
 #: Placeholder confidences -- see `PartialParse`'s docstring.
@@ -219,7 +228,7 @@ def parse_utterance(store: ContactStore, text: str, now_sim: float) -> PartialPa
     """The deterministic intent parser (see module docstring for the design
     rationale). Pure aside from the one `belief.tools.find_contact` call for
     reference resolution -- no mutation, no I/O."""
-    stripped = text.strip()
+    stripped = _VOCATIVE_PREFIX.sub("", text.strip(), count=1)
     for row in _PATTERNS:
         match = row.pattern.match(stripped)
         if match is None:

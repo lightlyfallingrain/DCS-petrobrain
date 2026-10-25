@@ -47,4 +47,20 @@
   collision surface is growing as the vocabulary does — worth a `tools/stt_bench.py` corpus check
   whenever a new short verb is added, not just when a collision is first noticed by inspection.
 
+- **Fixing where a transcript is routed does not fix what the receiving grammar can do with the
+  text it still contains.** `[[AA-B7]]` correctly made a wake-prefixed transmission reach brain
+  escalation instead of "say again" (`command_matcher.opens_with_wake_word`, checked before verb
+  anchoring) — the Reviewer verified that routing chain in full. But the escalated transcript is
+  never stripped of the wake-word prefix, and the receiving side,
+  `belief.utterance.parse_utterance`, matches with **start-anchored** regexes
+  (`^where(?:'s| is| was)\s+...`). `"Petrovich, where is mark one?"` still fails to match
+  (`matched_intent=None`) where `"where is mark one?"` (unprefixed) succeeds — measured directly,
+  not inferred. The pilot gets a different wrong answer ("Unable, no such command.") instead of the
+  old wrong answer ("say again"), and a flight test against the literal sortie-log sentence reads
+  as the fix having failed. Lesson: when a fix changes *where* a string goes, re-run it through
+  whatever the destination actually does with that string — a routing fix verified end-to-end by
+  tracing code is not the same claim as "the destination's own grammar still applies to this
+  text," and nothing short of running the destination's parser against the exact string catches
+  the gap. (`[[BL-B100]]`, found by DoD, 2026-10-25.)
+
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.

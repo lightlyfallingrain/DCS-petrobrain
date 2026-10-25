@@ -1,8 +1,13 @@
 # BL-B52 — The wake word strips the slots off a `report` command
 
-- [ ] **BL-B52 — `Petrovich, report left` matches the `report` token with `slots=None`, so the filter is
-  silently lost and he answers about the whole scene.** #status/open Found by DoD during [[BL-13]],
+- [x] **BL-B52 — `Petrovich, report left` matches the `report` token with `slots=None`, so the filter is
+  silently lost and he answers about the whole scene.** #status/done Found by DoD during [[BL-13]],
   2026-10-10, by running the shipped matcher rather than reading it — no review document held this.
+
+  **Closed 2026-10-25 by [[AA-B7]]'s decision, not by the fix shape below** — that shape (strip the
+  wake word, run the command) is rejected. User: *"'[hey, ]Petrovich' at start is intentionally the
+  keyword that means free text for the brain."* `Petrovich, report left` now goes to the brain
+  whole, so no command runs and no slot is dropped. Plain `report left` is unaffected.
 
   The command still works; what is lost is the **narrowing**. To the pilot that reads as *"left was
   ignored"*, which is worse than a `say_again`: he gets a plausible answer to a question he did not

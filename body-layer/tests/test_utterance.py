@@ -147,6 +147,28 @@ def test_where_is_intent_matches_describe_contact_and_strips_question_mark() -> 
         assert parse.referenced_contact_id == contact_id
 
 
+def test_leading_wake_word_is_not_part_of_the_question() -> None:
+    """`[[BL-B100]]`: since `[[AA-B7]]`, "[hey] Petrovich, ..." is what
+    routes a transmission here, so the patterns must see past it."""
+    store, contact_id = _store_with_one_contact()
+    for phrase in (
+        f"Petrovich, where is {contact_id}?",
+        f"Hey, Petrovich! Where is {contact_id}?",
+        f"Petrovitch where's {contact_id}",
+        f"petrovich watch {contact_id}",
+    ):
+        parse = parse_utterance(store, phrase, now_sim=0.0)
+        assert parse.disposition == "handled", phrase
+        assert parse.referenced_contact_id == contact_id
+
+
+def test_wake_word_later_in_the_sentence_is_left_alone() -> None:
+    store, contact_id = _store_with_one_contact()
+    parse = parse_utterance(store, f"where is {contact_id} petrovich", now_sim=0.0)
+    assert parse.matched_intent == "describe_contact"
+    assert parse.disposition == "escalated"
+
+
 def test_status_intent_matches_describe_contact() -> None:
     store, contact_id = _store_with_one_contact()
     parse = parse_utterance(store, f"status {contact_id}", now_sim=0.0)
