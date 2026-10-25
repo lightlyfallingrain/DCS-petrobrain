@@ -1,7 +1,8 @@
 # BL-B98 — 9K113 sight returns to dead-ahead after a glance-away instead of staying at its last position
 
-- [ ] **BL-B98 — The 9K113 sight resumes dead ahead `(0.0, 0.0)` on every glance-away-triggered
-  resume, not at its last position.** #status/open Found during the BL-B89 Stage 1 review
+- [~] **BL-B98 — The 9K113 sight resumes dead ahead `(0.0, 0.0)` on every glance-away-triggered
+  resume, not at its last position.** #status/in-progress Folded into `[[BL-B89]]` on
+  `feature/9k113-scan-procedure` (user direction 2026-10-25, below). Found during the BL-B89 Stage 1 review
   (`plans/9k113-scan-procedure/review.md`, Required Fix 1), pre-existing — not this stage's
   defect to introduce, but newly measured by this stage's own tests.
 
@@ -26,3 +27,19 @@
   Fix is to have `_start_glance_away` preserve the aim (or have the resume functions re-derive it
   from state captured before the null) rather than discarding it — scope and approach not yet
   decided; this entry only files the defect.
+
+  **User direction, 2026-10-25** (verbatim):
+
+  > *"fold in BL-B98 fix, it fits well with this feature. The sight does/must reset when OBSERV
+  > switches to OFF, but not when it remains ON regardless of not using it actively. There was an
+  > earlier fix to write 0 to the exis commands to stop it from moving, when not using the sight,
+  > but that does not mean resessing it to boresight, just stopping movement."*
+
+  So the rule is:
+
+  1. **OBSERV on→off (any cause): the sight's believed aim resets to boresight `(0, 0)`.**
+  2. **While OBSERV stays on, the aim persists** — through a glance-away, a binocular excursion,
+     an idle period, anything that is not OBSERV going off. Resume picks up where it was.
+  3. **A zero axis command is "stop moving", not "go to boresight".** The 2026-10-24 F1 fix
+     (`e1d16037`, write 0 to both slew axes once on OBSERV off) halts slew; nothing may read a
+     zero axis write, or an idle/`None` look, as the sight having recentred.
