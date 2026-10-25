@@ -37,9 +37,13 @@ holds; "resumes at the exact same step" was never a stated requirement.
 - `src/vocabulary.py` — new `point` token; `PHRASES["scan_ahead"/"scan_left"/
   "scan_right"]` lose their `"look ..."` phrasings (look is no longer a scan
   alias); `PHRASES["point"] = ("look", "sight")` added as a calibration-only
-  entry (reaches `VERB_ANCHOR_WORDS`/`to_prompt()`, never reached by the
-  generic phrase table in practice since the dedicated branch below always
-  resolves first).
+  entry (reaches `VERB_ANCHOR_WORDS`/`to_prompt()`). **Correction
+  (review-stage2.md, Optional Refinements):** this entry *is* reached by the
+  generic phrase table for a bare `"look"`/`"sight"` with no slot — the
+  dedicated branch returns `None` on no slot by design and falls through to
+  it, resolving to `point`/`slots=None` at ratio 1.0. The outcome is still
+  correct (`_handle_point` degrades `slots=None` to "say again"), so this
+  was a documentation nit, not a functional issue.
 - `src/command_matcher.py` — `_POINT_VERBS`/`_WHAT_VERB`, `_parse_point_
   slots`, and two new slot-resolution branches in `match_transcript` (point
   verbs, then `"what"`), ordered with the existing `follow`/`report`/
@@ -210,3 +214,60 @@ Produced by calling the actual `handle_command`/`handle_transcript`/
   the `clock`/`sector` (compass) case. A future reviewer tempted to
   "unify" the two paths should re-read the plan's own flagged risk on this
   point before doing so.
+
+### Review fixes (review-stage2.md)
+
+**Required Fix 1 — fixed.** `body.py`'s `point_request_transition` apply
+block reset `OpticState.look_started_sim = None` unconditionally, for
+every `_POINT_LOOK_SUPERSEDING_TOKENS` entry, even when no bounded look
+was ever active. Because `look_started_sim` is shared with the sight's own
+per-target look clock (`_decide_sighting`'s mid-look continuation check)
+and the idle 3-leg search cycle's per-leg clock, this silently abandoned a
+real, unrelated, in-progress contact look and leaked its `pending_
+attempted_at_range_m` entry — reachable from almost any other command
+(`follow`, `select_target`, `watch_nearest`, `engage`, `disengage`,
+`step`, `cancel_task`, any `scan`/`look` phrase) fired while the sight was
+mid-look.
+
+**Fix, as sketched in the review**: the apply block is now a named helper,
+`body._apply_point_request_transition`, applying the review's own guard —
+`look_started_sim` is reset only when the transition actually concerns the
+bounded-look clock (a bounded look was running before the change, or the
+new transition is a fresh `BoundedSightLook` starting one); otherwise it
+is left untouched. Extracted into its own function (previously inline in
+`_run_crew_text_poll_loop`) specifically so it is unit-testable without
+driving the whole poll loop.
+
+**Test added first, confirmed red, then fixed** (`test_body.py::
+test_an_unrelated_superseding_command_does_not_abandon_a_running_look`):
+starts a real mid-look via `decide()` (same starting point as `test_
+optic_policy.py`'s `test_the_look_survives_past_the_poll_that_started_
+it`), applies an unrelated superseding `"clear"` transition the way the
+poll loop does, then runs `decide()` again and asserts the look continues
+onto the same contact. Verified red against the pre-fix (unconditional
+reset) body of the helper — `AssertionError: assert None == 'CONTACT_1'`
+— then restored the fix (checksum-verified identical to the pre-break
+source) and confirmed green.
+
+**Optional Refinements — left as-is, with reasons:**
+
+- **The "book"/"fight"-class fuzzy collisions** (`audio-adapter/src/
+  command_matcher.py`'s `VERB_FLOOR = 0.5`): not tightened. `VERB_FLOOR` is
+  one global floor shared by every verb, including the two collisions it
+  was deliberately set to admit (`"skin"`→`scan` and `"walk"`→`look`, both
+  exactly 0.5, per that constant's own docstring/provenance). There is no
+  per-verb floor to narrow without either introducing a new, unplanned
+  per-word threshold table (an architectural change, not the "small and
+  consistent with matcher precedent" the review conditioned this on) or
+  running `tools/stt_bench.py`'s corpus to see whether "book"/"fight" are
+  actually produced for "look"/"sight" in practice — a measurement task,
+  not an implementation one. Given push-to-talk discipline this is
+  low-risk per the review's own read; flagging for a dedicated corpus pass
+  rather than guessing at a fix here.
+- **The `PHRASES["point"]` documentation claim**: fixed directly in this
+  implementation notes file (the inaccurate claim lived here, not in
+  source) — see the "Files Changed" entry above for the correction. No
+  source change needed; the behavioural outcome was already correct.
+- **The redundant `point_request_transition = "clear"` write under
+  `ATTACK_RUN_ENGAGED`**: left as-is per the review's own conclusion — confirmed
+  harmless, not a correctness issue, no test or source change requested.

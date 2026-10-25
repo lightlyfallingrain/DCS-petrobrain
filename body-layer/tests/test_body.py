@@ -3085,6 +3085,76 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert optic_state.look_contact_id is None
 
 
+def test_an_unrelated_superseding_command_does_not_abandon_a_running_look() -> None:
+    """`review-stage2.md` Required Fix 1: `point_request_transition` is
+    set to `"clear"` for *every* `_POINT_LOOK_SUPERSEDING_TOKENS` entry --
+    not just `look`/`scan`, but `select_target`/`follow`/`engage`/... --
+    regardless of whether a bounded look was ever running. Applying it
+    unconditionally reset `OpticState.look_started_sim`, which is also the
+    sight's own per-target look clock (`_decide_sighting`'s mid-look
+    continuation check). That silently abandoned a real, in-progress
+    contact look: `look_contact_id` was dropped and its `pending_
+    attempted_at_range_m` entry was never committed or cleared, locking
+    the contact out of every future look.
+
+    Reproduced the way the poll loop actually drives it: a mid-look
+    `OpticState` (as if the sight had already been dwelling on CONTACT_1
+    for one poll), then the apply block for a superseding token that has
+    nothing to do with any look (`"clear"`, same as `select_target`/
+    `follow`/`engage`/... all set unconditionally), then `decide` for the
+    next poll. The look must continue onto CONTACT_1, not fall back to
+    picking a fresh target."""
+    from belief.optic_policy import LookTarget, OpticPhase, OpticState, decide
+    from perception.optics import SIGHT_NARROW_OPTIC
+
+    target = LookTarget(
+        contact_id="CONTACT_1",
+        azimuth_deg=0.0,
+        elevation_deg=0.0,
+        range_m=5_000.0,
+        object_type="T-72",
+        current_level="presence",
+    )
+
+    # Poll 1: the sight picks CONTACT_1 for a real, in-progress look --
+    # the same starting point as `TestFieldOfRegardEnforcement.test_the_
+    # look_survives_past_the_poll_that_started_it`.
+    state, decision = decide(
+        OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        ),
+        now_sim=0.5,
+        scan_cycle_period_s=16.0,
+        targets=[target],
+        steady=True,
+    )
+    assert state.look_contact_id == "CONTACT_1"
+    assert decision.optic is SIGHT_NARROW_OPTIC
+
+    # Between poll 1 and poll 2, the pilot issues an unrelated command
+    # (`select_target`/`follow`/`engage`/...) that has nothing to do with
+    # any look -- `point_request_transition` is still set to `"clear"`
+    # unconditionally for every one of those tokens, and the poll loop's
+    # own apply block runs exactly as `_run_crew_text_poll_loop` runs it.
+    state = body_module._apply_point_request_transition(state, "clear")
+
+    # Poll 2: the look must continue onto CONTACT_1, not be silently
+    # abandoned and re-picked from scratch (which would exclude it, since
+    # it is already in `pending_attempted_at_range_m`, and lock it out of
+    # every future look).
+    state, decision = decide(
+        state,
+        now_sim=1.5,
+        scan_cycle_period_s=16.0,
+        targets=[target],
+        steady=True,
+    )
+    assert state.look_contact_id == "CONTACT_1"
+    assert decision.optic is SIGHT_NARROW_OPTIC
+
+
 def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

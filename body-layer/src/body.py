@@ -2885,6 +2885,37 @@ def _load_effector_config() -> tuple[
     return sequences_by_key, own_registry, bool(banner_lines), polled
 
 
+def _apply_point_request_transition(
+    optic_state: OpticState,
+    transition: Literal["clear"] | BoundedSightLook,
+) -> OpticState:
+    """Apply `CrewConsole.point_request_transition` (`plans/
+    9k113-scan-procedure/plan-stage2.md`'s "Supersession") to `optic_state.
+    bounded_look`, the one field `CrewConsole` cannot reach directly.
+
+    `look_started_sim` is reset only when the transition actually concerns
+    the bounded-look clock -- a bounded look was running before this change
+    or `transition` is a fresh `BoundedSightLook` starting one. It is
+    **not** reset for a superseding token (`cancel_scan`, `select_target`,
+    `engage`, ...) that fires while `bounded_look` was already `None`: that
+    token still clears `bounded_look` (a true no-op) but must leave `look_
+    started_sim` alone, because the same field also doubles as the sight's
+    own per-target look clock (`optic_policy._decide_sighting`'s mid-look
+    continuation check) and the idle 3-leg search cycle's per-leg clock
+    (`optic_policy._idle_sight_search`'s own docstring). Resetting it
+    unconditionally silently abandoned an unrelated, in-progress contact
+    look -- its `pending_attempted_at_range_m` entry was then never
+    committed or cleared, locking that contact out of every future look
+    until the next OBSERV off->on cycle (review-stage2.md Required Fix 1)."""
+    new_bounded_look = None if transition == "clear" else transition
+    reset_clock = optic_state.bounded_look is not None or new_bounded_look is not None
+    return replace(
+        optic_state,
+        bounded_look=new_bounded_look,
+        look_started_sim=(None if reset_clock else optic_state.look_started_sim),
+    )
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -3746,18 +3777,13 @@ def _run_crew_text_poll_loop(
                     # applied here to `runner.optic_state.bounded_look`,
                     # the one field `CrewConsole` cannot reach directly.
                     # `None` (the common case: nothing to apply) is a true
-                    # no-op. `"clear"` and a fresh `BoundedSightLook` both
-                    # just `replace()` the field -- the latter *is* the
-                    # start of a new bounded look, the plan's own "clear
-                    # then start" collapsing to one write.
+                    # no-op. See `_apply_point_request_transition`'s own
+                    # docstring for what it does to `look_started_sim` and
+                    # why.
                     if crew_console.point_request_transition is not None:
-                        transition = crew_console.point_request_transition
-                        runner.optic_state = replace(
+                        runner.optic_state = _apply_point_request_transition(
                             runner.optic_state,
-                            bounded_look=(
-                                None if transition == "clear" else transition
-                            ),
-                            look_started_sim=None,
+                            crew_console.point_request_transition,
                         )
                         crew_console.point_request_transition = None
                 connection.report_success()
