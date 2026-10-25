@@ -155,3 +155,96 @@ test per the plan's own instruction.
 ### Verdict
 
 CHANGES REQUESTED
+
+### Re-review
+
+Re-reviewed the fix commit `627ab398b074b308f90ba4ec023edb765ecdd25e` (parent `d0b58959`, this
+review's own CHANGES REQUESTED tip) on `feature/9k113-scan-procedure`, against
+`implementation-stage2.md`'s "Review fixes" section and `plan-stage2.md`.
+
+**Required Fix 1 — resolved.** `body.py` now has a named helper,
+`_apply_point_request_transition(optic_state, transition)`, extracted from the inline apply block
+in `_run_crew_text_poll_loop` and used at its sole call site. It implements exactly the guard this
+review sketched: `reset_clock = optic_state.bounded_look is not None or new_bounded_look is not
+None`, and `look_started_sim` is only reset when `reset_clock` is true. `grep -n
+point_request_transition src/body.py` confirms there is exactly one place in `body.py` that writes
+`look_started_sim` via this transition (the helper itself) and exactly one call site — no second,
+unguarded write was left behind.
+
+**Confirmed by mutation, not just reading.** Reverted the helper's body to the pre-fix
+unconditional `look_started_sim=None` and re-ran the new test
+(`test_an_unrelated_superseding_command_does_not_abandon_a_running_look`): it goes red with the
+exact symptom this review's own repro showed (`assert None == 'CONTACT_1'` on `look_contact_id`
+after the second `decide()` poll). Restored the file; `git diff` against the restored file shows no
+difference, confirming the restore was exact. The new test also calls
+`body_module._apply_point_request_transition` directly, the same function the poll loop calls, not
+a reimplementation of its logic — so the regression test is wired to the real code path, not to a
+parallel assertion that could drift from it.
+
+**Remaining write sites.** `grep -n look_started_sim src/body.py` returns three lines: the
+docstring, the one conditional write inside the helper, and a comment referencing the helper. There
+is no other place in `body.py` that writes this field from the point-request path.
+
+**Bounded-look teardown on supersession, checked by direct construction against the real
+dataclasses (not inferred):**
+- **A new look/scan superseding a running bounded look** (`transition` is a fresh
+  `BoundedSightLook` while `optic_state.bounded_look` was already set): `reset_clock` is true via
+  either disjunct, `look_started_sim` is reset to `None`, `bounded_look` becomes the new wedge —
+  correct, the new look starts its own clock from the next poll rather than inheriting the stale
+  value.
+- **`cancel`/`cancel_scan` clearing a running bounded look** (`transition == "clear"`,
+  `bounded_look` was set): `reset_clock` is true via the first disjunct, both fields clear
+  together — correct.
+- **OBSERV off** does not go through `_apply_point_request_transition` at all — it is a distinct
+  mechanism (`CrewConsole.observ_transition`, applied separately in the poll loop, driving `decide`
+  into a phase transition that reaches `optic_policy`'s `_back_to_home`, which clears
+  `look_started_sim`/`look_contact_id`/`bounded_look` together in its own `replace()`). That path is
+  unchanged by this fix and already covered by
+  `test_observ_off_command_stops_the_sight_through_the_real_poll_loop`, which this re-review re-ran
+  and confirms still passes with `look_contact_id is None` after the transition.
+- **The fix's own case** (an unrelated superseding token with no bounded look running): confirmed
+  `look_started_sim` is left untouched, reproducing the new test's own assertion from a hand-built
+  `OpticState`.
+
+All three mutation checks above (new bounded look, cancel, no-bounded-look) were run against the
+real `_apply_point_request_transition` with real `BoundedSightLook`/`OpticState` instances, not
+read off the diff.
+
+**Comment pruning.** The removed comment lines ("`'clear'` and a fresh `BoundedSightLook` both just
+`replace()` the field — the latter *is* the start of a new bounded look, the plan's own 'clear then
+start' collapsing to one write") described the pre-fix behaviour, which the fix itself changes; no
+dated line, verbatim user quote, or measurement was among what was removed, and the replacement
+text points to the new helper's own docstring, which carries the fuller explanation (including the
+`look_started_sim` reasoning) that used to live only in the review and the implementation notes. No
+boundary case moved into a test and vanished — the one boundary case this fix is about shipped with
+the new test in the same commit.
+
+**Optional refinements.** Both left as-is, matching the review's own conclusions:
+`VERB_FLOOR`'s "book"/"fight" collisions need a corpus measurement (`tools/stt_bench.py`), not a
+code change — not acted on, correctly deferred rather than guessed at; the `PHRASES["point"]`
+documentation claim was corrected in `implementation-stage2.md` itself (no source change needed,
+behaviour was already correct); the harmless redundant `point_request_transition = "clear"` write
+under `ATTACK_RUN_ENGAGED` was left untouched, as the review itself concluded it should be. Nothing
+here required a change.
+
+**Checks, run from `body-layer/`:** `ruff format --check src tests` — 173 files already formatted.
+`ruff check src tests` — all checks passed. `mypy src` — success, no issues in 74 source files,
+strict. `pytest -q` — 2612 passed, 4 xfailed (one run hit a single, non-reproducing failure in
+`test_mission_start_reset.py::test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure`,
+unrelated to anything this commit touches; it passed in isolation and on two subsequent full runs,
+so treated as a pre-existing order-sensitive flake rather than a regression from this fix). The fix
+commit touches only `body-layer` (`git diff --stat d0b58959 627ab398`), so no `audio-adapter`
+commands were re-run for this pass.
+
+### Re-review Verdict
+
+APPROVED
+
+### Re-review Confidence
+
+Full read of the fix commit's diff (`body.py`, `test_body.py`, `implementation-stage2.md`).
+Mutation-confirmed the regression test against the real pre-fix code, with an exact-restore check.
+Independently constructed and ran all three teardown scenarios (new bounded look, cancel,
+no-bounded-look) against the real dataclasses rather than inferring correctness from the guard
+expression alone. Did not re-verify the OBSERV-off path's own internals beyond re-running its
+existing test, since that path is untouched by this commit.
