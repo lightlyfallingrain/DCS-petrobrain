@@ -493,7 +493,7 @@ Surfaces and transports:
 - `src/detection_trace_writer.py` — the sanctioned ground-truth-plus-belief join. Read-only, one-directional, buffered off the poll loop's critical path.
 - `src/ascii_canvas.py` — shared ASCII-canvas primitives (`Canvas`, `wrap`, the ANSI colour constants) extracted from `eyesight_view.py` (`plans/pov-view/plan.md`, `BL-B99`) so `pov_view.py` reuses the same grid instead of forking it.
 - `src/eyesight_view.py` — `--eyesight-view`'s top-down plan-view renderer (ownship-relative bearing/range, gaze cone, ground-truth-plus-believed markers). Deliberately shows ground truth — debug/testing/calibration exemption, see its own module docstring.
-- `src/pov_view.py` — `--pov-view`'s forward-POV renderer (`plans/pov-view/plan.md`, `BL-B99`), the forward-looking twin of `eyesight_view.py`: a Cartesian azimuth/elevation grid centred on the current optic's boresight, same ground-truth exemption, ignores anything outside the player bubble.
+- `src/pov_view.py` — `--pov-view`'s forward-POV renderer (`plans/pov-view/plan.md`, `BL-B99`), the forward-looking twin of `eyesight_view.py`: a Cartesian azimuth/elevation grid (azimuth from the nose, elevation from the horizon) with the current optic's FOV drawn on it, same ground-truth exemption, ignores anything outside the player bubble.
 - `src/run_log_paths.py` — per-run log filenames (`BL-11` Stage 5). The three JSONL logs roll per run rather than appending across sorties, so **the path passed on the command line is not the path written** — see `RUN.md`.
 - `src/replay.py` — the BL-0 replay harness; drives any `PerceptionSource` over recorded ownship states.
 - `tools/summarize_detection_trace.py`, `tools/speak_samples.py` — post-flight reducer and a dev acceptance aid, not tests.
