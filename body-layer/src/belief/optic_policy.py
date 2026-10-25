@@ -281,52 +281,75 @@ MAX_SEARCH_SECTOR_HALF_WIDTH_DEG: Final[float] = 15.0
 #: identification look is for, and it happens on a later cycle.
 SEARCH_STEP_S: Final[float] = 0.8
 
-#: The near/mid/far band edges the sight's own search cycle sweeps --
-#: `plans/9k113-narrow-search/plan.md` Stage 3, amendment 2 ("narrow
-#: searches both bands, near first"). **Keep in sync with `logger.
-#: _SEARCH_BAND_M`, which independently owns the same two edges for the
-#: binocular search** -- the two tunable sets happen to share today's
-#: defaults (`SIGHT_SEARCH_NEAR_M`/`_SEARCH_BAND_M[0]`,
-#: `SIGHT_SEARCH_MID_M`/`_SEARCH_BAND_M[1]`) but are declared independently
-#: on purpose, by value not by import, since one answers "where does the
-#: naked eye's/binoculars' own reach end" and the other "where does the
-#: sight's own wide/narrow split fall" -- two different questions that
-#: happen to agree today, not one constant wearing two names.
+#: The band edges the sight's own search cycle sweeps -- `plans/
+#: 9k113-scan-procedure/plan.md` Stage 1, replacing the narrow-search
+#: plan's near/far-band split with three bands tied to actual points of
+#: interest (`SightSearchLeg`'s own docstring has the cycle). **Keep in
+#: sync with `body._SEARCH_BAND_M`**, which independently owns the naked-
+#: eye/binocular search's own near/far edge -- the two tunable sets happen
+#: to share `SIGHT_SEARCH_NEAR_M`'s *old* default, not this one, and are
+#: declared independently on purpose: one answers "where does the naked
+#: eye's/binoculars' own reach end", the other "where does the sight's own
+#: wide/narrow split fall".
 #:
 #: **Known residual coupling, not caught by per-key bounds** (the same
 #: shape as `belief.decay`'s documented `OBSERVED_WINDOW_S <
 #: POSITION_HALF_LIFE_S` coupling, `body-layer/CLAUDE.md` "Tuning"):
 #: nothing stops `SIGHT_SEARCH_NEAR_M` being tuned above `SIGHT_SEARCH_
-#: MID_M`, or `SIGHT_SEARCH_MID_M` above `SIGHT_SEARCH_FAR_M`,
+#: WIDE_MID_M`, or `SIGHT_SEARCH_WIDE_MID_M` above `SIGHT_SEARCH_WIDE_
+#: FAR_M`, or `SIGHT_SEARCH_WIDE_FAR_M` above `SIGHT_SEARCH_FAR_M`,
 #: independently within each one's own declared bounds. Single-key tuning
-#: is safe; tuning more than one of these three together is not protected.
+#: is safe; tuning more than one of these four together is not protected.
 #:
-#: Where the naked eye's own reach ends -- the wide leg's own near edge,
-#: and (amendment 2) the near edge of narrow's own first ("near first")
-#: band too.
+#: Where the naked eye's own reach ends -- `wide_near`'s own near edge.
+#: **Lowered to 1.5 km from the narrow-search plan's 2333 m** (explore-
+#: notes, verbatim: *"wide scan near -> 0.5 km is too close. naked eye can
+#: detect, no 9K113 needed. more like 1.5 km - 4 km"*) -- `lo` lowered
+#: from 1000.0 to 500.0 to keep the new, lower default comfortably off
+#: the floor.
 SIGHT_SEARCH_NEAR_M: Final[float] = tuning.real(
     "belief.optic_policy.SIGHT_SEARCH_NEAR_M",
-    2_333.0,
-    lo=1_000.0,
+    1_500.0,
+    lo=500.0,
     hi=4_000.0,
     status="judgement",
 )
 
-#: Where binoculars' own reach ends -- the wide/narrow-near band's own far
-#: edge, and the far/near boundary between narrow's two bands (amendment
-#: 2: narrow covers both the 2.3-5.6 km band and the 5.6-13.6 km band,
-#: near first).
-SIGHT_SEARCH_MID_M: Final[float] = tuning.real(
-    "belief.optic_policy.SIGHT_SEARCH_MID_M",
-    5_647.0,
+#: `wide_near`/`wide_far`'s own boundary -- the mock's own placeholder
+#: (explore-notes: *"rows and time per pass were not corrected... should
+#: be tunable"*), confirmed only as a starting value, not a measurement.
+SIGHT_SEARCH_WIDE_MID_M: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_SEARCH_WIDE_MID_M",
+    4_000.0,
+    lo=2_000.0,
+    hi=6_000.0,
+    status="judgement",
+)
+
+#: `wide_far`'s own far edge (tune alongside `SIGHT_SEARCH_NEAR_M`, the
+#: same residual coupling above), and the boundary at which `narrow_far_
+#: sweep` takes over -- "wide's far edge is wide's own useful reach;
+#: beyond that only narrow brings information" (the 2026-10-20 F4
+#: follow-up's own principle). **A plain tunable, not derived** -- the
+#: narrow-search plan's `_SIGHT_WIDE_SEARCH_FAR_M` (`body.py`) scaled
+#: this value from `SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.
+#: presence_range_mult`, which only made sense while `SIGHT_SEARCH_
+#: NEAR_M` *was* the naked eye's own presence reach; now that it has
+#: been lowered specifically because it no longer is (see that
+#: constant's own default above), the derivation's premise is gone and
+#: this replaces it outright. A starting value, like the two bands
+#: either side of it.
+SIGHT_SEARCH_WIDE_FAR_M: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_SEARCH_WIDE_FAR_M",
+    8_000.0,
     lo=4_000.0,
-    hi=10_000.0,
+    hi=15_000.0,
     status="judgement",
 )
 
 #: The sight narrow setting's own presence reach (`2333 * 5.81`,
-#: `plans/9k113-sight/plan.md` §17) -- the far band's own far edge, and the
-#: whole search cycle's outer limit.
+#: `plans/9k113-sight/plan.md` §17) -- `narrow_far_sweep`'s own far edge,
+#: and the whole search cycle's outer limit. Unchanged by this stage.
 SIGHT_SEARCH_FAR_M: Final[float] = tuning.real(
     "belief.optic_policy.SIGHT_SEARCH_FAR_M",
     13_556.0,
@@ -464,14 +487,22 @@ class LookTarget:
 
 
 #: Which leg of the idle sight's search cycle is current --
-#: `plans/9k113-narrow-search/plan.md` Stage 3, amendment 2. A brief
-#: `"wide"` orientation pass, then `"narrow_near"`/`"narrow_far"`
-#: (*"narrow sweeps both bands, near first, wide only to orient"*), then a
-#: `"binocular"` excursion for any out-of-regard remainder a commanded
-#: sector left over (Stage 2's split). Four names, not two, because
-#: amendment 2 gave narrow its own near/far split -- the original design's
-#: `"narrow"` single leg no longer names one thing.
-SightSearchLeg = Literal["wide", "narrow_near", "narrow_far", "binocular"]
+#: `plans/9k113-scan-procedure/plan.md` Stage 1: a wide S-scan
+#: near-to-mid (`"wide_near"`, close threats/targets), then wide far
+#: (`"wide_far"`, points of interest), then a narrow far sweep for
+#: detection (`"narrow_far_sweep"`) -- the mock's own steps 1/2/5.
+#: Narrow's *identification* visits (the mock's steps 3/4) are not legs of
+#: this cycle at all; they are `choose_sighting_look` picking an
+#: already-detected contact, which pre-empts the idle cycle entirely
+#: whenever something is worth looking at (see that function's own
+#: docstring).
+#:
+#: **`"binocular"` is not a value of this type** -- the out-of-regard
+#: excursion for a commanded sector's own remainder is entered from the
+#: mandatory glance-away's resume point (`_decide_without_guidance`'s
+#: `home_phase is SIGHTING` branch), not as a fourth leg of this cycle,
+#: so it never needs representing here at all.
+SightSearchLeg = Literal["wide_near", "wide_far", "narrow_far_sweep"]
 
 
 @dataclass(frozen=True)
@@ -665,11 +696,12 @@ class OpticState:
     #: about whose clock this is at any given poll.
     look_started_sim: float | None = None
     #: Which leg of the idle search cycle is current -- `SightSearchLeg`'s
-    #: own docstring has the cycle. Default `"wide"` is a true no-op for
-    #: every pre-existing caller/test: read only inside `_decide_sighting`'s
-    #: idle branch, never by `SCANNING`/`GLASSING`/`SEARCHING`-at-home,
-    #: which have their own, unrelated, single-optic sweeps.
-    sight_search_leg: SightSearchLeg = "wide"
+    #: own docstring has the cycle. Default `"wide_near"` (the cycle's own
+    #: first leg) is a true no-op for every pre-existing caller/test: read
+    #: only inside `_decide_sighting`'s idle branch, never by
+    #: `SCANNING`/`GLASSING`/`SEARCHING`-at-home, which have their own,
+    #: unrelated, single-optic sweeps.
+    sight_search_leg: SightSearchLeg = "wide_near"
 
     #: `BL-B71`'s standing guidance grant -- the optic `attack_run`'s
     #: request is currently overriding every other optic decision with,
@@ -1359,6 +1391,33 @@ def choose_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     return max(targets, key=covered)
 
 
+def choose_sighting_look(targets: Sequence[LookTarget]) -> LookTarget | None:
+    """`_decide_sighting`'s own candidate ordering -- `choose_look`'s
+    coverage/watched/range rule, with an outer priority bucket on top:
+    `plans/9k113-scan-procedure/plan.md` Stage 1, the explore notes'
+    procedure (*"first units not yet identified that might be inside
+    identification range... same thing for class"*). A contact already at
+    `"class"` (one look from full identification, `"type"`) is visited
+    before any contact still seeking `"class"` -- within one bucket,
+    `choose_look`'s own ordering applies unchanged.
+
+    Implemented by grouping and delegating to `choose_look` rather than
+    re-deriving its coverage math (root `CLAUDE.md`, "Do not reinvent the
+    wheel"). `current_level == "type"` never appears in `targets` here --
+    `sight_can_still_improve` already excludes it from `worth_looking`
+    upstream, same as today."""
+    if not targets:
+        return None
+
+    def bucket(target: LookTarget) -> int:
+        return 0 if target.current_level == "class" else 1
+
+    by_bucket: dict[int, list[LookTarget]] = {}
+    for target in targets:
+        by_bucket.setdefault(bucket(target), []).append(target)
+    return choose_look(by_bucket[min(by_bucket)])
+
+
 def _angular_separation_deg(a: LookTarget, b: LookTarget) -> float:
     """True angular separation between two look directions -- not an
     azimuth difference, for the same reason `within_optic_fov` is not a
@@ -1701,37 +1760,32 @@ def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
     return _back_to_home(state, now_sim)[0]
 
 
-#: The search cycle's fixed order -- `plans/9k113-narrow-search/plan.md`
-#: Stage 3, amendment 2. `_next_search_leg` walks it; never read directly
-#: outside this module.
+#: The search cycle's fixed order -- `plans/9k113-scan-procedure/plan.md`
+#: Stage 1. `_next_search_leg` walks it; never read directly outside this
+#: module. **No `"binocular"` entry** -- unlike the narrow-search plan's
+#: four-leg order, the out-of-regard excursion is not a leg of this cycle
+#: at all; see `SightSearchLeg`'s own docstring.
 _SEARCH_LEG_ORDER: Final[tuple[SightSearchLeg, ...]] = (
-    "wide",
-    "narrow_near",
-    "narrow_far",
-    "binocular",
+    "wide_near",
+    "wide_far",
+    "narrow_far_sweep",
 )
 
-#: Which optic each non-binocular leg looks through -- `"binocular"` is
-#: deliberately absent: that leg hands off to `OpticPhase.SEARCHING`
-#: entirely (`_enter_binocular_search`), which already hardcodes
-#: `BINOCULAR_OPTIC` for every one of its callers.
-_SEARCH_LEG_OPTIC: Final[dict[Literal["wide", "narrow_near", "narrow_far"], Optic]] = {
-    "wide": SIGHT_WIDE_OPTIC,
-    "narrow_near": SIGHT_NARROW_OPTIC,
-    "narrow_far": SIGHT_NARROW_OPTIC,
+#: Which optic each leg looks through.
+_SEARCH_LEG_OPTIC: Final[dict[SightSearchLeg, Optic]] = {
+    "wide_near": SIGHT_WIDE_OPTIC,
+    "wide_far": SIGHT_WIDE_OPTIC,
+    "narrow_far_sweep": SIGHT_NARROW_OPTIC,
 }
 
 
-def _next_search_leg(leg: SightSearchLeg, *, has_out_of_regard: bool) -> SightSearchLeg:
-    """The next leg after `leg` in the fixed cycle `wide -> narrow_near ->
-    narrow_far -> binocular -> wide`, skipping `binocular` whenever there is
-    no out-of-regard remainder to search (the default-sector and `ahead`
-    cases, where the cycle is `wide -> narrow_near -> narrow_far` only)."""
+def _next_search_leg(leg: SightSearchLeg) -> SightSearchLeg:
+    """The next leg after `leg` in the fixed cycle `wide_near -> wide_far
+    -> narrow_far_sweep -> wide_near -> ...`. Unconditional -- there is no
+    `"binocular"` entry to skip any more (see `_enter_binocular_search`'s
+    own docstring for where that excursion is triggered instead)."""
     index = _SEARCH_LEG_ORDER.index(leg)
-    candidate = _SEARCH_LEG_ORDER[(index + 1) % len(_SEARCH_LEG_ORDER)]
-    if candidate == "binocular" and not has_out_of_regard:
-        return _SEARCH_LEG_ORDER[(index + 2) % len(_SEARCH_LEG_ORDER)]
-    return candidate
+    return _SEARCH_LEG_ORDER[(index + 1) % len(_SEARCH_LEG_ORDER)]
 
 
 def _enter_binocular_search(
@@ -1739,10 +1793,22 @@ def _enter_binocular_search(
     now_sim: float,
     sight_out_of_regard_search: Sequence[tuple[float, float]],
 ) -> tuple[OpticState, OpticDecision]:
-    """The `binocular` leg: a commanded sector's out-of-regard remainder,
-    searched via the ordinary `OpticPhase.SEARCHING` dispatch (unchanged --
-    it already hardcodes `BINOCULAR_OPTIC`, correct for this new caller
-    too), not through `_decide_sighting` again.
+    """A commanded sector's out-of-regard remainder, searched via the
+    ordinary `OpticPhase.SEARCHING` dispatch (unchanged -- it already
+    hardcodes `BINOCULAR_OPTIC`, correct for this caller too), not through
+    `_decide_sighting` again.
+
+    **Triggered once per lap from the mandatory glance-away's own resume
+    point** (`_decide_without_guidance`'s `home_phase is SIGHTING`
+    branch, right where `elapsed >= SIGHT_GLANCE_AWAY_S` would otherwise
+    call `_back_to_home` directly) -- `plans/9k113-scan-procedure/plan.md`
+    Stage 1: *"the out-of-regard binocular excursion... does not count
+    toward a lap"*. Moved out of `_idle_sight_search`'s own leg-stepping
+    logic (where the narrow-search plan entered it as a fourth
+    `"binocular"` leg) specifically so it never competes with that
+    function's "a lap of the three named legs just completed" detection --
+    the two triggers are now independent events rather than one leg
+    cycle expressing both.
 
     **Deliberately omits `look_azimuth_deg`/`look_elevation_deg` from the
     `replace()` below** -- leaving them exactly as they were is "the sight
@@ -1750,11 +1816,12 @@ def _enter_binocular_search(
     feedback.md`, F4/F5 "settled": *"Leave 9K113 at last position"*), for
     free, simply by never touching them.
 
-    **Sets `sight_search_leg` back to `"wide"` immediately at entry**,
+    **Sets `sight_search_leg` to `"wide_near"` immediately at entry**,
     not on exit, so that whenever this excursion ends (pattern exhausted,
     or `not steady`) and `_back_to_home` resumes `SIGHTING`, the very next
-    idle-branch evaluation starts a fresh `wide` pass without needing to
-    distinguish "just returned from binoculars" from any other resume."""
+    idle-branch evaluation starts a fresh `wide_near` pass without needing
+    to distinguish "just returned from binoculars" from any other
+    resume."""
     first_azimuth, first_elevation = sight_out_of_regard_search[0]
     return (
         replace(
@@ -1769,7 +1836,7 @@ def _enter_binocular_search(
             pending_attempted_at_level={},
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
-            sight_search_leg="wide",
+            sight_search_leg="wide_near",
         ),
         OpticDecision(
             optic=BINOCULAR_OPTIC,
@@ -1787,7 +1854,7 @@ def _idle_sight_rest(state: OpticState) -> tuple[OpticState, OpticDecision]:
     synthesized default, straddles or contains azimuth 0), so `_idle_
     sight_search` below always finds a non-empty leg to step. It is
     reached by a direct `decide()`/`_decide_sighting()` call that supplies
-    none of the four `sight_*_search` sequences -- most of this module's
+    none of the three `sight_*_search` sequences -- most of this module's
     own tests -- and must still never leave the aim unset (closes F5):
     hold the last position, or dead ahead if there never was one, exactly
     `_back_to_home`'s own convention for the same question."""
@@ -1814,52 +1881,57 @@ def _idle_sight_rest(state: OpticState) -> tuple[OpticState, OpticDecision]:
 def _idle_sight_search(
     state: OpticState,
     now_sim: float,
+    targets: Sequence[LookTarget],
     *,
-    sight_wide_search: Sequence[tuple[float, float]],
-    sight_narrow_near_search: Sequence[tuple[float, float]],
-    sight_narrow_far_search: Sequence[tuple[float, float]],
-    sight_out_of_regard_search: Sequence[tuple[float, float]],
+    sight_wide_near_search: Sequence[tuple[float, float]],
+    sight_wide_far_search: Sequence[tuple[float, float]],
+    sight_narrow_far_sweep_search: Sequence[tuple[float, float]],
 ) -> tuple[OpticState, OpticDecision]:
     """`_decide_sighting`'s idle branch (nothing worth a closer look):
     step through whichever leg of the search cycle is current (`state.
-    sight_search_leg`) -- a brief `wide` orientation pass, then `narrow_
-    near`/`narrow_far` (amendment 2's "narrow sweeps both bands, near
-    first"), then a `binocular` excursion for any out-of-regard remainder
-    -- advancing to the next leg once the current one's steps run out.
+    sight_search_leg`) -- a wide S-scan near-to-mid, then wide far, then a
+    narrow far sweep for detection (`SightSearchLeg`'s own docstring) --
+    advancing to the next leg once the current one's steps run out.
     `SEARCH_STEP_S` per step, `look_started_sim` reused as the per-leg
     clock (its own docstring), exactly the mechanism `GLASSING`/
     `SEARCHING` already use for their own step timing, generalised to
     whichever leg is current.
 
-    **Skips an empty leg defensively rather than stalling on it**
-    (`_next_search_leg`'s own skip of `binocular` is the one case this is
-    known to hit in production; see `_idle_sight_rest` for what happens
-    if every leg is empty)."""
-    sequences: dict[
-        Literal["wide", "narrow_near", "narrow_far"], Sequence[tuple[float, float]]
-    ] = {
-        "wide": sight_wide_search,
-        "narrow_near": sight_narrow_near_search,
-        "narrow_far": sight_narrow_far_search,
+    **A completed lap (stepping off `narrow_far_sweep`, the cycle's last
+    leg) forces the mandatory naked-eye pause instead of continuing**
+    (`plans/9k113-scan-procedure/plan.md` Stage 1, item 5) --
+    independent of `SIGHT_MAX_DWELL_S`'s own scheduled break, which this
+    is an additional entry path into (`_start_glance_away`, same
+    function, same `SIGHT_GLANCE_AWAY_S` duration). `sight_search_leg`/
+    `look_started_sim` are reset to the cycle's own first leg *before*
+    handing off, so the glance-away's resume (and any out-of-regard
+    binocular detour ahead of it, `_enter_binocular_search`'s own
+    docstring) starts a genuinely fresh `wide_near` pass rather than
+    re-detecting steps that have already run out.
+
+    **Skips an empty leg defensively rather than stalling on it** (an
+    attitude-emptied leg, `_idle_sight_rest` for what happens if every
+    leg is empty); a leg that becomes empty exactly at the poll it would
+    have completed a lap is not specially detected as a lap completion --
+    see `plans/9k113-scan-procedure/implementation.md` for this edge
+    case."""
+    sequences: dict[SightSearchLeg, Sequence[tuple[float, float]]] = {
+        "wide_near": sight_wide_near_search,
+        "wide_far": sight_wide_far_search,
+        "narrow_far_sweep": sight_narrow_far_sweep_search,
     }
-    has_out_of_regard = bool(sight_out_of_regard_search)
 
     def first_nonempty_leg(starting: SightSearchLeg) -> SightSearchLeg | None:
         leg = starting
         for _ in range(len(_SEARCH_LEG_ORDER)):
-            if leg == "binocular":
-                if has_out_of_regard:
-                    return leg
-            elif sequences[leg]:
+            if sequences[leg]:
                 return leg
-            leg = _next_search_leg(leg, has_out_of_regard=has_out_of_regard)
+            leg = _next_search_leg(leg)
         return None
 
     leg = first_nonempty_leg(state.sight_search_leg)
     if leg is None:
         return _idle_sight_rest(state)
-    if leg == "binocular":
-        return _enter_binocular_search(state, now_sim, sight_out_of_regard_search)
 
     steps = sequences[leg]
     leg_started_sim = (
@@ -1869,13 +1941,19 @@ def _idle_sight_search(
     )
     index = int((now_sim - leg_started_sim) // SEARCH_STEP_S)
     if index >= len(steps):
-        next_leg = first_nonempty_leg(
-            _next_search_leg(leg, has_out_of_regard=has_out_of_regard)
-        )
+        if leg == _SEARCH_LEG_ORDER[-1]:
+            return _start_glance_away(
+                replace(
+                    state,
+                    sight_search_leg=_SEARCH_LEG_ORDER[0],
+                    look_started_sim=None,
+                ),
+                now_sim,
+                targets,
+            )
+        next_leg = first_nonempty_leg(_next_search_leg(leg))
         if next_leg is None:
             return _idle_sight_rest(state)
-        if next_leg == "binocular":
-            return _enter_binocular_search(state, now_sim, sight_out_of_regard_search)
         leg = next_leg
         steps = sequences[leg]
         leg_started_sim = now_sim
@@ -1905,10 +1983,9 @@ def _decide_sighting(
     targets: Sequence[LookTarget],
     sight_steady: bool,
     *,
-    sight_wide_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
-    sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
+    sight_wide_near_search: Sequence[tuple[float, float]] = (),
+    sight_wide_far_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -1920,16 +1997,20 @@ def _decide_sighting(
     function had no way to notice, so the two could diverge and this
     docstring's claim did not hold; it is enforced now, not merely assumed.
 
-    The four `sight_*_search` sequences (`plans/9k113-narrow-search/
-    plan.md` Stage 3) are the idle branch's own active search cycle --
+    The three `sight_*_search` sequences (`plans/9k113-scan-procedure/
+    plan.md` Stage 1) are the idle branch's own active search cycle --
     `body.py` computes them fresh every poll from the commanded-or-
     default sector (the same way `search` is computed for `SCANNING`-at-
     home) and threads them through `decide`/`_decide_without_guidance`
-    unchanged; all four default to empty, a true no-op for every
-    pre-existing caller/test, none of which pass them.
+    unchanged; all three default to empty, a true no-op for every
+    pre-existing caller/test, none of which pass them. **The out-of-regard
+    binocular excursion is no longer one of them** -- it is triggered from
+    `_decide_without_guidance`'s own glance-away resume point instead
+    (`_enter_binocular_search`'s own docstring), so this function never
+    reads `sight_out_of_regard_search` at all.
 
     **Plays the role `GLASSING` plays today** -- pick a target via
-    `choose_look`, sweep its believed-bearing envelope via `look_sweep`,
+    `choose_sighting_look`, sweep its believed-bearing envelope via `look_sweep`,
     using the narrow sight (the role `BINOCULAR_OPTIC` plays for
     `GLASSING`) -- **but as the home phase**: no scan boundary to wait
     for, so a target is picked the instant one is worth looking at, and
@@ -2031,7 +2112,7 @@ def _decide_sighting(
 
     # `BL-B64` security finding (`plans/9k113-sight/security.md`, required
     # fix 1): a target outside the sight's own field of regard is excluded
-    # from the candidate list before `choose_look` ever sees it -- rejected,
+    # from the candidate list before `choose_sighting_look` ever sees it -- rejected,
     # not clamped (`within_field_of_regard`'s own docstring has the
     # attribution argument against clamping). `SIGHT_WIDE_OPTIC`'s
     # `regard_*` fields are read rather than `SIGHT_NARROW_OPTIC`'s only
@@ -2053,7 +2134,7 @@ def _decide_sighting(
             SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
         )
     ]
-    chosen = choose_look(worth_looking)
+    chosen = choose_sighting_look(worth_looking)
     if chosen is None:
         # Nothing worth a closer look: step through the idle search cycle
         # instead of resting with no aim (`plans/9k113-narrow-search/
@@ -2061,10 +2142,10 @@ def _decide_sighting(
         return _idle_sight_search(
             state,
             now_sim,
-            sight_wide_search=sight_wide_search,
-            sight_narrow_near_search=sight_narrow_near_search,
-            sight_narrow_far_search=sight_narrow_far_search,
-            sight_out_of_regard_search=sight_out_of_regard_search,
+            targets,
+            sight_wide_near_search=sight_wide_near_search,
+            sight_wide_far_search=sight_wide_far_search,
+            sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
         )
 
     # Starting a new look at the chosen target -- same shape as `decide`'s
@@ -2133,9 +2214,9 @@ def _decide_without_guidance(
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
     sight_steady: bool = True,
-    sight_wide_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
+    sight_wide_near_search: Sequence[tuple[float, float]] = (),
+    sight_wide_far_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
@@ -2152,10 +2233,14 @@ def _decide_without_guidance(
     another one, and the user's own sequencing says so (*"detected targets
     then get the dwell behaviour"*).
 
-    The four `sight_*_search` sequences are `search`'s own sibling for the
-    `SIGHTING` branch below (`plans/9k113-narrow-search/plan.md` Stage 3)
-    -- threaded straight through to `_decide_sighting`, read only there.
-    All default to empty, a true no-op for every pre-existing caller.
+    The three `sight_*_search` sequences are `search`'s own sibling for
+    the `SIGHTING` branch below (`plans/9k113-scan-procedure/plan.md`
+    Stage 1) -- threaded straight through to `_decide_sighting`, read
+    only there. `sight_out_of_regard_search` is **not** threaded through
+    to `_decide_sighting`; this function reads it directly, at the
+    glance-away resume point below (`_enter_binocular_search`'s own
+    docstring has the reasoning). All four default to empty, a true
+    no-op for every pre-existing caller.
 
     Pure: same inputs, same outputs, no clock read and no store access --
     which is what keeps a replay identical, the property `gaze_at` was
@@ -2303,10 +2388,9 @@ def _decide_without_guidance(
             now_sim,
             targets,
             sight_steady,
-            sight_wide_search=sight_wide_search,
-            sight_narrow_near_search=sight_narrow_near_search,
-            sight_narrow_far_search=sight_narrow_far_search,
-            sight_out_of_regard_search=sight_out_of_regard_search,
+            sight_wide_near_search=sight_wide_near_search,
+            sight_wide_far_search=sight_wide_far_search,
+            sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
         )
 
     # state.phase must be SCANNING here (the only phase not already
@@ -2323,6 +2407,16 @@ def _decide_without_guidance(
         # sighting`, which this glance will return to).
         elapsed = now_sim - state.phase_started_sim
         if elapsed >= SIGHT_GLANCE_AWAY_S:
+            # `plans/9k113-scan-procedure/plan.md` Stage 1: the commanded
+            # sector's out-of-regard remainder, if any, is swept once per
+            # lap right here -- as the mandatory pause ends, not as a
+            # fourth leg of `_idle_sight_search`'s own cycle
+            # (`_enter_binocular_search`'s own docstring). Its own exit
+            # already resumes `SIGHTING` at a fresh `wide_near` leg.
+            if sight_out_of_regard_search:
+                return _enter_binocular_search(
+                    state, now_sim, sight_out_of_regard_search
+                )
             return _back_to_home(state, now_sim)
         return state, OpticDecision(optic=UNAIDED_OPTIC)
 
@@ -2577,9 +2671,9 @@ def decide(
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
     sight_steady: bool = True,
-    sight_wide_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
-    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
+    sight_wide_near_search: Sequence[tuple[float, float]] = (),
+    sight_wide_far_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
     guidance_request: Optic | None = None,
 ) -> tuple[OpticState, OpticDecision]:
@@ -2594,9 +2688,10 @@ def decide(
     requested_optic` whenever an attack run is engaged; `belief.attack_
     run.decide` is the only producer of that value.
 
-    The four `sight_*_search` sequences (`plans/9k113-narrow-search/
-    plan.md` Stage 3) are `_decide_without_guidance`'s own parameters of
-    the same name, passed straight through; see that function's docstring.
+    The four `sight_*_search`/`sight_out_of_regard_search` sequences
+    (`plans/9k113-scan-procedure/plan.md` Stage 1) are
+    `_decide_without_guidance`'s own parameters of the same name, passed
+    straight through; see that function's docstring.
 
     **Never applied while `decision.suppressed`** -- the hands-busy
     window already means nothing is observed through any optic this
@@ -2610,9 +2705,9 @@ def decide(
         steady=steady,
         search=search,
         sight_steady=sight_steady,
-        sight_wide_search=sight_wide_search,
-        sight_narrow_near_search=sight_narrow_near_search,
-        sight_narrow_far_search=sight_narrow_far_search,
+        sight_wide_near_search=sight_wide_near_search,
+        sight_wide_far_search=sight_wide_far_search,
+        sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
         sight_out_of_regard_search=sight_out_of_regard_search,
     )
     if decision.suppressed:
