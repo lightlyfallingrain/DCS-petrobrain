@@ -46,10 +46,10 @@ from belief.mission_phase import (
     MissionPhaseTracker,
     MissionUnderstandingData,
 )
+from belief.optic_policy import BoundedSightLook
 from belief.sight_effector import GuidanceUnitState
 from belief.tasks import TaskStore
 from body import (
-    _SIGHT_WIDE_SEARCH_FAR_M,
     DEFAULT_SPEECH_LOG_PATH,
     LOOK_DIRECTION_FOV_HALF_DEG,
     MISSION_START_RESOLVE_FALLBACK_S,
@@ -67,6 +67,7 @@ from body import (
     _search_sweep,
     _sight_in_regard_sweep,
     _sight_out_of_regard_sweep,
+    _sight_point_sweep,
     _speech_log_sink,
     _split_sector_by_regard,
     _to_body_relative_steps,
@@ -77,7 +78,14 @@ from mission_memory.admission import FiredOnTracker
 from mission_memory.store import MissionMemory
 from perception import association
 from perception.forest import ForestOcclusion
-from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
+from perception.gaze import (
+    FREE_SCAN_PLAN,
+    SIGHT_AHEAD_LEGS,
+    SIGHT_AHEAD_WINDOW_DWELL_S,
+    SIGHT_SECTOR_WEDGE_DEG,
+    ScanPlan,
+    gaze_at,
+)
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -859,10 +867,14 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
 
 
 def _ownship_for_search(
-    *, alt_agl_m: float = 120.0, pitch_deg: float = 0.0, bank_deg: float = 0.0
+    *,
+    alt_agl_m: float = 120.0,
+    pitch_deg: float = 0.0,
+    bank_deg: float = 0.0,
+    t_sim: float = 0.0,
 ) -> OwnshipState:
     return OwnshipState(
-        t_sim=0.0,
+        t_sim=t_sim,
         x=0.0,
         z=0.0,
         alt_m=500.0,
@@ -935,13 +947,76 @@ class TestSplitSectorByRegard:
 
 class TestCommandedOrDefaultSector:
     def test_a_commanded_sector_is_respected_at_its_own_width(self) -> None:
-        """`ahead`'s own 30 deg half-width is never widened to the sight's
-        full regard -- only the no-commanded-sector default does that."""
-        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
-        assert _commanded_or_default_sector(plan, 60.0) == (0.0, 30.0)
+        """`left`'s own 30 deg half-width (`SIGHT_SECTOR_WEDGE_DEG`, the
+        sight's own table) is never widened to the sight's full regard --
+        only the no-commanded-sector default does that."""
+        plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+        assert _commanded_or_default_sector(plan, _ownship_for_search(), 60.0) == (
+            -30.0,
+            30.0,
+        )
 
     def test_no_commanded_sector_defaults_to_the_full_regard_ahead(self) -> None:
-        assert _commanded_or_default_sector(FREE_SCAN_PLAN, 60.0) == (0.0, 60.0)
+        assert _commanded_or_default_sector(
+            FREE_SCAN_PLAN, _ownship_for_search(), 60.0
+        ) == (0.0, 60.0)
+
+    def test_a_commanded_single_oclock_hour_resolves_to_its_own_30deg_wedge(
+        self,
+    ) -> None:
+        """Explore notes, verbatim: *"one o'clock sector such scan is
+        comanded"* -- `ScanPlan.commanded_legs` with exactly one hour
+        resolves via `_gaze_for_clock_hour`'s own formula, same as a named
+        sector would."""
+        plan = ScanPlan(commanded_sector=None, commanded_legs=(2,), command_t_sim=0.0)
+        assert _commanded_or_default_sector(plan, _ownship_for_search(), 60.0) == (
+            60.0,
+            15.0,
+        )
+
+
+class TestSightSectorWedge:
+    """`SIGHT_SECTOR_WEDGE_DEG`/`SIGHT_AHEAD_LEGS` -- `plans/
+    9k113-scan-procedure/plan.md` Stage 1's own worked spans, explore
+    notes: *"left scan -60 to 0 deg. right scan 0 to +60 deg"*."""
+
+    def test_left_right_full_match_the_worked_spans(self) -> None:
+        assert SIGHT_SECTOR_WEDGE_DEG["left"] == (-30.0, 30.0)  # [-60, 0]
+        assert SIGHT_SECTOR_WEDGE_DEG["right"] == (30.0, 30.0)  # [0, 60]
+        assert SIGHT_SECTOR_WEDGE_DEG["full"] == (0.0, 60.0)  # [-60, 60]
+
+    def test_ahead_alternates_between_the_two_windows_over_time(self) -> None:
+        """Explore notes, verbatim: *"alternating sequence -30 to +10 deg
+        and -10 to +30 deg"* -- toggled by `ownship.t_sim` on
+        `SIGHT_AHEAD_WINDOW_DWELL_S`, so two `t_sim` values a dwell apart
+        land on the two different windows ("across two laps", the plan's
+        own test description)."""
+        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+        first = _commanded_or_default_sector(plan, _ownship_for_search(t_sim=0.0), 60.0)
+        second = _commanded_or_default_sector(
+            plan, _ownship_for_search(t_sim=SIGHT_AHEAD_WINDOW_DWELL_S), 60.0
+        )
+        assert first == (-10.0, 20.0)  # [-30, +10]
+        assert second == (10.0, 20.0)  # [-10, +30]
+        assert (first, second) == SIGHT_AHEAD_LEGS
+
+    def test_every_named_sector_now_fits_inside_the_regard(self) -> None:
+        """The sight's own sector widths are all [subset of] its own
+        regard by construction -- `left`/`right` are exactly the
+        regard's own left/right half, `full` is the regard itself, and
+        `ahead`'s two windows are each well inside it."""
+        regard = 60.0
+        for center_deg, half_width_deg in (
+            SIGHT_SECTOR_WEDGE_DEG["left"],
+            SIGHT_SECTOR_WEDGE_DEG["right"],
+            SIGHT_SECTOR_WEDGE_DEG["full"],
+            *SIGHT_AHEAD_LEGS,
+        ):
+            in_span, out_spans = _split_sector_by_regard(
+                center_deg, half_width_deg, regard
+            )
+            assert in_span is not None
+            assert out_spans == []
 
 
 class TestSightInRegardSweep:
@@ -964,9 +1039,11 @@ class TestSightInRegardSweep:
     def test_left_sector_sweep_is_confined_to_its_own_in_regard_sub_span(
         self,
     ) -> None:
-        """`left`'s in-regard sub-span is `(-45, 15)` (`TestSplitSectorByRegard`
-        above) -- every step stays within it, never reaching `left`'s own
-        full `(-60, 30)` span."""
+        """`left`'s own sector (`SIGHT_SECTOR_WEDGE_DEG["left"]`, the
+        sight's own table) is `(-30, 30)`, i.e. the span `[-60, 0]` --
+        exactly the regard's own left half, so it is fully in-regard by
+        construction (`plans/9k113-scan-procedure/plan.md` Stage 1) and
+        every step stays inside it."""
         plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
         pattern = _sight_in_regard_sweep(
             plan,
@@ -976,7 +1053,43 @@ class TestSightInRegardSweep:
             far_m=13_556.0,
         )
         azimuths = [azimuth for azimuth, _ in pattern]
-        assert all(-60.0 <= azimuth <= -30.0 for azimuth in azimuths)
+        assert azimuths
+        assert all(-60.0 <= azimuth <= 0.0 for azimuth in azimuths)
+
+
+class TestSightPointSweep:
+    """`_sight_point_sweep` -- `plans/9k113-scan-procedure/plan-stage2.md`'s
+    "The sweep itself", `_sight_in_regard_sweep`'s sibling driven directly
+    by a `BoundedSightLook` wedge/band rather than a commanded sector."""
+
+    def test_none_is_empty(self) -> None:
+        assert _sight_point_sweep(None, _ownship_for_search()) == []
+
+    def test_a_forward_wedge_sweeps_within_it(self) -> None:
+        bounded = BoundedSightLook(
+            center_azimuth_deg=30.0,
+            half_width_deg=15.0,
+            near_m=1_500.0,
+            far_m=8_000.0,
+            label="two o'clock",
+        )
+        pattern = _sight_point_sweep(bounded, _ownship_for_search())
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert azimuths
+        assert all(15.0 <= azimuth <= 45.0 for azimuth in azimuths)
+
+    def test_a_wedge_wholly_outside_regard_is_empty(self) -> None:
+        """A compass bearing straddling or outside the sight's own +-60
+        deg field of regard yields no steps -- `_advance_bounded_look`'s
+        own defensive empty-`steps` handling, not a crash."""
+        bounded = BoundedSightLook(
+            center_azimuth_deg=120.0,
+            half_width_deg=15.0,
+            near_m=1_500.0,
+            far_m=8_000.0,
+            label="south",
+        )
+        assert _sight_point_sweep(bounded, _ownship_for_search()) == []
 
 
 class TestSightInRegardSweepElevation:
@@ -1002,62 +1115,67 @@ class TestSightInRegardSweepElevation:
         list[tuple[float, float]], list[tuple[float, float]], list[tuple[float, float]]
     ]:
         """The same three in-regard legs `body.py`'s poll loop builds
-        (its `sight_wide_search=`/`sight_narrow_near_search=`/
-        `sight_narrow_far_search=` wiring) -- same near/far edges, so this
-        exercises the real production geometry, not a synthetic stand-in."""
+        (its `sight_wide_near_search=`/`sight_wide_far_search=`/
+        `sight_narrow_far_sweep_search=` wiring) -- same near/far edges,
+        so this exercises the real production geometry, not a synthetic
+        stand-in."""
         from belief.optic_policy import (
             SIGHT_SEARCH_FAR_M,
-            SIGHT_SEARCH_MID_M,
             SIGHT_SEARCH_NEAR_M,
+            SIGHT_SEARCH_WIDE_FAR_M,
+            SIGHT_SEARCH_WIDE_MID_M,
         )
 
         ownship = _ownship_for_search(alt_agl_m=alt_agl_m)
-        wide = _sight_in_regard_sweep(
+        wide_near = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
             ownship,
             optic=SIGHT_WIDE_OPTIC,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            far_m=SIGHT_SEARCH_WIDE_MID_M,
         )
-        narrow_near = _sight_in_regard_sweep(
+        wide_far = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_WIDE_MID_M,
+            far_m=SIGHT_SEARCH_WIDE_FAR_M,
+        )
+        narrow_far_sweep = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
             ownship,
             optic=SIGHT_NARROW_OPTIC,
-            near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=SIGHT_SEARCH_MID_M,
-        )
-        narrow_far = _sight_in_regard_sweep(
-            FREE_SCAN_PLAN,
-            ownship,
-            optic=SIGHT_NARROW_OPTIC,
-            near_m=SIGHT_SEARCH_MID_M,
+            near_m=SIGHT_SEARCH_WIDE_FAR_M,
             far_m=SIGHT_SEARCH_FAR_M,
         )
-        return wide, narrow_near, narrow_far
+        return wide_near, wide_far, narrow_far_sweep
 
-    def test_wide_leg_at_1000m_agl_stays_within_regard(self) -> None:
+    def test_wide_near_leg_at_1000m_agl_stays_within_regard(self) -> None:
         from perception.optics import within_field_of_regard
 
-        wide, _, _ = self._legs(self._ALT_AGL_M)
-        assert wide  # the near edge is still reachable after filtering, not emptied
-        assert all(within_field_of_regard(SIGHT_WIDE_OPTIC, az, el) for az, el in wide)
-
-    def test_narrow_near_leg_at_1000m_agl_stays_within_regard(self) -> None:
-        from perception.optics import within_field_of_regard
-
-        _, narrow_near, _ = self._legs(self._ALT_AGL_M)
-        assert narrow_near
+        wide_near, _, _ = self._legs(self._ALT_AGL_M)
+        assert wide_near  # the near edge is still reachable after filtering
         assert all(
-            within_field_of_regard(SIGHT_NARROW_OPTIC, az, el) for az, el in narrow_near
+            within_field_of_regard(SIGHT_WIDE_OPTIC, az, el) for az, el in wide_near
         )
 
-    def test_narrow_far_leg_at_1000m_agl_stays_within_regard(self) -> None:
+    def test_wide_far_leg_at_1000m_agl_stays_within_regard(self) -> None:
         from perception.optics import within_field_of_regard
 
-        _, _, narrow_far = self._legs(self._ALT_AGL_M)
-        assert narrow_far
+        _, wide_far, _ = self._legs(self._ALT_AGL_M)
+        assert wide_far
         assert all(
-            within_field_of_regard(SIGHT_NARROW_OPTIC, az, el) for az, el in narrow_far
+            within_field_of_regard(SIGHT_WIDE_OPTIC, az, el) for az, el in wide_far
+        )
+
+    def test_narrow_far_sweep_leg_at_1000m_agl_stays_within_regard(self) -> None:
+        from perception.optics import within_field_of_regard
+
+        _, _, narrow_far_sweep = self._legs(self._ALT_AGL_M)
+        assert narrow_far_sweep
+        assert all(
+            within_field_of_regard(SIGHT_NARROW_OPTIC, az, el)
+            for az, el in narrow_far_sweep
         )
 
     def test_the_unfiltered_geometry_really_does_reach_past_the_down_limit(
@@ -1069,13 +1187,14 @@ class TestSightInRegardSweepElevation:
         if this ever stops failing, the fix above has nothing left to do
         and should be revisited, not silently kept as dead code."""
         from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+        from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _FAR_M
         from perception.optics import within_field_of_regard
 
         unfiltered = search_pattern(
             center_azimuth_deg=0.0,
             sector_half_width_deg=60.0,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            far_m=_FAR_M,
             altitude_agl_m=self._ALT_AGL_M,
             fov_full_width_deg=(SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0,
             max_half_width_deg=60.0,
@@ -1091,17 +1210,18 @@ class TestSightInRegardSweepElevation:
     ) -> None:
         """End-to-end: the three real legs built the way `run_once` builds
         them, driven through `decide()` for several polls -- enough to
-        cycle `wide -> narrow_near -> narrow_far -> wide` more than once --
-        checking the *committed* `(azimuth, elevation)` on each returned
-        `OpticDecision`, not just the raw pattern. 120 m AGL is this
-        feature's own existing test default (comfortably under the ~625 m
-        threshold, so this also pins "the fix is a no-op at the altitude
-        every other test in this module already uses"); 1000 m AGL is the
-        altitude the security review measured as failing unfiltered."""
+        cycle `wide_near -> wide_far -> narrow_far_sweep -> wide_near`
+        more than once -- checking the *committed* `(azimuth, elevation)`
+        on each returned `OpticDecision`, not just the raw pattern. 120 m
+        AGL is this feature's own existing test default (comfortably
+        under the ~625 m threshold, so this also pins "the fix is a no-op
+        at the altitude every other test in this module already uses");
+        1000 m AGL is the altitude the security review measured as
+        failing unfiltered."""
         from belief.optic_policy import OpticPhase, OpticState, decide
         from perception.optics import within_field_of_regard
 
-        wide, narrow_near, narrow_far = self._legs(alt_agl_m)
+        wide_near, wide_far, narrow_far_sweep = self._legs(alt_agl_m)
         state = OpticState(
             phase=OpticPhase.SIGHTING,
             phase_started_sim=0.0,
@@ -1115,9 +1235,9 @@ class TestSightInRegardSweepElevation:
                 scan_cycle_period_s=16.0,
                 targets=[],
                 steady=True,
-                sight_wide_search=wide,
-                sight_narrow_near_search=narrow_near,
-                sight_narrow_far_search=narrow_far,
+                sight_wide_near_search=wide_near,
+                sight_wide_far_search=wide_far,
+                sight_narrow_far_sweep_search=narrow_far_sweep,
             )
             assert decision.look_azimuth_deg is not None
             assert decision.look_elevation_deg is not None
@@ -1146,8 +1266,17 @@ class TestSightInRegardSweepBoresightRelative:
         """The exact case `TestSightInRegardSweepElevation` pins as
         out-of-regard at level flight (-23.2 deg, 8.2 deg past the -15 deg
         down limit) -- 10 deg of nose-down pitch is enough to bring it back
-        inside, the user's own worked example."""
-        from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+        inside, the user's own worked example.
+
+        **Synthetic `near_m`, not `SIGHT_SEARCH_NEAR_M`** -- `plans/
+        9k113-scan-procedure/plan.md` Stage 1 lowered that constant to
+        1500 m, which alone already sits past the down limit at 1000 m
+        AGL (-33.7 deg) and no longer recovers with only 10 deg of
+        nose-down. `2_333.0` (the pre-Stage-1 value) is kept here only to
+        land the level-flight depression at the same clean -23.2 deg this
+        test was written to demonstrate, same treatment as the nose-up
+        case below's own synthetic `near_m`."""
+        from belief.optic_policy import search_pattern
         from perception.optics import within_field_of_regard
 
         fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
@@ -1157,11 +1286,12 @@ class TestSightInRegardSweepBoresightRelative:
         # == 1` branch) -- and `near_m`/`far_m` one metre apart collapses
         # its elevation bands to one too, so this is a single, exactly-
         # known `(0.0, depression)` step, not an average over several.
+        near_m = 2_333.0
         raw_steps = search_pattern(
             center_azimuth_deg=0.0,
             sector_half_width_deg=1.0,
-            near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=SIGHT_SEARCH_NEAR_M + 1.0,
+            near_m=near_m,
+            far_m=near_m + 1.0,
             altitude_agl_m=1000.0,
             fov_full_width_deg=fov_full_width_deg,
         )
@@ -1240,13 +1370,14 @@ class TestSightInRegardSweepBoresightRelative:
         flight, which is what every pre-existing test in this module (all
         written before F5) already assumed."""
         from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+        from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _FAR_M
 
         fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
         raw_steps = search_pattern(
             center_azimuth_deg=0.0,
             sector_half_width_deg=60.0,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            far_m=_FAR_M,
             altitude_agl_m=120.0,
             fov_full_width_deg=fov_full_width_deg,
             max_half_width_deg=60.0,
@@ -1264,25 +1395,27 @@ class TestSightInRegardSweepBoresightRelative:
         self,
     ) -> None:
         """End-to-end through the real call site, not just the shared
-        conversion helper: `_sight_in_regard_sweep`'s own near-band leg
-        (`SIGHT_SEARCH_NEAR_M`..`_SIGHT_WIDE_SEARCH_FAR_M`, the same `wide`
-        leg `run_once` builds) gains at least one more in-regard step with
+        conversion helper: `_sight_in_regard_sweep`'s own `wide_near` leg
+        (`SIGHT_SEARCH_NEAR_M`..`SIGHT_SEARCH_WIDE_FAR_M`, the same leg
+        `run_once` builds) gains at least one more in-regard step with
         10 deg of nose-down pitch at 1000 m AGL than it has at level
         flight -- the comparative form of the same claim the pure-geometry
         test above pins exactly."""
+        from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _FAR_M
+
         level = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
             _ownship_for_search(alt_agl_m=1000.0),
             optic=SIGHT_WIDE_OPTIC,
-            near_m=2_333.0,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            near_m=1_500.0,
+            far_m=_FAR_M,
         )
         nose_down = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
             _ownship_for_search(alt_agl_m=1000.0, pitch_deg=-10.0),
             optic=SIGHT_WIDE_OPTIC,
-            near_m=2_333.0,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            near_m=1_500.0,
+            far_m=_FAR_M,
         )
         assert len(nose_down) > len(level)
 
@@ -1300,113 +1433,217 @@ class TestSightInRegardSweepBoresightRelative:
 
     def test_sight_out_of_regard_sweep_aim_is_also_rotated(self) -> None:
         """Same claim as `_search_sweep` above, for the commanded-sector
-        remainder a narrow sight can't reach (`_sight_out_of_regard_sweep`)."""
-        plan = ScanPlan(commanded_sector="full", command_t_sim=0.0)
+        remainder a narrow sight can't reach (`_sight_out_of_regard_sweep`).
+
+        **A commanded clock hour, not `"full"`** -- `plans/
+        9k113-scan-procedure/plan.md` Stage 1 makes every named sector
+        fit inside the regard by construction, so `"full"` no longer has
+        an out-of-regard remainder to rotate at all; a straddling single
+        o'clock hour (5 o'clock, 150 deg) is the one case that still
+        does (`TestSightOutOfRegardSweep`)."""
+        plan = ScanPlan(commanded_sector=None, commanded_legs=(5,), command_t_sim=0.0)
         level = _sight_out_of_regard_sweep(plan, _ownship_for_search())
         banked = _sight_out_of_regard_sweep(plan, _ownship_for_search(bank_deg=30.0))
+        assert level and banked
         assert level != banked
 
-
-class TestSightWideSearchFarM:
-    """`_SIGHT_WIDE_SEARCH_FAR_M` -- `docs/acceptance/2026-10-20-sortie-
-    feedback.md` F4: the wide sweep's far edge is wide's own useful reach,
-    not `SIGHT_SEARCH_MID_M` (binoculars' own boundary, which the near
-    band and the wide leg used to share)."""
-
-    def test_matches_the_reference_vehicles_presence_reach_through_wide(
+    def test_wide_near_leg_at_5deg_and_10deg_nose_up_within_50_to_800m_agl(
         self,
     ) -> None:
-        from belief.optic_policy import SIGHT_SEARCH_NEAR_M
+        """Nose-up *raises* the depression needed for a given range --
+        the direction most likely to empty `wide_near`'s own near edge,
+        the F5 fix's pitch range read in reverse (the nose-down case
+        above is the only direction a pre-Stage-1 test exercised).
+        `plans/9k113-scan-procedure/plan.md` Stage 1's own required
+        coverage: nose-up, 50-800 m AGL.
 
-        expected = SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult
-        assert _SIGHT_WIDE_SEARCH_FAR_M == pytest.approx(expected)
+        **Measured, not assumed.** The near edge stays reachable at
+        100/300 m AGL (both pitches) and at 800 m with 5 deg, but
+        genuinely empties at 800 m with 10 deg: `SIGHT_SEARCH_NEAR_M`'s
+        own 1.5 km near edge (lowered this stage from 2333 m) needs
+        -28.1 deg of depression there, which the +10 deg pitch
+        correction only brings to -18.1 deg -- still past the mount's
+        -15 deg down-regard limit. Not a defect in this stage's own
+        fix: `_idle_sight_search`'s existing leg-skip fallback (`first_
+        nonempty_leg`) already handles an emptied leg without stalling
+        (next test), and the geometry recovers the moment the nose comes
+        back down, with no extra state to reset."""
+        from belief.optic_policy import SIGHT_SEARCH_NEAR_M, SIGHT_SEARCH_WIDE_MID_M
 
-    def test_reaches_further_than_the_old_shared_near_band_boundary(
+        expect_nonempty = {
+            (100.0, 5.0): True,
+            (100.0, 10.0): True,
+            (300.0, 5.0): True,
+            (300.0, 10.0): True,
+            (800.0, 5.0): True,
+            (800.0, 10.0): False,
+        }
+        for (alt_agl_m, pitch_deg), nonempty in expect_nonempty.items():
+            pattern = _sight_in_regard_sweep(
+                FREE_SCAN_PLAN,
+                _ownship_for_search(alt_agl_m=alt_agl_m, pitch_deg=pitch_deg),
+                optic=SIGHT_WIDE_OPTIC,
+                near_m=SIGHT_SEARCH_NEAR_M,
+                far_m=SIGHT_SEARCH_WIDE_MID_M,
+            )
+            assert bool(pattern) == nonempty, (
+                f"wide_near at {alt_agl_m} m AGL, {pitch_deg} deg nose-up: "
+                f"expected nonempty={nonempty}, got {len(pattern)} steps"
+            )
+
+    def test_lap_mechanism_composes_correctly_when_wide_near_is_emptied_by_attitude(
         self,
     ) -> None:
-        from belief.optic_policy import SIGHT_SEARCH_MID_M
-
-        assert _SIGHT_WIDE_SEARCH_FAR_M > SIGHT_SEARCH_MID_M
-
-    def test_stays_inside_the_player_bubble(self) -> None:
-        assert _SIGHT_WIDE_SEARCH_FAR_M < association.PLAYER_BUBBLE_RADIUS_M
-
-    def test_presence_reach_is_already_the_farther_of_presence_and_class(
-        self,
-    ) -> None:
-        """Falsifies the derivation's own claim rather than assuming it:
-        `tier_ranges`' chained `min()`s make a class threshold never
-        exceed its own optic's presence threshold, for the reference
-        vehicle and `SIGHT_WIDE_OPTIC` this constant is built from -- so
-        taking the presence reach alone already is "the farther of
-        detection and classification reach"."""
-        from perception.object_model import (
-            apparent_extent_m,
-            distinctiveness_of,
-            profile_for,
+        """800 m AGL, 10 deg nose-up -- the one combination above that
+        empties `wide_near` -- still produces a valid aim on every
+        `SIGHTING` poll, by skipping to `wide_far`/`narrow_far_sweep`
+        instead of stalling (`_idle_sight_search`'s own `first_nonempty_
+        leg`); no leg silently empties forever."""
+        from belief.optic_policy import (
+            SIGHT_SEARCH_FAR_M,
+            SIGHT_SEARCH_NEAR_M,
+            SIGHT_SEARCH_WIDE_FAR_M,
+            SIGHT_SEARCH_WIDE_MID_M,
+            OpticPhase,
+            OpticState,
+            decide,
         )
-        from perception.visibility import tier_ranges
 
-        profile = profile_for("T-72")
-        extent = apparent_extent_m(profile, None)
-        distinctiveness = distinctiveness_of(profile)
-        presence_m, class_m, _type_m = tier_ranges(
-            presence_size_m=profile.size_m,
-            recognition_extent_m=extent,
-            optic=SIGHT_WIDE_OPTIC,
-            distinctiveness=distinctiveness,
-        )
-        assert class_m <= presence_m
-
-    def test_wide_sweep_reaches_a_shallower_elevation_than_the_old_boundary(
-        self,
-    ) -> None:
-        """`_sight_in_regard_sweep` itself, not the call site: with the
-        production far edge it produces a shallower (less negative, i.e.
-        further-reaching) elevation than it would with the old shared
-        `SIGHT_SEARCH_MID_M` boundary, for the same near edge and
-        altitude. Does **not** prove `run_once` actually passes this far
-        edge -- see `test_run_once_passes_the_wide_legs_own_far_edge`
-        below for that."""
-        from belief.optic_policy import SIGHT_SEARCH_MID_M, SIGHT_SEARCH_NEAR_M
-
-        old_pattern = _sight_in_regard_sweep(
+        ownship = _ownship_for_search(alt_agl_m=800.0, pitch_deg=10.0)
+        wide_near = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
-            _ownship_for_search(),
+            ownship,
             optic=SIGHT_WIDE_OPTIC,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=SIGHT_SEARCH_MID_M,
+            far_m=SIGHT_SEARCH_WIDE_MID_M,
         )
-        new_pattern = _sight_in_regard_sweep(
+        wide_far = _sight_in_regard_sweep(
             FREE_SCAN_PLAN,
-            _ownship_for_search(),
+            ownship,
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_WIDE_MID_M,
+            far_m=SIGHT_SEARCH_WIDE_FAR_M,
+        )
+        narrow_far_sweep = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_NARROW_OPTIC,
+            near_m=SIGHT_SEARCH_WIDE_FAR_M,
+            far_m=SIGHT_SEARCH_FAR_M,
+        )
+        assert wide_near == []  # pins the premise this test exercises
+        assert wide_far and narrow_far_sweep
+
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        now_sim = 0.0
+        saw_sighting = False
+        for _ in range(6):
+            state, decision = decide(
+                state,
+                now_sim=now_sim,
+                scan_cycle_period_s=16.0,
+                targets=[],
+                steady=True,
+                sight_wide_near_search=wide_near,
+                sight_wide_far_search=wide_far,
+                sight_narrow_far_sweep_search=narrow_far_sweep,
+            )
+            if state.phase is OpticPhase.SIGHTING:
+                saw_sighting = True
+                assert decision.look_azimuth_deg is not None
+                assert decision.look_elevation_deg is not None
+            now_sim += 1.0
+        assert saw_sighting
+
+    @pytest.mark.parametrize("pitch_deg", [0.0, -8.0])
+    def test_the_1_to_2km_agl_band_is_rare_but_must_not_silently_empty(
+        self, pitch_deg: float
+    ) -> None:
+        """1-2 km AGL is rare but must still work (user, 2026-10-25:
+        *"1000 - 2000 m AGL being possible but rare"*) -- "work" means
+        the mechanism keeps producing a valid aim, not that every leg
+        individually has steps.
+
+        **Measured, not assumed.** At 1500 m AGL dead level,
+        `wide_near`/`wide_far` both empty -- the wide optic's -15 deg
+        down-regard limit genuinely cannot reach a near-band target from
+        that altitude without nose-down pitch -- and only `narrow_far_
+        sweep` reaches. -8 deg of nose-down recovers all three legs.
+        Neither is a defect: `plans/9k113-scan-procedure/explore-notes.md`'s
+        own residue (*"the altitude at which a band empties moves with
+        pitch, and nose-up lowers it"*) names exactly this, the other
+        direction."""
+        from belief.optic_policy import (
+            SIGHT_SEARCH_FAR_M,
+            SIGHT_SEARCH_NEAR_M,
+            SIGHT_SEARCH_WIDE_FAR_M,
+            SIGHT_SEARCH_WIDE_MID_M,
+        )
+
+        ownship = _ownship_for_search(alt_agl_m=1500.0, pitch_deg=pitch_deg)
+        wide_near = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
             optic=SIGHT_WIDE_OPTIC,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            far_m=SIGHT_SEARCH_WIDE_MID_M,
         )
-        assert new_pattern[0][1] > old_pattern[0][1]
+        wide_far = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_WIDE_MID_M,
+            far_m=SIGHT_SEARCH_WIDE_FAR_M,
+        )
+        narrow_far_sweep = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_NARROW_OPTIC,
+            near_m=SIGHT_SEARCH_WIDE_FAR_M,
+            far_m=SIGHT_SEARCH_FAR_M,
+        )
+        assert narrow_far_sweep  # always reaches, at either attitude
+        if pitch_deg <= -8.0:
+            assert wide_near and wide_far
+        else:
+            assert not wide_near and not wide_far
 
-    def test_run_once_passes_the_wide_legs_own_far_edge(
+
+class TestRunOncePassesTheThreeLegsOwnBandEdges:
+    """`plans/9k113-scan-procedure/plan.md` Stage 1's own band table --
+    pins the call-site wiring itself, since `SIGHT_SEARCH_WIDE_MID_M`/
+    `SIGHT_SEARCH_WIDE_FAR_M` replace the old derived `_SIGHT_WIDE_SEARCH_
+    FAR_M` and a reviewer should be able to check the wiring without
+    reading `optic_policy.py`'s own tunable declarations."""
+
+    def test_run_once_passes_the_three_legs_own_near_far_pairs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Pins the call-site wiring itself: `run_once`'s own `decide_
-        optic(...)` call is made with `far_m=_SIGHT_WIDE_SEARCH_FAR_M` for
-        the `optic=SIGHT_WIDE_OPTIC` leg, not `SIGHT_SEARCH_MID_M` (the old
-        shared boundary) -- the one line `docs/acceptance/
-        2026-10-20-sortie-feedback.md` F4 asked to change. Computed fresh
-        every poll regardless of sight phase (the same posture `search`'s
-        own unconditional computation already has), so no `SIGHTING`
-        dwell needs to be set up to observe it -- a default runner's very
-        first poll already makes the call."""
+        """Computed fresh every poll regardless of sight phase (the same
+        posture `search`'s own unconditional computation already has), so
+        no `SIGHTING` dwell needs to be set up to observe it -- a default
+        runner's very first poll already makes the call."""
+        from belief.optic_policy import (
+            SIGHT_SEARCH_FAR_M,
+            SIGHT_SEARCH_NEAR_M,
+            SIGHT_SEARCH_WIDE_FAR_M,
+            SIGHT_SEARCH_WIDE_MID_M,
+        )
+
         real_sweep = body_module._sight_in_regard_sweep
-        captured_far_m: list[float] = []
+        captured: list[tuple[float, float]] = []
 
         def spy(
-            *args: object, optic: object, far_m: float, **kwargs: object
+            *args: object, optic: object, near_m: float, far_m: float, **kwargs: object
         ) -> list[tuple[float, float]]:
-            if optic is SIGHT_WIDE_OPTIC:
-                captured_far_m.append(far_m)
-            return real_sweep(*args, optic=optic, far_m=far_m, **kwargs)  # type: ignore[arg-type]
+            captured.append((near_m, far_m))
+            return real_sweep(  # type: ignore[arg-type]
+                *args, optic=optic, near_m=near_m, far_m=far_m, **kwargs
+            )
 
         monkeypatch.setattr(body_module, "_sight_in_regard_sweep", spy)
 
@@ -1416,37 +1653,56 @@ class TestSightWideSearchFarM:
         )
         runner.run_once()
 
-        assert captured_far_m == [_SIGHT_WIDE_SEARCH_FAR_M]
+        assert captured == [
+            (SIGHT_SEARCH_NEAR_M, SIGHT_SEARCH_WIDE_MID_M),  # wide_near
+            (SIGHT_SEARCH_WIDE_MID_M, SIGHT_SEARCH_WIDE_FAR_M),  # wide_far
+            (SIGHT_SEARCH_WIDE_FAR_M, SIGHT_SEARCH_FAR_M),  # narrow_far_sweep
+        ]
 
 
 class TestSightOutOfRegardSweep:
+    """`plans/9k113-scan-procedure/plan.md` Stage 1: with the sight's own
+    sector table (`SIGHT_SECTOR_WEDGE_DEG`/`SIGHT_AHEAD_LEGS`), every
+    named sector is now [subset of] the regard by construction -- the
+    out-of-regard binocular excursion becomes reachable only via a
+    straddling single commanded o'clock hour (the narrow-search plan's
+    own `left`/`full` remainders are gone, not a regression; flagged in
+    the plan's own "Affected Modules" so a reviewer does not read it as
+    one)."""
+
     def test_no_commanded_sector_never_has_an_out_of_regard_remainder(self) -> None:
         """The synthesized default sector is exactly the regard width, by
         construction -- it can never have anything left outside it."""
         assert _sight_out_of_regard_sweep(FREE_SCAN_PLAN, _ownship_for_search()) == []
 
-    def test_ahead_never_has_an_out_of_regard_remainder(self) -> None:
-        """`ahead`'s own 30 deg span is fully inside the 60 deg regard."""
-        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+    @pytest.mark.parametrize("sector", ["ahead", "left", "right", "full"])
+    def test_every_named_sector_now_fits_inside_the_regard(self, sector: str) -> None:
+        plan = ScanPlan(commanded_sector=sector, command_t_sim=0.0)  # type: ignore[arg-type]
         assert _sight_out_of_regard_sweep(plan, _ownship_for_search()) == []
 
-    def test_left_sweeps_the_one_out_of_regard_remainder(self) -> None:
-        """`left`'s out-of-regard sub-span is `(-75, 15)` -- every step
-        stays on that side, past the -60 deg regard boundary."""
-        plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+    def test_a_commanded_clock_hour_outside_regard_sweeps_the_remainder(self) -> None:
+        """The one case that still produces a binocular out-of-regard
+        excursion, unchanged from today's commanded-sector behaviour --
+        5 o'clock (150 deg) is fully outside the +-60 deg regard."""
+        plan = ScanPlan(commanded_sector=None, commanded_legs=(5,), command_t_sim=0.0)
         pattern = _sight_out_of_regard_sweep(plan, _ownship_for_search())
         azimuths = [azimuth for azimuth, _ in pattern]
         assert azimuths
-        assert all(azimuth < -60.0 for azimuth in azimuths)
+        assert all(azimuth > 60.0 for azimuth in azimuths)
 
-    def test_full_sweeps_both_out_of_regard_remainders(self) -> None:
-        """`full`'s two remainder pieces, `(-75, 15)` and `(75, 15)` -- one
-        list, both sides of the regard boundary represented."""
-        plan = ScanPlan(commanded_sector="full", command_t_sim=0.0)
-        pattern = _sight_out_of_regard_sweep(plan, _ownship_for_search())
-        azimuths = [azimuth for azimuth, _ in pattern]
-        assert any(azimuth < -60.0 for azimuth in azimuths)
-        assert any(azimuth > 60.0 for azimuth in azimuths)
+    def test_the_same_clock_hour_yields_an_empty_in_regard_sweep(self) -> None:
+        """The in-regard counterpart to the test above -- the plan's own
+        Tests section: "an hour fully outside ±60° yields an empty
+        in-regard sweep and a non-empty out-of-regard one"."""
+        plan = ScanPlan(commanded_sector=None, commanded_legs=(5,), command_t_sim=0.0)
+        pattern = _sight_in_regard_sweep(
+            plan,
+            _ownship_for_search(),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=1_500.0,
+            far_m=4_000.0,
+        )
+        assert pattern == []
 
 
 # -- _active_gaze / _apply_active_gaze (slice 2B; ScanPlan generalisation
@@ -2830,6 +3086,76 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert optic_state.look_contact_id is None
 
 
+def test_an_unrelated_superseding_command_does_not_abandon_a_running_look() -> None:
+    """`review-stage2.md` Required Fix 1: `point_request_transition` is
+    set to `"clear"` for *every* `_POINT_LOOK_SUPERSEDING_TOKENS` entry --
+    not just `look`/`scan`, but `select_target`/`follow`/`engage`/... --
+    regardless of whether a bounded look was ever running. Applying it
+    unconditionally reset `OpticState.look_started_sim`, which is also the
+    sight's own per-target look clock (`_decide_sighting`'s mid-look
+    continuation check). That silently abandoned a real, in-progress
+    contact look: `look_contact_id` was dropped and its `pending_
+    attempted_at_range_m` entry was never committed or cleared, locking
+    the contact out of every future look.
+
+    Reproduced the way the poll loop actually drives it: a mid-look
+    `OpticState` (as if the sight had already been dwelling on CONTACT_1
+    for one poll), then the apply block for a superseding token that has
+    nothing to do with any look (`"clear"`, same as `select_target`/
+    `follow`/`engage`/... all set unconditionally), then `decide` for the
+    next poll. The look must continue onto CONTACT_1, not fall back to
+    picking a fresh target."""
+    from belief.optic_policy import LookTarget, OpticPhase, OpticState, decide
+    from perception.optics import SIGHT_NARROW_OPTIC
+
+    target = LookTarget(
+        contact_id="CONTACT_1",
+        azimuth_deg=0.0,
+        elevation_deg=0.0,
+        range_m=5_000.0,
+        object_type="T-72",
+        current_level="presence",
+    )
+
+    # Poll 1: the sight picks CONTACT_1 for a real, in-progress look --
+    # the same starting point as `TestFieldOfRegardEnforcement.test_the_
+    # look_survives_past_the_poll_that_started_it`.
+    state, decision = decide(
+        OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        ),
+        now_sim=0.5,
+        scan_cycle_period_s=16.0,
+        targets=[target],
+        steady=True,
+    )
+    assert state.look_contact_id == "CONTACT_1"
+    assert decision.optic is SIGHT_NARROW_OPTIC
+
+    # Between poll 1 and poll 2, the pilot issues an unrelated command
+    # (`select_target`/`follow`/`engage`/...) that has nothing to do with
+    # any look -- `point_request_transition` is still set to `"clear"`
+    # unconditionally for every one of those tokens, and the poll loop's
+    # own apply block runs exactly as `_run_crew_text_poll_loop` runs it.
+    state = body_module._apply_point_request_transition(state, "clear")
+
+    # Poll 2: the look must continue onto CONTACT_1, not be silently
+    # abandoned and re-picked from scratch (which would exclude it, since
+    # it is already in `pending_attempted_at_range_m`, and lock it out of
+    # every future look).
+    state, decision = decide(
+        state,
+        now_sim=1.5,
+        scan_cycle_period_s=16.0,
+        targets=[target],
+        steady=True,
+    )
+    assert state.look_contact_id == "CONTACT_1"
+    assert decision.optic is SIGHT_NARROW_OPTIC
+
+
 def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2893,6 +3219,64 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     # exactly on `decide_optic`'s desired direction in this one poll.
     assert runner.optic_state.actual_aim_azimuth_deg == pytest.approx(12.0)
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
+
+
+def test_run_once_resets_the_believed_sight_aim_to_boresight_on_observed_observ_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B98]]`, user direction 2026-10-25: OBSERV on->off, whatever
+    the cause, must reset the believed sight aim to boresight `(0, 0)`.
+    `run_once` derives `home_phase` from the *observed* arg-886 edge
+    (`[[BL-B80]]`), not only the pilot's own command, so this drives that
+    observed edge directly -- `guidance_unit_state.observ_observed`
+    going `False` while `optic_state.home_phase` still reads `SIGHTING`
+    from a prior poll -- rather than going through `CrewConsole.
+    handle_command`. `decide_optic` is faked to echo its input state
+    unchanged, so any reset observed here is attributable to `run_once`'s
+    own pre-`decide_optic` home_phase-transition handling, not to
+    `decide_optic` happening to null it."""
+    import body as body_module
+    from belief.optic_policy import OpticDecision, OpticPhase, OpticState
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    # A look already in progress, aim held well off boresight -- mirrors
+    # what a real `SIGHTING` dwell leaves on `state` mid-look.
+    runner.optic_state = OpticState(
+        phase=OpticPhase.SIGHTING,
+        phase_started_sim=sim_t,
+        home_phase=OpticPhase.SIGHTING,
+        look_azimuth_deg=35.0,
+        look_elevation_deg=-4.0,
+        look_contact_id="CONTACT_1",
+        look_started_sim=sim_t,
+    )
+    # OBSERV reads off on this poll, no player command involved.
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=False, align_observed=True
+    )
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC,
+            look_azimuth_deg=state.look_azimuth_deg,
+            look_elevation_deg=state.look_elevation_deg,
+        )
+
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()
+
+    assert runner.optic_state.home_phase is OpticPhase.SCANNING
+    assert runner.optic_state.look_azimuth_deg is None
+    assert runner.optic_state.look_elevation_deg is None
 
 
 def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim(

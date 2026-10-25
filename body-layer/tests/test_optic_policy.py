@@ -23,21 +23,24 @@ from belief.optic_policy import (
     HANDS_BUSY_DURATION_S,
     MAX_LOOK_S,
     OPTIC_RETRY_INTERVAL_S,
+    POINT_SWEEP_COUNT,
     RETRY_RANGE_FRACTION,
     SEARCH_STEP_S,
     SIGHT_GLANCE_AWAY_S,
     SIGHT_MAX_DWELL_S,
-    SIGHT_SEARCH_MID_M,
     SIGHT_SEARCH_NEAR_M,
+    SIGHT_SEARCH_WIDE_MID_M,
     SIGHT_STALL_COOLDOWN_S,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
     STEADY_RATE_LIMIT_DEG_S,
+    BoundedSightLook,
     LookTarget,
     OpticDecision,
     OpticPhase,
     OpticState,
     advance_sight_aim,
     choose_look,
+    choose_sighting_look,
     decide,
     guidance_request_for,
     improvement_window_m,
@@ -202,6 +205,43 @@ class TestChooseLook:
 
     def test_nothing_to_look_at_chooses_nothing(self) -> None:
         assert choose_look([]) is None
+
+
+class TestChooseSightingLook:
+    """`plans/9k113-scan-procedure/plan.md` Stage 1's priority ordering --
+    the explore notes, verbatim: *"first units not yet identified that
+    might be inside identification range... same thing for class"*."""
+
+    def test_a_class_level_target_beats_a_presence_level_one_regardless_of_range(
+        self,
+    ) -> None:
+        """A contact already at `"class"` (one look from `"type"`) is
+        visited before a `"presence"`-level one even though the latter is
+        closer -- the outer priority bucket overrides `choose_look`'s own
+        range-based tie-break."""
+        near_presence = _target(
+            "CONTACT_NEAR", azimuth_deg=-30.0, range_m=600.0, current_level="presence"
+        )
+        far_class = _target(
+            "CONTACT_FAR", azimuth_deg=30.0, range_m=1_500.0, current_level="class"
+        )
+        chosen = choose_sighting_look([near_presence, far_class])
+        assert chosen is not None
+        assert chosen.contact_id == "CONTACT_FAR"
+
+    def test_within_one_bucket_choose_looks_own_ordering_is_reproduced(self) -> None:
+        """Two `"class"`-level targets: the usual coverage/watched/range
+        ordering still applies unchanged within the bucket."""
+        near = _target(
+            "CONTACT_NEAR", azimuth_deg=-30.0, range_m=600.0, current_level="class"
+        )
+        far = _target(
+            "CONTACT_FAR", azimuth_deg=30.0, range_m=1_500.0, current_level="class"
+        )
+        assert choose_sighting_look([near, far]) == choose_look([near, far])
+
+    def test_no_targets_chooses_nothing(self) -> None:
+        assert choose_sighting_look([]) is None
 
 
 class TestPhaseCycle:
@@ -1752,7 +1792,7 @@ class TestSightingDwellCycle:
             center_azimuth_deg=0.0,
             sector_half_width_deg=60.0,
             near_m=SIGHT_SEARCH_NEAR_M,
-            far_m=SIGHT_SEARCH_MID_M,
+            far_m=SIGHT_SEARCH_WIDE_MID_M,
             altitude_agl_m=120.0,
             fov_full_width_deg=(SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0,
             max_half_width_deg=60.0,
@@ -1763,13 +1803,13 @@ class TestSightingDwellCycle:
             scan_cycle_period_s=_CYCLE_S,
             targets=[],
             steady=True,
-            sight_wide_search=wide_search,
+            sight_wide_near_search=wide_search,
         )
         assert decision.optic is SIGHT_WIDE_OPTIC
         assert (decision.look_azimuth_deg, decision.look_elevation_deg) == wide_search[
             0
         ]
-        assert state.sight_search_leg == "wide"
+        assert state.sight_search_leg == "wide_near"
 
     def test_a_worthwhile_target_is_picked_immediately_no_scan_boundary(
         self,
@@ -2384,12 +2424,11 @@ class TestIdleAimInvariant:
         self._assert_invariant(decision)
 
 
-class TestSearchCycle:
-    """The three-leg-plus-binocular cycle itself (`plans/
-    9k113-narrow-search/plan.md` Stage 3, amendment 2) -- `_decide_
-    sighting`'s own mechanism, driven here with small synthetic sequences
-    rather than `body.py`'s real geometry (that geometry has its own
-    tests in `test_body.py`)."""
+class TestSightSearchLegs:
+    """The three-leg cycle itself (`plans/9k113-scan-procedure/plan.md`
+    Stage 1) -- `_decide_sighting`'s own mechanism, driven here with
+    small synthetic sequences rather than `body.py`'s real geometry (that
+    geometry has its own tests in `test_body.py`)."""
 
     def _sighting_state(self, **overrides: object) -> OpticState:
         base = OpticState(
@@ -2399,9 +2438,9 @@ class TestSearchCycle:
         )
         return replace(base, **overrides)  # type: ignore[arg-type]
 
-    _WIDE_STEPS = ((0.0, -1.0),)
-    _NEAR_STEPS = ((10.0, -2.0),)
-    _FAR_STEPS = ((20.0, -3.0),)
+    _WIDE_NEAR_STEPS = ((0.0, -1.0),)
+    _WIDE_FAR_STEPS = ((10.0, -2.0),)
+    _NARROW_FAR_SWEEP_STEPS = ((20.0, -3.0),)
 
     def _decide(
         self,
@@ -2416,27 +2455,25 @@ class TestSearchCycle:
             scan_cycle_period_s=_CYCLE_S,
             targets=[],
             steady=True,
-            sight_wide_search=self._WIDE_STEPS,
-            sight_narrow_near_search=self._NEAR_STEPS,
-            sight_narrow_far_search=self._FAR_STEPS,
+            sight_wide_near_search=self._WIDE_NEAR_STEPS,
+            sight_wide_far_search=self._WIDE_FAR_STEPS,
+            sight_narrow_far_sweep_search=self._NARROW_FAR_SWEEP_STEPS,
             sight_out_of_regard_search=out_of_regard,
         )
 
-    def test_the_cycle_alternates_wide_narrow_near_narrow_far_with_no_binocular_leg(
+    def test_the_cycle_steps_wide_near_wide_far_narrow_far_sweep_in_order(
         self,
     ) -> None:
-        """No out-of-regard remainder (the default-sector/`ahead` case):
-        the cycle is `wide -> narrow_near -> narrow_far -> wide -> ...`
-        forever, never entering `SEARCHING`. Steps `now_sim` by `1.0`, not
-        `SEARCH_STEP_S` (0.8) -- comfortably past each leg's own one-step
-        boundary without landing on it, since repeated float addition of
-        0.8 drifts enough (`2.4000000000000004`) to occasionally read as
-        just *under* a step's own `SEARCH_STEP_S` width and miss the
-        advance by one poll."""
+        """Steps `now_sim` by `1.0`, not `SEARCH_STEP_S` (0.8) --
+        comfortably past each leg's own one-step boundary without landing
+        on it, since repeated float addition of 0.8 drifts enough
+        (`2.4000000000000004`) to occasionally read as just *under* a
+        step's own `SEARCH_STEP_S` width and miss the advance by one
+        poll."""
         state = self._sighting_state()
         seen: list[tuple[Optic, tuple[float, float] | None]] = []
         now_sim = 0.0
-        for _ in range(5):
+        for _ in range(3):
             state, decision = self._decide(state, now_sim)
             seen.append(
                 (
@@ -2448,47 +2485,96 @@ class TestSearchCycle:
             now_sim += 1.0
         assert [optic for optic, _ in seen] == [
             SIGHT_WIDE_OPTIC,
-            SIGHT_NARROW_OPTIC,
-            SIGHT_NARROW_OPTIC,
             SIGHT_WIDE_OPTIC,
             SIGHT_NARROW_OPTIC,
         ]
         assert [aim for _, aim in seen] == [
-            self._WIDE_STEPS[0],
-            self._NEAR_STEPS[0],
-            self._FAR_STEPS[0],
-            self._WIDE_STEPS[0],
-            self._NEAR_STEPS[0],
+            self._WIDE_NEAR_STEPS[0],
+            self._WIDE_FAR_STEPS[0],
+            self._NARROW_FAR_SWEEP_STEPS[0],
         ]
+        assert state.sight_search_leg == "narrow_far_sweep"
 
-    def test_the_cycle_enters_a_binocular_excursion_and_returns_to_the_last_sight_position(
+    def test_completing_a_lap_forces_the_glance_away_not_a_fresh_wide_near(
         self,
     ) -> None:
-        """A commanded sector with an out-of-regard remainder: after the
-        three sight legs, the next leg is `binocular` -- a real
-        `OpticPhase.SEARCHING` detour, not another sight step -- and once
-        its own pattern runs out, `_back_to_home` resumes `SIGHTING` at
-        the sight's last position (narrow_far's own last step), with the
-        cycle already primed to start a fresh `wide` pass."""
-        out_of_regard = ((70.0, -1.0), (-70.0, -1.0))
+        """Stage 1 item 5: stepping off `narrow_far_sweep` (the cycle's
+        last leg) is a completed lap -- the mandatory naked-eye pause
+        fires *instead of* restarting `wide_near`, independent of
+        `SIGHT_MAX_DWELL_S` -- proven here by `now_sim - phase_started_
+        sim` being far under that constant's default (30 s) when the
+        pause starts, which is only possible if the *other* trigger
+        fired."""
         state = self._sighting_state()
         now_sim = 0.0
-        state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
+        for _ in range(3):  # wide_near, wide_far, narrow_far_sweep
+            state, _decision = self._decide(state, now_sim)
+            now_sim += 1.0
+        assert state.phase is OpticPhase.SIGHTING
+
+        # The poll after narrow_far_sweep's own single step runs out.
+        state, decision = self._decide(state, now_sim)
+        assert state.phase is OpticPhase.SCANNING
+        assert state.home_phase is OpticPhase.SIGHTING  # a pause, not OBSERV off
+        assert decision.optic is UNAIDED_OPTIC
+        assert now_sim - state.phase_started_sim < SIGHT_MAX_DWELL_S
+
+    def test_the_cycle_resumes_a_fresh_wide_near_pass_after_the_glance_away(
+        self,
+    ) -> None:
+        """No out-of-regard remainder: once `SIGHT_GLANCE_AWAY_S` elapses,
+        `_back_to_home` resumes `SIGHTING` at the sight's own last
+        position -- `narrow_far_sweep`'s own step, since `[[BL-B98]]`'s
+        fix has `_start_glance_away` carry the aim through rather than
+        nulling it -- and the poll after that starts `wide_near` over
+        from its own first step -- never entering `OpticPhase.SEARCHING`
+        at all."""
+        state = self._sighting_state()
+        now_sim = 0.0
+        for _ in range(4):  # wide_near, wide_far, narrow_far_sweep, glance-away starts
+            state, _decision = self._decide(state, now_sim)
+            now_sim += 1.0
+        assert state.phase is OpticPhase.SCANNING
+
+        now_sim = state.phase_started_sim + SIGHT_GLANCE_AWAY_S
+        state, decision = self._decide(state, now_sim)
+        assert state.phase is OpticPhase.SIGHTING  # resumed, at last position
         assert decision.optic is SIGHT_WIDE_OPTIC
-        now_sim += 1.0
-        state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
-        assert decision.optic is SIGHT_NARROW_OPTIC
-        now_sim += 1.0
-        state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
-        assert decision.optic is SIGHT_NARROW_OPTIC
         assert (
             decision.look_azimuth_deg,
             decision.look_elevation_deg,
-        ) == self._FAR_STEPS[0]
-        now_sim += 1.0
+        ) == self._NARROW_FAR_SWEEP_STEPS[0]
+        assert state.sight_search_leg == "wide_near"
 
-        # The leg after narrow_far, with an out-of-regard remainder
-        # present, is the binocular excursion -- a real phase change.
+        now_sim += 1.0
+        state, decision = self._decide(state, now_sim)
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert decision.look_azimuth_deg == self._WIDE_NEAR_STEPS[0][0]
+        assert decision.look_elevation_deg == self._WIDE_NEAR_STEPS[0][1]
+
+        now_sim += 1.0
+        state, decision = self._decide(state, now_sim)
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert decision.look_azimuth_deg == self._WIDE_FAR_STEPS[0][0]
+
+    def test_an_out_of_regard_remainder_is_swept_once_the_glance_away_ends(
+        self,
+    ) -> None:
+        """The out-of-regard binocular excursion is entered from the
+        glance-away's own resume point, not as a fourth leg of this
+        cycle (`_enter_binocular_search`'s own docstring) -- so it never
+        appears mid-lap, only right after the mandatory pause."""
+        out_of_regard = ((70.0, -1.0), (-70.0, -1.0))
+        state = self._sighting_state()
+        now_sim = 0.0
+        for _ in range(4):  # wide_near, wide_far, narrow_far_sweep, glance-away starts
+            state, _decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
+            now_sim += 1.0
+        assert state.phase is OpticPhase.SCANNING
+
+        now_sim = state.phase_started_sim + SIGHT_GLANCE_AWAY_S
         state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
         assert state.phase is OpticPhase.SEARCHING
         assert decision.optic is BINOCULAR_OPTIC
@@ -2496,14 +2582,17 @@ class TestSearchCycle:
             decision.look_azimuth_deg,
             decision.look_elevation_deg,
         ) == out_of_regard[0]
-        assert state.sight_search_leg == "wide"
-        # "Stays at last position": the sight's own aim is untouched by
-        # entering the excursion.
-        assert state.look_azimuth_deg == self._FAR_STEPS[0][0]
-        assert state.look_elevation_deg == self._FAR_STEPS[0][1]
+        assert state.sight_search_leg == "wide_near"
+        # The mandatory glance-away this excursion was entered from no
+        # longer nulls the sight's own aim (`[[BL-B98]]`'s fix to
+        # `_start_glance_away`) -- `_enter_binocular_search` carries the
+        # pre-lap position through unchanged, it does not null it.
+        assert state.look_azimuth_deg == self._NARROW_FAR_SWEEP_STEPS[0][0]
+        assert state.look_elevation_deg == self._NARROW_FAR_SWEEP_STEPS[0][1]
 
         # The excursion's own pattern (two steps) runs out and resumes
-        # SIGHTING at exactly that last sight position.
+        # SIGHTING at exactly that last sight position, ready to start a
+        # fresh `wide_near` pass.
         now_sim += 1.0
         state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
         assert state.phase is OpticPhase.SEARCHING
@@ -2515,10 +2604,20 @@ class TestSearchCycle:
 
         now_sim += 1.0
         state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
+        assert state.phase is OpticPhase.SIGHTING  # resumed, at last position
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert (
+            decision.look_azimuth_deg,
+            decision.look_elevation_deg,
+        ) == self._NARROW_FAR_SWEEP_STEPS[0]
+        assert state.sight_search_leg == "wide_near"
+
+        now_sim += 1.0
+        state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
         assert state.phase is OpticPhase.SIGHTING
         assert decision.optic is SIGHT_WIDE_OPTIC
-        assert decision.look_azimuth_deg == self._FAR_STEPS[0][0]
-        assert decision.look_elevation_deg == self._FAR_STEPS[0][1]
+        assert decision.look_azimuth_deg == self._WIDE_NEAR_STEPS[0][0]
+        assert decision.look_elevation_deg == self._WIDE_NEAR_STEPS[0][1]
 
 
 class TestSightStallCooldown:
@@ -2538,9 +2637,9 @@ class TestSightStallCooldown:
         )
         return replace(base, **overrides)  # type: ignore[arg-type]
 
-    _WIDE_STEPS = ((0.0, -1.0),)
-    _NEAR_STEPS = ((10.0, -2.0),)
-    _FAR_STEPS = ((20.0, -3.0),)
+    _WIDE_NEAR_STEPS = ((0.0, -1.0),)
+    _WIDE_FAR_STEPS = ((10.0, -2.0),)
+    _NARROW_FAR_SWEEP_STEPS = ((20.0, -3.0),)
 
     def _decide(
         self, state: OpticState, now_sim: float, targets: Sequence[LookTarget]
@@ -2551,9 +2650,9 @@ class TestSightStallCooldown:
             scan_cycle_period_s=_CYCLE_S,
             targets=targets,
             steady=True,
-            sight_wide_search=self._WIDE_STEPS,
-            sight_narrow_near_search=self._NEAR_STEPS,
-            sight_narrow_far_search=self._FAR_STEPS,
+            sight_wide_near_search=self._WIDE_NEAR_STEPS,
+            sight_wide_far_search=self._WIDE_FAR_STEPS,
+            sight_narrow_far_sweep_search=self._NARROW_FAR_SWEEP_STEPS,
         )
 
     def test_a_stalled_contact_is_not_retried_before_the_sight_cooldown(
@@ -2678,7 +2777,7 @@ class TestSightStallCooldown:
             f"whole run (pre-BL-B85 measured 88%); measured "
             f"{busy_fraction:.2%}"
         )
-        assert legs_seen >= {"wide", "narrow_near", "narrow_far"}, (
+        assert legs_seen >= {"wide_near", "wide_far", "narrow_far_sweep"}, (
             "the idle search cycle should advance through every leg once "
             f"the cooldown gives it room; only saw {legs_seen}"
         )
@@ -2784,7 +2883,7 @@ class TestSightStallCooldown:
             f"measured busy_polls={busy_polls}, total_polls={total_polls} "
             f"({busy_fraction:.1%}); expected 175/900 (19.4%)"
         )
-        assert legs_seen == {"wide", "narrow_near", "narrow_far"}, (
+        assert legs_seen == {"wide_near", "wide_far", "narrow_far_sweep"}, (
             "every search leg should be visited once all three contacts "
             f"have exited candidacy; only saw {legs_seen}"
         )
@@ -3595,3 +3694,139 @@ class TestGuidanceOverride:
         assert new_state.guidance_optic_since_sim == 0.0
         assert new_state.hands_busy_until_sim == 0.0 + HANDS_BUSY_DURATION_S
         assert decision.optic is BINOCULAR_OPTIC
+
+
+class TestBoundedSightLook:
+    """`look <o'clock>`/`look <compass>`'s own bounded search (`plans/
+    9k113-scan-procedure/plan-stage2.md`'s "The sweep itself") -- driven
+    here with small synthetic step sequences, the same posture
+    `TestSightSearchLegs` takes for the three-leg cycle."""
+
+    _POINT_STEPS = ((5.0, -1.0), (6.0, -1.0))
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+            bounded_look=BoundedSightLook(
+                center_azimuth_deg=5.5,
+                half_width_deg=15.0,
+                near_m=1_500.0,
+                far_m=8_000.0,
+                label="two o'clock",
+            ),
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def _decide(
+        self, state: OpticState, now_sim: float, *, targets: Sequence[LookTarget] = ()
+    ) -> tuple[OpticState, OpticDecision]:
+        return decide(
+            state,
+            now_sim=now_sim,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=targets,
+            steady=True,
+            sight_point_search=self._POINT_STEPS,
+        )
+
+    def test_bounded_look_is_checked_before_the_idle_cycle(self) -> None:
+        """A `bounded_look` pre-empts the ordinary three-leg cycle --
+        `sight_search_leg` stays untouched (still its default `wide_near`)
+        while the bounded search runs, so the idle cycle resumes there
+        once the bounded look clears."""
+        state = self._sighting_state()
+        state, decision = self._decide(state, 0.0)
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert (decision.look_azimuth_deg, decision.look_elevation_deg) == (
+            self._POINT_STEPS[0]
+        )
+        assert state.sight_search_leg == "wide_near"
+        assert state.bounded_look is not None
+        assert state.bounded_look.sweeps_completed == 0
+
+    def test_two_sweeps_then_clear_and_resume(self) -> None:
+        """`POINT_SWEEP_COUNT` (2) complete traversals of the two-step
+        sequence with nothing found, then `point_clear_label` is set and
+        the idle cycle takes over the same poll."""
+        assert POINT_SWEEP_COUNT == 2
+        state = self._sighting_state()
+        now_sim = 0.0
+        step_s = SEARCH_STEP_S
+        # Each sweep is two steps; step past both to complete one sweep.
+        for _ in range(2 * POINT_SWEEP_COUNT):
+            state, decision = self._decide(state, now_sim)
+            now_sim += step_s
+
+        # One more poll steps past the second sweep's own last step.
+        state, decision = self._decide(state, now_sim)
+        assert state.bounded_look is None
+        assert state.point_clear_label == "two o'clock"
+        # Handed off to the idle cycle in the same poll -- no aim is left
+        # unset.
+        assert decision.look_azimuth_deg is not None
+
+    def test_a_found_contact_does_not_consume_a_sweep(self) -> None:
+        """Mid-sweep, a target becoming worth a look interrupts the
+        bounded search (an ordinary look, chosen by `choose_sighting_
+        look`) without incrementing `sweeps_completed` -- the interrupting
+        report is not counted as a completed sweep."""
+        state = self._sighting_state()
+        state, _ = self._decide(state, 0.0)
+        assert state.bounded_look is not None
+        assert state.bounded_look.sweeps_completed == 0
+
+        target = _target(
+            "c1",
+            azimuth_deg=5.0,
+            elevation_deg=-1.0,
+            range_m=3_000.0,
+            current_level="class",
+        )
+        state, decision = self._decide(state, SEARCH_STEP_S, targets=[target])
+        assert state.look_contact_id == "c1"
+        assert decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
+        # The bounded look's own sweep count is untouched by the
+        # interruption.
+        assert state.bounded_look is not None
+        assert state.bounded_look.sweeps_completed == 0
+
+    def test_observ_off_clears_the_bounded_look(self) -> None:
+        """`_back_to_home`'s OBSERV-off branch (`home_phase` leaving
+        `SIGHTING`) tears a running bounded look down, same as the rest
+        of the sighting state (`[[BL-B98]]`'s own rule)."""
+        state = self._sighting_state()
+        state, _ = self._decide(state, 0.0)
+        assert state.bounded_look is not None
+        state = replace(state, home_phase=OpticPhase.SCANNING)
+        state, decision = decide(
+            state,
+            now_sim=SEARCH_STEP_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
+        assert state.bounded_look is None
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+
+    def test_empty_steps_falls_back_to_idle_cycle_without_announcing(self) -> None:
+        """A bounded wedge/band that generates no steps at all (e.g. a
+        compass bearing wholly outside the sight's own field of regard)
+        hands off to the idle cycle the same poll, with no "<where>
+        clear." -- an empty search answered nothing, which is not the
+        same claim as "searched it and it was clear."."""
+        state = self._sighting_state()
+        state, decision = decide(
+            state,
+            now_sim=0.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            sight_point_search=(),
+            sight_wide_near_search=((0.0, -1.0),),
+        )
+        assert state.bounded_look is None
+        assert state.point_clear_label is None
+        assert decision.look_azimuth_deg is not None

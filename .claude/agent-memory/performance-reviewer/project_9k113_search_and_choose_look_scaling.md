@@ -80,3 +80,21 @@ prune by azimuth bucket before the O(k²) pass, an Architect question, not a thi
 See [[project_body_layer_poll_loop_diagnosis]] for the 1.0 Hz budget this is measured against, and
 [[project_optic_policy_dict_copy_cost]] for the sibling `optic_policy.decide` per-contact-dict-copy
 measurement from the same lineage of reviews.
+
+## `choose_sighting_look` (BL-B89 Stage 1, `9k113-scan-procedure`) only shrinks `choose_look`'s own k, never grows it
+
+New wrapper buckets `targets` by `current_level` ("class" before "presence") in O(n), then runs
+`choose_look`'s O(k²) on only the highest-priority non-empty bucket — `k` is always a subset of
+the same `targets` passed in, so this call is cheaper than or equal to calling `choose_look`
+directly on the full list, at every split. Measured (`body-layer/.venv`, synthetic `LookTarget`s,
+`plans/9k113-scan-procedure/performance-review.md`):
+
+| n | class fraction | `choose_look` | `choose_sighting_look` |
+|---|---|---|---|
+| 55 (largest recorded sortie) | 0.5 | 962 µs | 241 µs |
+| 200 | 0.5 | 12.74 ms | 3.24 ms |
+| 200 | 0.9 (worst case, one bucket absorbs nearly everything) | 12.59 ms | 10.25 ms |
+
+Worst case (skewed bucket) converges toward `choose_look`'s own cost, never exceeds it — so this
+wrapper inherits `choose_look`'s existing MONITOR disposition rather than adding a new one. No
+re-measurement needed unless `choose_look` itself is changed.

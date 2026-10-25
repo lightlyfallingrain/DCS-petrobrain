@@ -312,13 +312,29 @@ def test_skin_bearing_315_matches_end_to_end() -> None:
 
 
 def test_walk_ahead_matches_end_to_end() -> None:
-    """A mishearing of "look ahead"/"scan ahead" (`ratio("walk", "look")`
-    = 0.5) -- the second case the lowered `VERB_FLOOR` was required to
-    admit, alongside `test_skin_bearing_315_matches_end_to_end`'s real
-    corpus case."""
+    """A mishearing of "look ahead" (`ratio("walk", "look")` = 0.5) --
+    the second case the lowered `VERB_FLOOR` was required to admit,
+    alongside `test_skin_bearing_315_matches_end_to_end`'s real corpus
+    case.
+
+    **Resolves to `point`'s `relative` slot, not `scan_ahead`, since
+    `plans/9k113-scan-procedure/plan-stage2.md`** -- `"look"` is no
+    longer an alias of `scan` (`vocabulary.PHRASES["scan_ahead"]` no
+    longer carries a `"look ahead"` phrasing at all), so a mishearing
+    that lands on `"look"` now anchors `point`'s own verb branch
+    (`VERB_FLOOR`, 0.5, admits `ratio("walk","look")`) before the generic
+    phrase table is ever reached -- `_parse_point_slots("walk ahead")`
+    resolves `relative="ahead"` the same way `"look ahead"` itself would.
+    This is the intended consequence of removing `"look ahead"` from
+    `scan_ahead`'s phrase list, not a regression: before Stage 2, `"walk
+    ahead"` had no `point` token to collide with and fell through to
+    `scan_ahead` via its removed `"look ahead"` phrasing; now that `look`
+    means the 9K113 specifically, the more faithful reading of this exact
+    mishearing is the sight command, not the naked-eye/binocular scan."""
     result = match_transcript("walk ahead")
-    assert result.token == "scan_ahead"
-    assert result.match_ratio >= MATCH_FLOOR
+    assert result.token == "point"
+    assert result.slots == {"relative": "ahead"}
+    assert result.match_ratio == 1.0
 
 
 def test_lowering_verb_floor_does_not_reopen_the_false_positives() -> None:
@@ -1283,3 +1299,71 @@ def test_good_job_degrades_rather_than_falsely_resolving_a_greeting() -> None:
     assert result.verb_anchored is True
     if result.token == "greeting":
         assert result.slots is None
+
+
+# --- `point` ("look"/"sight"/"what is at") -- BL-B89 Stage 2 --------------
+
+
+class TestPointSlots:
+    """`plans/9k113-scan-procedure/plan-stage2.md`'s "Vocabulary design"
+    and Tests section."""
+
+    def test_look_clock_resolves_with_expected_slots(self) -> None:
+        result = match_transcript("look two o'clock")
+        assert result.token == "point"
+        assert result.slots == {"clock": 2}
+        assert result.verb_anchored is True
+        assert result.ambiguous is False
+
+    def test_sight_clock_and_distance_resolves_with_expected_slots(self) -> None:
+        result = match_transcript("sight two o'clock three kilometres")
+        assert result.token == "point"
+        assert result.slots == {"clock": 2, "distance_km": 3}
+
+    def test_what_is_at_clock_resolves_to_point(self) -> None:
+        result = match_transcript("what is at two o'clock")
+        assert result.token == "point"
+        assert result.slots == {"clock": 2}
+
+    def test_what_do_you_see_still_resolves_to_report_all(self) -> None:
+        """`"what"`'s own point-slot branch must fall through unchanged
+        when no `where` slot fires -- `report_all`'s existing phrasing
+        must still win, not be shadowed by the new branch."""
+        result = match_transcript("what do you see")
+        assert result.token == "report_all"
+        assert result.slots is None
+
+    def test_look_left_right_ahead_resolve_to_point_relative(self) -> None:
+        """`"look"` is no longer an alias of `scan` -- these three now
+        carry the `relative` slot instead of resolving to `scan_left`/
+        `scan_right`/`scan_ahead`."""
+        for text, relative in (
+            ("look left", "left"),
+            ("look right", "right"),
+            ("look ahead", "ahead"),
+        ):
+            result = match_transcript(text)
+            assert result.token == "point", text
+            assert result.slots == {"relative": relative}, text
+
+    def test_scan_left_is_unaffected(self) -> None:
+        """`scan <direction>` keeps its own dispatch unchanged -- `look`'s
+        new vocabulary surface must not collide with it."""
+        result = match_transcript("scan left")
+        assert result.token == "scan_left"
+        assert result.slots is None
+
+    def test_two_where_slots_is_a_detected_error(self) -> None:
+        """`"look left two o'clock"` names the direction twice in
+        incompatible frames -- the same detected-error shape `_where_
+        slot_count` already gives `follow`/`report`/`select_target`/
+        `engage`, never a guess."""
+        result = match_transcript("look left two o'clock")
+        assert result.token is None
+        assert result.verb_anchored is True
+        assert result.ambiguous is False
+
+    def test_sight_compass_resolves_with_sector_slot(self) -> None:
+        result = match_transcript("sight north")
+        assert result.token == "point"
+        assert result.slots == {"sector": "north"}

@@ -168,9 +168,11 @@ from belief.mission_phase import (
 from belief.optic_policy import (
     HANDS_BUSY_DURATION_S,
     SIGHT_SEARCH_FAR_M,
-    SIGHT_SEARCH_MID_M,
     SIGHT_SEARCH_NEAR_M,
+    SIGHT_SEARCH_WIDE_FAR_M,
+    SIGHT_SEARCH_WIDE_MID_M,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
+    BoundedSightLook,
     LookTarget,
     OpticDecision,
     OpticPhase,
@@ -217,8 +219,12 @@ from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
     SECTOR_WEDGE_DEG,
+    SIGHT_AHEAD_LEGS,
+    SIGHT_AHEAD_WINDOW_DWELL_S,
+    SIGHT_SECTOR_WEDGE_DEG,
     Gaze,
     ScanPlan,
+    _gaze_for_clock_hour,
     gaze_at,
     legs_within_wedge,
 )
@@ -708,7 +714,26 @@ class ConsolePerceptionRunner:
             observ_observed is False
             and self.optic_state.home_phase is not OpticPhase.SCANNING
         ):
-            self.optic_state = replace(self.optic_state, home_phase=OpticPhase.SCANNING)
+            # `[[BL-B98]]`, user direction 2026-10-25: OBSERV on->off,
+            # whatever the cause, resets the *believed* sight aim to
+            # boresight -- this is the one place that transition is
+            # detected from the observed switch state (pilot command, DCS
+            # AI, or a readback that simply changed), rather than only
+            # `_force_observ_off`'s own manoeuvre-triggered path inside
+            # `decide_optic` (which already nulls both fields via `_back_
+            # to_home`'s non-SIGHTING branch). Without this, OBSERV
+            # turning off while mid-glance-away (`phase is SCANNING`,
+            # `home_phase` was `SIGHTING`) would leave the pre-glance aim
+            # on `self.optic_state` untouched -- `decide_optic` never
+            # revisits a `SCANNING` phase that is already `SCANNING` here
+            # to null it -- and a later OBSERV-on would resume there
+            # instead of boresight.
+            self.optic_state = replace(
+                self.optic_state,
+                home_phase=OpticPhase.SCANNING,
+                look_azimuth_deg=None,
+                look_elevation_deg=None,
+            )
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
@@ -726,36 +751,47 @@ class ConsolePerceptionRunner:
                 list(self.attitude_history),
                 rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
             ),
-            # `plans/9k113-narrow-search/plan.md` Stage 3 -- the sight's own
-            # active search cycle, computed fresh every poll the same way
-            # `search` above already is: a brief wide orientation pass out
-            # to wide's own useful reach (`_SIGHT_WIDE_SEARCH_FAR_M`), then
-            # narrow over the near band, then narrow over the far band,
-            # then (Stage 2) a binocular excursion for whatever a commanded
-            # sector left outside the sight's own field of regard.
-            sight_wide_search=_sight_in_regard_sweep(
+            # `plans/9k113-scan-procedure/plan.md` Stage 1 -- the sight's
+            # own active search cycle, computed fresh every poll the same
+            # way `search` above already is: a wide S-scan near-to-mid
+            # (close threats/targets), then wide far (points of interest),
+            # then a narrow far sweep for detection, then -- once per lap,
+            # from the glance-away's own resume point rather than as a
+            # fourth leg here -- a binocular excursion for whatever a
+            # commanded sector left outside the sight's own field of
+            # regard.
+            sight_wide_near_search=_sight_in_regard_sweep(
                 self.scan_plan,
                 ownship,
                 optic=SIGHT_WIDE_OPTIC,
                 near_m=SIGHT_SEARCH_NEAR_M,
-                far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+                far_m=SIGHT_SEARCH_WIDE_MID_M,
             ),
-            sight_narrow_near_search=_sight_in_regard_sweep(
+            sight_wide_far_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_WIDE_OPTIC,
+                near_m=SIGHT_SEARCH_WIDE_MID_M,
+                far_m=SIGHT_SEARCH_WIDE_FAR_M,
+            ),
+            sight_narrow_far_sweep_search=_sight_in_regard_sweep(
                 self.scan_plan,
                 ownship,
                 optic=SIGHT_NARROW_OPTIC,
-                near_m=SIGHT_SEARCH_NEAR_M,
-                far_m=SIGHT_SEARCH_MID_M,
-            ),
-            sight_narrow_far_search=_sight_in_regard_sweep(
-                self.scan_plan,
-                ownship,
-                optic=SIGHT_NARROW_OPTIC,
-                near_m=SIGHT_SEARCH_MID_M,
+                near_m=SIGHT_SEARCH_WIDE_FAR_M,
                 far_m=SIGHT_SEARCH_FAR_M,
             ),
             sight_out_of_regard_search=_sight_out_of_regard_sweep(
                 self.scan_plan, ownship
+            ),
+            # `plans/9k113-scan-procedure/plan-stage2.md` -- a bounded
+            # `look <o'clock>`/`look <compass>`'s own search steps,
+            # computed fresh every poll from `self.optic_state.
+            # bounded_look` (the *previous* poll's own decision, the same
+            # one-poll-behind convention every other `sight_*_search`
+            # argument here already follows), empty when none is active.
+            sight_point_search=_sight_point_sweep(
+                self.optic_state.bounded_look, ownship
             ),
             # `BL-B71`: the attack run's own standing ladder request, from
             # the *previous* poll -- `drain_attack_run` (which recomputes
@@ -1107,42 +1143,6 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
 #: search has no contact yet -- that is what it is looking for.
 _SEARCH_BAND_M: tuple[float, float] = (2_333.0, 5_647.0)
 
-#: Wide's own far edge for its idle-search leg -- not `SIGHT_SEARCH_MID_M`
-#: (binoculars' own reach), but the range beyond which wide itself can
-#: bring neither detection nor classification information
-#: (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F4 -- wide sweep
-#: band": *"use it up to where it can bring information, be it detection
-#: or classification. At greater distances it cannot, narrow can."*).
-#:
-#: **Derived, not a new tunable**: `SIGHT_SEARCH_NEAR_M` is already the
-#: reference vehicle's unaided presence reach, and `SIGHT_SEARCH_FAR_M`'s
-#: own comment already establishes the pattern of scaling that same base
-#: by an optic's `presence_range_mult` to get *that* optic's presence
-#: reach for the same vehicle (`2333 * 5.81` for narrow) -- this applies
-#: the identical scaling to `SIGHT_WIDE_OPTIC`'s own multiplier
-#: (`2333 * 3.55 ~= 8282 m`), so it moves automatically if `SIGHT_SEARCH_
-#: NEAR_M` is ever retuned, rather than drifting out of step with it.
-#:
-#: **This is also "the farther of detection and classification reach"
-#: without computing a class threshold separately**: `tier_ranges`' own
-#: chained `min()`s (`perception.visibility.tier_ranges`) make a class
-#: threshold never exceed its own optic's presence threshold, for any
-#: object profile -- so the presence reach computed here already *is* the
-#: larger of the two, and a direct class-reach computation alongside it
-#: would only ever reproduce the smaller number.
-#:
-#: Clamped to `PLAYER_BUBBLE_RADIUS_M` (10 km) -- the tighter of the two
-#: caps that could apply, `SIGHT_WIDE_OPTIC.range_cap_m` being the looser
-#: 20 km -- since nothing beyond the bubble is ever admitted as a
-#: candidate regardless of what any optic could resolve. At ~8.28 km for
-#: the reference vehicle this sits inside the bubble today and the clamp
-#: does not bind, but a retuned `SIGHT_SEARCH_NEAR_M` could push it past
-#: that boundary.
-_SIGHT_WIDE_SEARCH_FAR_M: float = min(
-    SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult,
-    PLAYER_BUBBLE_RADIUS_M,
-)
-
 
 def _to_body_relative_steps(
     steps: Sequence[tuple[float, float]], ownship: OwnshipState
@@ -1269,21 +1269,57 @@ def _split_sector_by_regard(
     return in_span, out_spans
 
 
+def _sight_commanded_sector(
+    scan_plan: ScanPlan, ownship: OwnshipState
+) -> tuple[float, float] | None:
+    """The sight's own view of a *commanded* sector, or `None` when
+    nothing is commanded (free scan) -- `plans/9k113-scan-procedure/
+    plan.md` Stage 1. Reads `SIGHT_SECTOR_WEDGE_DEG`/`SIGHT_AHEAD_LEGS`
+    (the sight's own, wider sector widths), never `SECTOR_WEDGE_DEG` (the
+    naked eye's/binoculars' own narrower convention, still read by
+    `_search_sweep` unchanged) -- "Sector widths diverge from the naked
+    eye's" is the plan's own name for why these are two tables, not one.
+
+    `"ahead"` alternates between `SIGHT_AHEAD_LEGS`'s two windows, toggled
+    by `ownship.t_sim` on `SIGHT_AHEAD_WINDOW_DWELL_S` -- the explore
+    notes' own *"could well be alternating sequence -30 to +10 deg and
+    -10 to +30 deg"*. `left`/`right`/`full` are a plain table lookup.
+
+    A commanded single o'clock hour (`ScanPlan.commanded_legs`, exactly
+    one entry) resolves to its own 30 deg wedge via `_gaze_for_clock_
+    hour`'s existing azimuth formula -- *"one o'clock sector such scan is
+    comanded"* -- the same geometry a named sector already gets. A
+    multi-leg `commanded_legs` (a compass-absolute scan converted to
+    several o'clock hours) is **not** handled here -- out of this stage's
+    own scope, same as today (falls through to the no-commanded-sector
+    default below, unchanged from before this function existed)."""
+    if scan_plan.commanded_sector == "ahead":
+        index = int(ownship.t_sim // SIGHT_AHEAD_WINDOW_DWELL_S) % len(SIGHT_AHEAD_LEGS)
+        return SIGHT_AHEAD_LEGS[index]
+    if scan_plan.commanded_sector is not None:
+        return SIGHT_SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    if scan_plan.commanded_legs is not None and len(scan_plan.commanded_legs) == 1:
+        gaze = _gaze_for_clock_hour(scan_plan.commanded_legs[0])
+        return gaze.center_azimuth_deg, gaze.half_width_deg
+    return None
+
+
 def _commanded_or_default_sector(
-    scan_plan: ScanPlan, regard_half_deg: float
+    scan_plan: ScanPlan, ownship: OwnshipState, regard_half_deg: float
 ) -> tuple[float, float]:
     """The sector the sight's own search cycle should cover -- a commanded
     sector at its own commanded width if one exists (never widened: `ahead`
-    stays 30 deg), else the sight's full field of regard centred on flight
-    direction (`docs/acceptance/2026-10-20-sortie-feedback.md`, F4/F5
-    "settled": "flight direction as normal default") -- there is no
-    commanded width to respect in the default case, and "a genuine physical
-    bound, not an invented UX cap" (the same reasoning `MAX_SEARCH_SECTOR_
-    HALF_WIDTH_DEG` is deliberately *not* applied here) applies identically.
-    Centre `0.0` is the same convention `_back_to_home`'s own dead-ahead
-    fallback uses."""
-    if scan_plan.commanded_sector is not None:
-        return SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    stays its own 40 deg window), else the sight's full field of regard
+    centred on flight direction (`docs/acceptance/2026-10-20-sortie-
+    feedback.md`, F4/F5 "settled": "flight direction as normal default")
+    -- there is no commanded width to respect in the default case, and "a
+    genuine physical bound, not an invented UX cap" (the same reasoning
+    `MAX_SEARCH_SECTOR_HALF_WIDTH_DEG` is deliberately *not* applied here)
+    applies identically. Centre `0.0` is the same convention `_back_to_
+    home`'s own dead-ahead fallback uses."""
+    commanded = _sight_commanded_sector(scan_plan, ownship)
+    if commanded is not None:
+        return commanded
     return 0.0, regard_half_deg
 
 
@@ -1324,7 +1360,9 @@ def _sight_in_regard_sweep(
     is reachable again (`BL-B86.md`) the moment the nose comes back down,
     with no extra state to reset."""
     regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
-    center_deg, half_width_deg = _commanded_or_default_sector(scan_plan, regard)
+    center_deg, half_width_deg = _commanded_or_default_sector(
+        scan_plan, ownship, regard
+    )
     in_span, _ = _split_sector_by_regard(center_deg, half_width_deg, regard)
     if in_span is None:
         return []
@@ -1351,23 +1389,29 @@ def _sight_out_of_regard_sweep(
     scan_plan: ScanPlan, ownship: OwnshipState
 ) -> list[tuple[float, float]]:
     """Binoculars, for the portion of a *commanded* sector the sight
-    cannot reach -- empty for the no-commanded-sector default (whose
-    synthesized sector is exactly the regard width, by construction, so
-    it never has an out-of-regard remainder). `plans/9k113-narrow-search/
-    plan.md` Stage 3; `full`'s two out-spans are concatenated into one
-    list -- `OpticPhase.SEARCHING`'s own dispatch just steps through
-    whatever sequence it is given, so two remainder pieces need no new
-    state, only a longer list.
+    cannot reach -- empty when nothing is commanded (the synthesized
+    default sector is exactly the regard width, by construction, so it
+    never has an out-of-regard remainder). `plans/9k113-scan-procedure/
+    plan.md` Stage 1: with the sight's own wider sector table
+    (`_sight_commanded_sector`), `left`/`right`/`full`/`ahead` are now all
+    [subset of] the regard by construction too, so this is empty for every
+    named sector -- only a commanded single o'clock hour straddling or
+    outside +-60 deg (4-8 o'clock) still produces a remainder, unchanged
+    from today's commanded-sector behaviour. `full`'s two out-spans (were
+    it ever to have any) are concatenated into one list -- `OpticPhase.
+    SEARCHING`'s own dispatch just steps through whatever sequence it is
+    given, so two remainder pieces need no new state, only a longer list.
 
     **Rotated into body-relative before being returned** (F5), same as
     `_sight_in_regard_sweep`'s own aim -- binoculars have no field of
     regard to filter against, but the binocular aim frame still has to
     agree with every other optic's, or a step generated here would point
     at the wrong patch of ground whenever the aircraft is not level."""
-    if scan_plan.commanded_sector is None:
+    commanded = _sight_commanded_sector(scan_plan, ownship)
+    if commanded is None:
         return []
     regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
-    center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    center_deg, half_width_deg = commanded
     _, out_spans = _split_sector_by_regard(center_deg, half_width_deg, regard)
     fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
     if fov_full_width_deg <= 0.0:
@@ -1388,6 +1432,54 @@ def _sight_out_of_regard_sweep(
             )
         )
     return _to_body_relative_steps(steps, ownship)
+
+
+def _sight_point_sweep(
+    bounded_look: BoundedSightLook | None, ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """A `look <o'clock>`/`look <compass>`'s own search steps, or empty
+    when none is active -- `plans/9k113-scan-procedure/plan-stage2.md`'s
+    "The sweep itself". `bounded_look`'s wedge/band is fed straight to
+    `search_pattern`, the sibling of `_sight_in_regard_sweep` above but
+    driven directly by a given `(center_deg, half_width_deg, near_m,
+    far_m)` rather than derived from a commanded sector -- a bounded look
+    is not a `ScanPlan` command (the plan's own "no exact aim line, the
+    wedge expressed exactly the way Stage 1 already expresses one, not a
+    point"), so there is no `ScanPlan` to read it from.
+
+    Filtered through the same `within_field_of_regard` + body-relative
+    rotation `_sight_in_regard_sweep` applies -- a wedge that straddles
+    the sight's own field of regard (never reached for an o'clock hour,
+    possible for a compass bearing behind the regard) yields an empty
+    in-span and this returns `[]`, same defensive handling `_advance_
+    bounded_look` already gives an empty `steps` sequence."""
+    if bounded_look is None:
+        return []
+    regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
+    in_span, _ = _split_sector_by_regard(
+        bounded_look.center_azimuth_deg, bounded_look.half_width_deg, regard
+    )
+    if in_span is None:
+        return []
+    in_center_deg, in_half_width_deg = in_span
+    fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    steps = search_pattern(
+        center_azimuth_deg=in_center_deg,
+        sector_half_width_deg=in_half_width_deg,
+        near_m=bounded_look.near_m,
+        far_m=bounded_look.far_m,
+        altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+        fov_full_width_deg=fov_full_width_deg,
+        max_half_width_deg=regard,
+    )
+    body_steps = _to_body_relative_steps(steps, ownship)
+    return [
+        step
+        for step in body_steps
+        if within_field_of_regard(SIGHT_WIDE_OPTIC, step[0], step[1])
+    ]
 
 
 def _apply_active_gaze(
@@ -2877,6 +2969,37 @@ def _load_effector_config() -> tuple[
     return sequences_by_key, own_registry, bool(banner_lines), polled
 
 
+def _apply_point_request_transition(
+    optic_state: OpticState,
+    transition: Literal["clear"] | BoundedSightLook,
+) -> OpticState:
+    """Apply `CrewConsole.point_request_transition` (`plans/
+    9k113-scan-procedure/plan-stage2.md`'s "Supersession") to `optic_state.
+    bounded_look`, the one field `CrewConsole` cannot reach directly.
+
+    `look_started_sim` is reset only when the transition actually concerns
+    the bounded-look clock -- a bounded look was running before this change
+    or `transition` is a fresh `BoundedSightLook` starting one. It is
+    **not** reset for a superseding token (`cancel_scan`, `select_target`,
+    `engage`, ...) that fires while `bounded_look` was already `None`: that
+    token still clears `bounded_look` (a true no-op) but must leave `look_
+    started_sim` alone, because the same field also doubles as the sight's
+    own per-target look clock (`optic_policy._decide_sighting`'s mid-look
+    continuation check) and the idle 3-leg search cycle's per-leg clock
+    (`optic_policy._idle_sight_search`'s own docstring). Resetting it
+    unconditionally silently abandoned an unrelated, in-progress contact
+    look -- its `pending_attempted_at_range_m` entry was then never
+    committed or cleared, locking that contact out of every future look
+    until the next OBSERV off->on cycle (review-stage2.md Required Fix 1)."""
+    new_bounded_look = None if transition == "clear" else transition
+    reset_clock = optic_state.bounded_look is not None or new_bounded_look is not None
+    return replace(
+        optic_state,
+        bounded_look=new_bounded_look,
+        look_started_sim=(None if reset_clock else optic_state.look_started_sim),
+    )
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -3089,6 +3212,20 @@ def _run_crew_text_poll_loop(
                         )
                     )
                 runner.run_once()
+                if runner.optic_state.point_clear_label is not None:
+                    # `plans/9k113-scan-procedure/plan-stage2.md` -- a
+                    # bounded `look <o'clock>`/`look <compass>` just
+                    # completed `POINT_SWEEP_COUNT` traversals with
+                    # nothing found. One-shot, cleared the same poll it is
+                    # read (`OpticState.point_clear_label`'s own
+                    # docstring), so `crew_console.pending_point_clear`
+                    # never sees the same label twice.
+                    crew_console.pending_point_clear = (
+                        runner.optic_state.point_clear_label
+                    )
+                    runner.optic_state = replace(
+                        runner.optic_state, point_clear_label=None
+                    )
                 if trace_collector is not None:
                     if eyesight_view or pov_view:
                         # Split one terminal's line budget in half when
@@ -3156,6 +3293,27 @@ def _run_crew_text_poll_loop(
                         crew_console.on_ground = (
                             runner.last_ownship_state.alt_agl_m
                             <= ON_GROUND_AGL_THRESHOLD_M
+                        )
+                        # `plans/9k113-scan-procedure/plan-stage2.md`,
+                        # "Attack-run interaction" -- refreshed every poll,
+                        # same as `on_ground` above, so a `look <where>`
+                        # dispatched this same poll (below) sees whether a
+                        # run is currently *engaged* (`runner.
+                        # attack_run_state is not None`, the same test
+                        # `_active_gaze`'s own `attack_run_engaged`
+                        # parameter already uses), not merely selected.
+                        crew_console.attack_run_engaged = (
+                            runner.attack_run_state is not None
+                        )
+                        # `plans/9k113-scan-procedure/plan-stage2.md`,
+                        # "What 'ready' means" -- refreshed every poll, so
+                        # `drain_pending_point_request` can wait for the
+                        # phase cycle actually reaching `SIGHTING` (not
+                        # merely the power-up lamp, already checked
+                        # synchronously at `_handle_observ_on`) without
+                        # reaching into `runner.optic_state` itself.
+                        crew_console.sight_phase_is_sighting = (
+                            runner.optic_state.home_phase is OpticPhase.SIGHTING
                         )
                         # `plans/effector-sequences/plan.md` Stage 2's own
                         # poll-block ordering: refresh readback -> takeoff
@@ -3666,6 +3824,16 @@ def _run_crew_text_poll_loop(
                     # cleared. Same per-poll hook point as `drain_events`/
                     # `drain_brain`.
                     crew_console.drain_pending_positional_replies(runner.last_t_sim)
+                    # `plans/9k113-scan-procedure/plan-stage2.md` -- speaks
+                    # a bounded `look`'s "<where> clear." once set (above),
+                    # same per-poll hook point as `drain_events`/
+                    # `drain_pending_positional_replies`/`drain_brain`.
+                    crew_console.drain_pending_point_clear(runner.last_t_sim)
+                    # `plans/9k113-scan-procedure/plan-stage2.md` -- drains
+                    # a deferred `look <where>` queued while OBSERV was off
+                    # and now confirmed on, once the sight phase actually
+                    # reaches `SIGHTING`.
+                    crew_console.drain_pending_point_request(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever
                     # `brain_client.poll_replies()` has decided since the
                     # last poll. A true no-op for NullBrainClient and
@@ -3710,6 +3878,23 @@ def _run_crew_text_poll_loop(
                             runner.optic_state = lower_binoculars(
                                 runner.optic_state, runner.last_t_sim
                             )
+                    # `plans/9k113-scan-procedure/plan-stage2.md`'s
+                    # "Supersession" -- a one-shot signal `crew_console`
+                    # sets (a new `look`/`scan`/cancel/task-changing
+                    # command dispatched this poll, or `drain_pending_
+                    # point_request` finally starting a deferred look),
+                    # applied here to `runner.optic_state.bounded_look`,
+                    # the one field `CrewConsole` cannot reach directly.
+                    # `None` (the common case: nothing to apply) is a true
+                    # no-op. See `_apply_point_request_transition`'s own
+                    # docstring for what it does to `look_started_sim` and
+                    # why.
+                    if crew_console.point_request_transition is not None:
+                        runner.optic_state = _apply_point_request_transition(
+                            runner.optic_state,
+                            crew_console.point_request_transition,
+                        )
+                        crew_console.point_request_transition = None
                 connection.report_success()
             except Exception as exc:
                 # Deliberately bare-ish: anything at all, because the

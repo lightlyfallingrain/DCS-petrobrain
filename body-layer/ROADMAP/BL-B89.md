@@ -28,5 +28,9 @@
   **Explored 2026-10-25** (`plans/9k113-scan-procedure/explore-notes.md`, verbatim). Wide near
   band 1.5–4 km, not 0.5. Sectors: ahead alternates −30…+10° / −10…+30°, left −60…0°, right
   0…+60°, a commanded o'clock is that sector. The naked-eye sweep is a required pause in the sight
-  scan. Pointing at a known place is stage 2 of this item. `[[BL-B86]]` is folded in. Built in code.
-  Queued after `[[BL-B96]]`.
+  scan. Pointing at a known place is stage 2 of this item. **Superseded**: *"`[[BL-B86]]` is
+  folded in"* was the explore session's first answer, later reversed in the same session --
+  `[[BL-B86]]` was declined 2026-10-25 (*"if B86's only thing is the high alt scan then reject
+  it"*, outside the operating altitude envelope). Residue (a nose-up test within 50–800 m AGL) is
+  carried into this item's tests, not the high-altitude scan itself. Built in code. Queued after
+  `[[BL-B96]]`.

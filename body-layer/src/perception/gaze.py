@@ -158,6 +158,59 @@ SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = (
     _RELATIVE_SECTOR_WEDGE_DEG
 )
 
+#: The 9K113 sight's own sector widths -- `plans/9k113-scan-procedure/
+#: plan.md` Stage 1, deliberately a *separate* table from `SECTOR_WEDGE_
+#: DEG` above, not a second reading of it. The naked eye's `left`/`right`
+#: are narrow, outward-shifted bands that exclude dead ahead (`"ahead"`
+#: already covers that); the sight's own regard is physically bounded at
+#: +-60 deg, and the user's own words size `left`/`right` to the *whole*
+#: left/right half of that regard, not an outward sliver of it
+#: (explore-notes, verbatim: *"left scan -60 to 0 deg. right scan 0 to
+#: +60 deg"*). `"ahead"` has no entry here -- it is not a single wedge;
+#: see `SIGHT_AHEAD_LEGS` below.
+SIGHT_SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = {
+    "left": (-30.0, 30.0),
+    "right": (30.0, 30.0),
+    "full": (0.0, 60.0),
+}
+
+#: The sight's own forward-sector cycle -- the user's own words: *"could
+#: well be alternating sequence -30 to +10 deg and -10 to +30 deg. That
+#: would be the normal scan ahead sweep."* Each entry is `(center,
+#: half_width)` in the same body-relative convention as `SIGHT_SECTOR_
+#: WEDGE_DEG`. Kept as its own table rather than folded into that one --
+#: the sight's own analogue of `_SECTOR_LEGS["ahead"]`'s naked-eye `(11,
+#: 12, 1)` cycling, but a different geometry (two wide windows, not three
+#: narrow ones), so forcing one table to express both would either narrow
+#: this to three cones or widen the naked eye's to two.
+SIGHT_AHEAD_LEGS: Final[tuple[tuple[float, float], ...]] = (
+    (-10.0, 20.0),
+    (10.0, 20.0),
+)
+
+#: How long the sight's own "ahead" search dwells on one of `SIGHT_AHEAD_
+#: LEGS`'s two windows before alternating to the other -- declared
+#: independently of both `FOCUS_DWELL_S` and `belief.optic_policy.
+#: SIGHT_MAX_DWELL_S`, not coupled to either. This module's own standing
+#: rule against letting two different questions share one number (see
+#: `LOOK_SWEEP_SIGMA`'s docstring in `belief.optic_policy`) is why it is
+#: not `FOCUS_DWELL_S`: that constant answers "how long does the naked
+#: eye dwell on one o'clock cone", this answers "how long does the
+#: sight's own ahead search dwell on one half of its forward sector"
+#: before moving to the other half. **A starting value, not a
+#: measurement**: picked at the same order of magnitude as `SIGHT_MAX_
+#: DWELL_S` (30 s), on the reasoning that one alternation per rough
+#: "lap" of the idle search cycle keeps either window from going
+#: unvisited for the whole encounter without flickering between the two
+#: faster than a look could resolve anything in either. Not yet flown.
+SIGHT_AHEAD_WINDOW_DWELL_S: Final[float] = tuning.real(
+    "perception.gaze.SIGHT_AHEAD_WINDOW_DWELL_S",
+    30.0,
+    lo=5.0,
+    hi=120.0,
+    status="judgement",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Gaze:
@@ -410,6 +463,44 @@ def _gaze_for_clock_hour(clock_hour: int) -> Gaze:
         half_width_deg=FOCUS_CONE_HALF_WIDTH_DEG,
         label=f"{clock_hour}_oclock",
     )
+
+
+#: Half the spacing between adjacent `SECTOR_WORDS`-style compass points
+#: (45 deg apart, `audio-adapter`'s `vocabulary.SECTOR_WORDS`) -- the
+#: sight's own compass-bearing wedge half-width (`plans/
+#: 9k113-scan-procedure/plan-stage2.md`, "Compass bearing width: 45 deg,
+#: not 30 deg -- by the same derivation the o'clock wedge already uses").
+#: `FOCUS_CONE_HALF_WIDTH_DEG` (15.0, half of the 30-degree o'clock
+#: spacing) is the one o'clock-hour reading of the identical idea; this
+#: is the compass-point reading of it, not a second, independent
+#: judgement call.
+COMPASS_SECTOR_HALF_WIDTH_DEG: Final[float] = 22.5
+
+
+def compass_wedge_body_relative(
+    absolute_bearing_deg: float, heading_true_deg: float
+) -> tuple[float, float]:
+    """A body-relative `(center_deg, half_width_deg)` wedge centred on an
+    absolute compass bearing -- `plans/9k113-scan-procedure/plan-stage2.md`,
+    the `look <compass>` bounded point's own wedge, by the identical
+    true-to-body-relative conversion `body._active_gaze` already applies
+    to a compass-absolute `scan north`/`scan bearing 320` (subtract
+    heading, wrap to [-180, 180)). A pure function of its two inputs, no
+    ownship/DCS dependency beyond the heading already passed in."""
+    center_deg = (absolute_bearing_deg - heading_true_deg + 180.0) % 360.0 - 180.0
+    return center_deg, COMPASS_SECTOR_HALF_WIDTH_DEG
+
+
+def clock_wedge_body_relative(clock_hour: int) -> tuple[float, float]:
+    """A body-relative `(center_deg, half_width_deg)` wedge for one
+    o'clock hour -- `plans/9k113-scan-procedure/plan-stage2.md`, the
+    `look <o'clock>` bounded point's own wedge. A thin public wrapper
+    over `_gaze_for_clock_hour` (this module's own private geometry) so a
+    caller outside this module (`belief.crew_console`) can ask for the
+    wedge without reaching for a private name -- the identical reasoning
+    `SECTOR_WEDGE_DEG`'s own "public alias" comment gives."""
+    gaze = _gaze_for_clock_hour(clock_hour)
+    return gaze.center_azimuth_deg, gaze.half_width_deg
 
 
 def legs_within_wedge(

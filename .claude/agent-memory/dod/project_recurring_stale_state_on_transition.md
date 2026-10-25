@@ -102,3 +102,39 @@ which transitions" to also ask "does anything outside this state machine read on
 unconditionally, and if so, does it need to gate on the same transition?" -- this is the third
 feature in this category and the first where the existing mitigation was in place and still didn't
 reach the actual instance.
+
+**Fourth and fifth occurrences, 2026-10-25, `BL-B89`/`BL-B98` (`plans/9k113-scan-procedure/`) --
+two more instances in one feature, same `optic_policy.py`/`body.py` state machine, caught at two
+different roles again:**
+
+8. `_start_glance_away` unconditionally nulled the believed sight aim (`look_azimuth_deg`/
+   `look_elevation_deg`) on every entry, for both its call sites -- but both only ever fire while
+   OBSERV stays on, so "resume at last position" was only ever true when the aim happened not to
+   have been nulled yet. The resume functions (`_back_to_home`, `_enter_binocular_search`) carry
+   the aim through unchanged rather than re-deriving it, inheriting whatever the shared nulling
+   call left behind. Caught by a pre-existing test that encoded the correct documented behaviour
+   and failed against the real code (Stage 1's review), filed as `BL-B98`, fixed by a Debugger
+   pass.
+9. `body.py`'s `point_request_transition` apply block reset `OpticState.look_started_sim = None`
+   for *every* token in a 13-entry superseding-command set, without checking whether a bounded
+   look was actually running -- clobbering the field's two other, pre-existing, documented
+   consumers (the sight's own per-target look clock, the idle 3-leg search cycle's per-leg clock)
+   whenever almost any other command fired mid-look. Caught by Reviewer, via mutation-testing the
+   diff's own flagged risk area, not by reading.
+
+**This is now five occurrences across three features** (`BL-14` x4, `BL-B64`/`BL-B80` x3 counting
+the widened read above, `BL-B89`/`BL-B98` x2) in the same project area every time --
+`belief/optic_policy.py` and the attack-run state machine, both phase/mode machines with co-moving
+fields. Instance 9 is exactly the shape the "process signal" above asked to widen the Co-moving
+Fields table for ("a field this state machine writes that something outside it reads
+unconditionally") -- except here the *reader* set is what grew (a brand-new mechanism, the bounded
+look, was added as a third consumer of an already-shared field), not a pre-existing reader that was
+missed. **Open question for the next retro, sharper than before**: the Co-moving Fields table
+checks "which fields must move together" at the point a plan is written; it does not prompt
+"if this plan adds a new consumer to an *existing* shared field, re-audit every other consumer of
+that field" -- which is what would have caught #9 before implementation. Both #8 and #9 were still
+caught before merge (Stage 1 review, Stage 2 review respectively), so the gate is not failing
+qualitatively -- but the category has now recurred enough times in one subsystem that a structural
+fix (e.g. a lint/grep rule flagging any `replace()`/assignment to a field with more than one
+documented reader, outside that field's own "owning" function) may be cheaper than catching it by
+hand a sixth time.
