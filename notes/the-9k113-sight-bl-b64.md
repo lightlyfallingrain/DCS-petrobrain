@@ -178,6 +178,30 @@
   observation) is not an edge either. The general shape: any "announce on this becoming true"
   callout needs the previous *observed* value, not a has-this-ever-fired flag, or it cannot
   distinguish "just became true" from "was already true before we were watching."
+- **A nulling call shared by two call sites, only one of which actually needs the null, resumes
+  wrong for the other — and only `replace()`-style resume functions downstream expose it.**
+  `_start_glance_away` (`BL-B98`) unconditionally nulled the believed sight aim on every entry,
+  for both its call sites — but both only ever fire while OBSERV stays on (a scheduled break, not
+  OBSERV turning off), so "resume at last position" was only ever true by accident, when the aim
+  happened not to have been nulled yet. The resume functions (`_back_to_home`,
+  `_enter_binocular_search`) both carry the aim through unchanged rather than re-deriving it, so
+  they silently inherited whatever the nulling function left behind. Found by a test that assumed
+  the documented behaviour and failed against the real code, not by reading the nulling function
+  in isolation — a function's own correctness ("nulls the aim, as documented") said nothing about
+  whether nulling was the right thing to do at *this* call site.
+- **A field reused across three independent per-poll clock mechanisms (the sight's per-target look
+  clock, the idle 3-leg search cycle's per-leg clock, and — once added — the bounded `look
+  <o'clock>` sweep's own clock) is a silent coupling hazard every time a new mechanism is added
+  to share it**, not just the first time. `look_started_sim`'s existing two consumers were already
+  documented; the Stage 2 apply block that cleared it for "any superseding command" treated the
+  field as private to the new bounded-look mechanism, and clobbered an unrelated, in-progress
+  sight look whenever almost any other command fired mid-look (`follow`, `select_target`,
+  `engage`, `cancel_task`, …). Caught by a Reviewer mutation test, not by reading the diff — the
+  fix scopes the reset to "a bounded look was actually involved" rather than "any transition that
+  happens to touch this shared field." Same pattern this topic already tracks for shared belief
+  fields (the per-optic-cap/readback-field entry above); worth grepping every reader of a shared
+  per-poll clock/state field whenever a new writer is added to it, not just when the field is
+  first introduced.
 - **Stopping writing a `SetCommand` axis is not the same as commanding it to zero, and this is a
   separate failure from the dither finding above.** The dither note above is about DCS *ignoring*
   a per-frame write whose value never changes; this is about what happens when the writes *stop

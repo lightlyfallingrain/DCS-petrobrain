@@ -318,3 +318,269 @@ tests.
 
 Does the feature pass acceptance testing? (yes / no + details) — **UNVERIFIED, needs the user's
 own flight; not run in this session.**
+
+---
+
+# Definition of Done — BL-B89 as a whole (Stage 1 + BL-B98 fix + Stage 2)
+
+**Verdict is scoped to tip `0c56453214fd602213805305ad96a953506c312b`** on
+`feature/9k113-scan-procedure` — "Performance review: BL-B89 Stage 2 + carried-over BL-B98 fix
+(APPROVED)". This worktree's prior HEAD (`8b21e866`, a different merged feature, BL-B99) was
+**not** an ancestor of this tip — reported per rule 4 — so this check ran on a `git checkout
+--detach` of the named sha directly, not a fast-forward; tree confirmed clean before and after. If
+the branch has moved since, re-run.
+
+Scope: the whole feature as merged — Stage 1 (already passed DoD at `7611888c`, above), the
+`BL-B98` fix (already passed DoD at `47c8e96d`, above), and Stage 2 (`look`/`sight`/`what is [at]
+<where>`, not previously DoD-checked). Diff taken against `main`'s merge-base
+(`e9fb4a2b41fdbf98f7d4e35a7c4fc09f847c1bde`): 37 files, two subprojects touched —
+`audio-adapter/{src,tests}` and `body-layer/{src,tests,config,ROADMAP}` — plus `notes/`, `plans/`
+and `docs/acceptance/`.
+
+## Mechanical checks (run in both touched subprojects, main checkout's venv — this worktree
+carries none)
+
+**body-layer/**, from inside the subproject:
+- `ruff format --check src tests`: **pass** (173 files already formatted)
+- `ruff check src tests`: **pass** (all checks passed)
+- `mypy src` (strict): **pass** (74 source files)
+- `pytest tests -q`: **pass** — 2612 passed, 4 xfailed (no sign of the filed `BL-B93` flake this
+  run)
+- `config/defaults.toml` vs `tools/generate_defaults.py --write`: **no diff** — regenerated
+  in-place, `git status --porcelain` clean before and after
+- `git status --porcelain`: **clean**
+
+**audio-adapter/**, from inside the subproject:
+- `ruff format --check src tests`: **pass** (31 files already formatted)
+- `ruff check src tests`: **pass** (all checks passed)
+- `mypy src` (strict): **pass** (16 source files)
+- `pytest tests -q`: **pass** — 357 passed, 2 skipped
+
+**Debug output / TODOs / bare excepts**: grepped the full diff
+(`git diff e9fb4a2b41fdbf98f7d4e35a7c4fc09f847c1bde HEAD -- body-layer/src audio-adapter/src`) for
+`print(`, `TODO`, `FIXME`, `XXX`, `pdb.set_trace`, bare `except:`/`except Exception:` — zero hits
+in added lines.
+
+## Scope & correctness — verified by reading the shipped code directly, not only the review/plan
+accounts
+
+- **Stage 1 + `BL-B98`**: already verified at their own DoD passes above; nothing in that code
+  changed again in Stage 2 (confirmed by `git diff` scope — Stage 2's diff touches
+  `optic_policy.py`/`crew_console.py`/`body.py` additively, no re-edit of the Stage 1/`BL-B98`
+  functions those passes already checked).
+- **`scan`/`look` split** (`crew_console.py:_handle_scan`'s own docstring, `handle_command`
+  dispatch): `scan <where>` is unchanged — still Petrovich's own eyes/binoculars/9K113 choice.
+  `look`/`sight`/`what is [at] <where>` dispatch to the new `_handle_point`/`_start_point` path,
+  confirmed by reading both functions, not inferred from the plan.
+- **Attack-run refusal, checked first** (`_handle_point`, line ~3464): `if
+  self.attack_run_engaged: return [render_unable("ATTACK_RUN_ENGAGED").text]` —
+  `_UNABLE_TEMPLATES["ATTACK_RUN_ENGAGED"] = "Unable, attack run."`, matching the explore-notes
+  decision verbatim.
+- **OBSERV gating reuses the existing confirm band exactly as decided**: read
+  `handle_transcript`'s affirm branch directly — `pending.observ_request is not None and (answer
+  == "affirm" or token == "observ_on")` dispatches `observ_on` then queues the deferred look only
+  if `sight_ready`; `answer == "negative"` under the same `if` returns `[]` (silent cancel, no
+  "unable") — matches *"no -> cancel look"* / *"yes/confirm/observ on -> observ on"* verbatim,
+  including the narrow, explicitly-scoped `observ_on`-counts-as-yes exception the explore notes
+  call for.
+- **`look left`/`look right` reuse Stage 1's own sector dispatch**: `_start_point`'s `relative`
+  branch calls `_handle_scan(... relative_sector=...)` — the exact function `scan left` already
+  uses — confirmed by reading `_start_point`, not assumed from its docstring.
+- **`look <o'clock>` is a 30° wedge near-to-far, not a line sweep** — matches the user's correction
+  verbatim (*"scan not in line, but that 30 deg sector near to far"*): `clock_wedge_body_relative`
+  feeds `BoundedSightLook`, consumed by `_advance_bounded_look`/`_sight_point_sweep`'s S-shaped
+  step generation, the same `search_pattern` mechanism the idle cycle's legs already use.
+- **Two sweeps, then "<where>, clear.", then resume** — `POINT_SWEEP_COUNT = 2` (`lo=1, hi=5`);
+  `_advance_bounded_look` only sets `point_clear_label` once `sweeps_completed >=
+  POINT_SWEEP_COUNT`; `render_clear("two o'clock")` → `"Two o'clock, clear."`, reusing the
+  `report` family's existing empty-answer phrasing, matching *"if nothing, say '<where> clear' and
+  continue what the previous action was"* and the mock's own `"Two o'clock clear"` line.
+- **A found target interrupts the sweep, is reported, and the sweep resumes** —
+  `choose_sighting_look` runs before `_advance_bounded_look` is ever reached (the bounded-look
+  branch is only reached when `chosen is None`), and `bounded_look` is not cleared by a found
+  target — matches *"report, then go back to scanning. target count makes no difference"*.
+- **Supersession**: `_POINT_LOOK_SUPERSEDING_TOKENS` includes every scan/look/task-changing
+  command named in explore-notes' point 6, and excludes `silence` — matching *"new command
+  replaces if it is look or scan command"* and the later-approved *"silence does not cancel a
+  look"* decision. The Reviewer's own Required Fix (an unrelated superseding command was
+  clobbering an in-progress, unrelated sight look via a shared `look_started_sim` field) is fixed
+  via the named `_apply_point_request_transition` helper — re-verified here by grep
+  (`grep -n look_started_sim src/body.py` → exactly one conditional write site, the helper itself)
+  rather than re-trusting the re-review's own account.
+- **No unplanned scope added**: the "quick position check" and the exact wide/far band-edge
+  numbers past 1.5 km remain explicitly out of scope, as both Stage 1's plan and this stage's own
+  plan state; nothing in the diff builds either.
+- **No invariants violated**: no new omniscience path (the point-slot parsers are closed-vocabulary
+  table lookups and a bounded integer range, confirmed by `security-stage2.md` and re-checked by
+  grep here — zero `eval`/`exec`/`subprocess`/`open(`/network hits in the diff); no
+  mechanism/calibration conflation (three new tunables — `POINT_SWEEP_COUNT`,
+  `POINT_READY_TIMEOUT_S`, `POINT_DISTANCE_BAND_HALF_KM` — all AST-literal `lo`/`hi`, all rendered
+  in `config/defaults.toml`, checked against the regenerated file above, not the source `#:`
+  comment).
+- **All new/modified files staged**: `git status --porcelain` clean at the checked-out tip.
+
+## Testing
+
+- Core logic covered: `test_an_unrelated_superseding_command_does_not_abandon_a_running_look`
+  (the Reviewer's own Required Fix, mutation-confirmed against the real pre-fix code by the
+  re-review), `test_two_sweeps_then_clear_and_resume`, `test_two_where_slots_is_a_detected_error`
+  (both independently mutation-tested by the Reviewer against the real code, not just read), plus
+  the full `TestSightSearchLegs`/`TestChooseSightingLook` suites carried from Stage 1.
+- Tests are meaningful: the regression test for the Required Fix calls
+  `body_module._apply_point_request_transition` directly — the same function the poll loop calls —
+  not a reimplementation that could drift from the real code path (re-confirmed by reading the
+  test, not taken on the re-review's word).
+- No existing tests broken: 2612 passed / 4 xfailed (body-layer), 357 passed / 2 skipped
+  (audio-adapter) — both full runs, no regressions.
+
+## Documentation
+
+- **Reviewer findings addressed**: Stage 1 (`review.md`, re-reviewed APPROVED), `BL-B98`
+  (`review-bl-b98.md`, APPROVED, no required fixes), Stage 2 (`review-stage2.md`, one Required
+  Fix, re-reviewed APPROVED) — all three verdicts read directly, not summarized from memory.
+- **Non-obvious behaviour explained**: `_apply_point_request_transition`'s own docstring documents
+  the `look_started_sim` sharing hazard the Required Fix closed; `_advance_bounded_look`'s
+  docstring documents why "resume" restarts the current traversal rather than the exact step (a
+  deliberate simplification, stated as such, not silently approximate).
+- **Acceptance card updated for the merged state** (this pass):
+  `docs/acceptance/2026-10-25-bl-b89-sector-scan-flight.md` rewritten to cover the whole feature —
+  branch/checkout instructions changed to `main`, "Stage 2 not built" wording removed, five new
+  flight blocks added (5: `look left`/`look right`; 6: `look <o'clock>`'s two-sweep-then-clear; 7:
+  compass bearing + stated distance; 8: OBSERV-off confirm, attack-run refusal, supersession; 9: a
+  found target during a look). **Every spoken-command utterance in the new blocks was run through
+  the real matcher** (`audio-adapter/src/command_matcher.py::match_transcript`, not reasoned about
+  from the plan):
+
+  | utterance | token | slots |
+  |---|---|---|
+  | `"look left"` | `point` | `{'relative': 'left'}` |
+  | `"look right"` | `point` | `{'relative': 'right'}` |
+  | `"look two o'clock"` | `point` | `{'clock': 2}` |
+  | `"look north"` | `point` | `{'sector': 'north'}` |
+  | `"sight two o'clock three kilometres"` | `point` | `{'clock': 2, 'distance_km': 3}` |
+  | `"sight left"` | `point` | `{'relative': 'left'}` |
+  | `"what is at two o'clock"` | `point` | `{'clock': 2}` |
+  | `"what is north"` | `point` | `{'sector': 'north'}` |
+  | `"observ on"` | `observ_on` | — |
+  | `"scan left"` | `scan_left` | — |
+
+  all `match_ratio=1.00`, none ambiguous — no surprises. The exact spoken wording in the card
+  (`"Two o'clock, clear."`, `"Need observ, confirm?"`, `"Unable, attack run."`, `"Left."`/
+  `"Right."`) was read off `render_clear`/`render_confirm_request`/`_UNABLE_TEMPLATES`/
+  `render_point_readback` directly, not guessed from the plan's mock. **The published card at
+  https://claude.ai/artifact/M9jAnsomghXnV1bSyds9Mj was republished from the updated source file**
+  (same URL, version 3) — not left stale.
+
+## Security
+
+- `plans/9k113-scan-procedure/security-plan.md` (Stage 1): **APPROVED**
+- `plans/9k113-scan-procedure/security.md` (Stage 1 deep analysis): **APPROVED**
+- `plans/9k113-scan-procedure/security-plan-stage2.md`: **APPROVED**
+- `plans/9k113-scan-procedure/security-stage2.md` (deep analysis, covers Stage 2 **and** the
+  `BL-B98` fix's carried-over debt): **APPROVED** — closes the end-condition the `BL-B98` DoD pass
+  above recorded ("clears only when Stage 2's own batch pass includes this fix's diff"); confirmed
+  by reading `security-stage2.md`'s own "Covers two pieces whose own security pass was deferred to
+  this batch" section, not assumed.
+
+## Performance
+
+- `plans/9k113-scan-procedure/performance-review.md` (Stage 1): **APPROVED — MONITOR**
+- `plans/9k113-scan-procedure/performance-review-stage2.md` (covers Stage 2 **and** the carried-over
+  `BL-B98` fix): **APPROVED** — every hot-path addition is either O(1)/early-return in the common
+  case, or outside the 1 Hz poll budget entirely (the matcher's two new branches run once per
+  spoken utterance, measured cheaper than the pre-existing fallback path). Closes the same
+  end-condition as Security above.
+
+## Acceptance testing
+
+**Not run — the user has authorised merging on DoD pass without waiting for this flight**
+(2026-10-25: *"When ready DoD BL-B89 as a whole and merge"*). Per root `CLAUDE.md`'s "Live
+verification happens in bursts, and must not gate the work": this is accepted, not waived — the
+updated flight card above is the live-acceptance vehicle, and `BL-B89`'s roadmap entry carries
+`#needs-flight` until a real sortie clears it.
+
+**Acceptance boundary, stated up front:** every test in this feature drives the state machine and
+the matcher with synthetic inputs/transcripts. That proves the mechanism matches the spec
+geometrically and lexically and never stalls. It structurally cannot show whether the scan/look
+procedure *sounds and feels* right spoken aloud with a real voice, real cadence, and a real
+microphone in a real cockpit — whether "Look two o'clock" is recognised promptly under flight
+noise, whether the per-lap pause and the OBSERV-off reset read as natural rather than jarring, or
+whether a found-target interruption mid-look feels like a report or like the look silently
+breaking. The card's nine blocks are built to answer exactly those questions, not to re-verify
+geometry or vocabulary a unit test already settled.
+
+## Milestone-completion question
+
+**Does BL-B89's completion change what the next milestone should be, or invalidate a downstream
+assumption?**
+
+Three concrete ways, named rather than left implicit:
+
+1. **`BL-B99`'s own roadmap entry names the exact re-check this merge triggers**: *"when
+   `[[BL-B89]]` merges, re-check `body._render_pov_frame`'s per-optic boresight table against
+   BL-B89's gaze/optic changes."* `BL-B99` (the Petrovich POV debug view, already merged to `main`
+   ahead of this feature) renders a per-optic boresight table that predates Stage 2's new bounded
+   look and the final shape of Stage 1's sector/wedge geometry. That re-check is now unblocked and
+   owed — not done as part of this DoD pass, since it is `BL-B99`'s own entry's open item, not
+   `BL-B89`'s.
+2. **The "quick position check" remains deliberately unbuilt**, as both Stage 1's and this
+   stage's plans state (`plan.md`'s Decision 6: "how short, how often" are new judgement calls the
+   source material does not supply). This is a scoped-out decision, not debt dressed as one — no
+   `#needs-flight` or backlog item is owed for it unless the user raises it as a new ask.
+3. **The `review-stage2.md` fuzzy-collision finding** (`"book"`/`"cook"`/`"hook"`/`"took"` vs
+   `"look"`, `"fight"`/`"sighted"` vs `"sight"`, all clearing `VERB_FLOOR` at full confidence) is
+   accepted debt, not a defect — `implementation-stage2.md`'s own disposition is "a measurement
+   task, not an implementation one," deferred to a `tools/stt_bench.py` corpus pass. **Executing
+   the unblock condition**: `tools/stt_bench.py` is a corpus-measurement tool, not a command that
+   clears on its own — there is no corpus entry yet naming "book"/"fight" as confusable with
+   "look"/"sight" to run it against. Checked `tools/stt_bench.py`'s own corpus file and confirmed
+   it does not yet contain either collision pair, so the clearing condition is "add corpus entries
+   for the two new collision pairs, then run the bench" — not yet executable today, and not
+   something this DoD pass can manufacture a corpus entry for without guessing at real STT output.
+   Left as a named, unblocked-when-ready item rather than closed.
+
+## Overall verdict: PASS
+
+All mechanical, scope, testing, documentation, security and performance criteria pass for the
+whole feature (Stage 1 + `BL-B98` fix + Stage 2), re-verified at this pass's own tip rather than
+re-trusting the three prior passes' accounts. Acceptance testing is accepted as outstanding per
+user authorization to merge without waiting for it — tracked via `#needs-flight` on `BL-B89`'s
+roadmap entry, with the flight card updated and republished to cover the whole feature in one
+trip.
+
+---
+
+**Acceptance Testing Plan: BL-B89 whole feature (9K113 scan + point procedure)**
+
+**Goal:** Verify the sector-scan procedure, the sight's resume behaviour, and the new explicit
+`look`/`sight`/`what is at` point request all match the described cockpit behaviour.
+
+**Prerequisites**
+- [x] Type-checked (`mypy src` from both `body-layer/` and `audio-adapter/`) — verified above,
+  pass.
+- [ ] DCS running, Mi-24P, air start, on `main` after the merge — see the card's own Setup section
+  (UNVERIFIED, needs Windows).
+
+**Test Cases** — see `docs/acceptance/2026-10-25-bl-b89-sector-scan-flight.md` Blocks 1-9 for the
+full do/expect/record detail; summarized:
+1-4. Stage 1 + `BL-B98` (unchanged from the prior Acceptance Testing Plan above).
+5. `look left`/`look right` match `scan left`/`scan right`'s width with a shorter readback.
+6. `look <o'clock>` sweeps the 30° wedge twice, then "<where>, clear.", then resumes.
+7. A compass bearing sweeps a wider (~45°) wedge; a stated distance narrows the sweep.
+8. OBSERV-off confirm/yes/no, the attack-run refusal wording, and supersession by a later command
+   all behave as described.
+9. A found target during a look is reported normally, and the look resumes afterward.
+
+**Edge Cases to Probe**
+- (carried from Stage 1) Does the per-lap pause ever visibly collide with
+  `SIGHT_MAX_DWELL_S`? Does a manoeuvre-forced OBSERV-off reset look the same as a commanded one?
+- Does "look" ever get misheard as "book"/"cook"/"hook"/"fight" in practice? (the accepted,
+  deferred fuzzy-collision finding — worth noting if it happens, not expected to be common under
+  push-to-talk discipline)
+
+**Pass Criteria**
+The feature passes if all nine blocks produce the expected result and no regression is visible in
+ordinary sight/scan behaviour outside what this card tests.
+
+Does the feature pass acceptance testing? (yes / no + details) — **UNVERIFIED, needs the user's
+own flight; merge proceeds without waiting for it, per explicit user authorization.**

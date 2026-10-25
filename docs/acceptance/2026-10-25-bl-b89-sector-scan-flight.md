@@ -1,17 +1,16 @@
-# BL-B89 Stage 1 acceptance — 9K113 sector scan flight
+# BL-B89 acceptance — 9K113 scan + point procedure (Stage 1 + BL-B98 fix + Stage 2)
 
-Source of truth for the published card (the main loop publishes the artifact from this file — do
-not fly from a copy, fly from whatever the card links back to here).
+Source of truth for the published card (the artifact at the link below is republished from this
+file — do not fly from a copy, fly from whatever the card links back to here).
 
 **Card:** https://claude.ai/artifact/M9jAnsomghXnV1bSyds9Mj
 
-**Branch:** `feature/9k113-scan-procedure` (tip `47c8e96dbbba13f2d7dac01ec9bfd65d8f273a0c`, updated
-2026-10-25 — the original Stage 1 tip was `7611888c`; the `BL-B98` fix below landed on top of it
-on the same branch) — `git checkout feature/9k113-scan-procedure`, in your own repo root, not a
-worktree. Not yet merged — DoD's mechanical checks, Reviewer, and the `BL-B98` fix's own
-re-review have all passed; this flight is the one thing that has not run yet. Performance and
-security for the `BL-B98` fix are deliberately waived until Stage 2 (user direction, see
-`plans/9k113-scan-procedure/plan.md` Stage 2 note) — not a gap in this flight.
+**Branch:** `main`, after the merge of `feature/9k113-scan-procedure` (merge commit named in
+`plans/9k113-scan-procedure/dod-check.md`'s whole-feature pass) — `git checkout main && git pull`
+in your own repo root, not a worktree. DoD has passed for the whole feature (Stage 1, the `BL-B98`
+fix, and Stage 2) and the user authorised merging on DoD pass without waiting for this flight
+(2026-10-25: *"When ready DoD BL-B89 as a whole and merge"*) — this flight is the one thing that
+has not run yet, and it runs on `main`, not on the now-deleted feature branch.
 
 **Player in the PILOT seat.** Petrovich operates the opposite seat (CPG) for this feature — you
 are watching *his* sight scan, not flying it from the CPG seat yourself.
@@ -23,45 +22,57 @@ sight, same as every other 9K113 sortie.
 
 ## What this tests
 
-Stage 1 of BL-B89: the sight's idle search now cycles three legs (`wide_near` 1.5-4 km,
+**Stage 1** of BL-B89: the sight's idle search cycles three legs (`wide_near` 1.5-4 km,
 `wide_far` 4-8 km, `narrow_far_sweep` 8-13.6 km) over the sectors you described — `ahead`
 alternating two 40°-wide windows, `left`/`right` spanning the whole left/right half of the
 sight's own ±60° regard, a commanded o'clock hour its own 30° wedge — and closes every lap with a
 mandatory naked-eye pause, not just the pre-existing time-based one. Also folded in: the `BL-B98`
-fix for the sight's resume position after a glance-away or OBSERV off (Block 4). Stage 2
-(pointing the sight at a named place) is designed but **not built** — do not expect a `point`
-command to exist yet.
+fix for the sight's resume position after a glance-away or OBSERV off (Block 4).
+
+**Stage 2** (new this pass, Blocks 5-9 below): `look`/`sight`/`what is [at] <where>` — an explicit
+request for the 9K113, distinct from `scan` (which still lets Petrovich pick eyes/binoculars/
+9K113 on its own). `look left`/`look right` reuse the same left/right sector `scan` already does.
+`look <o'clock>`/`look <compass>` sweep that 30°/45° wedge near-to-far, twice, then say
+"<where>, clear." and resume whatever was running before. A spoken distance narrows the sweep to
+a band around it. OBSERV off defers via the existing confirm band; an attack run refuses the
+command outright; a later `scan`/`look`/task-changing command supersedes a running or pending
+look.
 
 ## What this does NOT test (deferred, not a gap)
 
-- **Stage 2 (pointing at a named o'clock/bearing).** Not built this round.
-- **The "quick position check" for a known, unmoved contact.** Left as the current
-  "simply don't re-look until it moves or the stall cooldown lapses" behaviour — no new action to
-  observe.
+- **The "quick position check" for a known, unmoved contact.** Flagged as an open Decision in
+  `plans/9k113-scan-procedure/plan.md` ("how short, how often" are new judgement calls the plan's
+  source material does not answer) — left as the current "simply don't re-look until it moves or
+  the stall cooldown lapses" behaviour. No new action to observe.
 - **Anything above ~2000 m AGL.** Out of the stated operating envelope; not built, not tested.
-- **The exact band-edge numbers past the 1.5 km near edge** (4/8/13.6 km). Only the near edge is
-  the user's own correction — the rest are the explore mock's placeholders, tunable via
+- **The exact band-edge numbers past the 1.5 km near edge** (4/8/13.6 km), and
+  `POINT_SWEEP_COUNT`/`POINT_DISTANCE_BAND_HALF_KM`'s default values. All tunable via
   `config/tuning.toml`, not fixed truths to verify against.
+- **Landmarks, waypoints, player-set marks as a `look`/`scan` target.** Out of scope for this
+  item; o'clock/compass/relative only.
 
 ## Acceptance boundary — what no fixture here could reach
 
-Every unit test in this stage drives the state machine directly with synthetic altitude/attitude/
-contact inputs. That proves the mechanism never stalls and the geometry matches the spec on
-paper. It cannot show whether the scan **looks and feels** like the procedure you described from
-the cockpit: whether the ahead-window alternation is noticeable without being distracting,
-whether the mandatory per-lap naked-eye pause reads as a natural beat or as the sight visibly
-"stuttering" (the plan's own flagged risk, since the lap-completion pause and the old
-`SIGHT_MAX_DWELL_S` clock can now fire in close succession), and whether the `BL-B98` fix's
-resume-at-last-position (Block 4 below) actually reads correctly from the cockpit — a believed
-aim is not itself observable, only the simulated sight's own slewing back to it is. None of that
-is testable from a unit test; all of it is what this flight is for.
+Every unit test in this feature drives the state machine directly with synthetic altitude/
+attitude/contact inputs and synthetic transcripts. That proves the mechanism never stalls and the
+geometry matches the spec on paper. It cannot show whether the scan **looks and feels** like the
+procedure you described from the cockpit: whether the ahead-window alternation is noticeable
+without being distracting, whether the mandatory per-lap naked-eye pause reads as a natural beat
+or as the sight visibly "stuttering", whether the `BL-B98` fix's resume-at-last-position (Block 4)
+actually reads correctly — a believed aim is not itself observable, only the simulated sight's own
+slewing back to it is — or whether a spoken `look <o'clock>`/`look <compass>` actually sounds and
+times like a real request when you say it with your own voice, cadence and microphone, rather than
+a scripted transcript fed straight to the matcher. None of that is testable from a unit test; all
+of it is what this flight is for.
 
 ## Setup — UNVERIFIED on the live box
 
-I ran the Mac-side mechanical checks (format/lint/mypy/pytest, defaults.toml regeneration) myself
-and they all pass — see `plans/9k113-scan-procedure/dod-check.md`. I cannot run any DCS-side step
-from here; every step below is labelled UNVERIFIED and is the standard power-up/launch sequence
-already used on prior 9K113 sorties, unchanged by this feature.
+I ran the Mac-side mechanical checks (format/lint/mypy/pytest, defaults.toml regeneration) myself,
+and ran every spoken-command utterance in this card through the real matcher
+(`audio-adapter/src/command_matcher.py::match_transcript`) myself — see
+`plans/9k113-scan-procedure/dod-check.md` for both. I cannot run any DCS-side step from here; every
+step below is labelled UNVERIFIED and is the standard power-up/launch sequence already used on
+prior 9K113 sorties, unchanged by this feature.
 
 1. **UNVERIFIED** — Start DCS, take an air start in the Mi-24P, straight and level, 300-500 m AGL
    to begin (you'll go lower and higher for specific checks below).
@@ -177,6 +188,70 @@ pre-manoeuvre position.
 OBSERV-off case above? Speakable answer: "yes, same reset" / "no, it kept the old position"
 (the latter would be a new defect, not `BL-B98`).
 
+### Block 5 — `look left`/`look right`, the 9K113-specific sector request
+
+**Do:** with OBSERV on, say **"Look left."**
+**Expect:** same sweep as Block 1's "Scan left" (dead ahead to ~60° left), but Petrovich should
+acknowledge with just **"Left."** rather than "Scanning left." — `look` is its own verb, not a
+`scan` echo.
+**Do:** say **"Look right."**
+**Expect:** mirror, acknowledged **"Right."**
+**Record:** did both match Block 1's sweep width, and did the readback say "Left."/"Right." rather
+than "Scanning left."/"Scanning right."?
+
+### Block 6 — `look <o'clock>`: a 30° wedge, near-to-far, two sweeps, then clear
+
+**Do:** pick a forward o'clock hour with nothing in it (e.g. an empty sky at one o'clock) and say
+**"Look two o'clock."** Matcher-checked (below): resolves to the explicit 9K113 point request,
+clock slot 2.
+**Expect:** Petrovich says **"Two o'clock."**, the sight swings to a ~30° wedge centered on that
+hour and sweeps it near-to-far, does this **twice**, then says **"Two o'clock, clear."** and
+resumes whatever free scan was running before — not a single pass, and not silence if nothing is
+there.
+**Record:** did you count two visible sweeps of the wedge before "clear"? Did the sight genuinely
+return to its previous scanning afterward?
+
+### Block 7 — `look north`/a compass bearing, and a look with a stated distance
+
+**Do:** say **"Look north."** (or any compass direction).
+**Expect:** a ~45° wedge centred on true north (compass-relative, not o'clock-relative), same
+two-sweeps-then-clear behaviour as Block 6, readback **"North."**.
+**Do:** with a real contact at a known clock/range, say, e.g., **"Sight two o'clock, three
+kilometres."**
+**Expect:** the sweep narrows to a band around 3 km (roughly 2-4 km) rather than sweeping the
+whole wedge near-to-far — it should find the contact faster than an unbounded look would.
+**Record:** did the compass wedge look wider than the o'clock wedge from Block 6? Did the
+distance-qualified look narrow in on the stated range?
+
+### Block 8 — OBSERV off, attack run, and supersession
+
+**Do:** with OBSERV **off**, say **"Look two o'clock."**
+**Expect:** Petrovich says **"Need observ, confirm?"** — he does not refuse outright and does not
+start the sight. Say **"Yes."** (or "Confirm," or "Observ on.").
+**Expect:** OBSERV comes on, and once the guidance unit is ready the deferred look starts on its
+own — you should not need to repeat "Look two o'clock."
+**Do (separately):** repeat the above but say **"No."** instead.
+**Expect:** the look is dropped silently — no "unable," no further speech, OBSERV stays off.
+**Do:** during an attack run (OBSERV on or off), say **"Look two o'clock."**
+**Expect:** **"Unable, attack run."** — the sight stays on the run's own target.
+**Do:** start a `look <o'clock>`, then before it clears say **"Scan left"** (or any other `look`/
+`scan`/`follow`/`select target`/`engage`/etc.).
+**Expect:** the new command takes over immediately — the old look does not finish its sweep or
+speak "clear."
+**Record:** did the confirm/yes/no flow work as described? Did the attack-run refusal use exactly
+the words "Unable, attack run"? Did a later command cleanly take over without a leftover "clear"
+from the old look?
+
+### Block 9 — a found target during a `look`, then back to scanning
+
+**Do:** command a `look <o'clock>`/`look <compass>` at a sector or bearing where a real contact is
+present.
+**Expect:** Petrovich interrupts the sweep to look at and report the contact the normal way
+(whatever he'd say for any detected/classified contact — target count makes no difference), then
+resumes the commanded look afterward rather than abandoning it.
+**Record:** did the contact get reported in the usual way, and did the commanded look continue
+(not silently vanish) afterward?
+
 ## Bring back
 
 - Block 1: did `ahead`'s two windows, `left`/`right`'s full-half-regard width, and a commanded
@@ -187,6 +262,14 @@ OBSERV-off case above? Speakable answer: "yes, same reset" / "no, it kept the ol
   or did it look broken/stuck?
 - Block 4: did the sight hold its position through a glance-away, and did it reset to boresight
   only on OBSERV going off (commanded or manoeuvre-forced)?
+- Block 5: did "look left"/"look right" sweep the same as "scan left"/"scan right" but with the
+  shorter "Left."/"Right." readback?
+- Block 6: did "look two o'clock" sweep twice before saying "clear," and resume afterward?
+- Block 7: did the compass wedge look wider than the o'clock wedge, and did a stated distance
+  narrow the sweep?
+- Block 8: did the OBSERV-off confirm/yes/no flow, the attack-run refusal wording, and supersession
+  by a later command all behave as described?
+- Block 9: did a found target get reported and the look resume afterward, rather than vanishing?
 - **Anything that surprises you is worth more than anything on this list.**
 
 ## Results
