@@ -561,10 +561,12 @@ private detail of this stage alone.
 
 ### Decisions Requiring User Input
 
-- **"Ready" means `home_phase is SIGHTING`, not a re-check of `self.sight_ready`** — recommended
-  above; still unconfirmed by this round of answers (the four approvals below did not cover it),
-  since the user's own wording ("lamp lit") names the other one and the two are not interchangeable
-  (see "What 'ready' means").
+None open.
+
+- **"Ready" is settled by the main loop, 2026-10-25:** wait for both the lamp lit
+  (`sight_ready`) **and** `home_phase is SIGHTING` — i.e. whichever comes later, in practice
+  `SIGHTING`, about one poll after the lamp. The user's "lamp lit" names the cockpit cue; the
+  extra poll is imperceptible, and waiting on `SIGHTING` is what makes the sight actually usable.
 
 **Approved 2026-10-25, no longer open:**
 - `look` during an engaged attack run is refused, `"unable, attack run"` (task item 1).
