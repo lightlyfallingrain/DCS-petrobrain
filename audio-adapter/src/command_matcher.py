@@ -180,6 +180,20 @@ _WORD_REPAIR_FLOOR: float = 0.5
 #: `test_command_matcher.py`'s regression tests for both directions.
 VERB_FLOOR: float = 0.5
 
+#: How close a transcript's opening word must be to `"petrovich"` to count
+#: as the wake word (`[[AA-B7]]`). Whisper's own spellings of the name in
+#: this repo's probes and logs are `petrovich` and `petrovitch` (0.947);
+#: 0.8 also admits `petrowich` (0.889) and `petrovic` (0.941) while
+#: leaving out `petro` (0.714), `petrol` (0.667) and `pedro` (0.571).
+#: Errs toward waking, as `vocabulary.ROUTING_TOKENS` says it should: a
+#: false wake costs a command some brain latency, a missed one sends free
+#: speech to the matcher. Not measured against the user's own voice --
+#: no clip of the name in his accent exists yet.
+WAKE_FLOOR: float = 0.8
+
+_WAKE_WORD = "petrovich"
+_WAKE_GREETING = "hey"
+
 #: Minimum ratio gap between the best and second-best *different-token*
 #: candidates (Decision 4 Layer 2 step 4, "the separation check") before
 #: they are treated as genuinely distinguishable rather than ambiguous.
@@ -383,6 +397,20 @@ class MatchResult:
     verb_anchored: bool
     ambiguous: bool = False
     slots: dict[str, int | str] | None = None
+
+
+def opens_with_wake_word(words: list[str]) -> bool:
+    """Whether a normalised, filler-stripped transcript begins with
+    `"petrovich"` or `"hey petrovich"` -- the tier discriminator
+    (`vocabulary.ROUTING_TOKENS`). Only the opening counts: user
+    direction, 2026-10-25 (`[[AA-B7]]`), *"Petrovich later in the
+    sentence does not trigger that."*"""
+    if words and words[0] == _WAKE_GREETING:
+        words = words[1:]
+    return (
+        bool(words)
+        and difflib.SequenceMatcher(None, words[0], _WAKE_WORD).ratio() >= WAKE_FLOOR
+    )
 
 
 def _verb_anchor_ratio(verb: str) -> float:
@@ -683,6 +711,17 @@ def match_transcript(text: str) -> MatchResult:
     normalized = strip_filler(normalize_for_match(text))
     words = normalized.split()
     if not words:
+        return MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
+
+    # The wake word is checked before any verb anchoring (`[[AA-B7]]`).
+    # User direction, 2026-10-25: *"'[hey, ]Petrovich' at start is
+    # intentionally the keyword that means free text for the brain."* So
+    # "Petrovich, scan left" goes to the brain too, not to `scan_left`;
+    # without the name, the same words are a command. Returned as
+    # "not a command attempt", which body-layer already routes to the
+    # brain -- the wake word used to anchor as a verb itself, so every
+    # "Petrovich, ..." question got "say again".
+    if opens_with_wake_word(words):
         return MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
 
     verb = words[0]

@@ -399,6 +399,16 @@ Beyond that reach only narrow brings information.
 Fix F2 (a transmission starting "Petrovich" routes to the brain) once `feature/9k113-narrow-search`
 has merged. That unblocks card item A14.
 
+### F2 — the edge decided (user, 2026-10-25)
+
+Asked whether `"Petrovich, scan left"` should still run the command or go to the brain:
+
+> A. "[hey, ]Petrovich" at start is intentionally the keyword that means free text for the brain.
+> Petrovich later in the sentence does not trigger that.
+
+So a leading wake word sends the whole transmission to the brain, command phrasing or not; only
+the opening counts. Built as `[[AA-B7]]`, branch `fix/aa-b7-wake-word-routing`.
+
 ## F8 — speaking must be asynchronous; layers don't wait on each other (user, 2026-10-20)
 
 On the performance review's finding that body-layer's `push_speech` is a blocking HTTP call on the

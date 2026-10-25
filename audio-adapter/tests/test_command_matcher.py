@@ -22,6 +22,7 @@ from command_matcher import (
     MatchResult,
     _phrase_match_ratio,
     match_transcript,
+    opens_with_wake_word,
 )
 from vocabulary import bearing_phrase, normalize_for_match
 
@@ -194,12 +195,58 @@ def test_never_mind_anchors_despite_not_being_in_the_plans_prose_list() -> None:
     )
 
 
-def test_hey_petrovich_anchors_too() -> None:
-    assert "hey" in VERB_ANCHOR_WORDS
-    result = match_transcript("hey petrovich")
-    assert result == MatchResult(
-        token="wake_petrovich", match_ratio=1.0, verb_anchored=True
-    )
+_NOT_A_COMMAND = MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The two from the 2026-10-20 speech log that got "say again".
+        "Petrovich, where is mark one?",
+        "Petrovich, where are we?",
+        # A command phrasing after the wake word still goes to the brain:
+        # user direction, 2026-10-25, AA-B7.
+        "Petrovich, scan left",
+        "Petrovich, report left",
+        "Petrovich, describe.",
+        "Hey, Petrovich! What do you see?",
+        "hey petrovich",
+        "Petrovich.",
+        # Filler before the name is not a word before it.
+        "um, Petrovich, where are we?",
+        # Whisper's other spelling of the name, and a near miss of it.
+        "Petrovitch, where are we?",
+        "Petrowich, where are we?",
+    ],
+)
+def test_opening_wake_word_is_free_speech_for_the_brain(text: str) -> None:
+    """`[[AA-B7]]`: a transmission opening with "[hey] Petrovich" is never
+    a command attempt, so body-layer routes it to the brain rather than
+    answering "say again". This replaces a test that pinned
+    `"hey petrovich"` anchoring as the `wake_petrovich` command -- the
+    defect itself."""
+    assert match_transcript(text) == _NOT_A_COMMAND
+
+
+@pytest.mark.parametrize(
+    ("text", "token"),
+    [
+        # "Petrovich later in the sentence does not trigger that."
+        ("scan left, Petrovich", "scan_left"),
+        ("good morning Petrovich", "greeting"),
+        ("scan left", "scan_left"),
+    ],
+)
+def test_wake_word_only_counts_at_the_start(text: str, token: str) -> None:
+    assert match_transcript(text).token == token
+
+
+def test_wake_floor_rejects_words_that_only_begin_like_the_name() -> None:
+    for word in ("petro", "petrol", "pedro"):
+        assert not opens_with_wake_word([word, "where", "are", "we"])
+    assert not opens_with_wake_word(["hey"])
+    assert not opens_with_wake_word(["hey", "scan", "left"])
+    assert not opens_with_wake_word([])
 
 
 def test_separation_min_is_measured_none_available_and_documented_as_such() -> None:
