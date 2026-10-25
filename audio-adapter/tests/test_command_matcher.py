@@ -1414,3 +1414,140 @@ class TestPointSlots:
         result = match_transcript("sight north")
         assert result.token == "point"
         assert result.slots == {"sector": "north"}
+
+
+# --- `[[BL-B102]]` -- "that"/"it" referent resolution
+# (plans/that-it-referent/plan.md) ---
+
+
+class TestReferentSlots:
+    """The `referent` slot on `follow`/`select_target`/`engage`, and the
+    three new tokens (`where_is_it`/`mark_target` via their explicit-
+    "target" split, `follow` via the new `watch` verb branch)."""
+
+    def test_follow_it_and_follow_that_resolve_with_a_bare_referent(self) -> None:
+        for word in ("it", "that"):
+            result = match_transcript(f"follow {word}")
+            assert result.token == "follow", word
+            assert result.verb_anchored is True, word
+            assert result.ambiguous is False, word
+            assert result.slots == {"referent": True}, word
+
+    def test_follow_that_group_carries_both_the_descriptor_and_the_referent(
+        self,
+    ) -> None:
+        result = match_transcript("follow that group")
+        assert result.token == "follow"
+        assert result.slots == {"descriptor": "group", "referent": True}
+
+    def test_target_it_and_target_that_resolve_to_select_target(self) -> None:
+        """The user's own verb in his worked examples -- `"target"` was
+        not previously a legal first word of `select_target` at all
+        (only its noun); `_SELECT_TARGET_VERBS` now admits it."""
+        for word in ("it", "that"):
+            result = match_transcript(f"target {word}")
+            assert result.token == "select_target", word
+            assert result.slots == {"referent": True}, word
+
+    def test_target_with_a_qualifier_and_a_referent(self) -> None:
+        result = match_transcript("target that 11 o'clock armor")
+        assert result.token == "select_target"
+        assert result.slots == {
+            "descriptor": "armor",
+            "clock": 11,
+            "referent": True,
+        }
+
+    def test_select_target_still_requires_the_literal_word_target(self) -> None:
+        """Adding `"target"` as a verb must not loosen the existing
+        literal-word gate -- a bare `"select"`/`"set"` with a referent
+        but no actual "target" word still fails this branch."""
+        result = match_transcript("select it")
+        assert result.token != "select_target"
+
+    def test_engage_it_and_engage_that_resolve_with_a_bare_referent(self) -> None:
+        for word in ("it", "that"):
+            result = match_transcript(f"engage {word}")
+            assert result.token == "engage", word
+            assert result.slots == {"referent": True}, word
+
+    def test_bare_engage_with_no_referent_is_unaffected(self) -> None:
+        """A bare "engage"/"engage target" (resume the already-selected
+        run) must still fall through to the phrase table with no slots
+        at all -- the referent slot is additive, not a new requirement."""
+        result = match_transcript("engage")
+        assert result.token == "engage"
+        assert result.slots is None
+
+    def test_where_is_it_and_where_is_that_resolve_with_a_bare_referent(self) -> None:
+        for phrase in ("where is it", "where is that", "where is it now"):
+            result = match_transcript(phrase)
+            assert result.token == "where_is_it", phrase
+            assert result.slots == {"referent": True}, phrase
+
+    def test_where_is_that_aaa_carries_the_descriptor_too(self) -> None:
+        result = match_transcript("where is that AAA")
+        assert result.token == "where_is_it"
+        assert result.slots == {"referent": True, "descriptor": "aaa"}
+
+    def test_where_is_target_stays_hard_bound_with_no_slots(self) -> None:
+        """Decision 1: "where is target" stays bound to the attack
+        target -- the literal word "target" keeps it out of the referent
+        branch entirely, falling through to the existing phrase."""
+        result = match_transcript("where is target")
+        assert result.token == "where_is_it"
+        assert result.slots is None
+
+    def test_mark_it_and_mark_that_resolve_to_mark_target(self) -> None:
+        for word in ("it", "that"):
+            result = match_transcript(f"mark {word}")
+            assert result.token == "mark_target", word
+            assert result.slots == {"referent": True}, word
+
+    def test_mark_target_stays_hard_bound_with_no_slots(self) -> None:
+        for phrase in ("mark target", "remember target"):
+            result = match_transcript(phrase)
+            assert result.token == "mark_target", phrase
+            assert result.slots is None, phrase
+
+    def test_watch_it_and_watch_that_dispatch_the_follow_token(self) -> None:
+        """`_parse_watch_slots` reuses `follow`'s own token/handler --
+        "watch" is deliberately not folded into `_FOLLOW_VERB`'s own
+        branch (see that branch's module comment)."""
+        for word in ("it", "that"):
+            result = match_transcript(f"watch {word}")
+            assert result.token == "follow", word
+            assert result.slots == {"referent": True}, word
+
+    def test_watch_nearest_is_unaffected_by_the_new_watch_branch(self) -> None:
+        for phrase, expected_token in (
+            ("watch nearest", "watch_nearest"),
+            ("watch nearest air defence", "watch_nearest_air_defence"),
+        ):
+            result = match_transcript(phrase)
+            assert result.token == expected_token, phrase
+            assert result.slots is None, phrase
+
+    def test_ordinary_sentences_containing_it_or_that_do_not_false_fire(self) -> None:
+        """A referent word alone is not enough -- the verb must still
+        anchor against one of the referent-bearing tokens' own verbs."""
+        for sentence in (
+            "that was a close call",
+            "it is getting dark",
+            "I saw that on the ridge",
+        ):
+            result = match_transcript(sentence)
+            assert result.token is None, sentence
+
+    def test_referent_branches_are_tried_before_the_phrase_table(self) -> None:
+        """Branch order, pinned against the source rather than left to
+        the comment that explains it -- the same convention `test_
+        follow_branch_is_tried_before_the_report_branch` uses."""
+        source = (Path(command_matcher.__file__)).read_text(encoding="utf-8")
+        phrase_table_index = source.index("heard_words = tuple(words)")
+        for marker in (
+            "_parse_where_is_it_slots(text)",
+            "_parse_mark_slots(text)",
+            "_parse_watch_slots(text)",
+        ):
+            assert source.index(marker) < phrase_table_index
