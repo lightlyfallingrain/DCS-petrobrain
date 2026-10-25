@@ -81,11 +81,10 @@ flowchart LR
 <div class="grid2">
 <section>
   <h2><span class="n">3</span> Search</h2>
-  <p class="note">Points Petrovich's search. Clock and bearing are relative to the nose and to north respectively.</p>
+  <p class="note">Points Petrovich's search; he picks the optic himself (eyes, binoculars or 9K113). Clock and bearing are relative to the nose and to north respectively. “Look” is no longer a scan word — see card 7.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   S(["scan"]) --> A["ahead · left · right"]
-  L(["look"]) --> A
   S --> F["full · all around"]
   FS(["full scan"])
   S --> CK["8 … 4  o'clock"]
@@ -124,7 +123,7 @@ flowchart LR
 </section>
 
 <section>
-  <h2><span class="n">6</span> Attack run <span class="badge">new</span></h2>
+  <h2><span class="n">6</span> Attack run</h2>
   <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up. “Where is it” repeats the guidance on demand whenever a target is set.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
@@ -139,20 +138,25 @@ flowchart LR
   EN ==> ARM["also sets weapons ARMED"]
   DT(["drop target"])
   DG(["disengage / stop attack / abort"])
-  WI(["where is it / where is target"]) --> WIa["guidance phrase, or “No target.”  ⟵ new"]
+  WI(["where is it / where is target"]) --> WIa["guidance phrase, or “No target.”"]
   </pre></div>
 </section>
 
 <div class="grid2">
 <section>
-  <h2><span class="n">7</span> 9K113 sight &amp; weapons</h2>
-  <p class="note">After takeoff Petrovich powers the guidance unit up by himself and says “Guidance unit ready”. Observ on before that gets “Unable, guidance unit not ready.”</p>
+  <h2><span class="n">7</span> 9K113 sight &amp; weapons <span class="badge">new</span></h2>
+  <p class="note">After takeoff Petrovich powers the guidance unit up by himself and says “Guidance unit ready”. Observ on before that gets “Unable, guidance unit not ready.” <b>Look</b> asks for the 9K113 explicitly: left/right/ahead keeps scanning that sector; an o'clock (30°) or compass point (45°) gets two near-to-far sweeps, then “&lt;where&gt; clear”. With observ off he asks “Need observ, confirm” — yes / confirm / observ on, or no. Refused during an attack run.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   AUTO["after takeoff (automatic)"] --> RDY["“Guidance unit ready”"]
   OB(["observ / observe"]) --> ON["on"]
   OB --> OFF["off"]
   RDY -.->|"needed first"| ON
+  LK(["look / sight / what is at  ⟵ new"]) --> LA["left · right · ahead"]
+  LK --> LC["8 … 4  o'clock"]
+  LK --> LP["north … northwest"]
+  LC -.-> LD["n km"]
+  LP -.-> LD
   WP(["weapons"]) --> AR["armed"]
   WP --> SF["safe"]
   </pre></div>
@@ -180,8 +184,9 @@ flowchart LR
 <footer>Source: <code>audio-adapter/src/vocabulary.py</code> (PHRASES and the slot word lists). Phrasings shown are the ones the recogniser is tuned toward; close variants may also match. Kept current by <code>.claude/scripts/command-map-check.py</code>, run at every merge.</footer>
 <script type="application/json" id="command-map-manifest">
 {
- "vocabulary_sha256": "bf0d9fd1bd6e7fb32b5df44b7320d4e1b4c19f9991ff20aa5c3dd2264a96d864",
+ "vocabulary_sha256": "660a38469a87a88a465f673cfcd2c979b5958493493e7f92a7143f74a29be716",
  "cards": {
+  "point": 7,
   "wake_petrovich": 1,
   "cancel_nevermind": 1,
   "scan_ahead": 3,
