@@ -42,6 +42,36 @@ if 1-5 are clean and it's genuinely small" -- out of scope for this cut).
 - `plans/pov-view/plan.md` -- appended "Main-loop amendments" and "Deviations from the plan found
   during implementation" sections (below).
 
+**Review fixes (`plans/pov-view/review.md`, tip `adf9583f`):**
+
+- `body-layer/src/ascii_canvas.py` -- added `GROUND_TRUTH_SEEN_GLYPH`/`GROUND_TRUTH_NOT_SEEN_GLYPH`
+  (`·`/`×`), shared by both views (Required Fix 1).
+- `body-layer/src/eyesight_view.py` -- its ground-truth glyph selection now imports the two
+  constants above instead of using its own local literal (no behaviour change -- same characters).
+- `body-layer/src/pov_view.py` -- ground-truth markers now draw `GROUND_TRUTH_SEEN_GLYPH`/
+  `GROUND_TRUTH_NOT_SEEN_GLYPH` instead of the old local `"."`/`"x"` pair (Required Fix 1);
+  `render_frame` now draws a dim-gray border row/column and 30-degree gridlines first, overridden
+  by the eye-sector/disc/ground-truth/believed layers in turn (Required Fix 2); the naked-eye
+  sector's edges draw as `‖` (`_EYE_EDGE_GLYPH`) instead of `|`, and the sector's top/bottom border
+  cells are recoloured green (Required Fix 3); the legend line updated to describe all of the
+  above.
+- `body-layer/tests/test_pov_view.py` -- one existing test renamed/updated
+  (`test_unaided_optic_draws_a_border_not_a_disc` → `test_unaided_optic_draws_eye_edges_not_a_disc`,
+  since the eye-edge glyph changed from `|` to `‖`); nine new tests (see "Tests Added").
+
+**User amendment (2026-10-25, mid-review-fix): "the optics FOV highlight could use background
+color instead."** `ascii_canvas.Canvas` gained an additive `set_bg`/`bg` layer, independent of the
+existing glyph/foreground layer (`eyesight_view.py` never calls it, so it and its tests are
+unaffected); `ascii_canvas.py` gained `BG_BLUE`/`BG_GRAY`/`BG_BROWN`. `pov_view.render_frame`'s
+optic-disc branch now paints a background tint per cell when `color=True` (keeping whatever glyph
+already occupies the cell -- a gridline, a marker, a blank), and only falls back to the original
+`.`-dot rendering when `color=False`, since there is no way to show a tint in plain text. One
+existing test (`test_sight_narrow_uses_the_brown_colour_code`) updated to check the background
+code instead of the foreground one, since the colour-on disc no longer uses the foreground colour
+at all; four new tests cover the tint/dot split, a marker inside the disc keeping its own glyph
+while gaining the tint, and a blank cell inside the disc rendering as a tinted space. Full account
+in `plans/pov-view/plan.md`'s "User amendment, 2026-10-25" section.
+
 ### Tests Added
 
 - `body-layer/tests/test_geometry.py` -- `test_elevation_deg_level_target_is_zero`,
@@ -50,14 +80,17 @@ if 1-5 are clean and it's genuinely small" -- out of scope for this cut).
 - `body-layer/tests/test_detection_trace.py` -- `test_admitted_entry_records_true_elevation_deg`,
   `test_rejected_entry_also_records_true_elevation_deg` (ground truth is recorded regardless of
   which gate decided the outcome).
-- `body-layer/tests/test_pov_view.py` (**new**, 21 tests) -- ground-truth/believed marker builders
-  (azimuth/elevation carried through correctly, player-bubble rows/contacts dropped, a row with no
-  elevation dropped rather than fabricated), `render_frame` draw order (believed wins over
-  disc/border, ground truth doesn't survive under a believed marker), azimuth-cutoff drop vs.
-  elevation clip-not-drop, the border-vs-disc distinction for `unaided` vs. every other optic
-  (verified both ways -- the border test was re-run against `binocular` to confirm it goes red for
-  the stated reason before being trusted), the brown colour code for `sight_narrow`, colour
-  on/off, watched=orange/unwatched=yellow, axis tick labels present, and the `max_lines` budget.
+- `body-layer/tests/test_pov_view.py` (**new**, originally 21 tests, now 30 after the review
+  fixes below) -- ground-truth/believed marker builders (azimuth/elevation carried through
+  correctly, player-bubble rows/contacts dropped, a row with no elevation dropped rather than
+  fabricated), `render_frame` draw order (believed wins over disc/border, ground truth doesn't
+  survive under a believed marker), azimuth-cutoff drop vs. elevation clip-not-drop, the
+  eye-edge-vs-disc distinction for `unaided` vs. every other optic (verified both ways), the brown
+  colour code for `sight_narrow`, colour on/off, watched=orange/unwatched=yellow, axis tick labels
+  present, and the `max_lines` budget. Nine tests added for the review fixes (glyph pinning on
+  both sides with a mutation check, the optic-FOV-dot-stays-ASCII distinction, border/gridline
+  presence and draw order, the eye-edge glyph, and the sector border-highlight colour) -- see
+  "Review fixes" below.
 - `body-layer/tests/test_body.py` -- `test_render_pov_frame_none_before_first_poll`,
   `test_render_pov_frame_unaided_optic_uses_gaze_boresight`,
   `test_render_pov_frame_binocular_optic_uses_fixed_look_boresight`,
@@ -67,84 +100,116 @@ if 1-5 are clean and it's genuinely small" -- out of scope for this cut).
 
 ### Checks (body-layer/)
 
-- `ruff format --check src tests`: pass (176 files)
+- `ruff format --check src tests`: pass (177 files, after reformatting `test_pov_view.py`)
 - `ruff check src tests`: pass (all checks passed)
 - `cd body-layer && mypy src`: pass (76 source files, no issues)
-- `pytest tests -q`: pass -- 2608 passed, 4 xfailed
+- `pytest tests -q`: pass -- 2617 passed, 4 xfailed (up from 2608 by the 9 review-fix tests)
+
+### Review fixes
+
+`plans/pov-view/review.md` (tip `adf9583f`) required three fixes before this could land; all three
+are now addressed, and the sample frames below are re-rendered from the fixed code.
+
+1. **Ground-truth glyphs.** Moved `GROUND_TRUTH_SEEN_GLYPH = "·"` (`·`)/
+   `GROUND_TRUTH_NOT_SEEN_GLYPH = "×"` (`×`) into `ascii_canvas.py`, so both views share one
+   literal rather than each defining its own. `eyesight_view.py`'s own ground-truth glyph selection
+   now imports them too (previously a local literal), closing the drift the review's own mutation
+   check found. The optic FOV's dot stays plain ASCII `.`, unchanged, per the user's own
+   instruction ("draw the current optic's FOV with dots '.'") -- deliberately a different
+   character from either ground-truth glyph, not a third alias for one of them.
+   `test_ground_truth_glyphs_are_the_shared_top_down_pair_not_ascii` pins the seen glyph and is
+   confirmed, by mutation, to fail if it reverts to `"q"` (or anything else);
+   `test_ground_truth_not_seen_glyph_is_pinned_too` does the same for the not-seen side (the
+   review's own optional refinement); `test_optic_fov_disc_still_draws_as_a_plain_dot` pins the
+   disc side of the same distinction.
+2. **Border and gridlines.** `render_frame` now draws a dim-gray `-` border row at both elevation
+   extremes and a dim-gray `|` border column at both azimuth extremes, plus dim-gray `|`
+   gridlines at every 30-degree azimuth tick running the full canvas height -- all drawn first,
+   via `set_if_blank`, so a marker/disc/eye-line below always wins its cell (`test_top_and_bottom_
+   border_rows_are_full_dash_lines`, `test_vertical_gridlines_run_through_the_full_canvas_body`,
+   `test_gridlines_and_border_are_drawn_before_the_optic_disc`).
+3. **Eye sector highlight.** The naked-eye sector's two edges now draw as `‖` (U+2016 DOUBLE
+   VERTICAL LINE), not the gridline's own `|`, so the sector still reads without colour
+   (`test_eye_edge_glyph_differs_from_the_gridline_glyph`); the top/bottom border cells spanning
+   the sector's azimuth width are recoloured green (`test_eye_sector_border_cells_are_recoloured_
+   green`), so the sector reads as one highlighted band rather than two free-floating lines. The
+   legend line was updated to describe all three glyphs (ground truth, eye sector, optic FOV) and
+   the gridlines.
 
 ### Sample frames
 
 Produced from the final `pov_view.render_frame`, `color=False`, with synthetic ground-truth and
-believed markers (not hand-drawn):
+believed markers (not hand-drawn) -- re-rendered after the review fixes above:
 
-**Unaided optic (green eye border, two vertical lines at the gaze wedge's azimuth edges):**
+**Unaided optic (green `‖` eye-sector edges, green sector highlight on the top/bottom border):**
 
 ```
 optic=unaided  boresight az=-10 el=+0
-AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: . seen / x not seen, eyes=green border, optic=dots)
+AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: · seen / × not seen, eyes=green ‖ sector, optic=dim ., grid=dim |)
     -90         -60          -30           0           +30          +60         +90
     |            |            |            |            |            |            |
- +10                            |            |                                      +10
-                                |            |                                     
-                                |            |                                     
-                       x        |            |                                     
-   0                            |            |                                      0
-                                |            |                                     
-                                |            |  AR                                 
-                                | .          |                                     
- -10                            |            |                                      -10
-                                |            |                     TR              
-                                |            |                                     
-                                |            |                                     
- -20                            |            |                                      -20
+ +10--------------------------‖----------------‖----------------------------------- +10
+    |            |            ‖            |   ‖        |            |            |
+    |            |            ‖            |   ‖        |            |            |
+    |            |            ‖            |   ‖        |            |            |
+   0|            |            ‖            |   ‖        |            |            | 0
+    |            |     ×      ‖            |   ‖        |            |            |
+    |            |            ‖            |   ‖        |            |            |
+    |           ×|            ‖            |   ‖AR      |            |            |
+ -10|            |            ‖            |   ‖        |            |            | -10
+    |            |            ‖            |   ‖        |          TR|            |
+    |            |            ‖            |   ‖        |            |            |
+    |            |            ‖            |   ‖        |            |            |
+ -20--------------------------‖----------------‖----------------------------------- -20
 ```
 
 **Binoculars (blue filled dot-disc, 4.25-degree half-angle):**
 
 ```
 optic=binocular  boresight az=+12 el=-5
-AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: . seen / x not seen, eyes=green border, optic=dots)
+AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: · seen / × not seen, eyes=green ‖ sector, optic=dim ., grid=dim |)
     -90         -60          -30           0           +30          +60         +90
     |            |            |            |            |            |            |
- +10                                                                                +10
-                                                                                   
-                                                                                   
-                       x                                                           
-   0                                                                                0
-                                               ...                                 
-                                               .AR.                                 
-                                  .            ...                                 
- -10                                                                                -10
-                                                                   TR              
-                                                                                   
-                                                                                   
- -20                                                                                -20
+ +10------------------------------------------------------------------------------- +10
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+   0|            |            |            |            |            |            | 0
+    |            |     ×      |            |   ...      |            |            |
+    |            |            |            |   ....     |            |            |
+    |           ×|            |            |   .AR      |            |            |
+ -10|            |            |            |            |            |            | -10
+    |            |            |            |            |          TR|            |
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+ -20------------------------------------------------------------------------------- -20
 ```
 
 **9K113 narrow (brown filled dot-disc, 3-degree half-angle -- visibly smaller than the binoculars'):**
 
 ```
 optic=sight_narrow  boresight az=+12 el=-5
-AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: . seen / x not seen, eyes=green border, optic=dots)
+AA air defence  AR armour  TR truck  G group  U unknown   (believed=bold, watched=orange, ground truth: · seen / × not seen, eyes=green ‖ sector, optic=dim ., grid=dim |)
     -90         -60          -30           0           +30          +60         +90
     |            |            |            |            |            |            |
- +10                                                                                +10
-                                                                                   
-                                                                                   
-                       x                                                           
-   0                                                                                0
-                                                .                                  
-                                               .AR                                 
-                                  .             .                                  
- -10                                                                                -10
-                                                                   TR              
-                                                                                   
-                                                                                   
- -20                                                                                -20
+ +10------------------------------------------------------------------------------- +10
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+   0|            |            |            |            |            |            | 0
+    |            |     ×      |            |    .       |            |            |
+    |            |            |            |   ...      |            |            |
+    |           ×|            |            |    AR      |            |            |
+ -10|            |            |            |            |            |            | -10
+    |            |            |            |            |          TR|            |
+    |            |            |            |            |            |            |
+    |            |            |            |            |            |            |
+ -20------------------------------------------------------------------------------- -20
 ```
 
-(ANSI colour codes stripped for this document; `AR`/`TR` render bold-orange/bold-yellow, the "x"
-ground-truth glyph dim gray, and the disc/border in the optic's own colour when `color=True`.)
+(ANSI colour codes stripped for this document; `AR`/`TR` render bold-orange/bold-yellow, the `×`
+ground-truth glyph dim gray, the gridlines/border dim gray, the eye-sector edges/border highlight
+green, and the disc in the optic's own colour when `color=True`.)
 
 ### Notable Discoveries
 

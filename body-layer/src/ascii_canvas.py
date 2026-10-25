@@ -34,6 +34,31 @@ ORANGE: Final[str] = "\x1b[38;5;208m"
 #: `GRAY` (sight wide) and `YELLOW`/`ORANGE` (believed markers).
 BROWN: Final[str] = "\x1b[38;5;130m"
 
+#: Ground-truth marker glyphs, shared between `eyesight_view.py`'s top-down
+#: view and `pov_view.py`'s forward-POV twin so the two can never render a
+#: ground-truth "seen"/"not seen" marker differently (`plans/pov-view/
+#: review.md` Required Fix 1 -- `pov_view.py` had reinvented its own `.`/`x`
+#: pair instead of reusing these). Deliberately distinct from the optic
+#: FOV's own dot glyph (plain `.`), which the user specified directly
+#: ("draw the current optic's FOV with dots '.'") and must not be confused
+#: with either of these.
+GROUND_TRUTH_SEEN_GLYPH: Final[str] = "·"
+GROUND_TRUTH_NOT_SEEN_GLYPH: Final[str] = "×"
+
+#: Per-optic background tints for `pov_view.py`'s optic-FOV highlight
+#: (user amendment, 2026-10-25: "the optics FOV highlight could use
+#: background color instead" -- a disc painted as `.` dots hides whatever
+#: glyph already occupied the cell; a background tint does not). Dim
+#: 256-colour backgrounds, deliberately darker than the matching
+#: foreground constant above (`BLUE`/`GRAY`/`BROWN`) so a bold yellow/
+#: orange marker label or the ground-truth `·`/`×` glyph stays readable
+#: painted on top of one. `BG_BROWN` reuses `BROWN`'s own 256-colour index
+#: (130) as a background instead of a foreground -- one "brown" in the
+#: palette, not two unrelated numbers.
+BG_BLUE: Final[str] = "\x1b[48;5;24m"
+BG_GRAY: Final[str] = "\x1b[48;5;240m"
+BG_BROWN: Final[str] = "\x1b[48;5;130m"
+
 
 def wrap(text: str, *codes: str, color: bool) -> str:
     """Apply ANSI `codes` to `text`, or return it unchanged when `color` is
@@ -55,6 +80,7 @@ class Canvas:
         self.codes: list[list[tuple[str, ...]]] = [
             [() for _ in range(self.cols)] for _ in range(self.rows)
         ]
+        self.bg: list[list[str | None]] = [[None] * self.cols for _ in range(self.rows)]
 
     def set(self, row: int, col: int, glyph: str, *codes: str) -> None:
         if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -69,24 +95,44 @@ class Canvas:
         ):
             self.set(row, col, glyph, *codes)
 
+    def set_bg(self, row: int, col: int, code: str) -> None:
+        """Paint a background tint on one cell, independent of its
+        glyph/foreground layer -- composes with whatever `set`/
+        `set_if_blank` already put there (or will put there later; order
+        between the two does not matter), rather than overwriting it.
+        `pov_view.py`'s optic-FOV highlight is the one caller; `eyesight_
+        view.py` never calls this, so its `render_frame` and tests are
+        unaffected by this layer's existence (additive, `bg` defaults
+        `None` everywhere)."""
+        if 0 <= row < self.rows and 0 <= col < self.cols:
+            self.bg[row][col] = code
+
     def render(self, *, color: bool) -> list[str]:
         lines = []
         for row in range(self.rows):
-            cells = [
-                wrap(self.glyph[row][col], *self.codes[row][col], color=color)
-                for col in range(self.cols)
-            ]
+            cells = []
+            for col in range(self.cols):
+                codes = self.codes[row][col]
+                bg_code = self.bg[row][col]
+                if bg_code is not None:
+                    codes = (*codes, bg_code)
+                cells.append(wrap(self.glyph[row][col], *codes, color=color))
             lines.append("".join(cells))
         return lines
 
 
 __all__ = [
+    "BG_BLUE",
+    "BG_BROWN",
+    "BG_GRAY",
     "BLUE",
     "BOLD",
     "BROWN",
     "DIM",
     "GRAY",
     "GREEN",
+    "GROUND_TRUTH_NOT_SEEN_GLYPH",
+    "GROUND_TRUTH_SEEN_GLYPH",
     "ORANGE",
     "RESET",
     "YELLOW",

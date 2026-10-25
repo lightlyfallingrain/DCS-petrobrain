@@ -5,6 +5,14 @@ a human, same split `test_eyesight_view.py` already establishes."""
 
 from __future__ import annotations
 
+from ascii_canvas import (
+    BG_BLUE,
+    BG_BROWN,
+    BOLD,
+    GROUND_TRUTH_NOT_SEEN_GLYPH,
+    GROUND_TRUTH_SEEN_GLYPH,
+    YELLOW,
+)
 from belief.cardinality import OP_1UNIT, new_cardinality_belief
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
@@ -221,7 +229,7 @@ def test_marker_beyond_elevation_range_is_clipped_not_dropped() -> None:
     assert any("AR" in line for line in frame.splitlines())
 
 
-def test_unaided_optic_draws_a_border_not_a_disc() -> None:
+def test_unaided_optic_draws_eye_edges_not_a_disc() -> None:
     frame = render_frame(
         optic_name="unaided",
         boresight_azimuth_deg=0.0,
@@ -229,10 +237,27 @@ def test_unaided_optic_draws_a_border_not_a_disc() -> None:
         half_angle_deg=15.0,
         color=False,
     )
-    # Two vertical border lines ("|"), not the disc glyph (".").
-    assert "|" in frame
+    # Two vertical green eye-edge lines, in the eye-edge's own glyph
+    # ("‖", review Required Fix 3) -- never the optic-disc glyph (".").
+    assert "‖" in frame
     canvas_lines = frame.splitlines()[4:]
     assert not any("." in line for line in canvas_lines)
+
+
+def test_eye_edge_glyph_differs_from_the_gridline_glyph() -> None:
+    # Mutation check (review's own method, Required Fix 1): the eye edge
+    # must draw a different character than the dim gray gridline, or the
+    # sector is unreadable with colour off. Confirmed by construction: the
+    # eye-edge glyph is U+2016, the gridline glyph is plain "|" (U+007C).
+    frame = render_frame(
+        optic_name="unaided",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=15.0,
+        color=False,
+    )
+    assert "‖" in frame
+    assert "|" in frame  # the gridlines/border columns, still present too
 
 
 def test_binocular_optic_draws_a_filled_disc() -> None:
@@ -247,7 +272,10 @@ def test_binocular_optic_draws_a_filled_disc() -> None:
     assert any("." in line for line in canvas_lines)
 
 
-def test_sight_narrow_uses_the_brown_colour_code() -> None:
+def test_sight_narrow_uses_the_brown_background_tint_with_colour_on() -> None:
+    # User amendment, 2026-10-25: "the optics FOV highlight could use
+    # background color instead" -- with colour on, the FOV is a
+    # background tint (BG_BROWN), not a foreground dot colour.
     frame = render_frame(
         optic_name="sight_narrow",
         boresight_azimuth_deg=0.0,
@@ -255,7 +283,9 @@ def test_sight_narrow_uses_the_brown_colour_code() -> None:
         half_angle_deg=3.0,
         color=True,
     )
-    assert "\x1b[38;5;130m" in frame  # BROWN
+    assert BG_BROWN in frame
+    canvas_lines = frame.splitlines()[4:]
+    assert not any("." in line for line in canvas_lines)
 
 
 def test_render_frame_color_disabled_has_no_escape_codes() -> None:
@@ -340,3 +370,220 @@ def test_frame_respects_a_tight_max_lines_budget() -> None:
         max_lines=5,
     )
     assert len(frame.splitlines()) <= 5
+
+
+# --- Review required fixes: glyphs, border, gridlines ----------------------
+
+
+def test_ground_truth_glyphs_are_the_shared_top_down_pair_not_ascii() -> None:
+    # Required Fix 1 (review.md): the top-down view's own "." (seen) was
+    # rejected by the user's explicit instruction ("use the existing
+    # symbols from the top-down graph") -- pin the real characters, and
+    # pin them against the shared constant so the two views cannot drift
+    # apart independently.
+    assert GROUND_TRUTH_SEEN_GLYPH == "·"
+    assert GROUND_TRUTH_NOT_SEEN_GLYPH == "×"
+    seen = [PovGroundTruthMarker(azimuth_deg=0.0, elevation_deg=0.0, visible=True)]
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=200.0,  # well outside the canvas -- no disc drawn
+        boresight_elevation_deg=0.0,
+        half_angle_deg=1.0,
+        ground_truth=seen,
+        color=False,
+    )
+    assert GROUND_TRUTH_SEEN_GLYPH in frame
+    # Mutation check (review's own method): a seen marker must never draw
+    # as the plain ASCII "." the old code used -- that glyph is reserved
+    # for the optic FOV dot and must not appear for a ground-truth marker
+    # here, where no disc is drawn at all.
+    canvas_lines = frame.splitlines()[4:]
+    assert not any("." in line for line in canvas_lines)
+
+
+def test_ground_truth_not_seen_glyph_is_pinned_too() -> None:
+    # Review's own optional refinement: pin the not-seen side too, not
+    # just the seen side the review's mutation check happened to use.
+    not_seen = [PovGroundTruthMarker(azimuth_deg=0.0, elevation_deg=0.0, visible=False)]
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=200.0,  # well outside the canvas -- no disc drawn
+        boresight_elevation_deg=0.0,
+        half_angle_deg=1.0,
+        ground_truth=not_seen,
+        color=False,
+    )
+    assert GROUND_TRUTH_NOT_SEEN_GLYPH in frame
+    canvas_lines = frame.splitlines()[4:]
+    assert not any("x" in line for line in canvas_lines)  # old ASCII glyph
+
+
+def test_optic_fov_disc_still_draws_as_a_plain_dot() -> None:
+    # The user's own instruction: "draw the current optic's FOV with dots
+    # '.'" -- the disc glyph must stay plain ASCII "." and must not be
+    # confused with either ground-truth glyph (review's Required Fix 1
+    # caution: "." vs "·" must differ).
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=20.0,
+        color=False,
+    )
+    canvas_lines = frame.splitlines()[4:]
+    assert any("." in line for line in canvas_lines)
+    assert not any(GROUND_TRUTH_SEEN_GLYPH in line for line in canvas_lines)
+    assert not any(GROUND_TRUTH_NOT_SEEN_GLYPH in line for line in canvas_lines)
+
+
+def test_top_and_bottom_border_rows_are_full_dash_lines() -> None:
+    # Required Fix 2: the user's mock shows a complete "-" border row at
+    # both elevation extremes, not just a labelled top edge.
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=-90.0,  # disc nowhere near either border row
+        half_angle_deg=2.0,
+        color=False,
+    )
+    canvas_lines = frame.splitlines()[4:]
+    top_row, bottom_row = canvas_lines[0], canvas_lines[-1]
+    assert top_row.count("-") > len(top_row) // 2
+    assert bottom_row.count("-") > len(bottom_row) // 2
+
+
+def test_vertical_gridlines_run_through_the_full_canvas_body() -> None:
+    # Required Fix 2: dim "|" gridlines at every 30-degree tick, the whole
+    # canvas height, not just a header tick row above the canvas.
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=-90.0,
+        half_angle_deg=2.0,
+        color=False,
+    )
+    canvas_lines = frame.splitlines()[4:]
+    # Interior rows (not the border rows, which are solid dashes) must
+    # each carry at least one gridline "|".
+    interior_rows = canvas_lines[1:-1]
+    assert interior_rows, "expected at least one interior row for this canvas"
+    assert all("|" in row for row in interior_rows)
+
+
+def test_gridlines_and_border_are_drawn_before_the_optic_disc() -> None:
+    # Required Fix 2's draw-order clause: the disc must win its cell over
+    # a gridline/border cell beneath it, not leave a gap in the disc.
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,  # boresight sits right on the centre gridline
+        boresight_elevation_deg=0.0,  # and on the 0-degree elevation row
+        half_angle_deg=5.0,
+        color=False,
+    )
+    canvas_lines = frame.splitlines()[4:]
+    center_row = canvas_lines[len(canvas_lines) // 2]
+    # The centre column must show the disc glyph, not a gridline "|" --
+    # i.e. the disc has overridden the gridline rather than the gridline
+    # surviving underneath it.
+    assert "." in center_row
+
+
+# --- User amendment (2026-10-25): optic-FOV highlight as a bg tint -------
+
+
+def test_disc_is_a_background_tint_not_a_dot_with_colour_on() -> None:
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=20.0,
+        color=True,
+    )
+    assert BG_BLUE in frame
+    canvas_lines = frame.splitlines()[4:]
+    assert not any("." in line for line in canvas_lines)
+
+
+def test_disc_falls_back_to_dots_with_colour_off() -> None:
+    # Unchanged from the user's original instruction ("draw the current
+    # optic's FOV with dots '.'") -- there is no way to show a background
+    # tint in plain text, so colour off keeps the old dot rendering.
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=20.0,
+        color=False,
+    )
+    assert "\x1b[" not in frame
+    canvas_lines = frame.splitlines()[4:]
+    assert any("." in line for line in canvas_lines)
+
+
+def test_marker_inside_the_disc_keeps_its_own_glyph_and_gains_the_tint() -> None:
+    # The whole point of the amendment: a background tint must never hide
+    # a marker (or anything else) inside the FOV -- the marker's own
+    # glyph/foreground survive, and the cell additionally carries the
+    # disc's background code.
+    believed = [PovBeliefMarker(label="AR", azimuth_deg=0.0, elevation_deg=0.0)]
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=20.0,
+        believed=believed,
+        color=True,
+    )
+    assert f"{BOLD}{YELLOW}{BG_BLUE}A" in frame
+    assert f"{BOLD}{YELLOW}{BG_BLUE}R" in frame
+
+
+def test_blank_cell_inside_the_disc_renders_as_a_tinted_space() -> None:
+    # A cell inside the FOV with nothing else drawn on it is not left
+    # untouched -- it still carries the background tint, as a tinted
+    # blank, confirming the tint paints the whole disc rather than only
+    # cells that already had a marker/gridline on them.
+    frame = render_frame(
+        optic_name="binocular",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=20.0,
+        color=True,
+    )
+    assert f"{BG_BLUE} " in frame
+
+
+def test_eye_sector_border_cells_are_recoloured_green() -> None:
+    # Required Fix 3's second clause: the top/bottom border cells across
+    # the naked-eye sector's azimuth width are recoloured green, so the
+    # sector reads as a highlighted band rather than two free-floating
+    # vertical lines.
+    frame = render_frame(
+        optic_name="unaided",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=15.0,
+        color=True,
+    )
+    lines = frame.splitlines()
+    top_border_line, bottom_border_line = lines[4], lines[-1]
+    green = "\x1b[32m"
+    assert f"{green}-" in top_border_line
+    assert f"{green}-" in bottom_border_line
+
+
+def test_eye_sector_border_highlight_is_absent_without_colour() -> None:
+    # Same scenario as above with color=False -- the recoloured segment
+    # must render as plain "-", not reappear as some other glyph, since
+    # colour is the only thing distinguishing it from the rest of the
+    # border row.
+    frame = render_frame(
+        optic_name="unaided",
+        boresight_azimuth_deg=0.0,
+        boresight_elevation_deg=0.0,
+        half_angle_deg=15.0,
+        color=False,
+    )
+    lines = frame.splitlines()
+    assert "\x1b[" not in lines[4]
+    assert "\x1b[" not in lines[-1]

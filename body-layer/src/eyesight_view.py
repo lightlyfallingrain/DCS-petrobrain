@@ -67,6 +67,8 @@ from ascii_canvas import BOLD as _BOLD
 from ascii_canvas import DIM as _DIM
 from ascii_canvas import GRAY as _GRAY
 from ascii_canvas import GREEN as _GREEN
+from ascii_canvas import GROUND_TRUTH_NOT_SEEN_GLYPH as _NOT_SEEN_GLYPH
+from ascii_canvas import GROUND_TRUTH_SEEN_GLYPH as _SEEN_GLYPH
 from ascii_canvas import ORANGE as _ORANGE
 from ascii_canvas import YELLOW as _YELLOW
 from ascii_canvas import Canvas as _Canvas
@@ -485,7 +487,7 @@ def render_frame(
     for gt_marker in ground_truth:
         cell = to_cell(gt_marker.bearing_deg, gt_marker.range_m)
         if cell is not None:
-            glyph = "·" if gt_marker.visible else "×"
+            glyph = _SEEN_GLYPH if gt_marker.visible else _NOT_SEEN_GLYPH
             canvas.set(*cell, glyph, _GRAY, _DIM)
 
     # Believed markers, last, unconditional -- never `set_if_blank`.

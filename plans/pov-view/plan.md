@@ -259,3 +259,46 @@ drawn to this scale.
   second stale count in `test_detection_trace.py`'s own docstring (also "25 fields") was shortened
   to drop the number entirely rather than re-guessing a figure that will drift again the next time a
   field is added.
+
+### Review fixes (`plans/pov-view/review.md`, tip `adf9583f`)
+
+Three required fixes, addressed on top of the above (see `plans/pov-view/implementation.md`'s own
+"Review fixes" section for the full account): ground-truth glyphs moved into `ascii_canvas.py` as
+`GROUND_TRUTH_SEEN_GLYPH`/`GROUND_TRUTH_NOT_SEEN_GLYPH` (`·`/`×`) and shared by both views; a
+persistent dim-gray border/gridline frame drawn first, underneath every marker/disc/eye-line; the
+naked-eye sector's edges drawn as `‖` with the sector's border cells recoloured green.
+
+### User amendment, 2026-10-25: optic-FOV highlight as a background tint, not dots
+
+The user's own words, given while the review fixes above were in progress: *"the optics FOV
+highlight could use background color instead, I believe that's possible with ASCII."*
+
+**Why this matters beyond cosmetics**: a `.`-glyph disc (the original, user-specified rendering)
+overwrites whatever glyph already occupied a cell — a gridline, a believed marker, a ground-truth
+glyph. A marker genuinely inside the optic's FOV (the common case, since Petrovich is usually
+looking roughly at what he is tracking) would lose its own glyph to the disc's dot, which is
+exactly the kind of thing this instrument exists to make visible, not hide.
+
+**Mechanism**: `ascii_canvas.Canvas` gained a `set_bg(row, col, code)` method and a parallel `bg`
+grid, additive and independent of the existing glyph/foreground layer (`set`/`set_if_blank`) —
+`eyesight_view.py` never calls it, so its own `render_frame` and `tests/test_eyesight_view.py` are
+unaffected. `render(color=...)` composes a cell's background code with its foreground codes when
+both are present, so a marker drawn inside a tinted disc keeps its own glyph/foreground and gains
+the tint, rather than either overwriting the other.
+
+**Colour on**: `pov_view.render_frame`'s non-`"unaided"` branch now calls `canvas.set_bg` for every
+cell inside the disc's angular radius instead of overwriting the cell with a `.` glyph. Three new
+background constants in `ascii_canvas.py`, the same per-optic scheme as the existing foreground
+colours: `BG_BLUE = "\x1b[48;5;24m"` (binoculars), `BG_GRAY = "\x1b[48;5;240m"` (9K113 wide),
+`BG_BROWN = "\x1b[48;5;130m"` (9K113 narrow — reusing `BROWN`'s own 256-colour index as a
+background rather than inventing a second "brown"). All three are dim enough that the bold
+yellow/orange marker labels and the ground-truth `·`/`×` glyphs stay readable painted on top of
+one (checked by rendering a marker inside a tinted disc — see `test_marker_inside_the_disc_keeps_
+its_own_glyph_and_gains_the_tint`).
+
+**Colour off**: unchanged from the user's original instruction ("draw the current optic's FOV with
+dots '.'") — there is no way to show a background tint in plain text, so the dot-glyph fallback
+from before this amendment still applies verbatim.
+
+**The naked-eye sector is unaffected** — it has no disc, only the two `‖` edge lines and the green
+border highlight from the review fixes above, both unchanged by this amendment.

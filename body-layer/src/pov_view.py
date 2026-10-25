@@ -42,15 +42,43 @@ against that optic's own `fov_half_angle_deg` -- reimplemented locally
 (`_angular_separation_deg`) rather than importing `optics.within_optic_fov`,
 since this module takes a resolved boresight + half-angle, not an `Optic`.
 
+**A persistent border and gridline frame is drawn first, per the user's
+own mock** (`plans/pov-view/review.md` Required Fix 2): a dim gray `-`
+border row at the elevation extremes, a dim gray `|` border column at the
+azimuth extremes, and dim gray `|` gridlines at every 30-degree azimuth
+tick, all the way through the canvas body -- a ruled grid, not just a
+labelled top edge, since reading an angle off the picture is the point of
+this instrument.
+
 **Draw order is load-bearing, same rule as `eyesight_view.py`'s own
-docstring**: eyes border / optic disc first, ground truth next, believed
-last -- a believed contact always wins its cell.
+docstring**: border/gridlines first (dim, `set_if_blank`), eyes border /
+optic disc next (unconditional `set`, so it always wins over a gridline
+underneath it), ground truth next, believed last -- a believed contact
+always wins its cell. The naked eye's green sector is doubly marked: its
+two edges draw as `_EYE_EDGE_GLYPH` (distinct from the gridline's own
+`|`, so it still reads without colour), and the top/bottom border cells
+spanning the sector's azimuth width are recoloured green so the sector
+reads as a highlighted band rather than two free-floating lines.
 
 **Off-canvas handling differs by axis, not symmetric** (`plans/pov-view/
 plan.md`'s "Open decisions"): azimuth beyond `azimuth_half_deg` is dropped
 (the naked eye's own hard FOV limit -- nothing can legitimately sit beyond
 it), elevation beyond `elevation_up_deg`/`elevation_down_deg` is clipped to
-the canvas edge (a display choice, not a perceptual one)."""
+the canvas edge (a display choice, not a perceptual one).
+
+**The optic-FOV disc is a background tint when colour is on, dots when it
+is off** (user amendment, 2026-10-25: "the optics FOV highlight could use
+background color instead"). A `.`-glyph disc hides whatever already
+occupied the cell -- a gridline, a believed marker, a ground-truth glyph
+-- which is exactly what this instrument must never do to a real marker.
+With colour on, every cell inside the disc's angular radius gets
+`Canvas.set_bg` instead of a glyph overwrite, so whatever is drawn there
+(including nothing -- a tinted blank) keeps its own glyph/foreground.
+With colour off there is no way to show a tint in plain text, so this
+falls back to the dot-glyph the user originally specified ("draw the
+current optic's FOV with dots '.'"), unchanged from before this
+amendment. The naked eye's green sector is unaffected by this -- it has
+no disc, only the two edge lines and the border highlight."""
 
 from __future__ import annotations
 
@@ -59,7 +87,21 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from ascii_canvas import BLUE, BOLD, BROWN, DIM, GRAY, GREEN, ORANGE, YELLOW
+from ascii_canvas import (
+    BG_BLUE,
+    BG_BROWN,
+    BG_GRAY,
+    BLUE,
+    BOLD,
+    BROWN,
+    DIM,
+    GRAY,
+    GREEN,
+    GROUND_TRUTH_NOT_SEEN_GLYPH,
+    GROUND_TRUTH_SEEN_GLYPH,
+    ORANGE,
+    YELLOW,
+)
 from ascii_canvas import Canvas as _Canvas
 from belief.attention import AttentionArea, effective_attention
 from belief.contacts import Contact
@@ -114,6 +156,29 @@ _OPTIC_DISC_COLOR: Final[dict[str, str]] = {
     "sight_wide": GRAY,
     "sight_narrow": BROWN,
 }
+
+#: The same per-optic scheme, as a background tint instead of a dot's
+#: foreground colour -- the colour-on disc rendering (module docstring,
+#: user amendment 2026-10-25). Unknown optic names fall back to `BG_GRAY`
+#: in `render_frame` itself, mirroring `_OPTIC_DISC_COLOR.get`'s own
+#: `GRAY` fallback above.
+_OPTIC_DISC_BG_COLOR: Final[dict[str, str]] = {
+    "binocular": BG_BLUE,
+    "sight_wide": BG_GRAY,
+    "sight_narrow": BG_BROWN,
+}
+
+#: The naked-eye sector's two green edge lines (`plans/pov-view/review.md`
+#: Required Fix 3) -- deliberately not the dim gray gridline's own `|`, so
+#: the eye sector still reads distinctly with colour off. U+2016 DOUBLE
+#: VERTICAL LINE, chosen over `:` for a closer visual match to a border
+#: line; swap for `:` if a target terminal's font renders this unreliably.
+_EYE_EDGE_GLYPH: Final[str] = "‖"
+
+#: Vertical gridline columns, azimuth ticks every 30 degrees -- dim gray,
+#: drawn before any marker/disc/eye-line so every one of those wins its
+#: cell (`plans/pov-view/review.md` Required Fix 2).
+_GRIDLINE_STEP_DEG: Final[int] = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,10 +368,47 @@ def render_frame(
     def cell_center(row: int, col: int) -> tuple[float, float]:
         return (col - center_col) * deg_per_col, elevation_up_deg - row * deg_per_row
 
+    # Azimuth tick/gridline azimuths -- every 30 deg within the canvas's
+    # own azimuth extent, shared by the header labels below and the
+    # vertical gridlines drawn here.
+    tick_values = [
+        value
+        for value in range(-90, 91, _GRIDLINE_STEP_DEG)
+        if abs(value) <= azimuth_half_deg + 1e-9
+    ]
+
+    # Border + gridlines, dim gray, drawn first so every marker/disc/
+    # eye-line below wins its cell (Required Fix 2, module docstring).
+    # Border rows first: a `set_if_blank` vertical gridline below this
+    # point skips an already-filled border cell, which is what keeps the
+    # top/bottom rows solid dashes rather than broken by a "|" (matches
+    # the user's own mock).
+    for col in range(cols):
+        canvas.set_if_blank(0, col, "-", GRAY, DIM)
+        canvas.set_if_blank(total_rows - 1, col, "-", GRAY, DIM)
+    for value in tick_values:
+        col = col_for(float(value))
+        for row in range(total_rows):
+            canvas.set_if_blank(row, col, "|", GRAY, DIM)
+    for col in (0, cols - 1):
+        for row in range(total_rows):
+            canvas.set_if_blank(row, col, "|", GRAY, DIM)
+
     if optic_name == "unaided":
-        # Eyes border: two vertical green lines at the gaze wedge's own
-        # azimuth edges, full canvas height -- no elevation bound to draw
-        # (module docstring).
+        # Eye sector: recolour the top/bottom border cells across the
+        # sector's azimuth width green first (Required Fix 3's "reads as a
+        # highlighted sector, not two free-floating lines"), then draw the
+        # two edge lines in green, full canvas height, overriding any
+        # border/gridline cell beneath them -- no elevation bound to draw
+        # (module docstring: `Gaze` carries only a centre elevation).
+        left_azimuth = max(-azimuth_half_deg, boresight_azimuth_deg - half_angle_deg)
+        right_azimuth = min(azimuth_half_deg, boresight_azimuth_deg + half_angle_deg)
+        if left_azimuth <= right_azimuth:
+            left_col = col_for(left_azimuth)
+            right_col = col_for(right_azimuth)
+            for col in range(left_col, right_col + 1):
+                canvas.set(0, col, "-", GREEN)
+                canvas.set(total_rows - 1, col, "-", GREEN)
         for edge_azimuth in (
             boresight_azimuth_deg - half_angle_deg,
             boresight_azimuth_deg + half_angle_deg,
@@ -315,11 +417,20 @@ def render_frame(
                 continue
             col = col_for(edge_azimuth)
             for row in range(total_rows):
-                canvas.set_if_blank(row, col, "|", GREEN)
+                canvas.set(row, col, _EYE_EDGE_GLYPH, GREEN)
     else:
-        # Filled dot-disc: every cell within half_angle_deg's angular
-        # separation of the boresight (module docstring).
-        disc_color = _OPTIC_DISC_COLOR.get(optic_name, GRAY)
+        # Optic FOV: every cell within half_angle_deg's angular separation
+        # of the boresight (module docstring). With colour on, a
+        # background tint (`set_bg`, additive -- never overwrites
+        # whatever glyph/foreground already occupies the cell, so a
+        # gridline or a believed/ground-truth marker inside the FOV stays
+        # visible, user amendment 2026-10-25). With colour off, falls
+        # back to the dot-glyph the user originally specified
+        # (unconditional `set`, not `set_if_blank`, so the dot still wins
+        # over a border/gridline cell beneath it -- there is no
+        # background layer to carry that distinction in plain text).
+        disc_fg_color = _OPTIC_DISC_COLOR.get(optic_name, GRAY)
+        disc_bg_color = _OPTIC_DISC_BG_COLOR.get(optic_name, BG_GRAY)
         for row in range(total_rows):
             for col in range(cols):
                 azimuth, elevation = cell_center(row, col)
@@ -332,14 +443,23 @@ def render_frame(
                     )
                     <= half_angle_deg
                 ):
-                    canvas.set_if_blank(row, col, ".", disc_color, DIM)
+                    if color:
+                        canvas.set_bg(row, col, disc_bg_color)
+                    else:
+                        canvas.set(row, col, ".", disc_fg_color, DIM)
 
     # Ground truth, dim -- drawn before believed markers so a believed
     # marker always wins the cell (module docstring's draw-order rule).
+    # Glyphs are `ascii_canvas`'s shared ground-truth pair, not this
+    # module's own optic-FOV dot (Required Fix 1).
     for gt_marker in ground_truth:
         cell = to_cell(gt_marker.azimuth_deg, gt_marker.elevation_deg)
         if cell is not None:
-            glyph = "." if gt_marker.visible else "x"
+            glyph = (
+                GROUND_TRUTH_SEEN_GLYPH
+                if gt_marker.visible
+                else GROUND_TRUTH_NOT_SEEN_GLYPH
+            )
             canvas.set(*cell, glyph, GRAY, DIM)
 
     # Believed markers, last, unconditional -- never `set_if_blank`.
@@ -359,9 +479,6 @@ def render_frame(
     # Azimuth header: tick marks every 30 deg, labels above them -- the
     # user's own mock layout.
     margin = "    "
-    tick_values = [
-        value for value in range(-90, 91, 30) if abs(value) <= azimuth_half_deg + 1e-9
-    ]
     label_row = [" "] * cols
     tick_row = [" "] * cols
     for value in tick_values:
@@ -393,8 +510,9 @@ def render_frame(
     )
     legend = (
         "AA air defence  AR armour  TR truck  G group  U unknown   "
-        "(believed=bold, watched=orange, ground truth: . seen / x not seen, "
-        "eyes=green border, optic=dots)"
+        f"(believed=bold, watched=orange, ground truth: {GROUND_TRUTH_SEEN_GLYPH} "
+        f"seen / {GROUND_TRUTH_NOT_SEEN_GLYPH} not seen, eyes=green "
+        f"{_EYE_EDGE_GLYPH} sector, optic=dim ., grid=dim |)"
     )
 
     parts = [info, legend, *header_lines, *canvas_block]
