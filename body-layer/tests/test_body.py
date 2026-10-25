@@ -46,6 +46,7 @@ from belief.mission_phase import (
     MissionPhaseTracker,
     MissionUnderstandingData,
 )
+from belief.optic_policy import BoundedSightLook
 from belief.sight_effector import GuidanceUnitState
 from belief.tasks import TaskStore
 from body import (
@@ -65,6 +66,7 @@ from body import (
     _search_sweep,
     _sight_in_regard_sweep,
     _sight_out_of_regard_sweep,
+    _sight_point_sweep,
     _speech_log_sink,
     _split_sector_by_regard,
     _to_body_relative_steps,
@@ -1052,6 +1054,41 @@ class TestSightInRegardSweep:
         azimuths = [azimuth for azimuth, _ in pattern]
         assert azimuths
         assert all(-60.0 <= azimuth <= 0.0 for azimuth in azimuths)
+
+
+class TestSightPointSweep:
+    """`_sight_point_sweep` -- `plans/9k113-scan-procedure/plan-stage2.md`'s
+    "The sweep itself", `_sight_in_regard_sweep`'s sibling driven directly
+    by a `BoundedSightLook` wedge/band rather than a commanded sector."""
+
+    def test_none_is_empty(self) -> None:
+        assert _sight_point_sweep(None, _ownship_for_search()) == []
+
+    def test_a_forward_wedge_sweeps_within_it(self) -> None:
+        bounded = BoundedSightLook(
+            center_azimuth_deg=30.0,
+            half_width_deg=15.0,
+            near_m=1_500.0,
+            far_m=8_000.0,
+            label="two o'clock",
+        )
+        pattern = _sight_point_sweep(bounded, _ownship_for_search())
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert azimuths
+        assert all(15.0 <= azimuth <= 45.0 for azimuth in azimuths)
+
+    def test_a_wedge_wholly_outside_regard_is_empty(self) -> None:
+        """A compass bearing straddling or outside the sight's own +-60
+        deg field of regard yields no steps -- `_advance_bounded_look`'s
+        own defensive empty-`steps` handling, not a crash."""
+        bounded = BoundedSightLook(
+            center_azimuth_deg=120.0,
+            half_width_deg=15.0,
+            near_m=1_500.0,
+            far_m=8_000.0,
+            label="south",
+        )
+        assert _sight_point_sweep(bounded, _ownship_for_search()) == []
 
 
 class TestSightInRegardSweepElevation:
