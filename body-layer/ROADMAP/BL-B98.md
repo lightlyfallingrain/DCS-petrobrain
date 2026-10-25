@@ -1,7 +1,7 @@
 # BL-B98 — 9K113 sight returns to dead-ahead after a glance-away instead of staying at its last position
 
-- [~] **BL-B98 — The 9K113 sight resumes dead ahead `(0.0, 0.0)` on every glance-away-triggered
-  resume, not at its last position.** #status/in-progress Folded into `[[BL-B89]]` on
+- [x] **BL-B98 — The 9K113 sight resumes dead ahead `(0.0, 0.0)` on every glance-away-triggered
+  resume, not at its last position.** #status/done #needs-flight Merged with `[[BL-B89]]` in `92da214a`. Folded into `[[BL-B89]]` on
   `feature/9k113-scan-procedure` (user direction 2026-10-25, below). Found during the BL-B89 Stage 1 review
   (`plans/9k113-scan-procedure/review.md`, Required Fix 1), pre-existing — not this stage's
   defect to introduce, but newly measured by this stage's own tests.

@@ -1,8 +1,14 @@
 # BL-B89 — 9K113 scanning procedure: points of interest, not band sweeps
 
-- [ ] **BL-B89 — Re-sequence the sight's search cycle to the way the user actually scans with the
-  9K113: wide S-scans find points of interest, then narrow visits them by priority.** #status/open
-  User direction, 2026-10-20 (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F5 — boresight-relative
+- [x] **BL-B89 — Re-sequence the sight's search cycle to the way the user actually scans with the
+  9K113: wide S-scans find points of interest, then narrow visits them by priority.** #status/done #needs-flight
+  **Done, merged `92da214a` (2026-10-25)** from `feature/9k113-scan-procedure`: Stage 1 (sector
+  scan), `[[BL-B98]]` (aim persistence), Stage 2 (`look`/`sight`/`what is at <where>`). Merged before
+  flight by user direction; flight card https://claude.ai/artifact/M9jAnsomghXnV1bSyds9Mj
+  (`docs/acceptance/2026-10-25-bl-b89-sector-scan-flight.md`). DoD: `plans/9k113-scan-procedure/dod-check.md`.
+  Milestone check: unblocks `[[BL-B99]]`'s POV boresight re-check; "quick position check" stays out of
+  scope; fuzzy `look`/`sight` mishearings ("book", "fight") await an STT corpus pass.
+    User direction, 2026-10-20 (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F5 — boresight-relative
   limits: explore answers", quoted in full there). The sequencing was agreed the same day:
   `feature/9k113-narrow-search` merges as built, and this is the next item, with a plan and a mock first.
 

@@ -127,7 +127,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B86]] — above ~3.6–4 km AGL the sight's idle search cycle goes fully idle — **DECLINED 2026-10-25**: outside the operating envelope
 - [[BL-B87]] — `_pending_positional_replies` has no size bound, unlike every other queue in this codebase
 - [[BL-B88]] — `join_voice_latency.py` crashes whole on one malformed JSONL line
-- [[BL-B89]] — 9K113 scanning procedure: points of interest, not band sweeps (next after 9k113-narrow-search)
+- [[BL-B89]] — 9K113 scanning procedure: points of interest, not band sweeps (done, merged `92da214a`)
 - [[BL-B90]] — configurable cockpit effector sequences: named registry + per-trigger sequence files (after [[BL-B80]])
 - [[BL-B91]] — effector-registry TOML renderer did not escape control characters in free-text fields (fixed)
 - [[BL-B92]] — `test_connection_reporter_*` tests order-dependent under pytest-randomly (fixed, merged `27f9821f`)
