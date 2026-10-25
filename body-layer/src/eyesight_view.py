@@ -62,6 +62,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from ascii_canvas import BLUE as _BLUE
+from ascii_canvas import BOLD as _BOLD
+from ascii_canvas import DIM as _DIM
+from ascii_canvas import GRAY as _GRAY
+from ascii_canvas import GREEN as _GREEN
+from ascii_canvas import GROUND_TRUTH_NOT_SEEN_GLYPH as _NOT_SEEN_GLYPH
+from ascii_canvas import GROUND_TRUTH_SEEN_GLYPH as _SEEN_GLYPH
+from ascii_canvas import ORANGE as _ORANGE
+from ascii_canvas import YELLOW as _YELLOW
+from ascii_canvas import Canvas as _Canvas
 from belief.attention import AttentionArea, effective_attention
 from belief.classification import (
     AIR_DEFENSE_OP_CLASSES,
@@ -124,30 +134,6 @@ _RING_COUNT: Final[int] = 4
 #: enough that consecutive plotted cells are contiguous at this canvas's
 #: typical resolution, coarse enough not to cost real time per frame.
 _TRACE_STEP_DEG: Final[float] = 2.0
-
-_RESET: Final[str] = "\x1b[0m"
-_DIM: Final[str] = "\x1b[2m"
-_BOLD: Final[str] = "\x1b[1m"
-_GREEN: Final[str] = "\x1b[32m"
-_BLUE: Final[str] = "\x1b[34m"
-_GRAY: Final[str] = "\x1b[90m"
-_YELLOW: Final[str] = "\x1b[33m"
-
-#: Watched contacts (user, 2026-09-25). 256-colour orange rather than one of
-#: the eight basic codes, because the basic set has no orange and the nearest
-#: -- bright yellow -- is too close to `_YELLOW` to distinguish a watched
-#: contact from an ordinary one at a glance, which is the entire point.
-_ORANGE: Final[str] = "\x1b[38;5;208m"
-
-
-def _wrap(text: str, *codes: str, color: bool) -> str:
-    """Apply ANSI `codes` to `text`, or return it unchanged when `color` is
-    `False` -- the one place this module branches on colour support, so
-    every caller can simply pass `color=` through without its own
-    conditional."""
-    if not color or not codes:
-        return text
-    return "".join(codes) + text + _RESET
 
 
 def relative_bearing_deg(true_bearing_deg: float, heading_true_deg: float) -> float:
@@ -237,7 +223,7 @@ def contact_label(contact: Contact) -> str:
     return "U"
 
 
-def _object_type_label(object_type: str) -> str:
+def object_type_label(object_type: str) -> str:
     """Ground-truth-side twin of `contact_label`, for the offline replay
     path (`believed_markers_from_trace_rows`) where no `Contact.
     cardinality`/`classification` exists at all -- only a raw DCS
@@ -324,7 +310,10 @@ def believed_markers_from_trace_rows(
     than the centroid `NakedEyePerceptionSource` actually emitted -- close
     for a tight cluster, visibly off for a loose one. No cardinality
     either (no cluster size survives into the trace row), so every
-    believed marker here comes from `_object_type_label`, never `G`.
+    believed marker here comes from `object_type_label`, never `G`. This
+    name dropped its leading underscore (`plans/pov-view/plan.md`,
+    `BL-B99`) since it now has a second caller, `pov_view.py`'s own
+    ground-truth label builder.
 
     `heading_true_deg` defaults to `0.0` because the recorded JSONL does
     not carry ownship heading at all (`DetectionTraceWriter` never wrote
@@ -339,7 +328,7 @@ def believed_markers_from_trace_rows(
             continue
         true_bearing = float(row["true_bearing_deg"])  # type: ignore[arg-type]
         markers[str(contact_id)] = BeliefMarker(
-            label=_object_type_label(str(row["object_type"])),
+            label=object_type_label(str(row["object_type"])),
             bearing_deg=relative_bearing_deg(true_bearing, heading_true_deg),
             range_m=float(row["true_range_m"]),  # type: ignore[arg-type]
         )
@@ -369,41 +358,6 @@ def _polar_to_cell(
     col = max(0, min(total_cols - 1, col))
     row = max(0, min(total_rows - 1, row))
     return row, col
-
-
-@dataclass
-class _Canvas:
-    rows: int
-    cols: int
-
-    def __post_init__(self) -> None:
-        self.glyph: list[list[str]] = [[" "] * self.cols for _ in range(self.rows)]
-        self.codes: list[list[tuple[str, ...]]] = [
-            [() for _ in range(self.cols)] for _ in range(self.rows)
-        ]
-
-    def set(self, row: int, col: int, glyph: str, *codes: str) -> None:
-        if 0 <= row < self.rows and 0 <= col < self.cols:
-            self.glyph[row][col] = glyph
-            self.codes[row][col] = codes
-
-    def set_if_blank(self, row: int, col: int, glyph: str, *codes: str) -> None:
-        if (
-            0 <= row < self.rows
-            and 0 <= col < self.cols
-            and self.glyph[row][col] == " "
-        ):
-            self.set(row, col, glyph, *codes)
-
-    def render(self, *, color: bool) -> list[str]:
-        lines = []
-        for row in range(self.rows):
-            cells = [
-                _wrap(self.glyph[row][col], *self.codes[row][col], color=color)
-                for col in range(self.cols)
-            ]
-            lines.append("".join(cells))
-        return lines
 
 
 def render_frame(
@@ -533,7 +487,7 @@ def render_frame(
     for gt_marker in ground_truth:
         cell = to_cell(gt_marker.bearing_deg, gt_marker.range_m)
         if cell is not None:
-            glyph = "·" if gt_marker.visible else "×"
+            glyph = _SEEN_GLYPH if gt_marker.visible else _NOT_SEEN_GLYPH
             canvas.set(*cell, glyph, _GRAY, _DIM)
 
     # Believed markers, last, unconditional -- never `set_if_blank`.
@@ -619,6 +573,7 @@ __all__ = [
     "believed_markers_from_trace_rows",
     "contact_label",
     "ground_truth_markers_from_trace",
+    "object_type_label",
     "relative_bearing_deg",
     "render_frame",
 ]

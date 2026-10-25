@@ -110,6 +110,18 @@ def range_m(observer: GeoPosition, target: GeoPosition) -> float:
     return math.sqrt(delta_x * delta_x + delta_z * delta_z + delta_alt * delta_alt)
 
 
+def elevation_deg(observer: GeoPosition, target: GeoPosition) -> float:
+    """World-horizon-relative elevation from `observer` to `target`,
+    degrees, positive up -- pitch/bank independent by construction (a pure
+    function of the two positions' altitudes and horizontal separation).
+    `plans/pov-view/plan.md` (`BL-B99`): the forward POV debug view's
+    elevation axis, and `DetectionTrace.true_elevation_deg`, both read
+    this value unconverted, since it is already the frame they want."""
+    delta_alt = target.alt_m - observer.alt_m
+    horizontal_m = math.hypot(target.x - observer.x, target.z - observer.z)
+    return math.degrees(math.atan2(delta_alt, horizontal_m))
+
+
 def project_from_bearing_range(
     observer: GeoPosition, bearing_deg: float, range_m: float
 ) -> GeoPosition:

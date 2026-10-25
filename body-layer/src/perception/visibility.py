@@ -248,6 +248,7 @@ from perception.geometry import (
     GeoPosition,
     bearing_deg,
     body_relative_direction,
+    elevation_deg,
     line_of_sight_clear,  # noqa: F401
     range_m,
 )
@@ -951,6 +952,7 @@ def check_visibility(
                 t_sim=ownship.t_sim,
                 true_bearing_deg=candidate_bearing_deg,
                 true_range_m=candidate_range_m,
+                true_elevation_deg=elevation_deg(observer, target),
                 range_threshold_m=range_threshold_m,
                 threshold_bound=threshold_bound,
                 outcome=outcome,

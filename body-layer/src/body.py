@@ -200,6 +200,7 @@ from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
 from eyesight_view import (
     believed_markers_from_contacts,
     ground_truth_markers_from_trace,
+    relative_bearing_deg,
 )
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
@@ -238,6 +239,12 @@ from perception.optics import (
     within_field_of_regard,
 )
 from perception.source import Observation, OwnshipState, PerceptionSource
+from pov_view import DEFAULT_MAX_LINES as POV_DEFAULT_MAX_LINES
+from pov_view import (
+    pov_believed_markers_from_contacts,
+    pov_ground_truth_markers_from_trace,
+)
+from pov_view import render_frame as render_pov_frame
 from run_log_paths import per_run_log_path
 from sight_trace_writer import SightTraceWriter
 from speech_log import SpeechLogWriter
@@ -1644,6 +1651,7 @@ def _render_eyesight_frame(
     runner: ConsolePerceptionRunner,
     trace_records: list[DetectionTrace],
     radius_m: float,
+    max_lines: int | None = None,
 ) -> str | None:
     """One `--eyesight-view` frame for the poll that just ran (`todo/
     todo.md`'s "Added 2026-09-25 (user)" entry) -- `None` before the first
@@ -1658,7 +1666,13 @@ def _render_eyesight_frame(
     trace`'s own module docstring), so the ground-truth half of a frame is
     naked-eye-only by the same limit; believed markers come from the full
     `ContactStore`, not the trace, so a scope/hybrid contact still appears
-    there."""
+    there.
+
+    `max_lines` defaults to `None`, meaning "read the real terminal"
+    (`_eyesight_max_lines()`) -- the poll loop passes an explicit, halved
+    budget instead when `--pov-view` is also on (`plans/pov-view/plan.md`,
+    `BL-B99`), so the two frames share one terminal's worth of lines
+    rather than each assuming it owns the whole thing."""
     if runner.last_ownship_state is None or runner.last_t_sim is None:
         return None
     ownship = runner.last_ownship_state
@@ -1679,7 +1693,74 @@ def _render_eyesight_frame(
             areas=runner.store.areas,
         ),
         radius_m=radius_m,
-        max_lines=_eyesight_max_lines(),
+        max_lines=max_lines if max_lines is not None else _eyesight_max_lines(),
+    )
+
+
+def _render_pov_frame(
+    runner: ConsolePerceptionRunner,
+    trace_records: list[DetectionTrace],
+    max_lines: int | None = None,
+) -> str | None:
+    """One `--pov-view` frame for the poll that just ran (`plans/pov-view/
+    plan.md`, `BL-B99`) -- mirrors `_render_eyesight_frame`'s own `None`
+    guard and `max_lines` posture.
+
+    **Boresight resolution is per-optic**, traced to a field that is
+    already in the frame this canvas wants, never derived fresh
+    (`plans/pov-view/plan.md`'s own table): `UNAIDED_OPTIC`/
+    `BINOCULAR_OPTIC` read `gaze.center_azimuth_deg`/`center_elevation_deg`
+    (already heading-/horizon-relative); the two sight optics read
+    `sight_head.world_az_true_deg`/`world_el_deg` (the world-true frame --
+    `relative_bearing_deg` converts azimuth to heading-relative, elevation
+    is left unconverted since world elevation already *is*
+    horizon-relative). `run_once`'s own cap at optic-decision time
+    (`optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC) and
+    not head_will_be_free`) guarantees `sight_head.mode == "free"` -- and
+    so both world fields non-`None` -- whenever `runner.optic` actually is
+    one of the two sight optics, which is why the `assert`s below never
+    fire in practice rather than needing a runtime fallback."""
+    if runner.last_ownship_state is None or runner.last_t_sim is None:
+        return None
+    ownship = runner.last_ownship_state
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    optic = runner.optic
+    boresight_azimuth_deg: float
+    boresight_elevation_deg: float
+    half_angle_deg: float
+    if optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC):
+        assert runner.sight_head.world_az_true_deg is not None
+        assert runner.sight_head.world_el_deg is not None
+        assert optic.fov_half_angle_deg is not None
+        boresight_azimuth_deg = relative_bearing_deg(
+            runner.sight_head.world_az_true_deg, ownship.heading_true_deg
+        )
+        boresight_elevation_deg = runner.sight_head.world_el_deg
+        half_angle_deg = optic.fov_half_angle_deg
+    else:
+        gaze = gaze_at(runner.last_t_sim, runner.scan_plan)
+        boresight_azimuth_deg = gaze.center_azimuth_deg
+        boresight_elevation_deg = gaze.center_elevation_deg
+        if optic is UNAIDED_OPTIC:
+            half_angle_deg = gaze.half_width_deg
+        else:
+            assert optic.fov_half_angle_deg is not None
+            half_angle_deg = optic.fov_half_angle_deg
+    return render_pov_frame(
+        optic_name=optic.name,
+        boresight_azimuth_deg=boresight_azimuth_deg,
+        boresight_elevation_deg=boresight_elevation_deg,
+        half_angle_deg=half_angle_deg,
+        ground_truth=pov_ground_truth_markers_from_trace(
+            trace_records, heading_true_deg=ownship.heading_true_deg
+        ),
+        believed=pov_believed_markers_from_contacts(
+            runner.store.contacts,
+            observer,
+            ownship.heading_true_deg,
+            areas=runner.store.areas,
+        ),
+        max_lines=max_lines if max_lines is not None else POV_DEFAULT_MAX_LINES,
     )
 
 
@@ -1797,15 +1878,18 @@ def _eyesight_max_lines() -> int:
         return EYESIGHT_DEFAULT_MAX_LINES
 
 
-def _print_eyesight_frame(frame: str) -> None:
-    """Clears the terminal and prints one `--eyesight-view` frame -- the
-    one place this feature touches the terminal, kept separate from
-    `_render_eyesight_frame`'s pure string-building so the geometry stays
-    testable (`tests/test_eyesight_view.py`) and this side effect needs no
-    test of its own, the same live-process-entrypoint posture `main()`
-    itself already has."""
+def _print_frames(frames: Sequence[str]) -> None:
+    """Clears the terminal and prints one or more debug-view frames,
+    separated by a blank line -- the one place `--eyesight-view`/
+    `--pov-view` touch the terminal, kept separate from
+    `_render_eyesight_frame`/`_render_pov_frame`'s pure string-building so
+    the geometry stays testable and this side effect needs no test of its
+    own, the same live-process-entrypoint posture `main()` itself already
+    has. Generalised from the old `_print_eyesight_frame` (`plans/
+    pov-view/plan.md`, `BL-B99`) to take any number of frames, so both
+    views share one clear-and-print cycle when both are on."""
     sys.stdout.write("\x1b[2J\x1b[H")
-    sys.stdout.write(frame)
+    sys.stdout.write("\n\n".join(frames))
     sys.stdout.write("\n")
     sys.stdout.flush()
 
@@ -2806,6 +2890,7 @@ def _run_crew_text_poll_loop(
     detection_trace_path: Path | None = None,
     eyesight_view: bool = False,
     eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
+    pov_view: bool = False,
     belief_truth_log_path: Path | None = None,
     forest_occlusion: bool = False,
     mission_memory_path: Path | None = None,
@@ -2834,9 +2919,14 @@ def _run_crew_text_poll_loop(
     this loop, but both are still checked so this function has no implicit
     dependency on how its caller constructs them. `detection_trace_path`
     (BL-9, `--detection-trace`), `eyesight_view`/`eyesight_view_radius_m`
-    (`--eyesight-view`), `belief_truth_log_path` (`--belief-truth-log`),
+    (`--eyesight-view`), `pov_view` (`--pov-view`, `plans/pov-view/
+    plan.md`, `BL-B99`), `belief_truth_log_path` (`--belief-truth-log`),
     and `forest_occlusion` (`--forest-occlusion`) are each additive and
-    default to a true no-op when unset.
+    default to a true no-op when unset. When both `eyesight_view` and
+    `pov_view` are on, the poll block below splits one terminal's line
+    budget between the two frames and prints them together in one
+    clear-and-print cycle; either one alone gets the full budget, the
+    same posture `eyesight_view` had on its own before this flag existed.
 
     `world_model_dir`/`detection_trace_base`/`belief_truth_log_base`/
     `group_trace_base`/`mission_memory_base` (`BL-15` Stage 3/Decision 5)
@@ -2883,6 +2973,7 @@ def _run_crew_text_poll_loop(
         if (
             detection_trace_path is not None
             or eyesight_view
+            or pov_view
             or belief_truth_log_path is not None
         )
         else None
@@ -2999,14 +3090,32 @@ def _run_crew_text_poll_loop(
                     )
                 runner.run_once()
                 if trace_collector is not None:
-                    if eyesight_view:
-                        frame = _render_eyesight_frame(
-                            runner,
-                            list(trace_collector.records),
-                            eyesight_view_radius_m,
-                        )
-                        if frame is not None:
-                            _print_eyesight_frame(frame)
+                    if eyesight_view or pov_view:
+                        # Split one terminal's line budget in half when
+                        # both views are on; either alone gets the whole
+                        # budget (module docstring).
+                        view_max_lines = _eyesight_max_lines()
+                        if eyesight_view and pov_view:
+                            view_max_lines //= 2
+                        trace_snapshot = list(trace_collector.records)
+                        frames = []
+                        if eyesight_view:
+                            eyesight_frame = _render_eyesight_frame(
+                                runner,
+                                trace_snapshot,
+                                eyesight_view_radius_m,
+                                max_lines=view_max_lines,
+                            )
+                            if eyesight_frame is not None:
+                                frames.append(eyesight_frame)
+                        if pov_view:
+                            pov_frame = _render_pov_frame(
+                                runner, trace_snapshot, max_lines=view_max_lines
+                            )
+                            if pov_frame is not None:
+                                frames.append(pov_frame)
+                        if frames:
+                            _print_frames(frames)
                     if (
                         belief_truth_writer is not None
                         and runner.last_ownship_state is not None
@@ -4247,6 +4356,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--pov-view",
+        action="store_true",
+        help=(
+            "print a live forward-POV ASCII view of the current optic's "
+            "field of view/boresight and what Petrovich detects through "
+            "it, redrawn every poll -- the forward-looking twin of "
+            "--eyesight-view, same debug/calibration posture (may show "
+            "ground truth, see pov_view.py's module docstring). Ignores "
+            "units outside the player bubble. Defaults off, a true no-op "
+            "when absent. When combined with --eyesight-view, the two "
+            "frames share one terminal's line budget and print together."
+        ),
+    )
+    parser.add_argument(
         "--mission-memory",
         type=Path,
         default=None,
@@ -4534,6 +4657,7 @@ def main() -> None:
             args.detection_trace,
             args.eyesight_view,
             args.eyesight_view_radius_m,
+            args.pov_view,
             args.belief_truth_log,
             args.forest_occlusion,
             args.mission_memory,

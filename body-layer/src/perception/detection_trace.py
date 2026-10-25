@@ -128,6 +128,12 @@ class DetectionTrace:
     range_threshold_m: float
     threshold_bound: str
     outcome: GateOutcome
+    #: World-horizon-relative elevation, degrees, positive up
+    #: (`perception.geometry.elevation_deg`) -- `None` default so no
+    #: existing test-constructed row breaks (`plans/pov-view/plan.md`,
+    #: `BL-B99`); both construction sites (`visibility.py`'s `_record`,
+    #: `naked_eye_source.py`'s `PLAYER_BUBBLE` row) now set it.
+    true_elevation_deg: float | None = None
     achieved_tier: str | None = None
     cluster_member_object_ids: tuple[int, ...] | None = None
     observation_id: str | None = None

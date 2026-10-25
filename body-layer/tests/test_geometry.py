@@ -62,6 +62,36 @@ def test_range_m_includes_altitude_component() -> None:
     assert geometry.range_m(observer, target) == pytest.approx(100.0)
 
 
+def test_elevation_deg_level_target_is_zero() -> None:
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=100.0)
+    target = GeoPosition(x=1000.0, z=0.0, alt_m=100.0)
+
+    assert geometry.elevation_deg(observer, target) == pytest.approx(0.0)
+
+
+def test_elevation_deg_target_above_is_positive() -> None:
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    target = GeoPosition(x=1000.0, z=0.0, alt_m=1000.0)
+
+    assert geometry.elevation_deg(observer, target) == pytest.approx(45.0)
+
+
+def test_elevation_deg_target_below_is_negative() -> None:
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=1000.0)
+    target = GeoPosition(x=1000.0, z=0.0, alt_m=0.0)
+
+    assert geometry.elevation_deg(observer, target) == pytest.approx(-45.0)
+
+
+def test_elevation_deg_directly_overhead_is_90() -> None:
+    # Degenerate case: zero horizontal separation -- atan2(delta_alt, 0.0)
+    # is well-defined as +/-90 in Python, no special-casing needed.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    target = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+
+    assert geometry.elevation_deg(observer, target) == pytest.approx(90.0)
+
+
 def test_elevation_at_delegates_to_describe_position(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
