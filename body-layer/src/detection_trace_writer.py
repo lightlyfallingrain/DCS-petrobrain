@@ -166,7 +166,7 @@ def _entry_to_dict(
     """One row's JSON payload, **with `None`-valued annotation fields
     omitted** -- `BL-11` Stage 5.
 
-    `DetectionTrace` has 25 fields and most are the optional annotations
+    `DetectionTrace` has 27 fields and most are the optional annotations
     (motion gate, live LOS, achieved tier, cluster membership) that stay
     `None` on any candidate those stages never reached. `asdict` emitted all
     of them, which is roughly half the bytes of a 290 KB/poll artifact

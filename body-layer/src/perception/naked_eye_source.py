@@ -268,7 +268,7 @@ from perception.gaze import (
     gaze_at,
     gaze_for,
 )
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.geometry import GeoPosition, bearing_deg, elevation_deg, range_m
 from perception.group_salience import group_salient_ids
 from perception.motion import (
     MOTION_ANGULAR_THRESHOLD_RAD_S,
@@ -762,6 +762,7 @@ class NakedEyePerceptionSource:
                         t_sim=now_sim,
                         true_bearing_deg=bearing_deg(observer, target),
                         true_range_m=range_m(observer, target),
+                        true_elevation_deg=elevation_deg(observer, target),
                         range_threshold_m=PLAYER_BUBBLE_RADIUS_M,
                         threshold_bound="player_bubble",
                         outcome=GateOutcome.PLAYER_BUBBLE,

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -243,6 +244,37 @@ def test_admission_records_achieved_tier() -> None:
     # naked_eye_source.py's job, exercised separately below.
     assert entry.cluster_member_object_ids is None
     assert entry.observation_id is None
+
+
+def test_admitted_entry_records_true_elevation_deg() -> None:
+    # `plans/pov-view/plan.md` (`BL-B99`): the candidate sits 100 m above
+    # ownship's own altitude, 250 m horizontal -- a known, non-zero
+    # elevation the pov-view canvas needs a real value to plot against.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=250.0, z=0.0, alt_m=600.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace)
+
+    assert result is not None
+    entry = trace.records[0]
+    assert entry.true_elevation_deg == pytest.approx(
+        math.degrees(math.atan2(100.0, 250.0))
+    )
+
+
+def test_rejected_entry_also_records_true_elevation_deg() -> None:
+    # Ground truth is recorded regardless of which gate decided the
+    # outcome -- the cockpit-mask rejection fixture above, re-checked for
+    # the new field.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=-100.0, z=0.0, alt_m=500.0)
+    trace = DetectionTraceCollector()
+
+    check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace)
+
+    entry = trace.records[0]
+    assert entry.true_elevation_deg == pytest.approx(0.0)
 
 
 def test_trace_none_is_a_true_no_op() -> None:
@@ -681,7 +713,7 @@ def _unannotated_entry() -> DetectionTrace:
 
 
 def test_none_annotation_fields_are_omitted_from_the_row(tmp_path: Any) -> None:
-    """`BL-11` Stage 5: `asdict` emitted all 25 fields including the ~13
+    """`BL-11` Stage 5: `asdict` emitted all fields including the ~13
     that are `None` on a rejected candidate, which is roughly half the
     bytes of a 290 KB/poll artifact. Absent means `None`."""
     trace = DetectionTraceCollector()

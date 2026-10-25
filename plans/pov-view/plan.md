@@ -211,3 +211,51 @@ The real renderer should reuse `eyesight_view.py`'s already-solved header-tick a
 aspect correction (renamed to a degree-based constant in `ascii_canvas.py` or kept in `pov_view.py`
 directly, Implementer's call) produces a sane picture — the user's own mock is illustrative, not
 drawn to this scale.
+
+### Main-loop amendments (override the plan above)
+
+1. **Vertical scale follows the user's mock, not terminal-aspect correction.** This plan's own
+   7-row/30°/4.56°-per-row prototype was too coarse: the 9K113 narrow field (6° wide) would draw in
+   barely one row, and this tool exists to fine-tune scanning. Shipped default is the user's own
+   mock scale instead — `pov_view.DEFAULT_DEG_PER_ROW = 2.5` (12-13 rows for +10..-20) and
+   `pov_view.DEFAULT_WIDTH = 79` (~2.3°/col for ±90°, close to the user's ~2.4°/col), both module
+   constants and both `render_frame` keyword parameters (`deg_per_row`, `width`). Azimuth tick
+   labels every 30° across the top; elevation tick labels at every 10°-multiple within
+   `[elevation_down_deg, elevation_up_deg]` (+10/0/-10/-20 for the defaults) on both canvas edges.
+   **Checked against the real renderer, not assumed**: `eyesight_view.py` has no pre-existing
+   "header-tick alignment code" to reuse (`grep` of the module found none) — the paragraph above
+   describing one was a plan assumption that did not hold; `pov_view.render_frame` builds its own
+   tick/label rows directly instead.
+2. **Player bubble.** `pov_ground_truth_markers_from_trace` drops any `GateOutcome.PLAYER_BUBBLE`
+   row (never drawn as "not seen" — it never reached `check_visibility` at all).
+   `pov_believed_markers_from_contacts` drops any contact whose `range_m(observer,
+   contact.last_position)` exceeds `perception.association.PLAYER_BUBBLE_RADIUS_M`. Both covered by
+   dedicated tests in `test_pov_view.py`.
+3. **9K113 narrow colour**: `ascii_canvas.BROWN = "\x1b[38;5;130m"` (olive/khaki-brown, 256-colour),
+   with a one-line comment mirroring `eyesight_view._ORANGE`'s own.
+4. **Stage 6 (`pov_replay.py`) skipped** — out of scope for this cut; `--pov-view` has no offline
+   replay tool yet, matching `eyesight_view`'s own history (it also shipped without
+   `eyesight_replay.py` on its first cut).
+
+### Deviations from the plan found during implementation
+
+- **`render_frame`'s listed signature was incomplete**: drawing the eyes' green border (unaided)
+  needs the active gaze's own half-width, and drawing an optic's filled disc needs that optic's own
+  `fov_half_angle_deg` — the plan's signature named neither. Resolved with one additional keyword,
+  `half_angle_deg: float`, which `_render_pov_frame` (`body.py`) resolves per-optic from the same
+  table the plan already specifies (gaze half-width for `unaided`, `Optic.fov_half_angle_deg` for
+  every other optic) — no new geometry, same "every boresight already in the right frame" posture
+  the plan's own "Design — how the frame maps" section argues for.
+- **`object_type_label` (the `eyesight_view` rename) ended up unused by `pov_view.py`**: ground
+  truth markers on this canvas carry no label at all (`PovGroundTruthMarker` has none), mirroring
+  `eyesight_view.GroundTruthMarker`'s own shape — only `contact_label` (believed markers) is
+  actually reused. The rename and `__all__` export still land as planned, since `pov_view.py`
+  importing it was the plan's own stated reason for dropping the leading underscore, independent of
+  whether this particular file calls it.
+- **A second stale field-count docstring found and fixed**: `detection_trace_writer.py`'s
+  `_entry_to_dict` docstring said "`DetectionTrace` has 25 fields" before this change — the actual
+  count (verified by `ast`-walking `DetectionTrace`'s own `AnnAssign` nodes) was already 26, one
+  past what the comment claimed, before `true_elevation_deg` made it 27. Bumped to 27 here; a
+  second stale count in `test_detection_trace.py`'s own docstring (also "25 fields") was shortened
+  to drop the number entirely rather than re-guessing a figure that will drift again the next time a
+  field is added.

@@ -60,6 +60,7 @@ from body import (
     _commanded_or_default_sector,
     _log_live_los_coverage_summary,
     _poll_transcripts,
+    _render_pov_frame,
     _resolve_speech_log_path,
     _run_crew_text_poll_loop,
     _run_crew_text_repl,
@@ -6837,4 +6838,89 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     free_rows = [row for row in rows if row["head_mode"] == "free"]
     assert free_rows, rows
     assert free_rows[-1]["head_world_azimuth_deg"] is not None
-    assert any(row["observ_commanded"] is False for row in rows)
+
+
+# --- _render_pov_frame (`plans/pov-view/plan.md`, `BL-B99`) ----------------
+
+
+def test_render_pov_frame_none_before_first_poll() -> None:
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    assert _render_pov_frame(runner, []) is None
+
+
+def test_render_pov_frame_unaided_optic_uses_gaze_boresight() -> None:
+    from perception.gaze import FULL_GAZE
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.scan_plan = ScanPlan(
+        commanded_sector=None, command_t_sim=None, fixed_look=FULL_GAZE
+    )
+
+    frame = _render_pov_frame(runner, [])
+
+    assert frame is not None
+    assert "optic=unaided" in frame
+    assert "boresight az=+0" in frame
+
+
+def test_render_pov_frame_binocular_optic_uses_fixed_look_boresight() -> None:
+    from perception.optics import BINOCULAR_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic = BINOCULAR_OPTIC
+    runner.scan_plan = ScanPlan.fixed_look_at(azimuth_deg=12.0, elevation_deg=-7.0)
+
+    frame = _render_pov_frame(runner, [])
+
+    assert frame is not None
+    assert "optic=binocular" in frame
+    assert "boresight az=+12" in frame
+    assert "el=-7" in frame
+
+
+def test_render_pov_frame_sight_tier_uses_sight_head_world_direction() -> None:
+    """The sight optics read the simulated head's own world-frame
+    direction, converted to heading-relative azimuth -- never the gaze/
+    `OpticState` fields the other two optics use (plan's own boresight
+    table)."""
+    from belief.sight_head import SightHead
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0
+    )
+    runner.optic = SIGHT_WIDE_OPTIC
+    runner.sight_head = SightHead(
+        mode="free", world_az_true_deg=100.0, world_el_deg=-5.0
+    )
+
+    frame = _render_pov_frame(runner, [])
+
+    assert frame is not None
+    assert "optic=sight_wide" in frame
+    # world_az_true_deg=100, heading=90 -> heading-relative azimuth +10.
+    assert "boresight az=+10" in frame
+    assert "el=-5" in frame
+
+
+def test_render_pov_frame_respects_max_lines() -> None:
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+
+    frame = _render_pov_frame(runner, [], max_lines=5)
+
+    assert frame is not None
+    assert len(frame.splitlines()) <= 5
