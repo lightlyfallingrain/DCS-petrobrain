@@ -2521,12 +2521,12 @@ class TestSightSearchLegs:
         self,
     ) -> None:
         """No out-of-regard remainder: once `SIGHT_GLANCE_AWAY_S` elapses,
-        `_back_to_home` resumes `SIGHTING` (dead ahead -- `_start_glance_
-        away` nulls the aim, same as it already does for the pre-existing
-        `SIGHT_MAX_DWELL_S`-triggered case, so resuming defaults to
-        `(0.0, 0.0)`, not the narrow_far_sweep's own last position) and
-        the poll after that starts `wide_near` over from its own first
-        step -- never entering `OpticPhase.SEARCHING` at all."""
+        `_back_to_home` resumes `SIGHTING` at the sight's own last
+        position -- `narrow_far_sweep`'s own step, since `[[BL-B98]]`'s
+        fix has `_start_glance_away` carry the aim through rather than
+        nulling it -- and the poll after that starts `wide_near` over
+        from its own first step -- never entering `OpticPhase.SEARCHING`
+        at all."""
         state = self._sighting_state()
         now_sim = 0.0
         for _ in range(4):  # wide_near, wide_far, narrow_far_sweep, glance-away starts
@@ -2536,9 +2536,12 @@ class TestSightSearchLegs:
 
         now_sim = state.phase_started_sim + SIGHT_GLANCE_AWAY_S
         state, decision = self._decide(state, now_sim)
-        assert state.phase is OpticPhase.SIGHTING  # resumed, dead ahead
+        assert state.phase is OpticPhase.SIGHTING  # resumed, at last position
         assert decision.optic is SIGHT_WIDE_OPTIC
-        assert (decision.look_azimuth_deg, decision.look_elevation_deg) == (0.0, 0.0)
+        assert (
+            decision.look_azimuth_deg,
+            decision.look_elevation_deg,
+        ) == self._NARROW_FAR_SWEEP_STEPS[0]
         assert state.sight_search_leg == "wide_near"
 
         now_sim += 1.0
@@ -2578,12 +2581,12 @@ class TestSightSearchLegs:
             decision.look_elevation_deg,
         ) == out_of_regard[0]
         assert state.sight_search_leg == "wide_near"
-        # The mandatory glance-away this excursion was entered from
-        # already nulled the sight's own aim (`_start_glance_away`'s own
-        # docstring) -- `_enter_binocular_search` carries that `None`
-        # through unchanged, it does not restore the pre-lap position.
-        assert state.look_azimuth_deg is None
-        assert state.look_elevation_deg is None
+        # The mandatory glance-away this excursion was entered from no
+        # longer nulls the sight's own aim (`[[BL-B98]]`'s fix to
+        # `_start_glance_away`) -- `_enter_binocular_search` carries the
+        # pre-lap position through unchanged, it does not null it.
+        assert state.look_azimuth_deg == self._NARROW_FAR_SWEEP_STEPS[0][0]
+        assert state.look_elevation_deg == self._NARROW_FAR_SWEEP_STEPS[0][1]
 
         # The excursion's own pattern (two steps) runs out and resumes
         # SIGHTING at exactly that last sight position, ready to start a
@@ -2599,9 +2602,12 @@ class TestSightSearchLegs:
 
         now_sim += 1.0
         state, decision = self._decide(state, now_sim, out_of_regard=out_of_regard)
-        assert state.phase is OpticPhase.SIGHTING  # resumed, dead ahead
+        assert state.phase is OpticPhase.SIGHTING  # resumed, at last position
         assert decision.optic is SIGHT_WIDE_OPTIC
-        assert (decision.look_azimuth_deg, decision.look_elevation_deg) == (0.0, 0.0)
+        assert (
+            decision.look_azimuth_deg,
+            decision.look_elevation_deg,
+        ) == self._NARROW_FAR_SWEEP_STEPS[0]
         assert state.sight_search_leg == "wide_near"
 
         now_sim += 1.0

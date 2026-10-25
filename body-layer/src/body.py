@@ -706,7 +706,26 @@ class ConsolePerceptionRunner:
             observ_observed is False
             and self.optic_state.home_phase is not OpticPhase.SCANNING
         ):
-            self.optic_state = replace(self.optic_state, home_phase=OpticPhase.SCANNING)
+            # `[[BL-B98]]`, user direction 2026-10-25: OBSERV on->off,
+            # whatever the cause, resets the *believed* sight aim to
+            # boresight -- this is the one place that transition is
+            # detected from the observed switch state (pilot command, DCS
+            # AI, or a readback that simply changed), rather than only
+            # `_force_observ_off`'s own manoeuvre-triggered path inside
+            # `decide_optic` (which already nulls both fields via `_back_
+            # to_home`'s non-SIGHTING branch). Without this, OBSERV
+            # turning off while mid-glance-away (`phase is SCANNING`,
+            # `home_phase` was `SIGHTING`) would leave the pre-glance aim
+            # on `self.optic_state` untouched -- `decide_optic` never
+            # revisits a `SCANNING` phase that is already `SCANNING` here
+            # to null it -- and a later OBSERV-on would resume there
+            # instead of boresight.
+            self.optic_state = replace(
+                self.optic_state,
+                home_phase=OpticPhase.SCANNING,
+                look_azimuth_deg=None,
+                look_elevation_deg=None,
+            )
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,

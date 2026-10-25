@@ -1566,18 +1566,21 @@ def _back_to_home(
     that makes the OBSERV-off path provably unchanged (§13's own claim).
 
     **`home_phase is SIGHTING`: the aim is carried through, never nulled**
-    here -- but on the glance-away-resume path, the aim was already nulled
-    upstream by `_start_glance_away` before this function ever runs, so
-    this only delivers "the sight stays at last position" when reached
-    directly from a mid-lap interruption (`lower_binoculars`, `not
-    steady`), not from a glance-away resume, where it defaults to
-    `(0.0, 0.0)` (dead ahead) the same as the never-set case. Not
-    previously exercised by a test that checked the *resumed* aim
-    specifically; measured and tracked as `[[BL-B98]]`
-    (`plans/9k113-scan-procedure/review.md`). `home_phase is SCANNING`:
-    byte-for-byte unchanged, aim nulled exactly as before -- `UNAIDED_OPTIC`
-    is unrestricted and free-scans, so it has no "last position" to
-    preserve."""
+    here -- and, as of `[[BL-B98]]`'s fix, `_start_glance_away` no longer
+    nulls it upstream either, so this now delivers "the sight stays at
+    last position" on every resume into `SIGHTING`: a mid-lap
+    interruption (`lower_binoculars`, `not steady`) reaching this
+    function directly, *and* a glance-away resume (`SIGHT_MAX_DWELL_S`,
+    or `_idle_sight_search`'s lap-completion trigger), both of which
+    leave `state.look_azimuth_deg`/`look_elevation_deg` exactly where
+    the sight last pointed. The `0.0`-default branch below only fires
+    when the aim was genuinely never set (a fresh `OpticState`, or
+    right after `_force_observ_off`'s OBSERV-off reset -- see that
+    function and the non-SIGHTING branch below). `home_phase is
+    SCANNING`: byte-for-byte unchanged, aim nulled exactly as before --
+    `UNAIDED_OPTIC` is unrestricted and free-scans, so it has no "last
+    position" to preserve, and this is also the believed-aim reset to
+    boresight that OBSERV going off requires (`[[BL-B98]]`'s rule 1)."""
     if state.home_phase is OpticPhase.SIGHTING:
         azimuth = state.look_azimuth_deg if state.look_azimuth_deg is not None else 0.0
         elevation = (
@@ -1662,7 +1665,24 @@ def _start_glance_away(
     dwell) has its look cut off here on every single cycle, never reaching
     the natural-end commit at all. A contact stuck like that now gets
     committed here (this function's original `BL-B85` fix), which is what
-    lets `SIGHT_STALL_COOLDOWN_S` engage for it at all."""
+    lets `SIGHT_STALL_COOLDOWN_S` engage for it at all.
+
+    **Deliberately leaves `look_azimuth_deg`/`look_elevation_deg` on
+    `state` untouched** (`[[BL-B98]]`, user direction 2026-10-25: *"The
+    sight does/must reset when OBSERV switches to OFF, but not when it
+    remains ON regardless of not using it actively"*). This is a
+    scheduled break within OBSERV staying on (see `home_phase` above),
+    never OBSERV turning off, so the believed aim the sight holds must
+    survive it -- `_back_to_home`'s own SIGHTING branch, and `_enter_
+    binocular_search`'s carry-through, both read whatever is left here
+    to resume at. Nulling it (the pre-fix behaviour) made every
+    glance-away-triggered resume -- both this whole-dwell boundary and
+    `_idle_sight_search`'s lap-completion trigger, since both call this
+    same function -- land dead ahead `(0.0, 0.0)` instead of the sight's
+    actual last position, which is `[[BL-B98]]`'s defect. The genuine
+    OBSERV-off reset to boresight is `_force_observ_off`'s job, via
+    `_back_to_home`'s non-SIGHTING branch, which still nulls both fields
+    -- that path is untouched by this fix."""
     current_level_by_id = {
         target.contact_id: target.current_level for target in targets
     }
@@ -1685,8 +1705,6 @@ def _start_glance_away(
             state,
             phase=OpticPhase.SCANNING,
             phase_started_sim=now_sim,
-            look_azimuth_deg=None,
-            look_elevation_deg=None,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             attempted_at_range_m=committed_range,
@@ -1814,16 +1832,16 @@ def _enter_binocular_search(
     cycle expressing both.
 
     **Deliberately omits `look_azimuth_deg`/`look_elevation_deg` from the
-    `replace()` below**, but this function's sole call site (the glance-
-    away's own resume point, see above) is reached only after
-    `_start_glance_away` has already nulled both fields to `None` -- so in
-    practice this resumes dead ahead `(0.0, 0.0)`, not at the sight's last
-    position, on every entry. The F4/F5 acceptance criterion
-    (`docs/acceptance/2026-10-20-sortie-feedback.md`, *"Leave 9K113 at last
-    position"*) is therefore not delivered on this path; measured by this
-    stage's own tests (`TestSightSearchLegs`,
-    `plans/9k113-scan-procedure/implementation.md` "Notable Discoveries").
-    Tracked as `[[BL-B98]]`.
+    `replace()` below** -- this function's sole call site (the glance-
+    away's own resume point, see above) is reached after `_start_glance_
+    away`, which as of `[[BL-B98]]`'s fix no longer nulls either field,
+    so omitting them here simply carries the sight's real last position
+    through into the excursion unchanged. (Before that fix, `_start_
+    glance_away` nulled both fields, and omitting them here meant this
+    resumed dead ahead `(0.0, 0.0)` on every entry instead -- the F4/F5
+    acceptance criterion, `docs/acceptance/2026-10-20-sortie-feedback.md`,
+    *"Leave 9K113 at last position"*, measured broken by this stage's own
+    tests, `TestSightSearchLegs`.)
 
     **Sets `sight_search_leg` to `"wide_near"` immediately at entry**,
     not on exit, so that whenever this excursion ends (pattern exhausted,

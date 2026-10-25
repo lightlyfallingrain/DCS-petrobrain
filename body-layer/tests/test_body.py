@@ -3113,6 +3113,64 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
 
 
+def test_run_once_resets_the_believed_sight_aim_to_boresight_on_observed_observ_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B98]]`, user direction 2026-10-25: OBSERV on->off, whatever
+    the cause, must reset the believed sight aim to boresight `(0, 0)`.
+    `run_once` derives `home_phase` from the *observed* arg-886 edge
+    (`[[BL-B80]]`), not only the pilot's own command, so this drives that
+    observed edge directly -- `guidance_unit_state.observ_observed`
+    going `False` while `optic_state.home_phase` still reads `SIGHTING`
+    from a prior poll -- rather than going through `CrewConsole.
+    handle_command`. `decide_optic` is faked to echo its input state
+    unchanged, so any reset observed here is attributable to `run_once`'s
+    own pre-`decide_optic` home_phase-transition handling, not to
+    `decide_optic` happening to null it."""
+    import body as body_module
+    from belief.optic_policy import OpticDecision, OpticPhase, OpticState
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    # A look already in progress, aim held well off boresight -- mirrors
+    # what a real `SIGHTING` dwell leaves on `state` mid-look.
+    runner.optic_state = OpticState(
+        phase=OpticPhase.SIGHTING,
+        phase_started_sim=sim_t,
+        home_phase=OpticPhase.SIGHTING,
+        look_azimuth_deg=35.0,
+        look_elevation_deg=-4.0,
+        look_contact_id="CONTACT_1",
+        look_started_sim=sim_t,
+    )
+    # OBSERV reads off on this poll, no player command involved.
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=False, align_observed=True
+    )
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC,
+            look_azimuth_deg=state.look_azimuth_deg,
+            look_elevation_deg=state.look_elevation_deg,
+        )
+
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()
+
+    assert runner.optic_state.home_phase is OpticPhase.SCANNING
+    assert runner.optic_state.look_azimuth_deg is None
+    assert runner.optic_state.look_elevation_deg is None
+
+
 def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
