@@ -80,3 +80,58 @@ asked five questions. Answers, verbatim:
 
 Already settled earlier (2026-10-20): the place is an o'clock or a compass bearing, with an optional
 distance; landmarks, waypoints and player marks come later.
+
+## Stage 2 vocabulary, mid-task clarifications, 2026-10-25 (architect pass, same day)
+
+Five follow-up messages arrived from the user while this plan was being written, each narrowing the
+vocabulary/command design below. Recorded verbatim, in the order they arrived.
+
+**1. The "look" clash:**
+
+> *"Let's reserve "scan <direction>" for scanning. "Look" for 9K113 scan."*
+
+**2. "look left/right" named directly:**
+
+> *""look left/righ" -> the 9K113 left/right scan that Stage 1 implemented"*
+
+**3. The scan/look split, settled:**
+
+> *""scan" can use 9K113, free to decide with logic the used optic*
+> *"look" and it's synomyns request an explicit 9K113 scan of <where>"*
+
+**4. OBSERV-off handling for an explicit "look", first answer:**
+
+> *"when observ off -> "Need observ, confirm" -> player:"yes" -> observ on -> use sight when observ
+> ready (lamp lit)"*
+
+**5. OBSERV-off handling, refined — no new confirm vocabulary:**
+
+> *"use the exiting comfirm -behaviour logic and words.*
+> *"no" -> cancel look*
+> *"yes"/"confirm"/"observ on" -> observ on, ..."*
+
+Read together: `scan <where>` is unchanged (Petrovich's own logic still picks eyes/binoculars/9K113
+for it, exactly as today). `look <where>` and its synonyms (`sight <where>`, `what is [at] <where>`)
+are a new, explicit request for the 9K113 specifically. `<where>` for `look` covers both a sector
+(left/right/ahead — Stage 1's own commanded-sector shape) and a point (o'clock/compass, optional
+distance — Stage 2's pointing). Whether a commanded o'clock/compass under `look` is read as a 30°
+sector or a point swept near-to-far turned out not to be a real fork — see "`look <o'clock>`
+collapses" below. The OBSERV-off path reuses the existing confirm-band mechanism and its existing
+accepted words (`confirm`/`yes`/`okay`/... already affirm; `no`/`negative`/... already negative) with
+one narrow, explicitly scoped exception: the spoken command `"observ on"` itself, if it resolves to
+the real `observ_on` token while this specific confirmation is pending, also counts as the "yes" —
+see "OBSERV-off confirm flow" below for why `classify_yes_no`'s general rule 2 (a resolved command
+token is never an answer) would otherwise swallow it.
+
+**6. Supersession by a later command, while a look is pending or running:**
+
+> *"new command replaces if it is look or scan command. Effector sequences and commands to trigger
+> tham can fire."*
+
+So: a new `look …`/`scan …` command replaces a pending-on-OBSERV or already-running look outright.
+A command that triggers an effector sequence (`observ_on`/`observ_off`/`weapons_armed`/
+`weapons_safe`) runs normally rather than being blocked by a pending look — it does not get a
+special "cancel the look first" rule of its own, because `observ_off` already tears the look down
+as a side effect of the existing `[[BL-B98]]` rule (aim resets to boresight, `home_phase` leaves
+`SIGHTING`), not because this command class was taught to cancel it. See "Supersession" in
+`plan-stage2.md` for the full command-class table and the one case flagged there (`silence`).

@@ -212,36 +212,44 @@ plan's own source material does not supply.
 
 ---
 
-### Stage 2 — pointing at a known place (designed, not built this round)
+### Stage 2 — pointing at a known place
 
-Per the roadmap's own staging ("sector first, pointing as second stage, but do that too") and the
+**Superseded by its own plan file, `plan-stage2.md`, 2026-10-25** (architect pass, after a round
+of explore-notes clarifications on the vocabulary and the OBSERV-off flow — see that file's own
+header and `explore-notes.md`'s "Stage 2 vocabulary, mid-task clarifications" section for the
+verbatim user decisions this rests on). The sketch below is kept for history; `plan-stage2.md` is
+the plan to build against.
+
+~~Per the roadmap's own staging ("sector first, pointing as second stage, but do that too") and the
 explore notes ("for now: an o'clock or a compass bearing, with an optional distance"), this stage
 is scoped and left for its own implementation pass once Stage 1 has flown. Shape, so the
-Implementer is not starting from nothing when it is picked up:
+Implementer is not starting from nothing when it is picked up:~~
 
-- **Command surface**: a new voice command, `point <o'clock|bearing>[, distance]`, parsed the same
+- ~~**Command surface**: a new voice command, `point <o'clock|bearing>[, distance]`, parsed the same
   way `scan <sector>`/`watch <o'clock>` already are (`belief/voice_commands.py`). Requires
   `OBSERV ON` (`home_phase is SIGHTING`) — issuing it otherwise is a `"unable"` reply per the
-  project's own "say again vs unable" convention, not a `"say again"`.
-- **Aim**: a single fixed `(azimuth, elevation)` goal, the sight's own analogue of `gaze.
+  project's own "say again vs unable" convention, not a `"say again"`.~~ (Superseded:
+  `plan-stage2.md`'s vocabulary design uses `look`/`sight`/`what is at`, not a `point` verb, and
+  OBSERV-off asks via the confirm band rather than refusing outright.)
+- ~~**Aim**: a single fixed `(azimuth, elevation)` goal, the sight's own analogue of `gaze.
   ScanPlan.fixed_look_at` (used today for the attack-run's fixed-aim case) — not a leg of the
   idle search cycle, so `OpticState` needs a way to say "pointed, not searching" that the existing
   `sight_search_leg` enum does not currently express. **This is the stage's own co-moving-fields
-  question** (see below) and needs its own pass at the state machine, not a bolt-on field.
-- **Wide-then-narrow at the point**: orient with `SIGHT_WIDE_OPTIC` for a short, tunable duration,
+  question** (see below) and needs its own pass at the state machine, not a bolt-on field.~~
+  (Carried forward unchanged into `plan-stage2.md`'s own Co-moving Fields table.)
+- ~~**Wide-then-narrow at the point**: orient with `SIGHT_WIDE_OPTIC` for a short, tunable duration,
   then switch to `SIGHT_NARROW_OPTIC` to identify/range — the same wide-then-narrow shape
   `sight_look_optic` already encodes for an ordinary look, applied to a commanded point instead of
-  a detected contact's believed bearing.
-- **Distance estimate**: the stadiametric mechanism from `docs/acceptance/
+  a detected contact's believed bearing.~~ (Carried forward, now "two proper sweeps," per
+  explore-notes answer 3.)
+- ~~**Distance estimate**: the stadiametric mechanism from `docs/acceptance/
   2026-10-15-9k113-sight-direction.md` §11 (`BL-B55`'s ranging, not yet built) is the natural
   consumer once it exists; until then, range comes from whatever ordinary classification/position
-  belief resolves once something is seen there.
-- **"Move between targets"**: once the point produces a contact worth a look, control hands back
+  belief resolves once something is seen there.~~
+- ~~**"Move between targets"**: once the point produces a contact worth a look, control hands back
   to the ordinary `choose_sighting_look` mechanism (unchanged) — pointing establishes where to
-  look first, it does not replace what happens once something is found.
-
-This is deliberately underspecified relative to Stage 1 — it is the next plan, not a stub inside
-this one.
+  look first, it does not replace what happens once something is found.~~ (Carried forward as
+  "something found → report, then go back to scanning," answer 4.)
 
 **Performance and security debt carried into this stage.** The `[[BL-B98]]` fix folded into Stage
 1 (`01a6fadd`, reviewed `47c8e96d` APPROVED) shipped with both passes waived by user direction
@@ -250,7 +258,8 @@ Stage 2's own performance and security passes must cover that fix's code too —
 removed nulling and `body.py`'s `run_once` OBSERV-off-edge aim reset — not just whatever Stage 2
 itself adds. This is not `#needs-flight`-shaped debt (nothing here needs a live DCS session to
 clear); it is a deferred review pass, and ends when Stage 2's batch runs Performance Reviewer and
-Security over the combined diff.
+Security over the combined diff — against `plan-stage2.md`'s own implementation, once built,
+plus the carried-over `[[BL-B98]]` diff named above.
 
 ---
 
