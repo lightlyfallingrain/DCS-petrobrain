@@ -3736,6 +3736,10 @@ def _run_crew_text_poll_loop(
                                 resolving_optic=runner.optic,
                             )
                             crew_console.where_is_it_requested = False
+                            # `[[BL-B102]]`'s co-moving field, cleared
+                            # alongside the flag above -- never left
+                            # holding an already-answered request's slots.
+                            crew_console.where_is_it_slots = None
                         # `[[BL-B80]]` v2: send the head's current world
                         # goal every poll while `sight_head.mode ==
                         # "free"` -- idle included, since the idle sight

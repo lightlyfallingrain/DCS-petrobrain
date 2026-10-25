@@ -40,12 +40,13 @@ from belief.crew_console import (
     _describe_token_for_confirm,
     _nearest_sector,
 )
-from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
+from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S, certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
 from belief.optic_policy import BoundedSightLook
 from belief.percept import Percept
+from belief.referent import Mention
 from belief.speech import (
     group_membership_state,
     render_group_disclosure,
@@ -6869,3 +6870,505 @@ def test_descriptor_score_maps_the_shared_verdict_onto_its_weights(
         == W_FOLLOW_DESC_WRONG
     )
     assert W_FOLLOW_DESC_UNKNOWN != W_FOLLOW_DESC_WRONG
+
+
+# --- `[[BL-B102]]`: "that"/"it" referent resolution ----------------------
+# `plans/that-it-referent/plan.md`. `belief.referent`'s own mechanics
+# (window pruning, qualified-filter, group reduction, nearest-wins) are
+# unit-tested directly in `test_referent.py`; these tests are the
+# `CrewConsole`-level integration: mention recording via `_print`, and
+# every referent-bearing command's own dispatch branch.
+
+
+def test_where_is_it_with_a_referent_resolves_without_any_target_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 1: "where is it" now resolves through the referent, not
+    only through a selected attack target -- with no target ever
+    selected, a bare "where is it" still answers from the last-mentioned
+    contact instead of "No target."."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_AAA",
+                t_sim=0.0,
+                classification_raw="OP_ZU23",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console._print(
+        ["AAA, 2 o'clock, far."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+
+    lines = console.handle_command("where_is_it", now_sim=1.0, slots={"referent": True})
+    assert lines == []
+    answer = console.drain_where_is_it(None, now_sim=1.0, ownship=_ownship())
+
+    assert answer != ["No target."]
+    assert "unable" not in answer[0].lower()
+
+
+def test_where_is_it_referent_during_a_run_prefers_the_engaged_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2's own target-priority clause: once a target is engaged,
+    a bare "where is it" that also names the target (the common case --
+    attack-run steering re-mentions it every tick) still speaks the
+    existing run-guidance phrase, not the plain positional answer."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_ARMOR", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    contact_id = store.contacts[0].id
+    task = attack_target_task(store, tasks, contact_id, now_sim=0.0)
+    assert task is not None
+    console._print(
+        ["Target selected."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+
+    lines = console.handle_command("where_is_it", now_sim=1.0, slots={"referent": True})
+    assert lines == []
+    answer = console.drain_where_is_it(None, now_sim=1.0, ownship=_ownship())
+
+    assert answer != ["No target."]
+    assert "unable" not in answer[0].lower()
+
+
+def test_where_is_it_referent_picks_a_more_recently_mentioned_contact_over_the_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user's own worked example: *"'where is that AAA' would point
+    to the AAA line (unless attack target is AAA which would take
+    priority)"* -- here the attack target is the armor, not the AAA, so
+    the more recently mentioned AAA wins."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=11,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_AAA",
+                t_sim=0.0,
+                classification_raw="OP_ZU23",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    armor_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    aaa_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ZU23")
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    task = attack_target_task(store, tasks, armor_id, now_sim=0.0)
+    assert task is not None
+    console._print(
+        ["Armor, eleven o'clock."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=armor_id, t_sim=0.0)],
+    )
+    console._print(
+        ["AAA, two o'clock, far."],
+        now_sim=1.0,
+        mentions=[Mention(kind="contact", id=aaa_id, t_sim=1.0)],
+    )
+
+    lines = console.handle_command("where_is_it", now_sim=2.0, slots={"referent": True})
+    assert lines == []
+    answer = console.drain_where_is_it(None, now_sim=2.0, ownship=_ownship())
+
+    assert answer != ["No target."]
+    # The AAA sits at 2 o'clock, the armor (the attack target) at 11 --
+    # this is the discriminator, not the unit-type word (`_unit_type_
+    # display` renders `OP_ZU23` as "Triple A", not "AAA").
+    assert "2 o'clock" in answer[0]
+
+
+def test_where_is_it_referent_resolves_an_unseen_lost_contact_from_belief(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 4 (explore-notes, user: "time ok, but use belief if not
+    visible") -- a mentioned contact that has since gone `"lost"` (no
+    further sighting) still resolves within the window, and still
+    answers positionally from belief rather than "unable". Measured: a
+    `"lost"` contact's `relative_now` is computed from its believed
+    position regardless of certainty (`belief.tools._add_enrichment_
+    facts`), and `_report_scope`'s own `restrict_to_ids` mode (used by
+    the qualified path exercised here) does not drop it on that account
+    -- unlike its unqualified `report`/`follow` filtering, which does."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_AAA",
+                t_sim=0.0,
+                classification_raw="OP_ZU23",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    # The contact is last actually *seen* at t=0; the mention is recorded
+    # only once it has already gone `"lost"` (past `LOST_THRESHOLD_S`
+    # with no further sighting) -- the realistic shape of this case: the
+    # window is measured from when Petrovich last *spoke* about the
+    # contact, not from when it was last *seen*.
+    later = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=later)
+    contact = store.contact(contact_id)
+    assert contact is not None
+    assert certainty_of(contact, later) == "lost"
+    console._print(
+        ["AAA, 2 o'clock, far."],
+        now_sim=later,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=later)],
+    )
+
+    now_sim = later + 1.0
+    lines = console.handle_command(
+        "where_is_it", now_sim=now_sim, slots={"referent": True, "descriptor": "aaa"}
+    )
+    assert lines == []
+    answer = console.drain_where_is_it(None, now_sim=now_sim, ownship=_ownship())
+
+    assert answer != ["No target."]
+    assert "unable" not in answer[0].lower()
+    assert "2 o'clock" in answer[0]
+
+
+def test_where_is_it_referent_expired_is_unable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing mentioned, nothing selected -- the referent window itself
+    answers "unable", distinct from the pre-existing "No target."
+    wording for a literal "where is target" with no referent at all."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("where_is_it", now_sim=0.0, slots={"referent": True})
+    assert lines == []
+    answer = console.drain_where_is_it(None, now_sim=0.0, ownship=_ownship())
+
+    assert answer == ["Unable, I don't know what you mean."]
+
+
+def test_follow_referent_resolves_the_last_mentioned_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "follow it"/"follow that" (measured today: anchors, then fails
+    the phrase table) now resolves via the referent instead of
+    `_resolve_follow_target`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
+    console._print(
+        ["Armor, two o'clock, far."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+    # The mention's own `_print` call just claimed the channel
+    # (`note_reply`) -- reset so the readback under test speaks
+    # immediately rather than deferring (`_speak_or_defer`'s own
+    # docstring).
+    console.scheduler.busy_until_sim = 0.0
+
+    lines = console.handle_command("follow", now_sim=1.0, slots={"referent": True})
+
+    assert "armor" in lines[0].lower()
+    contact = store.contact(contact_id)
+    assert contact is not None and contact.attention == "watch"
+
+
+def test_target_it_resolves_the_last_mentioned_contact_via_select_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user's own worked example: *"Petrovich: 'unit in 11 o'clock
+    group is armor' / Player: 'target that/it' <- that is the armor
+    unit"*. `command_matcher`'s own `_SELECT_TARGET_VERBS` now admits
+    `"target"` as a verb, so "target it"/"target that" reach
+    `select_target` with `slots={"referent": True}`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=11,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console._print(
+        ["Unit in eleven o'clock group is armor."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+    console.scheduler.busy_until_sim = 0.0
+
+    lines = console.handle_command(
+        "select_target", now_sim=1.0, slots={"referent": True}
+    )
+
+    assert "armor" in lines[0].lower()
+    assert any(task.contact_id == contact_id for task in tasks.tasks)
+
+
+def test_engage_it_selects_then_engages_the_mentioned_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "engage it"/"engage that" is a positive signal the player means a
+    specific contact, not the bare "resume the run" form -- Design,
+    decided locally and reversibly."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=11,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console._print(
+        ["Armor, eleven o'clock."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+
+    lines = console.handle_command("engage", now_sim=1.0, slots={"referent": True})
+
+    assert "armor" in lines[0].lower()
+    assert console.attack_run_transition == "engage"
+
+
+def test_mark_it_marks_the_mentioned_contacts_believed_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    marked: list[tuple[str, float]] = []
+
+    def _mark_target_fn(mark_contact_id: str, now_sim: float) -> str:
+        marked.append((mark_contact_id, now_sim))
+        return f"mark set on {mark_contact_id}"
+
+    console = CrewConsole(
+        store=store,
+        enrichment=_enrichment_context(monkeypatch),
+        mark_target_fn=_mark_target_fn,
+    )
+    console._print(
+        ["Armor, two o'clock, far."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+    console.scheduler.busy_until_sim = 0.0
+
+    lines = console.handle_command("mark_target", now_sim=1.0, slots={"referent": True})
+
+    assert lines == [f"mark set on {contact_id}"]
+    assert marked == [(contact_id, 1.0)]
+
+
+def test_watch_that_dispatches_through_the_follow_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`command_matcher._parse_watch_slots` dispatches the `"follow"`
+    token for "watch it"/"watch that" -- this pins the body-side half:
+    `handle_command("follow", slots={"referent": True})` behaves
+    identically whether it arrived from "follow it" or "watch it"."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
+    console._print(
+        ["Armor, two o'clock, far."],
+        now_sim=0.0,
+        mentions=[Mention(kind="contact", id=contact_id, t_sim=0.0)],
+    )
+    console.scheduler.busy_until_sim = 0.0
+
+    lines = console.handle_command("follow", now_sim=1.0, slots={"referent": True})
+
+    assert "armor" in lines[0].lower()
+
+
+def test_report_records_every_in_scope_contact_as_one_mention_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2: "every line... sets the referent" -- a `report`
+    naming two ungrouped contacts records both as mentions, in one
+    batch, so a later qualified referent can pick either one back out."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=11,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_AAA",
+                t_sim=0.0,
+                classification_raw="OP_ZU23",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    armor_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    aaa_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ZU23")
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    console.handle_command("report_all", now_sim=0.0)
+
+    recent = console._referent_memory.recent(now_sim=0.0)
+    assert {mention.id for mention in recent} == {armor_id, aaa_id}
+
+
+def test_follow_that_group_resolves_to_a_member_of_the_mentioned_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 3: *"'that group' always takes the whole group"* --
+    reduced to the group's own lead member, which `_mark_watched_with_
+    group` then tags along with every other member, same as a bare
+    "follow" that happens to resolve onto a grouped contact."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    group = store.groups[0]
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
+    console._print(
+        ["Group, two o'clock, far."],
+        now_sim=0.0,
+        mentions=[Mention(kind="group", id=group.id, t_sim=0.0)],
+    )
+    console.scheduler.busy_until_sim = 0.0
+
+    lines = console.handle_command(
+        "follow", now_sim=1.0, slots={"descriptor": "group", "referent": True}
+    )
+
+    assert lines == ["Watching two."]
+    assert all(c.attention == "watch" for c in store.contacts)

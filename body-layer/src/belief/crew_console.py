@@ -95,7 +95,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO, cast
 
@@ -130,6 +130,7 @@ from belief.optic_policy import (
 )
 from belief.optic_policy import SIGHT_SEARCH_NEAR_M as _POINT_NEAR_M
 from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _POINT_FAR_M
+from belief.referent import Mention, ReferentMemory, resolve_referent
 from belief.speech import (
     UrgentCall,
     _contact_report_text,
@@ -699,6 +700,12 @@ class _PendingPositionalReply:
     correlation_id: str | None
     queued_since_sim: float
     render: Callable[[float], list[str]]
+    #: `[[BL-B102]]` -- the referent-worthy subject(s) this readback is
+    #: about, captured here (not on `self._pending_mentions`, which the
+    #: next dispatch would overwrite before this entry is ever drained)
+    #: so `drain_pending_positional_replies`'s own `_print` call records
+    #: the same mention it would have recorded had the channel been clear.
+    mentions: list[Mention] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1259,6 +1266,34 @@ class CrewConsole:
     #: transition`, and consumed-and-cleared by the poll loop's `drain_
     #: where_is_it` the moment it is applied.
     where_is_it_requested: bool = False
+    #: `[[BL-B102]]`'s co-moving field alongside `where_is_it_requested` --
+    #: *this* dispatch's slots (`referent`/`descriptor`/`clock`, or `None`
+    #: for a bare "where is target"), set together with the flag above by
+    #: `_handle_where_is_it` and consumed together by `drain_where_is_it`,
+    #: which resets both. Never left holding an already-answered request's
+    #: slots -- see `plans/that-it-referent/plan.md`'s "Co-moving Fields".
+    where_is_it_slots: dict[str, int | str] | None = None
+    #: `[[BL-B102]]` -- the short-window "what was Petrovich last talking
+    #: about" ledger (`belief.referent.ReferentMemory`), recorded into by
+    #: `_print` whenever a caller passes `mentions`, read by
+    #: `_resolve_referent_target`. Not in `reset_for_new_mission`'s
+    #: "survives" list, so a mission restart resets it to empty for free
+    #: (`__init__`'s `default_factory` applies) -- a mention from a
+    #: mission that just ended is not something "it"/"that" should still
+    #: point at.
+    _referent_memory: ReferentMemory = field(default_factory=ReferentMemory, repr=False)
+    #: `[[BL-B102]]` -- the current dispatch's referent-worthy subject(s),
+    #: set by a handler before returning and read by `handle_command`'s/
+    #: `handle_line`'s/`_handle_brain_reply`'s own tail `_print` call, the
+    #: same "handler sets a narrow instruction, the caller applies it"
+    #: shape `last_command_target_contact_id` already uses. Reset to
+    #: `None` at the top of every `handle_command`/`handle_line` dispatch
+    #: so a stale value from an earlier command cannot leak into an
+    #: unrelated later one's mention recording. A handler that defers its
+    #: readback through `_speak_or_defer` passes `mentions` to that method
+    #: directly instead (carried on the deferred entry, not through this
+    #: field) -- see that method's own docstring.
+    _pending_mentions: list[Mention] | None = field(default=None, repr=False)
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `speech_client`: `None` is a true no-op.
@@ -1572,7 +1607,8 @@ class CrewConsole:
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
-        `weapon_safety_transition`, `on_ground`, `sight_ready`,
+        `weapon_safety_transition`, `where_is_it_slots`, `_referent_memory`,
+        `_pending_mentions`, `on_ground`, `sight_ready`,
         `enrichment`, `refused`, `_positional_reply_overflow_
         warned`) resets to its declared
         default -- see `refused`'s own field docstring for why resetting
@@ -1647,8 +1683,13 @@ class CrewConsole:
         if radio_check_or_greeting is not None:
             token, slots = radio_check_or_greeting
             return self.handle_command(token, now_sim, slots=slots)
+        # `[[BL-B102]]` -- reset before dispatch, same reason/convention as
+        # `handle_command`'s own reset block: `_act` (via `_handle_
+        # utterance`) sets this when it has a subject, and a stale value
+        # from an earlier typed line must not leak into this one.
+        self._pending_mentions = None
         lines = self._handle_utterance(stripped, now_sim)
-        self._print(lines, now_sim, bypass_gate=False)
+        self._print(lines, now_sim, bypass_gate=False, mentions=self._pending_mentions)
         return lines
 
     def drain_events(self, now_sim: float) -> list[str]:
@@ -1690,7 +1731,14 @@ class CrewConsole:
         # A scheduler-drained line never carries `bypass_gate=True` (only an
         # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
-        self._print(spoken, now_sim, bypass_gate=False)
+        # `[[BL-B102]]`: `scheduler.last_spoken_mention` is this same
+        # `tick()` call's own subject, `None` when `spoken` is `[]`.
+        mentions = (
+            [self.scheduler.last_spoken_mention]
+            if self.scheduler.last_spoken_mention is not None
+            else None
+        )
+        self._print(spoken, now_sim, bypass_gate=False, mentions=mentions)
         return spoken
 
     def drain_guidance_unit_ready(
@@ -1759,6 +1807,7 @@ class CrewConsole:
         now_sim: float,
         correlation_id: str | None,
         render: Callable[[float], list[str]],
+        mentions: list[Mention] | None = None,
     ) -> list[str]:
         """Speak `render(now_sim)` now if the channel is modeled clear;
         otherwise defer it to `drain_pending_positional_replies`, to be
@@ -1775,6 +1824,12 @@ class CrewConsole:
         indistinguishable, from `handle_command`'s own perspective, from any
         other command whose readback happens to be empty."""
         if now_sim >= self.scheduler.busy_until_sim:
+            # `[[BL-B102]]` -- carried for `handle_command`'s/
+            # `handle_line`'s own tail `_print` call to pick up, exactly as
+            # `render`'s own closed-over `contact_id` is already known at
+            # this same dispatch-time point; see `_pending_mentions`'
+            # field docstring.
+            self._pending_mentions = mentions
             return render(now_sim)
         if len(self._pending_positional_replies) >= _MAX_PENDING_POSITIONAL_REPLIES:
             self._pending_positional_replies.pop(0)
@@ -1791,6 +1846,7 @@ class CrewConsole:
                 correlation_id=correlation_id,
                 queued_since_sim=now_sim,
                 render=render,
+                mentions=mentions,
             )
         )
         return []
@@ -1828,7 +1884,12 @@ class CrewConsole:
                 still_pending.append(entry)
                 continue
             lines = entry.render(now_sim)
-            self._print(lines, now_sim, correlation_id=entry.correlation_id)
+            self._print(
+                lines,
+                now_sim,
+                correlation_id=entry.correlation_id,
+                mentions=entry.mentions,
+            )
             spoken.extend(lines)
         self._pending_positional_replies = still_pending
         return spoken
@@ -1938,6 +1999,10 @@ class CrewConsole:
             )
             return []
 
+        # `[[BL-B102]]` -- reset before dispatch, same convention as
+        # `handle_command`'s/`handle_line`'s own reset: only `_handle_
+        # brain_pick` (via `_act`) ever sets this.
+        self._pending_mentions = None
         if reply.kind == "unable":
             lines = [render_unable(reply.reason or "").text]
         elif reply.kind == "confirm":
@@ -1947,7 +2012,7 @@ class CrewConsole:
         else:  # "ask"
             lines = self._handle_brain_ask(parse, now_sim)
 
-        self._print(lines, now_sim)
+        self._print(lines, now_sim, mentions=self._pending_mentions)
         return lines
 
     def _handle_brain_confirm(self, reply: BrainReply, now_sim: float) -> list[str]:
@@ -2080,6 +2145,10 @@ class CrewConsole:
         # Same reset, same reason, for "where is it?"
         # (`where_is_it_requested`'s own docstring).
         self.where_is_it_requested = False
+        self.where_is_it_slots = None
+        # Same reset, same reason, for `[[BL-B102]]`'s referent-mention
+        # recording -- see `_pending_mentions`' own docstring.
+        self._pending_mentions = None
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -2169,11 +2238,13 @@ class CrewConsole:
         elif token == "point":
             lines = self._handle_point(now_sim, slots, correlation_id=correlation_id)
         elif token == "where_is_it":
-            lines = self._handle_where_is_it()
+            lines = self._handle_where_is_it(slots)
         elif token == "mark_here":
             lines = self._handle_mark_here(now_sim)
         elif token == "mark_target":
-            lines = self._handle_mark_target(now_sim, correlation_id=correlation_id)
+            lines = self._handle_mark_target(
+                now_sim, slots, correlation_id=correlation_id
+            )
         elif token == "observ_on":
             lines = self._handle_observ_on()
         elif token == "observ_off":
@@ -2228,7 +2299,12 @@ class CrewConsole:
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
-        self._print(lines, now_sim, correlation_id=correlation_id)
+        self._print(
+            lines,
+            now_sim,
+            correlation_id=correlation_id,
+            mentions=self._pending_mentions,
+        )
         return lines
 
     def _believed_air_defence(self, facts: dict[str, object]) -> bool:
@@ -2422,6 +2498,12 @@ class CrewConsole:
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
 
+        # `[[BL-B102]]` -- "watch nearest" names a subject just as plainly
+        # as "follow" does (Decision 2: "every line... sets the
+        # referent"), even though it is not named in the plan's own audit
+        # table; see implementation.md.
+        mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
+
         def _render(render_now_sim: float) -> list[str]:
             if marked > 1:
                 return [render_watch_group_readback(marked).text]
@@ -2432,7 +2514,7 @@ class CrewConsole:
                 return [render_lost_contact().text]
             return [render_watch_nearest_readback(redone["facts"]).text]
 
-        return self._speak_or_defer(now_sim, correlation_id, _render)
+        return self._speak_or_defer(now_sim, correlation_id, _render, mentions=mentions)
 
     def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
         """The descriptor term of `_resolve_follow_target`'s score --
@@ -2453,6 +2535,103 @@ class CrewConsole:
         if verdict == "unclassified":
             return W_FOLLOW_DESC_UNKNOWN
         return W_FOLLOW_DESC_WRONG
+
+    def _resolve_referent_target(
+        self,
+        now_sim: float,
+        *,
+        descriptor: str | None = None,
+        clock: int | None = None,
+        sector: Sector | None = None,
+        relative: RelativeSector | None = None,
+        band: str | None = None,
+    ) -> tuple[str | None, list[str]]:
+        """`[[BL-B102]]` -- the one call site every referent-bearing
+        handler (`follow`/`select_target`/`engage`/`mark_target`/`where_
+        is_it`, and the `watch` family via `follow`'s own handler) uses to
+        resolve a pronoun ("it"/"that") to a contact id. Wraps `belief.
+        referent.resolve_referent`, supplying the two things that function
+        deliberately does not own itself (see its own docstring): the
+        currently active attack target (for the target-priority clause),
+        and a qualifier-filtering callable built from `_report_scope`'s
+        own `restrict_to_ids` mode -- `None`/absent `self.enrichment`
+        degrades to "no candidates survive the qualifier" rather than
+        raising, mirroring every other `_report_scope`-dependent handler's
+        own `self.enrichment is None` guard.
+
+        **`descriptor == "group"` is handled separately, before any of
+        that** (Design, Decision 3's "'that group' always takes the
+        whole group"). `_report_scope`'s own `descriptor_verdict`
+        reads `"group"` as a *single contact's* multi-unit cardinality
+        estimate (`cardinality.lo > 1`) -- a different concept from
+        `belief.groups.Group` membership, the same distinction `_mark_
+        watched_with_group`'s own docstring draws -- so routing it
+        through the ordinary qualifier-filtering path would filter out
+        exactly the `Mention(kind="group")` this qualifier means to
+        select (a group's own *members* are each singular contacts, with
+        `cardinality.lo == 1`)."""
+        if descriptor == "group":
+            return self._resolve_group_referent_target(now_sim)
+        has_qualifier = any(
+            value is not None for value in (descriptor, clock, sector, relative, band)
+        )
+
+        def _qualifier_scope(ids: Collection[str]) -> list[dict[str, object]]:
+            if self.enrichment is None:
+                return []
+            return self._report_scope(
+                now_sim,
+                clock=clock,
+                sector=sector,
+                descriptor=descriptor,
+                relative=relative,
+                band=band,
+                restrict_to_ids=ids,
+            ).facts
+
+        target_task = self._active_attack_target_task()
+        active_attack_target_id = (
+            target_task.contact_id if target_task is not None else None
+        )
+        return resolve_referent(
+            self.store,
+            self._referent_memory,
+            now_sim,
+            has_qualifier=has_qualifier,
+            qualifier_scope=_qualifier_scope,
+            active_attack_target_id=active_attack_target_id,
+        )
+
+    def _resolve_group_referent_target(
+        self, now_sim: float
+    ) -> tuple[str | None, list[str]]:
+        """`[[BL-B102]]`'s `descriptor == "group"` branch of `_resolve_
+        referent_target` -- the most recently mentioned `Mention(kind=
+        "group")` still inside the window, reduced to one contact id by
+        `resolve_referent`'s own group-reduction step (via a throwaway
+        `ReferentMemory` holding just that one mention, so the reduction
+        logic is not duplicated here). **Any other qualifier (clock/
+        sector/relative/band) accompanying "group" is not applied** --
+        not reachable from any of the plan's own worked examples
+        (`plans/that-it-referent/plan.md`), and noted as a scope limit
+        in `implementation.md` rather than built speculatively."""
+        group_mentions = [
+            mention
+            for mention in self._referent_memory.recent(now_sim)
+            if mention.kind == "group"
+        ]
+        if not group_mentions:
+            return None, [render_unable("NO_REFERENT").text]
+        throwaway = ReferentMemory()
+        throwaway.record([group_mentions[-1]], now_sim)
+        return resolve_referent(
+            self.store,
+            throwaway,
+            now_sim,
+            has_qualifier=False,
+            qualifier_scope=lambda ids: [],
+            active_attack_target_id=None,
+        )
 
     def _resolve_follow_target(
         self,
@@ -2559,17 +2738,29 @@ class CrewConsole:
 
         **The readback is deferred, not the resolution** (Stage 6, `plans/
         voice-latency-instrumentation/plan.md`) -- see `_handle_watch_
-        nearest`'s identical note."""
+        nearest`'s identical note.
+
+        **`[[BL-B102]]`'s `referent` slot** ("follow it"/"follow that
+        [group]", or the `watch` family's own `_parse_watch_slots`
+        reusing this same handler via the same token) resolves through
+        `_resolve_referent_target` instead of `_resolve_follow_target`.
+        `range_km` plays no part in a referent query -- `_report_scope`
+        (what `_resolve_referent_target` filters through) has no exact-
+        range slot, only `band`'s three tiers, so a referent qualified by
+        range alone is not resolvable here; not a case either the plan's
+        worked examples or `audio-adapter`'s `_parse_follow_slots` ever
+        combine with a pronoun."""
         descriptor = slots.get("descriptor") if slots is not None else None
         clock = slots.get("clock") if slots is not None else None
         range_km = slots.get("range_km") if slots is not None else None
+        referent = bool(slots.get("referent")) if slots is not None else False
         if not isinstance(descriptor, str):
             descriptor = None
         if not isinstance(clock, int):
             clock = None
         if not isinstance(range_km, int):
             range_km = None
-        if descriptor is None and clock is None and range_km is None:
+        if descriptor is None and clock is None and range_km is None and not referent:
             # A malformed/empty-slots call -- unreachable from a real
             # `follow` match (the matcher never returns `token="follow"`
             # with `slots=None`), but a defensive, request-shape check
@@ -2579,9 +2770,14 @@ class CrewConsole:
         if self.enrichment is None:
             return ["no world-model connection configured"]
 
-        contact_id, no_match_lines = self._resolve_follow_target(
-            now_sim, descriptor, clock, range_km
-        )
+        if referent:
+            contact_id, no_match_lines = self._resolve_referent_target(
+                now_sim, descriptor=descriptor, clock=clock
+            )
+        else:
+            contact_id, no_match_lines = self._resolve_follow_target(
+                now_sim, descriptor, clock, range_km
+            )
         if contact_id is None:
             return no_match_lines
 
@@ -2593,6 +2789,8 @@ class CrewConsole:
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
 
+        mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
+
         def _render(render_now_sim: float) -> list[str]:
             if marked > 1:
                 return [render_watch_group_readback(marked).text]
@@ -2603,7 +2801,7 @@ class CrewConsole:
                 return [render_lost_contact().text]
             return [render_watch_nearest_readback(redone["facts"]).text]
 
-        return self._speak_or_defer(now_sim, correlation_id, _render)
+        return self._speak_or_defer(now_sim, correlation_id, _render, mentions=mentions)
 
     def _resolve_attack_target(
         self,
@@ -2723,14 +2921,21 @@ class CrewConsole:
         finding this stage exists to fix): resolving the target and
         registering the task above are unconditional, exactly as before;
         only the *speaking* of the readback waits for a modeled-busy
-        channel and is then re-rendered against belief at that later tick."""
+        channel and is then re-rendered against belief at that later tick.
+
+        **`[[BL-B102]]`'s `referent` slot** ("target it"/"target that
+        [11 o'clock armor]") resolves through `_resolve_referent_target`
+        instead of `_resolve_attack_target` -- the same five-slot
+        qualifier set either way."""
         descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
+        referent = bool(slots.get("referent")) if slots is not None else False
         if (
             descriptor is None
             and clock is None
             and sector is None
             and relative is None
             and band is None
+            and not referent
         ):
             return ["say again -- select target needs what and/or where"]
         if self.enrichment is None:
@@ -2738,9 +2943,19 @@ class CrewConsole:
         if self.tasks is None:
             return ["no task store configured"]
 
-        contact_id, no_match_lines = self._resolve_attack_target(
-            now_sim, descriptor, clock, sector, relative, band
-        )
+        if referent:
+            contact_id, no_match_lines = self._resolve_referent_target(
+                now_sim,
+                descriptor=descriptor,
+                clock=clock,
+                sector=sector,
+                relative=relative,
+                band=band,
+            )
+        else:
+            contact_id, no_match_lines = self._resolve_attack_target(
+                now_sim, descriptor, clock, sector, relative, band
+            )
         if contact_id is None:
             return no_match_lines
 
@@ -2765,6 +2980,8 @@ class CrewConsole:
         if result is None:
             return [f"no such contact: {contact_id}"]
 
+        mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
+
         def _render(render_now_sim: float) -> list[str]:
             redone = describe_contact(
                 self.store, contact_id, render_now_sim, enrichment=self.enrichment
@@ -2773,7 +2990,7 @@ class CrewConsole:
                 return [render_lost_contact().text]
             return [render_target_readback(redone["facts"]).text]
 
-        return self._speak_or_defer(now_sim, correlation_id, _render)
+        return self._speak_or_defer(now_sim, correlation_id, _render, mentions=mentions)
 
     def _handle_drop_target(self) -> list[str]:
         """`drop target` (`plans/attack-run/plan.md` Decision 2) -- ends
@@ -2795,7 +3012,10 @@ class CrewConsole:
         return [self.mark_here_fn(now_sim)]
 
     def _handle_mark_target(
-        self, now_sim: float, correlation_id: str | None = None
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`mark target` (`plans/bl8-mission-memory/plan.md` Decision 6) --
         mark the currently selected attack-run target's believed position,
@@ -2803,6 +3023,12 @@ class CrewConsole:
         (`_active_attack_target_task`). The "no target selected" failure
         is the exact wording every other target-keyed command already
         uses for the same missing input (`_handle_step`'s own check).
+
+        **`[[BL-B102]]`'s `referent` slot** ("mark it"/"mark that") -- a
+        bare "mark target" with no pronoun stays bound to the attack
+        target as above; `slots["referent"]` instead resolves through
+        `_resolve_referent_target`, exactly as `follow`'s own referent
+        branch does.
 
         **The write happens here, unconditionally, at command time** --
         `mark_target_fn(contact_id, now_sim)` records the contact's
@@ -2822,17 +3048,32 @@ class CrewConsole:
         replays the fixed text."""
         if self.mark_target_fn is None:
             return ["no mission memory configured"]
-        target_task = self._active_attack_target_task()
-        if target_task is None or target_task.contact_id is None:
-            return ["no target selected"]
-        contact_id = target_task.contact_id
+        referent = bool(slots.get("referent")) if slots is not None else False
+        if referent:
+            descriptor = slots.get("descriptor") if slots is not None else None
+            clock = slots.get("clock") if slots is not None else None
+            if not isinstance(descriptor, str):
+                descriptor = None
+            if not isinstance(clock, int):
+                clock = None
+            contact_id, no_match_lines = self._resolve_referent_target(
+                now_sim, descriptor=descriptor, clock=clock
+            )
+            if contact_id is None:
+                return no_match_lines
+        else:
+            target_task = self._active_attack_target_task()
+            if target_task is None or target_task.contact_id is None:
+                return ["no target selected"]
+            contact_id = target_task.contact_id
 
         text = self.mark_target_fn(contact_id, now_sim)
+        mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
 
         def _render(render_now_sim: float) -> list[str]:
             return [text]
 
-        return self._speak_or_defer(now_sim, correlation_id, _render)
+        return self._speak_or_defer(now_sim, correlation_id, _render, mentions=mentions)
 
     def _active_attack_target_task(self) -> PendingIntent | None:
         """The currently active `attack_target` task, or `None` -- shared
@@ -3024,22 +3265,41 @@ class CrewConsole:
         accepted and discarded (Decision 15: "nothing reads it yet" --
         `_parse_target_slots` has no weapon field, so it is simply never
         read here either, the same "accepted into the grammar, never
-        consumed" shape the plan describes)."""
+        consumed" shape the plan describes).
+
+        **`[[BL-B102]]`'s `referent` slot** ("engage it"/"engage that") is
+        itself a positive signal the player means a specific contact, not
+        nothing -- decided here, local and reversible (Design): it takes
+        the same branch a what/where descriptor does (select-then-engage
+        via `_resolve_referent_target`), rather than being read as the
+        bare "resume the already-selected run" form below."""
         descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
+        referent = bool(slots.get("referent")) if slots is not None else False
         if (
             descriptor is not None
             or clock is not None
             or sector is not None
             or relative is not None
             or band is not None
+            or referent
         ):
             if self.enrichment is None:
                 return ["no world-model connection configured"]
             if self.tasks is None:
                 return ["no task store configured"]
-            contact_id, no_match_lines = self._resolve_attack_target(
-                now_sim, descriptor, clock, sector, relative, band
-            )
+            if referent:
+                contact_id, no_match_lines = self._resolve_referent_target(
+                    now_sim,
+                    descriptor=descriptor,
+                    clock=clock,
+                    sector=sector,
+                    relative=relative,
+                    band=band,
+                )
+            else:
+                contact_id, no_match_lines = self._resolve_attack_target(
+                    now_sim, descriptor, clock, sector, relative, band
+                )
             if contact_id is None:
                 return no_match_lines
             task = attack_target_task(
@@ -3076,6 +3336,11 @@ class CrewConsole:
         # same field `_handle_weapons_armed` sets -- engaging while
         # already armed is a harmless re-write, never a conflicting state.
         self.weapon_safety_transition = "armed"
+        # `[[BL-B102]]` -- `handle_command`'s own tail `_print` call
+        # records this; `_handle_engage` never defers (unlike `follow`/
+        # `select_target`), so there is no `_speak_or_defer` call to pass
+        # `mentions` to.
+        self._pending_mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
         return [render_engage_readback(result["facts"]).text]
 
     def _handle_disengage(self) -> list[str]:
@@ -3093,7 +3358,7 @@ class CrewConsole:
         self.attack_run_transition = "disengage"
         return [render_attack_run_off().text]
 
-    def _handle_where_is_it(self) -> list[str]:
+    def _handle_where_is_it(self, slots: dict[str, int | str] | None) -> list[str]:
         """ "Where is it?" (`plans/attack-run-los/plan.md` F3) -- the
         pilot's own words: *"Add command 'where is it?' that gives me an
         update during an attack run based on A) seeing the target B)
@@ -3108,8 +3373,19 @@ class CrewConsole:
         already use for a runner-level effect, except here the signal
         gates the *entire* readback, not a side effect alongside an
         immediate one. Always `[]` -- one of `NO_RETURN_VALUE_COMMAND_
-        TOKENS`' two documented exceptions."""
+        TOKENS`' two documented exceptions.
+
+        **`[[BL-B102]]`'s Co-moving Fields**: `slots` is carried alongside
+        the flag, not just the flag alone -- `command_matcher._parse_
+        where_is_it_slots`' explicit-"target"-anchor check keeps a literal
+        "where is target" hard-bound to the attack target (that parser
+        returns `None` for it, falling through to the phrase table, so
+        `slots` is `None` here too); every other recorded phrasing
+        ("where is it"/"where is it now") carries the pronoun "it" and so
+        resolves as a referent, `{"referent": True, ...}`, for `drain_
+        where_is_it` to resolve."""
         self.where_is_it_requested = True
+        self.where_is_it_slots = slots
         return []
 
     def _handle_observ_on(self) -> list[str]:
@@ -3280,6 +3556,10 @@ class CrewConsole:
                     "attack_run_azimuth_deg": new_state.current_azimuth_deg,
                     "attack_run_elevation_deg": new_state.current_elevation_deg,
                 },
+                # `[[BL-B102]]` -- Decision 2 names this explicitly:
+                # attack-run steering lines are included in "every line
+                # sets the referent," not exempted.
+                mentions=[Mention(kind="contact", id=contact.id, t_sim=now_sim)],
             )
             return new_state
         # Occupancy suppressed the print (Stage 4-5 review, required fix
@@ -3320,33 +3600,90 @@ class CrewConsole:
         from. **Answering never engages or alters the run** -- the
         throwaway instance (when constructed) is discarded immediately
         after this call, never stored anywhere, and `attack_run.query`
-        itself never writes `state` either way."""
+        itself never writes `state` either way.
+
+        **`[[BL-B102]]`, Decision 1 revised**: a pronoun ("it"/"that")
+        now resolves through `_resolve_referent_target` rather than
+        unconditionally through `_active_attack_target_task` -- `self.
+        where_is_it_slots` (set by `_handle_where_is_it`, the Co-moving
+        Fields table) carries whether this dispatch heard one. The
+        resolved contact still speaks the existing run-guidance phrase
+        below *when it happens to be the current attack target* (the
+        pilot's own worked example: "where is it" during a run means the
+        target unless something else was mentioned more recently); any
+        other resolved contact gets the plain positional answer
+        (`render_contact_report`, Decision 6's "<o'clock> <distance> <world
+        ref>" shape) instead. A bare "where is target" (no pronoun,
+        `where_is_it_slots is None`) keeps the original unconditional
+        binding, unchanged."""
+        slots = self.where_is_it_slots
+        referent = bool(slots.get("referent")) if slots is not None else False
         target_task = self._active_attack_target_task()
-        if target_task is None or target_task.contact_id is None:
-            lines = [render_no_target().text]
-            self._print(lines, now_sim)
-            return lines
-        contact = self.store.contact(target_task.contact_id)
+        active_attack_target_id = (
+            target_task.contact_id if target_task is not None else None
+        )
+        if referent:
+            descriptor = slots.get("descriptor") if slots is not None else None
+            clock = slots.get("clock") if slots is not None else None
+            if not isinstance(descriptor, str):
+                descriptor = None
+            if not isinstance(clock, int):
+                clock = None
+            contact_id, no_match_lines = self._resolve_referent_target(
+                now_sim, descriptor=descriptor, clock=clock
+            )
+            if contact_id is None:
+                self._print(no_match_lines, now_sim)
+                return no_match_lines
+        else:
+            if active_attack_target_id is None:
+                lines = [render_no_target().text]
+                self._print(lines, now_sim)
+                return lines
+            contact_id = active_attack_target_id
+
+        contact = self.store.contact(contact_id)
         if contact is None:
             lines = [render_lost_contact().text]
             self._print(lines, now_sim)
             return lines
-        group = self.store.group_for_contact(contact.id)
-        state = (
-            attack_run_state
-            if attack_run_state is not None
-            else AttackRunState(last_contact_id=contact.id)
-        )
-        speech = query_attack_run(
-            state,
-            now_sim=now_sim,
-            ownship=ownship,
-            contact=contact,
-            group=group,
-            resolving_optic=resolving_optic,
-        )
-        lines = [speech.text]
-        self._print(lines, now_sim)
+
+        mentions = [Mention(kind="contact", id=contact_id, t_sim=now_sim)]
+        if contact_id == active_attack_target_id:
+            group = self.store.group_for_contact(contact.id)
+            state = (
+                attack_run_state
+                if attack_run_state is not None
+                else AttackRunState(last_contact_id=contact.id)
+            )
+            speech = query_attack_run(
+                state,
+                now_sim=now_sim,
+                ownship=ownship,
+                contact=contact,
+                group=group,
+                resolving_optic=resolving_optic,
+            )
+            lines = [speech.text]
+        else:
+            # Decision 6: the plain positional answer for a referent that
+            # is not (or is no longer) the current attack target --
+            # `render_contact_report`'s own "<unit type>, <clock> o'clock,
+            # <range> km[ <world ref>]." already carries that shape
+            # (Facts section), reused rather than invented. `describe_
+            # contact`/`render_contact_report` answer from belief
+            # regardless of certainty (Decision 4) -- only a `contact_id`
+            # that no longer exists in the store at all fails, and that
+            # was already checked above.
+            report_speech = render_contact_report(
+                self.store, contact_id, now_sim, self.enrichment
+            )
+            if report_speech is None:
+                lines = [render_lost_contact().text]
+                self._print(lines, now_sim)
+                return lines
+            lines = [report_speech.text]
+        self._print(lines, now_sim, mentions=mentions)
         return lines
 
     def _point_slots_label(self, slots: dict[str, int | str]) -> str:
@@ -3810,6 +4147,18 @@ class CrewConsole:
         if self.enrichment is None:
             return ["no world-model connection configured"]
 
+        # `[[BL-B102]]` -- mutated by `_render` below when it actually
+        # runs, not filled here: this report is "deferred as a whole," so
+        # the in-scope set (and therefore the mention batch) can only be
+        # known at the tick it is actually spoken, same as `facts_list`
+        # itself. `_speak_or_defer` reads this same list object back,
+        # after `_render` has populated it, whether that happens
+        # immediately (this call) or later (`drain_pending_positional_
+        # replies`) -- see that method's own docstring for why a mutable
+        # container, rather than a second return value, is what makes
+        # that work without changing every other caller's contract.
+        mentions: list[Mention] = []
+
         def _render(render_now_sim: float) -> list[str]:
             # `self.enrichment` is re-checked here, not only above: this
             # closure may run on a later poll than the one that validated
@@ -3834,6 +4183,15 @@ class CrewConsole:
                     assert scope.direction_label is not None
                     return [render_no_view(scope.direction_label).text]
                 return [render_clear(scope.direction_label).text]
+
+            # Decision 2's "every line... sets the referent" -- the whole
+            # in-scope batch, one `_print` call, so the recorded order
+            # matches speaking order by construction (`_print`'s own
+            # docstring).
+            mentions.extend(
+                Mention(kind="contact", id=cast(str, facts["id"]), t_sim=render_now_sim)
+                for facts in facts_list
+            )
 
             # Decision C: the answer is one summary utterance, not the
             # per-group enumeration -- *"B. I can also look myself, so a
@@ -3866,7 +4224,7 @@ class CrewConsole:
                 ).text
             ]
 
-        return self._speak_or_defer(now_sim, correlation_id, _render)
+        return self._speak_or_defer(now_sim, correlation_id, _render, mentions=mentions)
 
     def _band_label_for(
         self, facts_list: list[dict[str, object]], band: str | None
@@ -3905,6 +4263,7 @@ class CrewConsole:
         descriptor: str | None,
         relative: RelativeSector | None,
         band: str | None,
+        restrict_to_ids: Collection[str] | None = None,
     ) -> ReportScope:
         """Which contacts a report is *about*, plus how to answer when that
         set is empty -- `_handle_report`'s filtering half, pulled out as a
@@ -3918,7 +4277,22 @@ class CrewConsole:
         `render_group_full_disclosure`, whose rule is to name a group's
         *full roster*, so an in-scope contact drags its out-of-scope
         group-mates into the text and a filter's effect is not readable
-        off the sentence at all."""
+        off the sentence at all.
+
+        **`restrict_to_ids` (`[[BL-B102]]`, `_resolve_referent_target`'s
+        own qualifier-filtering mode) changes which contacts are even
+        considered, not just how -- and it changes the certainty rule
+        too.** A plain `report`/`_resolve_attack_target` call (this
+        parameter absent/`None`) drops `certainty == "lost"` as it always
+        has: a report should not keep re-announcing a contact that has
+        gone cold. A referent query is the opposite case (Decision 4,
+        explore-notes: "use belief if not visible") -- a mentioned
+        contact must still resolve even after going `"lost"`, so this mode
+        skips that drop entirely and filters to exactly `restrict_to_ids`
+        instead. The two are mutually exclusive by construction: a
+        caller passing `restrict_to_ids` is asking "which of *these*
+        specific mentioned ids survive the qualifier," not "which
+        currently-live contacts match"."""
         assert self.enrichment is not None
         heading = self.enrichment.ownship.heading_true_deg
         rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
@@ -3970,7 +4344,10 @@ class CrewConsole:
         facts_list: list[dict[str, object]] = []
         for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
             facts = result["facts"]
-            if facts.get("certainty") == "lost":
+            if restrict_to_ids is not None:
+                if facts.get("id") not in restrict_to_ids:
+                    continue
+            elif facts.get("certainty") == "lost":
                 continue
             relative_now = facts.get("relative_now")
             if not isinstance(relative_now, dict):
@@ -4697,6 +5074,14 @@ class CrewConsole:
             )
             if not found:
                 return [f"no such contact: {contact_id}"]
+            # `[[BL-B102]]` -- `handle_line`'s/`_handle_brain_reply`'s own
+            # tail `_print` call is what actually records this; only a
+            # *successful* readback plants a mention (a "no such contact"
+            # line above must not plant a referent for an id that does not
+            # resolve, the same rule every other failure line follows).
+            self._pending_mentions = [
+                Mention(kind="contact", id=contact_id, t_sim=now_sim)
+            ]
             return [render_readback(parse.attention_level, contact_id).text]
         if parse.matched_intent == "describe_contact":
             speech = render_contact_report(
@@ -4704,6 +5089,9 @@ class CrewConsole:
             )
             if speech is None:
                 return [f"no such contact: {contact_id}"]
+            self._pending_mentions = [
+                Mention(kind="contact", id=contact_id, t_sim=now_sim)
+            ]
             return [speech.text]
         return []
 
@@ -4732,6 +5120,7 @@ class CrewConsole:
         bypass_gate: bool = False,
         attack_run_fields: dict[str, object] | None = None,
         correlation_id: str | None = None,
+        mentions: list[Mention] | None = None,
     ) -> None:
         """Prints each line to `output` (unchanged) and, when
         `speech_client` is configured, pushes the same
@@ -4801,7 +5190,17 @@ class CrewConsole:
         ordering/context only (this process and audio-adapter are not
         assumed to share a clock) -- `push_duration_s`, derived from the
         monotonic bracket, is the trustworthy number. All three stay `None`
-        when nothing was pushed (`speech_client` unset, or `self.silenced`)."""
+        when nothing was pushed (`speech_client` unset, or `self.silenced`).
+
+        `mentions` (`[[BL-B102]]`) records *this* call's subject(s) into
+        `self._referent_memory` once per call, not once per line -- every
+        line in `lines` is one logical reply/line-batch about the same
+        subject(s). Recorded only when `lines` is non-empty: a call that
+        ends up speaking nothing (an empty deferred-readback tail call,
+        the common case once `_speak_or_defer` has already queued the
+        real one) must not plant a referent for a line nobody heard."""
+        if lines and mentions:
+            self._referent_memory.record(mentions, now_sim)
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)

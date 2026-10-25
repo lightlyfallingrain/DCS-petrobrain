@@ -151,6 +151,12 @@ SIGHT_STALL_COOLDOWN_S = 132.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 
+[belief.referent]
+# How long a mention stays resolvable by a bare/qualified pronoun (Decision 4: "time ok").
+# status: judgement | range: 15.0 .. 180.0
+# source: belief/referent.py:REFERENT_WINDOW_S
+REFERENT_WINDOW_S = 60.0
+
 [belief.sight_head]
 # How long the sight keeps tracking the last *seen* direction after the target drops out of the glass (left the FOV, LOS blocked, a binocular/ unaided poll, hands busy) before falling back to belief's own desired direction -- the plan's "Aim source" selection rule, `held` row.
 # status: agreed-guess | range: 0.0 .. 10.0

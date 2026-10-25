@@ -245,6 +245,7 @@ from belief.events import (
     EventKind,
 )
 from belief.groups import Group
+from belief.referent import Mention
 from belief.speech import (
     _format_range_km,
     _group_member_facts,
@@ -865,6 +866,14 @@ class CalloutScheduler:
     #: contact's own `CONTACT_DETECTED`/`CONTACT_REACQUIRED` never reaches
     #: this check at all -- it only ever sees an ungrouped contact now.
     _last_spoken_signature: dict[str, str] = field(default_factory=dict, repr=False)
+    #: `[[BL-B102]]` -- the subject of the last line `tick` actually
+    #: returned non-empty, for `CrewConsole.drain_events` to pass to
+    #: `_print` as `mentions`. Set at every `tick` return (`None` when
+    #: nothing was spoken), not left stale from a previous call -- a
+    #: caller that only reads this after a non-empty `tick()` result would
+    #: still be correct, but setting it unconditionally means there is
+    #: nothing to get wrong by reading it after an empty one too.
+    last_spoken_mention: Mention | None = field(default=None, repr=False)
 
     def note_urgent(self, now_sim: float, text: str) -> None:
         """An urgent (`bypass_gate=True`) line just went out through a path
@@ -1039,6 +1048,7 @@ class CalloutScheduler:
         `None` (the default, every caller but `CrewConsole.drain_events`)
         is a true no-op: this push-path push method has no other reason
         to know an attack run exists."""
+        self.last_spoken_mention = None
         if now_sim < self.busy_until_sim:
             return []
 
@@ -1348,6 +1358,12 @@ class CalloutScheduler:
                     ):
                         acknowledge_event(store, member_event.id)
                 text = speech.text
+                # `[[BL-B102]]` -- the group itself is the subject, not
+                # any one member; `resolve_referent`'s own group-reduction
+                # step is what turns this into a single contact id later.
+                self.last_spoken_mention = Mention(
+                    kind="group", id=candidate.id, t_sim=now_sim
+                )
             else:
                 text = self._render_event(store, candidate, now_sim, enrichment)
                 if text is None:
@@ -1355,6 +1371,9 @@ class CalloutScheduler:
                     continue
                 if candidate.kind in _WATCHED_ONLY_KINDS:
                     self._last_spoken_sim[candidate.contact_id] = now_sim
+                self.last_spoken_mention = Mention(
+                    kind="contact", id=candidate.contact_id, t_sim=now_sim
+                )
             self.busy_until_sim = (
                 now_sim + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S
             )
