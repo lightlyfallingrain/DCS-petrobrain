@@ -1566,15 +1566,18 @@ def _back_to_home(
     that makes the OBSERV-off path provably unchanged (§13's own claim).
 
     **`home_phase is SIGHTING`: the aim is carried through, never nulled**
-    (`plans/9k113-narrow-search/plan.md` Stage 1, closing F5's "idle sight
-    has no aim" defect for every path that reaches here -- an interrupted
-    glance-away, a finished binocular excursion, `lower_binoculars` called
-    mid-interruption). This *is* "the sight stays at last position," for
-    free, once this function stops erasing it -- defaulting to `(0.0, 0.0)`
-    (dead ahead) only if an aim was never set at all (the very first poll
-    after "Observ on"). `home_phase is SCANNING`: byte-for-byte unchanged,
-    aim nulled exactly as before -- `UNAIDED_OPTIC` is unrestricted and
-    free-scans, so it has no "last position" to preserve."""
+    here -- but on the glance-away-resume path, the aim was already nulled
+    upstream by `_start_glance_away` before this function ever runs, so
+    this only delivers "the sight stays at last position" when reached
+    directly from a mid-lap interruption (`lower_binoculars`, `not
+    steady`), not from a glance-away resume, where it defaults to
+    `(0.0, 0.0)` (dead ahead) the same as the never-set case. Not
+    previously exercised by a test that checked the *resumed* aim
+    specifically; measured and tracked as `[[BL-B98]]`
+    (`plans/9k113-scan-procedure/review.md`). `home_phase is SCANNING`:
+    byte-for-byte unchanged, aim nulled exactly as before -- `UNAIDED_OPTIC`
+    is unrestricted and free-scans, so it has no "last position" to
+    preserve."""
     if state.home_phase is OpticPhase.SIGHTING:
         azimuth = state.look_azimuth_deg if state.look_azimuth_deg is not None else 0.0
         elevation = (
@@ -1811,10 +1814,16 @@ def _enter_binocular_search(
     cycle expressing both.
 
     **Deliberately omits `look_azimuth_deg`/`look_elevation_deg` from the
-    `replace()` below** -- leaving them exactly as they were is "the sight
-    stays at its last position" (`docs/acceptance/2026-10-20-sortie-
-    feedback.md`, F4/F5 "settled": *"Leave 9K113 at last position"*), for
-    free, simply by never touching them.
+    `replace()` below**, but this function's sole call site (the glance-
+    away's own resume point, see above) is reached only after
+    `_start_glance_away` has already nulled both fields to `None` -- so in
+    practice this resumes dead ahead `(0.0, 0.0)`, not at the sight's last
+    position, on every entry. The F4/F5 acceptance criterion
+    (`docs/acceptance/2026-10-20-sortie-feedback.md`, *"Leave 9K113 at last
+    position"*) is therefore not delivered on this path; measured by this
+    stage's own tests (`TestSightSearchLegs`,
+    `plans/9k113-scan-procedure/implementation.md` "Notable Discoveries").
+    Tracked as `[[BL-B98]]`.
 
     **Sets `sight_search_leg` to `"wide_near"` immediately at entry**,
     not on exit, so that whenever this excursion ends (pattern exhausted,

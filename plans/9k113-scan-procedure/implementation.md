@@ -170,3 +170,41 @@ All run from `body-layer/`:
   recommended left as the stand-in ("simply don't re-look") until Stage 1 has flown.
 - The wide-band split (1.5–4 / 4–8 km) and the narrow-far-sweep band (8–13.6 km) remain
   unconfirmed starting values past the 1.5 km near edge, per the plan's own open Decision.
+
+## Review fixes
+
+Applied both of `review.md`'s Required Fixes (verdict: NEEDS REVISION); no Optional Refinements
+required action.
+
+1. **`_enter_binocular_search`'s docstring, `body-layer/src/belief/optic_policy.py`.** Rewrote
+   the "Deliberately omits `look_azimuth_deg`/`look_elevation_deg`" paragraph to state the
+   measured truth — this function's sole call site is reached only after `_start_glance_away` has
+   already nulled both fields to `None`, so it resumes dead ahead `(0.0, 0.0)` on every entry, not
+   at the sight's last position — and points at the new `[[BL-B98]]` backlog entry (item 3
+   below). Also corrected `_back_to_home`'s pre-existing docstring, flagged by the reviewer as
+   carrying the identical false claim for the same reason (the "optional, your call" half of
+   Required Fix 1): it now says the "stays at last position" claim only holds when reached
+   directly from a mid-lap interruption, not from a glance-away resume, and points at `[[BL-B98]]`
+   too. Docstring-only; no behaviour change (confirmed — both edits are prose inside existing
+   `"""..."""` blocks, no code line touched).
+
+2. **`body-layer/ROADMAP/BL-B89.md`.** Marked the "`[[BL-B86]]` is folded in" line superseded
+   (kept, not deleted, per root `CLAUDE.md`'s "supersession is marked, not deleted"): that was the
+   explore session's first answer, reversed later the same session — `[[BL-B86]]` was declined
+   2026-10-25 (*"if B86's only thing is the high alt scan then reject it"*, outside the operating
+   altitude envelope) — with the residue (a nose-up test within 50–800 m AGL) carried into this
+   item's tests, not the high-altitude scan itself.
+
+3. **Filed `[[BL-B98]]`** (`body-layer/ROADMAP/BL-B98.md`, indexed in
+   `body-layer/ROADMAP/body-layer-backlog.md`): the 9K113 sight resumes dead ahead instead of at
+   its last position on every glance-away-triggered resume, against the settled F4/F5 acceptance
+   criterion in `docs/acceptance/2026-10-20-sortie-feedback.md`. Pre-existing
+   (`_start_glance_away` nulls the aim fields regardless of trigger), surfaced by this stage's own
+   tests, not a defect introduced by this stage. Cites `plans/9k113-scan-procedure/review.md`.
+
+**Checks after the fix**, all from `body-layer/`:
+
+- `ruff format --check src tests tools`: pass
+- `ruff check src tests tools`: pass
+- `mypy src`: pass
+- `pytest tests -q`: pass — 2587 passed, 4 xfailed (unchanged — docstring-only change)
