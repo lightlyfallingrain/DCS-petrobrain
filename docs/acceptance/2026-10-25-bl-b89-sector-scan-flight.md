@@ -3,6 +3,8 @@
 Source of truth for the published card (the main loop publishes the artifact from this file — do
 not fly from a copy, fly from whatever the card links back to here).
 
+**Card:** https://claude.ai/artifact/M9jAnsomghXnV1bSyds9Mj
+
 **Branch:** `feature/9k113-scan-procedure` (tip `7611888cbbf5808828d59b0d742e5aede1c225d8`) —
 `git checkout feature/9k113-scan-procedure`, in your own repo root, not a worktree. Not yet
 merged — DoD's mechanical checks, Reviewer, Security and Performance Reviewer have all passed;
