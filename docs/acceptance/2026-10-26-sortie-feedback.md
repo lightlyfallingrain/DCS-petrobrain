@@ -148,4 +148,14 @@ Open for the plan, not for the user: measuring that margin (clip vs. valid; elev
 were never measured, `plans/9k113-sight-pointing/plan.md` risks), the field shape the projection
 uses, and what happens when DCS ignores the drive inside the field (the mark shows it now).
 
-**Status:** explored; ready to plan.
+**Clarified same day, verbatim — load-bearing for the plan:**
+
+> *"'parks where the line from boresight toward the simulated sight meets the field edge' -> yes
+> and it keeps it at the intersect point as the simulated sight moves and thus the intersect point
+> moves."*
+
+So the park is continuous, not a one-shot action: the real sight slides along the field edge,
+tracking the intersection point as the simulated sight moves, for as long as the simulated sight
+stays outside the field.
+
+**Status:** explored; planned (`plans/9k113-sight-pointing/plan.md`, "v3 (2026-10-26)").

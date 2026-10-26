@@ -25,6 +25,16 @@ rows, Risks (the first risk is replaced), Decision 1 (resolved, pointer), the se
 and the per-frame mechanism made agnostic between dither and flicker (run 11). Everything else is
 unchanged.*
 
+*Amended 2026-10-26 (third pass), from `docs/acceptance/2026-10-26-sortie-feedback.md` §2 (the
+pilot flew the merged v2 build and saw the DCS mark moving inside the HUD while the debug view
+showed the simulated sight pointing well to the side). What changed, all aircraft-layer-only: a
+new "### v3 — the real sight never leaves the ASP-17 field (edge park)" section immediately before
+"### Implementation Plan" replaces Design-detail steps 3–5's field-validity gate and open-loop
+branch, superseding them in place (marked inline, not deleted); a new Stage 6; new Risks and one
+Decision. **Nothing under `body-layer/` changes** — the wire shape, `SightHead`, and the "Aim
+source" rule are all untouched; this is purely how `Export.lua` slaves the real sight to the goal
+it already receives.
+
 ### The picture
 
 ```mermaid
@@ -209,16 +219,23 @@ rate instead overshoots by up to 20° whenever a slew ends between polls. The co
 2. goal(t) = goal + rate·clamp(t − t_sim, 0, cap); setpoint ← rate-limited toward goal(t) in
    airframe axes at the frame's attitude (`LoGetSelfData` heading/pitch/bank), gimbal-clamped,
    stored world.
-3. Mark: 566 → az, 555 → el (the probe's channels; 565/556 logged alongside), converted with the
-   calibrated scale/boresight. **Valid** when OBSERV on, aligned, and not at a clip edge.
-4. **Closed loop** when the setpoint is inside the field (minus margin) and the mark is valid:
-   e = setpoint_body − mark_body; u = Kp·e + I + ff, ff = 3 × goal world rate (rate = u/3 °/s per
-   degree-of-command); I += Ki·e·dt, clamped, frozen while stalled or saturated. Estimate := mark.
-5. **Open loop** otherwise: u = sat(Kp·(setpoint − estimate)) + ff; estimate += modelled obeyed
-   rate·dt (deadzone 0.18° modelled). **Re-anchors**: boresight at alignment; the mark whenever
-   valid; a **clipped** mark is a half-plane fact (the sight is beyond that edge) — if the estimate
-   contradicts it, project the estimate to edge + 1°, which is what breaks the "estimate says
-   inside, sight stuck outside, loop never engages" deadlock.
+3. **SUPERSEDED by v3 (2026-10-26), below.** Mark: 566 → az, 555 → el (the probe's channels;
+   565/556 logged alongside), converted with the calibrated scale/boresight. ~~**Valid** when
+   OBSERV on, aligned, and not at a clip edge.~~ This line never actually checked the mark's own
+   raw value against a clip edge — see v3's "Root cause" for what it checked instead, and why that
+   is the sortie bug.
+4. **SUPERSEDED by v3, below.** ~~**Closed loop** when the setpoint is inside the field (minus
+   margin) and the mark is valid: e = setpoint_body − mark_body; u = Kp·e + I + ff, ff = 3 × goal
+   world rate (rate = u/3 °/s per degree-of-command); I += Ki·e·dt, clamped, frozen while stalled
+   or saturated. Estimate := mark.~~ "the field" here meant the ±60°/+20°/−15° **gimbal** limits,
+   not the ASP-17's own ~±4.3° readable window — v3's root cause.
+5. **SUPERSEDED by v3, below.** ~~**Open loop** otherwise: u = sat(Kp·(setpoint − estimate)) + ff;
+   estimate += modelled obeyed rate·dt (deadzone 0.18° modelled). **Re-anchors**: boresight at
+   alignment; the mark whenever valid; a **clipped** mark is a half-plane fact (the sight is beyond
+   that edge) — if the estimate contradicts it, project the estimate to edge + 1°, which is what
+   breaks the "estimate says inside, sight stuck outside, loop never engages" deadlock.~~ v3 drops
+   open loop entirely; the half-plane re-anchor idea survives, narrowed to the new `homing`
+   sub-mode.
 6. u += the per-frame value change: **dither** (measured: 0.6° sin 8 Hz az; elevation component
    cos, run 10's ratio) **or flicker** (run 11: an alternating ±ε on the written value, ε far
    below the 0.003-unit deadzone, so no visible motion) — one selector, everything downstream
@@ -230,7 +247,9 @@ rate instead overshoots by up to 20° whenever a slew ends between polls. The co
    inconclusive); dither is the remedy and is already on.
 8. Status line at 5 Hz: mode (`off|caged|hold|open|closed`), setpoint body, mark body (or null),
    error, `stalled`, stall count, 962. Per-frame internals (u_p, u_i, ff, dither, mark args) to the
-   existing `push_slew_trace` debug log.
+   existing `push_slew_trace` debug log. **Extended by v3**: mode's `open` string becomes `homing`
+   (its meaning changed, not just its name — see v3's "Root cause"); two new fields,
+   `field_target_azimuth_deg`/`field_target_elevation_deg`; a new `mark_clipped: bool`.
 
 **Candidate, measurement pending — "hold still, re-wobble to correct" (user, 2026-10-22).** User,
 verbatim: *"what about wobble movement > stop > wobble movement? if that is reliable, we can point
@@ -405,6 +424,310 @@ module-level, reset in two places: the 886-off branch and `LuaExportStop`.
 | Lua I | internal | open ↔ closed switch, stall, saturation | reset on entering closed; frozen while stalled/saturated |
 | Lua goal | external (`sight_target`) | no message for > stale timeout | mode `hold`; dither only |
 | Lua `still` sub-mode (candidate, Stage 5, run 11 pending) | internal | |e| > re-wobble threshold, goal moves, mark invalid, or 886/898 edge | back to `closed` with dither on and I = 0 — never left `still` across any reset above |
+| Lua `field_target_body_az/el_deg` (v3, new) | internal (`sight_clip_to_field_body_deg`, every frame, recomputed fresh — never held across frames) | setpoint moves in/out of the inset ASP-17 field, or moves while already outside it | equals the rate-limited setpoint when inside; the radial projection onto the inset field edge when outside, **continuously tracking the moving intersection point** as the setpoint slides (pilot's clarification, 2026-10-26) — **never** equals a point outside the field, and never a stale/held value from an earlier frame |
+| Lua `sight_mode` (v3) | internal | mark reading on either axis within `ASP17_FIELD_MARGIN_DEG` of its own raw clip bound | `homing` (was `open`); the `closed` branch is never entered on a clipped mark reading, regardless of how far outside the field the setpoint itself is |
+
+### v3 (2026-10-26) — the real sight never leaves the ASP-17 field (edge park)
+
+**Decision** (`docs/acceptance/2026-10-26-sortie-feedback.md` §2, pilot verbatim): *"Option 2...
+The way it works is the ASP-17 shows direction to 9K113 sight by parking the cross hair to edge of
+HUD. Like a line drawn from boresight point in HUD to 9K113 position outside visible HUD area and
+then the cross is shown where that line intersects the HUD limits. We could use that logic, but
+achieve it by moving the sight to that position. Keep it just within the HUD limit so that we do
+get a read back value."* Inset margin: *"As close to edge while still keeping the read back
+values."*
+
+**Clarified same day, verbatim, and load-bearing — this is continuous tracking, not a one-shot
+park**: *"'parks where the line from boresight toward the simulated sight meets the field edge' ->
+yes and it keeps it at the intersect point as the simulated sight moves and thus the intersect
+point moves."* So `field_target` (below) is not computed once when the sim sight first leaves the
+field and then held — it is recomputed every frame from that frame's own setpoint, exactly like
+the inside-field case already is. The real sight slides continuously along the field edge,
+tracking the moving intersection point, for as long as the sim sight stays outside the field; it
+re-centres smoothly onto the sim sight's own direction the moment that direction re-enters the
+field (`scale` passing back through 1.0, no mode change, no re-anchor). This is how the design
+below is written — `sight_clip_to_field_body_deg` is called every frame inside `run_sight_servo`,
+never on a transition edge — but is stated here explicitly because it is also the single easiest
+way to misread "parks at the edge" as a one-off action.
+
+So: the real DCS sight's commanded target is never the simulated sight's raw direction once that
+direction leaves the ASP-17's own readable field (**measured ≈ ±4.3° azimuth**,
+`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` line 423; elevation's own clip edges were
+never measured, "Calibration" above). It is that direction **radially projected from boresight
+onto the inset field edge** when outside, and the direction itself when inside. The real sight is
+therefore always closed-loop on the ASP-17 mark; **open loop is removed, not kept as a fallback.**
+Perception, `SightHead`, and the "Aim source" rule are all unaffected — Petrovich's own simulated
+sight stays free within the ±60°/+20°/−15° gimbal limits exactly as `v2` built it; only what
+`Export.lua` commands the real head toward changes.
+
+```
+   sim sight (desired, outside) ●
+                                /
+        +--------------------/-+   ASP-17 field (≈ ±4.3° az)
+        |                 ○    |   ○ = field_target = projection of the
+        |               /      |       desired direction onto the inset
+        |             ⊕        |       field edge -- this is what the
+        +----------------------+       closed loop tracks, always
+```
+
+**Root cause, confirmed by reading `run_sight_servo` (not reasoned about blind).** The existing
+`setpoint_inside_field` gate (Design detail, step 4, above) compares the **setpoint** against
+`GIMBAL_AZ_HALF_DEG`/`GIMBAL_EL_UP_DEG`/`GIMBAL_EL_DOWN_DEG` (60°/+20°/−15°, minus
+`FIELD_MARGIN_DEG`) — the sight's full mechanical slew envelope, not the ASP-17's own ~±4.3°
+readable window. So a simulated direction anywhere up to ~58° off boresight was read as "inside
+the field," and the **closed** branch ran: `e_az = setpoint_body_az_deg − sight_mark_body_az_deg`,
+with `sight_mark_body_az_deg` built from the mark's raw argument (566), which *physically cannot
+exceed* the ASP-17's own ±4.3° window — it saturates there regardless of where the real sight
+actually is. The closed branch's `u_az`/`u_el` have **no saturation at all** before the final
+write-command clamp (±1.5 raw units, ≈±90°/±30° equivalent) — unlike the (now-removed) open
+branch, which was capped at `OPEN_LOOP_SAT_DEG = 6.0`. So a 20° simulated direction produced
+`e_az ≈ 20 − 4.3 ≈ 15.7°`, `u_az ≈ Kp·15.7 ≈ 47°` before the write clamp: the servo drove the real
+sight hard against (or past) its own clip trying to close an error against a target the mark
+geometrically cannot represent, while the mark's number stayed pinned near the clip edge — reading
+as "the mark is moving [near the HUD edge]" while the debug view correctly showed the simulated
+sight pointing well off to the side. **This is the fifth occurrence of this subsystem's own
+recurring defect class** — a field-of-regard-shaped bound gets checked against the wrong frame or
+the wrong magnitude (`.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md`,
+occurrences 1–4, all on this same 9K113 sight). The pattern each time: a bound that exists and is
+correctly *named* gets reused for a check it was never sized for. Flagged loudly here for Reviewer
+and Security, not left to a fifth near-miss review pass.
+
+**The fix has three parts: two independent and both required to close the bug (fixing only one
+reproduces a narrower version of it), plus a third that is a correctness refinement needed for
+the continuous-tracking behaviour specifically (without it the bug is closed but the edge-tracking
+motion is wrong while sliding):**
+
+1. **What the mark-validity gate checks.** Replace `setpoint_inside_field` (setpoint vs. gimbal
+   limits) with a check of the **mark's own raw reading** against the ASP-17's own clip bound —
+   `sight_mark_is_clipped(mark_raw, boresight_raw, field_half_deg, deg_per_unit, margin_deg)`,
+   true when `|mark_raw-derived degrees| ≥ field_half_deg − margin_deg` on either axis. This is
+   what step 3's old comment ("not at a clip edge") already claimed to do and never did.
+2. **What the closed loop is commanded toward.** Replace `setpoint_body_az/el_deg` as the error
+   loop's reference with `field_target_body_az/el_deg` — the setpoint **radially projected onto
+   the inset ASP-17 field** (new pure function, `sight_clip_to_field_body_deg`, same style as
+   `sight_world_to_body`/`sight_rate_limit_step`):
+
+   ```lua
+   -- scale = 1 when (set_az, set_el) is already inside the inset field;
+   -- otherwise the largest scale ≤ 1 that brings it exactly onto the
+   -- nearer field edge, per axis, taking the smaller of the two scales
+   -- (whichever axis hits its edge first) -- the standard ray-to-box
+   -- clip, not a circular one, because the mark is two independent
+   -- linear gauges (azimuth 565/566, elevation 555/556), not a cone.
+   local function sight_clip_to_field_body_deg(set_az_deg, set_el_deg,
+           field_az_half_deg, field_el_half_deg)
+       local scale = 1.0
+       if set_az_deg ~= 0.0 then
+           scale = math.min(scale, field_az_half_deg / math.abs(set_az_deg))
+       end
+       if set_el_deg ~= 0.0 then
+           scale = math.min(scale, field_el_half_deg / math.abs(set_el_deg))
+       end
+       return set_az_deg * scale, set_el_deg * scale, scale < 1.0
+   end
+   ```
+
+3. **What feeds the loop's feed-forward term while sliding along the edge.** The feed-forward
+   (`ff = FF_GAIN * sight_goal_rate_*_deg_s`, step 4/6 above) exists to anticipate a *moving*
+   target, and currently uses the raw world-goal's own rate (`sight_goal_rate_az/el_deg_s`, what
+   `SightHead` reports for the simulated sight's own motion). That is the right rate while
+   `field_target == setpoint` (inside the field). It is the **wrong** rate while outside: the point
+   the loop is actually tracking is `field_target`, and because `scale` itself changes continuously
+   as the setpoint moves (not just the setpoint's raw azimuth/elevation), `field_target`'s own rate
+   along the boundary can be smaller than the raw goal's rate (sliding tangentially near a corner),
+   larger (radial component collapsing as the setpoint swings past perpendicular to the boresight),
+   or opposite in sign at a corner crossing. Feed-forward on the wrong rate while sliding either
+   lags or overshoots the edge-tracking motion — exactly the kind of error this fix exists to
+   remove. **Fix: feed-forward on `field_target`'s own per-frame finite difference**
+   (`(field_target_body_az_deg - previous-frame's field_target_body_az_deg) / dt`, same pattern as
+   every other per-frame rate already computed in this file — no new external state, no body-layer
+   change), used in place of `sight_goal_rate_*_deg_s` whenever `scale < 1.0` that frame; the raw
+   goal rate is used unchanged whenever `scale == 1.0` (inside the field), since there
+   `field_target` and the goal move identically and the finite difference would just reconstruct
+   the same number one frame late for no benefit.
+
+   Doing (2) without (1) would still saturate `u` against an achievable target (no more runaway
+   command), but a *stale or stuck* mark reading right at the clip (DCS having briefly ignored the
+   drive, or the real head still catching up after an `OBSERV`/alignment edge) would still be
+   trusted as ground truth for the error term. Doing (1) without (2) would correctly refuse to
+   trust a clipped mark, but the loop would still be *steering toward* an off-field setpoint
+   whenever the gate (now correctly narrow) says "not valid," reproducing the open-loop branch's
+   drift under a different name. Both together: the loop is always closed, always steering toward
+   a point the mark can represent, and the mark-validity gate is a transient/safety signal, not the
+   everyday path.
+
+**Merged mode, replacing the old closed/open split.** With `field_target` always inside the field,
+the mark should read valid in steady state — the old "open" branch's everyday role disappears.
+What remains, renamed `homing` (its meaning changed with the rename — see Co-moving Fields): the
+narrow, transient case where the mark reading itself is invalid (missing, or at/near its own clip)
+despite `field_target` being inset — e.g., the first frame or two after `caged → free`, or after
+`OBSERV` cycles with the real head left pointing stale from before this fix deploys. In `homing`,
+reuse the half-plane re-anchor idea step 5 already had (a clipped mark is a known half-plane
+fact), bounded by a capped push (`HOMING_SAT_DEG`, inherits the old `OPEN_LOOP_SAT_DEG = 6.0`
+value as a starting point — not re-derived, since its role — bound a transient correction, never
+sustain one — is unchanged) toward `field_target`, so the mark re-enters validity within a frame
+or two and `closed` resumes. **`homing` is not a mode the pilot should see often or for long**; if
+it recurs or persists, that is itself the DCS-ignoring-the-drive signal the sortie feedback's point
+D asked to make observable (below).
+
+**Handling DCS ignoring the drive inside the field (point D).** Unchanged mechanism (the existing
+stall detector, step 7, already does this for the `closed` branch) plus one addition: `homing`
+persisting beyond `STALL_WINDOW_S` with no mark motion is now also counted toward
+`sight_stall_count`/`sight_stalled`, rather than being a mode with no stall accounting of its own
+(the old open branch never fed the stall detector). **Not a new state machine with an externally-
+written co-moving field** (step 6a's trigger does not fire here — `sight_mode` is one internal
+field, not two independently-written phase fields), but the existing Co-moving Fields table is
+updated above for the renamed/added rows regardless, since this change touches what they mean.
+
+**Field constants (new, Lua-only — same "no tuning mechanism outside body-layer" posture the
+plan already states for this file's constants).**
+
+| constant | default | source | status |
+|---|---|---|---|
+| `ASP17_FIELD_AZ_HALF_DEG` | 4.3 | measured, `2026-10-22-9k113-ai-latency-probe.md` line 423 | measured |
+| `ASP17_FIELD_EL_HALF_DEG` | 4.3 (= az's value) | **placeholder** — 555's own clip edges were never measured; this assumes the same raw-unit field width as azimuth (both axes currently share `MARK_DEG_PER_UNIT_* = 1/0.039`, itself a placeholder) | needs-flight |
+| `ASP17_FIELD_MARGIN_DEG` | 0.5 | **guess** — small relative to a ~4.3° field (the old `FIELD_MARGIN_DEG = 2.0` was sized for a 58°-margin gimbal check and would eat more than half this field); the pilot's own wording ("as close to edge while still keeping the read back values") asks for this to shrink once a flight shows how close the mark can sit to 0.333/0.667 before the readback itself gets noisy | needs-flight |
+
+`FIELD_MARGIN_DEG`/`GIMBAL_*` stay exactly as they are (still correctly used elsewhere: the gimbal
+clamp on the setpoint itself, step 2, is unchanged and unaffected by this fix). The two margin
+concepts are **not the same constant and must not be merged under one name** — conflating a
+60°-scale margin with a 4.3°-scale margin is precisely the cross-domain-coupling shape this file's
+elevation-conversion functions already warn about (`implementation.md`, "Notable Discoveries").
+
+**Affected Modules / Files (all in addition to the v2 table above; none of v2's body-layer rows
+change).**
+
+- `aircraft-layer/dcs-export/Export.lua` — new pure functions `sight_clip_to_field_body_deg`,
+  `sight_mark_is_clipped` (placed, like every other pure helper in this file, above
+  `run_sight_servo`'s own `local function` declaration, since it is called from inside it); new
+  constants table above; `run_sight_servo`'s steps 3–5 rewritten per "The fix" above; `sight_mode`
+  string `"open"` → `"homing"`; `push_sight_servo_state` gains `field_target_azimuth_deg`/
+  `field_target_elevation_deg`/`mark_clipped`; version bump.
+- `aircraft-layer/src/schema/sight_servo.py` — `SightServoState` gains `field_target_azimuth_deg`/
+  `field_target_elevation_deg: float | None` and `mark_clipped: bool`; docstring's five-mode list
+  updated (`"open"` → `"homing"`), still passed through verbatim, no enum validation added (same
+  "this layer carries the raw values and decides nothing" rule the module docstring already
+  states).
+- `aircraft-layer/tests/test_sight_servo_lua.py` — new `TestSightClipToFieldBodyDeg` (pure
+  function, reference computed inline with `math`, no body-layer import — same module-
+  independence note the file's own docstring already carries) and `TestSightMarkIsClipped`; extend
+  `TestRunSightServoObservOffWrites`'s mock-run harness with a new
+  `TestRunSightServoFieldPark` class (below).
+- `aircraft-layer/tests/test_sight_servo_api.py` — the one test using `"open"` as an example wire
+  value is relabelled `"homing"` for clarity (the schema does not validate the string, so this is
+  documentation, not a behavioural fix).
+- `body-layer/CLAUDE.md` — one clause added to the `--slew-trace` paragraph noting the trace now
+  also carries `field_target_*`/`mark_clipped` once a `sight_servo` sample exists (`src/
+  sight_trace_writer.py` — new columns, same "write-only" posture every other trace column has).
+- `notes/the-9k113-sight-bl-b64.md` — new bullet for DoD to harvest: this is occurrence 5 of the
+  recurring field-of-regard-enforcement defect, and the first occurrence where the bound checked
+  against the *wrong magnitude* (not just the wrong frame, occurrence 4's shape) produced a
+  user-visible, flight-observed symptom rather than being caught by review first.
+
+**Tests (`TestRunSightServoFieldPark`, mock-run harness extending `_run_servo_off_sequence`'s
+pattern).** All exercised against the real, extracted `run_sight_servo` body, not a reproduction:
+
+- A setpoint 20° off boresight (well outside the ASP-17 field, well inside the gimbal limits) with
+  a mocked mark reading that tracks `field_target` (not the raw 20° setpoint) converges — the
+  commanded correction shrinks toward zero as the mocked mark approaches the *projected* point,
+  not the 20° point. **Named mutation this must catch**: reverting `field_target` back to the raw
+  setpoint reproduces exactly the sortie's own symptom — an unbounded growing command against a
+  mark that cannot move past the field edge — and the test must fail against that reversion.
+- A mocked mark reading held exactly at the clip edge (566 = 0.667) with `field_target` safely
+  inset: mode must be `homing`, not `closed` — this is the regression test for the root cause
+  itself (the old code, given this exact input, reported `closed` because its gate never looked at
+  the mark's own value). **This is the test to run red against the pre-fix code** before writing
+  the fix, to confirm it actually reproduces the bug, not just a plausible-sounding description of
+  it.
+- `homing` with the mark clipped on the right edge recovers to `closed` once the mocked mark moves
+  back inside the margin — one frame's worth of improvement is enough, no multi-frame settle
+  required at the mock level.
+- A setpoint that oscillates in and out of the field (crossing the ASP-17 boundary every few
+  frames, the ordinary "searching" case) never produces a `field_target` outside
+  `ASP17_FIELD_AZ_HALF_DEG - ASP17_FIELD_MARGIN_DEG`/`ASP17_FIELD_EL_HALF_DEG - ...` on either axis,
+  for any sampled setpoint magnitude up to the full gimbal range — a property test over a small
+  grid of setpoint values, not just the two or three cases above.
+- `homing`'s capped push feeds the existing stall detector (point D): a mark held fixed at the
+  clip for longer than `STALL_WINDOW_S` while `homing` sets `sight_stalled`/increments
+  `sight_stall_count`, matching the `closed` branch's own behaviour — the old open branch's
+  silence here is the gap this closes.
+- **Continuous edge-tracking, not a one-shot park** (the pilot's clarification): a setpoint swept
+  smoothly from 10° to 40° azimuth while held a few degrees outside the elevation field (a
+  tangential slide along the az edge, not a radial approach) produces a `field_target_body_az_deg`
+  sequence that moves smoothly and monotonically with it, frame to frame, never jumping or
+  sticking at one value while the setpoint keeps moving — the regression case for "parks once"
+  instead of "tracks continuously."
+- **Feed-forward uses the edge point's own rate, not the raw goal's rate, while sliding**: with a
+  mocked `sight_goal_rate_az_deg_s` deliberately set to a value that does **not** match
+  `field_target`'s own frame-to-frame finite difference (constructed so the two rates differ in
+  sign), the commanded correction must track the finite-difference rate. **Named mutation this
+  must catch**: feeding `sight_goal_rate_*_deg_s` into `ff` unconditionally (reverting part 3 only,
+  parts 1–2 left fixed) passes every other test above but fails this one — the bug it reproduces
+  is edge-tracking lag/overshoot, not the original runaway-command bug, which is exactly why part
+  3 needs its own test rather than relying on parts 1–2's tests to catch its absence.
+- The stall detector needs no change to handle a *moving* `field_target`: its own definition
+  (commanding a real correction for `STALL_WINDOW_S` with the **mark** not moving) is already
+  defined in terms of mark motion, not target motion, so a sliding edge goal that the real sight
+  successfully follows never trips it — worth one explicit test (mark tracking a sliding
+  `field_target` cleanly) precisely because it is easy to assume stall needs touching here and it
+  does not.
+
+**Risks & Unknowns (v3-specific, in addition to the v2 list above — most of which still applies
+unchanged: elevation closability, intermittent obedience, gimbal-limit sourcing, the Lua/Python
+math twin).**
+
+- **`ASP17_FIELD_EL_HALF_DEG` is a guess, not a measurement** — if the real elevation field is
+  much narrower than 4.3°, `field_target`'s elevation component will still occasionally land
+  outside the true window and reproduce a smaller version of the same symptom on that axis alone;
+  if much wider, the margin is overly conservative and the real sight parks further from the true
+  edge than it needs to. Flight A (already in the v2 plan, not yet flown with this fix) is where
+  this gets measured; ship the placeholder, tighten after.
+- **`ASP17_FIELD_MARGIN_DEG = 0.5°` is also a guess.** Too small and dither/measurement noise could
+  intermittently clip the mark right at the edge (false `homing` churn); too large and the real
+  sight parks visibly short of the HUD edge, which is the opposite of what the pilot asked for
+  ("as close to edge while still keeping the read back values"). Needs a flight to tune down.
+- **`homing` churn at the field boundary.** A setpoint sitting exactly at the field edge (the
+  pilot's own 3 o'clock example, or any target near boresight's perpendicular) could flicker
+  between `closed` and `homing` frame to frame if the margin is too tight relative to dither's own
+  ~0.03° p-p noise on the mark. The property test above samples near the boundary deliberately to
+  surface this before a flight does.
+- **This fix cannot be verified by the existing Flight A/B cards as written** — neither names a
+  case where the simulated sight is held well outside the ASP-17 field. The next sortie (before or
+  as part of Flight B) must add exactly that case: call a target well off boresight (3+ o'clock,
+  reproducing the pilot's own observation), watch the real ASP-17 cross hair park near the HUD
+  edge rather than drift/peg, then bring the target back toward boresight and confirm the cross
+  hair tracks it smoothly back in. Air start, per this project's own 9K113 testing convention.
+
+**Decisions Requiring User Input (v3-specific).**
+
+> **ANSWERED 2026-10-26 (pilot), verbatim:** *"Elevation - measure in flight."* Read as: the
+> elevation clip edges (555) are measured on the next air-start flight and
+> `ASP17_FIELD_EL_HALF_DEG` / the margin are set from that measurement. The build carries the
+> placeholder only so that flight can run; the trace must log raw 555 at the clip transitions so
+> the edges can be read off it. The value is not to be trusted, or tuned by eye, before then.
+
+1. **Ship the elevation field half-angle/margin as guesses (above), or hold elevation closed-loop
+   back until 555's clip edges are measured** (e.g., freeze elevation at boresight, azimuth-only
+   field park, until Flight A's numbers land)? **Recommendation:** ship the guess — it is the same
+   posture the rest of v2 already ships under (mark scale/boresight are also placeholders pending
+   Flight A), and an elevation field park that is somewhat mis-sized is still strictly better than
+   the current unbounded-command bug; freezing elevation entirely would leave the exact symptom
+   the pilot reported, just on one axis only, for no evidenced benefit. Say if you'd rather hold it
+   back.
+2. Everything else in this section (the `"open"` → `"homing"` rename, the two-constant split
+   instead of reusing `FIELD_MARGIN_DEG`, `HOMING_SAT_DEG` inheriting the old `OPEN_LOOP_SAT_DEG`
+   value) is local, reversible, and does not change product behaviour beyond what this section
+   already specifies — not escalated, per `AGENTS.md`'s Escalation Rules.
+
+**Second-order effect.** Tightens, not widens, `[[BL-B67]]`'s inherited foundation: the ATGM run
+was already going to depend on the mark being trustworthy near boresight (where ATGM launch
+happens, per the v2 "Calibration" section) — this fix is what makes "trustworthy" true for a mark
+reading in the first place, rather than one that can be driven to represent a position it
+physically cannot hold. Also closes out occurrence 5 of the field-of-regard-enforcement pattern
+(`.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md`) specifically for
+this subsystem's *last* remaining field-of-regard-shaped check — every other one on this sight
+(gimbal clamp, intent's ±60° azimuth cap) was already checked against its own correct frame/
+magnitude before this pass.
 
 ### Implementation Plan
 
@@ -463,9 +786,27 @@ module-level, reset in two places: the 886-off branch and `LuaExportStop`.
    (flicker fails) and the stop→re-wobble probe shows the restart is reliable**. Both probes can fly
    any time — they need only a probe script — and their answers decide Stage 5's shape and Stage
    4's `SERVO_WOBBLE` default, not Stages 0–3b. **Flight C.**
+6. **ASP-17 field park (v3, aircraft-layer only; fully testable without DCS via the luajit pure-
+   math/mock-run pattern already used for Stages 4/5).** `sight_clip_to_field_body_deg`,
+   `sight_mark_is_clipped`, the merged closed/`homing` mode, part 3's feed-forward switch, the new
+   constants table, `push_sight_servo_state`'s new fields, the `"open"`→`"homing"` rename, the
+   `body-layer/CLAUDE.md` clause. Tests: the `TestRunSightServoFieldPark` class above (including
+   the red run against the pre-fix code confirming the root-cause reproduction), the continuous-
+   tracking/tangential-slide test, the feed-forward-rate test and its named mutation, the stall-
+   while-sliding test, the boundary-property test. **Does not touch body-layer** — no body-layer
+   checks need re-running beyond confirming nothing in that subproject changed. Lands on
+   `feature/9k113-sight-pointing` ahead of Flight B (which has not been flown or had its card
+   written yet, so this is a revision to an unflown build, not a fix to a merged one). The next
+   sortie's card (to be written once this stage is implemented) must add the case Risks names
+   below: hold the target well outside the ASP-17 field and watch the real cross hair park and
+   slide at the edge rather than drift or peg.
 
 Stages 1–4 (with 3b) are one batch (one performance and one security pass after Stage 4). Stage 0 is a
-probe, outside the batch. Stage 5 is its own batch if built.
+probe, outside the batch. Stage 5 is its own batch if built. **Stage 6 is its own batch** (one
+performance and one security pass after it) — it lands on the same branch as Stages 1–4 but after
+that batch's own passes already ran, and changes the servo's control logic enough (removing a
+whole branch, adding two new per-frame pure functions) to warrant its own pass rather than being
+folded silently into an already-approved batch.
 
 **Flights — each says what it measures.**
 - **Flight A** (Stage 0 probe, air start): mark scale both axes; az and el boresight from 962
@@ -529,9 +870,12 @@ probe, outside the batch. Stage 5 is its own batch if built.
   an elevation error he cannot be told about.
 - **Intermittent obedience is not explained**, only suppressed by dither (22/22 + 7/7 steps, two
   runs). If it returns, outside the field nothing can see it; inside, the stall flag records it.
-- **Open-loop estimate drifts** when DCS ignores commands outside the field. Harmless to the pilot
-  (he cannot see it there); costs acquisition time when the setpoint enters the field. The
-  clipped-edge re-anchor bounds the worst case.
+- ~~**Open-loop estimate drifts** when DCS ignores commands outside the field. Harmless to the
+  pilot (he cannot see it there); costs acquisition time when the setpoint enters the field. The
+  clipped-edge re-anchor bounds the worst case.~~ **SUPERSEDED by v3 (2026-10-26)**: this is
+  exactly the risk the pilot's sortie observation proved wrong — not harmless, because the gate
+  that was supposed to keep this drift invisible used the wrong field size. v3 removes the branch
+  this risk was about. See v3's own Risks for what replaces it.
 - **`min_slew_velocity = rad(0.07)`** (`Devices_specs/9K113.lua`) may impose a minimum obeyed rate
   → a small limit cycle at the setpoint. Visible in Flight B's wobble numbers.
 - **Gimbal limits are sourced, not file-verified**: ±60° az user-supplied (2026-09-11), +20/−15°

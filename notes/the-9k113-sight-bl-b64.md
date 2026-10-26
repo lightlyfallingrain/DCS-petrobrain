@@ -214,3 +214,18 @@
   latches, "stop driving it" and "command it to a safe/neutral value" are two different actions,
   and ending a control loop without the second leaves whatever the loop was doing at that instant
   frozen in place rather than cleared.
+- **Occurrence 5 of the recurring field-of-regard-enforcement defect** (occurrences 1-4:
+  `.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md`) — v3's
+  `run_sight_servo` gate (`setpoint_inside_field`) checked the **setpoint** against the sight's
+  ±60°/+20°/−15° gimbal limits, not the **mark's own raw reading** against the ASP-17's own
+  ~±4.3° readable window, so a simulated direction anywhere up to ~58° off boresight read as
+  "valid" and the closed loop's unsaturated error term drove the real sight hard against (or past)
+  its own clip. The first occurrence where the bound was checked against the **wrong magnitude**
+  (a ±60° check standing in for a ~±4.3° one), not just the wrong frame (occurrence 4's shape,
+  ground-relative vs. boresight-relative) — and the first of the five to produce a **user-visible,
+  flight-observed symptom** (the pilot's own 2026-10-26 report) rather than being caught by review
+  or security first. The fix (`sight_mark_is_clipped` against the mark's own raw value, the loop
+  always steering toward `field_target` — the setpoint radially projected onto the inset field —
+  rather than the raw setpoint) closes this sight's last remaining field-of-regard-shaped check;
+  every other one on this subsystem (the gimbal clamp, intent's ±60° azimuth cap) was already
+  checked against its own correct frame/magnitude before this pass.
