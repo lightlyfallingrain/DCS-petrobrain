@@ -166,7 +166,12 @@ Then present the user with an **Acceptance Testing Plan**. The plan must be conc
 The feature passes if all test cases produce the expected result and no regressions are visible in [related areas].
 ```
 
-Ask the user: "Does the feature pass acceptance testing? (yes / no + details)"
+**Do not wait for the user's answer when the acceptance is live** (a sortie, a Windows session).
+User direction 2026-10-26: features are tested in batches and a DoD pass merges automatically. So
+publish the card, tag the entry `#needs-flight`, and go straight to Step 5 with acceptance reported
+as **PENDING (live)**. Ask the user *"Does the feature pass acceptance testing? (yes / no + details)"*
+only for acceptance they can perform right now, here; a later "no" from a flight comes back as sortie
+feedback, not as a reopened DoD.
 
 ### Step 4 — If User Rejects Acceptance Testing
 
@@ -177,9 +182,9 @@ Ask the user: "Does the feature pass acceptance testing? (yes / no + details)"
 5. Report to the user: what needs fixing, which agent should handle it, ask for confirmation
 6. After fixes, return to Step 3
 
-### Step 5 — If User Accepts Acceptance Testing
+### Step 5 — If User Accepts Acceptance Testing, or it is pending live
 
-The feature is done. Perform knowledge harvest, then commit and merge:
+The feature is done. Perform knowledge harvest, then commit; **the main loop merges** (you run in an isolated worktree and cannot move `main`, which is checked out in the user's root):
 
 **Knowledge harvest:**
 1. Run `/notes-harvest <featurename>` — extracts insight candidates from all plan files and flags likely duplicates against the topic files under `notes/`, naming the file
@@ -190,13 +195,13 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 **Commit and merge:**
 7. Run `git status` to confirm what is staged
 8. Commit all staged changes with a message summarizing the feature
-9. **Merge via the `/merge` skill's disposable-worktree pattern (`.claude/skills/merge/SKILL.md`), never `git checkout main` in the current directory.** `AGENTS.md`'s "Where work happens" states who owns the main checkout and where agents run — read it there rather than here, because that division has been inverted once already (2026-09-21) and this step's justification depends on it. The short version: **the main checkout's branch is a contract with the user**, who tests on it and does not operate in worktrees, so a bare `git checkout main` takes the branch they were told to fly out from under them. A disposable worktree merges without touching it at all. Steps: `git fetch origin main`, `git worktree add ../<repo>-merge-<name> main`, `cd` into it, `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`, re-run the touched subproject(s)' verification inside the worktree, then `git worktree remove` when done.
-10. Verify the merge succeeded with `git log --oneline -5` (in the worktree, before removing it).
+9. **Do not merge yourself.** Your PASSED report is the merge trigger: the main loop runs `/merge` on the feature branch as soon as it reads it (root `CLAUDE.md` "Workflow", 2026-10-26). Merging needs the root, which belongs to the user (`AGENTS.md` rule 3), and the main loop is what checks it is clean first.
+10. Write the roadmap done-entry on the feature branch (below), leaving the merge hash for the main loop to fill in at merge time.
 11. Update the relevant roadmap: the merged feature's subproject roadmap is the source of truth for milestone status. **Find it from root `ROADMAP.md`'s status table, never from a list written here** — the enumeration defect this replaces (three subprojects named while six exist) has now recurred four times in this repo, most recently in the commit gate that itself warns about it. **Then resolve that path before writing to it: every subproject's `ROADMAP.md` is now a four-line pointer, and the content lives in one file per entry under `<subproject>/ROADMAP/`.** `.claude/scripts/roadmap-source.sh <path>` gives the index and `--dir <path>` the directory; a non-pointer passes through unchanged, so it is safe to run on whatever the status table named. Writing a done-entry into the pointer is the specific way this goes wrong silently — the entry file stays open, `grep '#status/done'` still reports it open, and `push-roadmap-gate.sh` is satisfied because *a* `ROADMAP.md` was touched. Mark the milestone `[x]` **on its own entry file**, write a real done-entry there (what was built, key decisions, live-acceptance results, second-order effects on the next milestone), and update that subproject's backlog entries if this feature closes or raises one (body-layer's backlog moved out of its `ROADMAP.md` on 2026-09-27 and into `body-layer/ROADMAP/` on 2026-10-09; new items take the next unused `BL-B<n>` — read it with the command in root `CLAUDE.md`, never from a document). Update root `ROADMAP.md`'s status table too if the subproject's overall phase status changed; that file is not split and is edited directly. Only touch `todo/backlog/` if this feature also affects a cross-cutting/unscoped item there (`X-B<n>` ids, same never-reuse rule). Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine) — **this must land in the same push as the merge**, not a later follow-up (this was skipped across several 2026-09-10 merges — BL-3/BL-4/BL-5 all shipped without a roadmap update, caught later by an integrity check — do not repeat that).
 
 Report to the user:
 - DoD: PASSED
-- Acceptance testing: PASSED
+- Acceptance testing: PASSED, or PENDING (live) with the card URL and the `#needs-flight` entry
 - What (if anything) was added to `notes/`, and to which topic files
 - Reviewer confidence, if `review.md` flagged a spot-check rather than a full read
 - Any recurring-fix pattern surfaced in step 4 above
