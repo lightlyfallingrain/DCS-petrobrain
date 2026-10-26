@@ -142,7 +142,9 @@ is always closed loop on the mark; open-loop pointing outside the field is dropp
         +--------------+
 ```
 
-Open for the plan, not for the user: the inset margin (clip vs. valid; elevation 555 clip edges
+Inset margin, **user, verbatim:** *"As close to edge while still keeping the read back values."*
+
+Open for the plan, not for the user: measuring that margin (clip vs. valid; elevation 555 clip edges
 were never measured, `plans/9k113-sight-pointing/plan.md` risks), the field shape the projection
 uses, and what happens when DCS ignores the drive inside the field (the mark shows it now).
 
