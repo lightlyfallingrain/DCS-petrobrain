@@ -1,7 +1,8 @@
 """The 9K113 DCS-slave servo's own per-frame status (`plans/
-9k113-sight-pointing/plan.md`, BL-B80 v2) -- `Export.lua`'s
-`run_sight_servo` status line, pushed at 5 Hz (the same cadence as the
-telemetry line), wire key `"servo_mode"`.
+9k113-sight-pointing/plan.md`, BL-B80 v2, extended by v3 -- "the real
+sight never leaves the ASP-17 field") -- `Export.lua`'s `run_sight_servo`
+status line, pushed at 5 Hz (the same cadence as the telemetry line),
+wire key `"servo_mode"`.
 
 **A second feed from `CockpitSwitchState`, deliberately** (the plan's own
 "Departure, stated"): that feed is change-gated, and the servo's status
@@ -11,10 +12,17 @@ change-gated line with the servo's own internal churn.
 
 This layer carries the raw values and decides nothing, the same rule
 every other schema here follows: `mode` is one of `Export.lua`'s own five
-strings (`"off"`/`"caged"`/`"hold"`/`"open"`/`"closed"`), passed through
-verbatim; `mark_azimuth_deg`/`mark_elevation_deg`/`error_azimuth_deg`/
+strings (`"off"`/`"caged"`/`"hold"`/`"homing"`/`"closed"` -- v3 renamed
+`"open"` to `"homing"`, its meaning changed with it, see the plan's
+"Merged mode"), passed through verbatim, no enum validation added;
+`mark_azimuth_deg`/`mark_elevation_deg`/`error_azimuth_deg`/
 `error_elevation_deg` are `None` whenever the mark was not valid that
-frame (open/hold/caged/off)."""
+frame (homing/hold/caged/off). `field_target_azimuth_deg`/
+`field_target_elevation_deg` (v3, new) are the setpoint radially
+projected onto the inset ASP-17 field -- what the closed loop actually
+tracks, `None` whenever no setpoint is being tracked that frame
+(hold/caged/off); `mark_clipped` (v3, new) is whether the mark's own raw
+reading is at or beyond its clip edge that frame."""
 
 from __future__ import annotations
 
@@ -44,6 +52,9 @@ class SightServoState:
     error_elevation_deg: float | None
     stalled: bool
     stall_count: int
+    field_target_azimuth_deg: float | None
+    field_target_elevation_deg: float | None
+    mark_clipped: bool
 
     @staticmethod
     def from_dict(
@@ -71,6 +82,8 @@ class SightServoState:
             "mark_elevation_deg",
             "error_azimuth_deg",
             "error_elevation_deg",
+            "field_target_azimuth_deg",
+            "field_target_elevation_deg",
         ):
             raw = data.get(field)
             if raw is None:
@@ -94,6 +107,12 @@ class SightServoState:
                 f"field 'stall_count' must be a number, got {type(stall_count).__name__}"
             )
 
+        mark_clipped = data.get("mark_clipped")
+        if not isinstance(mark_clipped, bool):
+            raise SightServoParseError(
+                f"field 'mark_clipped' must be a boolean, got {type(mark_clipped).__name__}"
+            )
+
         return SightServoState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -106,6 +125,9 @@ class SightServoState:
             error_elevation_deg=optional_numbers["error_elevation_deg"],
             stalled=stalled,
             stall_count=int(stall_count),
+            field_target_azimuth_deg=optional_numbers["field_target_azimuth_deg"],
+            field_target_elevation_deg=optional_numbers["field_target_elevation_deg"],
+            mark_clipped=mark_clipped,
         )
 
     @staticmethod
@@ -134,4 +156,7 @@ class SightServoState:
             "error_elevation_deg": self.error_elevation_deg,
             "stalled": self.stalled,
             "stall_count": self.stall_count,
+            "field_target_azimuth_deg": self.field_target_azimuth_deg,
+            "field_target_elevation_deg": self.field_target_elevation_deg,
+            "mark_clipped": self.mark_clipped,
         }

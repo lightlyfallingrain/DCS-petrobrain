@@ -351,3 +351,132 @@ two `UP012` unnecessary-`encoding`-argument lints on the new `.encode()` calls),
 count as before this fix), `test_dcs_export_lua_local_order.py` run by name (32 passed, confirming
 the new Lua code introduces no local-read-as-global defect). body-layer untouched by this fix, so
 its checks were not re-run.
+
+### Stage 6 (v3 — the real sight never leaves the ASP-17 field, 2026-10-26)
+
+Merged `9dfc3d2f` (plan's v3 section) and implemented it exactly as planned — the root-cause fix
+(`setpoint_inside_field`'s wrong-magnitude gate replaced by `sight_mark_is_clipped` against the
+mark's own raw reading), the always-closed loop on `field_target` (`sight_clip_to_field_body_deg`,
+the setpoint radially projected onto the inset ASP-17 field), part 3's feed-forward switch to
+`field_target`'s own finite difference while sliding, the merged `homing` mode (renamed from
+`open`, its meaning changed), and the shared stall detector covering both `closed` and `homing`.
+Open loop (`sight_estimate_body_*_deg`, `OPEN_LOOP_SAT_DEG`, `OPEN_LOOP_DEADZONE_DEG`) removed
+entirely, not kept as a fallback, per the plan's own instruction.
+
+**Files changed:**
+
+- `aircraft-layer/dcs-export/Export.lua` —
+  - New constants: `ASP17_FIELD_AZ_HALF_DEG`/`ASP17_FIELD_EL_HALF_DEG` (4.3, az measured/el
+    placeholder) and `ASP17_FIELD_MARGIN_DEG` (0.5, guess), replacing the now-unused
+    `FIELD_MARGIN_DEG` (see Notable Discoveries); `HOMING_SAT_DEG` (6.0) replaces
+    `OPEN_LOOP_SAT_DEG`/`OPEN_LOOP_DEADZONE_DEG`, which are deleted along with the open-loop
+    branch they served.
+  - New pure functions `sight_clip_to_field_body_deg` (the plan's own ray-to-box clip, verbatim)
+    and `sight_mark_is_clipped` (root-cause check), placed above `run_sight_servo`.
+  - `run_sight_servo` rewritten: `field_target_body_az/el_deg` computed every frame
+    (`sight_clip_to_field_body_deg` called with the **margin-reduced** half-angles
+    `ASP17_FIELD_*_HALF_DEG - ASP17_FIELD_MARGIN_DEG`, not the raw field half-angle — see Notable
+    Discoveries for why that call shape, not the raw one, is what the plan's own property-test
+    wording requires); feed-forward uses `field_target`'s own per-frame finite difference whenever
+    `scale < 1.0`, the raw goal rate otherwise; `closed`/`homing` split on
+    `sight_mark_is_clipped`, both sharing one error/command formula (`closed` unsaturated beyond
+    the write clamp, `homing` capped at `HOMING_SAT_DEG`); stall detection unified across both
+    modes, gated on having a numeric mark to measure motion from.
+  - `push_sight_servo_state` gains `field_target_azimuth_deg`/`field_target_elevation_deg`/
+    `mark_clipped`.
+  - `push_slew_trace` (the per-**frame** debug log, `--slew-trace`'s sibling) gains
+    `mark_az_raw`/`mark_el_raw` (raw 566/555) and a computed `mark_clipped` flag — the user's own
+    ANSWERED decision (*"Elevation - measure in flight"*): this is what a calibration flight reads
+    to find 555's real clip edges, independent of the `ASP17_FIELD_EL_HALF_DEG` placeholder.
+    **Moved the whole function below `sight_mark_is_clipped`/the new constants**, since it now
+    reads them — see Notable Discoveries, this was a real local-read-as-global bug caught before
+    it shipped, not a style choice.
+  - `LuaExportStop` and every other state-reset site (OBSERV off, caged, hold) updated for the new
+    fields (`sight_field_target_body_az/el_deg`, `sight_mark_clipped`,
+    `sight_prev_field_target_body_az/el_deg`) and the removed ones
+    (`sight_estimate_body_az/el_deg`).
+- `aircraft-layer/src/schema/sight_servo.py` — `SightServoState` gains
+  `field_target_azimuth_deg`/`field_target_elevation_deg: float | None` and `mark_clipped: bool`
+  (required, same posture as `stalled`); docstring's mode list updated (`"open"` → `"homing"`).
+- `aircraft-layer/tests/test_sight_servo_lua.py` — `TestSightClipToFieldBodyDeg` (incl. a property
+  test over 11 setpoint samples pinning the margin-inset bound), `TestSightMarkIsClipped`, and
+  `TestRunSightServoFieldPark` (7 end-to-end tests against the real `run_sight_servo`, via a new
+  `_run_field_park_sequence` mock-run harness extending `_run_servo_off_sequence`'s pattern with a
+  `GetDevice` mock covering 898/566/555 and mocked `LoGetSelfData`/`LoGetADIPitchBankYaw` at level
+  flight). Covers every test the plan names: convergence against the reverted-field-target
+  mutation, the root-cause regression (mark at clip edge, field_target inset → `homing` not
+  `closed`), one-frame recovery to `closed`, the feed-forward finite-difference fix and its named
+  mutation (raw-rate reversion), `homing` feeding the stall detector, continuous (non-latching)
+  edge tracking, and the stall detector staying silent while the mark cleanly tracks a sliding
+  target.
+- `aircraft-layer/tests/test_sight_servo_api.py` — `_LINE` and the dict-literal tests extended
+  with the two new fields (an unplanned but necessary ripple from making `mark_clipped` a
+  *required* field — see Notable Discoveries); the one `"open"`-as-example-value test relabelled
+  `"homing"` per the plan's own instruction.
+- `body-layer/CLAUDE.md` — the `--slew-trace` clause gained one sentence: the new
+  `field_target_*`/`mark_clipped` fields exist on `GET /sight_servo/latest` as of this stage, but
+  `sight_trace_writer.py` does not read them yet (deliberately out of this stage's scope — see
+  below).
+- `notes/the-9k113-sight-bl-b64.md` — new bullet, occurrence 5 of the recurring
+  field-of-regard-enforcement defect (the plan's own text, lightly adapted).
+
+**Checks**: aircraft-layer — `ruff format --check` (pass, after `ruff format` auto-reformatted the
+new test file once), `ruff check` (pass, after fixing one `UP032` format-call and one `RUF007`
+zip-over-pairwise finding by hand), `mypy --strict` on `src` (pass, 25 source files) and on the
+two touched test files directly (pass, strict), `pytest tests -q` (607 passed, up from 553 — 46 in
+`test_sight_servo_lua.py`'s new classes, plus the `test_sight_servo_api.py` additions),
+`luac5.1 -p` (pass) and the `GETGLOBAL` own-helper check (clean) on `Export.lua`,
+`test_dcs_export_lua_local_order.py` (41 passed, parametrized over every `dcs-export/*.lua` file —
+this is the test that would have caught the `push_slew_trace` ordering bug below had it shipped).
+body-layer had no source change (CLAUDE.md only), so its checks were not re-run; confirmed by
+`git status --porcelain` showing only the one doc file under `body-layer/`.
+
+**No new behaviour-affecting constant went through `tuning.py`**: `ASP17_FIELD_AZ_HALF_DEG`,
+`ASP17_FIELD_EL_HALF_DEG`, `ASP17_FIELD_MARGIN_DEG`, and `HOMING_SAT_DEG` are Lua-only, same
+posture the plan states for every other constant in this file ("no tuning mechanism outside
+body-layer") — flagged per that rule's own instruction to note it rather than improvise a second
+loader.
+
+**Notable Discoveries:**
+
+- **`FIELD_MARGIN_DEG` became dead code, not merely superseded, once `setpoint_inside_field` was
+  removed.** The plan's own text ("`FIELD_MARGIN_DEG`/`GIMBAL_*` stay exactly as they are — still
+  correctly used elsewhere") is accurate for `GIMBAL_*` (the gimbal clamp, step 2, is genuinely
+  unchanged) but not for `FIELD_MARGIN_DEG` itself: a `grep` of the pre-fix file shows its only use
+  was inside the very check being replaced, and no other call site reads it. Removed it rather
+  than leave an unused constant with a comment claiming it is still load-bearing; said so here
+  rather than silently reinterpreting the plan.
+- **`sight_clip_to_field_body_deg` must be called with the margin-reduced half-angle
+  (`ASP17_FIELD_*_HALF_DEG - ASP17_FIELD_MARGIN_DEG`), not the raw field half-angle**, even though
+  the plan's own Lua snippet for the function takes `field_az_half_deg`/`field_el_half_deg` as
+  bare parameters with no margin baked in. The plan's property-test wording settles this: it
+  requires `field_target` to never exceed `ASP17_FIELD_AZ_HALF_DEG - ASP17_FIELD_MARGIN_DEG` on
+  either axis, which is only true if the *caller* passes the margin-reduced value as the clip
+  bound. One consequence worth flagging rather than silently accepting: since
+  `sight_mark_is_clipped`'s own clip threshold is computed as the exact same value
+  (`field_half_deg - margin_deg`), a mark that has fully converged onto a fully-saturated
+  `field_target` sits exactly *at* the mark's own clip threshold, not safely inside it — the
+  boundary-churn risk the plan's own "Risks & Unknowns" section already names and defers to a
+  flight-tuned margin, not a defect introduced here.
+- **`push_slew_trace` had to move**, not just gain two fields. It is defined early in `Export.lua`
+  (originally directly after `safe_call`), far above where `sight_mark_is_clipped` and the
+  `ASP17_FIELD_*`/`MARK_*` constants are declared. Referencing them from the original location
+  would have reproduced the exact "local read as global" bug `test_dcs_export_lua_local_order.py`
+  exists to catch (and that this same function caused once before, 2026-10-21, per its own
+  comment) — caught by running that test, not by inspection, before it was ever committed. Moved
+  the whole function to just after `sight_mark_is_clipped`, well before its one call site.
+- **Making `mark_clipped` a required field (mirroring `stalled`) rippled further than the plan's
+  one-line note ("the one test using `'open'` ... is relabelled") implied.** Every existing
+  `test_sight_servo_api.py` test built around the module-level `_LINE` fixture or a literal
+  `SightServoState(...)`/expected-dict construction needed the two new fields added, or parsing
+  failed with a `SightServoParseError` the plan's own file list did not anticipate. Flagging this
+  as the "test-impact list is a hypothesis" case the role's own process asks for: the plan named
+  one test, the actual diff touched five.
+- **Stage 6 deliberately stops short of wiring `field_target_*`/`mark_clipped` into
+  `sight_trace_writer.py`'s own columns**, even though the plan's "Affected Modules/Files" section
+  (written for v3 as a whole) names that file. The Implementation Plan's own Stage 6 bullet is
+  explicit that this stage is aircraft-layer-only and needs no body-layer check re-run — a
+  body-layer source change would contradict that. Resolved by writing the `body-layer/CLAUDE.md`
+  clause to describe what is actually true after this stage (the fields exist on the API, the
+  trace writer does not yet read them) rather than what the broader v3 section's prose implied.
+  Said here explicitly since it is a real scope narrowing, not an oversight.

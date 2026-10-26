@@ -32,7 +32,9 @@ _LINE = (
     '{"t":1.5,"servo_mode":"closed","setpoint_azimuth_deg":12.0,'
     '"setpoint_elevation_deg":-3.0,"mark_azimuth_deg":12.01,'
     '"mark_elevation_deg":-2.99,"error_azimuth_deg":-0.01,'
-    '"error_elevation_deg":-0.01,"stalled":false,"stall_count":0}'
+    '"error_elevation_deg":-0.01,"stalled":false,"stall_count":0,'
+    '"field_target_azimuth_deg":12.0,"field_target_elevation_deg":-3.0,'
+    '"mark_clipped":false}'
 )
 
 
@@ -49,28 +51,45 @@ class TestSightServoState:
         assert sample.stall_count == 0
 
     def test_null_mark_and_error_fields_parse_as_none(self) -> None:
+        # "homing" (v3 rename of "open"): the schema does not validate
+        # the string, so this is a label change only, not a behavioural
+        # fix -- `plans/9k113-sight-pointing/plan.md` v3's own Affected
+        # Files note.
         line = (
-            '{"t":1.5,"servo_mode":"open","setpoint_azimuth_deg":12.0,'
+            '{"t":1.5,"servo_mode":"homing","setpoint_azimuth_deg":12.0,'
             '"setpoint_elevation_deg":-3.0,"mark_azimuth_deg":null,'
             '"mark_elevation_deg":null,"error_azimuth_deg":null,'
-            '"error_elevation_deg":null,"stalled":false,"stall_count":2}'
+            '"error_elevation_deg":null,"stalled":false,"stall_count":2,'
+            '"field_target_azimuth_deg":null,"field_target_elevation_deg":null,'
+            '"mark_clipped":true}'
         )
         sample = SightServoState.from_json_line(line, received_wall_clock_s=99.0)
         assert sample.mark_azimuth_deg is None
         assert sample.error_azimuth_deg is None
         assert sample.stall_count == 2
+        assert sample.field_target_azimuth_deg is None
+        assert sample.mark_clipped is True
 
     def test_missing_servo_mode_is_a_parse_error(self) -> None:
         with pytest.raises(SightServoParseError):
             SightServoState.from_json_line(
-                '{"t":1.5,"stalled":false,"stall_count":0}',
+                '{"t":1.5,"stalled":false,"stall_count":0,"mark_clipped":false}',
                 received_wall_clock_s=99.0,
             )
 
     def test_non_boolean_stalled_is_a_parse_error(self) -> None:
         with pytest.raises(SightServoParseError):
             SightServoState.from_json_line(
-                '{"t":1.5,"servo_mode":"open","stalled":"nope","stall_count":0}',
+                '{"t":1.5,"servo_mode":"homing","stalled":"nope",'
+                '"stall_count":0,"mark_clipped":false}',
+                received_wall_clock_s=99.0,
+            )
+
+    def test_non_boolean_mark_clipped_is_a_parse_error(self) -> None:
+        with pytest.raises(SightServoParseError):
+            SightServoState.from_json_line(
+                '{"t":1.5,"servo_mode":"closed","stalled":false,'
+                '"stall_count":0,"mark_clipped":"nope"}',
                 received_wall_clock_s=99.0,
             )
 
@@ -87,6 +106,9 @@ class TestSightServoState:
             error_elevation_deg=-0.01,
             stalled=False,
             stall_count=0,
+            field_target_azimuth_deg=12.0,
+            field_target_elevation_deg=-3.0,
+            mark_clipped=False,
         )
         assert sample.to_api_dict() == {
             "t": pytest.approx(1.5),
@@ -100,6 +122,9 @@ class TestSightServoState:
             "error_elevation_deg": pytest.approx(-0.01),
             "stalled": False,
             "stall_count": 0,
+            "field_target_azimuth_deg": pytest.approx(12.0),
+            "field_target_elevation_deg": pytest.approx(-3.0),
+            "mark_clipped": False,
         }
 
 
@@ -215,4 +240,7 @@ class TestSightServoLatestEndpoint:
             "error_elevation_deg": pytest.approx(-0.01),
             "stalled": False,
             "stall_count": 0,
+            "field_target_azimuth_deg": pytest.approx(12.0),
+            "field_target_elevation_deg": pytest.approx(-3.0),
+            "mark_clipped": False,
         }

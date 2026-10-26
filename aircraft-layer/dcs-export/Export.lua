@@ -589,52 +589,14 @@ end
 local SLEW_TRACE_TAIL_S = 5.0
 local slew_trace_observ_off_since = nil
 
--- Every frame, flag-gated: sim time, the sight's own actual-position
--- readback (874/876, raw), OBSERV (886), and the last slew command sent on
--- the player axis (3025/3026) -- always `nil` in this entry, since nothing
--- in this codebase writes that axis yet (BL-B80 is the slew loop
--- itself). The field exists now so BL-B80 only has to start assigning it,
--- never add a new log line format. Logged only while OBSERV is on (or
--- within SLEW_TRACE_TAIL_S of it going off) so an idle sortie's log stays
--- empty -- body-layer's own 1 Hz poll cannot see a slew at all, which is
--- the entire reason this runs here, every frame, rather than there.
---
--- **This must stay below `safe_call`**, for the reason push_ptt_state's
--- comment gives: a `local` referenced above its declaration compiles as a
--- global lookup, nil at call time, and the error aborted the rest of
--- LuaExportAfterNextFrame -- all telemetry export -- whenever SLEW_DEBUG
--- was on. Found on the first SLEW_DEBUG sortie, 2026-10-21.
-local function push_slew_trace(t)
-    if not SLEW_DEBUG then
-        return
-    end
-    local observe = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_OBSERVE)
-    end)
-    local observ_on = type(observe) == "number" and observe >= 0.5
-    if observ_on then
-        slew_trace_observ_off_since = nil
-    elseif slew_trace_observ_off_since == nil then
-        slew_trace_observ_off_since = t
-    end
-    if slew_trace_observ_off_since ~= nil
-        and (t - slew_trace_observ_off_since) > SLEW_TRACE_TAIL_S then
-        return
-    end
-    local az = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
-    end)
-    local elev = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
-    end)
-    slew_log_buffer[#slew_log_buffer + 1] = string.format(
-        '{"t":%.3f,"az":%s,"elev":%s,"observe":%s,"slew_cmd_az":null,"slew_cmd_el":null}\n',
-        t, fmt_num_or_null(az), fmt_num_or_null(elev), fmt_num_or_null(observe)
-    )
-    if #slew_log_buffer >= SLEW_LOG_FLUSH_EVERY_N_LINES then
-        slew_log_flush()
-    end
-end
+-- v3 (`plans/9k113-sight-pointing/plan.md`): `push_slew_trace` below
+-- needs `sight_mark_is_clipped` and the `ASP17_FIELD_*`/`MARK_*`
+-- constants, all declared further down this file (grouped with
+-- `run_sight_servo`'s own constants) -- so its definition moved below
+-- them too (same "a `local` referenced above its declaration compiles as
+-- a global lookup, nil at call time" rule this file already enforces
+-- everywhere else; see `push_slew_trace`'s own comment at its new
+-- location, just after `sight_mark_is_clipped`).
 
 --: Reads the pilot's trigger and sends a line only when it has moved.
 --: Deliberately not part of the telemetry line: that line is throttled to
@@ -1249,11 +1211,12 @@ local FLICKER_EPS = 1.0e-4
 -- i.e. a 3-deg command sustains roughly 1 deg/s of obeyed slew).
 local KP = 3.0
 local FF_GAIN = 3.0
--- Open-loop command saturation and the modelled deadzone below which an
--- open-loop command is assumed to produce no obeyed motion at all (the
--- probe's own measured ~0.18 deg deadzone).
-local OPEN_LOOP_SAT_DEG = 6.0
-local OPEN_LOOP_DEADZONE_DEG = 0.18
+-- `homing`'s capped push toward `field_target` (v3) -- inherits the old
+-- open-loop branch's `OPEN_LOOP_SAT_DEG = 6.0` value as a starting point,
+-- not re-derived, since its role (bound a transient correction, never
+-- sustain one) is unchanged even though open loop itself is gone (v3's
+-- "Merged mode" section, `plans/9k113-sight-pointing/plan.md`).
+local HOMING_SAT_DEG = 6.0
 
 -- A `sight_target` command older than this is ignored (mode `hold`
 -- instead) -- the plan's own stale-target timeout. Extrapolation beyond
@@ -1265,13 +1228,25 @@ local EXTRAPOLATION_CAP_S = 2.0
 -- Field-of-regard gimbal limits -- same sourced figures as `perception.
 -- optics.SIGHT_WIDE_OPTIC` (one source of truth is the Python side; kept
 -- in sync by hand here, same cross-file convention as every other
--- Lua-side mirror in this file). `FIELD_MARGIN_DEG` is how far inside the
--- field the setpoint must sit for the mark to be trusted as valid (step
--- 3's "not at a clip edge").
+-- Lua-side mirror in this file).
 local GIMBAL_AZ_HALF_DEG = 60.0
 local GIMBAL_EL_UP_DEG = 20.0
 local GIMBAL_EL_DOWN_DEG = -15.0
-local FIELD_MARGIN_DEG = 2.0
+
+-- The ASP-17's own readable field (v3) -- what the real sight is actually
+-- closed-loop on, not the gimbal limits above (the sortie bug: the old
+-- gate checked the setpoint against the gimbal limits while the mark
+-- physically cannot exceed this much smaller window). Azimuth is
+-- measured (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` line
+-- 423); elevation is a placeholder (555's own clip edges unmeasured) --
+-- ship it anyway so a flight can measure 555's edges, per the pilot's own
+-- "measure in flight" answer. `ASP17_FIELD_MARGIN_DEG` is how far inside
+-- this field the mark must sit to be trusted (not the gimbal margin the
+-- old `FIELD_MARGIN_DEG` was sized for -- the two are different scales
+-- and must not be merged under one name).
+local ASP17_FIELD_AZ_HALF_DEG = 4.3
+local ASP17_FIELD_EL_HALF_DEG = 4.3
+local ASP17_FIELD_MARGIN_DEG = 0.5
 
 -- Stall detection (run 8's definition): commanding at least this many
 -- degrees of correction for at least this long with the mark moving less
@@ -1313,13 +1288,23 @@ local sight_goal_rate_el_deg_s = 0.0
 local sight_goal_t_sim = nil
 local sight_setpoint_body_az_deg = nil
 local sight_setpoint_body_el_deg = nil
-local sight_estimate_body_az_deg = nil
-local sight_estimate_body_el_deg = nil
 local sight_mode = "off"
 local sight_mark_body_az_deg = nil
 local sight_mark_body_el_deg = nil
 local sight_error_az_deg = nil
 local sight_error_el_deg = nil
+-- v3: the setpoint radially projected onto the inset ASP-17 field --
+-- what the closed loop actually tracks, always (`sight_clip_to_field_
+-- body_deg`, recomputed fresh every frame). `sight_mark_clipped` is the
+-- mark-validity signal (`sight_mark_is_clipped`) driving the `closed`/
+-- `homing` split. `sight_prev_field_target_body_*_deg` holds only the
+-- previous frame's `field_target` for the feed-forward finite difference
+-- (part 3 of the fix) -- never read as a position itself.
+local sight_field_target_body_az_deg = nil
+local sight_field_target_body_el_deg = nil
+local sight_mark_clipped = false
+local sight_prev_field_target_body_az_deg = nil
+local sight_prev_field_target_body_el_deg = nil
 local sight_last_frame_t = nil
 local sight_last_write_az_cmd = 0.0
 local sight_last_write_el_cmd = 0.0
@@ -1385,19 +1370,129 @@ local function sight_observ_transition(observ_on, was_on)
     return was_on, false
 end
 
+-- v3 (`plans/9k113-sight-pointing/plan.md`, "v3 -- the real sight never
+-- leaves the ASP-17 field"): the setpoint radially projected onto the
+-- inset ASP-17 field, per axis independently (the mark is two linear
+-- gauges, az 565/566 and el 555/556, not a cone, so this is the standard
+-- ray-to-box clip, not a circular one). `scale == 1.0` when the setpoint
+-- is already inside; otherwise the largest scale <= 1 that lands it
+-- exactly on the nearer edge, whichever axis hits its own edge first.
+-- Pure math -- `test_sight_servo_lua.py` runs this under `luajit` against
+-- a Python reference.
+local function sight_clip_to_field_body_deg(set_az_deg, set_el_deg,
+        field_az_half_deg, field_el_half_deg)
+    local scale = 1.0
+    if set_az_deg ~= 0.0 then
+        scale = math.min(scale, field_az_half_deg / math.abs(set_az_deg))
+    end
+    if set_el_deg ~= 0.0 then
+        scale = math.min(scale, field_el_half_deg / math.abs(set_el_deg))
+    end
+    return set_az_deg * scale, set_el_deg * scale, scale < 1.0
+end
+
+-- v3: true when the mark's own raw reading is at or beyond its clip edge
+-- (within `margin_deg`) -- the root-cause fix. The old `setpoint_inside_
+-- field` gate this replaces checked the *setpoint* against the gimbal
+-- limits (60 deg), not the mark against the ASP-17's own ~4.3 deg window,
+-- so a setpoint anywhere up to ~58 deg off boresight read as "valid" --
+-- see v3's "Root cause". Pure math, one axis at a time; the caller ORs
+-- both axes together.
+local function sight_mark_is_clipped(mark_raw, boresight_mark, field_half_deg,
+        deg_per_unit, margin_deg)
+    local body_deg = (mark_raw - boresight_mark) * deg_per_unit
+    return math.abs(body_deg) >= (field_half_deg - margin_deg)
+end
+
+-- Every frame, flag-gated: sim time, the sight's own actual-position
+-- readback (874/876, raw), OBSERV (886), and the last slew command sent on
+-- the player axis (3025/3026) -- always `nil` in this entry, since nothing
+-- in this codebase writes that axis yet (BL-B80 is the slew loop
+-- itself). The field exists now so BL-B80 only has to start assigning it,
+-- never add a new log line format. Logged only while OBSERV is on (or
+-- within SLEW_TRACE_TAIL_S of it going off) so an idle sortie's log stays
+-- empty -- body-layer's own 1 Hz poll cannot see a slew at all, which is
+-- the entire reason this runs here, every frame, rather than there.
+--
+-- `mark_az_raw`/`mark_el_raw` (566/555, raw -- v3) and `mark_clipped`
+-- (v3, computed here with `sight_mark_is_clipped` against the current
+-- `ASP17_FIELD_*_HALF_DEG`/`ASP17_FIELD_MARGIN_DEG`) answer the user's
+-- own ANSWERED decision on elevation (v3's "Decisions Requiring User
+-- Input"): *"Elevation - measure in flight"* -- 555's own clip edges
+-- were never measured, so this per-**frame** log, not the 5 Hz
+-- `push_sight_servo_state` line, is what a calibration flight reads to
+-- find them: `mark_clipped`'s transitions mark where 555/566 actually
+-- clip, independent of whatever `ASP17_FIELD_EL_HALF_DEG` placeholder
+-- is in force at the time.
+--
+-- **Must stay below `safe_call`/`SLEW_DEBUG`/`slew_trace_observ_off_
+-- since`/`SLEW_TRACE_TAIL_S`/`fmt_num_or_null`/`slew_log_buffer`/
+-- `SLEW_LOG_FLUSH_EVERY_N_LINES`/`slew_log_flush`/`ASP17_FIELD_*`/
+-- `MARK_*`/`sight_mark_is_clipped`** -- moved below them all (v3) for the
+-- same reason every other function in this file was found calling a
+-- `local` declared below itself; see the comment left at this function's
+-- old location.
+local function push_slew_trace(t)
+    if not SLEW_DEBUG then
+        return
+    end
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local observ_on = type(observe) == "number" and observe >= 0.5
+    if observ_on then
+        slew_trace_observ_off_since = nil
+    elseif slew_trace_observ_off_since == nil then
+        slew_trace_observ_off_since = t
+    end
+    if slew_trace_observ_off_since ~= nil
+        and (t - slew_trace_observ_off_since) > SLEW_TRACE_TAIL_S then
+        return
+    end
+    local az = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    end)
+    local elev = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    end)
+    local m566 = safe_call(function() return GetDevice(0):get_argument_value(566) end)
+    local m555 = safe_call(function() return GetDevice(0):get_argument_value(555) end)
+    local mark_clipped = "null"
+    if type(m566) == "number" and type(m555) == "number" then
+        local clipped =
+            sight_mark_is_clipped(m566, MARK_BORESIGHT_AZ, ASP17_FIELD_AZ_HALF_DEG,
+                MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
+            or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_HALF_DEG,
+                MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
+        mark_clipped = tostring(clipped)
+    end
+    slew_log_buffer[#slew_log_buffer + 1] = string.format(
+        '{"t":%.3f,"az":%s,"elev":%s,"observe":%s,"slew_cmd_az":null,"slew_cmd_el":null'
+        .. ',"mark_az_raw":%s,"mark_el_raw":%s,"mark_clipped":%s}\n',
+        t, fmt_num_or_null(az), fmt_num_or_null(elev), fmt_num_or_null(observe),
+        fmt_num_or_null(m566), fmt_num_or_null(m555), mark_clipped
+    )
+    if #slew_log_buffer >= SLEW_LOG_FLUSH_EVERY_N_LINES then
+        slew_log_flush()
+    end
+end
+
 -- Export.lua's per-frame DCS-slave servo (`plans/9k113-sight-pointing/
--- plan.md`'s "Export.lua run_sight_servo(t)" design-detail section) --
+-- plan.md`'s "Export.lua run_sight_servo(t)" design-detail section,
+-- extended by v3's "the real sight never leaves the ASP-17 field") --
 -- tracks the world goal body-layer last sent, in airframe axes converted
--- fresh every frame, closed-loop on the ASP-17 mark where valid, open-
--- loop estimate otherwise, with the per-frame value-change mechanism
--- always on. Called every frame from `LuaExportAfterNextFrame`, before
--- that function's own 5 Hz export throttle -- same reasoning as every
+-- fresh every frame, always closed-loop on the ASP-17 mark toward
+-- `field_target` (the setpoint clipped into the field), with the
+-- per-frame value-change mechanism always on. Called every frame from
+-- `LuaExportAfterNextFrame`, before that function's own 5 Hz export
+-- throttle -- same reasoning as every
 -- other per-frame function in this file.
 --
 -- **Must stay below `safe_call`/`sight_point_quiet`/`sight_rate_limit_
 -- step`/`sight_world_to_body`/`sight_mark_to_body_deg`/`sight_observ_
--- transition`** -- same reasoning as every other function in this file
--- that was found calling a `local` declared below itself.
+-- transition`/`sight_clip_to_field_body_deg`/`sight_mark_is_clipped`** --
+-- same reasoning as every other function in this file that was found
+-- calling a `local` declared below itself.
 local function run_sight_servo(t)
     local observe = safe_call(function()
         return GetDevice(0):get_argument_value(ARG_OBSERVE)
@@ -1426,13 +1521,16 @@ local function run_sight_servo(t)
         sight_goal_t_sim = nil
         sight_setpoint_body_az_deg = nil
         sight_setpoint_body_el_deg = nil
-        sight_estimate_body_az_deg = nil
-        sight_estimate_body_el_deg = nil
         sight_mode = "off"
         sight_mark_body_az_deg = nil
         sight_mark_body_el_deg = nil
         sight_error_az_deg = nil
         sight_error_el_deg = nil
+        sight_field_target_body_az_deg = nil
+        sight_field_target_body_el_deg = nil
+        sight_mark_clipped = false
+        sight_prev_field_target_body_az_deg = nil
+        sight_prev_field_target_body_el_deg = nil
         sight_stall_window_start_t = nil
         sight_stalled = false
         if observ_falling_edge then
@@ -1461,12 +1559,15 @@ local function run_sight_servo(t)
         sight_mode = "caged"
         sight_setpoint_body_az_deg = 0.0
         sight_setpoint_body_el_deg = 0.0
-        sight_estimate_body_az_deg = 0.0
-        sight_estimate_body_el_deg = 0.0
         sight_mark_body_az_deg = nil
         sight_mark_body_el_deg = nil
         sight_error_az_deg = nil
         sight_error_el_deg = nil
+        sight_field_target_body_az_deg = nil
+        sight_field_target_body_el_deg = nil
+        sight_mark_clipped = false
+        sight_prev_field_target_body_az_deg = nil
+        sight_prev_field_target_body_el_deg = nil
         sight_stall_window_start_t = nil
         sight_stalled = false
         return -- caged: no writes
@@ -1477,10 +1578,6 @@ local function run_sight_servo(t)
         -- boresight, same as the body-layer head's own seeding.
         sight_setpoint_body_az_deg = 0.0
         sight_setpoint_body_el_deg = 0.0
-    end
-    if sight_estimate_body_az_deg == nil then
-        sight_estimate_body_az_deg = sight_setpoint_body_az_deg
-        sight_estimate_body_el_deg = sight_setpoint_body_el_deg
     end
 
     local have_goal = sight_goal_az_deg ~= nil and sight_goal_t_sim ~= nil
@@ -1494,6 +1591,11 @@ local function run_sight_servo(t)
         sight_mark_body_el_deg = nil
         sight_error_az_deg = nil
         sight_error_el_deg = nil
+        sight_field_target_body_az_deg = nil
+        sight_field_target_body_el_deg = nil
+        sight_mark_clipped = false
+        sight_prev_field_target_body_az_deg = nil
+        sight_prev_field_target_body_el_deg = nil
         sight_stall_window_start_t = nil
         sight_stalled = false
     else
@@ -1528,30 +1630,101 @@ local function run_sight_servo(t)
         sight_setpoint_body_el_deg = math.max(
             GIMBAL_EL_DOWN_DEG, math.min(GIMBAL_EL_UP_DEG, sight_setpoint_body_el_deg))
 
+        -- v3: `field_target` is what the closed loop actually tracks,
+        -- always -- the setpoint itself, radially projected onto the
+        -- inset ASP-17 field. Recomputed fresh every frame from this
+        -- frame's own setpoint (never held across frames), so the real
+        -- sight slides continuously along the field edge as the setpoint
+        -- moves (pilot's 2026-10-26 clarification). Clipped to the
+        -- *margin-reduced* half-angle, not the raw field half-angle, so a
+        -- mark that has fully converged onto `field_target` sits inside
+        -- (not exactly on) `sight_mark_is_clipped`'s own clip threshold --
+        -- the property test below pins this bound.
+        local field_target_az, field_target_el, field_clipped =
+            sight_clip_to_field_body_deg(sight_setpoint_body_az_deg, sight_setpoint_body_el_deg,
+                ASP17_FIELD_AZ_HALF_DEG - ASP17_FIELD_MARGIN_DEG,
+                ASP17_FIELD_EL_HALF_DEG - ASP17_FIELD_MARGIN_DEG)
+
+        -- Part 3 of the fix: feed-forward on `field_target`'s own
+        -- per-frame finite difference while sliding along the edge
+        -- (`scale < 1.0`, i.e. `field_clipped`) -- the raw goal rate is
+        -- the wrong rate there, since `field_target`'s own rate along the
+        -- boundary can differ from it in magnitude or sign. Inside the
+        -- field the two move identically, so the raw goal rate is used
+        -- unchanged (and reconstructing it from a one-frame-late
+        -- difference would be no benefit).
+        local ff_az, ff_el = sight_goal_rate_az_deg_s, sight_goal_rate_el_deg_s
+        if field_clipped and sight_prev_field_target_body_az_deg ~= nil and dt > 0 then
+            ff_az = (field_target_az - sight_prev_field_target_body_az_deg) / dt
+            ff_el = (field_target_el - sight_prev_field_target_body_el_deg) / dt
+        end
+
         local m566 = safe_call(function() return GetDevice(0):get_argument_value(566) end)
         local m555 = safe_call(function() return GetDevice(0):get_argument_value(555) end)
-        local setpoint_inside_field =
-            math.abs(sight_setpoint_body_az_deg) <= (GIMBAL_AZ_HALF_DEG - FIELD_MARGIN_DEG)
-            and sight_setpoint_body_el_deg <= (GIMBAL_EL_UP_DEG - FIELD_MARGIN_DEG)
-            and sight_setpoint_body_el_deg >= (GIMBAL_EL_DOWN_DEG + FIELD_MARGIN_DEG)
-        local mark_valid = setpoint_inside_field
-            and type(m566) == "number" and type(m555) == "number"
+        local mark_types_ok = type(m566) == "number" and type(m555) == "number"
 
-        if mark_valid then
-            sight_mode = "closed"
+        local mark_clipped = false
+        if mark_types_ok then
             sight_mark_body_az_deg = sight_mark_to_body_deg(m566, MARK_BORESIGHT_AZ, MARK_DEG_PER_UNIT_AZ)
             sight_mark_body_el_deg = sight_mark_to_body_deg(m555, MARK_BORESIGHT_EL, MARK_DEG_PER_UNIT_EL)
-            local e_az = sight_setpoint_body_az_deg - sight_mark_body_az_deg
-            local e_el = sight_setpoint_body_el_deg - sight_mark_body_el_deg
-            sight_error_az_deg = e_az
-            sight_error_el_deg = e_el
-            u_az = KP * e_az + FF_GAIN * sight_goal_rate_az_deg_s
-            u_el = KP * e_el + FF_GAIN * sight_goal_rate_el_deg_s
-            sight_estimate_body_az_deg = sight_mark_body_az_deg
-            sight_estimate_body_el_deg = sight_mark_body_el_deg
+            mark_clipped =
+                sight_mark_is_clipped(m566, MARK_BORESIGHT_AZ, ASP17_FIELD_AZ_HALF_DEG,
+                    MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
+                or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_HALF_DEG,
+                    MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
+        else
+            sight_mark_body_az_deg = nil
+            sight_mark_body_el_deg = nil
+        end
 
-            -- Stall (run 8's definition): commanding a real correction
-            -- for `STALL_WINDOW_S` with the mark not moving.
+        local e_az, e_el
+        if mark_types_ok and not mark_clipped then
+            -- `closed`: field_target is inset and the mark reads valid --
+            -- the everyday path. No saturation on `u` beyond the write
+            -- clamp below: `field_target` already bounds the achievable
+            -- error to the field's own size.
+            sight_mode = "closed"
+            e_az = field_target_az - sight_mark_body_az_deg
+            e_el = field_target_el - sight_mark_body_el_deg
+            u_az = KP * e_az + FF_GAIN * ff_az
+            u_el = KP * e_el + FF_GAIN * ff_el
+        else
+            -- `homing`: the mark reading itself is invalid (missing, or
+            -- at/near its own clip) despite `field_target` being inset --
+            -- a transient case (the first frame or two after `caged ->
+            -- free`, or a stale real head left pointing from before this
+            -- fix deployed), not the everyday path. A clipped mark is a
+            -- known half-plane fact (the real sight is beyond that edge,
+            -- in that direction); push toward `field_target`, capped at
+            -- `HOMING_SAT_DEG` so a stale reading cannot produce a
+            -- runaway command the way the old open-loop branch's
+            -- unbounded closed-branch error term could.
+            sight_mode = "homing"
+            if mark_types_ok then
+                e_az = field_target_az - sight_mark_body_az_deg
+                e_el = field_target_el - sight_mark_body_el_deg
+            else
+                e_az = field_target_az
+                e_el = field_target_el
+            end
+            u_az = math.max(-HOMING_SAT_DEG, math.min(HOMING_SAT_DEG, KP * e_az + FF_GAIN * ff_az))
+            u_el = math.max(-HOMING_SAT_DEG, math.min(HOMING_SAT_DEG, KP * e_el + FF_GAIN * ff_el))
+        end
+        sight_error_az_deg = e_az
+        sight_error_el_deg = e_el
+        sight_field_target_body_az_deg = field_target_az
+        sight_field_target_body_el_deg = field_target_el
+        sight_mark_clipped = mark_clipped or not mark_types_ok
+        sight_prev_field_target_body_az_deg = field_target_az
+        sight_prev_field_target_body_el_deg = field_target_el
+
+        -- Stall (run 8's definition, point D): commanding a real
+        -- correction for `STALL_WINDOW_S` with the mark not moving --
+        -- shared by `closed` and `homing` alike (v3: the old open branch
+        -- never fed this at all). Gated on actually having a mark to
+        -- measure motion from; a missing mark can't be judged stalled or
+        -- not, so neither flag changes in that case.
+        if mark_types_ok then
             if math.abs(u_az) >= STALL_CMD_DEG or math.abs(u_el) >= STALL_CMD_DEG then
                 if sight_stall_window_start_t == nil then
                     sight_stall_window_start_t = t
@@ -1574,25 +1747,8 @@ local function run_sight_servo(t)
                 sight_stalled = false
             end
         else
-            sight_mode = "open"
-            sight_mark_body_az_deg = nil
-            sight_mark_body_el_deg = nil
             sight_stall_window_start_t = nil
             sight_stalled = false
-            local e_az = sight_setpoint_body_az_deg - sight_estimate_body_az_deg
-            local e_el = sight_setpoint_body_el_deg - sight_estimate_body_el_deg
-            sight_error_az_deg = e_az
-            sight_error_el_deg = e_el
-            u_az = math.max(-OPEN_LOOP_SAT_DEG, math.min(
-                OPEN_LOOP_SAT_DEG, KP * e_az + FF_GAIN * sight_goal_rate_az_deg_s))
-            u_el = math.max(-OPEN_LOOP_SAT_DEG, math.min(
-                OPEN_LOOP_SAT_DEG, KP * e_el + FF_GAIN * sight_goal_rate_el_deg_s))
-            if math.abs(u_az) > OPEN_LOOP_DEADZONE_DEG then
-                sight_estimate_body_az_deg = sight_estimate_body_az_deg + (u_az / FF_GAIN) * dt
-            end
-            if math.abs(u_el) > OPEN_LOOP_DEADZONE_DEG then
-                sight_estimate_body_el_deg = sight_estimate_body_el_deg + (u_el / FF_GAIN) * dt
-            end
         end
     end
 
@@ -1640,13 +1796,16 @@ local function run_sight_servo(t)
     sight_last_write_el_cmd = write_el_cmd
 end
 
--- Sends `run_sight_servo`'s own status -- mode, setpoint, the mark-
--- derived body direction (or `null` when invalid), error, and the stall
--- flag -- as a **second** feed from `push_cockpit_switch_state`'s own
--- line, wire key "servo_mode" (the plan's own "Departure, stated": that
--- feed is change-gated, this one changes every frame under the per-frame
--- wobble, a different rate class). Called once per `LuaExportAfterNext
--- Frame`'s own 5 Hz export throttle, same cadence as the telemetry line.
+-- Sends `run_sight_servo`'s own status -- mode (`off|caged|hold|homing|
+-- closed`, v3: `open` renamed `homing`, its meaning changed with it, see
+-- v3's "Merged mode"), setpoint, the mark-derived body direction (or
+-- `null` when invalid), error, the stall flag, and (v3, new)
+-- `field_target_*`/`mark_clipped` -- as a **second** feed from
+-- `push_cockpit_switch_state`'s own line, wire key "servo_mode" (the
+-- plan's own "Departure, stated": that feed is change-gated, this one
+-- changes every frame under the per-frame wobble, a different rate
+-- class). Called once per `LuaExportAfterNextFrame`'s own 5 Hz export
+-- throttle, same cadence as the telemetry line.
 local function push_sight_servo_state(t)
     if client == nil then
         return
@@ -1660,7 +1819,10 @@ local function push_sight_servo_state(t)
         .. ',"error_azimuth_deg":' .. fmt_num_or_null(sight_error_az_deg)
         .. ',"error_elevation_deg":' .. fmt_num_or_null(sight_error_el_deg)
         .. ',"stalled":' .. tostring(sight_stalled)
-        .. ',"stall_count":' .. tostring(sight_stall_count) .. '}\n')
+        .. ',"stall_count":' .. tostring(sight_stall_count)
+        .. ',"field_target_azimuth_deg":' .. fmt_num_or_null(sight_field_target_body_az_deg)
+        .. ',"field_target_elevation_deg":' .. fmt_num_or_null(sight_field_target_body_el_deg)
+        .. ',"mark_clipped":' .. tostring(sight_mark_clipped) .. '}\n')
     if not ok then
         debug_log("sight-servo send failed: " .. tostring(err))
         client:close()
@@ -1803,13 +1965,16 @@ function LuaExportStop()
     sight_goal_t_sim = nil
     sight_setpoint_body_az_deg = nil
     sight_setpoint_body_el_deg = nil
-    sight_estimate_body_az_deg = nil
-    sight_estimate_body_el_deg = nil
     sight_mode = "off"
     sight_mark_body_az_deg = nil
     sight_mark_body_el_deg = nil
     sight_error_az_deg = nil
     sight_error_el_deg = nil
+    sight_field_target_body_az_deg = nil
+    sight_field_target_body_el_deg = nil
+    sight_mark_clipped = false
+    sight_prev_field_target_body_az_deg = nil
+    sight_prev_field_target_body_el_deg = nil
     sight_last_frame_t = nil
     sight_last_write_az_cmd = 0.0
     sight_last_write_el_cmd = 0.0

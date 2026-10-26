@@ -185,7 +185,13 @@ sight_trace_writer.py` is the writer; reduce with `.claude/skills/sortie-log-tri
 reads `Export.lua`'s own per-**frame** companion log (`aircraft_layer_slew_debug.flag` →
 `aircraft_layer_slew_trace.log`, a different flag from the general `DEBUG` one, since this writes
 every frame rather than a handful of one-shot dumps). Defaults off, a true no-op when absent, same
-additive posture as every other per-run log.
+additive posture as every other per-run log. **v3's `field_target_azimuth_deg`/
+`field_target_elevation_deg`/`mark_clipped` (the real sight's ASP-17 edge-park fields) are on `GET
+/sight_servo/latest` as of Stage 6, aircraft-layer-only** — `sight_trace_writer.py` does not read
+them yet (Stage 6's own scope stopped at this one documentation clause and deliberately made no
+body-layer code change; wiring them into `--slew-trace`'s own columns is follow-up work). Read
+`GET /sight_servo/latest` directly, or `aircraft_layer_slew_trace.log`'s raw 555/566, until that
+follow-up lands.
 
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
