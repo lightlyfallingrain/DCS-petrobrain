@@ -180,7 +180,65 @@ Given unprompted during the `[[BL-B67]]` session, verbatim:
 | speed | possibly not implemented |
 
 **Consequence for settled point 6's vocabulary:** *"hold 200 m"* and *"speed 2 2 0"* cannot lean on
-the SAU the way attitude and heading can — they are likely Petrovich's own closed loop on the
-collective (altitude) and cyclic pitch (speed), on top of the SAU's attitude hold. The "not
+the SAU the way attitude and heading can, so Petrovich's own loop has to fly them. **How that loop is
+shaped is the next section, which corrects the first reading written here** ("collective for
+altitude, cyclic pitch for speed" — exactly the decomposition the user rules out). The "not
 available" half is a recollection of an older DCS document, so stage 0 should confirm which SAU
 channels exist and engage, rather than assume either way.
+
+## Direction, 2026-10-26 — fly the lift vector, not one axis per control
+
+Given in response to that first reading, verbatim:
+
+> *"The control logic should really be about the lift vector and tail rotor yaw control.*
+>
+> *Most everything happens by controlling the lift vector. It's length and direction.*
+>
+> *Amount of lift is controlled by blade angle which is controlled by the collective.*
+>
+> *Direction of lift vector is controlled by the rotor disk tilt which is controlled by the
+> cyclic.*
+>
+> *Tail rotor is fixed position and produces varying about of yaw torque controlled by the
+> pedals.*
+>
+> *Because everything affects everything else, we can't just use collective for altitude, pitch
+> for speed. We need to use the lift vector. Point it in the direction of desired acceleration
+> (physics speak) and control the vector length with collective.*
+>
+> *From this we get: to gain speed we need forward component of lift vector -> force ->
+> acceleration. At the same time forward tilt of lift vector decreases vertical component so we
+> must compensate by increasing collective to maintain the vertical component and thus level
+> flight.*
+>
+> *Similarly, to decrease speed, we point the lift vector back to get force and thus acceleration
+> in rear direction are the forward speed decreases. At the same time, at speed tilting the rotor
+> disc back increases its angle of attack as a whole -> much more lift -> helicopter climbs fast ->
+> we need to lower the collective -> low blade angle -> lift vector length decrease so that level
+> flight can be maintained. There are of course limit to blade angle so the the lift vector is the
+> only control if collective is at limit.*
+>
+> *We need to fly the rotor disc. The helicopter body hangs beneath it and follows anywhere the
+> rotor disc pulls it. Rotor disc lift vector is how we control where the disc pulls the aircraft.*
+>
+> *Note that due to the angular momentum forces of engine turning the rotor, the hind yaws much
+> easier to left. At hover and slow flight a lot of right rudder is needed. That means there's not
+> much right rudder left for additional right yaw."*
+
+What this settles for the controller's shape (a reading, to be confirmed when `BL-16` is planned):
+
+- **One vector loop, not per-axis loops.** The outer loop turns the goal (heading, speed, altitude)
+  into a **desired acceleration vector**; the lift vector needed is that acceleration plus gravity
+  compensation. **Cyclic sets its direction** (disc tilt), **collective sets its length** (blade
+  angle). Speed and altitude are never owned by one control each.
+- **The coupling is the point, not a disturbance.** Accelerating = tilt forward *and* raise
+  collective to keep the vertical component. Decelerating at speed = tilt back *and* lower
+  collective, because the disc's own angle of attack rises and the aircraft would balloon.
+- **Collective limits move the work to the direction.** At the blade-angle limit, the vector's
+  direction is the only control left.
+- **Fly the disc; the body hangs beneath and follows** — the fuselage attitude is a consequence of
+  where the disc pulls, not the thing being controlled.
+- **Yaw authority is asymmetric.** Engine torque yaws the Hind left easily; hover and slow flight
+  already use a lot of right pedal, so **right-yaw margin is small at low speed**. A controller
+  must treat pedal headroom as direction-dependent, and a collective increase (more torque) eats
+  into the right-yaw margin further.
