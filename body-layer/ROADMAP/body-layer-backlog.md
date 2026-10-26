@@ -140,7 +140,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B99]] — Petrovich POV debug view: optic FOV and detections in angle space (done, merged `7796206d`)
 - [[BL-B100]] — a wake-prefixed question still defeats `parse_utterance`'s own grammar (found during `[[AA-B7]]` DoD, 2026-10-25)
 - [[BL-B101]] — terrain avoidance from flight-path elevation while Petrovich flies (deferred, split from [[BL-16]])
-- [[BL-B102]] — "that"/"it" in a command means the contact Petrovich last talked about (user request, 2026-10-26)
+- [[BL-B102]] — "that"/"it" in a command means the contact Petrovich last talked about (done, merged `3a9a1a18`, needs flight)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

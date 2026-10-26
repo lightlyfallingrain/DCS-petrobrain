@@ -39,7 +39,7 @@ footer{color:var(--muted);font-size:.8rem}
 <div class="wrap">
 <header>
   <h1>Petrovich Command Map</h1>
-  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-25. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
+  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-26. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
 </header>
 
 <div class="legend">
@@ -66,8 +66,8 @@ flowchart LR
 </section>
 
 <section>
-  <h2><span class="n">2</span> Shared slots</h2>
-  <p class="note">Report, select target, engage and follow reuse these lists. Where a card shows a slot, say any one word from it.</p>
+  <h2><span class="n">2</span> Shared slots <span class="badge">new</span></h2>
+  <p class="note">Report, select target, engage and follow reuse these lists. Where a card shows a slot, say any one word from it. <b>It / that</b> means the contact or group Petrovich last talked about (within 60 s, even if he can no longer see it). Add a what/where to pick among what he mentioned recently — “that AAA”, “that 11 o'clock armor”; if your target matches, the target wins. Nothing to refer to: “Unable, no contact.”</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   WHAT{{"what"}} --> W1["armor · truck · infantry · sam · aaa · ship · group"]
@@ -75,6 +75,7 @@ flowchart LR
   WHERE --> C2["north · northeast · east · southeast<br/>south · southwest · west · northwest"]
   WHERE --> C3["left · right · ahead"]
   FAR{{"how far"}} --> F1["near / close · medium / mid · far / distant / long"]
+  REF{{"it / that  ⟵ new"}} --> R1["last contact he talked about<br/>“that group” = the whole group"]
   </pre></div>
 </section>
 
@@ -96,11 +97,13 @@ flowchart LR
 
 <section>
   <h2><span class="n">4</span> Watch a contact</h2>
-  <p class="note">Watching makes him report that contact's movement and range changes unprompted. “Follow” with slots picks the best match.</p>
+  <p class="note">Watching makes him report that contact's movement and range changes unprompted. “Follow” with slots picks the best match. “Watch it”, “follow that group” take what he just mentioned.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
   WN(["watch nearest / follow nearest"]) -.-> AD["air defence"]
   FO(["follow"]) -.-> WH{{"what"}}
+  FO -.-> RF{{"it / that  ⟵ new"}}
+  WT(["watch  ⟵ new"]) --> RF
   FO -.-> CK["8 … 4  o'clock"]
   FO -.-> KM["n km<br/>(km · klicks · kilometres)"]
   CW(["cancel watch / stop watching<br/>stop following"])
@@ -124,27 +127,31 @@ flowchart LR
 
 <section>
   <h2><span class="n">6</span> Attack run</h2>
-  <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up. “Where is it” repeats the guidance on demand whenever a target is set.</p>
+  <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up. “Where is target” repeats the guidance on demand. “Where is it” now means the last thing he talked about — usually the target during a run, since steering keeps mentioning it. “Target it” selects what he just called out.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
-  ST(["select target / set target"]) --> WHAT{{"what"}}
+  ST(["select target / set target / target"]) --> WHAT{{"what"}}
+  ST --> REF{{"it / that  ⟵ new"}}
   ST --> WHERE{{"where"}}
   ST -.-> FAR{{"how far"}}
   STP(["step"]) -.-> N["one … nine"]
   STP --> DIR["left · right<br/>near / closer · far / further / away"]
   N --> DIR
   EN(["engage / engage target"]) -.-> SL["what · where · how far"]
+  EN -.-> REF
   EN -.-> WP["guns · rockets · missiles"]
   EN ==> ARM["also sets weapons ARMED"]
   DT(["drop target"])
   DG(["disengage / stop attack / abort"])
-  WI(["where is it / where is target"]) --> WIa["guidance phrase, or “No target.”"]
+  WI(["where is it / where is that"]) -.-> WHAT
+  WI --> WIb["o'clock · km · landmark<br/>(guidance phrase if it is the target)  ⟵ new"]
+  WT(["where is target"]) --> WIa["guidance phrase, or “No target.”"]
   </pre></div>
 </section>
 
 <div class="grid2">
 <section>
-  <h2><span class="n">7</span> 9K113 sight &amp; weapons <span class="badge">new</span></h2>
+  <h2><span class="n">7</span> 9K113 sight &amp; weapons</h2>
   <p class="note">After takeoff Petrovich powers the guidance unit up by himself and says “Guidance unit ready”. Observ on before that gets “Unable, guidance unit not ready.” <b>Look</b> asks for the 9K113 explicitly: left/right/ahead keeps scanning that sector; an o'clock (30°) or compass point (45°) gets two near-to-far sweeps, then “&lt;where&gt; clear”. With observ off he asks “Need observ, confirm” — yes / confirm / observ on, or no. Refused during an attack run.</p>
   <div class="g"><pre class="mermaid">
 flowchart LR
@@ -152,7 +159,7 @@ flowchart LR
   OB(["observ / observe"]) --> ON["on"]
   OB --> OFF["off"]
   RDY -.->|"needed first"| ON
-  LK(["look / sight / what is at  ⟵ new"]) --> LA["left · right · ahead"]
+  LK(["look / sight / what is at"]) --> LA["left · right · ahead"]
   LK --> LC["8 … 4  o'clock"]
   LK --> LP["north … northwest"]
   LC -.-> LD["n km"]
@@ -175,6 +182,7 @@ flowchart LR
   GM(["good"]) --> TOD["morning · day · evening · night"] --> PV(["petrovich"])
   MK(["mark"]) --> MH["here / this position"]
   MK --> MT["target"]
+  MK --> MI["it / that  ⟵ new"]
   RM(["remember"]) --> RL["this location"]
   RM --> RT["target"]
   </pre></div>
@@ -184,7 +192,7 @@ flowchart LR
 <footer>Source: <code>audio-adapter/src/vocabulary.py</code> (PHRASES and the slot word lists). Phrasings shown are the ones the recogniser is tuned toward; close variants may also match. Kept current by <code>.claude/scripts/command-map-check.py</code>, run at every merge.</footer>
 <script type="application/json" id="command-map-manifest">
 {
- "vocabulary_sha256": "660a38469a87a88a465f673cfcd2c979b5958493493e7f92a7143f74a29be716",
+ "vocabulary_sha256": "b5fbcd79da51e5218b4d454caeb2cdeaf3bfd3544a94447e8e3d9fac9bf4c534",
  "cards": {
   "point": 7,
   "wake_petrovich": 1,
