@@ -16,6 +16,48 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
+  ## v3 Stage 6 DoD-passed 2026-10-26 (`f65f0ce0`, merge hash TBD by main loop) — `#needs-flight`
+
+  `plans/9k113-sight-pointing/plan.md` v3 Stage 6 — the ASP-17 edge-park fix for the
+  `docs/acceptance/2026-10-26-sortie-feedback.md` §2 symptom (real mark moving inside the HUD
+  while the simulated sight pointed well off to the side) — is implemented, reviewed, and
+  DoD-passed on `feature/9k113-sight-edge-park` (`plans/9k113-sight-pointing/dod-check.md`).
+  Root cause: `run_sight_servo`'s field-validity gate compared the setpoint against the sight's
+  **gimbal** limits (±60°/+20°/−15°), not the ASP-17's own much narrower readable window
+  (measured ≈±4.3° azimuth) — occurrence 5 of this subsystem's recurring field-of-regard-
+  enforcement defect (`.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md`),
+  and per the plan's own words, the subsystem's *last* remaining field-of-regard-shaped check.
+  Fix: `sight_mark_is_clipped` checked against the mark's own raw reading (566/555), and the real
+  sight always closed-loop on `field_target_body_*_deg` — the setpoint radially projected onto the
+  inset ASP-17 field, continuously tracked as the simulated sight moves (not a one-shot park).
+  Open loop removed entirely, not kept as a fallback. Aircraft-layer-only; no body-layer source
+  change (`body-layer/CLAUDE.md` gained a documentation clause only).
+
+  Reviewer (`review-v3.md`), Performance (`performance-review-v3.md`, MONITOR — inherited
+  baseline, not new), and Security (`security-review-v3.md`) all APPROVED with **no required
+  fixes**. DoD mechanical checks: aircraft-layer `ruff format`/`ruff check`/`mypy --strict`/
+  `pytest` (607 passed), `luac5.1 -p` and the `GETGLOBAL` undeclared-global scan on `Export.lua`,
+  all clean; no debug output/TODO markers/error suppression in touched files; tree clean. No
+  body-layer code-quality gate run — no body-layer source changed.
+
+  **`#needs-flight`**: `ASP17_FIELD_EL_HALF_DEG`/`ASP17_FIELD_MARGIN_DEG` remain guesses per the
+  user's own 2026-10-26 ANSWERED decision ("Elevation - measure in flight") — the build carries
+  the per-frame raw-555/raw-566 trace (`push_slew_trace`, behind the `aircraft_layer_slew_debug.flag`
+  touch-file) specifically so the next sortie can read the real elevation clip edges off it. Test
+  card: see below. **Acceptance-boundary statement** (so a fixture pass is never mistaken for a
+  flight pass): no automated test here touches a real 9K113 gimbal, a real ASP-17 optical mark, or
+  DCS's own intermittent-obedience behaviour — whether the real field is actually ≈4.3°/the
+  guessed elevation half-angle, whether the cross hair visibly parks at the HUD edge rather than
+  drifting/pegging, and whether continuous edge-tracking looks smooth to a human eye are all
+  outside this test suite's reach by construction.
+
+  Card: `docs/acceptance/2026-10-26-bl-b80-v3-sight-edge-park.md`,
+  published https://claude.ai/artifact/H4Q7cCrVqEh2G8sj75L6Su — branch to fly is `main`.
+
+  This does not close the broader BL-B80 milestone (`[~]` stays correct) — Flight A/B below remain
+  outstanding independent of this stage, and this stage's own flight (elevation measurement +
+  edge-park visual confirmation) batches with them where practical.
+
   ## Merged 2026-10-23 (`a2ea382c`) before Flight A — still in progress, not flown
 
   `feature/9k113-sight-pointing` merged to `main` at user direction (*"merge BL-B80, I will test

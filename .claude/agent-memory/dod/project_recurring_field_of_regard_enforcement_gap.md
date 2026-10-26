@@ -1,6 +1,6 @@
 ---
 name: recurring-field-of-regard-enforcement-gap
-description: Fourth occurrence of a field-of-regard enforcement defect on the same 9K113 sight subsystem -- the first three were "never checked at all," the fourth was "checked, but in the wrong reference frame." A process signal, not just a code-review catch.
+description: Five occurrences of a field-of-regard enforcement defect on the same 9K113 sight subsystem, the last one (BL-B80 v3 Stage 6, 2026-10-26) closing the subsystem's last remaining field-of-regard-shaped check. Read before recommending further process hardening here -- occurrence 5 was caught by the user's own flight observation, not by review, and the fix shipped clean (Reviewer/Security/Performance all APPROVED, no required fixes).
 metadata:
   type: project
 ---
@@ -37,6 +37,31 @@ metadata:
    check existed and had a passing test) but the same root cause one level up: nobody asked, for a
    bound expressed in the airframe's own frame, "is the value being checked against it actually in
    that frame too."
+
+5. `BL-B80` v3 Stage 6 (`plans/9k113-sight-pointing/plan.md`, 2026-10-26 sortie feedback §2):
+   `run_sight_servo`'s field-validity gate compared the setpoint against the sight's **gimbal**
+   limits (±60°/+20°/−15°), not the ASP-17's own much narrower readable window (measured ≈±4.3°
+   azimuth) -- the closed loop ran unsaturated against a mark reading that was physically clipped
+   at the field edge, so the real cross hair moved inside the HUD while the simulated sight pointed
+   well off to the side. **Different proximate shape from 1-4 again**: this time two differently-
+   scaled bounds shared conceptual space (the mechanical gimbal field vs. the optically-readable
+   ASP-17 field) and the wrong one was checked -- not "never checked" (1-3) and not "wrong frame"
+   (4), but "checked against the wrong bound of the same name." Caught by the pilot's own flight
+   observation, not by any review pass -- the fixture suite had nothing that held the sight
+   outside the ASP-17 field while asserting on `homing` vs. `closed`, because nobody had framed the
+   two bounds as distinct until this sortie. Fixed by introducing `sight_mark_is_clipped` (checked
+   against the mark's own raw reading, not either bound) as the root-cause gate, and always closing
+   the loop on `field_target_body_*_deg` (the setpoint radially projected onto the inset ASP-17
+   field) rather than letting an unsaturated command run free outside it. Reviewer, Performance,
+   and Security all APPROVED Stage 6 with **no required fixes** -- the fix itself was clean; the
+   defect was in a plan/implementation generation before this one, not in this stage's own code.
+   **The plan's own words: this closes out "this subsystem's *last* remaining field-of-regard-
+   shaped check" -- every other one on this sight (gimbal clamp, intent's ±60° azimuth cap) was
+   already checked against its own correct frame/magnitude before this pass.** Do not add a sixth
+   occurrence entry reflexively the next time this subsystem is touched; check first whether the
+   new work is actually another field-of-regard-shaped bound, or something else this pattern
+   doesn't cover (`[[BL-B67]]`'s ATGM guidance accuracy, which this blocks, is the next thing
+   landing here and is a precision question, not a regard-enforcement one).
 
 **Why review keeps missing it, each time, for a different proximate reason**: pass 1 verified the
 consumer and never the selection; pass 2 verified the azimuth side and never asked whether
