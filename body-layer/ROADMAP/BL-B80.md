@@ -16,7 +16,7 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
-  ## v3 Stage 6 DoD-passed 2026-10-26 (`f65f0ce0`, merge hash TBD by main loop) — `#needs-flight`
+  ## v3 Stage 6 DoD-passed 2026-10-26 (`f65f0ce0`, merged `d763ab20`) — `#needs-flight`
 
   `plans/9k113-sight-pointing/plan.md` v3 Stage 6 — the ASP-17 edge-park fix for the
   `docs/acceptance/2026-10-26-sortie-feedback.md` §2 symptom (real mark moving inside the HUD
