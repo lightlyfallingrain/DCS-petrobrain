@@ -700,6 +700,12 @@ math twin).**
 
 **Decisions Requiring User Input (v3-specific).**
 
+> **ANSWERED 2026-10-26 (pilot), verbatim:** *"Elevation - measure in flight."* Read as: the
+> elevation clip edges (555) are measured on the next air-start flight and
+> `ASP17_FIELD_EL_HALF_DEG` / the margin are set from that measurement. The build carries the
+> placeholder only so that flight can run; the trace must log raw 555 at the clip transitions so
+> the edges can be read off it. The value is not to be trusted, or tuned by eye, before then.
+
 1. **Ship the elevation field half-angle/margin as guesses (above), or hold elevation closed-loop
    back until 555's clip edges are measured** (e.g., freeze elevation at boresight, azimuth-only
    field park, until Flight A's numbers land)? **Recommendation:** ship the guess — it is the same
