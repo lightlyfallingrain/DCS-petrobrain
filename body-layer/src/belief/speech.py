@@ -484,6 +484,12 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # project's "say again" vs "unable" distinction, same shape as
     # `ON_GROUND`/`GUIDANCE_NOT_READY` above.
     "ATTACK_RUN_ENGAGED": "Unable, attack run.",
+    # `[[BL-B102]]` -- a pronoun ("it"/"that") with nothing to point at:
+    # the referent window expired, or nothing has been mentioned at all
+    # since the last mission (re)start. Heard and understood, not
+    # resolvable -- the "unable" half of the project's "say again" vs
+    # "unable" distinction, same shape as `ON_GROUND`/`GUIDANCE_NOT_READY`.
+    "NO_REFERENT": "Unable, no contact.",
 }
 
 

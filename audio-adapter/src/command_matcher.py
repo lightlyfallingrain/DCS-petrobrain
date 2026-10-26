@@ -99,6 +99,7 @@ from vocabulary import (
     parse_clock,
     parse_descriptor,
     parse_range_km,
+    parse_referent,
     parse_relative_word,
     parse_sector_word,
     parse_step_count,
@@ -325,11 +326,27 @@ _REPORT_VERBS: tuple[str, ...] = report_verbs()
 #: failure, not a conjunction -- see `_where_slot_count`.
 _WHERE_SLOT_NAMES: tuple[str, ...] = ("clock", "sector", "relative")
 
-#: `select_target`'s two legal verbs (`plans/attack-run/plan.md` Decision
+#: `select_target`'s legal verbs (`plans/attack-run/plan.md` Decision
 #: 14, "`set|select target <what> <where>`"), fuzzy-matched for the same
 #: reason `_FOLLOW_VERB`/`_REPORT_VERBS` are: `verb` here is already a
 #: possibly-misheard first word.
-_SELECT_TARGET_VERBS: tuple[str, ...] = ("select", "set")
+#:
+#: **`"target"` itself, added for `[[BL-B102]]`** -- the user's own verb
+#: in his worked examples ("target that/it"), not previously a legal
+#: first word of this command ("target" was only ever this phrase's
+#: *noun*, as in "select target"). It anchors on its own (`_verb_anchor_
+#: ratio("target")` == `VERB_FLOOR` exactly, not below it) but did not
+#: previously fuzzy-match either existing verb well enough to reach this
+#: branch -- `ratio("target", "set")` == 0.444, `ratio("target",
+#: "select")` == 0.167, both under `VERB_FLOOR`. Checked ahead of
+#: `_ENGAGE_VERBS` in `match_transcript`'s own branch order, which
+#: matters: `ratio("target", "engage")` == `VERB_FLOOR` exactly too, so
+#: without that ordering "target it" would be genuinely ambiguous between
+#: selecting and engaging -- this command's own existing position in the
+#: function (before `engage`'s) is what makes "target" resolve to
+#: *selecting*, matching the user's own worked example ("target that" is
+#: the thing just described, not yet attacked).
+_SELECT_TARGET_VERBS: tuple[str, ...] = ("select", "set", "target")
 
 #: `step`'s own verb (`plans/attack-run/plan.md` Decision 6), fuzzy-
 #: matched for the same reason every other slotted token's verb is.
@@ -513,7 +530,14 @@ def _parse_follow_slots(text: str) -> dict[str, int | str] | None:
     `strip_filler` drops nothing any of the three parsers look for, so
     this is just avoiding a second normalisation pass, not a behaviour
     difference. Returns `None` when none of the three resolves -- Decision
-    2b-iii: "at least one must be present," never an empty slot dict."""
+    2b-iii: "at least one must be present," never an empty slot dict.
+
+    **`[[BL-B102]]`'s `referent` slot** ("follow it"/"follow that
+    [group]") is a fourth, additive slot on this same dict -- a bare
+    referent with no other slot still makes this non-`None`, which is
+    what lets "follow it"/"follow that" reach body-layer at all: measured
+    (`plans/that-it-referent/plan.md`'s "Facts"), both anchor on `follow`
+    and then fail the phrase table today, resolving to `"say_again"`."""
     slots: dict[str, int | str] = {}
     descriptor = parse_descriptor(text)
     if descriptor is not None:
@@ -524,6 +548,8 @@ def _parse_follow_slots(text: str) -> dict[str, int | str] | None:
     range_km = parse_range_km(text)
     if range_km is not None:
         slots["range_km"] = range_km
+    if parse_referent(text):
+        slots["referent"] = True
     return slots if slots else None
 
 
@@ -577,7 +603,13 @@ def _parse_select_slots(text: str) -> dict[str, int | str] | None:
     idle"` anchors against `"set"` at ratio 1.0, same as any other real
     verb-anchor word) -- `"target"` is what the phrase actually commits to
     saying, and its absence is the cheap, sufficient signal that this is
-    not this command at all, before any slot is even looked at."""
+    not this command at all, before any slot is even looked at.
+
+    **`[[BL-B102]]`'s `referent` slot** ("target it"/"target that") is a
+    sixth, additive slot -- the literal "target" check above already
+    requires the verb-anchored word, so "target it"/"target that" still
+    passes it and becomes a non-empty slot dict even with no descriptor/
+    clock/sector/relative/band at all."""
     words = normalize_for_match(text).split()
     if "target" not in words:
         return None
@@ -597,6 +629,8 @@ def _parse_select_slots(text: str) -> dict[str, int | str] | None:
     band = parse_band(text)
     if band is not None:
         slots["band"] = band
+    if parse_referent(text):
+        slots["referent"] = True
     return slots if slots else None
 
 
@@ -634,7 +668,14 @@ def _parse_engage_slots(text: str) -> dict[str, int | str] | None:
     command (resume the already-selected run) -- so this returns `None`
     only when **nothing** resolves, which `match_transcript`'s own
     caller then reads as "fall through to the ordinary phrase table,"
-    where the bare forms are recorded phrasings."""
+    where the bare forms are recorded phrasings.
+
+    **`[[BL-B102]]`'s `referent` slot** ("engage it"/"engage that") is a
+    seventh, additive slot -- a heard referent alone is enough to make
+    this non-`None`, intercepting the slotted branch instead of falling
+    through to "resume the run" (body-layer's own decision: a heard
+    referent is itself a positive signal the player means a specific
+    contact)."""
     slots: dict[str, int | str] = {}
     descriptor = parse_descriptor(text)
     if descriptor is not None:
@@ -654,6 +695,8 @@ def _parse_engage_slots(text: str) -> dict[str, int | str] | None:
     weapon = parse_weapon(text)
     if weapon is not None:
         slots["weapon"] = weapon
+    if parse_referent(text):
+        slots["referent"] = True
     return slots if slots else None
 
 
@@ -693,6 +736,86 @@ def _parse_point_slots(text: str) -> dict[str, int | str] | None:
     if distance_km is not None:
         slots["distance_km"] = distance_km
     return slots if slots else None
+
+
+#: `[[BL-B102]]`'s own verbs -- `where_is_it`'s "where" and `mark_target`'s
+#: "mark", fuzzy-matched for the same reason every other slotted token's
+#: verb is: `verb` here is already a possibly-misheard first word. Both
+#: are already anchorable (`VERB_ANCHOR_WORDS` is derived from `PHRASES`,
+#: and "where is it"/"mark target" are recorded phrasings starting with
+#: each).
+_WHERE_IS_IT_VERB = "where"
+_MARK_TARGET_VERB = "mark"
+
+#: The `watch` family's own verb ("watch nearest"/"watch nearest air
+#: defence") -- deliberately a *separate* branch from `follow`'s, not a
+#: widened `_FOLLOW_VERB` set, because `"watch"` is not `follow`'s own
+#: verb and conflating the two parsers would misstate which verb anchors
+#: which branch (Design, `plans/that-it-referent/plan.md`). Dispatches
+#: the same `"follow"` token/handler either way -- see `_parse_watch_
+#: slots`' own docstring.
+_WATCH_VERB = "watch"
+
+
+def _parse_where_is_it_slots(text: str) -> dict[str, int | str] | None:
+    """`[[BL-B102]]` -- "where is it"/"where is that [AAA]"'s referent
+    form. **Checks for the literal word `"target"` first**: "where is
+    target" stays hard-bound to the attack target (Design) and must keep
+    falling through unchanged to the ordinary phrase table, where that
+    exact phrasing (and "where is it now", which *does* carry the
+    pronoun "it" and so resolves here instead) is already recorded.
+    `None` (falls through) when no referent word is heard at all --
+    unreachable in practice today, since every recorded `where_is_it`
+    phrasing besides "where is target" contains "it", but kept as the
+    same defensive shape every other slotted parser here has."""
+    words = normalize_for_match(text).split()
+    if "target" in words:
+        return None
+    if not parse_referent(text):
+        return None
+    slots: dict[str, int | str] = {"referent": True}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    return slots
+
+
+def _parse_mark_slots(text: str) -> dict[str, int | str] | None:
+    """`[[BL-B102]]` -- "mark it"/"mark that"'s referent form, the same
+    explicit-"target"-anchor split `_parse_where_is_it_slots` uses: "mark
+    target"/"remember target" (both recorded phrasings carry the literal
+    word) keep falling through to the existing hard binding to the attack
+    target; only a bare/qualified pronoun reaches here."""
+    words = normalize_for_match(text).split()
+    if "target" in words:
+        return None
+    if not parse_referent(text):
+        return None
+    slots: dict[str, int | str] = {"referent": True}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    return slots
+
+
+def _parse_watch_slots(text: str) -> dict[str, int | str] | None:
+    """`[[BL-B102]]` -- "watch it"/"watch that"'s referent form,
+    dispatching `follow`'s own token/handler (`match_transcript`'s own
+    branch below sets `token="follow"`) rather than a second resolution
+    path: `_handle_follow` already reduces "the player named no specific
+    id" to one resolved contact, and a referent is exactly that case.
+    `None` (falls through to the ordinary phrase table, where "watch
+    nearest"/"watch nearest air defence" are recorded) when no referent
+    word is heard."""
+    if not parse_referent(text):
+        return None
+    return {"referent": True}
 
 
 def _where_slot_count(slots: dict[str, int | str]) -> int:
@@ -910,6 +1033,50 @@ def match_transcript(text: str) -> MatchResult:
                 return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
             return MatchResult(
                 token="point", match_ratio=1.0, verb_anchored=True, slots=what_slots
+            )
+
+    # `[[BL-B102]]` -- "where is it"/"where is that [AAA]", tried before
+    # the generic phrase table for the identical reason the slotted
+    # branches above are. "where is target" (no pronoun) parses to no
+    # slots here (`_parse_where_is_it_slots` returns `None`) and falls
+    # through to the phrase table, where it already resolves to
+    # `where_is_it` with `slots=None` -- unchanged.
+    if difflib.SequenceMatcher(None, verb, _WHERE_IS_IT_VERB).ratio() >= VERB_FLOOR:
+        where_is_it_slots = _parse_where_is_it_slots(text)
+        if where_is_it_slots is not None:
+            return MatchResult(
+                token="where_is_it",
+                match_ratio=1.0,
+                verb_anchored=True,
+                slots=where_is_it_slots,
+            )
+
+    # `[[BL-B102]]` -- "mark it"/"mark that", tried before the generic
+    # phrase table for the identical reason. "mark target"/"remember
+    # target" parse to no slots here and fall through unchanged to the
+    # phrase table, where they already resolve to `mark_target` with
+    # `slots=None`.
+    if difflib.SequenceMatcher(None, verb, _MARK_TARGET_VERB).ratio() >= VERB_FLOOR:
+        mark_slots = _parse_mark_slots(text)
+        if mark_slots is not None:
+            return MatchResult(
+                token="mark_target",
+                match_ratio=1.0,
+                verb_anchored=True,
+                slots=mark_slots,
+            )
+
+    # `[[BL-B102]]` -- "watch it"/"watch that", dispatching `follow`'s own
+    # token/handler (`_parse_watch_slots`' own docstring). "watch
+    # nearest"/"watch nearest air defence" parse to no slots here (no
+    # referent word heard) and fall through unchanged to the phrase
+    # table, where they already resolve to `watch_nearest`/`watch_
+    # nearest_air_defence`.
+    if difflib.SequenceMatcher(None, verb, _WATCH_VERB).ratio() >= VERB_FLOOR:
+        watch_slots = _parse_watch_slots(text)
+        if watch_slots is not None:
+            return MatchResult(
+                token="follow", match_ratio=1.0, verb_anchored=True, slots=watch_slots
             )
 
     heard_words = tuple(words)

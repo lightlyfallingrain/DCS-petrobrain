@@ -19,6 +19,7 @@ from vocabulary import (
     LEGACY_F10_TOKENS,
     LEGAL_BEARINGS_DEG,
     PHRASES,
+    REFERENT_WORDS,
     RELATIVE_WORDS,
     ROUTING_TOKENS,
     SECTOR_WORDS,
@@ -36,6 +37,7 @@ from vocabulary import (
     parse_clock,
     parse_descriptor,
     parse_range_km,
+    parse_referent,
     parse_relative_word,
     parse_sector_word,
     parse_step_count,
@@ -393,6 +395,24 @@ def test_parse_descriptor_returns_none_for_an_unrecognised_word() -> None:
     assert parse_descriptor("follow the helicopter") is None
 
 
+# --- `[[BL-B102]]`'s referent words -----------------------------------
+
+
+def test_parse_referent_matches_both_recognised_words() -> None:
+    for word in REFERENT_WORDS:
+        assert parse_referent(f"follow {word}") is True
+
+
+def test_parse_referent_returns_false_without_a_referent_word() -> None:
+    assert parse_referent("follow nearest") is False
+
+
+def test_referent_words_is_exactly_it_and_that() -> None:
+    """Explore-notes decision 6: "keep current vocabulary" -- no other
+    pronoun form ("him", "this one", "the second one") is admitted."""
+    assert REFERENT_WORDS == ("it", "that")
+
+
 # --- the slotted crew query's three new parsers and its mirror tables
 # (plans/crew-query-path/plan.md Decision A / Decision E) ---
 
@@ -682,6 +702,7 @@ def test_prompt_carries_every_slot_word() -> None:
         "BAND_WORDS": tuple(BAND_WORDS),
         "STEP_DIRECTION_WORDS": tuple(STEP_DIRECTION_WORDS),
         "WEAPON_WORDS": WEAPON_WORDS,
+        "REFERENT_WORDS": REFERENT_WORDS,
     }
     missing = {
         (table, word)

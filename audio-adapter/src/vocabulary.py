@@ -1268,6 +1268,27 @@ def parse_band(text: str) -> str | None:
     return None
 
 
+#: `[[BL-B102]]`'s referent words -- "it"/"that", the only two
+#: pronoun forms `_report_scope`/`command_matcher.py`'s new slot
+#: parsers recognise (explore-notes decision 6: "keep current
+#: vocabulary"). **Deliberately not folded into `FILLER_WORDS`** --
+#: `command_matcher.FILLER_WORDS`'s own docstring already measured that
+#: adding "that" there inflates adversarial false-positive scores for no
+#: matching gain, and both words carry real meaning here, the referent
+#: itself.
+REFERENT_WORDS: tuple[str, ...] = ("it", "that")
+
+
+def parse_referent(text: str) -> bool:
+    """Whether the normalised transcript contains a referent word at all
+    -- a bare presence check, not a slot value, since there is only one
+    thing a referent can mean here (resolve via `belief.referent.
+    resolve_referent`), not several values to discriminate between the
+    way `parse_descriptor`/`parse_sector_word` do."""
+    words = set(normalize_for_match(text).split())
+    return any(word in words for word in REFERENT_WORDS)
+
+
 #: `step`'s own direction slot (`plans/attack-run/plan.md` Decision 6,
 #: `docs/concept/Attacking target.md`'s *"step [count]
 #: left/right/near|closer|close/far|further/away"*) -- several spoken
@@ -1404,6 +1425,7 @@ def recognised_words() -> tuple[str, ...]:
         *BAND_WORDS,
         *STEP_DIRECTION_WORDS,
         *WEAPON_WORDS,
+        *REFERENT_WORDS,
     ]
     words: dict[str, None] = {}
     for source in sources:
