@@ -7,7 +7,7 @@
 ### Question
 
 Follow-up to the prior unmerged-branch investigation
-(`feature/omniscient-mission-memory:aircraft-layer/research/2026-09-09-worldobjects-object-id-stability.md`,
+(`aircraft-layer/research/2026-09-09-worldobjects-object-id-stability.md`,
 read in full this session, not re-derived — see that file for the base evidence: ED's own doc
 comment "Returned table index = object identificator," `Unit.getObjectID()` vs `Unit.getID()`
 distinction, MIST's death/respawn id-collision workaround). That session's own "Unresolved"
@@ -148,4 +148,4 @@ Unchanged in substance from the prior session, now on firmer footing:
   `forum.dcs.world/topic/302542-how-to-use-logetworldobjects-only-for-my-aircraft/` — both
   403'd, unread.
 - Prior session (cited by reference, not duplicated):
-  `feature/omniscient-mission-memory:aircraft-layer/research/2026-09-09-worldobjects-object-id-stability.md`.
+  `aircraft-layer/research/2026-09-09-worldobjects-object-id-stability.md`.
