@@ -39,3 +39,17 @@ module file — no DCS install needed for this cross-check.
   by this investigation — leave that to Architect/the user if a derived table file is ever shipped.
 - A `--depth 1` clone only shows the one commit at HEAD for `git log`, even scoped to one file — it
   cannot answer "how recently was `Mi-24P.lua` itself last touched." Needs a full clone for that.
+
+**Two repos share the "DCS-BIOS" name and only one has the Mi-24P (found 2026-10-26, desk
+session, no clone possible that day).** `github.com/toxaq/dcs-bios`'s own README lists only
+A-10C/UH-1H/MiG-21bis and invites requests for more — that is the *original, now-abandoned*
+project. **`DCS-Skunkworks/dcs-bios` (above) is the maintained continuation that actually has
+`Mi-24P.lua`.** A WebSearch for "DCS-BIOS Mi-24P github" surfaces the stale `toxaq` repo first and
+can read as "no Mi-24P support exists" if you stop at the first hit — always check
+`DCS-Skunkworks/dcs-bios` by name before concluding DCS-BIOS doesn't cover a Mi-24P control.
+
+**Still has no flight-control-axis coverage** (consistent with the sight-slew-axis gap already
+noted above): it is a clickable-cockpit-element survey, and the cyclic/collective/pedal axes
+(global iCommands 2001-2004, no backing clickable element) are structurally outside what it maps,
+same reason as the 9K113 player-slew axis. Don't expect it to answer a flight-axis draw-argument
+question; it was built for panel switches/gauges, not control inputs.
