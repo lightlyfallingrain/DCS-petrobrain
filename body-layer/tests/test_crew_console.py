@@ -7081,7 +7081,7 @@ def test_where_is_it_referent_expired_is_unable(
     assert lines == []
     answer = console.drain_where_is_it(None, now_sim=0.0, ownship=_ownship())
 
-    assert answer == ["Unable, I don't know what you mean."]
+    assert answer == ["Unable, no contact."]
 
 
 def test_follow_referent_resolves_the_last_mentioned_contact(

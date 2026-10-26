@@ -83,7 +83,7 @@ def test_resolve_referent_with_nothing_mentioned_is_unable() -> None:
         active_attack_target_id=None,
     )
     assert contact_id is None
-    assert lines == ["Unable, I don't know what you mean."]
+    assert lines == ["Unable, no contact."]
 
 
 def test_resolve_referent_bare_referent_picks_the_last_mention() -> None:
@@ -116,7 +116,7 @@ def test_resolve_referent_expired_mention_is_unable() -> None:
         active_attack_target_id=None,
     )
     assert contact_id is None
-    assert lines == ["Unable, I don't know what you mean."]
+    assert lines == ["Unable, no contact."]
 
 
 # --- resolve_referent: qualified filter ---------------------------------
@@ -162,7 +162,7 @@ def test_resolve_referent_qualified_filter_with_no_survivors_is_unable() -> None
         active_attack_target_id=None,
     )
     assert contact_id is None
-    assert lines == ["Unable, I don't know what you mean."]
+    assert lines == ["Unable, no contact."]
 
 
 def test_resolve_referent_target_priority_wins_over_a_qualified_match() -> None:
@@ -344,7 +344,7 @@ def test_resolve_referent_group_mention_with_no_resolvable_group_is_unable() -> 
     )
 
     assert contact_id is None
-    assert lines == ["Unable, I don't know what you mean."]
+    assert lines == ["Unable, no contact."]
 
 
 # --- Decision 4: an unseen/"lost" contact still resolves ----------------

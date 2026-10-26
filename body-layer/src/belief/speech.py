@@ -489,7 +489,7 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # since the last mission (re)start. Heard and understood, not
     # resolvable -- the "unable" half of the project's "say again" vs
     # "unable" distinction, same shape as `ON_GROUND`/`GUIDANCE_NOT_READY`.
-    "NO_REFERENT": "Unable, I don't know what you mean.",
+    "NO_REFERENT": "Unable, no contact.",
 }
 
 
