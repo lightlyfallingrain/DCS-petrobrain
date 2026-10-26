@@ -1944,6 +1944,13 @@ def _speech_log_sink(
     runner sees the current ones. Failures are swallowed by the caller --
     a debug log must never be why Petrovich stops talking.
 
+    `gaze_label`/`gaze_center_deg` come from `_resolve_active_gaze`, not
+    `gaze_at(now_sim, runner.scan_plan)` directly (`docs/acceptance/
+    2026-10-26-sortie-feedback.md`: "I need to know where he is looking" --
+    applies to this log the same way it applies to `--eyesight-view`/
+    `--pov-view`; see that function's own docstring for why `runner.
+    scan_plan` alone is wrong whenever a fixed look is in force).
+
     `attack_run_fields` (Stage 5, `plans/attack-run/plan.md`) is `_print`'s
     third argument, threaded straight through to `write_speech`'s own
     four attack-run keyword arguments -- `None` for every line but
@@ -1977,7 +1984,7 @@ def _speech_log_sink(
         now_sim = runner.last_t_sim
         if now_sim is None:
             return
-        gaze = gaze_at(now_sim, runner.scan_plan)
+        gaze = _resolve_active_gaze(runner)
         ownship = runner.last_ownship_state
         extra = attack_run_fields or {}
         target_contact_id = extra.get("attack_run_target_contact_id")

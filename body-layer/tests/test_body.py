@@ -7481,3 +7481,66 @@ def test_eyesight_and_pov_frames_agree_on_the_sight_boresight() -> None:
     assert "centre=+10" in eyesight_frame
     assert "boresight az=+10" in pov_frame
     assert "el=-5" in pov_frame
+
+
+def test_speech_log_sink_sight_tier_uses_sight_head_not_stale_scan_plan() -> None:
+    """Mirrors `test_render_eyesight_frame_sight_tier_shows_sight_head_
+    direction_not_scan_plan_label` for `_speech_log_sink` -- the belief-
+    truth log's own `gaze_label`/`gaze_center_deg` must come from the
+    same `_resolve_active_gaze` the two debug views read, not from
+    `gaze_at(now_sim, runner.scan_plan)`'s stale commanded sector
+    (`docs/acceptance/2026-10-26-sortie-feedback.md`: "I need to know
+    where he is looking" -- the user direction that named this log too)."""
+    from belief.sight_head import SightHead
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0
+    )
+    runner.optic = SIGHT_WIDE_OPTIC
+    runner.sight_head = SightHead(
+        mode="free", world_az_true_deg=100.0, world_el_deg=-5.0
+    )
+    # The stale commanded sector left in force before the sight took over --
+    # must not leak into the log row.
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Target, armour, straight ahead.", False, None, None, None, None, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["gaze_label"] == "sight_wide"
+    assert call["gaze_center_deg"] == 10.0
+
+
+def test_speech_log_sink_binocular_fixed_look_uses_actual_aim_not_stale_scan_plan() -> (
+    None
+):
+    """Mirrors `test_render_eyesight_frame_binocular_fixed_look_uses_
+    actual_aim_not_stale_scan_plan` for `_speech_log_sink`."""
+    from belief.optic_policy import OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic = BINOCULAR_OPTIC
+    runner.optic_state = OpticState(
+        actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-7.0
+    )
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Scanning right.", False, None, None, None, None, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["gaze_label"] == "binocular"
+    assert call["gaze_center_deg"] == 12.0

@@ -79,9 +79,49 @@ of "where he's looking." `_render_pov_frame`'s per-optic table was deleted in fa
 function; no other behaviour of either view changed (ground-truth/believed marker handling,
 radius, max-lines budget, the ground-truth ASCII exemption — all untouched).
 
-No change to `_apply_active_gaze`, `run_once`'s scan-plan wiring, or the speech-log sink
-(`_speech_log_sink`, which has the same latent defect reading `runner.scan_plan` — out of this
-fix's stated scope, left as-is).
+No change to `_apply_active_gaze`, `run_once`'s scan-plan wiring, or (at the time) the speech-log
+sink (`_speech_log_sink`, which had the same latent defect reading `runner.scan_plan` — out of
+this fix's stated scope, left as-is).
+
+### Addendum: `_speech_log_sink` had the identical defect
+
+User direction, same sortie: *"I need to know where he is looking"* — applies to the belief-truth
+log's `kind: "speech"` rows the same way it applies to the two debug views. `_speech_log_sink`
+(`body.py`) still read `gaze = gaze_at(now_sim, runner.scan_plan)` for its `gaze_label`/
+`gaze_center_deg` fields, so a logged callout could claim an o'clock label (or a stale commanded
+sector's centre) while Petrovich was actually on the 9K113 sight or glassing with binoculars —
+the same stale-`scan_plan` gap `_resolve_active_gaze` was built to close, just not plumbed into
+this third reader.
+
+**Fix:** `_speech_log_sink`'s `sink` closure now calls `gaze = _resolve_active_gaze(runner)`
+instead of `gaze_at(now_sim, runner.scan_plan)` — the same shared resolver `_render_eyesight_
+frame`/`_render_pov_frame` already use, not a re-derivation. No change to `write_speech`'s
+signature or `belief_truth_log.py`'s row schema: `gaze_label`/`gaze_center_deg` keep their
+existing field names, only their *value* changes when a fixed look is in force. `gaze_label` can
+now read an optic's own name (`"sight_wide"`, `"binocular"`) instead of an o'clock label while on
+a fixed look — the same label-semantics change `_resolve_active_gaze`'s own docstring already
+documents for the two debug views, and no reader (`.claude/skills/sortie-log-triage/`,
+`tools/join_voice_latency.py`, or any other grep hit on `gaze_label`/`gaze_center_deg`) branches
+on that value, so nothing downstream needed updating.
+
+**Grep performed for every other reporting reader of `runner.scan_plan`/`gaze_at(` before
+concluding the fix was complete** (`grep -n "gaze_at(\|runner\.scan_plan\|\.scan_plan\b" src`,
+then read each hit in context): every remaining `self.scan_plan`/`gaze_at(self.scan_plan)` site in
+`body.py`'s `run_once` and `naked_eye_source.py` *drives* perception or the Lua look-direction push
+(`_active_gaze`, `_apply_active_gaze`, `_sight_*_sweep`, the naked-eye source's own gating), never
+*reports* where he looks to a person — out of this fix's scope by the same distinction the
+original debug report drew. `_speech_log_sink` was the only remaining reporting site.
+
+**Tests added** (`tests/test_body.py`): `test_speech_log_sink_sight_tier_uses_sight_head_not_
+stale_scan_plan`, `test_speech_log_sink_binocular_fixed_look_uses_actual_aim_not_stale_scan_plan`
+— mirror the two `_render_eyesight_frame` regression tests above, same stale-`scan_plan`
+reproduction. Both confirmed to fail against the pre-fix `gaze_at(now_sim, runner.scan_plan)` line
+(checksum-verified restore after the counterfactual) and pass after.
+
+**Verification:** `ruff format`/`ruff check` clean (one test file needed `ruff format`, applied),
+`cd body-layer && .venv/bin/mypy src` → `Success: no issues found in 77 source files`, full suite
+`pytest body-layer/tests -q` → 2694 passed, 4 xfailed (two more passing tests than the parent
+fix's 2692, both new).
 
 ### Verification
 
