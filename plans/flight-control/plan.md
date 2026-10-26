@@ -84,9 +84,9 @@ flowchart LR
   GM -->|"POST /command/flight_control\n→ UDP → poll_command_socket"| G
   subgraph EX["Export.lua — run_flight_control(t), every frame"]
     G["goal\n(latest seq)"] --> SH["reference shapers\nheading/turn rate · VS · IAS\njerk-limited S-curve,\napproach curve, no overshoot"]
-    F["floor: DCS AGL + its trend\n→ raises the vertical goal"] --> SH
+    F["floor: AGL (radar, else DCS) + trend\n→ raises the vertical goal"] --> SH
     SH --> AD["desired acceleration\n(lateral, vertical, along-track)\n+ feedback on ref − state, rate"]
-    M["measured state & trend\nattitude, rates, accel,\nIAS, VS, DCS AGL, slip"] --> AD
+    M["measured state & trend\nattitude, rates, accel,\nIAS, VS, AGL, slip"] --> AD
     AD --> LV["lift-vector CORRECTIONS\nΔ disc tilt (pitch/bank target)\nΔ collective\nfrom accel error, incremental"]
     LV --> IN["inner: cyclic closes on tilt\ntarget with rate damping;\npedal on slip / heading"]
     IN --> OUT["outputs from captured position,\nrate-limited, saturated,\n+ per-frame value change\n→ LoSetCommand 2001–2004"]
@@ -122,7 +122,7 @@ names.** The user flies; nothing here needs body-layer.
 | S0-3 | `LuaExportBeforeNextFrame` vs `AfterNextFrame` as the write site | either works; pick the one with no one-frame physical-stick leak in S0-2 | — | where `run_flight_control` is called |
 | S0-4 | Is `v` an **absolute** control position or **relative to trim**? Trim with the Trimmer, then write `v = 0` | documented either way | — | capture (Stage 1): absolute → capture = current args; trim-relative → capture = args − trim |
 | S0-5 | **Release**: stop writing with Petrovich's output ≠ physical stick. Does the axis snap to the physical stick at once, or only when the stick next moves? | documented only | — | nothing — the release jump is not handled (Decision 4) |
-| S0-6 | Read side at frame rate: `LoGetADIPitchBankYaw`, `LoGetAngularVelocity`, `LoGetAccelerationUnits`, `LoGetVectorVelocity`, `LoGetVerticalVelocity`, `LoGetIndicatedAirSpeed`, `LoGetAltitudeAboveGroundLevel` (stands in for radar altitude — Decision 7), `LoGetAltitudeAboveSeaLevel`, `LoGetMagneticYaw` / `LoGetSelfData().Heading` **compared against the HSI heading card** (Decision 8: the getter that matches the HSI wins), `LoGetSlipBallPosition`, stick/collective/pedal draw args | every quantity the loop closes on is present and changes every frame (not 5 Hz-stepped); each getter's table `debug_dump`ed once (shapes are undocumented); a `get_argument_value` sweep while the pilot moves stick, collective and pedals finds the args that track each (none known by number for cyclic or pedals) | a quantity stepped or absent → derive it (differentiate velocity) and say so; no control-position arg → capture must use the last value written by the input channel, which Export cannot read (escalate) | Stage 2 inputs; Stage 1 capture |
+| S0-6 | Read side at frame rate: `LoGetADIPitchBankYaw`, `LoGetAngularVelocity`, `LoGetAccelerationUnits`, `LoGetVectorVelocity`, `LoGetVerticalVelocity`, `LoGetIndicatedAirSpeed`, `LoGetRadarAltimeter` (value + valid, up to what height and bank — **does it read at all?**), `LoGetAltitudeAboveGroundLevel` (fallback — Decision 7), `LoGetAltitudeAboveSeaLevel`, `LoGetMagneticYaw` / `LoGetSelfData().Heading` **compared against the HSI heading card** (Decision 8: the getter that matches the HSI wins), `LoGetSlipBallPosition`, stick/collective/pedal draw args | every quantity the loop closes on is present and changes every frame (not 5 Hz-stepped); each getter's table `debug_dump`ed once (shapes are undocumented); a `get_argument_value` sweep while the pilot moves stick, collective and pedals finds the args that track each (none known by number for cyclic or pedals) | a quantity stepped or absent → derive it (differentiate velocity) and say so; no control-position arg → capture must use the last value written by the input channel, which Export cannot read (escalate) | Stage 2 inputs; Stage 1 capture |
 | S0-7 | Response sign and rough size: a 0.05 step on each axis from trim, 2 s, back | sign, rough gain and lag per axis recorded (no plant model needed — user's addendum) | — | initial gains, rate limits |
 | S0-8 | SAU from code: engage H/K/T/B via device 10 (`performClickableAction`, the `cockpit_switch` op), confirm the letter mapping against cockpit labels, observe hold; hold and release `Trimmer` while off the held attitude — re-reference on release, or fixed? Altitude (`HeightOn`/B, with K/H/T on first) and `SpeedOn` (above 150 km/h): hold or drift over 30 s? `HoverOn`, `RouteOn`: do anything? | each channel: engages yes/no, holds how well, Trimmer behaviour recorded | — | Stage 5 branch (below) |
 | S0-9 | SAU vs raw writes: with K/H/T on, does a written cyclic change get fought (held back by the SAU's limited authority) or followed? | documented | — | whether SAU stays on during manoeuvres (Stage 5) |
@@ -255,8 +255,8 @@ and a correction to `mi24p-command-surface.md` §8 (which still says "unverified
   altitude and IAS held within bands the user sets after S0-7, no oscillation visible on the
   per-frame trace (the `sortie-log-triage` skill gains a flight-trace section).
 
-**Stage 3 — terrain floor from current AGL.** In Lua, every frame: if DCS AGL
-(`LoGetAltitudeAboveGroundLevel`, standing in for radar altitude — Decision 7) plus its trend ×
+**Stage 3 — terrain floor from current AGL.** In Lua, every frame: if height above ground (radar
+altitude when valid, else `LoGetAltitudeAboveGroundLevel` — Decision 7) plus its trend ×
 look-ahead falls below the floor, the vertical goal is raised to the floor, over any spoken
 altitude; for a barometric goal the floor is converted through the current AGL-minus-baro
 difference. Body-layer sends the floor value and says, once per event, that he is climbing for
@@ -264,7 +264,7 @@ terrain. **Flight 3**: hold 60 m over rising ground.
 
 **Stage 4 — the first vocabulary.** Slots in audio-adapter; `set_turn` (relative degrees, or
 continuous when no degrees), `set_heading` (shortest way unless a direction was spoken; the
-heading the HSI shows — Decision 8), `set_altitude` (radar, i.e. DCS AGL, by default — Decision 9),
+heading the HSI shows — Decision 8), `set_altitude` (radar by default — Decision 9),
 `set_speed` (km/h IAS); short readback on every accepted command (Decision 10), no callout when
 the goal is reached, "unable, <reason>" on refusal (below the floor, outside limits). A new goal never resets the shaper: the S-curve continues from the current
 reference value and rate, so a heading changed mid-turn bends smoothly. **Flight 4**: the
@@ -330,9 +330,10 @@ on purpose, so those sites cannot drop it.
   eats it. The pedal output carries a direction-dependent limit, and a collective increase is
   rate-limited when right pedal is near it. Untested until Flight 2.
 - **SAU behaviour is the user's recollection plus an older document** — Stage 5 may vanish.
-- **DCS AGL is terrain truth, not an instrument** (Decision 7). Accepted by the user as the
-  workaround for radar altitude; it is a deliberate, named exception to the no-omniscience line,
-  confined to the floor and the radar-referenced hold.
+- **The DCS AGL fallback is terrain truth, not an instrument** (Decision 7). Accepted by the user
+  as the workaround when radar altitude is missing; a deliberate, named exception to the
+  no-omniscience line, confined to the floor and the radar-referenced hold. If radar altitude
+  never reads (as noticed before), the fallback is the only source in practice.
 - **Model time while paused** keeps advancing per `aircraft-layer/CLAUDE.md`; the loop must use
   model-time `dt` and not integrate through a pause as if flying (Co-moving Fields' last row).
   Include a paused-state check in Flight 1, as that file requires.
@@ -367,13 +368,16 @@ the Architect's options and recommendations are in git history (`ca818317`).
    tracking needed. Mirror case (an attack run requested while he flies) is refused as well,
    because his optics are off; that follows from settled point 2, not a separate decision.
 6. **Stick override: measure first** (S0-2), explore options only if it fails.
-7. **Use DCS AGL** (`LoGetAltitudeAboveGroundLevel`). *"That is acceptable workaround for radar
-   alt."* It stands in for the radar altimeter wherever this plan needs one: the terrain floor and
-   the radar-referenced altitude hold. A named exception to the no-omniscience line, scoped to
-   flight control.
+7. **Radar altitude preferred; DCS AGL (`LoGetAltitudeAboveGroundLevel`) is the fallback**
+   whenever radar altitude is unavailable or invalid. *"That is acceptable workaround for radar
+   alt."* Clarified the same day: *"fallback. We earlier noticed that we get no radar alt reading,
+   so that fallback may become our only source, but radar alt reading would be preferred."* One
+   height-above-ground source feeds both the terrain floor and the radar-referenced hold, with a
+   status flag saying which is in use. S0-6 settles whether `LoGetRadarAltimeter` returns anything
+   at all. The fallback is a named exception to the no-omniscience line, scoped to flight control.
 8. **"Turn heading" uses whatever the HSI shows.** *"Whatever the HSI uses."* S0-6 compares the
    candidate getters against the HSI heading card and the matching one is used.
-9. **Altitude reference defaults to radar** (i.e. DCS AGL, Decision 7). The readback says
+9. **Altitude reference defaults to radar** (radar altitude, DCS AGL as fallback — Decision 7). The readback says
    *"barometric"* only when barometric is in use; radar is unspoken.
 10. **Short readback for every command; no callout when the goal is reached.** The user's examples:
 
@@ -384,7 +388,9 @@ the Architect's options and recommendations are in git history (`ca818317`).
     | altitude 300 m | *"300 meters"* |
     | altitude 300 m barometric | *"300 meters barometric"* (Decision 9) |
 
-    Turn heading and a turn with no degrees are not in the examples; the Implementer follows the
-    same shape (number first, no filler) and the readback strings go in the test card for the user
-    to hear.
+    | turn heading 3 1 5 | *"heading 3 1 5"* |
+    | turn left (no degrees, continuous) | *"left"* |
+
+    The last two confirmed by the user the same day. Same shape for anything else: number first,
+    no filler; the strings go in the test card for the user to hear.
 
