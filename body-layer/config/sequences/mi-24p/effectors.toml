@@ -44,3 +44,20 @@ values = { on = 1.0, off = 0.0 }
 [effectors.weapon_safety]
 source_element = "ARMAMENT-POWER-OP-PTR"   # arg 673
 values = { armed = 1.0, safe = 0.0 }
+
+[effectors.rwr_signal]
+source_element = "SIRENA-SIGNAL-PTR"   # arg 365
+values = { on = 1.0, off = 0.0 }
+
+[effectors.sight_grid_brightness]
+source_element = "SIGHT-GRID-BRIGHNTNESS-KNOB-PTR"   # arg 567
+values = { off = 0.0, third = 0.3, half = 0.5, full = 1.0 }
+
+[effectors.intercom_1]
+source_element = "SPU8-1-ON-OFF-PTR"   # arg 376
+values = { on = 1.0, off = 0.0 }
+
+[effectors.intercom_2]
+source_element = "SPU8-2-ON-OFF-PTR"   # arg 377
+values = { on = 1.0, off = 0.0 }
+
