@@ -118,3 +118,32 @@ Missile in flight: **silence**. No warning about the ±60° azimuth limit either
 > *"4 - just track"*
 
 Launch while out of range or inside 400 m: **say nothing extra, just track.**
+
+## 2026-10-26 — fourth round: command form, out of missiles, end of run
+
+> *"1 - missiles = ATGM"*
+
+`engage <what> <where> missiles` starts the **ATGM run**. Without a weapon word, or with
+`guns`/`rockets`, it is the `BL-14` guns/rockets run, which never touches the selector. (The
+weapon slot is already parsed by audio-adapter, `parse_weapon`; body-layer does not read it yet.)
+
+> *"2 - "no more missiles". Keep tracking for guns/rockets."*
+
+Last missile gone: Petrovich says **"No more missiles"** and **keeps tracking** so a guns/rockets
+attack can follow. The run does not end.
+
+> *"3 - OBSERV stays on unless commanded off."*
+
+Ending the run (`disengage`) turns the missile selector OFF and **leaves OBSERV on**. OBSERV goes
+off only on command.
+
+### Mi-24P quirk: OBSERV and the cannon are mutually exclusive
+
+> *"One Mi-24P quirk to note down. OBSERV ON and the Hind's 30 mm cannon being selected as weapon
+> (pilot weapon selector) are *mutually exclusive*. If cannon is selected, OBSERV will not turn
+> on."*
+
+With the cannon selected on the **pilot's** weapon selector, OBSERV cannot be turned on. This
+reaches beyond this entry: `[[BL-B66]]`/`[[BL-B80]]`'s OBSERV-on path will see the switch refused
+(the observed arg 886 stays off) whenever the pilot has the cannon selected. Recorded also in
+`docs/acceptance/2026-10-17-9k113-procedures-direction.md`, addendum 2026-10-26.
