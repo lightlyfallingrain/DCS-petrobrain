@@ -26,9 +26,17 @@ So, at face value, two disagreements:
 
 - **Direction of view**: 3 o'clock (+90°) in the top view, about +6° in the POV view, for the same
   optic in the same poll.
-- **The contact's bearing**: roughly 11–12 o'clock in the top view, about +6° in the POV view.
-  Rough estimate from character positions, and it depends on whether `^` in the top view is the
-  nose (heading-up) or north (north-up) — not yet checked.
+- ~~**The contact's bearing**~~ — on a closer read the `U` sits slightly right of `^` and ahead
+  in the top view too (about +10°), so it agrees with the POV view's +6° within the top view's
+  character resolution. Not a disagreement.
+
+**First reading of the code (2026-10-26, not run, not yet explored with the user).** The two views
+take "where he looks" from different places. `--pov-view` uses the 9K113 sight head's direction
+whenever the optic is a sight (`body.py` `_render_pov_frame`). `--eyesight-view` always draws
+`gaze_at(runner.scan_plan)`, the naked-eye scan plan (`body.py` `_render_eyesight_frame`). Perception
+itself does not use that plan while on the sight: `_apply_active_gaze` replaces it with a fixed
+look at the sight head's direction. So this looks like the top view drawing a stale naked-eye scan
+sector, not Petrovich looking in two directions at once.
 
 Also on screen, not commented on by the user: `live LOS coverage: 0/1 gate-4 evaluations had no
 live verdict this sortie`.
