@@ -92,3 +92,29 @@ The "some others too" readback args are **owed by the user**, after checking in 
 Impact = the launched missile's object leaving the DCS object list, **for any reason** — target,
 terrain, anything. No distinction. **Correction:** the missiles are **radio-guided**, not
 wire-guided; there is no guidance wire to break (the question had assumed one).
+
+## 2026-10-26 — third round: at and after launch
+
+Shown a mock run (readback → "Observ on, wait" → arm + pylon → "Out of range" → guidance →
+"In range" → "Lined up" → launch → "Shturm, 12 seconds" → silent tracking → "Impact" → reset →
+???) and asked four questions.
+
+> *"1 - keep tracking and select next missile in preparation for another attack"*
+
+**Impact does not end the run.** Petrovich keeps the sight on the target and selects the next
+missile, ready for another launch. The run ends on the pilot's command (`disengage`).
+
+> *"2 - yes. End of attack run sets missile selector off. Only select missile when ATGM attack run
+> is commanded, for guns/rockets it stays at off position."*
+
+- After each launch, Petrovich turns the pylon knob to the next missile-present pylon himself.
+- **End of the ATGM run turns the missile selector to OFF.**
+- **The selector is touched only for an ATGM run.** A guns/rockets run (`BL-14`) leaves it at OFF.
+
+> *"3 - silence"*
+
+Missile in flight: **silence**. No warning about the ±60° azimuth limit either.
+
+> *"4 - just track"*
+
+Launch while out of range or inside 400 m: **say nothing extra, just track.**
