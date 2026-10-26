@@ -347,7 +347,7 @@ Once a role sequence starts, move to the next stage automatically — do not sto
 
 A Security or Performance Reviewer change request re-enters that same loop rather than ending it — Implementer, then Reviewer on the fix, then DoD (see "A change request from Security or Performance Reviewer re-enters the loop" above). Auto-advance applies to that re-entry too: it does not need the user's go-ahead, only their decision on anything the Escalation Rules actually cover.
 
-Only stop and hand control to the user mid-sequence when one of the Escalation Rules below applies, or a step genuinely needs the user's own input, verification, or perception (e.g. live DCS acceptance testing, a judgment call only the user can make). Otherwise keep going through Architect → Implementer → Reviewer → (loop) → DoD in one continuous run.
+Only stop and hand control to the user mid-sequence when one of the Escalation Rules below applies, or a step genuinely needs the user's own input, verification, or perception (e.g. live DCS acceptance testing, a judgment call only the user can make). Otherwise keep going through Architect → Implementer → Reviewer → (loop) → DoD → **merge** in one continuous run. **DoD PASSED is the merge trigger** (user direction 2026-10-26, root `CLAUDE.md` "Workflow"): the main loop merges with `/merge` without asking, and a live test the user has not flown yet does not hold it — it becomes `#needs-flight` and a test card naming `main`.
 
 ---
 

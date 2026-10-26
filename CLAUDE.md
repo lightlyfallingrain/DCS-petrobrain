@@ -443,7 +443,16 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 
 - One feature at a time. Commit in small logical steps.
 - **Always create a feature branch before starting any implementation task.** Name the branch after the feature using kebab-case (e.g., `feature/hyg-data-pipeline`, `fix/floating-origin-precision`). Never implement directly on `main`. **Always branch from local `main`** — do not use `origin/main` as the branch point. **Create it as a worktree, not a checkout:** `git worktree add -b <branch> ../<repo>-<short-name> main` branches from local `main` without moving the root's own checkout, which is what the bullet below requires. (This bullet read *"checkout `main` first, then create the branch"* until 2026-10-09 — the pre-worktree procedure, and the one action the next-but-one bullet and `AGENTS.md` rule 3 now forbid. A `PreToolUse` hook refuses `git checkout -b` while the root is parked off `main` and names the worktree form instead; the stale wording and the hook that enforced it were found together by the 2026-10-09 integrity audit, findings 2 and 3.)
-- Do not merge without user approval.
+- **A feature branch merges automatically when DoD passes** — no separate approval, and live
+  acceptance does not gate it. User direction, 2026-10-26: *"I notice I test features in batches.
+  Change so that when DoD passes, feature branch is merged automatically. I'm the only user and only
+  dev, so merging features I have not tested is acceptable for now."* The main loop runs `/merge`
+  right after the DoD report says PASSED; untested live behaviour is carried as `#needs-flight` on
+  the entry and in the test card, which names `main` as the branch to fly. **Still stop and ask** if
+  the root is dirty (`AGENTS.md` rule 3), if the merge conflicts in a way that is not clear-cut, or if
+  DoD did not pass. Branches that are not DoD-gated features (plans, docs, config) still merge on the
+  user's word. **Lapses when there is a second user or developer** — then merges go back to explicit
+  approval.
 - Before starting, surface any ambiguous, contradicting, or missing information and ask for clarification.
 - **All work happens in a worktree — agents and the main loop alike — and the repo root belongs to the user.** Revised 2026-10-09 by user direction; see `AGENTS.md`, "Where work happens", rule 3. Read-mostly roles (Reviewer, DoD, Architect, Investigator) always take `isolation: "worktree"`; a feature's own worktree is named after the feature and lives until it merges. **The user parks the root wherever they like** — usually `main`, so they can add input documents or check out a branch to fly without colliding with anything running. **So naming the branch is the only way they learn what to test**: the root's branch no longer tells them, and that former backstop is gone. Name it in every test card and every acceptance request.
 - **Non-code, cross-cutting updates that aren't part of the current milestone** (skill/config edits, backlog notes, cross-milestone bookkeeping) still do not belong in a feature branch's commits — they take **their own worktree on their own branch**. Committing them on `main` from the root is no longer the way: the root is the user's, and moving its branch under them is what rule 3 now forbids. The user may override this for a given piece of work and has done, to keep one thing to review instead of several.
