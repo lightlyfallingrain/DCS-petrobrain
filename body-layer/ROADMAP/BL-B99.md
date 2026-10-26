@@ -63,3 +63,27 @@
   and rolls. Revisit if it reads wrong in flight.
 
   The `-200` on the example's last line is read as a typo for `-20`.
+
+  **Follow-on fix, 2026-10-26, `#needs-flight`:** `--eyesight-view` and `--pov-view` disagreed on
+  where Petrovich was actually looking for the same poll (sortie screenshot,
+  `docs/acceptance/2026-10-26-sortie-feedback.md`: *"both should show what Petrovich is really
+  looking at and with what optic. Scan plan is useless data unless he actually looks there."*).
+  Root cause: `--eyesight-view` (and `--pov-view`'s non-sight branch) read `runner.scan_plan`
+  directly -- the *commanded* plan -- which `_apply_active_gaze` never writes a fixed look (sight
+  aim, or a binocular glass phase) back onto; only `--pov-view`'s sight-tier branch already read
+  the real sight direction, which is why the screenshot's sight case looked right on one view and
+  wrong on the other. Fixed with one shared `_resolve_active_gaze(runner)` in `body-layer/
+  src/body.py`, read by both debug views and by `_speech_log_sink` (the belief-truth speech log's
+  `gaze_label`/`gaze_center_deg`, closed in a follow-on commit the same day).
+  `fix/optic-views-actual-look`, merged `9d8908e2` (2026-10-26). Reviewer (two passes, both
+  mutation-tested), Security and Performance all APPROVED, no required fixes.
+  DoD: `plans/optic-views-actual-look/dod-check.md`.
+  **Acceptance boundary:** all 13 new tests exercise the resolver against fabricated `runner`
+  state, not a live DCS poll or a human reading a real terminal -- correct per-case logic is
+  proven, not that a real sortie reproduces those input shapes or that the rendered output reads
+  right to a pilot. Live check needed next flight: with `--eyesight-view --pov-view` both running,
+  confirm (a) sight case -- top view's header names the optic in use and its wedge points where
+  the POV boresight is, not where the free-scan plan would be; (b) binoculars/any fixed-look case
+  -- same agreement, this is the case the original screenshot did not happen to exercise; (c)
+  naked-eye free scan still shows the scan sector (regression check -- this path is unchanged by
+  the fix). Clears `#needs-flight` on confirmation, naming the sortie.

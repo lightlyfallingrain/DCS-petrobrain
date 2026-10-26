@@ -1739,6 +1739,81 @@ def _log_live_los_coverage_summary(sources: list[PerceptionSource]) -> None:
         logger.exception("live LOS coverage summary failed (ignoring)")
 
 
+def _resolve_active_gaze(runner: ConsolePerceptionRunner) -> Gaze:
+    """Where Petrovich is actually looking, and how wide, this poll -- the
+    one resolved value both `--eyesight-view` and `--pov-view` must read
+    (`docs/acceptance/2026-10-26-sortie-feedback.md`: *"both should show
+    what Petrovich is really looking at and with what optic. Scan plan is
+    useless data unless he actually looks there."*).
+
+    **Why not just read `runner.scan_plan` directly** (the bug this
+    function fixes): `runner.scan_plan` is the *commanded* plan
+    `_active_gaze` resolves before `run_once` calls `_apply_active_gaze`,
+    which may override it with a fixed look (a glass phase, or the 9K113
+    sight) -- that override lands on the naked-eye source's own private
+    `scan_plan` copy (`_apply_active_gaze`'s `source.scan_plan =
+    resolved_plan`), never back onto `runner.scan_plan`. Reading `runner.
+    scan_plan` is therefore only ever correct while Petrovich is actually
+    free-scanning; while on a fixed look it was still showing the sector
+    that was commanded *before* the look took over -- `--eyesight-view`
+    showing `3_oclock` while the 9K113 held `az=+6` is exactly this.
+
+    **Per-optic resolution, mirroring `_apply_active_gaze`'s own
+    inputs rather than its output** (`plans/pov-view/plan.md`'s boresight
+    table, previously used by `_render_pov_frame` alone):
+
+    - `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`: the simulated `SightHead`'s
+      own world-true direction, converted to heading-relative azimuth --
+      never `runner.scan_plan`, even after `_apply_active_gaze` resolves
+      it, because that resolution uses the sight head's *body*-relative
+      direction (pitch/bank included, `head_body_direction`), which
+      `plans/pov-view/plan.md`'s own "Design" section rules out as the
+      display frame for this canvas.
+    - A fixed look on any other optic (binoculars, or any future optic
+      that gets one): `OpticState.actual_aim_azimuth_deg/elevation_deg`,
+      which is the same resolved value `_apply_active_gaze` computed for
+      the naked-eye source's `scan_plan.fixed_look`, read directly rather
+      than through the field that failed to carry it.
+    - Otherwise (free-scanning, `actual_aim_*` both `None`): `runner.
+      scan_plan` is correct as-is -- `gaze_at` indexes the live scan cycle,
+      `_active_gaze` already resolved it for this poll, and no override
+      applies.
+
+    `gaze.label` is deliberately the optic's own name (`"sight_wide"`,
+    `"binocular"`) while on a fixed look, not a stale scan-plan o'clock
+    label -- a debug view's header must never claim a scanning direction
+    that is not what is actually happening, which was the screenshot's
+    other symptom alongside the wrong bearing."""
+    optic = runner.optic
+    if optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC):
+        assert runner.sight_head.world_az_true_deg is not None
+        assert runner.sight_head.world_el_deg is not None
+        assert optic.fov_half_angle_deg is not None
+        assert runner.last_ownship_state is not None
+        azimuth_deg = relative_bearing_deg(
+            runner.sight_head.world_az_true_deg,
+            runner.last_ownship_state.heading_true_deg,
+        )
+        return Gaze(
+            center_azimuth_deg=azimuth_deg,
+            half_width_deg=optic.fov_half_angle_deg,
+            label=optic.name,
+            center_elevation_deg=runner.sight_head.world_el_deg,
+        )
+    actual_azimuth_deg = runner.optic_state.actual_aim_azimuth_deg
+    actual_elevation_deg = runner.optic_state.actual_aim_elevation_deg
+    if actual_azimuth_deg is not None and actual_elevation_deg is not None:
+        assert optic.fov_half_angle_deg is not None
+        return Gaze(
+            center_azimuth_deg=actual_azimuth_deg,
+            half_width_deg=optic.fov_half_angle_deg,
+            label=optic.name,
+            center_elevation_deg=actual_elevation_deg,
+        )
+    assert runner.last_t_sim is not None
+    return gaze_at(runner.last_t_sim, runner.scan_plan)
+
+
 def _render_eyesight_frame(
     runner: ConsolePerceptionRunner,
     trace_records: list[DetectionTrace],
@@ -1764,12 +1839,18 @@ def _render_eyesight_frame(
     (`_eyesight_max_lines()`) -- the poll loop passes an explicit, halved
     budget instead when `--pov-view` is also on (`plans/pov-view/plan.md`,
     `BL-B99`), so the two frames share one terminal's worth of lines
-    rather than each assuming it owns the whole thing."""
+    rather than each assuming it owns the whole thing.
+
+    **Gaze comes from `_resolve_active_gaze`, not `gaze_at(runner.
+    scan_plan)` directly** (`docs/acceptance/2026-10-26-sortie-feedback.
+    md`) -- see that function's own docstring for why reading `runner.
+    scan_plan` alone was wrong whenever a fixed look (glassing, or the
+    9K113 sight) was in force."""
     if runner.last_ownship_state is None or runner.last_t_sim is None:
         return None
     ownship = runner.last_ownship_state
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
-    gaze = gaze_at(runner.last_t_sim, runner.scan_plan)
+    gaze = _resolve_active_gaze(runner)
     rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
     return render_eyesight_frame(
         gaze=gaze,
@@ -1798,46 +1879,25 @@ def _render_pov_frame(
     plan.md`, `BL-B99`) -- mirrors `_render_eyesight_frame`'s own `None`
     guard and `max_lines` posture.
 
-    **Boresight resolution is per-optic**, traced to a field that is
-    already in the frame this canvas wants, never derived fresh
-    (`plans/pov-view/plan.md`'s own table): `UNAIDED_OPTIC`/
-    `BINOCULAR_OPTIC` read `gaze.center_azimuth_deg`/`center_elevation_deg`
-    (already heading-/horizon-relative); the two sight optics read
-    `sight_head.world_az_true_deg`/`world_el_deg` (the world-true frame --
-    `relative_bearing_deg` converts azimuth to heading-relative, elevation
-    is left unconverted since world elevation already *is*
-    horizon-relative). `run_once`'s own cap at optic-decision time
-    (`optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC) and
-    not head_will_be_free`) guarantees `sight_head.mode == "free"` -- and
-    so both world fields non-`None` -- whenever `runner.optic` actually is
-    one of the two sight optics, which is why the `assert`s below never
-    fire in practice rather than needing a runtime fallback."""
+    **Boresight comes from `_resolve_active_gaze`**, the same resolved
+    value `_render_eyesight_frame` now reads too
+    (`docs/acceptance/2026-10-26-sortie-feedback.md`) -- previously this
+    function alone did the per-optic resolution (`plans/pov-view/plan.md`'s
+    boresight table), which is why only `--eyesight-view` showed the
+    stale commanded scan sector and `--pov-view` already read the real
+    aim for the sight tier; see that function's own docstring for the
+    full per-optic account, including why a fixed look on a non-sight
+    optic needed its own fix here too (`OpticState.actual_aim_*`, not
+    `runner.scan_plan`, which `_apply_active_gaze` never updates)."""
     if runner.last_ownship_state is None or runner.last_t_sim is None:
         return None
     ownship = runner.last_ownship_state
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     optic = runner.optic
-    boresight_azimuth_deg: float
-    boresight_elevation_deg: float
-    half_angle_deg: float
-    if optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC):
-        assert runner.sight_head.world_az_true_deg is not None
-        assert runner.sight_head.world_el_deg is not None
-        assert optic.fov_half_angle_deg is not None
-        boresight_azimuth_deg = relative_bearing_deg(
-            runner.sight_head.world_az_true_deg, ownship.heading_true_deg
-        )
-        boresight_elevation_deg = runner.sight_head.world_el_deg
-        half_angle_deg = optic.fov_half_angle_deg
-    else:
-        gaze = gaze_at(runner.last_t_sim, runner.scan_plan)
-        boresight_azimuth_deg = gaze.center_azimuth_deg
-        boresight_elevation_deg = gaze.center_elevation_deg
-        if optic is UNAIDED_OPTIC:
-            half_angle_deg = gaze.half_width_deg
-        else:
-            assert optic.fov_half_angle_deg is not None
-            half_angle_deg = optic.fov_half_angle_deg
+    gaze = _resolve_active_gaze(runner)
+    boresight_azimuth_deg = gaze.center_azimuth_deg
+    boresight_elevation_deg = gaze.center_elevation_deg
+    half_angle_deg = gaze.half_width_deg
     return render_pov_frame(
         optic_name=optic.name,
         boresight_azimuth_deg=boresight_azimuth_deg,
@@ -1884,6 +1944,13 @@ def _speech_log_sink(
     runner sees the current ones. Failures are swallowed by the caller --
     a debug log must never be why Petrovich stops talking.
 
+    `gaze_label`/`gaze_center_deg` come from `_resolve_active_gaze`, not
+    `gaze_at(now_sim, runner.scan_plan)` directly (`docs/acceptance/
+    2026-10-26-sortie-feedback.md`: "I need to know where he is looking" --
+    applies to this log the same way it applies to `--eyesight-view`/
+    `--pov-view`; see that function's own docstring for why `runner.
+    scan_plan` alone is wrong whenever a fixed look is in force).
+
     `attack_run_fields` (Stage 5, `plans/attack-run/plan.md`) is `_print`'s
     third argument, threaded straight through to `write_speech`'s own
     four attack-run keyword arguments -- `None` for every line but
@@ -1917,7 +1984,7 @@ def _speech_log_sink(
         now_sim = runner.last_t_sim
         if now_sim is None:
             return
-        gaze = gaze_at(now_sim, runner.scan_plan)
+        gaze = _resolve_active_gaze(runner)
         ownship = runner.last_ownship_state
         extra = attack_run_fields or {}
         target_contact_id = extra.get("attack_run_target_contact_id")
