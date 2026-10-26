@@ -33,3 +33,20 @@
   treat "this premise is false on this host" as a prompt to ask whether the premise itself should
   change, not as a verdict that the test cannot be fixed (`connection-reporter-flaky` debug + review
   reports, 2026-10-23).
+
+- **When two debug views disagree on "what is the current state," check which one reads the
+  commanded value and which reads the applied value before assuming either is wrong on its own
+  terms.** `--eyesight-view` and `--pov-view` showed different gaze directions for the same poll,
+  same optic, because `--eyesight-view` read `runner.scan_plan` (the *commanded* free-scan plan,
+  set once per poll before any override) while `--pov-view`'s sight-tier branch already read the
+  sight head's real world direction. The commanded value and the applied value only diverge when
+  something overrides the plan without writing back onto the field every other reader assumes is
+  current (here: a fixed look — sight aim or a binocular glass phase — applied onto a *different*
+  attribute, `OpticState.actual_aim_*`, never back onto `scan_plan`). The fix was not "pick the
+  right one of the two existing readers" but a third function reading the actual per-case inputs
+  `_apply_active_gaze` itself reads, because writing the resolved value back onto the shared field
+  would have fixed one case and broken the other (the sight override's own frame is body-relative,
+  wrong for a heading/horizon-relative display). General form: a "plan" field and an "actual/
+  applied" field that can diverge need every downstream reader of "current state" to go through
+  one shared resolver, not through whichever field happened to be convenient at each call site
+  (`optic-views-actual-look` debug + review, 2026-10-26).
