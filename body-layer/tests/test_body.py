@@ -60,7 +60,9 @@ from body import (
     _commanded_or_default_sector,
     _log_live_los_coverage_summary,
     _poll_transcripts,
+    _render_eyesight_frame,
     _render_pov_frame,
+    _resolve_active_gaze,
     _resolve_speech_log_path,
     _run_crew_text_poll_loop,
     _run_crew_text_repl,
@@ -7308,3 +7310,174 @@ def test_render_pov_frame_respects_max_lines() -> None:
 
     assert frame is not None
     assert len(frame.splitlines()) <= 5
+
+
+# --- _resolve_active_gaze / --eyesight-view and --pov-view agreement
+# (`docs/acceptance/2026-10-26-sortie-feedback.md`: the two debug views
+# disagreed on where Petrovich was looking) -------------------------------
+
+
+def test_resolve_active_gaze_binocular_fixed_look_uses_actual_aim_not_stale_scan_plan() -> (
+    None
+):
+    """Reproduces the production wiring: `_apply_active_gaze` resolves a
+    glass phase's fixed look onto the naked-eye source's own `scan_plan`
+    and onto `OpticState.actual_aim_*`, but never back onto `runner.
+    scan_plan` -- which is why `runner.scan_plan` here is left holding an
+    unrelated, stale commanded sector while the fixed look is in force,
+    exactly as it is after a real poll. The resolved gaze must come from
+    `actual_aim_*`, not from the stale sector."""
+    from belief.optic_policy import OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic = BINOCULAR_OPTIC
+    runner.optic_state = OpticState(
+        actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-7.0
+    )
+    # The stale, pre-override commanded sector -- unrelated to the fixed
+    # look above, the same way `self.scan_plan` is never touched by
+    # `_apply_active_gaze` in production.
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    gaze = _resolve_active_gaze(runner)
+
+    assert gaze.center_azimuth_deg == 12.0
+    assert gaze.center_elevation_deg == -7.0
+    assert gaze.half_width_deg == BINOCULAR_OPTIC.fov_half_angle_deg
+    assert gaze.label == "binocular"
+
+
+def test_resolve_active_gaze_sight_tier_uses_sight_head_not_scan_plan() -> None:
+    """Same reproduction for the 9K113 -- `runner.scan_plan` is left at
+    whatever sector was last commanded before the sight took over; the
+    resolved gaze must come from the simulated `SightHead`'s own
+    world-true direction instead (`plans/pov-view/plan.md`'s boresight
+    table), converted to heading-relative azimuth."""
+    from belief.sight_head import SightHead
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0
+    )
+    runner.optic = SIGHT_WIDE_OPTIC
+    runner.sight_head = SightHead(
+        mode="free", world_az_true_deg=100.0, world_el_deg=-5.0
+    )
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    gaze = _resolve_active_gaze(runner)
+
+    # world_az_true_deg=100, heading=90 -> heading-relative azimuth +10.
+    assert gaze.center_azimuth_deg == 10.0
+    assert gaze.center_elevation_deg == -5.0
+    assert gaze.label == "sight_wide"
+
+
+def test_resolve_active_gaze_free_scan_still_reads_scan_plan() -> None:
+    """No override in force (`OpticState.actual_aim_*` both `None`,
+    `UNAIDED_OPTIC`) -- the commanded scan plan is still the right
+    answer, unchanged from before this fix."""
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    gaze = _resolve_active_gaze(runner)
+
+    assert gaze == gaze_at(0.0, runner.scan_plan)
+
+
+def test_render_eyesight_frame_sight_tier_shows_sight_head_direction_not_scan_plan_label() -> (
+    None
+):
+    """The defect itself: `--eyesight-view` while on the 9K113 must show
+    the sight's real aim and label, not a stale naked-eye o'clock scan
+    label left over from before the sight took over
+    (`docs/acceptance/2026-10-26-sortie-feedback.md`'s screenshot --
+    `gaze: 3_oclock centre=+90` while the POV view already read `az=+6`
+    off the sight)."""
+    from belief.sight_head import SightHead
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0
+    )
+    runner.optic = SIGHT_WIDE_OPTIC
+    runner.sight_head = SightHead(
+        mode="free", world_az_true_deg=100.0, world_el_deg=-5.0
+    )
+    # The stale commanded sector left in force before the sight took
+    # over -- must not appear anywhere in the rendered frame.
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    frame = _render_eyesight_frame(runner, [], radius_m=5000.0)
+
+    assert frame is not None
+    assert "gaze: sight_wide" in frame
+    assert "centre=+10" in frame
+    assert "3_oclock" not in frame
+    assert "optic=sight_wide" in frame
+
+
+def test_render_eyesight_frame_binocular_fixed_look_uses_actual_aim_not_stale_scan_plan() -> (
+    None
+):
+    """Mirrors the sight-tier case above for a binocular glass phase."""
+    from belief.optic_policy import OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic = BINOCULAR_OPTIC
+    runner.optic_state = OpticState(
+        actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-7.0
+    )
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    frame = _render_eyesight_frame(runner, [], radius_m=5000.0)
+
+    assert frame is not None
+    assert "centre=+12" in frame
+    assert "optic=binocular" in frame
+
+
+def test_eyesight_and_pov_frames_agree_on_the_sight_boresight() -> None:
+    """The two views must never disagree on where Petrovich is looking --
+    same runner state, same resolved azimuth/elevation in both frames'
+    headers."""
+    from belief.sight_head import SightHead
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0
+    )
+    runner.optic = SIGHT_WIDE_OPTIC
+    runner.sight_head = SightHead(
+        mode="free", world_az_true_deg=100.0, world_el_deg=-5.0
+    )
+    runner.scan_plan = ScanPlan(commanded_sector="right", command_t_sim=0.0)
+
+    eyesight_frame = _render_eyesight_frame(runner, [], radius_m=5000.0)
+    pov_frame = _render_pov_frame(runner, [])
+
+    assert eyesight_frame is not None
+    assert pov_frame is not None
+    assert "centre=+10" in eyesight_frame
+    assert "boresight az=+10" in pov_frame
+    assert "el=-5" in pov_frame
