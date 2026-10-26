@@ -1,7 +1,7 @@
 # Sortie feedback — 2026-10-26
 
 Captured before any diagnosis, per root `CLAUDE.md` "Flight feedback is captured, then explored,
-then planned". Branch flown: not stated (ask).
+then planned". Branch flown: `main` (user, same day) — `fee96cdc` at the time.
 
 ## 1. Optics debug views disagree
 
