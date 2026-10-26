@@ -41,4 +41,13 @@ sector, not Petrovich looking in two directions at once.
 Also on screen, not commented on by the user: `live LOS coverage: 0/1 gate-4 evaluations had no
 live verdict this sortie`.
 
-**Status:** captured, not yet explored.
+**Explored with the user, 2026-10-26.** Direction, verbatim:
+
+> *"both should show what Petrovich is really looking at and with what optic. Scan *plan* is
+> useless data unless he actually looks there. I need to know where he is looking."*
+
+So both views draw the **actual** look direction and the optic in use, taken from the same place
+perception takes it — never the scan plan as such. When he is scanning with the naked eye the plan
+*is* where he looks; on the sight, the binoculars, or a fixed `look <o'clock>`, it is not.
+
+**Status:** explored; going to a fix.
