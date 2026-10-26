@@ -160,3 +160,27 @@ look-ahead, deferred).
   attitude hold, as in the real aircraft? What does the SAU need to be stable before it engages?
 - Read side: are attitude, IAS, vertical speed, radar altitude and the stick/collective positions
   readable per frame?
+
+## Addendum, 2026-10-26 — what the DCS SAU actually holds
+
+Given unprompted during the `[[BL-B67]]` session, verbatim:
+
+> *"DCS autopilot can fairly well hold stable flight state, or more specifically pitch, bank and
+> yaw. Course when course mode is on. Hover too, once the pilot first establishes hover."*
+>
+> *"Altitude hold, not so well. I have rarely used it and some earlier DCS doc said some SAU
+> functionality is not available (yet), likely speed and alt."*
+
+| SAU function | per the user |
+|---|---|
+| pitch, bank, yaw hold | holds fairly well |
+| course | holds, with course mode on |
+| hover | holds, once the pilot has established the hover |
+| altitude | poor; possibly not implemented |
+| speed | possibly not implemented |
+
+**Consequence for settled point 6's vocabulary:** *"hold 200 m"* and *"speed 2 2 0"* cannot lean on
+the SAU the way attitude and heading can — they are likely Petrovich's own closed loop on the
+collective (altitude) and cyclic pitch (speed), on top of the SAU's attitude hold. The "not
+available" half is a recollection of an older DCS document, so stage 0 should confirm which SAU
+channels exist and engage, rather than assume either way.
