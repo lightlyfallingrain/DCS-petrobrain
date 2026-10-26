@@ -86,5 +86,30 @@
   state change on its own) or is read at need via a trigger's own one-shot read (if it is only ever
   checked at a specific moment, e.g. "launch permission at the moment of firing").
 
+  ## 2026-10-26 update — explore run, behaviour settled
+
+  `/explore` ran 2026-10-26: `plans/bl-b67-atgm-run/explore-notes.md` (the user's words, verbatim)
+  **now governs where it differs from this entry.** In short:
+
+  - **"Target selection is now harder" is struck** (*"Elevation - drop"*): `BL-14`'s `select`/`step`
+    never used elevation, so the missing elevation readout costs selection nothing.
+  - **Missile data: Wikipedia figures accepted** (*"Wikipedia is good enough approximation"*) — the
+    `db_weapons*.lua` read is no longer owed.
+  - **`RELATIVE_DIRECTION_SIGMA_DEG` stays `0.0`** for this run. Always a single unit, never a
+    cluster — so the aim point must be one unit's position, not a cluster centroid.
+  - **Launch** = pilot's launch button **and** loadout −1 (both; jettison is not a launch).
+    **Impact** = the launched missile's object leaving the DCS object list, any cause.
+    Damage reporting is a later stage. The missiles are radio-guided.
+  - `engage … missiles` = ATGM run. After impact: keep tracking, select next missile. Last one gone:
+    *"No more missiles"*, keep tracking for guns/rockets. Silence in flight; no range warnings at
+    launch. End of run: missile selector OFF, OBSERV stays on. Selector touched only for an ATGM run.
+  - **Mi-24P quirk:** cannon selected on the pilot's selector and OBSERV ON are mutually exclusive.
+    What Petrovich does on a refusal is **deferred**.
+  - **`[[BL-B63]]` is no longer a precondition** — `[[BL-B66]]`'s 2026-10-21 note dropped it once the
+    AI-axis per-frame writes moved into Lua; the list above predates that.
+
+  Still owed before a plan: args from the user (pylon selector, launch button, extra readers),
+  desk recon (loadout read, launched-missile id), and `[[BL-B80]]` Flight A.
+
   Related: `[[BL-B64]]`, `[[BL-B66]]`, `[[BL-B65]]`, `[[BL-B63]]`, `[[BL-B62]]`, `[[BL-14]]`,
   `[[BL-B90]]`.
