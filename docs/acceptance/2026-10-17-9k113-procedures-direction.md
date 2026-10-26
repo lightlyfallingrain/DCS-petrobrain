@@ -174,3 +174,15 @@ number to carry, not to build against yet.
    §5 already flags that a 3-minute silence after *"Observ on"* would be wrong behaviour.
 3. **Whether the attack-run ARMED trigger fires on the pilot's command word or on the guidance
    state** — *"any attack run start"* could be either.
+
+## Addendum, 2026-10-26 — OBSERV and the cannon are mutually exclusive
+
+Given during the `[[BL-B67]]` explore (`plans/bl-b67-atgm-run/explore-notes.md`), verbatim:
+
+> *"One Mi-24P quirk to note down. OBSERV ON and the Hind's 30 mm cannon being selected as weapon
+> (pilot weapon selector) are *mutually exclusive*. If cannon is selected, OBSERV will not turn
+> on."*
+
+So with the cannon selected on the pilot's weapon selector, an OBSERV ON write is refused by the
+aircraft: the observed arg 886 stays off. Any OBSERV-on path (`[[BL-B66]]`, `[[BL-B80]]`,
+`[[BL-B67]]`) has to expect that refusal.
