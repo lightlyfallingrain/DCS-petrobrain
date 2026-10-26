@@ -242,3 +242,30 @@ What this settles for the controller's shape (a reading, to be confirmed when `B
   already use a lot of right pedal, so **right-yaw margin is small at low speed**. A controller
   must treat pedal headroom as direction-dependent, and a collective increase (more torque) eats
   into the right-yaw margin further.
+
+## Direction, 2026-10-26 — corrections from the current state, not computed absolute values
+
+Given after the lift-vector reading above was summarised as "lift vector needed = m·(a − g)",
+verbatim:
+
+> *"Smooth control inputs beat fast and jerky ones. We do not need to know the can't values for
+> lift vector, rather just, what needs to change compared to what is current state and what is
+> happening now. That gets us the control corrections. That's how I fly it. Feedback loops."*
+
+("can't" read as **exact** — the absolute values; recorded rather than silently corrected.)
+
+So the lift-vector section describes **what the corrections act on**, not a model to compute:
+
+- **No absolute lift vector is computed.** The controller does not solve for thrust from mass and
+  gravity. It works from the **difference** between the goal and the current state, plus **what is
+  happening now** (the trend — rates, accelerations), and turns that into a **correction** to the
+  current control positions.
+- **Feedback loops, incremental.** Each control moves by a correction from where it already is —
+  which is also what settled point 3 (take over from where the player left the axes, no jump)
+  needs.
+- **Smooth over fast.** Corrections are small and continuous; rate of change of each control is
+  bounded. Matches settled point 5 (S-curves, no oscillation).
+- **Consequence for stage 0:** a precise plant model (disc tilt rate per unit cyclic, fuselage lag)
+  is **not** a precondition. What stage 0 still needs is the sign and rough size of each response
+  and the read side (attitude, rates, IAS, vertical speed, radar altitude, control positions per
+  frame) — the inputs a feedback loop closes on.
