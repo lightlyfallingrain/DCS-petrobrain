@@ -127,6 +127,7 @@ names.** The user flies; nothing here needs body-layer.
 | S0-8 | SAU from code: engage H/K/T/B via device 10 (`performClickableAction`, the `cockpit_switch` op), confirm the letter mapping against cockpit labels, observe hold; hold and release `Trimmer` while off the held attitude — re-reference on release, or fixed? Altitude (`HeightOn`/B, with K/H/T on first) and `SpeedOn` (above 150 km/h): hold or drift over 30 s? `HoverOn`, `RouteOn`: do anything? | each channel: engages yes/no, holds how well, Trimmer behaviour recorded | — | Stage 5 branch (below) |
 | S0-9 | SAU vs raw writes: with K/H/T on, does a written cyclic change get fought (held back by the SAU's limited authority) or followed? | documented | — | whether SAU stays on during manoeuvres (Stage 5) |
 | S0-10 | Seat: repeat S0-1 from the operator seat (player in front, Petrovich nominally "pilot") — is ED's AI pilot a second writer? | documented only | — | nothing in BL-16; recorded for pilot-Petrovich |
+| S0-11 | **Pilot-flown reference manoeuvres** (Decision 11): the user flies a set of known manoeuvres by hand; log his cyclic, collective and pedal positions per frame beside the S0-6 telemetry | each manoeuvre's input shape (how much deflection, how fast, how it is taken off) and the aircraft's response are on one time base | no readable input position → escalate (same as S0-6) | Stage 2 gains, rate limits and step shapes; Stage 2 and 6 reference traces |
 
 S0-10 is cheap while the probe is loaded and is the only seat-agnostic evidence the milestone
 gathers; it does not gate anything here.
@@ -393,4 +394,13 @@ the Architect's options and recommendations are in git history (`ca818317`).
 
     The last two confirmed by the user the same day. Same shape for anything else: number first,
     no filler; the strings go in the test card for the user to hear.
+11. **Record the pilot flying first: his control inputs and the aircraft's response.** User,
+    2026-10-26, verbatim: *"A smart way to get data for what control inputs look like, is to read
+    and log my joystick input value (=cyclic and collective and pedal axis values) in DCS and log
+    them. Add aircraft telemetry data to that and we get controls input values, how they change,
+    and how that affects the aircraft. I fly a set of known manouvres and we log how, with how much
+    controller deflection and how the aircraft behaves in response."* Added to stage 0 as **S0-11**.
+    Not yet planned in detail: which channel reads the pilot's axes (the S0-6 draw-arg sweep finds
+    the cockpit control positions; whether Export can read the raw joystick input is unverified),
+    the manoeuvre list, and how the recordings seed gains, rate limits and the Stage 2 tests.
 
