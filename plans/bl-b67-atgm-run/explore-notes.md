@@ -147,3 +147,33 @@ With the cannon selected on the **pilot's** weapon selector, OBSERV cannot be tu
 reaches beyond this entry: `[[BL-B66]]`/`[[BL-B80]]`'s OBSERV-on path will see the switch refused
 (the observed arg 886 stays off) whenever the pilot has the cannon selected. Recorded also in
 `docs/acceptance/2026-10-17-9k113-procedures-direction.md`, addendum 2026-10-26.
+
+## 2026-10-26 — fifth round: the quirk's consequences
+
+Asked (1) what Petrovich says when OBSERV is refused because the cannon is selected — he sees only
+arg 886 staying off, not the pilot's selector — and whether an `engage … missiles` run then waits or
+fails; (2) whether selecting the cannon while OBSERV is on drops OBSERV.
+
+> *"1 - defer, I don't know yet"*
+
+**Deferred, undecided.** No callout and no wait/fail behaviour chosen for an OBSERV refusal. The plan
+must not invent one.
+
+> *"2 - I believe DCS drops OBSERV OFF then"*
+
+**Believed, not verified:** selecting the cannon with OBSERV on makes DCS turn OBSERV off. If true,
+the existing OBSERV on→off edge handling (`fix/observ-off-axis-zero`: zero the AI axis once,
+whoever caused the edge) already covers it, and Petrovich's OBSERV state has to follow the
+observed arg 886 rather than his own command (the gap `[[BL-B66]]` carried into `[[BL-B80]]`).
+**Wants a flight check.**
+
+## State at end of 2026-10-26
+
+Behaviour for the run is settled except for the deferred OBSERV-refusal response. Still owed:
+
+- **User:** sim names/args for the extra readers ("some others too"), the **pylon selector knob**
+  (arg and position values) and the **launch button**.
+- **Desk:** how the loadout count is read (Export API or arg) and how the launched missile's own
+  object is identified for impact detection.
+- **Flight:** `[[BL-B80]]` Flight A (`docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`) before the
+  plan — the run rests on the pointing chain being accurate; plus the cannon→OBSERV-off belief above.
