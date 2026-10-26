@@ -50,4 +50,36 @@ So both views draw the **actual** look direction and the optic in use, taken fro
 perception takes it — never the scan plan as such. When he is scanning with the naked eye the plan
 *is* where he looks; on the sight, the binoculars, or a fixed `look <o'clock>`, it is not.
 
-**Status:** explored; going to a fix.
+**Status:** explored; fixed and merged (`fix/optic-views-actual-look`, `2a04e947`).
+
+## 2. Scanning and optics look right now; simulated and DCS 9K113 drift apart
+
+Same day, after the view fix, on `main`. **User, verbatim:**
+
+> *"Now that the debug views are fixed, the scanning and optics logic seems to work fairly well.
+> Though I only did a quick test.*
+>
+> *However, the simulated and DCS 9K113 do not stay in sync, there's a lot of error it seems.*
+>
+> *I flew with AI overlay off. What did we establish about reading the 9K113 actual pointing
+> direction? It was in some way dependent on what DCS AI is doing?"*
+
+**Already established** (`plans/9k113-sight-pointing/explore-notes.md`, `plan.md`, `dod-check.md`;
+`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`):
+
+- The only true readback of where the DCS sight points is the **ASP-17 mark** (args 566 az / 555
+  el), valid only while the sight's line is inside the ASP-17 field (±~4–6°). 874/876 echo the
+  demand and are not a position.
+- The drive channel is the 9K113 AI axis: a **rate** command with a deadzone, obeyed only when the
+  written value changes frame to frame (dither), and **intermittently ignored** — 3–100+ s,
+  invisibly — by DCS.
+- Probe run 11: the DCS AI overlay is **not required**. Flying with it off is the supported case.
+- User decision: Petrobrain's simulated sight *is* Petrovich's sight. Outside the ASP-17 field the
+  DCS sight is driven **open loop** on an estimate; inside it, closed loop on the mark (re-anchored
+  whenever the mark is valid). So drift outside the field is expected and cannot be measured from
+  inside DCS.
+
+**Open:** where the error was seen (inside the ASP-17 field, or outside it), how it was judged
+(the sight view vs. the debug views), and how large. Not yet explored.
+
+**Status:** captured; to explore.
