@@ -44,6 +44,22 @@
   no correction. Flight B (not yet written) should note that "Guidance unit ready." is expected
   once, on the observed lamp's off→on transition, not at mission start if the unit is already warm.
 
+  **Planned, not yet built, 2026-10-26: `plans/9k113-sight-pointing/plan.md`, "v3 (2026-10-26) —
+  the real sight never leaves the ASP-17 field (edge park)".**
+  `docs/acceptance/2026-10-26-sortie-feedback.md` §2: the pilot flew the merged v2 build and saw
+  the DCS mark moving inside the HUD while the debug view showed the simulated sight pointing well
+  off to the side — a fifth occurrence of this subsystem's recurring field-of-regard-enforcement
+  defect (`.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md`): the
+  existing `run_sight_servo` field-validity gate compared the setpoint against the sight's
+  **gimbal** limits (±60°/+20°/−15°), not the ASP-17's own much narrower readable window
+  (measured ≈±4.3° azimuth), so the closed loop ran unsaturated against a mark reading that was
+  physically clipped at the field edge. v3 (not yet implemented): the real sight is now always
+  closed-loop, its commanded target the simulated direction radially projected onto the inset
+  ASP-17 field when outside it, continuously tracking the moving intersection point as the
+  simulated sight moves (pilot's same-day clarification) rather than parking once. Open loop is
+  removed entirely. Aircraft-layer-only; no body-layer change. Awaiting user review of the plan
+  before Implementer starts.
+
   **Fixed on `fix/observ-off-axis-zero` (DoD pass 2026-10-24, tip `8a46e30a`), merged to `main`
   2026-10-24 (`e1d16037`).** `docs/acceptance/2026-10-24-sortie-feedback.md` F1: the pilot saw the ASP-17 mark
   still moving with OBSERV off. `run_sight_servo`'s existing `if not observ_on then ... return end`
