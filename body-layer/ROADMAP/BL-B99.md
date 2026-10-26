@@ -75,7 +75,7 @@
   wrong on the other. Fixed with one shared `_resolve_active_gaze(runner)` in `body-layer/
   src/body.py`, read by both debug views and by `_speech_log_sink` (the belief-truth speech log's
   `gaze_label`/`gaze_center_deg`, closed in a follow-on commit the same day).
-  `fix/optic-views-actual-look`, merged `9d8908e2` (2026-10-26). Reviewer (two passes, both
+  `fix/optic-views-actual-look` (tip `82a2c92b`), merged to `main` as `2a04e947` (2026-10-26). Reviewer (two passes, both
   mutation-tested), Security and Performance all APPROVED, no required fixes.
   DoD: `plans/optic-views-actual-look/dod-check.md`.
   **Acceptance boundary:** all 13 new tests exercise the resolver against fabricated `runner`
