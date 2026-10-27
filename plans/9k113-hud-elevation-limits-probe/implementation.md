@@ -101,6 +101,60 @@ Not done: gating `START_DELAY_S` on the Л5 lamp instead of a flat timer (review
 note) — left as-is, the review itself called the flat-timer risk low given the 2× margin over the
 measured ~10 s alignment.
 
+### Simplified per user, 2026-10-27
+
+The stall-margin design above (travel-plausibility check, `MARGIN_S`/`RETURN_NUDGE_S`/
+`MAX_PHASE_S`, three repeated cycles) is **superseded**. User direction, verbatim:
+
+> *"stall prevention: use the wobble technique that is used in 9K113 slew as currently built."*
+> *"edge detection then becomes: ASP-17 value no longer changes -> slew back and see that it moves
+> again -> edge is there"*
+> *"gimbal limits: nowhere near the HUD limits, safe to ignore"*
+> *"from OBSERV ON, then the gyro sync wait (just wait 15 s on timer) then slew up (use wobble)
+> until limit reached. Record it. Slew down until limit reached. Record it. Done. If this takes
+> many minutes it's over engineered. This should be simple."*
+
+Rewrote `aircraft-layer/dcs-export/Export.probe-9k113-hud-elevation-limits.lua` in full:
+
+- **Wobble, not invented here.** The per-frame value-change mechanism is copied unmodified from
+  production `Export.lua`'s `run_sight_servo`, `SERVO_WOBBLE == "dither"` branch (~line 1197):
+  `DITHER_AZ_DEG = 0.6`, `DITHER_HZ = 8.0`, `DITHER_EL_DEG = DITHER_AZ_DEG * (0.03 / 1.5)`, az sine
+  / el cosine (90° out of phase), converted through the same degrees→raw-command scale
+  (`GIMBAL_EL_UP_DEG = 20.0`, also copied) production already uses. All of the probe's own
+  `FLICKER_EPS`/flicker-dither machinery is gone.
+- **Stall detection folded into the reversal, not a separate travel/time check.** A plateau
+  candidate (555 flat for `PLATEAU_WINDOW_S = 1.0 s`) triggers a `REVERSE_CHECK_S = 1.0 s` reversal
+  of the commanded direction; if 555 moves more than `PLATEAU_EPS` during that reversal, the
+  plateau is accepted as the edge (the mark really was free to move, just not that way); if it
+  doesn't move, it was the known AI-axis command gate, not an edge, and the probe resumes pushing
+  the original direction and looks again. This replaces the removed `MIN_TRAVEL_FRACTION`/
+  `MIN_TRAVEL_EL` plausibility math entirely — the reversal is a large, unambiguous command change
+  next to a frozen stall value, so no separate elapsed-time arithmetic is needed to tell the two
+  apart.
+- **One pass per direction, no `CYCLES` loop, no `MAX_PHASE_S` timeout.** Sequence is exactly
+  `WAIT_OBSERV → DELAY(15s, fixed timer) → SEEK_POS → CHECK_POS → SEEK_NEG → CHECK_NEG → DONE`,
+  logging `EDGE UP 555=<v>` and `EDGE DOWN 555=<v>` (literal text from the user's spec — "UP"/
+  "DOWN" label the first/second direction commanded, not a confirmed visual direction, since that
+  mapping is still unconfirmed project-wide) and finally `PROBE DONE up=<v> down=<v>`. No more
+  writes after `DONE`.
+- **Gimbal limits not checked** (user: "nowhere near the HUD limits, safe to ignore") — no clamping
+  of the written command, unlike production's `±1.5` clamp; the commanded magnitudes here
+  (`EL_RATE_CMD = 0.05` plus a sub-0.001 dither) never approach a range where that would matter.
+- **Per-frame log narrowed to exactly the fields asked for**: `t`, `phase`, `cmd`, `555`, `556`,
+  `566`, `886` (dropped 565 and the Л5/READY/launch-permission lamp tracking the v1 design carried
+  — not requested, and "keep it lean" argues against carrying them).
+- **Slew rate and resulting resolution.** Kept `EL_RATE_CMD = 0.05` (unchanged from v1) → 0.5°/s
+  (`Devices_specs/9K113.lua`'s `v_axis_velocity = 10°/s`), comfortably above the 0.003-unit command
+  deadzone noted in production `Export.lua`'s `FLICKER_EPS` comment. Using the mark scale from
+  `plans/9k113-sight-pointing/plan.md` line 588 (`MARK_DEG_PER_UNIT_EL = 1/0.039`, i.e. 0.039 raw
+  units per degree — elevation's own placeholder, inherited from azimuth's measured value, never
+  independently confirmed), one frame at an assumed ~60 fps commands ≈0.0083° (≈0.00033 raw-555
+  units) — small relative to `PLATEAU_EPS = 0.003`'s flat-window threshold, so the edge should
+  resolve to a small fraction of a degree.
+- **Card** (`docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`) rewritten to match:
+  the simplified timeline, ~1-minute runtime estimate, the `EDGE UP`/`EDGE DOWN` log-line wording,
+  and the up/down pilot-confirmation ask carried over unchanged. Deploy/restore wording unchanged.
+
 ### Notable Discoveries
 - **This worktree had no `aircraft-layer/.venv`** (gitignored, not copied by `git worktree add`).
   Ran every tool via the main checkout's `aircraft-layer/.venv/bin/<tool>` with `cwd` set inside

@@ -20,8 +20,18 @@ super easy to measure."*
 **What the probe does not know.** Which signed elevation command moves the crosshair visually
 *up* on the glass has never been nailed down in this project (one earlier run called it
 "sign-inverted, so probably down" and left it unconfirmed). The probe commands one direction first
-(logged as `POS`) and the opposite second (`NEG`), sweeping between the two edges three times, and
-leaves the up/down labelling to you.
+(logged by command sign, `SEEK_POS`/`CHECK_POS`) and the opposite second (`SEEK_NEG`/`CHECK_NEG`),
+and its two summary lines are literally `EDGE UP` (first direction) and `EDGE DOWN` (second) —
+"UP"/"DOWN" here just means "first"/"second", not a confirmed visual direction. That's yours to
+tell it.
+
+**Simplified 2026-10-27** (pilot direction — see `plans/9k113-hud-elevation-limits-probe/
+implementation.md`, "Simplified per user, 2026-10-27"): one pass per direction, no repeated
+cycles, no multi-minute stall margin. Stall rejection is now the same per-frame dither
+Export.lua's production sight servo already applies to this axis, plus a brief reversal: when the
+mark stops moving, the probe reverses command direction for about a second — if the mark moves
+again, that was the true edge; if it doesn't, it was a momentary command stall and the probe just
+resumes pushing.
 
 ## Setup (Windows)
 
@@ -32,46 +42,31 @@ leaves the up/down labelling to you.
    sight drifts with attitude, which would be read as elevation movement that isn't the command.
 4. **DCS AI Petrovich overlay OFF** the whole flight. **No joystick axes bound to the operator's
    controls.**
-5. From the **copilot seat**, switch OBSERV **on last** = **T+0**. Move to the **pilot seat** by
-   T+0:20 and stay there — no 9K113 view.
+5. From the **copilot seat**, switch OBSERV **on last** = **T+0**. Move to the **pilot seat**
+   right after and stay there — no 9K113 view.
 
 ## Timeline (T+ from OBSERV on)
 
 | T+ | what the probe does | what you watch |
 |---|---|---|
-| 0:00–0:20 | nothing (gyro alignment, seat move) | get to the pilot seat |
-| 0:20 on | **cycle 1 POS**: elevation slews slowly one way until it stops moving (plateau), holds ~20 s more to confirm, then reverses | the crosshair moves steadily toward one HUD edge, then stops — does it rise or fall? |
-| — | **cycle 1 NEG**: slews the other way, through centre, to the opposite plateau | crosshair crosses back through boresight to the far edge — rise or fall this time? |
-| — | repeats POS/NEG two more times (3 cycles total) | the crosshair should stop at the *same* two edges each time |
-| after cycle 3 | nudges back toward the last edge reached (a few seconds, not a precise re-centre), then stops writing | crosshair settles a few degrees off true centre — **expected**, not a sign the probe failed (the AI axis is a rate command, so stopping the command does not snap it back to boresight) |
+| 0:00–0:15 | nothing (gyro sync, fixed 15 s wait) | get to the pilot seat |
+| 0:15 on | elevation slews slowly one way (dither always on) until it stops moving, then briefly reverses to check it's a real edge | the crosshair moves steadily toward one HUD edge, then stops — does it rise or fall? |
+| edge confirmed | logs `EDGE UP`, then slews the other way, through centre, to the opposite edge, same check | crosshair crosses back through boresight to the far edge — rise or fall this time? |
+| edge confirmed | logs `EDGE DOWN`, then `PROBE DONE`, and stops writing | crosshair stays wherever it ended up — **expected**, the AI axis is a rate command and stopping it does not snap it back to boresight |
 
-Total runtime depends on how far the edges are from boresight and whether the known AI-axis
-command gate fires — likely 4–8 minutes (longer than earlier 9K113 probes: the hold that confirms
-each plateau was lengthened past the gate's documented 4–18 s window, see below). If a sweep seems
-to run unusually long (over ~60 s without the crosshair stopping), that is the probe's own timeout
-logging "no plateau found" for that leg and moving on; nothing to do.
-
-**What a gate-stall looks like by eye, and what to do about it.** This project has previously
-measured the 9K113 AI axis intermittently ignoring a held command for 4–18 s at a stretch, and once
-for an entire flight. If that happens right as a seek begins, the crosshair can sit almost exactly
-where it started — near the glass centre, not visibly approaching either edge — while the probe is
-still in a seek segment pushing it. The probe now defends against this itself (it logs `SUSPECT`
-rather than accepting a near-zero-travel stop as a plateau, and keeps retrying), but **watch for it
-anyway**: if you see the crosshair stall near centre rather than approaching an edge for more than a
-few seconds, note it and the rough time, and flag that leg for a re-check even if the log's own
-`SUMMARY` line comes back clean — your eyes are the backstop against the log's own logic being
-wrong.
+Total runtime: ~1 minute (15 s wait, plus whatever it takes to reach each edge at ~0.5°/s — a few
+seconds of commanding each direction if the measured azimuth clip, ≈4.3°, is any guide). If a
+sweep seems to stall near the glass centre (not visibly approaching either edge) for more than a
+few seconds at a time, that is the gate-stall case above — the probe's own reversal check should
+clear it on its own; just note the rough time if you see it happen more than once or twice.
 
 ## Bring back
 
-- **Which direction (POS, commanded first, or NEG, commanded second) made the crosshair rise, and
-  which made it fall?** This is the one thing only you can tell from the cockpit.
-- **Did the crosshair visibly stop at the same two edges on all three cycles**, or did a sweep run
-  further/stop short on some cycles? (The log's own `SUMMARY` lines answer this mechanically, but
-  your eyes are the check against the log being wrong.)
-- Any stall near centre rather than at an edge, per "What a gate-stall looks like by eye" above —
-  the probe's own `SUSPECT`/`STALL not a clip` logging should already catch these, but note it if
-  you see one.
+- **Which direction (the one logged `EDGE UP`, commanded first, or `EDGE DOWN`, commanded second)
+  made the crosshair rise, and which made it fall?** This is the one thing only you can tell from
+  the cockpit.
+- Any stall near centre rather than at an edge (see above) — note it if you see one, even though
+  the probe should recover from it unattended.
 - If the returned elevation half-angle reads far from the already-measured azimuth figure
   (≈4.3°), give it a second look before treating it as settled — the raw log is still the ground
   truth either way.

@@ -8,43 +8,43 @@ docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md.
 WHY (plan.md v3, "Elevation - measure in flight", ANSWERED 2026-10-26)
   The ASP-17 HUD field's azimuth clip is measured (565/566, ~+-4.3 deg,
   docs/acceptance/2026-10-22-9k113-ai-latency-probe.md line 423). Its
-  elevation clip (555/556) never has been -- v3's edge-park design ships a
-  placeholder half-angle on that axis pending this flight. User request,
-  verbatim: "create a probe for measuring the HUD elevation limits. slew up
-  until limit, then down until limit and log the values. That'll then be
-  super easy to measure."
+  elevation clip (555/556) never has been.
 
-  Open-loop AI-axis elevation command (CMD_AI_ELEV, 3060), one direction at
-  a time, slow enough (EL_RATE_CMD below) to locate the plateau to within
-  about 0.05 deg. Every command keeps the value changing every frame
-  (flicker dither) because DCS intermittently ignores a held value
-  otherwise (same ai-latency-probe doc, runs 6-8). Each direction pushes a
-  margin past the first plateau to rule out a momentary stall (DCS
-  ignoring the axis, not a true field edge), then reverses through
-  boresight to the opposite edge. The whole up/down sweep repeats
-  CYCLES times: a true edge repeats at the same 555 value every cycle; a
-  stall does not -- except that the same ai-latency-probe doc also records
-  the AI-axis gate holding for the *entire* flight at least once (run 8),
-  in which case every cycle would plateau at the same near-zero-travel
-  value and a cycle-consistency check alone cannot tell that apart from a
-  real edge (reviewer, 2026-10-27: see
-  .claude/agent-memory/reviewer/feedback_9k113_stall_vs_clip_margin_too_short.md).
-  So a plateau is only ever accepted if its travel from the seek's own
-  starting value is plausible given how long the axis has been commanded
-  (MIN_TRAVEL_FRACTION below) and it is not suspiciously close to
-  boresight (MIN_TRAVEL_EL) -- otherwise it is logged SUSPECT, never
-  accepted, and the probe keeps pushing/retrying rather than taking the
-  gate's frozen value as the field edge.
+SIMPLIFIED PER USER, 2026-10-27 (plans/9k113-hud-elevation-limits-probe/
+implementation.md has the full "Simplified per user, 2026-10-27" section
+and the superseded v1 stall-margin design it replaces). One pass per
+direction, no cycles, no travel-plausibility check, no phase timeout:
 
-  The script does not know which signed command direction is visually "up"
-  on the ASP-17 glass -- that mapping has never been nailed down in this
-  project (ai-latency-probe doc, run 2: "sign-inverted, so probably down").
-  Phases are logged by command sign only ("POS"/"NEG"); the test card asks
-  the pilot which one they saw rise and which fell.
+  wait OBSERV (886) on -> wait 15 s (gyro sync) -> slew one elevation
+  direction (wobble always on) until raw 555 stops changing for ~1 s ->
+  reverse briefly: if 555 moves again, that was the true edge (record
+  it); if it does not move, it was a momentary command stall (DCS
+  intermittently ignoring the axis), not an edge, so resume pushing the
+  same way and look again -> once confirmed, do the same thing in the
+  other direction -> stop writing.
+
+  Stall handling IS the wobble: this probe reuses, unmodified in shape,
+  the per-frame dither Export.lua's run_sight_servo already applies to
+  the same AI axis in production (SERVO_WOBBLE == "dither" branch,
+  DITHER_AZ_DEG/DITHER_HZ/DITHER_EL_DEG, Export.lua ~line 1197) -- the
+  thing that keeps DCS obeying the axis at all. No separate travel-vs-
+  elapsed-time plausibility math is needed: a plateau that is actually
+  a stall un-sticks itself the moment the commanded direction reverses,
+  because reversing is a large, unambiguous value change next to the
+  stall's own frozen value -- the dither no longer has to do that job
+  alone during the stall window, the deliberate reversal does.
+
+  Which signed elevation command is visually "up" on the glass has never
+  been nailed down in this project. Per-frame rows are labelled by
+  command sign (`SEEK_POS`/`CHECK_POS`/`SEEK_NEG`/`CHECK_NEG`), not by
+  "up"/"down" -- only the two summary lines use "UP"/"DOWN", naming the
+  first and second direction commanded, not a confirmed visual
+  direction. The test card asks the pilot which one they saw rise.
 
   Overlay OFF. Pilot seat throughout, no 9K113 view, no operator axes
-  bound. The only writes are the AI elevation (and a matching tiny-flicker
-  AI azimuth) axis.
+  bound. The only writes are the AI elevation axis (seek/check command)
+  and a matching AI azimuth write carrying only the shared dither, so
+  both axes see the same per-frame value-change DCS needs.
 ]]
 
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_9k113_hud_elevation_limits.log"
@@ -84,102 +84,59 @@ local CMD_AI_AZ = 3061
 local CMD_AI_ELEV = 3060
 
 -- Mark pair (ASP-17 crosshair): 565/566 horizontal, 555/556 vertical
--- (docs/acceptance/2026-10-22-9k113-ai-latency-probe.md). Both of a pair
--- read identically; both are logged so a divergence would be visible.
-local ARG_AZ, ARG_AZ2 = 565, 566
+-- (docs/acceptance/2026-10-22-9k113-ai-latency-probe.md). 555 is the
+-- measurement; 556 is logged alongside it so a divergence would be seen.
+local ARG_AZ2 = 566
 local ARG_EL, ARG_EL2 = 555, 556
 
--- Л5 "ROLL SYNC TR UNCAGE" (alignment done), READY, LAUNCH PERMITTED --
--- context lamps, not control inputs to this probe.
-local LAMP_ARGS = { { 898, "L5_ALIGN" }, { 960, "READY" }, { 962, "LAUNCH_PERM" } }
-local LAMP_EPS = 0.1
-
 local OBSERV_DEBOUNCE_S = 0.5
-local START_DELAY_S = 20.0
+
+--: fixed gyro-sync wait after OBSERV comes on, per user direction
+--: ("just wait 15 s on timer") -- not gated on a lamp, kept as a plain
+--: timer for simplicity.
+local START_DELAY_S = 15.0
 
 --: AI-axis elevation command unit, open loop. Devices_specs/9K113.lua:
 --: v_axis_velocity = 10 deg/s, so commanded rate = EL_RATE_CMD * 10 deg/s.
---: 0.05 -> 0.5 deg/s, slow enough that a 0.05 deg edge shows across several
---: frames rather than one, at any plausible DCS frame rate.
+--: 0.05 -> 0.5 deg/s: comfortably above the 0.003-unit command deadzone
+--: (Export.lua's own FLICKER_EPS comment), slow enough that one frame's
+--: 555 step stays small. At MARK_DEG_PER_UNIT_EL's placeholder scale
+--: (1/0.039, shared with azimuth's measured value, plans/9k113-sight-
+--: pointing/plan.md line 588) and an assumed ~60 fps, one frame commands
+--: ~0.0083 deg (~0.0083 * 0.039 =~ 0.00033 raw 555 units) -- see
+--: implementation.md for the full resolution note.
 local EL_RATE_CMD = 0.05
 
---: per-frame dither amplitude added to both AI axes so DCS does not
---: intermittently ignore a held command value (confirmed necessary,
---: docs/acceptance/2026-10-22-9k113-ai-latency-probe.md runs 6-8; the
---: BL-B80 v2 calibration probe uses the same trick, flicker 1e-4).
-local FLICKER_EPS = 1e-4
-
---: rough 555-per-degree scale, from the BL-B80 v2 calibration probe
---: (never itself confirmed against a measured elevation range) -- used
---: only to print a degrees estimate alongside the raw summary; the raw
---: 555 values are the measurement that matters.
-local MARK_PER_DEG_EL = 0.028
+--: dither amplitude/rate/phase-offset, copied unmodified from production
+--: Export.lua's run_sight_servo (SERVO_WOBBLE == "dither" branch, ~line
+--: 1197) -- the proven per-frame value-change mechanism that keeps DCS
+--: obeying this axis at all; not reinvented here. GIMBAL_EL_UP_DEG is
+--: production's own degrees->raw-command scale for the elevation axis
+--: (same file, ~line 1233), reused only for that unit conversion -- the
+--: gimbal limits themselves are nowhere near the HUD field and are not
+--: checked by this probe (user direction).
+local DITHER_AZ_DEG = 0.6
+local DITHER_HZ = 8.0
+local DITHER_EL_DEG = DITHER_AZ_DEG * (0.03 / 1.5)
+local GIMBAL_EL_UP_DEG = 20.0
 
 --: a window of this many seconds with 555 flat to within PLATEAU_EPS,
---: while still commanding motion, counts as "stopped" -- about 0.05 deg
---: of travel at EL_RATE_CMD's rate, so the window is long enough to not
---: trigger on dither noise alone (dither moves 555 by ~1e-4 ESH an order
---: below PLATEAU_EPS) and short enough to not blur past a real edge.
-local PLATEAU_WINDOW_S = 0.6
+--: while still commanding motion, counts as "stopped" -- user direction
+--: ("short no-change window, e.g. ~1 s").
+local PLATEAU_WINDOW_S = 1.0
 
---: 555 units; ~0.05 deg at MARK_PER_DEG_EL. The flat-window threshold.
-local PLATEAU_EPS = 0.0015
+--: how long the probe reverses command direction before deciding whether
+--: the plateau just found was a true edge (555 moves again) or a
+--: momentary command stall (555 stays put) -- user direction ("reverse
+--: briefly").
+local REVERSE_CHECK_S = 1.0
 
---: once a plateau is seen, keep commanding into it this much longer to
---: rule out a momentary stall rather than a true field edge -- if 555
---: moves again during this window it was a stall, not an edge, and the
---: seek resumes. Set above the AI-axis gate windows documented in
---: docs/acceptance/2026-10-22-9k113-ai-latency-probe.md runs 6-8 (4-18 s
---: typical) -- a 3 s margin (the original value) is shorter than nearly
---: every one of those windows and so cannot, by itself, rule them out
---: (reviewer, 2026-10-27). The travel check below is the primary defence;
---: this margin is the secondary one.
-local MARGIN_S = 20.0
-
---: the final open-loop nudge back toward centre (RETURN phase) uses its
---: own short duration rather than MARGIN_S -- reusing MARGIN_S here (the
---: original design) meant raising MARGIN_S for the stall margin above
---: would also make the nudge overshoot many degrees past centre, which is
---: not what the nudge is for.
-local RETURN_NUDGE_S = 3.0
-
---: safety cap per direction per cycle, in case the axis never plateaus
---: (e.g. a genuine, long-lived command stall) -- the probe logs a timeout
---: and moves on rather than hanging the whole run. Measured from
---: phase_start (set once per direction, not reset by a SUSPECT retry), and
---: sized to comfortably fit a real seek plus the now-longer MARGIN_S hold.
-local MAX_PHASE_S = 60.0
-
---: a plateau is accepted as a real field/gimbal edge only if its travel
---: from the seek's own starting value is at least this fraction of what
---: EL_RATE_CMD's rate times the elapsed seek time would predict for
---: continuous, ungated motion. Well under this (the AI-axis gate holding
---: the command from the very start of the seek) means the mark has barely
---: moved despite being commanded the whole time -- the signature of the
---: gate documented in ai-latency-probe runs 6-8, not a true edge, however
---: long the plateau holds.
-local MIN_TRAVEL_FRACTION = 0.5
-
---: absolute floor (555 units, ~0.2 deg) below which a plateau is flagged
---: as suspiciously close to boresight on its own, even if travel-from-
---: start happens to clear MIN_TRAVEL_FRACTION (e.g. a seek that itself
---: began a hair off boresight) -- a real elevation clip this close to
---: centre would be surprising given azimuth's already-measured ~4.3 deg.
-local MIN_TRAVEL_EL = 0.006
-
---: expected 555-units-per-second of real motion at EL_RATE_CMD's full rate
---: (0.5 deg/s, Devices_specs/9K113.lua) times MARK_PER_DEG_EL's rough scale
---: -- used only to judge whether a plateau's travel is plausible, not as a
---: precise conversion.
-local MARK_RATE_PER_S = EL_RATE_CMD * 10.0 * MARK_PER_DEG_EL
-
---: number of full pos/neg sweeps. A true edge reads the same 555 value
---: every cycle; a stall (DCS ignoring the command) does not -- see WHY.
-local CYCLES = 3
-
---: cycle-to-cycle plateau values within this spread (555 units, ~0.36 deg)
---: count as the same edge, for the final summary's consistency check.
-local CONSISTENCY_EPS = 0.01
+--: raw 555 units. The flat-window/no-movement threshold, shared by both
+--: checks above: comfortably above the dither's own per-frame amplitude
+--: on this axis (DITHER_EL_DEG / GIMBAL_EL_UP_DEG =~ 0.0006) and well
+--: below one second of real motion at EL_RATE_CMD's rate (EL_RATE_CMD *
+--: 10 deg/s * 0.039 units/deg =~ 0.0195 units/s).
+local PLATEAU_EPS = 0.003
 
 -- ---------------------------------------------------------------- helpers
 local function fmt(v)
@@ -201,52 +158,28 @@ local function set_quiet(cmd, value)
     pcall(dev.SetCommand, dev, cmd, value)
 end
 
-local function centre_all()
-    set_quiet(CMD_AI_AZ, 0.0)
-    set_quiet(CMD_AI_ELEV, 0.0)
+-- Same dither shape as production run_sight_servo's SERVO_WOBBLE ==
+-- "dither" branch: az sine / el cosine (90 deg out of phase), in degrees,
+-- converted to the same raw command units CMD_AI_AZ/CMD_AI_ELEV take.
+local function wobble(t)
+    local wobble_az_deg = DITHER_AZ_DEG * math.sin(2.0 * math.pi * DITHER_HZ * t)
+    local wobble_el_deg = DITHER_EL_DEG * math.cos(2.0 * math.pi * DITHER_HZ * t)
+    return wobble_az_deg / 60.0, wobble_el_deg / GIMBAL_EL_UP_DEG
 end
 
-local flick_parity = false
-local function flicker()
-    flick_parity = not flick_parity
-    return flick_parity and FLICKER_EPS or -FLICKER_EPS
+-- Writes both AI axes every frame: elevation carries the seek/check
+-- command, azimuth carries only the shared dither.
+local function write_axes(el_cmd, t)
+    local w_az, w_el = wobble(t)
+    set_quiet(CMD_AI_AZ, w_az)
+    set_quiet(CMD_AI_ELEV, el_cmd + w_el)
 end
 
--- Writes both AI axes every frame: elevation carries the seek/return
--- command, azimuth carries only the shared dither so it does not drift
--- and so DCS sees a per-frame change on both axes alike.
-local function write_axes(el_cmd)
-    local f = flicker()
-    set_quiet(CMD_AI_AZ, f)
-    set_quiet(CMD_AI_ELEV, el_cmd + f)
-end
-
-local lamp_last = {}
-local function log_lamp_changes(dt)
-    for _, e in ipairs(LAMP_ARGS) do
-        local v = read_arg(e[1])
-        if type(v) == "number" then
-            local prev = lamp_last[e[1]]
-            if prev == nil then
-                log(string.format("  lamp %d %s = %s (initial) t=%7.3f", e[1], e[2], fmt(v), dt))
-                lamp_last[e[1]] = v
-            elseif math.abs(v - prev) >= LAMP_EPS then
-                log(string.format("  lamp %d %s %s -> %s  t=%7.3f", e[1], e[2], fmt(prev), fmt(v), dt))
-                lamp_last[e[1]] = v
-            end
-        end
-    end
-end
-
-local total_frames = 0
-local function log_row(dt, seg, el_cmd)
-    total_frames = total_frames + 1
+local function log_row(dt, phase_label, el_cmd)
     log(string.format(
-        "  . f=%6d t=%8.3f seg=%-16s el_cmd=%+.5f  555=%s 556=%s 566=%s 565=%s 886=%s",
-        total_frames, dt, seg, el_cmd,
-        fmt(read_arg(ARG_EL)), fmt(read_arg(ARG_EL2)), fmt(read_arg(ARG_AZ2)), fmt(read_arg(ARG_AZ)),
-        fmt(read_arg(ARG_OBSERVE))))
-    return total_frames
+        "  . t=%8.3f phase=%-10s cmd=%+.5f  555=%s 556=%s 566=%s 886=%s",
+        dt, phase_label, el_cmd,
+        fmt(read_arg(ARG_EL)), fmt(read_arg(ARG_EL2)), fmt(read_arg(ARG_AZ2)), fmt(read_arg(ARG_OBSERVE))))
 end
 
 -- ---------------------------------------------------------------- state
@@ -254,32 +187,19 @@ local started, t0 = false, nil
 local phase = "WAIT_OBSERV"
 local observ_on_since = nil
 local delay_start = nil
-local last_heartbeat_t = -1e9
 local aborted = false
 
--- CYCLE state: dir "POS"/"NEG", sub "SEEK"/"MARGIN".
-local cycle = 1
-local dir = "POS"
-local sub = "SEEK"
-local seek_start = nil
-local margin_start = nil
-local hist = {}          -- { {t, m}, ... } over the last PLATEAU_WINDOW_S
+-- Rolling window of recent {t, 555} samples, reset at the start of every
+-- SEEK attempt; cleared whenever a seek (re)starts.
+local hist = {}
 local plateau_value = nil
-local plateau_frame = nil
+-- Set when a plateau candidate is found and the reverse check begins;
+-- check_ref is that candidate's 555 value.
+local check_start = nil
+local check_ref = nil
 
--- phase_start: set once per direction attempt, not reset by a SUSPECT
--- retry -- MAX_PHASE_S is measured from here so a gate that keeps
--- restarting the SEEK sub-phase cannot also keep resetting its own cap.
-local phase_start = nil
--- seek_start_value: 555 at the moment this SEEK attempt (post-retry)
--- began; nil until the first frame's read lands.
-local seek_start_value = nil
--- suspect_logged: throttles the SUSPECT log line to once per flat-window
--- episode rather than once per frame while the gate holds.
-local suspect_logged = false
-
--- results[dir][cycle] = { value = number-or-nil, frame = number-or-nil }
-local results = { POS = {}, NEG = {} }
+local edge_pos_555 = nil
+local edge_neg_555 = nil
 
 local function push_hist(t, m)
     hist[#hist + 1] = { t, m }
@@ -296,50 +216,17 @@ local function window_flat(t)
     return (hi - lo) <= PLATEAU_EPS, lo, hi
 end
 
-local function el_cmd_for(d)
-    return (d == "POS") and EL_RATE_CMD or -EL_RATE_CMD
-end
-
-local function start_seek(dt)
-    sub = "SEEK"
-    seek_start = dt
-    seek_start_value = nil
+local function start_seek(dt, sign, label)
     hist = {}
-    plateau_value, plateau_frame = nil, nil
-    suspect_logged = false
-    log(string.format("=== cycle %d/%d  %s seek  t=%7.3f  el_cmd=%+.5f", cycle, CYCLES, dir, dt, el_cmd_for(dir)))
-end
-
-local function finish_phase(dt, timed_out)
-    results[dir][cycle] = { value = plateau_value, frame = plateau_frame }
-    if timed_out then
-        log(string.format("  ... cycle %d %s: TIMEOUT after %.1f s, no plateau found", cycle, dir, MAX_PHASE_S))
-    else
-        log(string.format("  ... cycle %d %s: plateau 555=%s confirmed at frame %s (margin %.1f s held)",
-            cycle, dir, fmt(plateau_value), tostring(plateau_frame), MARGIN_S))
-    end
-    if dir == "POS" then
-        dir = "NEG"
-        phase_start = dt
-        start_seek(dt)
-    else
-        dir = "POS"
-        cycle = cycle + 1
-        if cycle > CYCLES then
-            phase = "RETURN"
-            seek_start = dt
-        else
-            phase_start = dt
-            start_seek(dt)
-        end
-    end
+    plateau_value = nil
+    log(string.format("=== %s  t=%7.3f  el_cmd=%+.5f", label, dt, sign * EL_RATE_CMD))
 end
 
 -- ---------------------------------------------------------------- driver
 function LuaExportStart()
     log("")
     log("#########################################################")
-    log("9K113 HUD ELEVATION LIMITS PROBE")
+    log("9K113 HUD ELEVATION LIMITS PROBE (simplified)")
     local v = try("LoGetVersionInfo", LoGetVersionInfo)
     if type(v) == "table" then
         local function ver(x)
@@ -370,15 +257,14 @@ function LuaExportAfterNextFrame()
         if t0 == nil then t0 = t end
         local dt = t - t0
 
-        log_lamp_changes(dt)
-
         if phase == "WAIT_OBSERV" then
             local observe = read_arg(ARG_OBSERVE)
             if type(observe) == "number" and observe >= 0.5 then
                 if observ_on_since == nil then observ_on_since = dt end
                 if (dt - observ_on_since) >= OBSERV_DEBOUNCE_S then
-                    log(string.format("  OBSERV on at t=%7.3f = T+0. Steps in %.0f s. Go to the PILOT seat and stay there (no 9K113 view).",
-                                      observ_on_since, START_DELAY_S))
+                    log(string.format(
+                        "  OBSERV on at t=%7.3f = T+0. Waiting %.0f s (gyro sync). Go to the PILOT seat.",
+                        observ_on_since, START_DELAY_S))
                     phase = "DELAY"
                     delay_start = observ_on_since
                 end
@@ -389,122 +275,74 @@ function LuaExportAfterNextFrame()
         end
 
         if phase == "DELAY" then
-            if (dt - last_heartbeat_t) >= 5.0 then
-                log(string.format("  . steps in %.0f s", START_DELAY_S - (dt - delay_start)))
-                last_heartbeat_t = dt
-            end
             if (dt - delay_start) >= START_DELAY_S then
-                phase = "CYCLE"
-                phase_start = dt
-                start_seek(dt)
+                phase = "SEEK_POS"
+                start_seek(dt, 1.0, "SEEK_POS")
             end
             return
         end
 
-        if phase == "CYCLE" then
-            local el_cmd = el_cmd_for(dir)
-            write_axes(el_cmd)
+        if phase == "SEEK_POS" or phase == "SEEK_NEG" then
+            local sign = (phase == "SEEK_POS") and 1.0 or -1.0
+            local el_cmd = sign * EL_RATE_CMD
+            write_axes(el_cmd, t)
             local m = read_arg(ARG_EL)
-            if sub == "SEEK" then
-                if type(m) == "number" then
-                    if seek_start_value == nil then seek_start_value = m end
-                    push_hist(dt, m)
-                    local flat, lo, hi = window_flat(dt)
-                    if flat then
-                        local candidate = (lo + hi) / 2
-                        local elapsed_seek = dt - seek_start
-                        local expected_travel = MARK_RATE_PER_S * elapsed_seek
-                        local travel = math.abs(candidate - seek_start_value)
-                        local suspect = (travel < MIN_TRAVEL_FRACTION * expected_travel) or (math.abs(candidate) < MIN_TRAVEL_EL)
-                        if suspect then
-                            if not suspect_logged then
-                                log(string.format(
-                                    "  ... cycle %d %s: SUSPECT -- near-zero travel (travel=%.5f from start=%.5f, expected>=%.5f over %.1f s) -- matches the known AI-axis gate (ai-latency-probe runs 6-8), NOT accepted as a plateau, continuing to seek",
-                                    cycle, dir, travel, seek_start_value, expected_travel, elapsed_seek))
-                                suspect_logged = true
-                            end
-                        else
-                            plateau_value = candidate
-                            plateau_frame = log_row(dt, cycle .. "/" .. dir .. "-SEEK", el_cmd)
-                            sub = "MARGIN"
-                            margin_start = dt
-                            log(string.format("  ... cycle %d %s: plateau candidate 555=%.5f at t=%.3f (window flat within %.5f, travel=%.5f from start=%.5f)",
-                                cycle, dir, plateau_value, dt, hi - lo, travel, seek_start_value))
-                        end
-                    end
+            log_row(dt, phase, el_cmd)
+            if type(m) == "number" then
+                push_hist(dt, m)
+                local flat, lo, hi = window_flat(dt)
+                if flat then
+                    plateau_value = (lo + hi) / 2
+                    check_ref = plateau_value
+                    check_start = dt
+                    phase = (phase == "SEEK_POS") and "CHECK_POS" or "CHECK_NEG"
+                    log(string.format(
+                        "  ... %s: plateau candidate 555=%.5f at t=%.3f, reversing to check",
+                        phase, plateau_value, dt))
                 end
-                if plateau_value == nil then
-                    log_row(dt, cycle .. "/" .. dir .. "-SEEK", el_cmd)
-                    if (dt - phase_start) >= MAX_PHASE_S then
-                        finish_phase(dt, true)
-                    end
-                end
-                return
-            end
-
-            if sub == "MARGIN" then
-                log_row(dt, cycle .. "/" .. dir .. "-MARGIN", el_cmd)
-                if type(m) == "number" and math.abs(m - plateau_value) > PLATEAU_EPS then
-                    log(string.format("  ... cycle %d %s: STALL not a clip -- resumed moving (555 %.5f -> %.5f), continuing to seek",
-                        cycle, dir, plateau_value, m))
-                    start_seek(dt)
-                    return
-                end
-                if (dt - margin_start) >= MARGIN_S then
-                    finish_phase(dt, false)
-                end
-                return
             end
             return
         end
 
-        if phase == "RETURN" then
-            -- Open-loop nudge back toward whichever edge was reached last
-            -- (direction NEG was always the final sweep of the last cycle,
-            -- so return in the POS direction); not a precise re-centre,
-            -- just so the real sight is not left parked at a field edge.
-            local el_cmd = -el_cmd_for("NEG")
-            write_axes(el_cmd)
-            log_row(dt, "RETURN", el_cmd)
-            if seek_start == nil then seek_start = dt end
-            if (dt - seek_start) >= RETURN_NUDGE_S then
-                centre_all()
-                log("=== SUMMARY per direction")
-                for _, d in ipairs({ "POS", "NEG" }) do
-                    local vals, frames = {}, {}
-                    for c = 1, CYCLES do
-                        local r = results[d][c]
-                        if r ~= nil and r.value ~= nil then
-                            vals[#vals + 1] = r.value
-                            frames[#frames + 1] = r.frame
-                        end
-                    end
-                    if #vals == 0 then
-                        log(string.format("  %s: no plateau found in any cycle", d))
-                    else
-                        local lo, hi = vals[1], vals[1]
-                        for _, v in ipairs(vals) do lo, hi = math.min(lo, v), math.max(hi, v) end
-                        local consistent = (hi - lo) <= CONSISTENCY_EPS
-                        local mean = 0.0
-                        for _, v in ipairs(vals) do mean = mean + v end
-                        mean = mean / #vals
-                        local vs, fs = {}, {}
-                        for i, v in ipairs(vals) do vs[#vs + 1] = fmt(v) fs[#fs + 1] = tostring(frames[i]) end
-                        log(string.format("  %s: %s  555 = %s  (per-cycle: %s, frames %s, spread %.5f)",
-                            d, consistent and "CONSISTENT (real clip)" or "INCONSISTENT (check per-cycle log, may include a stall)",
-                            fmt(mean), table.concat(vs, " "), table.concat(fs, " "), hi - lo))
-                    end
+        if phase == "CHECK_POS" or phase == "CHECK_NEG" then
+            local seek_sign = (phase == "CHECK_POS") and 1.0 or -1.0
+            local el_cmd = -seek_sign * EL_RATE_CMD
+            write_axes(el_cmd, t)
+            local m = read_arg(ARG_EL)
+            log_row(dt, phase, el_cmd)
+            if type(m) == "number" and math.abs(m - check_ref) > PLATEAU_EPS then
+                if phase == "CHECK_POS" then
+                    edge_pos_555 = check_ref
+                    log(string.format("EDGE UP 555=%.5f", edge_pos_555))
+                    phase = "SEEK_NEG"
+                    start_seek(dt, -1.0, "SEEK_NEG")
+                else
+                    edge_neg_555 = check_ref
+                    log(string.format("EDGE DOWN 555=%.5f", edge_neg_555))
+                    log(string.format("PROBE DONE up=%.5f down=%.5f", edge_pos_555, edge_neg_555))
+                    phase = "DONE"
                 end
-                log(string.format("=== ELEVATION LIMITS (raw 555, rough deg at %.3f/deg): see SUMMARY lines above", MARK_PER_DEG_EL))
-                log("  PROBE DONE. Re-copy the production Export.lua afterwards.")
-                phase = "FINISHED"
+                return
+            end
+            if (dt - check_start) >= REVERSE_CHECK_S then
+                log(string.format(
+                    "  ... %s: stall, not an edge (555 held at %.5f through the reverse check) -- resuming seek",
+                    phase, check_ref))
+                if phase == "CHECK_POS" then
+                    phase = "SEEK_POS"
+                    start_seek(dt, 1.0, "SEEK_POS")
+                else
+                    phase = "SEEK_NEG"
+                    start_seek(dt, -1.0, "SEEK_NEG")
+                end
             end
             return
         end
+
+        -- phase == "DONE": no further writes.
     end)
     if not ok then
         aborted = true
         log("  UNCAUGHT ERROR in frame callback: " .. tostring(err))
-        pcall(centre_all)
     end
 end
