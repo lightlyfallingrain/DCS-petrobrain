@@ -57,6 +57,50 @@ this worktree's own source/test files)
   `test_dcs_export_lua_local_order.py` and `test_dcs_export_lua_syntax.py` (if present) over the
   new file
 
+**Re-run after the required-fix round** (same commands, same worktree gap/workaround): `luac5.1 -p`
+pass; `luac5.1 -l -p | grep GETGLOBAL` on the revised file: same clean list as before
+(`GetDevice`, `LoGetModelTime`, `LoGetVersionInfo`, `lfs`, `io`, `ipairs`, `math`, `os`, `pcall`,
+`string`, `table`, `tostring`, `type` — all genuine DCS/Lua stdlib, nothing of the probe's own);
+`ruff format --check`/`ruff check`/`mypy --strict`: pass (still no Python touched); `pytest
+aircraft-layer/tests -q`: 610 passed (confirmed by name, unfiltered `-v -k lua`: 208 passed across
+`test_dcs_export_lua_local_order.py`/`test_dcs_export_lua_syntax.py` and the other Lua-touching
+suites, none deselected by the filter missing a target).
+
+### Required-Fix Round (2026-10-27, Reviewer: APPROVED WITH MINOR FIXES)
+
+Reviewer flagged that `MARGIN_S = 3.0` could not rule out the documented 9K113 AI-axis command
+gate (4–18 s typical, up to flight-duration once — `docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`
+runs 6–8): a gate onset at the very start of a SEEK phase would read as a confirmed plateau at
+≈boresight within ~3.6 s, and the `CYCLES`-cross-check cannot catch it if the gate holds for every
+cycle alike (see `.claude/agent-memory/reviewer/feedback_9k113_stall_vs_clip_margin_too_short.md`).
+Required fix applied, plus the suggested optional margin lengthening (both review-listed fixes were
+cheap, so both went in rather than picking one):
+
+- **Travel-plausibility check (the primary defence).** A plateau is now only accepted if its travel
+  from the SEEK attempt's own starting value is at least `MIN_TRAVEL_FRACTION = 0.5` of what
+  `EL_RATE_CMD`'s rate times the elapsed seek time would predict for continuous, ungated motion, and
+  is not within an absolute `MIN_TRAVEL_EL = 0.006` (≈0.2°) of boresight on its own. A plateau
+  failing either check is logged `SUSPECT -- near-zero travel ... NOT accepted as a plateau,
+  continuing to seek` (once per flat-window episode, not once per frame) and the probe keeps
+  seeking rather than treating the gate's frozen value as an edge — it is never written to
+  `results[dir][cycle]`, so it cannot surface as `CONSISTENT (real clip)` in the summary; a
+  gate that never releases times out (now via `phase_start`, a per-direction timer that a SUSPECT
+  retry does not reset) and reports "no plateau found", not a wrong number.
+- **`MARGIN_S` raised 3.0 → 20.0** (the secondary defence), above the documented 4–18 s typical gate
+  window. Since the old code reused `MARGIN_S` for the RETURN phase's final centring nudge too
+  (review's optional-refinements note), raising it in place would have made that nudge overshoot by
+  many degrees — split into its own `RETURN_NUDGE_S = 3.0`, keeping the nudge's behaviour unchanged.
+  `MAX_PHASE_S` raised 30.0 → 60.0 to comfortably fit a real seek plus the longer margin hold.
+- **Card updated** (`docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`): a "What a
+  gate-stall looks like by eye, and what to do about it" section (required), the revised runtime
+  estimate (4–8 min, up from 2–4, driven by the larger `MARGIN_S`), and the optional refinements —
+  the sight not returning to exact centre is expected (rate command, not a position command), and a
+  returned elevation half-angle far from azimuth's already-measured ≈4.3° is worth a second look.
+
+Not done: gating `START_DELAY_S` on the Л5 lamp instead of a flat timer (review's other optional
+note) — left as-is, the review itself called the flat-timer risk low given the 2× margin over the
+measured ~10 s alignment.
+
 ### Notable Discoveries
 - **This worktree had no `aircraft-layer/.venv`** (gitignored, not copied by `git worktree add`).
   Ran every tool via the main checkout's `aircraft-layer/.venv/bin/<tool>` with `cwd` set inside

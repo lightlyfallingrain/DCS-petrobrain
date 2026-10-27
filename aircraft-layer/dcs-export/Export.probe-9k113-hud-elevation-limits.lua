@@ -23,7 +23,18 @@ WHY (plan.md v3, "Elevation - measure in flight", ANSWERED 2026-10-26)
   ignoring the axis, not a true field edge), then reverses through
   boresight to the opposite edge. The whole up/down sweep repeats
   CYCLES times: a true edge repeats at the same 555 value every cycle; a
-  stall does not.
+  stall does not -- except that the same ai-latency-probe doc also records
+  the AI-axis gate holding for the *entire* flight at least once (run 8),
+  in which case every cycle would plateau at the same near-zero-travel
+  value and a cycle-consistency check alone cannot tell that apart from a
+  real edge (reviewer, 2026-10-27: see
+  .claude/agent-memory/reviewer/feedback_9k113_stall_vs_clip_margin_too_short.md).
+  So a plateau is only ever accepted if its travel from the seek's own
+  starting value is plausible given how long the axis has been commanded
+  (MIN_TRAVEL_FRACTION below) and it is not suspiciously close to
+  boresight (MIN_TRAVEL_EL) -- otherwise it is logged SUSPECT, never
+  accepted, and the probe keeps pushing/retrying rather than taking the
+  gate's frozen value as the field edge.
 
   The script does not know which signed command direction is visually "up"
   on the ASP-17 glass -- that mapping has never been nailed down in this
@@ -117,13 +128,50 @@ local PLATEAU_EPS = 0.0015
 --: once a plateau is seen, keep commanding into it this much longer to
 --: rule out a momentary stall rather than a true field edge -- if 555
 --: moves again during this window it was a stall, not an edge, and the
---: seek resumes.
-local MARGIN_S = 3.0
+--: seek resumes. Set above the AI-axis gate windows documented in
+--: docs/acceptance/2026-10-22-9k113-ai-latency-probe.md runs 6-8 (4-18 s
+--: typical) -- a 3 s margin (the original value) is shorter than nearly
+--: every one of those windows and so cannot, by itself, rule them out
+--: (reviewer, 2026-10-27). The travel check below is the primary defence;
+--: this margin is the secondary one.
+local MARGIN_S = 20.0
+
+--: the final open-loop nudge back toward centre (RETURN phase) uses its
+--: own short duration rather than MARGIN_S -- reusing MARGIN_S here (the
+--: original design) meant raising MARGIN_S for the stall margin above
+--: would also make the nudge overshoot many degrees past centre, which is
+--: not what the nudge is for.
+local RETURN_NUDGE_S = 3.0
 
 --: safety cap per direction per cycle, in case the axis never plateaus
 --: (e.g. a genuine, long-lived command stall) -- the probe logs a timeout
---: and moves on rather than hanging the whole run.
-local MAX_PHASE_S = 30.0
+--: and moves on rather than hanging the whole run. Measured from
+--: phase_start (set once per direction, not reset by a SUSPECT retry), and
+--: sized to comfortably fit a real seek plus the now-longer MARGIN_S hold.
+local MAX_PHASE_S = 60.0
+
+--: a plateau is accepted as a real field/gimbal edge only if its travel
+--: from the seek's own starting value is at least this fraction of what
+--: EL_RATE_CMD's rate times the elapsed seek time would predict for
+--: continuous, ungated motion. Well under this (the AI-axis gate holding
+--: the command from the very start of the seek) means the mark has barely
+--: moved despite being commanded the whole time -- the signature of the
+--: gate documented in ai-latency-probe runs 6-8, not a true edge, however
+--: long the plateau holds.
+local MIN_TRAVEL_FRACTION = 0.5
+
+--: absolute floor (555 units, ~0.2 deg) below which a plateau is flagged
+--: as suspiciously close to boresight on its own, even if travel-from-
+--: start happens to clear MIN_TRAVEL_FRACTION (e.g. a seek that itself
+--: began a hair off boresight) -- a real elevation clip this close to
+--: centre would be surprising given azimuth's already-measured ~4.3 deg.
+local MIN_TRAVEL_EL = 0.006
+
+--: expected 555-units-per-second of real motion at EL_RATE_CMD's full rate
+--: (0.5 deg/s, Devices_specs/9K113.lua) times MARK_PER_DEG_EL's rough scale
+--: -- used only to judge whether a plateau's travel is plausible, not as a
+--: precise conversion.
+local MARK_RATE_PER_S = EL_RATE_CMD * 10.0 * MARK_PER_DEG_EL
 
 --: number of full pos/neg sweeps. A true edge reads the same 555 value
 --: every cycle; a stall (DCS ignoring the command) does not -- see WHY.
@@ -219,6 +267,17 @@ local hist = {}          -- { {t, m}, ... } over the last PLATEAU_WINDOW_S
 local plateau_value = nil
 local plateau_frame = nil
 
+-- phase_start: set once per direction attempt, not reset by a SUSPECT
+-- retry -- MAX_PHASE_S is measured from here so a gate that keeps
+-- restarting the SEEK sub-phase cannot also keep resetting its own cap.
+local phase_start = nil
+-- seek_start_value: 555 at the moment this SEEK attempt (post-retry)
+-- began; nil until the first frame's read lands.
+local seek_start_value = nil
+-- suspect_logged: throttles the SUSPECT log line to once per flat-window
+-- episode rather than once per frame while the gate holds.
+local suspect_logged = false
+
 -- results[dir][cycle] = { value = number-or-nil, frame = number-or-nil }
 local results = { POS = {}, NEG = {} }
 
@@ -244,8 +303,10 @@ end
 local function start_seek(dt)
     sub = "SEEK"
     seek_start = dt
+    seek_start_value = nil
     hist = {}
     plateau_value, plateau_frame = nil, nil
+    suspect_logged = false
     log(string.format("=== cycle %d/%d  %s seek  t=%7.3f  el_cmd=%+.5f", cycle, CYCLES, dir, dt, el_cmd_for(dir)))
 end
 
@@ -259,6 +320,7 @@ local function finish_phase(dt, timed_out)
     end
     if dir == "POS" then
         dir = "NEG"
+        phase_start = dt
         start_seek(dt)
     else
         dir = "POS"
@@ -267,6 +329,7 @@ local function finish_phase(dt, timed_out)
             phase = "RETURN"
             seek_start = dt
         else
+            phase_start = dt
             start_seek(dt)
         end
     end
@@ -332,6 +395,7 @@ function LuaExportAfterNextFrame()
             end
             if (dt - delay_start) >= START_DELAY_S then
                 phase = "CYCLE"
+                phase_start = dt
                 start_seek(dt)
             end
             return
@@ -343,20 +407,35 @@ function LuaExportAfterNextFrame()
             local m = read_arg(ARG_EL)
             if sub == "SEEK" then
                 if type(m) == "number" then
+                    if seek_start_value == nil then seek_start_value = m end
                     push_hist(dt, m)
                     local flat, lo, hi = window_flat(dt)
                     if flat then
-                        plateau_value = (lo + hi) / 2
-                        plateau_frame = log_row(dt, cycle .. "/" .. dir .. "-SEEK", el_cmd)
-                        sub = "MARGIN"
-                        margin_start = dt
-                        log(string.format("  ... cycle %d %s: plateau candidate 555=%.5f at t=%.3f (window flat within %.5f)",
-                            cycle, dir, plateau_value, dt, hi - lo))
+                        local candidate = (lo + hi) / 2
+                        local elapsed_seek = dt - seek_start
+                        local expected_travel = MARK_RATE_PER_S * elapsed_seek
+                        local travel = math.abs(candidate - seek_start_value)
+                        local suspect = (travel < MIN_TRAVEL_FRACTION * expected_travel) or (math.abs(candidate) < MIN_TRAVEL_EL)
+                        if suspect then
+                            if not suspect_logged then
+                                log(string.format(
+                                    "  ... cycle %d %s: SUSPECT -- near-zero travel (travel=%.5f from start=%.5f, expected>=%.5f over %.1f s) -- matches the known AI-axis gate (ai-latency-probe runs 6-8), NOT accepted as a plateau, continuing to seek",
+                                    cycle, dir, travel, seek_start_value, expected_travel, elapsed_seek))
+                                suspect_logged = true
+                            end
+                        else
+                            plateau_value = candidate
+                            plateau_frame = log_row(dt, cycle .. "/" .. dir .. "-SEEK", el_cmd)
+                            sub = "MARGIN"
+                            margin_start = dt
+                            log(string.format("  ... cycle %d %s: plateau candidate 555=%.5f at t=%.3f (window flat within %.5f, travel=%.5f from start=%.5f)",
+                                cycle, dir, plateau_value, dt, hi - lo, travel, seek_start_value))
+                        end
                     end
                 end
                 if plateau_value == nil then
                     log_row(dt, cycle .. "/" .. dir .. "-SEEK", el_cmd)
-                    if (dt - seek_start) >= MAX_PHASE_S then
+                    if (dt - phase_start) >= MAX_PHASE_S then
                         finish_phase(dt, true)
                     end
                 end
@@ -388,7 +467,7 @@ function LuaExportAfterNextFrame()
             write_axes(el_cmd)
             log_row(dt, "RETURN", el_cmd)
             if seek_start == nil then seek_start = dt end
-            if (dt - seek_start) >= MARGIN_S then
+            if (dt - seek_start) >= RETURN_NUDGE_S then
                 centre_all()
                 log("=== SUMMARY per direction")
                 for _, d in ipairs({ "POS", "NEG" }) do

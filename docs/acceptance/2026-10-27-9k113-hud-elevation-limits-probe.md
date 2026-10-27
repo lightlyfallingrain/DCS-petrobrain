@@ -40,14 +40,27 @@ leaves the up/down labelling to you.
 | T+ | what the probe does | what you watch |
 |---|---|---|
 | 0:00–0:20 | nothing (gyro alignment, seat move) | get to the pilot seat |
-| 0:20 on | **cycle 1 POS**: elevation slews slowly one way until it stops moving (plateau), holds a few seconds more to confirm, then reverses | the crosshair moves steadily toward one HUD edge, then stops — does it rise or fall? |
+| 0:20 on | **cycle 1 POS**: elevation slews slowly one way until it stops moving (plateau), holds ~20 s more to confirm, then reverses | the crosshair moves steadily toward one HUD edge, then stops — does it rise or fall? |
 | — | **cycle 1 NEG**: slews the other way, through centre, to the opposite plateau | crosshair crosses back through boresight to the far edge — rise or fall this time? |
 | — | repeats POS/NEG two more times (3 cycles total) | the crosshair should stop at the *same* two edges each time |
-| after cycle 3 | nudges back toward the last edge reached, then centres and stops writing | crosshair settles, no further movement |
+| after cycle 3 | nudges back toward the last edge reached (a few seconds, not a precise re-centre), then stops writing | crosshair settles a few degrees off true centre — **expected**, not a sign the probe failed (the AI axis is a rate command, so stopping the command does not snap it back to boresight) |
 
-Total runtime depends on how far the edges are from boresight — likely 2–4 minutes. If a sweep
-seems to run unusually long (over ~30 s without the crosshair stopping), that is the probe's own
-timeout logging a "no plateau found" for that leg and moving on; nothing to do.
+Total runtime depends on how far the edges are from boresight and whether the known AI-axis
+command gate fires — likely 4–8 minutes (longer than earlier 9K113 probes: the hold that confirms
+each plateau was lengthened past the gate's documented 4–18 s window, see below). If a sweep seems
+to run unusually long (over ~60 s without the crosshair stopping), that is the probe's own timeout
+logging "no plateau found" for that leg and moving on; nothing to do.
+
+**What a gate-stall looks like by eye, and what to do about it.** This project has previously
+measured the 9K113 AI axis intermittently ignoring a held command for 4–18 s at a stretch, and once
+for an entire flight. If that happens right as a seek begins, the crosshair can sit almost exactly
+where it started — near the glass centre, not visibly approaching either edge — while the probe is
+still in a seek segment pushing it. The probe now defends against this itself (it logs `SUSPECT`
+rather than accepting a near-zero-travel stop as a plateau, and keeps retrying), but **watch for it
+anyway**: if you see the crosshair stall near centre rather than approaching an edge for more than a
+few seconds, note it and the rough time, and flag that leg for a re-check even if the log's own
+`SUMMARY` line comes back clean — your eyes are the backstop against the log's own logic being
+wrong.
 
 ## Bring back
 
@@ -56,9 +69,12 @@ timeout logging a "no plateau found" for that leg and moving on; nothing to do.
 - **Did the crosshair visibly stop at the same two edges on all three cycles**, or did a sweep run
   further/stop short on some cycles? (The log's own `SUMMARY` lines answer this mechanically, but
   your eyes are the check against the log being wrong.)
-- Anything that looked like a stall rather than a real stop (crosshair pauses mid-glass, then
-  resumes) — the probe's own margin-push should already tell these apart and log them as `STALL
-  not a clip`, but note it if you see one.
+- Any stall near centre rather than at an edge, per "What a gate-stall looks like by eye" above —
+  the probe's own `SUSPECT`/`STALL not a clip` logging should already catch these, but note it if
+  you see one.
+- If the returned elevation half-angle reads far from the already-measured azimuth figure
+  (≈4.3°), give it a second look before treating it as settled — the raw log is still the ground
+  truth either way.
 - `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_hud_elevation_limits.log`.
 
 Restore the production `Export.lua` afterwards.
