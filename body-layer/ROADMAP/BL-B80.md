@@ -16,6 +16,10 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
+  **Elevation clip-edge probe merged 2026-10-27 (`d641ca3b`)**: `aircraft-layer/dcs-export/Export.probe-9k113-hud-elevation-limits.lua`,
+  card `docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`, ~1 min. Its `EDGE UP`/`EDGE DOWN`
+  555 values set `ASP17_FIELD_EL_HALF_DEG` and the margin. `#needs-flight`
+
   ## v3 Stage 6 DoD-passed 2026-10-26 (`f65f0ce0`, merged `d763ab20`) — `#needs-flight`
 
   `plans/9k113-sight-pointing/plan.md` v3 Stage 6 — the ASP-17 edge-park fix for the
