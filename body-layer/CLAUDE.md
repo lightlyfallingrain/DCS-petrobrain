@@ -185,13 +185,14 @@ sight_trace_writer.py` is the writer; reduce with `.claude/skills/sortie-log-tri
 reads `Export.lua`'s own per-**frame** companion log (`aircraft_layer_slew_debug.flag` →
 `aircraft_layer_slew_trace.log`, a different flag from the general `DEBUG` one, since this writes
 every frame rather than a handful of one-shot dumps). Defaults off, a true no-op when absent, same
-additive posture as every other per-run log. **v3's `field_target_azimuth_deg`/
-`field_target_elevation_deg`/`mark_clipped` (the real sight's ASP-17 edge-park fields) are on `GET
-/sight_servo/latest` as of Stage 6, aircraft-layer-only** — `sight_trace_writer.py` does not read
-them yet (Stage 6's own scope stopped at this one documentation clause and deliberately made no
-body-layer code change; wiring them into `--slew-trace`'s own columns is follow-up work). Read
-`GET /sight_servo/latest` directly, or `aircraft_layer_slew_trace.log`'s raw 555/566, until that
-follow-up lands.
+additive posture as every other per-run log. **v4 (2026-10-28)** adds, per row: every
+`GET /sight_servo/latest` field as a `servo_<key>` column — setpoint, the ASP-17 mark
+(`servo_mark_*`, the crosshair-derived body direction), `servo_mark_clipped`/`servo_field_target_*`
+(v3's edge-park) and the sample's own `servo_dcs_model_time_s`; ownship position, heading,
+`ownship_pitch_deg`/`ownship_bank_deg`; and `sight_fov`, the objects this poll's perception
+evaluated through a sight optic and found inside its FOV (truth geometry and gate outcome, nearest
+first) — what the simulated 9K113 sees. Turning it on also turns on the detection-trace collector
+in memory (no detection-trace file unless `--detection-trace` is given).
 
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,

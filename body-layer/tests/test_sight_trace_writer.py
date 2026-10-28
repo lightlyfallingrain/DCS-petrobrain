@@ -16,7 +16,9 @@ import pytest
 from belief.optic_policy import OpticState
 from belief.sight_effector import GuidanceUnitState
 from belief.sight_head import SightHead
+from perception.detection_trace import DetectionTrace, GateOutcome
 from perception.optics import SIGHT_WIDE_OPTIC
+from perception.source import OwnshipState
 from sight_trace_writer import SightTraceWriter
 
 
@@ -152,6 +154,169 @@ class TestFieldSelection:
         assert row["servo_error_azimuth_deg"] == pytest.approx(0.01)
         assert row["servo_error_elevation_deg"] == pytest.approx(-0.02)
         assert row["servo_stalled"] is False
+
+    def test_asp17_mark_and_setpoint_columns_read_from_the_servo_sample(
+        self, tmp_path: Path
+    ) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            GuidanceUnitState(),
+            SightHead(),
+            sight_servo_latest={
+                "dcs_model_time_s": 0.98,
+                "setpoint_azimuth_deg": 4.0,
+                "setpoint_elevation_deg": -3.0,
+                "mark_azimuth_deg": 3.5,
+                "mark_elevation_deg": -2.5,
+                "mark_clipped": True,
+                "field_target_azimuth_deg": 3.6,
+                "field_target_elevation_deg": -2.4,
+                "stall_count": 2,
+            },
+        )
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["servo_dcs_model_time_s"] == pytest.approx(0.98)
+        assert row["servo_setpoint_azimuth_deg"] == pytest.approx(4.0)
+        assert row["servo_setpoint_elevation_deg"] == pytest.approx(-3.0)
+        assert row["servo_mark_azimuth_deg"] == pytest.approx(3.5)
+        assert row["servo_mark_elevation_deg"] == pytest.approx(-2.5)
+        assert row["servo_mark_clipped"] is True
+        assert row["servo_field_target_azimuth_deg"] == pytest.approx(3.6)
+        assert row["servo_field_target_elevation_deg"] == pytest.approx(-2.4)
+        assert row["servo_stall_count"] == 2
+
+
+class TestOwnship:
+    def test_attitude_and_position_carried_through(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            GuidanceUnitState(),
+            SightHead(),
+            ownship=OwnshipState(
+                t_sim=1.0,
+                x=100.0,
+                z=200.0,
+                alt_m=650.0,
+                heading_true_deg=292.0,
+                pitch_deg=-6.5,
+                bank_deg=12.0,
+            ),
+        )
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["ownship_x"] == pytest.approx(100.0)
+        assert row["ownship_z"] == pytest.approx(200.0)
+        assert row["ownship_alt_m"] == pytest.approx(650.0)
+        assert row["ownship_heading_true_deg"] == pytest.approx(292.0)
+        assert row["ownship_pitch_deg"] == pytest.approx(-6.5)
+        assert row["ownship_bank_deg"] == pytest.approx(12.0)
+
+    def test_attitude_null_without_telemetry(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), SightHead())
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["ownship_pitch_deg"] is None
+        assert row["ownship_bank_deg"] is None
+
+
+def _trace(
+    object_id: int, outcome: GateOutcome, optic: str, range_m: float = 3000.0
+) -> DetectionTrace:
+    return DetectionTrace(
+        object_id=object_id,
+        object_type="BMP-2",
+        t_sim=1.0,
+        true_bearing_deg=45.0,
+        true_range_m=range_m,
+        range_threshold_m=5000.0,
+        threshold_bound="optic",
+        outcome=outcome,
+        true_elevation_deg=-2.0,
+        optic=optic,
+    )
+
+
+class TestSightFov:
+    def test_keeps_only_sight_optic_rows_past_the_fov_gate(
+        self, tmp_path: Path
+    ) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            GuidanceUnitState(),
+            SightHead(),
+            detection_records=[
+                _trace(1, GateOutcome.ADMITTED, "sight_narrow"),
+                _trace(2, GateOutcome.TERRAIN_LOS, "sight_wide"),
+                _trace(3, GateOutcome.RANGE_OR_SIZE, "sight_narrow"),
+                _trace(4, GateOutcome.FOREST, "sight_narrow"),
+                _trace(5, GateOutcome.OPTIC_FOV, "sight_narrow"),
+                _trace(6, GateOutcome.GAZE, "sight_narrow"),
+                _trace(7, GateOutcome.PLAYER_BUBBLE, "sight_narrow"),
+                _trace(8, GateOutcome.COCKPIT_MASK, "sight_narrow"),
+                _trace(9, GateOutcome.ADMITTED, "unaided"),
+                _trace(10, GateOutcome.ADMITTED, "binocular"),
+            ],
+        )
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        sight_fov = row["sight_fov"]
+        assert isinstance(sight_fov, list)
+        assert sorted(entry["object_id"] for entry in sight_fov) == [1, 2, 3, 4]
+
+    def test_entries_nearest_first_with_truth_geometry(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            GuidanceUnitState(),
+            SightHead(),
+            detection_records=[
+                _trace(1, GateOutcome.ADMITTED, "sight_narrow", range_m=4000.0),
+                _trace(2, GateOutcome.TERRAIN_LOS, "sight_narrow", range_m=2500.0),
+            ],
+        )
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["sight_fov"] == [
+            {
+                "object_id": 2,
+                "object_type": "BMP-2",
+                "optic": "sight_narrow",
+                "outcome": "terrain_los",
+                "true_bearing_deg": 45.0,
+                "true_elevation_deg": -2.0,
+                "true_range_m": 2500.0,
+            },
+            {
+                "object_id": 1,
+                "object_type": "BMP-2",
+                "optic": "sight_narrow",
+                "outcome": "admitted",
+                "true_bearing_deg": 45.0,
+                "true_elevation_deg": -2.0,
+                "true_range_m": 4000.0,
+            },
+        ]
+
+    def test_empty_without_records(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), SightHead())
+        writer.flush()
+
+        assert _row(tmp_path / "slew.jsonl")["sight_fov"] == []
 
 
 class TestBufferingAndFailure:

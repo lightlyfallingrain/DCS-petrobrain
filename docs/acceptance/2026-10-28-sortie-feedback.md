@@ -102,3 +102,16 @@ important thing is that the Petrobrain simulated and DCS sight *match*."*
 So the real sight's elevation field is the measured readback range, 555 from **0.278 to 1.0**
 (minus the margin), around boresight **0.83**. Matching the simulated sight is the criterion, not
 keeping the cross visible. Built on `fix/9k113-el-field-measured`.
+
+## 5. Simulated vs DCS 9K113 sight: pointing or sync wrong
+
+**User, verbatim:**
+
+> *"9K113 pointing and/or sync between simulated and DCS sight is incorrect."*
+
+No further detail yet: which way it is off, whether the error grows with pitch or bank, and whether
+it is the simulated head or the DCS sight that is wrong are all open. **Not explored, not fixed.**
+The first step is data. `--slew-trace` was extended for this (`feature/slew-trace-context`): sim
+time, the simulated head's axis, the ASP-17 mark, ownship pitch/bank, and what the simulated sight's
+FOV contains, all on one row per poll. Fly with it on, then `/explore` what the behaviour should be
+before an Architect pass.

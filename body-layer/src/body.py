@@ -3165,6 +3165,8 @@ def _run_crew_text_poll_loop(
             or eyesight_view
             or pov_view
             or belief_truth_log_path is not None
+            # `--slew-trace`'s `sight_fov` column reads this poll's records.
+            or slew_trace_path is not None
         )
         else None
     )
@@ -3293,6 +3295,11 @@ def _run_crew_text_poll_loop(
                     runner.optic_state = replace(
                         runner.optic_state, point_clear_label=None
                     )
+                # Kept past the clear below for `--slew-trace`'s `sight_fov`,
+                # which is written later in this poll.
+                poll_detection_records = (
+                    list(trace_collector.records) if trace_collector is not None else []
+                )
                 if trace_collector is not None:
                     if eyesight_view or pov_view:
                         # Split one terminal's line budget in half when
@@ -3864,6 +3871,8 @@ def _run_crew_text_poll_loop(
                                 runner.sight_head,
                                 sight_servo_latest,
                                 commanded_values=runner.effector_state.commanded_values,
+                                ownship=runner.last_ownship_state,
+                                detection_records=poll_detection_records,
                             )
                     # BL-8: after `run_once()` has settled this poll's
                     # belief, before `drain_events` -- Decision 3's
