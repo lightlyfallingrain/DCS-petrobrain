@@ -479,7 +479,7 @@ rather than from this dump).
 | `SIGHT-CROSSHAIR-BACKUP-PTR` | Sight Crosshair Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3013] | [568] |  | 0/1 |  |
 | `SIGHT-CROSSHAIR-BRIGHNTNESS-KNOB-PTR` | Sight Crosshair Brightness Adjustment | pilot (defaulted) | default_axis | [3011] | [564] |  | 0 to 1 continuous (gain 0.05) |  |
 | `SIGHT-GRID-BACKUP-PTR` | Sight Grid Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3012] | [569] |  | 0/1 |  |
-| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  | 0 to 1 continuous (gain 0.05) |  |
+| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  | 0 to 1 continuous (gain 0.05) | `sight_grid_brightness` |
 | `SIGHT-HOR-KNOB-PTR` | Sight Crosshair Horizontal Adjustment | pilot (defaulted) | default_axis | [3006] | [566] |  | 0 to 1 continuous (gain 0.0125) |  |
 | `SIGHT-MAN-AUTO-PTR` | Sight mode MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3001] | [553] |  | 0/0.5 |  |
 | `SIGHT-SYNC-UNSYNC-PTR` | Sight mode SYNC/ASYNC | pilot (defaulted) | default_2_position_tumb | [3002] | [554] |  | 0/0.5 |  |
@@ -843,8 +843,8 @@ rather than from this dump).
 
 | Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  | 0/1 |  |
-| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  | 0/1 |  |
+| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  | 0/1 | `intercom_1` |
+| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  | 0/1 | `intercom_2` |
 | `SPU8-CV-PTR` | Circular Call Button (N/F) | pilot (defaulted) | default_button | [3008] | [454] |  | 0/1 momentary |  |
 | `SPU8-EXT-PTR` | Radio/ICS Switch | pilot (defaulted) | default_2_position_tumb | [3004] | [456] |  | 0/1 |  |
 | `SPU8-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | pilot (defaulted) | multiposition_switch | [3003] | [455] |  | 0/0.2/0.4/0.6/0.8/1 |  |
@@ -962,7 +962,7 @@ rather than from this dump).
 | `GFORCE-RESET-PTR001` | Check RWR | pilot (defaulted) | default_button | [3004] | [990] |  | 0/1 momentary |  |
 | `MAPDISPLAY-VERT-PTR001` | RWR DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3003] | [989] |  | 0/1 |  |
 | `SIRENA-POWER-PTR` | RWR Power | pilot (defaulted) | default_2_position_tumb | [3001] | [366] |  | 0/1 |  |
-| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  | 0/1 |  |
+| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  | 0/1 | `rwr_signal` |
 
 ## Device 68 -- KM_2
 

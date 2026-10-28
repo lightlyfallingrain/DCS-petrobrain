@@ -6862,6 +6862,10 @@ def test_load_effector_config_round_trips_the_real_committed_files() -> None:
         "scho_pwr_b1",
         "observ",
         "weapon_safety",
+        "rwr_signal",
+        "sight_grid_brightness",
+        "intercom_1",
+        "intercom_2",
     }
     assert set(sequences) == {
         ("Mi-24P", "copilot", "takeoff"),
@@ -6869,6 +6873,7 @@ def test_load_effector_config_round_trips_the_real_committed_files() -> None:
         ("Mi-24P", "copilot", "observ-off"),
         ("Mi-24P", "copilot", "weapons-arm"),
         ("Mi-24P", "copilot", "weapons-safe"),
+        ("Mi-24P", "copilot", "mission-start-in-air"),
     }
 
 

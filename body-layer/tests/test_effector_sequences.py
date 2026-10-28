@@ -425,6 +425,7 @@ def test_every_shipped_sequence_file_round_trips(
         ("Mi-24P", "copilot", "observ-off"),
         ("Mi-24P", "copilot", "weapons-arm"),
         ("Mi-24P", "copilot", "weapons-safe"),
+        ("Mi-24P", "copilot", "mission-start-in-air"),
     }
 
 

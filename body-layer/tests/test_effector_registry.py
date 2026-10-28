@@ -246,6 +246,10 @@ def test_round_trip_against_the_committed_registry() -> None:
         "scho_pwr_b1": (6, 3030, 955),
         "observ": (7, 3002, 886),
         "weapon_safety": (6, 3020, 673),
+        "rwr_signal": (67, 3002, 365),
+        "sight_grid_brightness": (16, 3010, 567),
+        "intercom_1": (55, 3018, 376),
+        "intercom_2": (55, 3017, 377),
     }
     assert set(registry) == set(expected)
     for name, (device, cmd, arg) in expected.items():
@@ -281,6 +285,10 @@ def test_load_registries_by_aircraft_discovers_the_real_mi24p_directory() -> Non
         "scho_pwr_b1",
         "observ",
         "weapon_safety",
+        "rwr_signal",
+        "sight_grid_brightness",
+        "intercom_1",
+        "intercom_2",
     }
 
 
