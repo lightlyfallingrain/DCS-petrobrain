@@ -18,24 +18,70 @@ readback). The head's own world-frame state (`mode`, `world_az_true_deg`/
 `world_el_deg`, `goal_world_az_deg`/`goal_world_el_deg`, `aim_source`) is
 carried separately, and the DCS-slave servo's own status (`sight_servo_
 latest`, `GET /sight_servo/latest`) when available -- mode, the mark-
-derived body direction, error, and the stall flag."""
+derived body direction, error, and the stall flag.
+
+**v4 columns** (2026-10-28, user direction after a sortie where the
+simulated and DCS sight disagreed: *"9K113 pointing and/or sync between
+simulated and DCS sight is incorrect"*): the servo's own setpoint, the
+ASP-17 mark (crosshair-derived body direction) with its edge-park fields
+and its DCS model time, so the simulated head and the real crosshair can
+be compared row by row; ownship attitude (`pitch_deg`/`bank_deg`/heading/
+position), since the head stabilises a *world* direction and every
+body/world conversion depends on them; and `sight_fov`, the objects this
+poll's perception evaluated through a sight optic and found inside its
+field of view -- what the simulated 9K113 "sees". `sight_fov` carries
+ground truth (true bearing/range per object, like the detection trace):
+a debug log, never an input to Petrovich."""
 
 from __future__ import annotations
 
 import contextlib
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
 from belief.optic_policy import OpticState
 from belief.sight_effector import GuidanceUnitState
 from belief.sight_head import SightHead
+from perception.detection_trace import DetectionTrace, GateOutcome
+from perception.source import OwnshipState
 
 #: Same reasoning/value as `detection_trace_writer.DEFAULT_FLUSH_EVERY_N_
 #: POLLS` -- a few polls' worth of buffering, not "as rarely as possible".
 DEFAULT_FLUSH_EVERY_N_POLLS = 5
+
+#: Gate outcomes a candidate can only reach *after* clearing the optic's
+#: field-of-view gate (`GateOutcome`'s declaration order is the gate
+#: order) -- i.e. it was inside the sight's FOV this poll, whether or not
+#: range/size, terrain or forest then rejected it.
+_INSIDE_FOV_OUTCOMES = frozenset(
+    {
+        GateOutcome.RANGE_OR_SIZE,
+        GateOutcome.TERRAIN_LOS,
+        GateOutcome.FOREST,
+        GateOutcome.ADMITTED,
+    }
+)
+
+#: `sight_servo_latest` keys copied through as `servo_<key>` columns,
+#: verbatim -- `aircraft-layer`'s `schema.sight_servo.SightServoState`.
+_SERVO_KEYS = (
+    "mode",
+    "dcs_model_time_s",
+    "setpoint_azimuth_deg",
+    "setpoint_elevation_deg",
+    "mark_azimuth_deg",
+    "mark_elevation_deg",
+    "mark_clipped",
+    "field_target_azimuth_deg",
+    "field_target_elevation_deg",
+    "error_azimuth_deg",
+    "error_elevation_deg",
+    "stalled",
+    "stall_count",
+)
 
 
 class SightTraceWriter:
@@ -63,6 +109,8 @@ class SightTraceWriter:
         sight_head: SightHead,
         sight_servo_latest: dict[str, Any] | None = None,
         commanded_values: Mapping[str, str] | None = None,
+        ownship: OwnshipState | None = None,
+        detection_records: Sequence[DetectionTrace] = (),
     ) -> None:
         """Appends this poll's one row. Called every poll, unconditionally
         (unlike the Lua-side per-frame log, which only runs while OBSERV
@@ -79,7 +127,12 @@ class SightTraceWriter:
         here, Stage 2). `None` -- the default, for every existing call site
         that predates the engine -- reads as "no successful write yet",
         the same `False` default `observ_commanded` already had on
-        `GuidanceUnitState` before the move."""
+        `GuidanceUnitState` before the move.
+
+        `ownship` is this poll's telemetry (`None` writes null attitude
+        columns). `detection_records` is this poll's detection-trace
+        entries; only sight-optic rows inside the FOV are kept, as
+        `sight_fov`."""
         if self._disabled:
             return
         try:
@@ -92,6 +145,8 @@ class SightTraceWriter:
                         sight_head,
                         sight_servo_latest,
                         commanded_values,
+                        ownship,
+                        detection_records,
                     )
                 )
             )
@@ -143,6 +198,8 @@ def _row(
     sight_head: SightHead,
     sight_servo_latest: dict[str, Any] | None,
     commanded_values: Mapping[str, str] | None = None,
+    ownship: OwnshipState | None = None,
+    detection_records: Sequence[DetectionTrace] = (),
 ) -> dict[str, object | None]:
     desired_azimuth_deg = optic_state.look_azimuth_deg
     desired_elevation_deg = optic_state.look_elevation_deg
@@ -160,15 +217,7 @@ def _row(
         else None
     )
 
-    servo_mode = None
-    servo_error_azimuth_deg = None
-    servo_error_elevation_deg = None
-    servo_stalled = None
-    if sight_servo_latest is not None:
-        servo_mode = sight_servo_latest.get("mode")
-        servo_error_azimuth_deg = sight_servo_latest.get("error_azimuth_deg")
-        servo_error_elevation_deg = sight_servo_latest.get("error_elevation_deg")
-        servo_stalled = sight_servo_latest.get("stalled")
+    servo = sight_servo_latest or {}
 
     return {
         "t": t_sim,
@@ -184,13 +233,42 @@ def _row(
         "head_goal_world_azimuth_deg": sight_head.goal_world_az_deg,
         "head_goal_world_elevation_deg": sight_head.goal_world_el_deg,
         "aim_source": sight_head.aim_source,
-        "servo_mode": servo_mode,
-        "servo_error_azimuth_deg": servo_error_azimuth_deg,
-        "servo_error_elevation_deg": servo_error_elevation_deg,
-        "servo_stalled": servo_stalled,
+        **{f"servo_{key}": servo.get(key) for key in _SERVO_KEYS},
         "observ_commanded": ((commanded_values or {}).get("observ") == "on"),
         "observ_observed": guidance_unit_state.observ_observed,
         "optic_mode": (
             optic_state.look_optic.name if desired_azimuth_deg is not None else None
         ),
+        "ownship_x": ownship.x if ownship is not None else None,
+        "ownship_z": ownship.z if ownship is not None else None,
+        "ownship_alt_m": ownship.alt_m if ownship is not None else None,
+        "ownship_heading_true_deg": (
+            ownship.heading_true_deg if ownship is not None else None
+        ),
+        "ownship_pitch_deg": ownship.pitch_deg if ownship is not None else None,
+        "ownship_bank_deg": ownship.bank_deg if ownship is not None else None,
+        "sight_fov": _sight_fov(detection_records),
     }
+
+
+def _sight_fov(records: Sequence[DetectionTrace]) -> list[dict[str, object]]:
+    """This poll's sight-optic candidates that were inside the FOV, nearest
+    first. Empty when no sight optic was looked through this poll."""
+    inside = [
+        record
+        for record in records
+        if record.optic.startswith("sight") and record.outcome in _INSIDE_FOV_OUTCOMES
+    ]
+    inside.sort(key=lambda record: record.true_range_m)
+    return [
+        {
+            "object_id": record.object_id,
+            "object_type": record.object_type,
+            "optic": record.optic,
+            "outcome": record.outcome.value,
+            "true_bearing_deg": record.true_bearing_deg,
+            "true_elevation_deg": record.true_elevation_deg,
+            "true_range_m": record.true_range_m,
+        }
+        for record in inside
+    ]

@@ -135,8 +135,10 @@ because an utterance matching no command is otherwise unobservable.
   azimuth (874) does convert, via the one confirmed calibration (`arg_874 = (deg/60)*0.44`,
   `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md` finding 2).
 - `--slew-trace`'s own per-**poll** body-layer file (`--body-slew`, no default path -- the flag
-  itself has none): desired-vs-actual azimuth, whether the actual value came from a real readback
-  or body-layer's own model, and the resulting error. A coarse cross-check against the per-frame
+  itself has none): desired-vs-actual aim, the simulated `SightHead`'s world direction, the DCS
+  servo's setpoint/ASP-17 mark/error (`servo_*`), ownship attitude (`ownship_pitch_deg`/
+  `ownship_bank_deg`) and `sight_fov` (objects inside the simulated sight's FOV that poll) --
+  `body-layer/CLAUDE.md`'s `--slew-trace` paragraph has the full column list. A coarse cross-check against the per-frame
   file above, not a replacement for it -- body-layer's 1 Hz poll cannot see a slew in progress.
 
 ## What it deliberately does not do
