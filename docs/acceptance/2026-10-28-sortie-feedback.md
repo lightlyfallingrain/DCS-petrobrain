@@ -92,3 +92,13 @@ sight; not identified. Seen only on the ground, only below boresight; the airbor
 its bottom limit (0.278) is the one taken.
 
 **Status:** measured; the ground-only break recorded, not investigated.
+
+## 4. Decision: the elevation park limits are the readback limits
+
+Offered: park the real sight's bottom at the bottom of the pilot's view, or at the readback limit.
+**User, verbatim:** *"readback limit. Here it does not matter that it can be out of my sight, the
+important thing is that the Petrobrain simulated and DCS sight *match*."*
+
+So the real sight's elevation field is the measured readback range, 555 from **0.278 to 1.0**
+(minus the margin), around boresight **0.83**. Matching the simulated sight is the criterion, not
+keeping the cross visible. Built on `fix/9k113-el-field-measured`.
