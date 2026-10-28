@@ -56,4 +56,14 @@ Log: `aircraft-layer/research/logs/2026-10-28/aircraft_layer_probe_9k113_hud_ele
 - Open, for the pilot: where the cross stood on the glass at each end, whether the bottom stop was
   the HUD's bottom edge, and where it was at the start (boresight or not).
 
-**Status:** measured; pilot's eye observations pending.
+**Pilot, verbatim:**
+
+> *"1 about boresight.*
+> *2 below what I can normally see as pilot, but apparently the ASP-17 crosshair can move that low*
+> *3 a little, but that is from the helicopter movement"*
+
+So: **555 boresight ≈ 0.829** (production's placeholder `MARK_BORESIGHT_EL = 0.556` is far off).
+The top clip (1.0) is ~5.6° above boresight; the **bottom readback limit (0.278) lies below the
+pilot's normal view of the HUD** — readable, but not seen. The sideways drift was the airframe.
+
+**Status:** measured; observations in.
