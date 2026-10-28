@@ -20,6 +20,20 @@
   card `docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`, ~1 min. Its `EDGE UP`/`EDGE DOWN`
   555 values set `ASP17_FIELD_EL_HALF_DEG` and the margin. `#needs-flight`
 
+  **Elevation field measured in flight 2026-10-28, `fix/9k113-el-field-measured`.** Two sorties
+  (`docs/acceptance/2026-10-28-sortie-feedback.md` §2-4) replaced the placeholder
+  `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_HALF_DEG` above with measured values:
+  boresight 0.83, scale 1/0.030, and an **asymmetric** field (~+5.7°/−18.4° about boresight, not a
+  half-angle) derived from the raw clip readings (top saturates at 1.0; bottom readback limit
+  0.278, the user's own decision — *"readback limit... the important thing is that the Petrobrain
+  simulated and DCS sight match"*). `sight_clip_to_field_body_deg`/`sight_mark_is_clipped` both
+  gained a signature split (one elevation bound → up/down). Discovery: the measured down bound
+  exceeds the sight's own gimbal down limit (−15°), so only the up side is ever reachable through
+  the normal setpoint path — see `plans/9k113-sight-pointing/implementation.md`'s matching entry.
+  `#needs-flight` still applies: this closes the elevation-calibration gap the previous entry
+  flagged, but the edge-park behaviour itself (does the real mark visibly sit at the new bounds,
+  does continuous tracking look right against them) is unconfirmed live.
+
   ## v3 Stage 6 DoD-passed 2026-10-26 (`f65f0ce0`, merged `d763ab20`) — `#needs-flight`
 
   `plans/9k113-sight-pointing/plan.md` v3 Stage 6 — the ASP-17 edge-park fix for the

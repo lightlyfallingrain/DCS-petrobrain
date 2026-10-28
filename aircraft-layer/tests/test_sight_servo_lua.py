@@ -215,21 +215,31 @@ class TestSightMarkToBodyDeg:
 
 #: Production's own margin-reduced call (`run_sight_servo`'s "v3:
 #: `field_target`" comment) -- the property test below pins this exact
-#: bound, not the raw field half-angle.
+#: bound, not the raw field half-angle. Elevation's up/down insets use
+#: round numbers rather than production's own measured 2026-10-28
+#: values (~5.17/~17.9) since this property test is about the clip
+#: function's own shape, not a production-constant regression pin.
 _FIELD_HALF_INSET_DEG = 4.3 - 0.5
+_FIELD_EL_UP_INSET_DEG = 5.0 - 0.5
+_FIELD_EL_DOWN_INSET_DEG = 15.0 - 0.5
 
 
 class TestSightClipToFieldBodyDeg:
     """v3's `sight_clip_to_field_body_deg` -- the standard ray-to-box
-    clip (`plans/9k113-sight-pointing/plan.md` v3's own Lua snippet)."""
+    clip (`plans/9k113-sight-pointing/plan.md` v3's own Lua snippet).
+    Elevation's two bounds (`field_el_up_deg`/`field_el_down_deg`) became
+    independent 2026-10-28 once flight measured them as asymmetric; a
+    symmetric call passes the same value for both, which these existing
+    (pre-asymmetry) cases do, and the dedicated asymmetric-elevation
+    tests below pass different ones."""
 
     def test_inside_field_is_unclipped(self) -> None:
         az, el, clipped = _run_lua(
             ["sight_clip_to_field_body_deg"],
             [
-                "(select(1, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3)))",
-                "(select(2, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3)))",
-                "(select(3, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3)) and 1 or 0)",
+                "(select(1, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3, 4.3)))",
+                "(select(2, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3, 4.3)))",
+                "(select(3, sight_clip_to_field_body_deg(2.0, 1.0, 4.3, 4.3, 4.3)) and 1 or 0)",
             ],
         )
         assert az == pytest.approx(2.0)
@@ -237,7 +247,7 @@ class TestSightClipToFieldBodyDeg:
         assert bool(clipped) is False
 
     def test_azimuth_only_clip_lands_exactly_on_the_edge(self) -> None:
-        call = "sight_clip_to_field_body_deg(20.0, 0.0, 4.3, 4.3)"
+        call = "sight_clip_to_field_body_deg(20.0, 0.0, 4.3, 4.3, 4.3)"
         az, el, clipped = _run_lua(
             ["sight_clip_to_field_body_deg"],
             [
@@ -254,7 +264,7 @@ class TestSightClipToFieldBodyDeg:
         # az alone would allow scale = 4.3/10 = 0.43; el alone would allow
         # scale = 2.0/10 = 0.2 -- the smaller (el's) must be the one used,
         # landing el exactly on its own edge and az short of its own.
-        call = "sight_clip_to_field_body_deg(10.0, 10.0, 4.3, 2.0)"
+        call = "sight_clip_to_field_body_deg(10.0, 10.0, 4.3, 2.0, 2.0)"
         az, el, clipped = _run_lua(
             ["sight_clip_to_field_body_deg"],
             [
@@ -266,6 +276,76 @@ class TestSightClipToFieldBodyDeg:
         assert el == pytest.approx(2.0)
         assert az == pytest.approx(2.0)  # same scale (0.2) applied to both
         assert az < 4.3
+        assert bool(clipped) is True
+
+    def test_setpoint_above_the_up_bound_lands_on_the_up_edge(self) -> None:
+        # Asymmetric elevation (up=5.0, down=15.0): a setpoint well above
+        # the up bound must clip there, never at the (much larger) down
+        # bound.
+        call = "sight_clip_to_field_body_deg(0.0, 20.0, 4.3, 5.0, 15.0)"
+        az, el, clipped = _run_lua(
+            ["sight_clip_to_field_body_deg"],
+            [
+                f"(select(1, {call}))",
+                f"(select(2, {call}))",
+                f"(select(3, {call}) and 1 or 0)",
+            ],
+        )
+        assert az == pytest.approx(0.0)
+        assert el == pytest.approx(5.0)
+        assert bool(clipped) is True
+
+    def test_setpoint_below_the_down_bound_lands_on_the_down_edge(self) -> None:
+        # Same asymmetric field, mirrored: a setpoint well below the down
+        # bound clips at -15.0, not at -5.0.
+        call = "sight_clip_to_field_body_deg(0.0, -30.0, 4.3, 5.0, 15.0)"
+        az, el, clipped = _run_lua(
+            ["sight_clip_to_field_body_deg"],
+            [
+                f"(select(1, {call}))",
+                f"(select(2, {call}))",
+                f"(select(3, {call}) and 1 or 0)",
+            ],
+        )
+        assert az == pytest.approx(0.0)
+        assert el == pytest.approx(-15.0)
+        assert bool(clipped) is True
+
+    def test_setpoint_inside_the_asymmetric_field_is_unchanged(self) -> None:
+        # -10.0 is inside the down bound (15.0) despite being outside the
+        # up bound (5.0) -- the sign, not the magnitude alone, selects
+        # which bound applies.
+        call = "sight_clip_to_field_body_deg(0.0, -10.0, 4.3, 5.0, 15.0)"
+        az, el, clipped = _run_lua(
+            ["sight_clip_to_field_body_deg"],
+            [
+                f"(select(1, {call}))",
+                f"(select(2, {call}))",
+                f"(select(3, {call}) and 1 or 0)",
+            ],
+        )
+        assert az == pytest.approx(0.0)
+        assert el == pytest.approx(-10.0)
+        assert bool(clipped) is False
+
+    def test_diagonal_setpoint_below_the_down_bound_still_clips_azimuth_too(
+        self,
+    ) -> None:
+        # Diagonal case: az alone would allow scale = 4.3/8 = 0.5375; the
+        # down bound alone would allow scale = 15.0/24 = 0.625 -- az is
+        # the smaller, so it wins and el lands short of its own edge.
+        call = "sight_clip_to_field_body_deg(8.0, -24.0, 4.3, 5.0, 15.0)"
+        az, el, clipped = _run_lua(
+            ["sight_clip_to_field_body_deg"],
+            [
+                f"(select(1, {call}))",
+                f"(select(2, {call}))",
+                f"(select(3, {call}) and 1 or 0)",
+            ],
+        )
+        assert az == pytest.approx(4.3)
+        assert el == pytest.approx(-12.9, abs=1e-6)  # -24 * (4.3/8)
+        assert el > -15.0
         assert bool(clipped) is True
 
     @pytest.mark.parametrize(
@@ -289,35 +369,46 @@ class TestSightClipToFieldBodyDeg:
     ) -> None:
         """The property test the plan names: for any sampled setpoint
         magnitude up to the full gimbal range, `field_target` never lands
-        outside `ASP17_FIELD_*_HALF_DEG - ASP17_FIELD_MARGIN_DEG` on
-        either axis -- production's own call (`run_sight_servo`), not the
-        raw field half-angle."""
+        outside the margin-inset field on either axis -- production's own
+        call shape (`run_sight_servo`), not the raw field bounds."""
         call = (
             f"sight_clip_to_field_body_deg({set_az_deg}, {set_el_deg}, "
-            f"{_FIELD_HALF_INSET_DEG}, {_FIELD_HALF_INSET_DEG})"
+            f"{_FIELD_HALF_INSET_DEG}, {_FIELD_EL_UP_INSET_DEG}, {_FIELD_EL_DOWN_INSET_DEG})"
         )
         az, el = _run_lua(
             ["sight_clip_to_field_body_deg"],
             [f"(select(1, {call}))", f"(select(2, {call}))"],
         )
         assert abs(az) <= _FIELD_HALF_INSET_DEG + 1e-9
-        assert abs(el) <= _FIELD_HALF_INSET_DEG + 1e-9
+        assert el <= _FIELD_EL_UP_INSET_DEG + 1e-9
+        assert el >= -_FIELD_EL_DOWN_INSET_DEG - 1e-9
 
 
 class TestSightMarkIsClipped:
     """v3's `sight_mark_is_clipped` -- the root-cause fix: checks the
     mark's own raw reading against the ASP-17's own clip bound, not the
-    setpoint against the gimbal limits (the old, wrongly-sized check)."""
+    setpoint against the gimbal limits (the old, wrongly-sized check).
+    `field_up_deg`/`field_down_deg` became independent 2026-10-28 once
+    flight measured elevation as asymmetric; a symmetric call (azimuth)
+    passes the same value for both."""
 
     _BORESIGHT = 0.500
     _DEG_PER_UNIT = 1.0 / 0.039
     _FIELD_HALF_DEG = 4.3
     _MARGIN_DEG = 0.5
 
-    def _clipped(self, mark_raw: float) -> bool:
+    def _clipped(
+        self,
+        mark_raw: float,
+        *,
+        field_up_deg: float | None = None,
+        field_down_deg: float | None = None,
+    ) -> bool:
+        up = self._FIELD_HALF_DEG if field_up_deg is None else field_up_deg
+        down = self._FIELD_HALF_DEG if field_down_deg is None else field_down_deg
         call = (
             f"sight_mark_is_clipped({mark_raw}, {self._BORESIGHT}, "
-            f"{self._FIELD_HALF_DEG}, {self._DEG_PER_UNIT}, {self._MARGIN_DEG})"
+            f"{up}, {down}, {self._DEG_PER_UNIT}, {self._MARGIN_DEG})"
         )
         (result,) = _run_lua(["sight_mark_is_clipped"], [f"({call} and 1 or 0)"])
         return bool(result)
@@ -342,6 +433,28 @@ class TestSightMarkIsClipped:
         # reading (v3's "Tests" section, "mark reading held exactly at
         # the clip edge (566 = 0.667)").
         assert self._clipped(0.667) is True
+
+    def test_asymmetric_up_bound_clips_independently_of_the_down_bound(
+        self,
+    ) -> None:
+        # up=5.0, down=15.0: a reading 4.6 deg above boresight is clipped
+        # against the (smaller) up bound, even though the same magnitude
+        # would be well inside the down bound.
+        mark_raw_up = self._BORESIGHT + 4.6 / self._DEG_PER_UNIT
+        mark_raw_down = self._BORESIGHT - 4.6 / self._DEG_PER_UNIT
+        assert self._clipped(mark_raw_up, field_up_deg=5.0, field_down_deg=15.0) is True
+        assert (
+            self._clipped(mark_raw_down, field_up_deg=5.0, field_down_deg=15.0) is False
+        )
+
+    def test_asymmetric_down_bound_clips_independently_of_the_up_bound(
+        self,
+    ) -> None:
+        # Mirror of the above: a reading 14.6 deg below boresight clips
+        # against the down bound (15.0), where the same magnitude above
+        # boresight would already have cleared the (smaller) up bound.
+        mark_raw = self._BORESIGHT - 14.6 / self._DEG_PER_UNIT
+        assert self._clipped(mark_raw, field_up_deg=5.0, field_down_deg=15.0) is True
 
 
 class TestSightObservTransition:
@@ -658,7 +771,6 @@ local GIMBAL_AZ_HALF_DEG = 60.0
 local GIMBAL_EL_UP_DEG = 20.0
 local GIMBAL_EL_DOWN_DEG = -15.0
 local ASP17_FIELD_AZ_HALF_DEG = 4.3
-local ASP17_FIELD_EL_HALF_DEG = 4.3
 local ASP17_FIELD_MARGIN_DEG = 0.5
 local KP = 3.0
 local FF_GAIN = 3.0
@@ -668,8 +780,14 @@ local STALL_WINDOW_S = 0.4
 local STALL_MOVE_EPS = 0.003
 local MARK_BORESIGHT_AZ = 0.500
 local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
-local MARK_BORESIGHT_EL = 0.556
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.039
+-- Matches production's measured 2026-10-28 calibration/field (`Export.
+-- lua`'s own `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_
+-- UP_DEG`/`ASP17_FIELD_EL_DOWN_DEG`), not extracted (same reasoning as
+-- every other constant in this preamble).
+local MARK_BORESIGHT_EL = 0.83
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.030
+local ASP17_FIELD_EL_UP_DEG = (1.0 - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
+local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - 0.278) * MARK_DEG_PER_UNIT_EL
 local STALE_TARGET_TIMEOUT_S = 3.0
 local EXTRAPOLATION_CAP_S = 2.0
 local SERVO_WOBBLE = "dither"
@@ -812,12 +930,16 @@ end
     return [_FieldParkResult(line) for line in result.stdout.splitlines()]
 
 
-def _mark_raw(body_deg: float, *, boresight: float = 0.500) -> float:
-    """Inverts `sight_mark_to_body_deg` for `MARK_DEG_PER_UNIT_* = 1/0.039`
-    (both axes, same as the harness's own constants) -- builds a raw mark
-    arg that will read back as `body_deg` once `run_sight_servo` converts
-    it."""
-    return boresight + body_deg * 0.039
+def _mark_raw(
+    body_deg: float, *, boresight: float = 0.500, scale: float = 0.039
+) -> float:
+    """Inverts `sight_mark_to_body_deg` for the given `1/MARK_DEG_PER_
+    UNIT_*` -- builds a raw mark arg that will read back as `body_deg`
+    once `run_sight_servo` converts it. Defaults (`boresight=0.500,
+    scale=0.039`) match the harness's own azimuth constants; elevation
+    callers pass `boresight=0.83, scale=0.030` to match the harness's
+    (measured 2026-10-28) `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`."""
+    return boresight + body_deg * scale
 
 
 class TestRunSightServoFieldPark:
@@ -842,19 +964,19 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
                 _FieldParkFrame(
                     0.2,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.0),
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
                 _FieldParkFrame(
                     0.4,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.7),
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
             ]
         )
@@ -881,7 +1003,7 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(1.0, 0.0),
                     m566=0.667,
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
             ]
         )
@@ -898,13 +1020,13 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(1.0, 0.0),
                     m566=0.667,
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
                 _FieldParkFrame(
                     0.2,
                     setpoint=(1.0, 0.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
             ]
         )
@@ -926,17 +1048,20 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.5, boresight=0.556),
+                    m555=_mark_raw(0.5, boresight=0.83, scale=0.030),
                 ),
-                # field_target now (3.8, 3.04) (az-limited clip); ff_az =
-                # (3.8 - 2.0) / 1.0 = 1.8, NOT the deliberately-mismatched
-                # raw rate (50 deg/s) fed in via `rate`.
+                # field_target now (3.8, 3.04) (az-limited clip, az's own
+                # inset edge still the smaller scale under the asymmetric
+                # elevation field too -- 3.04 is well inside the up inset,
+                # ~5.17); ff_az = (3.8 - 2.0) / 1.0 = 1.8, NOT the
+                # deliberately-mismatched raw rate (50 deg/s) fed in via
+                # `rate`.
                 _FieldParkFrame(
                     1.0,
                     setpoint=(10.0, 8.0),
                     rate=(50.0, 0.0),
                     m566=_mark_raw(3.0),
-                    m555=_mark_raw(1.0, boresight=0.556),
+                    m555=_mark_raw(1.0, boresight=0.83, scale=0.030),
                 ),
             ]
         )
@@ -949,8 +1074,8 @@ class TestRunSightServoFieldPark:
         all -- `homing` must, using the same mark-motion definition."""
         frames = _run_field_park_sequence(
             [
-                _FieldParkFrame(0.2, setpoint=(1.0, 0.0), m566=0.667, m555=0.556),
-                _FieldParkFrame(0.7, setpoint=(1.0, 0.0), m566=0.667, m555=0.556),
+                _FieldParkFrame(0.2, setpoint=(1.0, 0.0), m566=0.667, m555=0.83),
+                _FieldParkFrame(0.7, setpoint=(1.0, 0.0), m566=0.667, m555=0.83),
             ]
         )
         assert [r.mode for r in frames] == ["homing", "homing"]
@@ -972,7 +1097,7 @@ class TestRunSightServoFieldPark:
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
-                    float(i), setpoint=(az, 4.2), m566=_mark_raw(0.0), m555=0.556
+                    float(i), setpoint=(az, 4.2), m566=_mark_raw(0.0), m555=0.83
                 )
                 for i, az in enumerate(az_values)
             ]
@@ -1004,16 +1129,61 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(10.0, 0.0),
                     m566=_mark_raw(3.8),
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
                 _FieldParkFrame(
                     0.5,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.79),  # still tracking, not fixed in place
-                    m555=_mark_raw(0.0, boresight=0.556),
+                    m555=_mark_raw(0.0, boresight=0.83),
                 ),
             ]
         )
         assert all(not r.stalled for r in frames)
         assert frames[0].stall_count == 0
         assert frames[1].stall_count == 0
+
+    def test_elevation_field_target_clips_at_the_up_inset_edge(self) -> None:
+        """End-to-end regression for the 2026-10-28 measured elevation
+        field (`docs/acceptance/2026-10-28-sortie-feedback.md` §2-4): a
+        setpoint far above boresight parks at the (small) up inset edge
+        -- the asymmetry the old, superseded symmetric `ASP17_FIELD_EL_
+        HALF_DEG` placeholder could never express."""
+        up_inset = (1.0 - 0.83) * (1.0 / 0.030) - 0.5
+        frames = _run_field_park_sequence(
+            [
+                _FieldParkFrame(
+                    0.0,
+                    setpoint=(0.0, 30.0),
+                    m566=_mark_raw(0.0),
+                    m555=_mark_raw(0.0, boresight=0.83, scale=0.030),
+                ),
+            ]
+        )
+        assert frames[0].field_target_el == pytest.approx(up_inset, abs=1e-6)
+
+    def test_elevation_down_field_bound_is_unreachable_through_the_gimbal(
+        self,
+    ) -> None:
+        """Notable discovery, not just a test: the measured down bound
+        (~18.4 deg, inset ~17.9) is *larger* than the sight's own gimbal
+        down limit (`GIMBAL_EL_DOWN_DEG = -15.0`), which clamps the
+        setpoint before it ever reaches `sight_clip_to_field_body_deg`.
+        So in production the down side of the asymmetric field can never
+        actually clip -- only the up side (~5.17 inset, well inside the
+        gimbal's +20 deg) can. Driving the setpoint to the full gimbal
+        extent lands `field_target_el` at the gimbal limit itself, not
+        at the (further-out) field bound -- the field clip for this
+        direction is pinned by the gimbal clip below the production
+        clip math is reached."""
+        frames = _run_field_park_sequence(
+            [
+                _FieldParkFrame(
+                    0.0,
+                    setpoint=(0.0, -40.0),
+                    m566=_mark_raw(0.0),
+                    m555=_mark_raw(0.0, boresight=0.83, scale=0.030),
+                ),
+            ]
+        )
+        assert frames[0].field_target_el == pytest.approx(-15.0, abs=1e-6)
