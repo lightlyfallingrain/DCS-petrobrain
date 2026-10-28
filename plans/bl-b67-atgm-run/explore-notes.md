@@ -228,3 +228,12 @@ That was measured for **rockets**, not ATGMs — a 9M114 appearing the same way 
 case, not yet observed, and its object `Name` is unknown. Design as the user states it: on launch
 (button + loadout −1), take the new world object whose type matches the carried missile; impact =
 that object leaving the list (round 2).
+
+### Flight A no longer gates the plan
+
+> *"we will work on sight pointing accuracy as well. But start doing what you can with the premise
+> that the sight pointing is (or will be) accurate."*
+
+The "Flight" item in "State at end of 2026-10-26" is **released as a gate on planning and
+building**: the plan takes `[[BL-B80]]`'s pointing chain as accurate (now or once fixed), and
+pointing accuracy is worked separately. Live acceptance of the run still depends on it.
