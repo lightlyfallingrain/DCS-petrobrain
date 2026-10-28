@@ -33,3 +33,6 @@ The degrees per raw unit are **not measured** — only implied, two incompatible
 
 The flat stop's shape does not tell the two apart. Settling it needs a known angle (a pitch change
 read against the attitude), not a commanded rate.
+
+**Shipped: 0.037** (user, 2026-10-28, on the reviewer's recommendation): physically consistent with
+the gimbal, near azimuth's 0.039. Field becomes ≈ +4.6° / −14.9° around boresight 0.83.

@@ -1271,21 +1271,25 @@ local STALL_MOVE_EPS = 0.003
 -- 2026-10-28 (`docs/acceptance/2026-10-28-sortie-feedback.md` §2)
 -- replacing the earlier unmeasured placeholder -- boresight ~0.83 (0.829
 -- air start, 0.833 ground start; pilot, verbatim, "about boresight");
--- scale is rate-derived, not a measured angle (commanded 0.5 deg/s gave
--- 555 slopes of 0.0162/0.0139 up and 0.0140/0.0128 down, air/ground, ~=
--- 0.030 raw units/deg -- the superseded 0.039 came from azimuth's own
--- probe, not an elevation measurement), pending a pitch-change check.
+-- scale 0.037 raw units/deg is gimbal-derived, not a measured angle: the
+-- air run's bottom readback stop (555 = 0.278) is taken as the sourced
+-- -15 deg gimbal limit, (0.83 - 0.278) / 15 ~= 0.037, close to azimuth's
+-- measured 0.039. The rate-derived 0.030 (commanded 0.5 deg/s against
+-- 555 slopes 0.0162/0.0139 up, 0.0140/0.0128 down) was rejected: it puts
+-- that stop at -18.4 deg, past the gimbal, and its two supporting figures
+-- share the same assumed rate (`plans/9k113-sight-pointing/review-el-
+-- field.md`; user chose 0.037, 2026-10-28). Pending a pitch-change check.
 local MARK_BORESIGHT_AZ = 0.500
 local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
 local MARK_BORESIGHT_EL = 0.83
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.030
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.037
 
 -- Elevation field bounds derived from the raw clip readings
 -- (`ASP17_MARK_EL_RAW_CLIP_UP`/`ASP17_MARK_EL_RAW_CLIP_DOWN` above) and
 -- this calibration -- declared here rather than beside the other
 -- `ASP17_FIELD_*` constants because Lua has no hoisting and this
 -- computation needs `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` already
--- defined. With the current calibration this is ~= +5.7/-18.4 deg.
+-- defined. With the current calibration this is ~= +4.6/-14.9 deg.
 local ASP17_FIELD_EL_UP_DEG = (ASP17_MARK_EL_RAW_CLIP_UP - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
 local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - ASP17_MARK_EL_RAW_CLIP_DOWN) * MARK_DEG_PER_UNIT_EL
 

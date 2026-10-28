@@ -217,7 +217,7 @@ class TestSightMarkToBodyDeg:
 #: `field_target`" comment) -- the property test below pins this exact
 #: bound, not the raw field half-angle. Elevation's up/down insets use
 #: round numbers rather than production's own measured 2026-10-28
-#: values (~5.17/~17.9) since this property test is about the clip
+#: values (~4.1/~14.4) since this property test is about the clip
 #: function's own shape, not a production-constant regression pin.
 _FIELD_HALF_INSET_DEG = 4.3 - 0.5
 _FIELD_EL_UP_INSET_DEG = 5.0 - 0.5
@@ -785,7 +785,7 @@ local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
 -- UP_DEG`/`ASP17_FIELD_EL_DOWN_DEG`), not extracted (same reasoning as
 -- every other constant in this preamble).
 local MARK_BORESIGHT_EL = 0.83
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.030
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.037
 local ASP17_FIELD_EL_UP_DEG = (1.0 - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
 local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - 0.278) * MARK_DEG_PER_UNIT_EL
 local STALE_TARGET_TIMEOUT_S = 3.0
@@ -937,7 +937,7 @@ def _mark_raw(
     UNIT_*` -- builds a raw mark arg that will read back as `body_deg`
     once `run_sight_servo` converts it. Defaults (`boresight=0.500,
     scale=0.039`) match the harness's own azimuth constants; elevation
-    callers pass `boresight=0.83, scale=0.030` to match the harness's
+    callers pass `boresight=0.83, scale=0.037` to match the harness's
     (measured 2026-10-28) `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`."""
     return boresight + body_deg * scale
 
@@ -1048,7 +1048,7 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.5, boresight=0.83, scale=0.030),
+                    m555=_mark_raw(0.5, boresight=0.83, scale=0.037),
                 ),
                 # field_target now (3.8, 3.04) (az-limited clip, az's own
                 # inset edge still the smaller scale under the asymmetric
@@ -1061,7 +1061,7 @@ class TestRunSightServoFieldPark:
                     setpoint=(10.0, 8.0),
                     rate=(50.0, 0.0),
                     m566=_mark_raw(3.0),
-                    m555=_mark_raw(1.0, boresight=0.83, scale=0.030),
+                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
                 ),
             ]
         )
@@ -1149,41 +1149,35 @@ class TestRunSightServoFieldPark:
         setpoint far above boresight parks at the (small) up inset edge
         -- the asymmetry the old, superseded symmetric `ASP17_FIELD_EL_
         HALF_DEG` placeholder could never express."""
-        up_inset = (1.0 - 0.83) * (1.0 / 0.030) - 0.5
+        up_inset = (1.0 - 0.83) * (1.0 / 0.037) - 0.5
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
                     0.0,
                     setpoint=(0.0, 30.0),
                     m566=_mark_raw(0.0),
-                    m555=_mark_raw(0.0, boresight=0.83, scale=0.030),
+                    m555=_mark_raw(0.0, boresight=0.83, scale=0.037),
                 ),
             ]
         )
         assert frames[0].field_target_el == pytest.approx(up_inset, abs=1e-6)
 
-    def test_elevation_down_field_bound_is_unreachable_through_the_gimbal(
-        self,
-    ) -> None:
-        """Notable discovery, not just a test: the measured down bound
-        (~18.4 deg, inset ~17.9) is *larger* than the sight's own gimbal
-        down limit (`GIMBAL_EL_DOWN_DEG = -15.0`), which clamps the
-        setpoint before it ever reaches `sight_clip_to_field_body_deg`.
-        So in production the down side of the asymmetric field can never
-        actually clip -- only the up side (~5.17 inset, well inside the
-        gimbal's +20 deg) can. Driving the setpoint to the full gimbal
-        extent lands `field_target_el` at the gimbal limit itself, not
-        at the (further-out) field bound -- the field clip for this
-        direction is pinned by the gimbal clip below the production
-        clip math is reached."""
+    def test_elevation_field_target_clips_at_the_down_inset_edge(self) -> None:
+        """With the gimbal-derived scale (1/0.037, 2026-10-28) the measured
+        down bound (~14.9 deg, inset ~14.4) sits just inside the -15 deg
+        gimbal, so the down side is reachable: a setpoint driven to the
+        gimbal extent parks at the down inset edge, not at the gimbal.
+        (Under the rejected 1/0.030 scale the bound was ~18.4 deg and this
+        side was unreachable.)"""
+        down_inset = (0.83 - 0.278) * (1.0 / 0.037) - 0.5
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
                     0.0,
                     setpoint=(0.0, -40.0),
                     m566=_mark_raw(0.0),
-                    m555=_mark_raw(0.0, boresight=0.83, scale=0.030),
+                    m555=_mark_raw(0.0, boresight=0.83, scale=0.037),
                 ),
             ]
         )
-        assert frames[0].field_target_el == pytest.approx(-15.0, abs=1e-6)
+        assert frames[0].field_target_el == pytest.approx(-down_inset, abs=1e-6)
