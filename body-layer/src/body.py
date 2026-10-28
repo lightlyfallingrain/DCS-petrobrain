@@ -341,6 +341,12 @@ class ConsolePerceptionRunner:
     #: thread either.
     world_model_conn: sqlite3.Connection | None = None
     theatre: str | None = None
+    #: `(theatre, store path)` behind `world_model_conn`, as one value so
+    #: `_run_crew_text_repl` -- another thread, which opens its own
+    #: connection -- always reads a matching pair, never a new theatre
+    #: with the old path. `None` while no store is loaded (theatre not yet
+    #: reported by DCS, or refusal mode).
+    world_model_store: tuple[str, Path] | None = None
     #: Updated every poll (mirrors `last_t_sim`) -- not otherwise consumed
     #: by this class (`enrichment.ownship` below is the field
     #: `belief.enrichment.relative_geometry` actually reads), kept for
@@ -609,6 +615,7 @@ class ConsolePerceptionRunner:
             group_trace_sink=self.group_trace_sink,
             world_model_conn=self.world_model_conn,
             theatre=self.theatre,
+            world_model_store=self.world_model_store,
         )
         self._last_look_direction = None
 
@@ -2314,6 +2321,7 @@ def _enter_refusal_mode(
     if runner.world_model_conn is not None:
         runner.world_model_conn.close()
     runner.world_model_conn = None
+    runner.world_model_store = None
     runner.enrichment = None
     runner.sources = []
     if crew_console is not None:
@@ -2453,6 +2461,7 @@ def _maybe_switch_theatre(
     )
     runner.world_model_conn = new_conn
     runner.theatre = event_theatre
+    runner.world_model_store = (event_theatre, candidate_db)
     # `runner.enrichment` was built (if at all) over `old_conn` -- clear it
     # so `run_once`'s lazy build rebuilds fresh against `new_conn` on the
     # next poll, rather than a stale `WorldEnrichmentCache` silently
@@ -2500,7 +2509,10 @@ def _check_for_new_mission(
     here: this function has no ownship sample of its own to decide
     freshness or airborne-ness from.
 
-    **Does nothing on the very first poll of a process**, even if a
+    **Resets nothing on the very first poll of a process** (it does adopt
+    that event's theatre, via `_maybe_switch_theatre` -- the event is the
+    live mission's, and `--world-model-dir` alone has no other source for
+    one), even if a
     sequence is already present (the collector may already hold a mission-
     start event from before body-layer connected) -- `runner.last_mission_
     start_sequence is None` is this function's own signal for "never
@@ -2554,6 +2566,20 @@ def _check_for_new_mission(
 
     if runner.last_mission_start_sequence is None:
         runner.last_mission_start_sequence = sequence
+        # No reset (the process has just started with clean state), but
+        # the latest event's theatre is still the live mission's own --
+        # adopt it now rather than waiting for the next mission (re)start.
+        # This is how `--world-model-dir` alone gets its first store, and
+        # how an initial theatre given on the command line (or derived
+        # from `--mission-understanding`) is corrected if DCS disagrees.
+        _maybe_switch_theatre(
+            runner,
+            crew_console,
+            event.get("theatre"),
+            world_model_dir,
+            trace_sink=trace_sink,
+            forest_occlusion=forest_occlusion,
+        )
         return False
     if sequence == runner.last_mission_start_sequence:
         return False
@@ -3071,8 +3097,8 @@ def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
     aircraft_client: AircraftLayerClient,
-    theatre: str,
-    world_model_db: Path,
+    theatre: str | None,
+    world_model_db: Path | None,
     poll_interval_s: float,
     stop_event: threading.Event,
     speech_client: AudioAdapterClient | None = None,
@@ -3157,7 +3183,6 @@ def _run_crew_text_poll_loop(
         tuple(polled_args) if polled_args is not None else ()
     )
     desired_watch_id = watch_id_for(desired_watch_args)
-    world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
         if (
@@ -3199,16 +3224,24 @@ def _run_crew_text_poll_loop(
     crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner)
     fired_on_tracker = FiredOnTracker()
     try:
-        runner.sources = _build_sources(
-            aircraft_client,
-            theatre,
-            world_model_conn,
-            emit_mode="every_poll",
-            trace_sink=trace_collector,
-            forest_occlusion=forest_occlusion,
-        )
-        runner.world_model_conn = world_model_conn
-        runner.theatre = theatre
+        if theatre is not None and world_model_db is not None:
+            world_model_conn = open_world_model(world_model_db)
+            runner.sources = _build_sources(
+                aircraft_client,
+                theatre,
+                world_model_conn,
+                emit_mode="every_poll",
+                trace_sink=trace_collector,
+                forest_occlusion=forest_occlusion,
+            )
+            runner.world_model_conn = world_model_conn
+            runner.theatre = theatre
+            runner.world_model_store = (theatre, world_model_db)
+        else:
+            # `--world-model-dir` alone: no store until DCS reports the
+            # theatre (see this function's docstring).
+            runner.sources = []
+            crew_console.refused = True
         live_los_warned = False
         connection = ConnectionReporter(logger)
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
@@ -3879,15 +3912,18 @@ def _run_crew_text_poll_loop(
                     # (`_maybe_switch_theatre`) updates `runner.theatre` in
                     # place, and the local parameter above is only this
                     # poll loop's *initial* value, never reassigned.
-                    assert runner.theatre is not None
-                    _mission_memory_step(
-                        mission_memory,
-                        runner,
-                        runner.last_t_sim,
-                        runner.theatre,
-                        phase,
-                        fired_on_tracker,
-                    )
+                    # `None` until DCS has reported a theatre
+                    # (`--world-model-dir` alone): nothing is perceived
+                    # yet, so there is nothing to remember either.
+                    if runner.theatre is not None:
+                        _mission_memory_step(
+                            mission_memory,
+                            runner,
+                            runner.last_t_sim,
+                            runner.theatre,
+                            phase,
+                            fired_on_tracker,
+                        )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/voice-latency-instrumentation/plan.md` Stage 6
                     # -- speaks any positional readback deferred because the
@@ -3987,14 +4023,13 @@ def _run_crew_text_poll_loop(
             belief_truth_writer.close()
         if slew_trace_writer is not None:
             slew_trace_writer.close()
-        world_model_conn.close()
+        if runner.world_model_conn is not None:
+            runner.world_model_conn.close()
 
 
 def _run_crew_text_repl(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
-    world_model_db: Path,
-    theatre: str,
 ) -> None:
     """The crew session's foreground REPL: reads one line at a time from
     stdin and dispatches it into `CrewConsole.handle_line`.
@@ -4020,19 +4055,34 @@ def _run_crew_text_repl(
     `ownship` from that field before every command rather than reading
     `runner.enrichment` at all. Two separate connections/caches (poll
     thread's and REPL thread's) rather than one shared one -- the same
-    accepted cost the old fix took, for the same reason."""
+    accepted cost the old fix took, for the same reason.
+
+    **The store follows `runner.world_model_store`**, read before every
+    command, rather than a theatre/path bound at startup: the poll thread
+    switches it when DCS reports a different theatre (`_maybe_switch_
+    theatre`), and with `--world-model-dir` alone there is none at all
+    until DCS has reported one. A changed pair reopens this thread's own
+    connection; `None` leaves no enrichment, which only refusal mode sees."""
     repl_conn: sqlite3.Connection | None = None
+    repl_store: tuple[str, Path] | None = None
     repl_enrichment: EnrichmentContext | None = None
     try:
         for line in sys.stdin:
             now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
-            if runner.last_ownship_state is not None:
+            store = runner.world_model_store
+            if store != repl_store:
+                if repl_conn is not None:
+                    repl_conn.close()
+                repl_conn = None
+                repl_enrichment = None
+                repl_store = store
+            if store is not None and runner.last_ownship_state is not None:
                 if repl_conn is None:
-                    repl_conn = open_world_model(world_model_db)
+                    repl_conn = open_world_model(store[1])
                 if repl_enrichment is None:
                     repl_enrichment = EnrichmentContext(
                         conn=repl_conn,
-                        theatre=theatre,
+                        theatre=store[0],
                         ownship=runner.last_ownship_state,
                     )
                 else:
@@ -4425,12 +4475,10 @@ def main() -> None:
         default=None,
         help=(
             "DCS theatre name for world-object lat/lon -> DCS x/z conversion, "
-            "e.g. Syria. Together with --world-model-db, this wins unchanged "
-            "(needed for small test regions like latakia-20km/gemerek-20km, "
-            "and for running without a mission-understanding artifact at "
-            "all). Omit both to derive theatre from --mission-understanding "
-            "instead (Stage 5, multi-theatre-afghanistan plan) -- see "
-            "--world-model-dir."
+            "e.g. Syria. Together with --world-model-db: a fixed store at "
+            "startup (needed for small test regions like latakia-20km/"
+            "gemerek-20km). Normally omitted -- give --world-model-dir and "
+            "the theatre is read from DCS at mission start."
         ),
     )
     parser.add_argument(
@@ -4440,8 +4488,8 @@ def main() -> None:
         help=(
             "path to a built world-model region .sqlite (see body-layer/CLAUDE.md's "
             "world-model seam note) -- NakedEyePerceptionSource's visibility filter "
-            "needs it for the terrain line-of-sight gate. See --theatre on when this "
-            "can be omitted in favour of --mission-understanding + --world-model-dir."
+            "needs it for the terrain line-of-sight gate. Only with --theatre; "
+            "see --world-model-dir for the usual form."
         ),
     )
     parser.add_argument(
@@ -4450,18 +4498,18 @@ def main() -> None:
         type=Path,
         help=(
             "directory holding per-theatre full-theatre world-model stores, named "
-            "<theatre.lower()>-full.sqlite (Stage 5, multi-theatre-afghanistan plan) "
-            "-- required together with --mission-understanding when --theatre/"
-            "--world-model-db are omitted, so theatre and store are derived from "
-            "the loaded mission-understanding artifact's theatre field instead of "
-            "a remembered flag. Also optional alongside an explicit --theatre/"
-            "--world-model-db pair (BL-15 Stage 3, plans/bl15-mission-start/plan.md): "
-            "when given there too, a live mission-start event naming a different "
-            "theatre re-resolves the store at <dir>/<theatre.lower()>-full.sqlite "
-            "and switches to it at runtime. Without it, a theatre change detected "
-            "mid-run has nowhere to resolve a new store from and enters refusal "
-            "mode (every player command answered 'system error, world model not "
-            "loaded') until the next mission (re)start resolves successfully."
+            "<theatre.lower()>-full.sqlite. The usual form, on its own: the "
+            "theatre is read from DCS's mission-start event (the latest one at "
+            "startup, then each mission (re)start) and the matching store is "
+            "loaded then; until DCS has named a theatre, perception is off and "
+            "every player command is answered 'system error, world model not "
+            "loaded'. Also optional alongside --theatre/--world-model-db or "
+            "--mission-understanding, which then only give the initial store: "
+            "a mission-start event naming a different theatre switches to "
+            "<dir>/<theatre.lower()>-full.sqlite (BL-15 Stage 3). Without it, "
+            "a theatre DCS reports that differs from the initial one has "
+            "nowhere to resolve a store from and enters that same refusal mode "
+            "until the next mission (re)start resolves successfully."
         ),
     )
     parser.add_argument(
@@ -4479,8 +4527,9 @@ def main() -> None:
             "(BL-7, plans/bl7-mission-phase-relevance/plan.md) -- when "
             "given, loaded once at startup and used to track live mission "
             "phase against ownship position, surfaced via get_situation's "
-            "'situation' command. Omitted (default): no phase data, "
-            "unchanged from before this milestone."
+            "'situation' command. Optional: omitted (default) gives no phase "
+            "data. With --world-model-dir, its theatre field gives the initial "
+            "store, which DCS's own reported theatre then overrides."
         ),
     )
     parser.add_argument(
@@ -4712,6 +4761,13 @@ def main() -> None:
     if args.mission_understanding is not None:
         mission_data = load_mission_understanding(args.mission_understanding)
 
+    # `theatre`/`world_model_db` stay `None` for the third form,
+    # `--world-model-dir` alone: the theatre is not known until the poll
+    # loop reads it from DCS's own mission-start event (`_check_for_new_
+    # mission`), and the store is resolved from it then, by the same
+    # `_maybe_switch_theatre` that handles a live theatre change.
+    theatre: str | None = None
+    world_model_db: Path | None = None
     if args.theatre is not None and args.world_model_db is not None:
         theatre = args.theatre
         world_model_db = args.world_model_db
@@ -4742,10 +4798,17 @@ def main() -> None:
                 "coordinates.projections.THEATRE_PROJECTIONS"
             )
         world_model_db = args.world_model_dir / f"{theatre.lower()}-full.sqlite"
+    elif args.world_model_dir is not None:
+        if not args.world_model_dir.is_dir():
+            parser.error(f"--world-model-dir {args.world_model_dir} is not a directory")
+        print(
+            "theatre: not given -- waiting for DCS to report it at mission start",
+            file=sys.stderr,
+        )
     else:
         parser.error(
-            "give either both --theatre and --world-model-db, or "
-            "--mission-understanding together with --world-model-dir"
+            "give --world-model-dir (theatre is then read from DCS at mission "
+            "start), or both --theatre and --world-model-db"
         )
 
     # Mismatch guard, independent of how theatre was resolved: the
@@ -4753,21 +4816,23 @@ def main() -> None:
     # theatre -- catches "pointed --theatre Syria at an Afghanistan
     # store" before the first poll, rather than silently applying the
     # wrong projection and producing a plausible-looking, wrong position
-    # for every contact.
-    try:
-        guard_conn = open_world_model(world_model_db)
+    # for every contact. Nothing to guard yet when the theatre comes from
+    # DCS: `_maybe_switch_theatre` runs the same guard at that point.
+    if world_model_db is not None:
         try:
-            built_region = load_only_region(guard_conn)
-        finally:
-            guard_conn.close()
-    except (sqlite3.Error, OSError):
-        parser.error(f"world model for {theatre} not built: {world_model_db}")
-    if built_region is not None and built_region.theatre != theatre:
-        parser.error(
-            f"--world-model-db {world_model_db} was built for theatre "
-            f"{built_region.theatre!r}, but the resolved theatre is "
-            f"{theatre!r}"
-        )
+            guard_conn = open_world_model(world_model_db)
+            try:
+                built_region = load_only_region(guard_conn)
+            finally:
+                guard_conn.close()
+        except (sqlite3.Error, OSError):
+            parser.error(f"world model for {theatre} not built: {world_model_db}")
+        if built_region is not None and built_region.theatre != theatre:
+            parser.error(
+                f"--world-model-db {world_model_db} was built for theatre "
+                f"{built_region.theatre!r}, but the resolved theatre is "
+                f"{theatre!r}"
+            )
 
     args.speech_log = _resolve_speech_log_path(
         speech_log=args.speech_log,
@@ -4934,7 +4999,7 @@ def main() -> None:
     poll_thread.start()
     print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
     try:
-        _run_crew_text_repl(crew_runner, crew_console, world_model_db, theatre)
+        _run_crew_text_repl(crew_runner, crew_console)
     finally:
         stop_event.set()
         poll_thread.join()

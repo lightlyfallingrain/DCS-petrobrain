@@ -89,16 +89,20 @@ world-model store** (PB-1.5, widened by the multi-theatre-afghanistan plan's Sta
 `NakedEyePerceptionSource`'s terrain line-of-sight gate needs a built world-model region
 `.sqlite` to run at all, per `docs/concept/PETROBRAIN_RUNTIME.md`'s naked-eye section and the
 world-model seam note above — there is no default and no way to run the logger without one.
-Two ways to give it one: `--theatre`/`--world-model-db` together (explicit, needed for small
-test regions like `latakia-20km`/`gemerek-20km`, or for running with no mission-understanding
-artifact at all), or `--mission-understanding PATH --world-model-dir DIR` (derives
-`--theatre` from the loaded artifact's own `theatre` field and resolves the store as
-`DIR/<theatre.lower()>-full.sqlite`). Giving neither combination, or a `--world-model-db`
-built for a different theatre than the resolved one, is a startup error (`parser.error`), not a
-silent default or a wrong-projection run. From `cd body-layer`:
+The usual way: `--world-model-dir DIR` alone — the theatre is read from DCS's mission-start
+event (the collector's latest one at startup, then each mission (re)start) and the store
+resolved as `DIR/<theatre.lower()>-full.sqlite` then, by `body._maybe_switch_theatre`; until DCS
+has named a theatre, body-layer sits in the loud refusal mode described under "Theatre
+switching" below. The explicit alternative is `--theatre`/`--world-model-db` together (needed
+for small test regions like `latakia-20km`/`gemerek-20km`). `--mission-understanding` is
+optional (mission phase); with `--world-model-dir` its `theatre` field gives the initial store,
+which DCS's reported theatre overrides. Giving neither `--world-model-dir` nor the pair, a
+`--world-model-dir` that is not a directory, or a `--world-model-db` built for a different
+theatre than `--theatre`, is a startup error (`parser.error`), not a silent default or a
+wrong-projection run. From `cd body-layer`:
 
 ```sh
-PYTHONPATH=src:../world-model/src .venv/bin/python -m body --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName> --world-model-db <path-to-region.sqlite>
+PYTHONPATH=src:../world-model/src .venv/bin/python -m body --aircraft-layer-url http://<aircraft-layer-host>:7791 --audio-adapter-url http://127.0.0.1:7795 --world-model-dir <dir-of-full-theatre-stores>
 ```
 
 (Or `source .venv/bin/activate` first, then drop the `.venv/bin/` prefix.) Plain `python -m
@@ -201,12 +205,12 @@ workaround.
 
 **Theatre switching (Stage 3).** If the mission-start event's `theatre` differs from the one
 currently running, `body._maybe_switch_theatre` re-resolves the store at
-`--world-model-dir/<theatre.lower()>-full.sqlite` (the same `<theatre.lower()>-full.sqlite` naming
-`--mission-understanding --world-model-dir` already uses above) and switches to it live —
-`--world-model-dir` is therefore also accepted (optionally) alongside an explicit
-`--theatre`/`--world-model-db` pair, not only with `--mission-understanding`, specifically so this
-runtime switch has somewhere to resolve a new store from regardless of how the *initial* theatre
-was given.
+`--world-model-dir/<theatre.lower()>-full.sqlite` and switches to it live. The **first** event a
+process sees resets nothing but is still the live mission's, so its theatre is adopted the same
+way — that is how `--world-model-dir` alone gets its first store, and how an initial
+`--theatre`/`--mission-understanding` theatre DCS disagrees with is corrected without waiting for
+a restart. The REPL thread follows `ConsolePerceptionRunner.world_model_store`, never a
+startup-bound path.
 
 **On any failure to resolve the new theatre's store** — no `--world-model-dir` given, an unknown
 theatre, a store that is not built, fails to open, or fails the built-region mismatch guard — the

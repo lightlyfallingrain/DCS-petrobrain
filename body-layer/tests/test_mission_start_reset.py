@@ -149,6 +149,7 @@ _RUNNER_PRESERVE = {
     "group_trace_sink",
     "world_model_conn",
     "theatre",
+    "world_model_store",
 }
 
 
@@ -759,3 +760,110 @@ def test_check_for_new_mission_refuses_when_new_theatre_has_no_store(
 
     assert reset_happened is True  # the belief reset still happened
     assert crew_console.refused is True
+
+
+# --- theatre read from DCS at startup (`--world-model-dir` alone) ----------
+
+
+def test_check_for_new_mission_first_poll_loads_the_store_dcs_names(
+    tmp_path: Path,
+) -> None:
+    """`--world-model-dir` alone starts with no theatre and no store; the
+    first mission-start event seen is the live mission's, so its theatre is
+    adopted on that first poll -- without a belief reset, which the first
+    poll never does."""
+    syria_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(syria_path, "Syria")
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.refused = True  # what the poll loop starts in, theatre unknown
+    client = _FakeMissionStartClient()
+    client.event = {"sequence": 3, "theatre": "Syria", "received_wall_clock_s": 0.0}
+
+    reset_happened = _check_for_new_mission(
+        runner,
+        crew_console,
+        MissionMemory(),
+        cast(AircraftLayerClient, client),
+        world_model_dir=tmp_path,
+    )
+
+    assert reset_happened is False
+    assert runner.last_mission_start_sequence == 3
+    assert runner.theatre == "Syria"
+    assert runner.world_model_store == ("Syria", syria_path)
+    assert runner.world_model_conn is not None
+    assert len(runner.sources) == 2
+    assert crew_console.refused is False
+    assert runner.pending_mission_start_fire is False  # not a mission (re)start
+
+
+def test_check_for_new_mission_first_poll_stays_refused_without_a_theatre(
+    tmp_path: Path,
+) -> None:
+    """An event whose Hook could not read the theatre gives nothing to
+    resolve a store from -- still no store, still refusing."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.refused = True
+    client = _FakeMissionStartClient()
+    client.event = {"sequence": 3, "theatre": None, "received_wall_clock_s": 0.0}
+
+    _check_for_new_mission(
+        runner,
+        crew_console,
+        MissionMemory(),
+        cast(AircraftLayerClient, client),
+        world_model_dir=tmp_path,
+    )
+
+    assert runner.world_model_conn is None
+    assert runner.world_model_store is None
+    assert crew_console.refused is True
+
+
+def test_check_for_new_mission_first_poll_corrects_a_wrong_initial_theatre(
+    tmp_path: Path,
+) -> None:
+    """An initial theatre given on the command line (or derived from a
+    mission-understanding artifact) that DCS contradicts is replaced on the
+    first poll, not carried until the next mission (re)start."""
+    syria_path = tmp_path / "syria-full.sqlite"
+    afghanistan_path = tmp_path / "afghanistan-full.sqlite"
+    _build_region_store(syria_path, "Syria")
+    _build_region_store(afghanistan_path, "Afghanistan")
+    runner = _runner_on(syria_path, "Syria")
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    client = _FakeMissionStartClient()
+    client.event = {
+        "sequence": 1,
+        "theatre": "Afghanistan",
+        "received_wall_clock_s": 0.0,
+    }
+
+    reset_happened = _check_for_new_mission(
+        runner,
+        crew_console,
+        MissionMemory(),
+        cast(AircraftLayerClient, client),
+        world_model_dir=tmp_path,
+    )
+
+    assert reset_happened is False
+    assert runner.theatre == "Afghanistan"
+    assert runner.world_model_store == ("Afghanistan", afghanistan_path)
+
+
+def test_enter_refusal_mode_clears_the_store_pair() -> None:
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    runner.world_model_store = ("Syria", Path("syria-full.sqlite"))
+
+    _enter_refusal_mode(runner, None)
+
+    assert runner.world_model_store is None
