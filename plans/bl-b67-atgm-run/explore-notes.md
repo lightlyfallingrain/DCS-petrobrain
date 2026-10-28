@@ -177,3 +177,54 @@ Behaviour for the run is settled except for the deferred OBSERV-refusal response
   object is identified for impact detection.
 - **Flight:** `[[BL-B80]]` Flight A (`docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`) before the
   plan — the run rests on the pointing chain being accurate; plus the cannon→OBSERV-off belief above.
+
+## 2026-10-29 — sixth round: the owed args, and how impact finds its missile
+
+Answers to the "User" and "Desk" items above.
+
+### Pylon selector
+
+> *"pylon selector know is probably `SHSCHO-KNOB-PTR` from
+> @body-layer/config/sequences/mi-24p/switch-reference.md. step 0 is off, steps 1-8 are the
+> pylons."*
+
+`switch-reference.md` row: `SHSCHO-KNOB-PTR`, "Select Station", operator, `multiposition_switch`,
+device 3038... cmd `[3038]`, arg `[963]`, values *"0 to 0.8 (9 steps)"*. So step *n* = value
+`n × 0.1`, step 0 = OFF, steps 1–8 = pylons. **"Probably"** is the user's word — the knob's
+identity is believed, not yet seen moving in the sim; which step is which physical pylon is not
+stated.
+
+### Launch button
+
+> *"launch button for copilot is OP-STICK-RS-PTR and STICK-RS-PTR for pilot"*
+
+| name | seat | shape | cmd | arg |
+|---|---|---|---|---|
+| `OP-STICK-RS-PTR` | operator (explicit) | `default_button`, 0/1 momentary | 3021 | 187 |
+| `STICK-RS-PTR` | pilot (**defaulted**) | `default_button`, 0/1 momentary | 3001 | 741 |
+
+Launch detection reads the **pilot's** button (arg 741) — the player flies the pilot seat and
+Petrovich operates the other one (round 1's "pilot pressing weapon launch button"). Two notes for
+the plan, not user questions: `switch-reference.md` marks 741's seat as *defaulted*, not explicit,
+so the user's naming is what settles it; and a momentary button read at the export tick can be
+missed by a short tap, so whether a 5 Hz continuous poll is enough is a design question.
+
+### Loadout count
+
+> *"how we read loadout - unknown, but DCS will that that somehow"*
+
+Unknown; desk recon owed (Export API — e.g. a payload/weapons getter — or a cockpit arg).
+
+### The launched missile's object
+
+> *"launched missiles object id - there was an earliear investigation of can we detect tracers
+> that found out that fired missile becomes it's own DCS object, and so has id. We know the
+> missile type we carry and can filter world object by that when launch button is pressed."*
+
+The investigation is `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`,
+"PROBE RESULTS, 2026-09-25": the player's own S-8 rockets appeared in `LoGetWorldObjects` as new
+`C_8` objects at the poll they were fired, and the count settled back; gun rounds never appeared.
+That was measured for **rockets**, not ATGMs — a 9M114 appearing the same way is the expected
+case, not yet observed, and its object `Name` is unknown. Design as the user states it: on launch
+(button + loadout −1), take the new world object whose type matches the carried missile; impact =
+that object leaving the list (round 2).
