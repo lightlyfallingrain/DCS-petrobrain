@@ -20,7 +20,10 @@
   card `docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`, ~1 min. Its `EDGE UP`/`EDGE DOWN`
   555 values set `ASP17_FIELD_EL_HALF_DEG` and the margin. `#needs-flight`
 
-  **Elevation field measured in flight 2026-10-28, `fix/9k113-el-field-measured`.** Two sorties
+  **Elevation field measured in flight 2026-10-28, `fix/9k113-el-field-measured`, merged
+  `23d436eb`.** *Superseded on merge: scale shipped as 1/0.037 (gimbal-derived), field ≈ +4.6°/−14.9°,
+  and the down side is reachable — the 1/0.030 figures below were rejected in review
+  (`plans/9k113-sight-pointing/review-el-field.md`).* Two sorties
   (`docs/acceptance/2026-10-28-sortie-feedback.md` §2-4) replaced the placeholder
   `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_HALF_DEG` above with measured values:
   boresight 0.83, scale 1/0.030, and an **asymmetric** field (~+5.7°/−18.4° about boresight, not a
