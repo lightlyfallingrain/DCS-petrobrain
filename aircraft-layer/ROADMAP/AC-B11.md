@@ -32,7 +32,14 @@ just a resource-exhaustion nuisance.
 
 **Recommended fix:** a small shared constant (e.g. `_MAX_BODY_BYTES`) checked against
 `Content-Length` before `rfile.read`, responding `400`/`413` over it — one helper, reused by all
-five (eventually six, once `BL-B67` lands) handlers rather than duplicated per-endpoint.
+five handlers rather than duplicated per-endpoint.
+
+**Correction, 2026-10-29 (`BL-B67` plan review):** the "eventually six, once `BL-B67` lands"
+prediction above does not hold as that plan is actually scoped. `BL-B67`'s two new aircraft-layer
+endpoints (`GET /payload/latest`, `GET /fire_button/latest`) are read-only GETs with no request
+body; its effector writes (`select_station`, `radiation_reset`) reuse the existing
+`/command/cockpit_switch` handler already counted in the five above rather than adding a sixth.
+The handler count stays five unless some other feature adds a new POST handler.
 
 Not blocking BL-B66's own merge — pre-existing shape, not something this feature's diff
 introduced as new risk, and low/low on this project's stated threat model. Filed so it is
