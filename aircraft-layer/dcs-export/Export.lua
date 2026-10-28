@@ -1238,14 +1238,24 @@ local GIMBAL_EL_DOWN_DEG = -15.0
 -- gate checked the setpoint against the gimbal limits while the mark
 -- physically cannot exceed this much smaller window). Azimuth is
 -- measured (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` line
--- 423); elevation is a placeholder (555's own clip edges unmeasured) --
--- ship it anyway so a flight can measure 555's edges, per the pilot's own
--- "measure in flight" answer. `ASP17_FIELD_MARGIN_DEG` is how far inside
--- this field the mark must sit to be trusted (not the gimbal margin the
--- old `FIELD_MARGIN_DEG` was sized for -- the two are different scales
--- and must not be merged under one name).
+-- 423) and symmetric. Elevation is measured in flight 2026-10-28
+-- (`docs/acceptance/2026-10-28-sortie-feedback.md` §2-4) and is strongly
+-- asymmetric about boresight -- not a half-angle at all, so the raw clip
+-- readings themselves are the measured facts (top saturates at 1.0;
+-- bottom readback limit is 0.278, the clean airborne run -- the ground
+-- run's 0.407 was a non-command disturbance partway down and is not
+-- used) and the degree bounds (`ASP17_FIELD_EL_UP_DEG`/`ASP17_FIELD_EL_
+-- DOWN_DEG`, declared below once `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_
+-- EL` exist) are derived from them, so they move together with that
+-- calibration rather than drifting out of sync with it.
+-- `ASP17_FIELD_MARGIN_DEG` is how far inside this field the mark must sit
+-- to be trusted (not the gimbal margin the old `FIELD_MARGIN_DEG` was
+-- sized for -- the two are different scales and must not be merged under
+-- one name), applied the same way on every bound above, both elevation
+-- sides included.
 local ASP17_FIELD_AZ_HALF_DEG = 4.3
-local ASP17_FIELD_EL_HALF_DEG = 4.3
+local ASP17_MARK_EL_RAW_CLIP_UP = 1.0
+local ASP17_MARK_EL_RAW_CLIP_DOWN = 0.278
 local ASP17_FIELD_MARGIN_DEG = 0.5
 
 -- Stall detection (run 8's definition): commanding at least this many
@@ -1256,15 +1266,32 @@ local STALL_CMD_DEG = 1.5
 local STALL_WINDOW_S = 0.4
 local STALL_MOVE_EPS = 0.003
 
--- Mark (ASP-17 reticle) calibration -- az from the dither probe's own
--- measured `MARK_PER_DEG`/boresight; elevation is the plan's own named
--- open end (555's boresight/clip unknown, never closed-loop-tested) --
--- these two are placeholders pending Flight A (Stage 0), not a
--- confirmed calibration.
+-- Mark (ASP-17 reticle) calibration. Azimuth: from the dither probe's own
+-- measured `MARK_PER_DEG`/boresight. Elevation: measured in flight
+-- 2026-10-28 (`docs/acceptance/2026-10-28-sortie-feedback.md` §2)
+-- replacing the earlier unmeasured placeholder -- boresight ~0.83 (0.829
+-- air start, 0.833 ground start; pilot, verbatim, "about boresight");
+-- scale 0.037 raw units/deg is gimbal-derived, not a measured angle: the
+-- air run's bottom readback stop (555 = 0.278) is taken as the sourced
+-- -15 deg gimbal limit, (0.83 - 0.278) / 15 ~= 0.037, close to azimuth's
+-- measured 0.039. The rate-derived 0.030 (commanded 0.5 deg/s against
+-- 555 slopes 0.0162/0.0139 up, 0.0140/0.0128 down) was rejected: it puts
+-- that stop at -18.4 deg, past the gimbal, and its two supporting figures
+-- share the same assumed rate (`plans/9k113-sight-pointing/review-el-
+-- field.md`; user chose 0.037, 2026-10-28). Pending a pitch-change check.
 local MARK_BORESIGHT_AZ = 0.500
 local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
-local MARK_BORESIGHT_EL = 0.556
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.039
+local MARK_BORESIGHT_EL = 0.83
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.037
+
+-- Elevation field bounds derived from the raw clip readings
+-- (`ASP17_MARK_EL_RAW_CLIP_UP`/`ASP17_MARK_EL_RAW_CLIP_DOWN` above) and
+-- this calibration -- declared here rather than beside the other
+-- `ASP17_FIELD_*` constants because Lua has no hoisting and this
+-- computation needs `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` already
+-- defined. With the current calibration this is ~= +4.6/-14.9 deg.
+local ASP17_FIELD_EL_UP_DEG = (ASP17_MARK_EL_RAW_CLIP_UP - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
+local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - ASP17_MARK_EL_RAW_CLIP_DOWN) * MARK_DEG_PER_UNIT_EL
 
 -- `sight_target`'s own wire bounds (security plan review, required
 -- change): a non-finite or out-of-range `t_sim` rejects the whole
@@ -1374,19 +1401,25 @@ end
 -- leaves the ASP-17 field"): the setpoint radially projected onto the
 -- inset ASP-17 field, per axis independently (the mark is two linear
 -- gauges, az 565/566 and el 555/556, not a cone, so this is the standard
--- ray-to-box clip, not a circular one). `scale == 1.0` when the setpoint
--- is already inside; otherwise the largest scale <= 1 that lands it
--- exactly on the nearer edge, whichever axis hits its own edge first.
--- Pure math -- `test_sight_servo_lua.py` runs this under `luajit` against
--- a Python reference.
+-- ray-to-box clip, not a circular one). Elevation's box side is
+-- asymmetric (measured 2026-10-28) -- `field_el_up_deg` bounds a positive
+-- `set_el_deg`, `field_el_down_deg` (also a positive magnitude) bounds a
+-- negative one; azimuth stays symmetric, called with the same half-angle
+-- for both sides. `scale == 1.0` when the setpoint is already inside;
+-- otherwise the largest scale <= 1 that lands it exactly on the nearer
+-- edge, whichever axis (and, for elevation, whichever side) hits its own
+-- edge first. Pure math -- `test_sight_servo_lua.py` runs this under
+-- `luajit` against a Python reference.
 local function sight_clip_to_field_body_deg(set_az_deg, set_el_deg,
-        field_az_half_deg, field_el_half_deg)
+        field_az_half_deg, field_el_up_deg, field_el_down_deg)
     local scale = 1.0
     if set_az_deg ~= 0.0 then
         scale = math.min(scale, field_az_half_deg / math.abs(set_az_deg))
     end
-    if set_el_deg ~= 0.0 then
-        scale = math.min(scale, field_el_half_deg / math.abs(set_el_deg))
+    if set_el_deg > 0.0 then
+        scale = math.min(scale, field_el_up_deg / set_el_deg)
+    elseif set_el_deg < 0.0 then
+        scale = math.min(scale, field_el_down_deg / -set_el_deg)
     end
     return set_az_deg * scale, set_el_deg * scale, scale < 1.0
 end
@@ -1396,12 +1429,18 @@ end
 -- field` gate this replaces checked the *setpoint* against the gimbal
 -- limits (60 deg), not the mark against the ASP-17's own ~4.3 deg window,
 -- so a setpoint anywhere up to ~58 deg off boresight read as "valid" --
--- see v3's "Root cause". Pure math, one axis at a time; the caller ORs
--- both axes together.
-local function sight_mark_is_clipped(mark_raw, boresight_mark, field_half_deg,
+-- see v3's "Root cause". `field_up_deg`/`field_down_deg` let the two
+-- sides differ (elevation, measured 2026-10-28, is asymmetric about
+-- boresight); a symmetric axis (azimuth) is called with the same value
+-- for both. Pure math, one axis at a time; the caller ORs both axes
+-- together.
+local function sight_mark_is_clipped(mark_raw, boresight_mark, field_up_deg, field_down_deg,
         deg_per_unit, margin_deg)
     local body_deg = (mark_raw - boresight_mark) * deg_per_unit
-    return math.abs(body_deg) >= (field_half_deg - margin_deg)
+    if body_deg >= 0.0 then
+        return body_deg >= (field_up_deg - margin_deg)
+    end
+    return -body_deg >= (field_down_deg - margin_deg)
 end
 
 -- Every frame, flag-gated: sim time, the sight's own actual-position
@@ -1416,14 +1455,11 @@ end
 --
 -- `mark_az_raw`/`mark_el_raw` (566/555, raw -- v3) and `mark_clipped`
 -- (v3, computed here with `sight_mark_is_clipped` against the current
--- `ASP17_FIELD_*_HALF_DEG`/`ASP17_FIELD_MARGIN_DEG`) answer the user's
--- own ANSWERED decision on elevation (v3's "Decisions Requiring User
--- Input"): *"Elevation - measure in flight"* -- 555's own clip edges
--- were never measured, so this per-**frame** log, not the 5 Hz
--- `push_sight_servo_state` line, is what a calibration flight reads to
--- find them: `mark_clipped`'s transitions mark where 555/566 actually
--- clip, independent of whatever `ASP17_FIELD_EL_HALF_DEG` placeholder
--- is in force at the time.
+-- `ASP17_FIELD_AZ_HALF_DEG`/`ASP17_FIELD_EL_UP_DEG`/`ASP17_FIELD_EL_DOWN_
+-- DEG`/`ASP17_FIELD_MARGIN_DEG`) is this per-**frame** log, not the 5 Hz
+-- `push_sight_servo_state` line, which is what the 2026-10-28 elevation
+-- calibration flight (`docs/acceptance/2026-10-28-sortie-feedback.md`)
+-- actually read to find 555's clip edges.
 --
 -- **Must stay below `safe_call`/`SLEW_DEBUG`/`slew_trace_observ_off_
 -- since`/`SLEW_TRACE_TAIL_S`/`fmt_num_or_null`/`slew_log_buffer`/
@@ -1461,9 +1497,9 @@ local function push_slew_trace(t)
     if type(m566) == "number" and type(m555) == "number" then
         local clipped =
             sight_mark_is_clipped(m566, MARK_BORESIGHT_AZ, ASP17_FIELD_AZ_HALF_DEG,
-                MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
-            or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_HALF_DEG,
-                MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
+                ASP17_FIELD_AZ_HALF_DEG, MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
+            or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_UP_DEG,
+                ASP17_FIELD_EL_DOWN_DEG, MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
         mark_clipped = tostring(clipped)
     end
     slew_log_buffer[#slew_log_buffer + 1] = string.format(
@@ -1643,7 +1679,8 @@ local function run_sight_servo(t)
         local field_target_az, field_target_el, field_clipped =
             sight_clip_to_field_body_deg(sight_setpoint_body_az_deg, sight_setpoint_body_el_deg,
                 ASP17_FIELD_AZ_HALF_DEG - ASP17_FIELD_MARGIN_DEG,
-                ASP17_FIELD_EL_HALF_DEG - ASP17_FIELD_MARGIN_DEG)
+                ASP17_FIELD_EL_UP_DEG - ASP17_FIELD_MARGIN_DEG,
+                ASP17_FIELD_EL_DOWN_DEG - ASP17_FIELD_MARGIN_DEG)
 
         -- Part 3 of the fix: feed-forward on `field_target`'s own
         -- per-frame finite difference while sliding along the edge
@@ -1669,9 +1706,9 @@ local function run_sight_servo(t)
             sight_mark_body_el_deg = sight_mark_to_body_deg(m555, MARK_BORESIGHT_EL, MARK_DEG_PER_UNIT_EL)
             mark_clipped =
                 sight_mark_is_clipped(m566, MARK_BORESIGHT_AZ, ASP17_FIELD_AZ_HALF_DEG,
-                    MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
-                or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_HALF_DEG,
-                    MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
+                    ASP17_FIELD_AZ_HALF_DEG, MARK_DEG_PER_UNIT_AZ, ASP17_FIELD_MARGIN_DEG)
+                or sight_mark_is_clipped(m555, MARK_BORESIGHT_EL, ASP17_FIELD_EL_UP_DEG,
+                    ASP17_FIELD_EL_DOWN_DEG, MARK_DEG_PER_UNIT_EL, ASP17_FIELD_MARGIN_DEG)
         else
             sight_mark_body_az_deg = nil
             sight_mark_body_el_deg = nil

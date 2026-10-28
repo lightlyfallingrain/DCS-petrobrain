@@ -480,3 +480,58 @@ loader.
   clause to describe what is actually true after this stage (the fields exist on the API, the
   trace writer does not yet read them) rather than what the broader v3 section's prose implied.
   Said here explicitly since it is a real scope narrowing, not an oversight.
+
+### Elevation field measured in flight, 2026-10-28 (`fix/9k113-el-field-measured`)
+
+**Change**: replaced the `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_HALF_DEG`
+placeholders above with the 2026-10-28 in-flight measurements
+(`docs/acceptance/2026-10-28-sortie-feedback.md` §2-4, user decision §4: *"readback limit... the
+important thing is that the Petrobrain simulated and DCS sight match"*). Boresight 0.556 → 0.83;
+scale 1/0.039 → 1/0.030 (rate-derived: commanded 0.5°/s gave 555 slopes 0.0162/0.0139 up and
+0.0140/0.0128 down, air/ground — pending a pitch-change check, not re-derived from an azimuth
+probe this time). The symmetric `ASP17_FIELD_EL_HALF_DEG` placeholder is gone, replaced by two raw
+clip constants (`ASP17_MARK_EL_RAW_CLIP_UP = 1.0`, `ASP17_MARK_EL_RAW_CLIP_DOWN = 0.278`, the
+measured facts) and two derived degree bounds (`ASP17_FIELD_EL_UP_DEG`/`ASP17_FIELD_EL_DOWN_DEG`,
+~+5.7°/−18.4° with the new calibration) computed from them so a future calibration change moves
+the field with it rather than needing two independent edits kept in sync by hand.
+
+`sight_clip_to_field_body_deg` and `sight_mark_is_clipped` both gained a signature change (one
+`field_el_half_deg` parameter split into `field_el_up_deg`/`field_el_down_deg`, selected by the
+sign of the setpoint/mark reading, not by magnitude alone) — azimuth stays symmetric, calling both
+functions with the same value for both sides. Every call site (`push_slew_trace`'s log-time clip
+check, `run_sight_servo`'s field-target projection, and its own mark-validity gate) updated
+together; `grep` for the old `ASP17_FIELD_EL_HALF_DEG` name confirms no read site was missed.
+
+**Notable discovery**: the measured down bound (~18.4°, inset ~17.9°) is *larger* than the sight's
+own gimbal down limit (`GIMBAL_EL_DOWN_DEG = -15.0`, v2's sourced figure, unchanged). The gimbal
+clamp runs on the setpoint before `sight_clip_to_field_body_deg` ever sees it, so in production
+the field's down edge can never actually be reached or clipped against — only the up edge (~5.17°
+inset, well inside the gimbal's +20°) is reachable. `test_elevation_down_field_bound_is_
+unreachable_through_the_gimbal` pins this directly: driving the setpoint to the full gimbal extent
+lands `field_target_el` at the gimbal limit (−15.0°), not at the field bound. Not a defect — the
+field math is still correct and the asymmetry is real — but worth knowing before spending more
+flight time trying to observe a down-side field clip that the gimbal will not let the setpoint
+reach.
+
+**Tests**: `test_sight_servo_lua.py` — both pure-function test classes extended for the new
+signatures (existing symmetric cases pass the same bound twice) plus new asymmetric cases
+(`sight_clip_to_field_body_deg`: setpoint above the up bound, below the down bound, inside despite
+exceeding the other bound, and a diagonal case where azimuth's own edge wins over an out-of-bound
+elevation; `sight_mark_is_clipped`: up-bound and down-bound clip checked independently of the
+other side's bound). `_mark_raw` gained a `scale` parameter (previously hardcoded to azimuth's
+0.039) so elevation test fixtures can build a raw mark value under elevation's own, now-different,
+calibration. Two new end-to-end `TestRunSightServoFieldPark` cases cover the up-side clip and the
+gimbal-limited down side described above. No existing test assertion needed to change beyond the
+boresight/scale literal it was built from — the symmetric-field test shapes (feed-forward,
+continuous tracking, stall detection) were re-checked by hand against the new elevation bounds and
+confirmed unaffected (az remains the limiting axis in every one of those cases).
+
+No wire-format change (`push_sight_servo_state`'s field set, shapes and the collector-side schema
+are untouched), so `EXPORT_SCRIPT_VERSION`/the collector's matching version constant were not
+bumped, per `server.py`'s own "bump both... whenever the wire format changes" rule.
+
+**Checks**: `luac5.1 -p` (pass), the `GETGLOBAL` own-helper check (clean — no own-function name
+read as a global), `ruff format --check`/`ruff check` (pass, after one auto-reformat), `mypy
+--strict` on `src` (pass, 25 files — this change touched no `src/` file at all, only `Export.lua`
+and its test), `pytest aircraft-layer/tests -q` (618 passed, up from 607/553; 54 in
+`test_sight_servo_lua.py`, up from 46).
