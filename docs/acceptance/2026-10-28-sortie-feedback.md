@@ -85,4 +85,10 @@ Log: `aircraft-layer/research/logs/2026-10-28/aircraft_layer_probe_9k113_hud_ele
   airframe (on the ground the nose sits higher); the sight's line of sight meeting the ground close
   by; something done in the cockpit at that moment.
 
-**Status:** measured; the break at t ≈ 147 s open.
+**Pilot, verbatim, on the break:** *"at that ~30 s down it suddenly started jerkingly moving
+right in steps. That was odd."* Matches the log: 566 rises in steps (2 s bins alternate ≈ +0.005/s
+and ≈ +0.001/s) from the same instant 555 speeds up. Something other than our command moved the
+sight; not identified. Seen only on the ground, only below boresight; the airborne run was clean, so
+its bottom limit (0.278) is the one taken.
+
+**Status:** measured; the ground-only break recorded, not investigated.
