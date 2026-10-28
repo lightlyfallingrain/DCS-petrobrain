@@ -128,8 +128,12 @@ local PLATEAU_WINDOW_S = 1.0
 --: how long the probe reverses command direction before deciding whether
 --: the plateau just found was a true edge (555 moves again) or a
 --: momentary command stall (555 stays put) -- user direction ("reverse
---: briefly").
-local REVERSE_CHECK_S = 1.0
+--: briefly"). The reversal ends the moment 555 moves, so this is only the
+--: give-up time: by the time the 1 s flat window fills, the head is already
+--: ~0.5 deg past the clip, and a 1 s reversal at the same rate would only
+--: just bring it back to the edge (2026-10-28 flight data: clip reached at
+--: t=44.3 s, plateau detected at 44.98 s).
+local REVERSE_CHECK_S = 10.0
 
 --: raw 555 units. The flat-window/no-movement threshold, shared by both
 --: checks above: comfortably above the dither's own per-frame amplitude
@@ -203,7 +207,12 @@ local edge_neg_555 = nil
 
 local function push_hist(t, m)
     hist[#hist + 1] = { t, m }
-    while #hist > 1 and hist[1][1] <= t - PLATEAU_WINDOW_S do table.remove(hist, 1) end
+    -- Keep the newest sample that is at least PLATEAU_WINDOW_S old, so the
+    -- history always spans the full window. Trimming on hist[1] (the old
+    -- form) dropped exactly that sample, window_flat's span test could never
+    -- pass, and the 2026-10-28 run pushed into the top clip (555 = 1.00000
+    -- from t=45 s) for 70 s without ever seeing a plateau.
+    while #hist > 2 and hist[2][1] <= t - PLATEAU_WINDOW_S do table.remove(hist, 1) end
 end
 
 local function window_flat(t)
