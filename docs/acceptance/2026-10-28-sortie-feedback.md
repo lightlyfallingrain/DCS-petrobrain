@@ -67,3 +67,22 @@ The top clip (1.0) is ~5.6° above boresight; the **bottom readback limit (0.278
 pilot's normal view of the HUD** — readable, but not seen. The sideways drift was the airframe.
 
 **Status:** measured; observations in.
+
+## 3. Same probe, landed (no airframe movement)
+
+**User, verbatim:** *"Tried again. New log. This time I landed first, so no airframe movement."*
+Log: `aircraft-layer/research/logs/2026-10-28/aircraft_layer_probe_9k113_hud_elevation_limits_ground.log`.
+`PROBE DONE up=0.99850 down=0.40655`.
+
+- **Start 555 = 0.833** (air run 0.829): boresight ≈ 0.83 holds.
+- **Top**: linear climb, 0.0139/s, clip at 1.0 after ~12 s (air: 0.0162/s, ~11 s). Same edge.
+- **Down**: linear at −0.0139/s from the top to 555 ≈ 0.78 (t ≈ 147 s, slightly below boresight).
+  Then, with the command unchanged, a **step change**: 555 suddenly drops at −0.036/s, and 566
+  starts moving sideways (0.488 → 0.63) at the same instant, both then decaying smoothly to a
+  stop at 555 = 0.407 / 566 = 0.63 — an exponential settle, not a slew. The air run had no such
+  break: linear all the way to 0.278 with 566 fixed by airframe motion only.
+- Not understood. Candidate readings, none tested: the head reaching a limit relative to the
+  airframe (on the ground the nose sits higher); the sight's line of sight meeting the ground close
+  by; something done in the cockpit at that moment.
+
+**Status:** measured; the break at t ≈ 147 s open.
