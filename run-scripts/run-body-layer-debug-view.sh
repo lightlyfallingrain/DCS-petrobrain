@@ -10,6 +10,6 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m body \
     --eyesight-view-radius-m 5000 \
     --pov-view \
     --speech-log logs/dcs-speech.jsonl \
-    --slew-tace logs/dcs-slew-trace.jsonl \
+    --slew-trace logs/dcs-slew-trace.jsonl \
     $@
 popd
