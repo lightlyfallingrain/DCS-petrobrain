@@ -824,7 +824,7 @@ def test_crew_text_repl_thread_reading_enrichment_does_not_crash(
         # If this REPL thread ever reads the poll thread's connection
         # (the pre-fix `--console` bug class), this raises
         # sqlite3.ProgrammingError on a different thread than opened it.
-        _run_crew_text_repl(runner, crew_console, db_path, "Syria")
+        _run_crew_text_repl(runner, crew_console)
     finally:
         stop_event.set()
         poll_thread.join(timeout=5.0)
@@ -3841,6 +3841,32 @@ def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
         main()
 
 
+def test_main_rejects_world_model_dir_that_is_not_a_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--world-model-dir` alone defers the store to mission start, so a
+    mistyped directory must fail at startup -- not surface mid-sortie as
+    refusal mode."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
+            "--world-model-dir",
+            str(tmp_path / "no-such-dir"),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+    assert "is not a directory" in capsys.readouterr().err
+
+
 def test_main_rejects_mission_understanding_without_world_model_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4814,6 +4840,67 @@ def test_crew_text_poll_loop_switches_theatre_on_mission_restart(
 
     assert not poll_thread.is_alive()
     assert runner.theatre == "Afghanistan"
+    assert crew_console.refused is False
+
+
+def test_crew_text_poll_loop_waits_for_dcs_to_name_the_theatre(
+    tmp_path: Path,
+) -> None:
+    """`--world-model-dir` alone: the real poll loop starts with no store
+    and refuses commands while polling telemetry normally, then loads the
+    store for whatever theatre DCS's mission-start event names."""
+    from store.models import Region
+    from store.writer import insert_region
+
+    syria_path = tmp_path / "syria-full.sqlite"
+    conn = open_for_build(syria_path)
+    insert_region(
+        conn,
+        Region(
+            name="syria-full",
+            theatre="Syria",
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=1000.0,
+            half_extent_z_m=1000.0,
+            built_at="2026-10-28T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(runner, crew_console, aircraft_client, None, None, 0.02, stop_event),
+        kwargs={"world_model_dir": tmp_path},
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert runner.last_t_sim is not None  # telemetry polled with no store
+        assert runner.theatre is None
+        assert crew_console.refused is True
+
+        aircraft_client.mission_start_sequence = 1
+        aircraft_client.mission_start_theatre = "Syria"
+        while runner.theatre is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.theatre == "Syria"
+    assert runner.world_model_store == ("Syria", syria_path)
     assert crew_console.refused is False
 
 

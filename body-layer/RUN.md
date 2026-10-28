@@ -50,8 +50,7 @@ cd body-layer
 PYTHONPATH=src:../world-model/src .venv/bin/python -m body \
   --aircraft-layer-url http://192.168.1.50:7791 \
   --audio-adapter-url http://127.0.0.1:7795 \
-  --theatre Syria \
-  --world-model-db ../world-model/data/syria-full.sqlite
+  --world-model-dir ../world-model/data
 ```
 
 **Windows (Command Prompt)** — note the `;` path separator, not `:`.
@@ -62,8 +61,7 @@ set PYTHONPATH=src;..\world-model\src
 .venv\Scripts\python -m body ^
   --aircraft-layer-url http://192.168.1.50:7791 ^
   --audio-adapter-url http://127.0.0.1:7795 ^
-  --theatre Syria ^
-  --world-model-db ..\world-model\data\syria-full.sqlite
+  --world-model-dir ..\world-model\data
 ```
 
 Two things that will bite:
@@ -81,16 +79,20 @@ Two things that will bite:
 |---|---|---|
 | `--aircraft-layer-url` | yes (unless `--print-tuning`) | base URL of the aircraft-layer LAN API |
 | `--audio-adapter-url` | yes (unless `--print-tuning`) | base URL of a running `audio-adapter` instance — speech in/out are always on (`BL-B96`) |
-| `--theatre` | one of these two pairs | DCS theatre name, for lat/lon → DCS x/z conversion — together with `--world-model-db` |
-| `--world-model-db` | one of these two pairs | path to a built region `.sqlite` — together with `--theatre` |
-| `--mission-understanding` | one of these two pairs | mission-interpreter `--emit-compact` JSON artifact — together with `--world-model-dir`, derives `--theatre` and the store path from it instead |
-| `--world-model-dir` | one of these two pairs | directory of per-theatre `<theatre.lower()>-full.sqlite` stores |
+| `--world-model-dir` | this, or the pair below | directory of per-theatre `<theatre.lower()>-full.sqlite` stores — the theatre is read from DCS and its store picked from here |
+| `--theatre` | with `--world-model-db` | DCS theatre name — a fixed store from startup, for small test regions (`latakia-20km`) |
+| `--world-model-db` | with `--theatre` | path to a built region `.sqlite` |
+| `--mission-understanding` | no | mission-interpreter `--emit-compact` JSON artifact — mission-phase tracking; with `--world-model-dir` its theatre gives the initial store, until DCS reports its own |
 | `--poll-interval-s` | no | seconds between poll ticks |
 
-Exactly one of the two theatre/store pairs above must be given — `--theatre`/
-`--world-model-db` wins unchanged if both pairs are present. The naked-eye
-channel's terrain LOS gate needs a built world-model region for elevation
-data; there is no default and no way to run without one.
+Give `--world-model-dir`, or `--theatre` with `--world-model-db` (that pair
+wins as the initial store if both are present). With `--world-model-dir`, the
+theatre comes from DCS's mission-start event — the collector's latest one when
+body-layer starts, then each mission (re)start — and its store is loaded then.
+**Until DCS has named a theatre, Petrovich perceives nothing and answers every
+command "system error, world model not loaded"**, the same loud refusal as a
+theatre whose store is not built. The naked-eye channel's terrain LOS gate
+needs a world-model store; there is no running without one.
 
 ### The debug logs get a new filename every run
 

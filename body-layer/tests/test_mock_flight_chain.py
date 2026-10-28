@@ -419,7 +419,7 @@ def test_mock_flight_chain_threaded_crew_text_smoke(tmp_path: Path) -> None:
             real_stdin = sys.stdin
             sys.stdin = stdin
             try:
-                _run_crew_text_repl(runner, crew_console, world_model_db, _THEATRE)
+                _run_crew_text_repl(runner, crew_console)
             finally:
                 sys.stdin = real_stdin
         finally:
