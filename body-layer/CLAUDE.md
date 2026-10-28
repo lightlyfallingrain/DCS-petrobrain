@@ -454,13 +454,16 @@ Belief — observation *consumption*:
   whatever the old one happened to reach. **An air start no longer fires `takeoff`** — only a real
   observed ground→air transition does; `crew_console.on_ground`'s baseline is established from
   that first trusted sample without firing anything. A body-layer process start/restart against an
-  already-running mission fires neither (unchanged — `_check_for_new_mission`'s pre-existing
-  first-poll rule already refused to treat that as a reset). **If no fresh sample arrives before
+  already-running mission fires neither — the collector already holds that mission's event at
+  the first check, so it is taken as the baseline. **The first mission after body-layer starts
+  does fire** when body-layer saw the collector empty first (the usual launch order: body-layer
+  up, then the mission started) — `runner.mission_start_absent_seen`, fixed 2026-10-28 after the
+  first-event baseline had silently swallowed it. **If no fresh sample arrives before
   `MISSION_START_RESOLVE_FALLBACK_S` elapses** (30 s default, 5–120 s range) — a paused mission
   load, or the rarer `t_sim`-coincidence case — `mission-start` still fires, but the in-air
   classification is dropped rather than guessed from the stale previous-mission sample;
-  `TAKEOFF` suppression ends the same poll either way. No sequence file ships for either new
-  trigger this cut.
+  `TAKEOFF` suppression ends the same poll either way. `mission-start-in-air.md` ships
+  (`97bad8fd`); nothing ships for `mission-start` yet.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

@@ -502,6 +502,20 @@ class ConsolePerceptionRunner:
     #: this field looking like "never checked" for the poll that follows.
     last_mission_start_sequence: int | None = None
 
+    #: Whether `_check_for_new_mission` has seen the collector report *no*
+    #: mission-start event at all (`GET /mission_start/latest` empty) while
+    #: `last_mission_start_sequence` was still `None`. Once it has, the first
+    #: event that then appears is a mission start this process watched
+    #: arrive, not one that predates it, so it fires the mission-start
+    #: triggers instead of being taken silently as the baseline. User
+    #: decision 2026-10-28 (*"my mission-start-in-air effector sequence does
+    #: not seem to run"*): the baseline rule had swallowed the first mission
+    #: after the usual launch order (body-layer up, then the mission
+    #: started). An event already present at the first check -- body-layer
+    #: started mid-mission -- still baselines silently, so restarting
+    #: body-layer in flight never throws switches.
+    mission_start_absent_seen: bool = False
+
     #: Set together by `_check_for_new_mission` right after a genuine
     #: reset (`plans/effector-sequences/explore-notes.md`, "Two new
     #: triggers: mission start") -- `True` means `EffectorTrigger.
@@ -2500,15 +2514,21 @@ def _check_for_new_mission(
     here: this function has no ownship sample of its own to decide
     freshness or airborne-ness from.
 
-    **Does nothing on the very first poll of a process**, even if a
-    sequence is already present (the collector may already hold a mission-
-    start event from before body-layer connected) -- `runner.last_mission_
-    start_sequence is None` is this function's own signal for "never
-    checked before," distinct from "sequence 0 was seen," and the plan's
-    explicit design choice is that the process just started with clean
-    state, so there is nothing to reset yet; firing a reset anyway would be
-    harmless but pointless noise (see the plan's "Decisions Requiring User
-    Input").
+    **Does nothing for an event already present at the first check**
+    (body-layer started mid-mission: the collector already holds that
+    mission's event) -- `runner.last_mission_start_sequence is None` is this
+    function's own signal for "never checked before," distinct from
+    "sequence 0 was seen"; the process just started with clean state, so
+    there is nothing to reset, and firing the mission-start triggers then
+    would throw switches mid-flight.
+
+    **An event that appears after the collector reported none is a real
+    mission start, and fires** (`runner.mission_start_absent_seen`, user
+    decision 2026-10-28). Before that change the first event was always
+    taken silently as the baseline, so in the usual launch order --
+    body-layer up, then the mission started -- the first mission never
+    fired `mission-start`/`mission-start-in-air` at all; only a restart
+    did.
 
     **`runner.last_mission_start_sequence` is re-assigned *after*
     `_reset_mission_state` returns, not before.** That field is not in
@@ -2545,6 +2565,8 @@ def _check_for_new_mission(
             logger.warning("mission-start poll failed (continuing)", exc_info=True)
         return False
     if event is None:
+        if runner.last_mission_start_sequence is None:
+            runner.mission_start_absent_seen = True
         return False
 
     sequence = event.get("sequence")
@@ -2552,14 +2574,17 @@ def _check_for_new_mission(
         logger.warning("mission-start event missing/invalid 'sequence': %r", event)
         return False
 
-    if runner.last_mission_start_sequence is None:
+    if (
+        runner.last_mission_start_sequence is None
+        and not runner.mission_start_absent_seen
+    ):
         runner.last_mission_start_sequence = sequence
         return False
     if sequence == runner.last_mission_start_sequence:
         return False
 
     logger.info(
-        "mission (re)start detected (sequence %d -> %d) -- resetting belief/mission memory",
+        "mission (re)start detected (sequence %s -> %s) -- resetting belief/mission memory",
         runner.last_mission_start_sequence,
         sequence,
     )

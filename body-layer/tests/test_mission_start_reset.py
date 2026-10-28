@@ -317,10 +317,9 @@ def test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure(
 def test_check_for_new_mission_does_nothing_on_first_poll_even_with_sequence_present() -> (
     None
 ):
-    """The very first poll of a process must never reset, even if the
-    collector already holds a mission-start event from before body-layer
-    connected -- the plan's explicit design (see "Decisions Requiring User
-    Input")."""
+    """An event already present at the very first check (body-layer started
+    mid-mission) is taken as the baseline: no reset, no mission-start
+    triggers, so restarting body-layer in flight never throws switches."""
     client = _FakeMissionStartClient()
     client.event = {"sequence": 5, "theatre": None, "received_wall_clock_s": 0.0}
     runner = ConsolePerceptionRunner(
@@ -334,6 +333,68 @@ def test_check_for_new_mission_does_nothing_on_first_poll_even_with_sequence_pre
 
     assert reset_happened is False
     assert runner.last_mission_start_sequence == 5
+
+
+def test_check_for_new_mission_fires_on_the_first_event_seen_arriving() -> None:
+    """User decision 2026-10-28: body-layer up with no mission, then the
+    mission starts -- the first event is a mission start this process
+    watched arrive, so it arms both mission-start triggers rather than
+    being taken silently as the baseline."""
+    client = _FakeMissionStartClient()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    client.event = None
+    assert (
+        _check_for_new_mission(
+            runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+        )
+        is False
+    )
+
+    client.event = {"sequence": 1, "theatre": None, "received_wall_clock_s": 0.0}
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is True
+    assert runner.last_mission_start_sequence == 1
+    assert runner.pending_mission_start_fire is True
+    assert runner.pending_mission_start_in_air_check is True
+
+    # The same event on the next poll is not a second start.
+    assert (
+        _check_for_new_mission(
+            runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+        )
+        is False
+    )
+
+
+def test_check_for_new_mission_does_not_arm_after_the_baseline_is_taken() -> None:
+    """An empty collector seen only *after* the baseline (a collector
+    restart mid-mission) must not turn the same sequence into a start."""
+    client = _FakeMissionStartClient()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    client.event = {"sequence": 5, "theatre": None, "received_wall_clock_s": 0.0}
+    _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+    client.event = None
+    _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+    client.event = {"sequence": 5, "theatre": None, "received_wall_clock_s": 0.0}
+
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is False
+    assert runner.pending_mission_start_fire is False
 
 
 def test_check_for_new_mission_resets_on_sequence_change() -> None:
