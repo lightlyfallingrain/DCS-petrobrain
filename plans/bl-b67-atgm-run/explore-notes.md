@@ -189,7 +189,7 @@ Answers to the "User" and "Desk" items above.
 > pylons."*
 
 `switch-reference.md` row: `SHSCHO-KNOB-PTR`, "Select Station", operator, `multiposition_switch`,
-device 3038... cmd `[3038]`, arg `[963]`, values *"0 to 0.8 (9 steps)"*. So step *n* = value
+cmd `[3038]`, arg `[963]`, values *"0 to 0.8 (9 steps)"*. So step *n* = value
 `n × 0.1`, step 0 = OFF, steps 1–8 = pylons. **"Probably"** is the user's word — the knob's
 identity is believed, not yet seen moving in the sim; which step is which physical pylon is not
 stated.
