@@ -20,7 +20,10 @@ The entries are in the order they were written, which is roughly perception → 
   `RelativeDirection` (`plans/attack-run/plan.md` Decision 16) and `Observation.
   relative_direction` are BL-14's ownship-relative perception datum — only `naked_eye_source.py`
   ever sets it, and only `belief.percept`/`belief.attack_run` may read the field name past the
-  belief boundary (grep-fenced, `test_attack_run.py`).
+  belief boundary (grep-fenced, `test_attack_run.py`). `Observation.aim_unit_direction`
+  (`[[BL-B67]]` Stage 2) is its sibling: the direction to the one cluster member nearest the
+  sight, not the centroid, set by `naked_eye_source.py` only on a sight-tier look — same setter,
+  same fence.
 - `src/perception/geometry.py` — bearing/range helpers, shared by every tier (per both
   investigator sessions, no tier has a native range field). Calls world-model's
   `query.describe_position` for a single-point elevation lookup. `line_of_sight_clear` (LOS
@@ -914,6 +917,22 @@ The entries are in the order they were written, which is roughly perception → 
   abandoning its id with no successor) is handled inside `drain_attack_run` itself, not deferred
   to the wiring: speaks `render_lost_contact()` once, cancels the standing task, and returns
   `None`.
+  **`[[BL-B67]]` Stage 2 ("Single unit, never a cluster")**: `seen_world_direction(...,
+  single_unit=True)` prefers `percept.aim_unit_direction` (the one cluster member nearest the
+  sight, set only on a sight-tier look) over the cluster-centroid `relative_direction`, falling
+  back to the latter when it is `None` — the ATGM run's aim, since a two-vehicle centroid misses.
+  `_tier1_alignment` never reads `aim_unit_direction`: guidance still aligns on the cluster.
+  `aim_unit_direction` sits under the same two-file fence as `relative_direction`
+  (`test_attack_run.py`). Stage 1 also adds `vertical=False` (azimuth-only guidance), done by
+  forcing an empty elevation table rather than a new branch.
+- `src/belief/atgm_run.py` (new, `[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`) — the ATGM run's
+  own per-poll state, `AtgmRunState`, carried on `ConsolePerceptionRunner.atgm_run_state` **beside**
+  `attack_run_state`, never as a field on it: `AttackRunState` is reset wholesale on every re-point,
+  which would silently drop a weapon field. `None` means "no ATGM run engaged". Its lifecycle is
+  tied to the attack run (one construction site, `body.py`'s engage-apply block, on
+  `engage … missiles`). **Stage 1 carries only `contact_id`**, which the "Observ on, wait."
+  dispatch (`CrewConsole.drain_atgm_engage`) and the sight lock / single-unit aim threading read;
+  the state machine, range latches and tracked missile are Stage 3.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
