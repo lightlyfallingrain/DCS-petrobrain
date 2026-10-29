@@ -5,10 +5,11 @@
 **Flight for:** [[BL-B67]]
 <!-- doc-provenance:end -->
 
-**Branch: `feature/bl-b67-atgm-run`.**
+**Branch: `main`** (batch A of `feature/bl-b67-atgm-run` — Stages 1-4 plus this Stage 0 probe —
+merged to `main` 2026-10-29; the card originally named the feature branch before that merge).
 
 ```sh
-git fetch origin && git checkout feature/bl-b67-atgm-run && git pull
+git fetch origin && git checkout main && git pull
 ```
 
 Two files, both already disposable extensions of existing committed probes (not new files):
