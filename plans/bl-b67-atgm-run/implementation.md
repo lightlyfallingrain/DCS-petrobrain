@@ -396,3 +396,35 @@ Q4 is retired per the plan's own revision (fire-button reading dropped in favour
 None — per `aircraft-layer/CLAUDE.md`'s own testing section, "`Export.lua` and the live Export.lua
 ↔ collector↔API path have no automated test"; this applies equally to a disposable probe
 extension of it. Correctness here is validated by the live flight, not by a test suite.
+
+#### Required Fix Addressed (Reviewer, `review.md` "BL-B67 Stage 0")
+
+Reviewer flagged that `maybe_advance_station` turned the SHSCHO knob on the **same poll** the
+payload count dropped — likely at or immediately after launch, i.e. while the just-fired missile
+could still be in flight (plan's own Risks section already names this as unknown whether it
+disturbs 9K113 guidance). Fixed per the review's option 1 (delay, not a card-only caveat):
+
+- Added `ADVANCE_DELAY_S = 25.0` (`Export.probe-weapons.lua`), matching the plan's own
+  `ATGM_MAX_FLIGHT_S` figure (max Shturm flight ≈ 6,000 m / 345 m/s ≈ 17 s, 25 s margin) — the
+  same constant value, reused rather than re-derived, so a missile is always physically down
+  before the knob moves.
+- `maybe_advance_station` now schedules the knob write for `now + ADVANCE_DELAY_S` on a count-drop
+  (using the same `model_time()` gating pattern the SWEEP/PARK/RESET state machine already uses)
+  instead of writing it immediately. The next loaded station is picked from `last_station_counts`
+  at the moment the delay elapses, not at drop time, so it reflects the freshest counts.
+- **A second count-drop on the same parked station while a delay is already pending re-arms the
+  deadline from that second drop's own time**, rather than being lost or causing the knob to
+  advance twice. This means if a second missile is fired off the same station before the first
+  one's 25 s elapses, the knob waits a further 25 s from the *second* shot — the wait always
+  outlasts the most recent launch, and exactly one knob write fires per quiescent period.
+- Both the scheduling and the actual advance are logged with model time (`ADVANCE scheduled …
+  for t=…` / `ADVANCE re-scheduled … (second drop while waiting)` at drop time; `ADVANCED to
+  step=N at t=…` when the write actually happens), so the sortie's own log shows the gap between
+  shot and knob movement rather than requiring it to be inferred.
+- `docs/acceptance/2026-10-29-bl-b67-stage0-probe.md` updated (flying-it steps 3–5) to tell the
+  pilot the knob moves ~25 s after each launch, not at launch, and to expect the wait to restart
+  if a second shot on the same station lands before the first 25 s is up.
+- Re-ran `luac5.1 -p` and the `GETGLOBAL` check on the edited file after the fix: both still pass,
+  no new global leaked (`GetDevice`, `LoGetModelTime`, `LoGetNameByType`, `LoGetPayloadInfo`,
+  `LoGetWorldObjects`, `io`, `lfs`, `pairs`, `pcall`, `string`, `table`, `tostring`, `type` — same
+  set as before the fix).

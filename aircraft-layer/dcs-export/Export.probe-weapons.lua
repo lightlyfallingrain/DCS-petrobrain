@@ -99,6 +99,15 @@ local KNOB_STEP_INTERVAL_S = 2.0
 local KNOB_SETTLE_S = 2.0
 local RESET_HOLD_S = 1.0
 
+--: Delay between a count-drop and the auto-advance knob write it
+--: schedules. Must outlast any missile this sortie fires: `plan.md`'s own
+--: figure is a Shturm's max flight time ~6,000 m / 345 m/s ~= 17 s
+--: (`ATGM_MAX_FLIGHT_S` = 25 s there, same margin reused here) -- Reviewer
+--: flagged (`review.md`, "BL-B67 Stage 0" Required Fix) that advancing on
+--: the same poll the count drops turns the knob while the just-fired
+--: missile is very plausibly still in flight.
+local ADVANCE_DELAY_S = 25.0
+
 local log_file = nil
 local function model_time()
     local ok, t = pcall(LoGetModelTime)
@@ -151,6 +160,12 @@ local reset_press_at = nil
 local reset_release_at = nil
 local parked_step = nil
 local last_parked_count = nil
+
+--: Set to a model-time deadline while an auto-advance is pending (nil
+--: otherwise). The knob write itself happens only when `now` reaches
+--: this, in `maybe_advance_station` -- never on the same poll as the
+--: count-drop that set it.
+local pending_advance_at = nil
 
 local function clickable(cmd, value)
     local ok, err = pcall(function()
@@ -284,6 +299,19 @@ end
 --: SWEEP/PARK log either confirms or refutes (if `CurrentStation` after
 --: writing step N is N, the assumption holds; if not, this logic is
 --: picking the wrong station and the log says so either way).
+--:
+--: **The knob write is delayed `ADVANCE_DELAY_S` after the count-drop
+--: that triggers it, never issued on the drop's own poll.** Writing on
+--: the same poll turns the knob while the just-fired missile is very
+--: plausibly still in flight (Reviewer, `review.md` "BL-B67 Stage 0"
+--: Required Fix) -- unverified whether that disturbs 9K113 guidance, and
+--: this probe has no business finding out by accident. A second drop
+--: observed on the same parked station while a delay is already pending
+--: (a second missile fired off the same station before the first one's
+--: advance fired) **re-arms the deadline from that second drop's own
+--: time** rather than keeping the earlier one or advancing twice -- so
+--: the knob always waits out the *most recent* launch, and one scheduled
+--: advance fires exactly once per quiescent period, never stacking.
 local function maybe_advance_station(now)
     if parked_step == nil then
         return
@@ -295,6 +323,20 @@ local function maybe_advance_station(now)
     if last_parked_count ~= nil and count < last_parked_count then
         logline("COUNT DROP step=" .. tostring(parked_step)
             .. " " .. tostring(last_parked_count) .. "->" .. tostring(count))
+        last_parked_count = count
+        local deadline = now + ADVANCE_DELAY_S
+        if pending_advance_at == nil then
+            logline("ADVANCE scheduled step=" .. tostring(parked_step)
+                .. " for t=" .. string.format("%.2f", deadline))
+        else
+            logline("ADVANCE re-scheduled step=" .. tostring(parked_step)
+                .. " for t=" .. string.format("%.2f", deadline)
+                .. " (second drop while waiting)")
+        end
+        pending_advance_at = deadline
+        return
+    end
+    if pending_advance_at ~= nil and now >= pending_advance_at then
         local next_step = nil
         for offset = 1, 8 do
             local candidate = ((parked_step - 1 + offset) % 8) + 1
@@ -304,14 +346,15 @@ local function maybe_advance_station(now)
                 break
             end
         end
+        pending_advance_at = nil
         if next_step ~= nil then
             parked_step = next_step
             clickable(CMD_KNOB, parked_step * 0.1)
-            logline("ADVANCED to step=" .. tostring(parked_step))
+            logline("ADVANCED to step=" .. tostring(parked_step)
+                .. " at t=" .. string.format("%.2f", now))
             last_parked_count = last_station_counts[parked_step]
         else
             logline("NO MORE LOADED STATIONS")
-            last_parked_count = count
         end
         return
     end

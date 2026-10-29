@@ -71,10 +71,21 @@ launch/impact now come from `S_EVENT_SHOT`.)
 2. Once the probe has parked (log line `PARKED step=N`, ~20 s in — you don't need to watch for
    this live, it's in the log either way), fly toward the first BTR.
 3. **Fire one Shturm at the first BTR.** Wait for the visible impact. **Note the clock (your DCS
-   mission time, not model time) at the moment you see it hit.**
-4. **Fire a second Shturm at the second BTR.** Wait for the visible impact. Note the clock again.
+   mission time, not model time) at the moment you see it hit.** **Then wait — the knob does not
+   move at launch.** It auto-advances to the next loaded station **~25 seconds after the count
+   drop**, not on the shot itself (the probe used to switch immediately, which the Stage 0 review
+   flagged as very plausibly happening while the missile was still in flight — this was fixed
+   before you flew it). Watch for `ADVANCE scheduled … for t=…` right after the count drop and
+   `ADVANCED to step=N at t=…` roughly 25 s later in the log (or just wait ~25 s past the impact
+   before expecting the knob to have moved — you don't need to watch the log live). If you fire a
+   second missile off the same station before that 25 s is up, the wait restarts from the second
+   shot — expected, not a bug.
+4. **Fire a second Shturm at the second BTR — only once you're ready to, the knob's own timing
+   does not gate you, just don't expect it to have switched stations until ~25 s after shot 1's
+   count drop.** Wait for the visible impact. Note the clock again.
 5. If an Ataka station is loaded, repeat once against whatever target is left (or a decoy) —
-   optional, only if time and loadout allow.
+   optional, only if time and loadout allow. Same ~25 s note applies between shots on the same
+   station.
 6. If an S-8 pod is loaded, **fire one pair of rockets** at anything convenient. This is the known
    case (`C_8` objects, already confirmed in an earlier probe) and exists here only as an in-sortie
    cross-check that the extended probe is still logging the object feed correctly.
