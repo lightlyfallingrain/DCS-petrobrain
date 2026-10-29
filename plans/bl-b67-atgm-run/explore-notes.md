@@ -237,3 +237,41 @@ that object leaving the list (round 2).
 The "Flight" item in "State at end of 2026-10-26" is **released as a gate on planning and
 building**: the plan takes `[[BL-B80]]`'s pointing chain as accurate (now or once fixed), and
 pointing accuracy is worked separately. Live acceptance of the run still depends on it.
+
+## 2026-10-29 — seventh round: the plan's six decisions
+
+Answers to `plan.md` "Decisions Requiring User Input" (as written at `85862506`).
+
+> *"1 - per run, but only if out of range first. If run starts in range, say nothing."*
+
+Range calls are **per run**, not per missile. **"Out of range" only if the run starts out of range;
+then "In range" once when it comes in. A run that starts in range says neither.** (Overrides the
+plan's once-per-missile recommendation.)
+
+> *"2 - agree. Though sine Pertivich is looking through the sight, he'll only see SAM launch etc
+> from that FOV."*
+
+Agreed: guidance and routine callouts held while the missile flies, urgent threats pass. **But an
+urgent threat reaches him only if it is inside the sight's FOV** — he is looking through the 9K113,
+so a SAM launch outside that field is not seen. No channel may hand him one he could not see.
+
+> *"3 - ok"*
+
+`engage … missiles` with the guidance unit not ready: "Unable, guidance unit not ready.", no run.
+
+> *"4 - that's probably failed launch then. Log it and treat as not launched."*
+
+Missile never seen as an object = **failed launch: log it, treat as not launched.** (Overrides the
+plan's "reset and select next after `ATGM_MAX_FLIGHT_S`".)
+
+> *"5 - yes"*
+
+No ATGM loaded: "No more missiles.", run as a tracking run.
+
+> *"6 - could well use it as primary signal, it'd be very reliable"*
+
+**`S_EVENT_SHOT` (initiator = player, guided weapon) becomes the primary launch signal** — not a
+fallback conditioned on the fire button failing. Design consequence, not a user question: the
+event carries the weapon object itself, which may also answer "which object is our missile" for
+impact detection without name-matching the world-object feed, and the fire-button per-frame feed
+may no longer be needed. The plan is to be revised for it.
