@@ -275,3 +275,19 @@ fallback conditioned on the fire button failing. Design consequence, not a user 
 event carries the weapon object itself, which may also answer "which object is our missile" for
 impact detection without name-matching the world-object feed, and the fire-button per-frame feed
 may no longer be needed. The plan is to be revised for it.
+
+## 2026-10-29 — eighth round: the revised plan's N1–N3
+
+> *"N1 - agree"*
+
+Launch confirmed, "gone" never arrives: after 25 s leave the flight silently, no "Impact", press
+reset, select the next missile, log an error.
+
+> *"N2 - skip"*
+
+"Danger <unit>" during the missile's flight: **"skip"** — read as *do not speak it during the
+flight* (the plan recommended letting it through). **Unconfirmed reading**, asked back the same day.
+
+> *"N3 - explain please"*
+
+Explanation requested; answer pending.
