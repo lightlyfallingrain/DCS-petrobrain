@@ -286,7 +286,11 @@ reset, select the next missile, log an error.
 > *"N2 - skip"*
 
 "Danger <unit>" during the missile's flight: **"skip"** — read as *do not speak it during the
-flight* (the plan recommended letting it through). **Unconfirmed reading**, asked back the same day.
+flight* (the plan recommended letting it through). Asked back the same day; confirmed:
+
+> *"N2 - focus is on guidance during missile flight. Drop the danger callout."*
+
+**No "Danger <unit>" while the missile flies.** Overrides the plan's recommendation.
 
 > *"N3 - explain please"*
 
