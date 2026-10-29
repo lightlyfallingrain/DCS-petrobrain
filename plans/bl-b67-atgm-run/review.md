@@ -438,3 +438,283 @@ re-run independently rather than trusted from `implementation.md`. Device/cmd/ar
 directly against `switch-reference.md`, not assumed. No live DCS access from this machine — the
 one thing this review cannot do is confirm the knob-during-flight risk empirically; it can only
 confirm the risk is real, undocumented to the user, and cheap to close.
+
+---
+
+## Reviewer: BL-B67 Stage 3 (`atgm_run.decide` + in-flight hold + guidance-floor settle)
+
+**Dispatch note on branch state**: the dispatched tip was `44ad42beefdd0031864afffd758cb228131521bc`.
+This worktree's own `HEAD` (`30a663b5`, on `worktree-agent-a76778b2f3afacfe5`) is **not** an
+ancestor of that tip, and the tip is not an ancestor of `HEAD` either — the two have diverged (this
+worktree branched from `main` well after the feature branch split off, and the feature branch's own
+history — Stage 0 review/fix, explore rounds 6-8, Stages 3/4 — was never rebased through here). Per
+dispatch instruction, no `git merge --ff-only` was attempted. Verified instead against an isolated
+snapshot: `git archive 44ad42beefdd0031864afffd758cb228131521bc | tar -x -C <scratch>`, with every
+check run from inside that scratch tree's own `body-layer/`. This file is written and committed in
+this worktree for the orchestrator to harvest onto the feature branch; the content below is accurate
+against the dispatched tip regardless of which branch holds it.
+
+Diff under review: the single commit `44ad42be` (14 files, 1887 insertions / 31 deletions). Stages
+0/1/2/4 are already reviewed above (or, for Stage 0's required fix, tracked in `implementation.md`)
+and not re-read here except where Stage 3 touches the same files.
+
+Inputs read in full: `plan.md` (the full "Design" section, "Range calls", "Silence while the missile
+flies", "Launch and impact detection", the Co-moving Fields table, Decisions N1-N3), `explore-notes.md`
+rounds 7-8 (the user's own words — these override `plan.md`'s own decisions section per this review's
+dispatch, and in practice the two agree: round 7 decision 1 is "Range calls," decision 2 is "Silence
+while the missile flies," round 8 N1/N2 are the backstop and the Danger-drop), `implementation.md`'s
+Stage 3 section (all 7 numbered deviations/discoveries), `review.md`'s own Stages 1-2 entry (above —
+confirming both its required fixes actually landed: `CLAUDE.md` line 323 and `STRUCTURE.md`'s
+`atgm_run.py`/`source.py` entries all now name `aim_unit_direction`, checked directly, not assumed).
+Source diff read in full: `atgm_run.py` (now 280 lines, read end to end, not just the added blocks),
+`speech.py`, `attack_run.py`, `crew_console.py`, `callouts.py`, `body.py`'s two touched sites,
+`STRUCTURE.md`'s rewritten entry, the regenerated `defaults.toml`'s rendered `[belief.atgm_run]`
+block (read the rendered file, not the source `#:` comments, per this role's own standing
+instruction). All three new/extended test files read in full (`test_atgm_run.py`, the `test_callouts.py`
+and `test_attack_run.py` additions).
+
+### Checks run
+
+From the scratch snapshot's `body-layer/`, against the repo-root venv
+(`/Users/sg/Code/DCS-petrobrain/body-layer/.venv/bin/`):
+- `ruff format --check src tests tools`: 190 files already formatted.
+- `ruff check src tests tools`: all checks passed.
+- `cd body-layer && .venv/bin/mypy src`: 0 errors, 78 files.
+- `pytest tests -q`: **2776 passed, 4 xfailed** — matches `implementation.md`'s reported count
+  exactly (2735 → 2776, +41: 36 `test_atgm_run.py` + 3 `test_callouts.py` + 2 `test_attack_run.py`).
+  Repeated (full suite, twice) and `--collect-only` three times: collection order was identical
+  every run (file-then-definition, as pytest does with no active randomizer) — see the flake note
+  below.
+
+### Mutation verification (not just reading)
+
+Five targeted mutations against the stage's highest-risk claims, each reverted and the suite
+re-confirmed green afterward:
+
+1. **Range calls, "starts in range says neither."** Changed the silent in-range branch of
+   `_maybe_range_call` (`atgm_run.py` line ~374) to speak `render_range_state(in_range=True)`
+   instead of `None`. `test_run_starting_in_range_says_neither` failed correctly (asserted `()`,
+   got `["In range."]`). **Caught.**
+2. **Backstop silence, Decision N1.** Changed `_in_flight_tick`'s `speech = (render_impact(),) if
+   inputs.missile_gone else ()` to unconditionally `(render_impact(),)`.
+   `test_backstop_leaves_in_flight_silently_after_max_flight_time` failed correctly (expected `()`,
+   got `["Impact."]`). **Caught.**
+3. **No-ATGM-at-start, "No more missiles."** Changed `_preparing_tick`'s empty-station branch to
+   return `()` instead of `(render_no_more_missiles(),)`.
+   `test_preparing_with_no_atgm_loaded_says_no_more_missiles` failed correctly. **Caught.**
+4. **Decision N2, "Danger `<unit>`" dropped during the flight.** Widened `callouts.py`'s
+   `hold_routine` pass-through condition (line ~1253) from `event.kind == CONTACT_FIRING_SEEN and
+   event.targets_ownship` to also admit `event.kind == CONTACT_ENGAGEMENT_CHANGED` — i.e. exactly
+   the regression round 8's N2 answer (*"focus is on guidance during missile flight. Drop the
+   danger callout."*) forbids. **Ran the full `test_callouts.py` suite: 74/74 still passed, zero
+   failures.** This is a real gap, not a reading error — see Required Fixes below.
+5. **Failed launch, "treat as not launched."** Confirmed by inspection (not by mutation, since
+   there is nothing to mutate: `decide` never reads `inputs.failed_launch` at all, per that
+   dataclass's own docstring) that no state field, speech, or action depends on it —
+   `test_failed_launch_gives_no_speech_no_state_change_and_no_reset` pins exactly this absence.
+
+All five mutations reverted; re-ran `pytest tests -q` after the last one and confirmed
+2776 passed, 4 xfailed, matching the pre-mutation baseline.
+
+### Findings by checklist item
+
+- **Range calls per run** (round 7, decision 1): verified correct by mutation (#1 above) and by
+  reading `test_run_starting_out_of_range_says_out_then_in_range_once` end to end — out-of-range
+  speaks once, stays silent while still out, speaks "In range." once on the crossing, then stays
+  silent for the rest of the run including a later missile and a range that re-opens past max.
+  Matches round 7 exactly: *"per run, but only if out of range first. If run starts in range, say
+  nothing."*
+- **In-flight hold + pass-through set** (round 7/8, decisions 2 and N2): `CONTACT_FIRING_SEEN`
+  with `targets_ownship` passes, everything else — including `CONTACT_ENGAGEMENT_CHANGED` — is
+  held, matching the design table in `plan.md` ("Silence while the missile flies"). The *mechanism*
+  is correct (read in full, confirmed against `callouts.py`'s diff); the **test coverage for the
+  N2 half specifically is not** (mutation #4). See Required Fixes.
+- **Guidance unit not ready → refusal**: unchanged from Stage 1 (not touched this stage); confirmed
+  by `git show --stat` showing no change to `crew_console.py`'s refusal gate.
+- **Failed launch, "log it, treat as not launched"** (round 7, decision 4): correct by design —
+  `decide` structurally cannot act on `failed_launch` because it never reads the field. The actual
+  *logging* (round 7's "log it" half) is explicitly Stage 7's job (`body.py`, not built yet) — this
+  is consistent with the plan ("the caller... logs the raw event directly to the sight trace/
+  belief-truth log, never through `decide`'s return") and is not a gap in this stage.
+- **N1 backstop**: silent, resets (`Fire("atgm-impact")`), and (via `_resetting_tick`) selects the
+  next loaded station, all confirmed by mutation #2 and by reading `_in_flight_tick`/
+  `_resetting_tick` together. The **error log** (round 8's "log an error" half) is, like the
+  failed-launch log line, Stage 7's job — `decide` has no logging side channel by design (pure
+  function, no I/O), so this cannot be Stage 3's to produce. Correctly deferred, not missing.
+- **No-ATGM → "No more missiles."** (round 7, decision 5): verified at both the Preparing
+  (run-start) and Tracking/Resetting (mid-run empties-out) entry points, by mutation (#3, Preparing
+  only) and by reading `_tracking_drop_check`/`_resetting_tick`'s matching branches, which share the
+  station-selection rule (`_resolve_station_selection`) rather than duplicating the "nothing loaded"
+  check three times.
+- **Count-drop-without-shot grace rule**: `_tracking_drop_check` arms
+  `unconfirmed_drop_since_sim` on the first poll the selected station's count reads lower than last
+  seen, resolves after `ATGM_UNCONFIRMED_DROP_GRACE_S`, and a `LaunchEvent` arriving before the
+  grace elapses is handled by `decide`'s own ordering (the Preparing/Tracking block checks
+  `inputs.launch` *before* falling through to `_tracking_drop_check`, so a launch inside the grace
+  window always wins and the drop timer is cleared as part of the same transition) — confirmed by
+  reading `decide`'s own docstring and `test_count_drop_followed_by_launch_inside_the_grace_window_
+  gives_no_selection_before_the_launch`.
+- **Guidance-ladder floor settle** (Stage 1/2's flagged deferral, "made, not deferred further"):
+  `attack_run.decide` gains `guidance_floor`, threaded at the same `runner.atgm_run_state is not
+  None` granularity `vertical` already uses — not narrowed to `home_phase is SIGHTING`, with the
+  reasoning given (`BL-B71`'s own "continuous and bidirectional" ladder) checked against that
+  module's own docstring directly, not taken on the implementer's word. This is a genuine
+  design decision the Stage 1/2 review flagged as owed ("Stage 3 must make an explicit decision
+  here") and it has been made, with a reason, not silently resolved either way.
+- **Tunables, lo/hi bounds, rendered `defaults.toml`**: all seven entries checked in the rendered
+  file (`config/defaults.toml`, `[belief.atgm_run]` block), not the source comment. All seven
+  render correctly — first sentence intact, no markdown corruption across the line wraps, no
+  truncated warning (none of the seven's *second* sentence is a warning/consequence the first
+  sentence doesn't already carry — `ATGM_MAX_FLIGHT_S`'s dropped second sentence is the Ataka
+  15 s derivation, informational, not a warning; see Optional Refinements for the one wording nit).
+  `lo`/`hi` bounds are plain numeric literals in every case (confirmed by reading, not just trusting
+  `generate_defaults.py --write`'s clean exit). **One of the seven, `ATGM_MIN_RANGE_M`, is declared
+  and rendered but never read by any code this stage adds** — see Required Fixes; this is the one
+  genuine gap in an otherwise clean tuning pass.
+- **Cross-key couplings**: confirmed none — `_FAMILY_SPEED_MPS`/`_FAMILY_MAX_RANGE_M` are plain
+  dicts keyed by `family_of`'s return value, not asserted against each other or against
+  `ATGM_MIN_RANGE_M`/`ATGM_MAX_FLIGHT_S` anywhere in `src/`. No import-time assertion exists linking
+  any two of the seven.
+- **Scope fits Stage 3 exactly**: no file under `perception/own_weapons.py` (Stage 5),
+  `effector_sequences.py`'s enum (Stage 6), or `atgm.toml` (Stage 5/6) is touched — confirmed by
+  `git show --stat`. `LaunchEvent`/`FailedLaunch`/`Fire` are declared locally in `atgm_run.py`
+  rather than imported from a module that doesn't exist yet, exactly as the module's own docstring
+  states and exactly the right call for a pure-function stage that must not block on Stage 0's
+  probe answers.
+- **The discovered re-point gap** (`body.py`'s engage-apply block always builds a fresh
+  `AtgmRunState` on re-point, contradicting the plan's own Co-moving Fields table): see its own
+  section below.
+- **Comment pruning** (deviation 6): `STRUCTURE.md`'s `atgm_run.py` entry's own forward-reference
+  sentence ("the state machine... are Stage 3") was deleted and replaced with what Stage 3 actually
+  built, confirmed by reading the diff directly — this is exactly the right prune (a stale
+  forward-reference superseded by the thing it pointed at, not a durable/dated line, not a `#:`
+  block, not a dropped boundary case).
+
+### The discovered re-point gap — decided: safely deferred to Stage 7, not a required fix now
+
+`body.py`'s engage-apply block (`AtgmRunState(contact_id=atgm_contact_id)`, Stage 1's own
+construction site, `body.py:3746`) always constructs a wholesale-fresh `AtgmRunState` on every
+`engage ... missiles`, including a re-point while an ATGM run is already active. The plan's own
+Co-moving Fields table says the opposite for that exact transition: keep `phase`/in-flight/
+`selected_step`, reset only the range latches and `contact_id`.
+
+**Verified this is genuinely inert right now, not merely asserted to be**: grepped the entire
+snapshot's `src/` for any call to `atgm_run.decide` outside the test suite —
+`grep -rn "atgm_run\.decide\|import atgm_run" body-layer/src` returns exactly one hit,
+`body.py`'s `from belief.atgm_run import AtgmRunState` (the dataclass only, never `decide`). Stage
+3 added the state machine but nothing in `body.py`'s own poll loop calls it yet — that wiring is
+explicitly Stage 7's. So the fields the re-point gap would silently drop (`phase`, `in_flight_since_sim`,
+`selected_step`, `tracked_family`) are never read by any production code path today; the gap has
+zero observable behaviour until Stage 7 wires `decide` into the loop. On that basis: **not a
+required fix for Stage 3.**
+
+It is, however, flagged in three places (`STRUCTURE.md`'s `atgm_run.py` entry, `implementation.md`'s
+Notable Discoveries #2, and a new agent-memory file,
+`.claude/agent-memory/implementer/project_bl_b67_atgm_run_repoint_gap.md`) — all three read and
+confirmed accurate. This is the **third** recorded instance of the exact defect shape
+`.claude/agent-memory/dod/project_recurring_stale_state_on_transition.md` already tracks across two
+other features (`BL-14`, four instances; `BL-B64`, at least two more) — a fresh-construction
+re-point that drops a field added after the construction site was written, caught only because this
+review went looking for it rather than because any mechanism prevents it. **Treat this as a hard
+blocking precondition for Stage 7's own dispatch, not a "nice to remember" note**: whoever wires
+`decide` into `body.py`'s poll loop must fix the engage-apply block's re-point branch (`replace()`
+instead of fresh construction when an ATGM run is already active) *before* or *as part of* that
+same stage, not after — the moment `decide` is wired in without that fix, a re-point mid-flight
+silently forgets the missile is in flight and resets to `PREPARING`, which is now live and user-
+visible, not latent.
+
+### Required fixes
+
+1. **`ATGM_MIN_RANGE_M` is declared through `tuning.py` (bounds 0–2000, rendered into
+   `defaults.toml` as "the shared minimum range below which the range calls say nothing at all")
+   but is never read by `decide` or any helper it calls** — confirmed by
+   `grep -rn "ATGM_MIN_RANGE_M" body-layer/src body-layer/tests`: it appears only in its own
+   declaration and in two *test* call sites that use it to compute a belief range, never as a
+   condition inside `atgm_run.py`. In the overwhelming majority of reachable cases this is harmless
+   by construction — the one-way `range_calls_done` latch means a run that was ever "in range"
+   never speaks again regardless of how close the target gets, so "inside 400 m says nothing" (the
+   plan's own wording) holds *as a side effect* of the max-bound-only latch, not because the
+   minimum is enforced. But it is not equivalent in one edge case I confirmed directly: a run that
+   is beyond max range (`range_out_called=True`, `in_range_call_pending=True`) and whose belief
+   range jumps, in a single poll, from beyond max straight to *below* `ATGM_MIN_RANGE_M`, speaks
+   "In range." — which is correct per the max-bound rule but contradicts the plan's literal "Inside
+   400 m says nothing" if that sentence is read as "no range-call speech once inside the floor, no
+   matter how it got there." (Reproduced with a one-off probe test against the real `decide`
+   function: a `TRACKING` state with `range_out_called=True, in_range_call_pending=True` fed
+   `belief_range_m=200.0` — below the 400 m floor — speaks `["In range."]`.) Given the ~4,600 m gap
+   between `SHTURM_MAX_RANGE_M` (5,000) and the floor (400), this single-poll jump is not reachable
+   at any realistic closing speed for this airframe/target pairing — but the constant is shipped as
+   if it were load-bearing, a user tuning it in `defaults.toml` would reasonably expect changing it
+   to change something, and nothing documents that it currently doesn't. Compare `own_feed_fresh`
+   (`AtgmInputs`), which is *also* accepted-but-unused this stage and got an explicit
+   Notable-Discoveries writeup explaining exactly why; `ATGM_MIN_RANGE_M` got none. **Fix: either**
+   wire an explicit floor check into `_maybe_range_call` (so the edge case above cannot speak), **or**
+   add the equivalent "accepted but intentionally unused this stage, because X" note — to the
+   module docstring/`ATGM_MIN_RANGE_M`'s own comment and to `implementation.md` — that `own_feed_
+   fresh` already has. Either closes it; leaving it silently unwired as shipped does not.
+2. **Decision N2 ("Danger `<unit>`" dropped during the flight) has no test pinning it**, confirmed
+   by mutation #4 above: widening `callouts.py`'s pass-through condition to also admit
+   `CONTACT_ENGAGEMENT_CHANGED` leaves all 74 tests in `test_callouts.py` green. This is the one
+   line in this stage with the most explicit, twice-confirmed user correction (round 8: *"skip"*,
+   then *"focus is on guidance during missile flight. Drop the danger callout."*), and it is
+   exactly the "verify by mutation per entry, not per set" failure shape this project's own
+   retrospective names — a set-level property (the pass-through tuple has exactly one member) can
+   look checked by the existing tests (which confirm `CONTACT_FIRING_SEEN`/`targets_ownship` passes
+   and an *unrelated* `CONTACT_DETECTED` is held) without any test asserting the specific member
+   that was explicitly, deliberately excluded. **Fix: one test**, the same shape as
+   `test_hold_routine_still_lets_taking_fire_through`, asserting a live `CONTACT_ENGAGEMENT_CHANGED`
+   candidate is held (not spoken) while `hold_routine=True`.
+
+Both fixes are small (a documentation sentence or a short guard clause; one new test) and do not
+require re-opening the state machine's design. Neither touches Stage 0/1/2/4's already-reviewed
+code.
+
+### Optional refinements
+
+- `ATGM_MAX_FLIGHT_S`'s source comment calls Ataka "the slower family" to justify deriving 25 s
+  from its figures — Ataka is actually the *faster* missile (400 m/s vs. Shturm's 345 m/s); what
+  makes it the right one to derive from is that it has the *longer* flight time to max range
+  (6,000/400 = 15 s vs. Shturm's 5,000/345 ≈ 14.5 s), because its range grew proportionally more
+  than its speed. The arithmetic itself is correct and consistent with the code's own constants
+  (confirmed: 6,000/400 = 15, matching the comment) — this is a wording nit in the comment ("the
+  slower family" → something like "the family with the longer flight time"), not a numeric error,
+  and the dropped-from-`defaults.toml` second sentence that carries it is informational rather than
+  a consequence/warning, so it doesn't meet this project's bar for a required fix either way.
+- Could not independently reproduce the order-dependent flake `implementation.md` reports in
+  `test_mission_start_reset.py::test_check_for_new_mission_keeps_the_traceback_for_a_non_
+  connection_failure`. The repo-root venv's `pytest_randomly` package is present on disk but has no
+  importable dist-info (`pip show pytest-randomly` reports "not found"; `pytest --help` shows no
+  `--randomly-seed` option), so no randomizer is actually active in the environment these checks
+  ran in — `pytest --collect-only`, run three times, produced byte-identical test order every time.
+  Ran the full suite twice on the pre-Stage-3 base (`232eaa9b`) and twice on the Stage 3 tip, in
+  this environment: 100% pass, zero flakes, in all four runs. This neither confirms nor refutes the
+  implementer's report (a flake that depends on an active randomizer in a *different* environment
+  can't be exercised here either way), but since the named test's own file is untouched by this
+  stage's diff (confirmed: not in the 14-file change list) and the implementer separately verified
+  it passes in isolation and under a fixed order, there is no basis to treat it as a Stage 3
+  regression. No action needed; noted for completeness since the dispatch asked for it.
+
+### Verdict
+
+**APPROVED WITH MINOR FIXES** — both required fixes are small and mechanical (a tuning-doc/guard
+clause for `ATGM_MIN_RANGE_M`, one new test for the N2 pass-through exclusion); neither reopens the
+state machine's design, and neither needs to loop back through a fresh Implementer dispatch from
+scratch. The re-point gap is judged safely deferred to Stage 7 (verified inert: `decide` is called
+from nowhere in production code this stage), on the explicit condition that Stage 7's own dispatch
+treats fixing it as a precondition of wiring the poll loop in, not an afterthought — this is the
+third recorded instance of the same defect shape across this project's features, and the first two
+were each caught later and at higher cost than this one.
+
+### Review Confidence
+
+Full read. All seven touched `src/` files read end to end (not just the diff hunks, for
+`atgm_run.py`, given how much of the stage's correctness lives in how the phases compose rather than
+in any single function); the rendered `defaults.toml` block read directly rather than the source
+`#:` comments; five targeted mutations run against the stage's highest-risk claims (range-call
+latch, backstop silence, no-ATGM callout, the N2 pass-through exclusion, failed-launch no-op), one
+of which (N2) found a real test gap; the discovered re-point gap verified inert by grep against the
+whole snapshot's `src/`, not taken on the implementer's word; all four mechanical checks
+(`ruff format`, `ruff check`, `mypy --strict`, `pytest`) run from the isolated snapshot and matching
+`implementation.md`'s reported counts exactly. The test-order flake could not be reproduced in this
+environment (noted above) — that one item is not independently confirmed either way. Not
+spot-checked otherwise.
