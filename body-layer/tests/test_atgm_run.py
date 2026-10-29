@@ -153,6 +153,29 @@ def test_run_starting_in_range_says_neither() -> None:
     assert state.in_range_call_pending is False
 
 
+def test_pending_run_jumping_straight_to_inside_min_range_says_neither() -> None:
+    """A pending run (already said "Out of range.") whose `belief_range_m`
+    jumps, in a single poll, from beyond max range straight to below
+    `ATGM_MIN_RANGE_M` -- the edge case the plan's own "Inside 400 m says
+    nothing" (round 3, "just track") covers even though the max-bound
+    latch alone would otherwise speak "In range." as a side effect of
+    crossing it on the way through. The run still settles
+    (`range_calls_done`), it just says nothing on the settling poll."""
+    state = _tracking_state(range_out_called=True, in_range_call_pending=True)
+    state, speech, _actions = decide(
+        state,
+        _inputs(
+            now_sim=5.0,
+            belief_range_m=ATGM_MIN_RANGE_M - 50.0,
+            station_counts={1: 2},
+            selected_station_type_name="shturm",
+        ),
+    )
+    assert speech == ()
+    assert state.in_range_call_pending is False
+    assert state.range_calls_done is True
+
+
 def test_second_missile_in_the_same_run_says_neither_range_call() -> None:
     """Once `range_calls_done`, a later missile's own launch -- and every
     poll after it -- never re-triggers either call, even though the

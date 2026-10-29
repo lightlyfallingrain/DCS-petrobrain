@@ -112,10 +112,11 @@ ATGM_UNCONFIRMED_DROP_GRACE_S: Final[float] = tuning.real(
 )
 #: The backstop: how long InFlight waits for a confirmed launch's `missile_
 #: gone` before giving up silently (Decision N1, round 8: *"after 25 s
-#: leave the flight silently... log an error"*). Derived from the slower
-#: family's own max range/speed (Ataka: 6,000 m / 400 m/s = 15 s) plus
-#: margin, not measured -- by 25 s the missile is physically gone
-#: regardless of what the feed says.
+#: leave the flight silently... log an error"*). Derived from the family
+#: with the longer flight time to max range (Ataka: 6,000 m / 400 m/s =
+#: 15 s, versus Shturm's 5,000 m / 345 m/s ~= 14.5 s -- Ataka's range grew
+#: proportionally more than its speed) plus margin, not measured -- by
+#: 25 s the missile is physically gone regardless of what the feed says.
 ATGM_MAX_FLIGHT_S: Final[float] = tuning.real(
     "belief.atgm_run.ATGM_MAX_FLIGHT_S", 25.0, lo=10.0, hi=60.0, status="derived"
 )
@@ -354,9 +355,16 @@ def _maybe_range_call(
     pending`; within it says nothing and the run is immediately `range_
     calls_done` (never spoke "In range." because it never needed to). A
     pending run's own first poll back at or inside max range says "In
-    range." once. Both latches are one-way: once `range_calls_done` is
-    `True` it stays `True` for the rest of the run, including every later
-    missile (`AtgmRunState`'s own docstring; Co-moving Fields table)."""
+    range." once -- unless that same poll's `belief_range_m` has already
+    fallen below `ATGM_MIN_RANGE_M` (a one-poll jump across both bounds,
+    e.g. a stale belief range catching up at speed), in which case the run
+    still settles (`range_calls_done`) but says nothing: the plan's own
+    "Inside 400 m says nothing" (round 3, "just track") governs that
+    poll's speech rather than the max-bound latch speaking "In range." as
+    a side effect of crossing it on the way through. Both latches are
+    one-way: once `range_calls_done` is `True` it stays `True` for the
+    rest of the run, including every later missile (`AtgmRunState`'s own
+    docstring; Co-moving Fields table)."""
     if state.range_calls_done:
         return state, None
     family = _current_family(state, inputs)
@@ -375,6 +383,8 @@ def _maybe_range_call(
         return new_state, None
     if state.in_range_call_pending and inputs.belief_range_m <= max_range_m:
         new_state = replace(state, in_range_call_pending=False, range_calls_done=True)
+        if inputs.belief_range_m < ATGM_MIN_RANGE_M:
+            return new_state, None
         return new_state, render_range_state(in_range=True)
     return state, None
 

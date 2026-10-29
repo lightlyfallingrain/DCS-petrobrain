@@ -3042,6 +3042,69 @@ def test_hold_routine_still_lets_taking_fire_through(
     )
 
 
+def test_hold_routine_holds_danger_callout_during_missile_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision N2 (round 8): *"focus is on guidance during missile
+    flight. Drop the danger callout."* -- `CONTACT_ENGAGEMENT_CHANGED`
+    ("Danger <unit>") is held like any other routine kind while
+    `hold_routine=True`, **not** exempted the way the pass-through set
+    exempts `CONTACT_FIRING_SEEN`/`targets_ownship` above. Same
+    dead-ahead/observable geometry as `test_hold_routine_still_lets_
+    taking_fire_through` (so the contact is genuinely `callout_observable`
+    and the hold, not the no-omniscience gate, is what's under test) --
+    the only difference between the two tests is the event kind, which is
+    the point: it proves the hold discriminates between them rather than
+    passing both through."""
+    _enrichment_context(monkeypatch)  # installs the describe/project fakes
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",
+                classification_level=3,
+            )
+        ],
+        now_sim=0.0,
+    )
+    ownship = _ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=0.0)
+    store.tick(now_sim=0.0, ownship=ownship)
+    contact_id = store.contacts[0].id
+    assert store.callout_observable(store.contacts[0], 0.0)
+    # `CONTACT_ENGAGEMENT_CHANGED` is also in `_WATCHED_ONLY_KINDS` --
+    # without this, the event would be skipped at that gate regardless of
+    # `hold_routine`, which would make this test insensitive to the very
+    # mutation it exists to catch (widening the pass-through condition).
+    set_attention(store, contact_id, "watch")
+    scheduler = CalloutScheduler()
+    enrichment = EnrichmentContext(conn=_FAKE_CONN, theatre="Syria", ownship=ownship)
+
+    store._events.append(
+        Event(
+            id="ENGAGE_1",
+            contact_id=contact_id,
+            kind=CONTACT_ENGAGEMENT_CHANGED,
+            t_sim=0.0,
+            certainty="observed",
+            previous_engaged=False,
+            engaged=True,
+        )
+    )
+
+    spoken = scheduler.tick(
+        store, now_sim=0.0, enrichment=enrichment, hold_routine=True
+    )
+
+    assert spoken == []
+    # Deferred, not consumed -- still there for the poll the hold lifts.
+    assert any(
+        event.kind == CONTACT_ENGAGEMENT_CHANGED
+        for event in store.unacknowledged_events
+    )
+
+
 def test_hold_routine_defers_group_disclosure_too() -> None:
     """Group disclosure mints no `Event` at all (module docstring), so the
     hold needs its own check in that loop -- `test_group_disclosure_

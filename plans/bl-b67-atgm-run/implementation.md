@@ -620,3 +620,41 @@ target`, `test_guidance_floor_default_is_byte_identical_to_unaided`.
 7. **No cross-key tuning coupling** — confirmed by inspection: the seven new tunables are read
    independently (two plain lookup dicts keyed by `family_of`'s return value, not by each other),
    and none of them is asserted against another constant anywhere in `src/`.
+
+### Stage 3 review fixes
+
+Addressed both required fixes and the optional nit from `review.md`'s Stage 3 section:
+
+1. **Decision N2 test gap closed.** Added
+   `test_hold_routine_holds_danger_callout_during_missile_flight` to `test_callouts.py`, same shape
+   as `test_hold_routine_still_lets_taking_fire_through`: a live `CONTACT_ENGAGEMENT_CHANGED`
+   (`engaged=True`) candidate on an observable contact, under `hold_routine=True`, must be held —
+   deferred to `store.unacknowledged_events`, not spoken. **First attempt was insensitive to the
+   mutation it exists to catch**: without `set_attention(store, contact_id, "watch")`, the event is
+   already skipped at the pre-existing `_WATCHED_ONLY_KINDS` gate (which `CONTACT_ENGAGEMENT_CHANGED`
+   is also a member of), so widening the hold's pass-through condition to admit it left the test
+   green regardless. Added the `set_attention` call; re-ran the mutation
+   (`callouts.py`'s pass-through condition widened to `(CONTACT_FIRING_SEEN and targets_ownship) or
+   CONTACT_ENGAGEMENT_CHANGED`) and confirmed the test now fails correctly (`"Danger, ZU-23-3
+   Sergey, 12 o'clock, very close."` spoken instead of `[]`), then reverted.
+2. **`ATGM_MIN_RANGE_M` wired into `_maybe_range_call`.** The pending→in-range transition
+   (`state.in_range_call_pending and inputs.belief_range_m <= max_range_m`) now checks
+   `inputs.belief_range_m < ATGM_MIN_RANGE_M` before speaking "In range." — the run still settles
+   (`range_calls_done=True`, `in_range_call_pending=False`) on that poll, it just says nothing,
+   per the plan's own "Inside 400 m says nothing" (round 3, "just track"). Per-run latch semantics
+   (round 7) are unchanged: this only changes what the *settling* poll says, never whether or when
+   the run settles. Added
+   `test_pending_run_jumping_straight_to_inside_min_range_says_neither`, reproducing the review's
+   exact edge case (a pending run fed `belief_range_m` 50 m below the floor in one poll);
+   confirmed it fails without the fix (`speech == (OutgoingSpeech(text='In range.', ...),)` instead
+   of `()`), then confirmed it passes with the fix restored.
+3. **Optional nit fixed.** `ATGM_MAX_FLIGHT_S`'s comment no longer calls Ataka "the slower family"
+   — reworded to "the family with the longer flight time to max range," with both families' figures
+   spelled out (Ataka 6,000/400 = 15 s vs. Shturm 5,000/345 ≈ 14.5 s). The rendered `defaults.toml`
+   first sentence is unchanged (confirmed: `tools/generate_defaults.py --write` produced no diff),
+   since the edited text is in the dropped second sentence — no regeneration was needed, but the
+   generator was run anyway to confirm that directly rather than assume it.
+
+Checks after all three fixes: `ruff format`/`ruff check` clean, `mypy src` 0 errors (78 files),
+`pytest tests -q` 2778 passed (2776 + 2 new tests), 4 xfailed — matching the pre-fix baseline plus
+exactly the two new tests, no regressions.
