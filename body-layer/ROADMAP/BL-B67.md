@@ -6,11 +6,14 @@
 
   ## 2026-10-29 — DoD: batch A merged, batch B waiting on the Stage 0 sortie
 
-  **Batch A (Stages 1-4, plus the Stage 0 probe files) passed DoD and merged to `main`.** This is
-  **not** the milestone done — it is the pure-function run machine, the single-unit aim, the
-  aircraft-layer payload feed, and the Stage 0 probe sortie's own Lua, none of which is wired into
-  `body.py`'s poll loop yet. Nothing a pilot does in the cockpit changes behaviour from this merge
-  alone.
+  **Batch A (Stages 1-4, plus the Stage 0 probe files) passed DoD and merged to `main`
+  (`7e9266ea`).** This is **not** the milestone done. `atgm_run.decide` (Stage 3) and the payload
+  feed (Stage 4) are not wired into `body.py`'s poll loop yet. **Stage 1/2 are live, though** —
+  corrected at merge time from the DoD's "nothing changes" wording, checked against `body.py`:
+  `engage … missiles` starts an ATGM run (`drain_atgm_engage`), which says "Observ on, wait." or
+  the guidance-unit refusal, pins the sight on the target (`sight_lock_contact_id`), drops
+  guidance to azimuth-only (`vertical=False`) and aims at one unit (`single_unit`). No launch,
+  impact or knob action happens yet.
 
   **What landed** (`plans/bl-b67-atgm-run/plan.md`, `implementation.md`, `review.md`,
   `performance-review.md`, `security-plan-review.md`, `security-review.md` — all in
