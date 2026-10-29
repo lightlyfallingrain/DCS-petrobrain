@@ -294,4 +294,13 @@ flight* (the plan recommended letting it through). Asked back the same day; conf
 
 > *"N3 - explain please"*
 
-Explanation requested; answer pending.
+Explained (ED's AI Helper target list, the hybrid channel, is not tied to our Petrovich's gaze).
+Answer:
+
+> *"DCS AI list was an early approach to using DCS AI to use the sight for us and what it could
+> detect. Now that we are building our own model, we can completely stop using the DCS AI overlay
+> list. We are moving towards complete (as much as possible) replacing DCS AI Petrovich. We can
+> simply drop reading that list."*
+
+Recorded as `[[BL-B103]]` (merged to `main` as backlog). **Not in this entry's scope**; this run's
+"hold ED-list sightings until impact" rule stays until BL-B103 removes the channel.
