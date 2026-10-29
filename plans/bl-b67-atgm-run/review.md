@@ -302,3 +302,139 @@ caught correctly; the `pairs()` ordering question probed directly with a live in
 than assumed; all four mechanical checks run per subproject and confirmed green with counts matching
 `implementation.md` exactly; the Lua `GETGLOBAL` bytecode check re-run and confirmed clean. Not
 spot-checked.
+
+---
+
+## Reviewer: BL-B67 Stage 0 (ATGM-run probe sortie) — pre-flight review
+
+Branch `feature/bl-b67-atgm-run`, fast-forwarded into this worktree from `ca69f8ec` to tip
+`739f533f` (tree was clean, HEAD was a strict ancestor of the tip — ff, not cherry-pick). Reviewed
+**before the user flies it**, per this review's purpose: catch anything that would waste the
+sortie or answer the wrong question, not a post-hoc check.
+
+Read in full: `aircraft-layer/dcs-export/Export.probe-weapons.lua`,
+`aircraft-layer/dcs-export/petrobrain-damage-events-probe-hook.lua`,
+`docs/acceptance/2026-10-29-bl-b67-stage0-probe.md`, `implementation.md`'s Stage 0 section (all 5
+flagged deviations), `plan.md`'s Stage 0 item/Q-table/Risks section,
+`aircraft-layer/research/2026-10-29-bl-b67-loadout-and-atgm-object-recon.md`,
+`body-layer/config/sequences/mi-24p/switch-reference.md`'s Device 6/7 rows, `aircraft-layer/
+CLAUDE.md`, `aircraft-layer/WORKFLOW.md`.
+
+### Checks run (not just trusted from `implementation.md`)
+
+- `luac5.1 -p` on both outer files: **pass** (re-run myself, `luac5.1` is available at
+  `/opt/homebrew/bin/luac5.1`, Lua 5.1.5 — the correct DCS-embedded version).
+- `GETGLOBAL` check on both outer files: **clean**, matches `implementation.md`'s claim exactly —
+  only genuine DCS APIs (`GetDevice`, `LoGetModelTime`, `LoGetNameByType`, `LoGetPayloadInfo`,
+  `LoGetWorldObjects`, `log`, `net`, `require`) and Lua stdlib.
+- `GETGLOBAL` check on all four extracted `dostring_in` literals (`LIFE_CODE`,
+  `EVENT_REGISTER_CODE`, `EVENT_POLL_CODE`, `WEAPON_EXIST_POLL_CODE`), extracted myself with a
+  throwaway script rather than re-using the implementer's own extraction: **clean** on all four —
+  only `coalition`/`ipairs`/`pairs`/`pcall`/`string`/`table`/`timer`/`tostring`/`type`/`world`
+  (genuine) and `PB_PROBE_EVENT_NAMES`/`PB_PROBE_EVENT_QUEUE`/`PB_PROBE_HANDLER_REGISTERED`/
+  `PB_PROBE_KEPT_WEAPON` (the deliberate cross-`dostring_in` shared-global set, matching the
+  file's own documented pattern). No own-helper-referenced-before-its-`local` bug found.
+- Device/cmd/arg numbers checked against `switch-reference.md` directly, not assumed from the
+  code comment: Device 7 ("I9K113") row 213, `SHSCHO-KNOB-PTR`, cmd **3038**, arg **963**,
+  `multiposition_switch`, "0 to 0.8 (9 steps)" — matches the probe's `CMD_KNOB`/`ARG_KNOB` and its
+  `n * 0.1` write exactly. Row 270, `OP-AIM-RESET-RAD-PTR`, cmd **3029**, arg **882**,
+  `default_button`, "0/1 momentary" — matches `CMD_RAD_RESET`/`ARG_RAD_RESET` and the
+  press-then-release sequencing exactly. `DEV_I9K113 = 7` also matches the production
+  `Export.lua`'s own constant (grepped: `aircraft-layer/dcs-export/Export.lua:272`). No mismatch.
+- Clock correlation across the two log files: the Export probe stamps `LoGetModelTime()`; the Hook
+  probe stamps `timer.getTime()` read inside the `"scripting"` state (not the Hook's own
+  `DCS.getRealTime()`). These are the same simulation clock by established project convention —
+  `petrobrain-mission-telemetry-hook.lua`'s own header note (lines 36-43) documents exactly this
+  equivalence and explains why `DCS.getRealTime()` is avoided (wall-clock drift). So the card's
+  instruction to correlate `payload`/`COUNT DROP` lines (Export probe) against `OWN_SHOT`/
+  `WEAPON_GONE` lines (Hook probe) by timestamp is sound, not an assumption this review had to
+  take on faith.
+- Each Q in the card's table traced to an actual log line the code emits: Q1 → `payload
+  current=... stations=...` (confirmed emitted every poll by `poll_payload`/`format_payload`) +
+  `COUNT DROP step=... N->M`; Q2 → `NEW: <name> keys=...` (first-seen key dump, confirmed in the
+  per-poll loop); Q3 → `SWEEP write step=N` / `arg963(knob)=...` / `payload current=...` together
+  (confirmed: `poll_watched_args` logs on change, `run_knob_script` logs each write); Q5 →
+  `RADIATION RESET pressed/released` + `arg882(rad_reset)=...` (confirmed); Q6 → `OWN_SHOT ...`,
+  `WEAPON_GONE t=...`, `HIT_ON_KEPT_WEAPON` (confirmed in the Hook's event handler and poll
+  functions). No Q is asked for a line the code does not actually produce.
+- No pipeline code, no DCS state mutated outside a clickable cockpit control (`performClickableAction`
+  on cmd 3038/3029 only — neither is a weapon-release or jettison command per `switch-reference.md`,
+  so the scripted sweep/park/reset cannot itself fire a weapon or drop a store).
+- Card: names the branch, states air-start/straight-and-level, is numbered, ~10 minutes, and the
+  bring-back list (two log files + the user's own clock-at-impact note) is complete against what
+  the Results section and Q6's own "gap... only you can give" framing need.
+
+### Required Fix
+
+**The auto-advance switches the knob away from the just-fired station on the same poll the count
+drops — which, per the plan's own stated unknown (Q1: "when does the count drop relative to the
+shot?"), is very plausibly at or immediately after launch, i.e. while the just-launched missile is
+still in flight (a Shturm's ~3.5 km flight at 345 m/s is ~10 s).** This is exactly the action the
+plan's own Risks section (`plan.md`, "Knob turned during flight") calls "unknown" whether it
+breaks guidance in DCS, and says production's own design "never does it" for that reason
+(selection barred in InFlight). The Stage 0 probe's `maybe_advance_station` (triggered by
+`LoGetPayloadInfo`'s count-drop, not by the Hook's `WEAPON_GONE`) does exactly this untested thing,
+on the very first shot the sortie fires — and the card, the plan's Q-table, and
+`implementation.md`'s deviation list (which flags the *station-index* assumption in the same
+function, but not this one) are all silent about it.
+
+If switching the SHSCHO knob mid-flight does affect which missile receives guidance commands, the
+most likely visible consequence is the first Shturm going unguided or off-target a few seconds
+after launch — which would (a) make the "note the clock at the moment you see it hit" instruction
+unreliable for missile 1 (a wandering, possibly out-of-view detonation has no clean "visible
+impact" moment), and (b) read, to the user watching, as an ordinary missed shot rather than a
+probe-script side effect, with nothing in the card telling them which it was. That is squarely the
+kind of thing that wastes a flight or produces a misleading answer to the wrong question — here,
+conflating "did my shot miss" with "did switching stations break guidance," neither of which the
+sortie currently distinguishes.
+
+Two independent ways to close this, either is enough — recommend the first as cheaper and more
+conservative, but the choice is the user's:
+
+1. **Delay `maybe_advance_station`'s write** by a fixed interval after the count-drop it detects
+   (e.g. close to `ATGM_MAX_FLIGHT_S`'s already-estimated ~17 s real flight time, or simply "wait
+   N seconds" using the same `model_time()` gating the SWEEP/PARK/RESET state machine already
+   uses) rather than switching on the same poll. A few lines, no new mechanism, keeps the
+   auto-advance (so the pilot still never touches the knob) while removing the exact action the
+   production plan flags as unverified from happening during this sortie's own first missile
+   flight.
+2. **Or, if the user would rather fly it as specified** and treat the question itself as
+   additional data worth having (does switching stations right after launch visibly disturb the
+   missile?) — add one line to the card saying so explicitly, and asking the user to note whether
+   the first Shturm's flight looked normal or erratic, so a genuine miss is distinguishable from a
+   probe-script side effect in the bring-back.
+
+Either is a small change; the point is that right now neither the card nor the plan's own
+deviation list surfaces this to the user before they fly, even though the plan already named the
+underlying risk as unknown.
+
+### Optional Refinements
+
+- `SWEEP` skipping knob step 0 as "off" (comment, `Export.probe-weapons.lua` line 141-142) is
+  asserted, not confirmed against `switch-reference.md`, which gives the value range ("0 to 0.8,
+  9 steps") but not per-step semantics. Low-risk: if step 0 were in fact a loaded station, the
+  sweep's own `sweep_best_step` logic would simply never pick it (first checked is step 1), so the
+  worst case is defaulting to step 1 with a logged "no loaded station found during sweep" line
+  that already exists for the no-stations-at-all case — not a silent failure, just worth noting
+  this is an assumption rather than a confirmed fact, in case the sortie's own log contradicts it.
+- The single-kept-weapon-slot limitation (deviation 4) and the no-tunables-outside-body-layer
+  posture (deviation 5) are correctly flagged and both match project convention
+  (root `CLAUDE.md`'s "Behaviour-affecting constants" section on declaring normally outside
+  body-layer) — no action needed, noted only for completeness of this pass.
+
+### Verdict
+
+**NEEDS REVISION** — one required fix (the knob-during-flight gap), cheap to close either way
+(code delay, or a one-line card addition plus the user's own call on which they'd prefer),
+before this sortie is flown. Everything else checked — the mechanics the sortie is built to
+measure (device/cmd/arg numbers, the Q-to-logline mapping, the Lua syntax/global checks, the
+deploy/restore steps, the card's shape) is correct and ready.
+
+### Review Confidence
+
+Full read of both Lua files and the card. Mechanical checks (`luac5.1 -p`, the `GETGLOBAL`
+bytecode scan on all six Lua units — two outer files plus four extracted `dostring_in` literals)
+re-run independently rather than trusted from `implementation.md`. Device/cmd/arg numbers checked
+directly against `switch-reference.md`, not assumed. No live DCS access from this machine — the
+one thing this review cannot do is confirm the knob-during-flight risk empirically; it can only
+confirm the risk is real, undocumented to the user, and cheap to close.
