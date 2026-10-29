@@ -1,4 +1,4 @@
-"""Generate `body-layer/config/effectors-raw.toml` from ED's own Mi-24P
+"""Generate `body-layer/config/effectors-raw/mi-24p.toml` from ED's own Mi-24P
 cockpit scripts -- `plans/effector-sequences/plan.md` Stage 0.
 
 Reads `devices.lua`, `command_defs.lua` and `clickabledata.lua` from the
@@ -35,7 +35,7 @@ Usage:
     # report only -- parses, prints a summary, writes nothing
     python tools/generate_effector_registry.py --scripts-dir <path>
 
-    # write config/effectors-raw.toml
+    # write config/effectors-raw/mi-24p.toml
     python tools/generate_effector_registry.py --scripts-dir <path> --write
 
     # on the DCS machine itself, with DCS_INSTALL_PATH set, no --scripts-dir needed
@@ -1724,7 +1724,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--write",
         action="store_true",
-        help="write config/effectors-raw.toml; without this, report only",
+        help="write config/effectors-raw/mi-24p.toml; without this, report only",
     )
     parser.add_argument(
         "--allow-unhandled",
