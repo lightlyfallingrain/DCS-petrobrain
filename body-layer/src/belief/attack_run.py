@@ -843,6 +843,7 @@ def decide(
     group: Group | None = None,
     resolving_optic: Optic | None = None,
     vertical: bool = True,
+    guidance_floor: Optic = UNAIDED_OPTIC,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
     """One tick of attack-run guidance: `(new_state, speech)`.
 
@@ -967,7 +968,29 @@ def decide(
     found no phrase" (the exact mechanism tier 2's own fail-open
     elevation case already relies on) -- no second code path, only a
     different table. `True` (the default) is every pre-existing caller's
-    unchanged behaviour."""
+    unchanged behaviour.
+
+    `guidance_floor` (`[[BL-B67]]` Stage 3, settling Stage 1/2's own
+    flagged deferral -- "Keeping the look through launch": *"the
+    guidance ladder's floor is `SIGHT_WIDE_OPTIC` (ATGM guidance is
+    9K113-only, BL-14 explore)."*) is passed straight through to
+    `guidance_request_for`'s own `floor` keyword, in place of the
+    hardcoded `UNAIDED_OPTIC` every pre-existing caller still gets via
+    the default. `guidance_request_for` already anticipates exactly this
+    ("the floor itself was raised since the last request (e.g. an ATGM
+    run's own floor/ceiling parameters) -- never hold a request below
+    the current floor"), so no change was needed there -- only threading
+    a non-default value in. The caller (`belief.crew_console.
+    drain_attack_run`, `body.py`'s poll loop) passes `SIGHT_WIDE_OPTIC`
+    while an ATGM run is engaged, `UNAIDED_OPTIC` (the default)
+    otherwise -- the same `runner.atgm_run_state is not None`
+    granularity `vertical` above already uses, not narrowed to `home_
+    phase is SIGHTING`: the ladder's own standing request is continuous
+    and bidirectional regardless of tier/phase (`BL-B71`'s own module
+    docstring), so gating the floor more narrowly than `vertical` would
+    let the ladder request below sight tier during Preparing, then jump
+    on the very poll `SIGHTING` is reached -- a visible floor change
+    mid-run for no behavioural reason, not a correctness bug either way."""
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
 
@@ -1027,7 +1050,7 @@ def decide(
             range_m(observer, contact.last_position),
             contact.last_class_raw,
             state.requested_optic,
-            floor=UNAIDED_OPTIC,
+            floor=guidance_floor,
             ceiling=SIGHT_NARROW_OPTIC,
         ),
     )

@@ -925,14 +925,49 @@ The entries are in the order they were written, which is roughly perception → 
   `aim_unit_direction` sits under the same two-file fence as `relative_direction`
   (`test_attack_run.py`). Stage 1 also adds `vertical=False` (azimuth-only guidance), done by
   forcing an empty elevation table rather than a new branch.
-- `src/belief/atgm_run.py` (new, `[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`) — the ATGM run's
-  own per-poll state, `AtgmRunState`, carried on `ConsolePerceptionRunner.atgm_run_state` **beside**
-  `attack_run_state`, never as a field on it: `AttackRunState` is reset wholesale on every re-point,
-  which would silently drop a weapon field. `None` means "no ATGM run engaged". Its lifecycle is
-  tied to the attack run (one construction site, `body.py`'s engage-apply block, on
-  `engage … missiles`). **Stage 1 carries only `contact_id`**, which the "Observ on, wait."
-  dispatch (`CrewConsole.drain_atgm_engage`) and the sight lock / single-unit aim threading read;
-  the state machine, range latches and tracked missile are Stage 3.
+- `src/belief/atgm_run.py` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`) — the ATGM run's own
+  per-poll state and "when". `AtgmRunState` is carried on `ConsolePerceptionRunner.atgm_run_state`
+  **beside** `attack_run_state`, never as a field on it: `AttackRunState` is reset wholesale on
+  every re-point, which would silently drop a weapon field. `None` means "no ATGM run engaged".
+  Its lifecycle is tied to the attack run (one construction site, `body.py`'s engage-apply block,
+  on `engage … missiles`). Stage 1 carried only `contact_id`, which the "Observ on, wait."
+  dispatch (`CrewConsole.drain_atgm_engage`) and the sight lock / single-unit aim threading read.
+  **Stage 3 adds the state machine itself**: `decide(state, inputs) -> (state, speech, actions)`,
+  modelled on `attack_run.decide`/`optic_policy.decide` — pure, no I/O, `speech` a tuple (a poll
+  can carry two lines, e.g. launch-and-gone in the same poll), `actions` restricted to `Fire`/
+  `SelectStation` (`say` stays a `speech` entry, not an action — a deliberate reading of root
+  `CLAUDE.md`'s "Behaviour as actions and params" table, flagged in the module docstring). Phases
+  (`AtgmPhase`): `PREPARING` (waits on `observ_observed`, then picks the first loaded station) →
+  `TRACKING` (range calls, launch detection, the count-drop-without-launch grace) → `IN_FLIGHT`
+  (the backstop, Decision N1: silent after `ATGM_MAX_FLIGHT_S`, no `own_feed_fresh` check — the
+  25 s timer alone is authoritative, per round 8's own wording) → `RESETTING` (waits on
+  `impact_sequence_running`) → resolves straight through `SELECTING` (never observed as the
+  returned state — `_resolve_station_selection`'s one shared rule: stay if still loaded, else next
+  loaded step cyclic, else `EMPTY`) back to `TRACKING`/`EMPTY`. **Against synthetic events, by
+  design** (Stage 3's own scope) — `LaunchEvent`/`FailedLaunch` are declared here, not imported
+  from `perception.own_weapons` (Stage 5, not built), and `Fire.trigger` is a plain string
+  (`"atgm-impact"`), not `effector_sequences.EffectorTrigger` (Stage 6's new members, not added
+  yet). `family_of` matches a loose substring table (Shturm/Ataka, a stand-in for `atgm.toml`'s
+  real DCS-confirmed names, Stage 5/6); `_current_family` prefers the launch event's own type name
+  once one exists, else the selected station's store name. Tunables:
+  `SHTURM_SPEED_MPS`/`SHTURM_MAX_RANGE_M`/`ATAKA_SPEED_MPS`/`ATAKA_MAX_RANGE_M`/`ATGM_MIN_RANGE_M`
+  (Wikipedia figures, round 1), `ATGM_UNCONFIRMED_DROP_GRACE_S` (judgement), `ATGM_MAX_FLIGHT_S`
+  (derived from the slower family's own max range/speed plus margin). **`attack_run.decide` also
+  gains `guidance_floor` this stage** (settling Stage 1/2's own flagged deferral): `SIGHT_WIDE_
+  OPTIC` while an ATGM run is engaged, `UNAIDED_OPTIC` otherwise, threaded through `drain_attack_
+  run`/`body.py` at the same `runner.atgm_run_state is not None` granularity `vertical` already
+  uses — see that function's own docstring for why not narrower. **`belief.callouts.
+  CalloutScheduler.tick` gains `hold_routine`** (the in-flight silence mechanism) — see that
+  module's own docstring for the pass-through set and why `CONTACT_ENGAGEMENT_CHANGED` is
+  deliberately not in it (round 8, N2). **Not wired into `body.py`'s poll loop yet** — that is
+  Stage 7. **Discovered gap, not fixed here** (out of this stage's scope — poll-loop wiring):
+  `body.py`'s current engage-apply block (Stage 1) always constructs a *fresh* `AtgmRunState` on
+  every `engage … missiles`, including a re-point while an ATGM run is already active. The plan's
+  own Co-moving Fields table's "ATGM run active, new target" row instead calls for `atgm` to *keep*
+  `phase`/in-flight/`selected_step` and only reset the range latches and `contact_id` — harmless
+  today (Stage 1 only carried `contact_id`, nothing to lose), but a real bug once Stage 7 wires
+  `decide` in: a re-point mid-flight would silently forget the missile is in flight. Stage 7 (or
+  whoever next touches that block) must fix it, not re-introduce it unexamined.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a

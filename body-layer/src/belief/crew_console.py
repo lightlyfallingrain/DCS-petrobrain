@@ -198,7 +198,7 @@ from perception.gaze import (
     compass_wedge_body_relative,
 )
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
-from perception.optics import Optic
+from perception.optics import UNAIDED_OPTIC, Optic
 from perception.source import OwnshipState
 
 #: Below this altitude AGL in metres, Petrovich is treated as on the
@@ -3539,6 +3539,7 @@ class CrewConsole:
         *,
         resolving_optic: Optic | None = None,
         vertical: bool = True,
+        guidance_floor: Optic = UNAIDED_OPTIC,
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
@@ -3572,6 +3573,12 @@ class CrewConsole:
         name -- `False` for an ATGM run (`body.py`'s caller sets it from
         `runner.atgm_run_state is None`), `True` (the default) for every
         pre-existing caller.
+
+        `guidance_floor` (`[[BL-B67]]` Stage 3) is passed straight
+        through to `decide`'s own keyword of the same name -- see that
+        docstring for why `SIGHT_WIDE_OPTIC` vs. `UNAIDED_OPTIC` (the
+        default) is decided at the same granularity as `vertical` above,
+        not narrowed further.
 
         **Resolves the target's `belief.groups.Group` and passes it to
         `decide` as of Stage 7** -- tier 2's own projection input (Decision
@@ -3628,6 +3635,7 @@ class CrewConsole:
             group=group,
             resolving_optic=resolving_optic,
             vertical=vertical,
+            guidance_floor=guidance_floor,
         )
         if speech is None:
             return new_state

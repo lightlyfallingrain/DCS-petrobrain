@@ -1034,6 +1034,7 @@ class CalloutScheduler:
         enrichment: EnrichmentContext | None = None,
         *,
         attack_run_target_contact_id: str | None = None,
+        hold_routine: bool = False,
     ) -> list[str]:
         """Speak at most one thing, chosen fresh from current belief. See
         module docstring for the full algorithm; this is `plans/
@@ -1047,7 +1048,29 @@ class CalloutScheduler:
         contact id -- see the check inside the main loop below for why.
         `None` (the default, every caller but `CrewConsole.drain_events`)
         is a true no-op: this push-path push method has no other reason
-        to know an attack run exists."""
+        to know an attack run exists.
+
+        `hold_routine` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+        Stage 3, "Silence while the missile flies") defers every candidate
+        -- both event-sourced and group disclosure -- except the one
+        pass-through kind the run allows through: `CONTACT_FIRING_SEEN`
+        with `targets_ownship` ("Taking fire"), the only threat the user's
+        round-seven/-eight answers let reach him while he is looking
+        through the sight. `CONTACT_ENGAGEMENT_CHANGED` ("Danger
+        <unit>") is deliberately **not** in that set -- round 8, N2:
+        *"focus is on guidance during missile flight. Drop the danger
+        callout."* -- so it is held like every other routine kind, not
+        exempted a second time the way `_OBSERVABILITY_EXEMPT_KINDS`
+        exempts it from the no-omniscience gate above. Held candidates are
+        **deferred, not consumed** (skipped without touching `self.
+        _consumed`, the same "skip, don't consume" treatment the
+        cockpit-mask gate above already gives a candidate that cannot
+        speak *yet*), so they are re-evaluated and re-rendered against
+        *current* belief the first tick `hold_routine` is `False` again --
+        never a stale, pre-rendered line from before the missile launched.
+        `False` (the default, every caller but `[[BL-B67]]`'s eventual
+        `body.py` wiring, Stage 7) is a true no-op -- this module has no
+        other reason to know an ATGM run exists."""
         self.last_spoken_mention = None
         if now_sim < self.busy_until_sim:
             return []
@@ -1227,6 +1250,15 @@ class CalloutScheduler:
                 and not store.callout_observable(contact, now_sim)
             ):
                 continue
+            if hold_routine and not (
+                event.kind == CONTACT_FIRING_SEEN and event.targets_ownship
+            ):
+                # `[[BL-B67]]` Stage 3's in-flight hold -- see `tick`'s own
+                # docstring for the pass-through set and why it is exactly
+                # this one kind/flag combination. Skipped, not consumed:
+                # the candidate is still live next tick, whether that
+                # tick holds or not.
+                continue
             live.append(event)
 
         scored: list[tuple[tuple[int, int, float, float], _Candidate]] = []
@@ -1240,6 +1272,14 @@ class CalloutScheduler:
             scored.append((callout_priority(result["facts"], event, now_sim), event))
 
         for belief_group in store.groups:
+            if hold_routine:
+                # `[[BL-B67]]` Stage 3 -- group disclosure has no
+                # pass-through member (the one exempt kind, `CONTACT_
+                # FIRING_SEEN`/`targets_ownship`, is never a group-level
+                # candidate), so every group is held, unconditionally,
+                # the same "skip, don't consume" deferral the event loop
+                # above gives its own held candidates.
+                continue
             # `plans/callout-observability-gate/debug.md` -- the same
             # no-omniscience gate the event loop above applies, for the one
             # candidate source that mints no `Event` at all and so could

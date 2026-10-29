@@ -9,6 +9,42 @@
 # (gitignored, created by you, sparse -- only the keys you change) and
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
+[belief.atgm_run]
+# Ataka's own max engagement range -- same source and caveat as `SHTURM_MAX_RANGE_M`.
+# status: agreed-guess | range: 1000.0 .. 10000.0
+# source: belief/atgm_run.py:ATAKA_MAX_RANGE_M
+ATAKA_MAX_RANGE_M = 6000.0
+
+# Ataka (9M120) cruise speed -- same source and caveat as `SHTURM_SPEED_MPS`.
+# status: agreed-guess | range: 200.0 .. 600.0
+# source: belief/atgm_run.py:ATAKA_SPEED_MPS
+ATAKA_SPEED_MPS = 400.0
+
+# The backstop: how long InFlight waits for a confirmed launch's `missile_gone` before giving up silently (Decision N1, round 8: *"after 25 s leave the flight silently... log an error"*).
+# status: derived | range: 10.0 .. 60.0
+# source: belief/atgm_run.py:ATGM_MAX_FLIGHT_S
+ATGM_MAX_FLIGHT_S = 25.0
+
+# The shared minimum range below which the range calls say nothing at all (round 3: *"just track"*) -- one constant, not per-family, since both families share the same 400 m figure.
+# status: agreed-guess | range: 0.0 .. 2000.0
+# source: belief/atgm_run.py:ATGM_MIN_RANGE_M
+ATGM_MIN_RANGE_M = 400.0
+
+# How long Tracking waits, after the selected station's payload count falls with no `LaunchEvent` to explain it, before treating the drop as a jettison/failed launch rather than a shot still leaving the rail -- the payload feed and the Hook's firing-events drain reach body-layer by different paths at different times, so a launch that really did happen can still show up a poll or two after its own count drop.
+# status: judgement | range: 0.5 .. 10.0
+# source: belief/atgm_run.py:ATGM_UNCONFIRMED_DROP_GRACE_S
+ATGM_UNCONFIRMED_DROP_GRACE_S = 3.0
+
+# Shturm's own max engagement range -- same Wikipedia source, the family profile's `_FAMILY_MAX_RANGE_M` entry the range calls compare belief range against.
+# status: agreed-guess | range: 1000.0 .. 8000.0
+# source: belief/atgm_run.py:SHTURM_MAX_RANGE_M
+SHTURM_MAX_RANGE_M = 5000.0
+
+# Shturm (9M114) cruise speed -- Wikipedia figure, round 1's own *"missile speeds, leave it, Wikipedia is good enough approximation"* -- used only to turn a believed range into the launch-line flight-time word (`"Shturm, N seconds."`).
+# status: agreed-guess | range: 200.0 .. 500.0
+# source: belief/atgm_run.py:SHTURM_SPEED_MPS
+SHTURM_SPEED_MPS = 345.0
+
 [belief.attack_run]
 # `ATTACK_RUN_ELEVATION_GATE_DEG` (10.0): deliberately wide (§11: "it's there to make me aim at the correct unit, not wrong one"), so a lofted nose stays inside it.
 # status: agreed-guess | range: 1.0 .. 45.0

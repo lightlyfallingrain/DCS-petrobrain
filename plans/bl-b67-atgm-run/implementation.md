@@ -428,3 +428,195 @@ disturbs 9K113 guidance). Fixed per the review's option 1 (delay, not a card-onl
   no new global leaked (`GetDevice`, `LoGetModelTime`, `LoGetNameByType`, `LoGetPayloadInfo`,
   `LoGetWorldObjects`, `io`, `lfs`, `pairs`, `pcall`, `string`, `table`, `tostring`, `type` — same
   set as before the fix).
+
+### Stage 3 — `atgm_run.decide` against synthetic events, plus the in-flight hold, plus the
+### guidance-ladder floor settle
+
+Implements **Stage 3 only**: the ATGM run's full state machine (`AtgmPhase`: Preparing → Tracking
+→ InFlight → Resetting → [Selecting, resolved within the same call] → Tracking/Empty), range
+calls, launch/impact detection, failed-launch/count-drop handling, the backstop (Decision N1), and
+the missile-family profiles — all against **synthetic `AtgmInputs`**, per the plan's own Stage 3
+scope. Also settles the guidance-ladder floor deferral Stages 1-2 flagged (deviation 1 above):
+**made**, not deferred further, with reasons below.
+
+**1b check**: confirmed the plan's own test list for Stage 3 before starting — every test it names
+either exists now (written here) or is covered by an existing mechanism (the "re-point resets the
+latches" case, see Notable Discoveries). Grepped `tests/` for any existing test touching
+`atgm_run`/`AtgmPhase`/`hold_routine` before writing new ones: none existed (Stage 1/2 built only
+`AtgmRunState(contact_id)`, no `decide`, no tests beyond the Co-moving Fields rows already in
+`test_body.py`). No test suite was silently degenerated — full suite run before and after.
+
+#### Files Changed
+
+**Rewritten** (was Stage 1's `contact_id`-only skeleton)
+- `body-layer/src/belief/atgm_run.py` — `AtgmPhase` (`str, Enum`); `AtgmRunState` (now carries
+  `phase`/`selected_step`/`selected_step_count_last_seen`/`in_flight_since_sim`/`tracked_family`/
+  the three range latches/`unconfirmed_drop_since_sim`, all with defaults so the Stage 1
+  construction site, `body.py:3746`, is unaffected); `AtgmInputs` (one poll's synthetic inputs);
+  `LaunchEvent`/`FailedLaunch` (declared here, not imported from `perception.own_weapons`, which
+  Stage 5 has not built); `Fire`/`SelectStation` (`AtgmAction = Fire | SelectStation`; `Fire.
+  trigger` is a plain string, not the not-yet-extended `EffectorTrigger` enum); `family_of`
+  (loose substring match against `atgm.toml`'s eventual real names); `decide` and its five
+  per-phase helpers (`_preparing_tick`, `_tracking_drop_check`, `_in_flight_tick`,
+  `_resetting_tick`, `_maybe_range_call`) plus `_resolve_station_selection` (the one shared
+  stay-or-cyclic-next rule `_preparing_tick`/`_tracking_drop_check`/`_resetting_tick` all call) and
+  `_render_launch_line`. Seven tunables (below).
+
+**Modified**
+- `body-layer/src/belief/speech.py` — `render_range_state`, `render_atgm_launch` (plus
+  `_ATGM_FAMILY_DISPLAY`), `render_impact`, `render_no_more_missiles`.
+- `body-layer/src/belief/attack_run.py` — `decide` gains `guidance_floor: Optic = UNAIDED_OPTIC`,
+  threaded straight into `guidance_request_for`'s own `floor=` keyword in place of the hardcoded
+  `UNAIDED_OPTIC`. No change to `guidance_request_for` itself — its own docstring already
+  anticipated exactly this ("the floor itself was raised since the last request (e.g. an ATGM
+  run's own floor/ceiling parameters)").
+- `body-layer/src/belief/crew_console.py` — `drain_attack_run` gains `guidance_floor: Optic =
+  UNAIDED_OPTIC`, passed straight through to `decide_attack_run`.
+- `body-layer/src/body.py` — the `drain_attack_run` call site gains `guidance_floor=(SIGHT_WIDE_
+  OPTIC if runner.atgm_run_state is not None else UNAIDED_OPTIC)` — the same granularity `vertical`
+  already uses on the line above it, not narrowed to `home_phase is SIGHTING` (reasoning in
+  `attack_run.decide`'s own docstring, see Notable Discoveries).
+- `body-layer/src/belief/callouts.py` — `CalloutScheduler.tick` gains `hold_routine: bool = False`:
+  both the event-candidate loop and the group-disclosure loop skip (never consume) every candidate
+  except `CONTACT_FIRING_SEEN` with `targets_ownship`, while `True`. Default `False` is a true
+  no-op for every pre-existing caller.
+- `body-layer/docs/STRUCTURE.md` — the `atgm_run.py` entry rewritten for Stage 3's actual content
+  (Stage 1's entry described a not-yet-built state machine as "Stage 3"; this replaces that
+  forward-reference with what Stage 3 actually built), plus the guidance-floor and `hold_routine`
+  additions, plus the discovered re-point gap (below).
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`) for the
+  seven new `[belief.atgm_run]` entries. Checked the **rendered** file, not the source comments:
+  each entry's first sentence (the only one the generator emits) states what the constant does and,
+  where applicable, the consequence of getting it wrong (e.g. `ATGM_UNCONFIRMED_DROP_GRACE_S`'s
+  "before treating the drop as a jettison/failed launch rather than a shot still leaving the
+  rail").
+
+#### Tunables (`belief.atgm_run`, all new this stage)
+
+| Key | Default | Bounds | Status |
+|---|---|---|---|
+| `SHTURM_SPEED_MPS` | 345.0 | 200–500 | agreed-guess |
+| `SHTURM_MAX_RANGE_M` | 5000.0 | 1000–8000 | agreed-guess |
+| `ATAKA_SPEED_MPS` | 400.0 | 200–600 | agreed-guess |
+| `ATAKA_MAX_RANGE_M` | 6000.0 | 1000–10000 | agreed-guess |
+| `ATGM_MIN_RANGE_M` | 400.0 | 0–2000 | agreed-guess |
+| `ATGM_UNCONFIRMED_DROP_GRACE_S` | 3.0 | 0.5–10 | judgement |
+| `ATGM_MAX_FLIGHT_S` | 25.0 | 10–60 | derived |
+
+No cross-key coupling introduced — each is read independently (`_FAMILY_SPEED_MPS`/`_FAMILY_MAX_
+RANGE_M` are plain dicts keyed by `family_of`'s own two return values, not a coupling between the
+tunables themselves). All seven are AST literals (`lo=`/`hi=` are plain numeric literals, not
+references), confirmed by `generate_defaults.py --write` running clean.
+
+#### Tests Added
+
+**`tests/test_atgm_run.py`** (new, 36 tests) — table-driven against synthetic `AtgmInputs`, no
+DCS. Covers every item in the plan's own Stage 3 test list: range calls (out-of-range-then-in-
+range once, in-range-says-neither, a second missile in the run says neither, a fresh `AtgmRunState`
+has untouched latches — see Notable Discoveries for why "re-point resets the latches" is tested at
+this granularity, not end-to-end); launch/impact (out-of-range/inside-min launch says only the
+launch line, a second launch while in flight rebases silently to the newest, launch-and-gone in
+the same poll gives both lines in order); failure paths (`FailedLaunch` is a true no-op, a count
+drop followed by a launch inside the grace window gives no selection before the launch, a count
+drop with no launch emptying the last station says "No more missiles.", a partial count drop
+clears the timer and stays); the backstop (silent after `ATGM_MAX_FLIGHT_S`, stays `IN_FLIGHT`
+before it elapses); Preparing's first selection (waits on `observ_observed`, picks the lowest
+loaded step, "No more missiles." with nothing loaded, `EMPTY` is a steady no-op); Resetting's
+post-impact resolution (waits on `impact_sequence_running`, stays on the still-loaded station with
+no action, cycles to the next loaded station, "No more missiles." with nothing left); `family_of`
+(both hint forms, case-insensitivity, unknown names); the launch line (unknown family/unknown
+range both say "Missile." with no invented number, the singular "1 second", the plural for every
+other count); the two families' own Wikipedia figures, pinned.
+
+**`tests/test_callouts.py`** (3 new) — `hold_routine`'s own mechanism, in the module it lives in:
+`test_hold_routine_defers_a_routine_event_and_speaks_it_once_cleared` (also covers the plan's
+"hybrid-only contact event" case — the `_observation` fixture's own source **is** the hybrid
+channel's, so no second test is needed: the hold gates by event kind, never by source);
+`test_hold_routine_still_lets_taking_fire_through` (the one pass-through kind/flag pair, with a
+live routine candidate for the *same* contact proven still held); `test_hold_routine_defers_group_
+disclosure_too`.
+
+**`tests/test_attack_run.py`** (2 new) — `test_guidance_floor_raises_the_request_even_for_a_near_
+target`, `test_guidance_floor_default_is_byte_identical_to_unaided`.
+
+#### Checks
+
+(body-layer only — no other subproject touched)
+- `ruff format --check src tests tools`: pass
+- `ruff check src tests tools`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (0 errors, 78 files)
+- `pytest tests -q`: pass — 2776 passed, 4 xfailed (was 2735 passed, 4 xfailed before this stage;
+  +41 new: 36 in `test_atgm_run.py`, 3 in `test_callouts.py`, 2 in `test_attack_run.py`). Also
+  confirmed with `-p no:randomly` after one default-order run flagged
+  `test_mission_start_reset.py::test_check_for_new_mission_keeps_the_traceback_for_a_non_
+  connection_failure` as failing — passed in isolation and passed with ordering fixed, so this is a
+  pre-existing test-order-dependent flake (the file was not touched by this stage), not a
+  regression; flagged below rather than silently worked around.
+- Also updated as a mechanical consequence of the new `drain_attack_run`/`decide_attack_run`
+  keyword: 5 pre-existing `spy_drain_attack_run` fixtures in `tests/test_body.py` (Stage 1's own
+  convention — their signatures must match the real call site to be valid monkeypatch targets)
+  gained `guidance_floor: object = None`. No assertion in any of those tests changed.
+
+#### Notable Discoveries / Deviations From the Plan
+
+1. **The guidance-ladder floor deferral (Stage 1/2's flagged deviation 1) is settled: made, not
+   deferred further.** `attack_run.decide` gains `guidance_floor: Optic = UNAIDED_OPTIC`, threaded
+   through at the **same granularity `vertical` already uses** (`runner.atgm_run_state is not
+   None`), not narrowed to `home_phase is SIGHTING` as the plan's prose literally reads ("While
+   `home_phase is SIGHTING` and [the lock] is set... the guidance ladder's floor is `SIGHT_WIDE_
+   OPTIC`"). Reasoned explicitly, not silently widened: `BL-B71`'s own ladder is "continuous and
+   bidirectional" regardless of tier/phase (that module's own docstring), so gating the floor more
+   narrowly than `vertical` would let the ladder request below sight tier during Preparing, then
+   visibly jump to `SIGHT_WIDE_OPTIC` the instant `SIGHTING` is reached — a floor change mid-run for
+   no behavioural reason the plan never asks for, not a correctness bug either way since nothing
+   downstream reads `requested_optic` before a grant exists. No change was needed in `guidance_
+   request_for` itself: its own docstring already names exactly this case ("the floor itself was
+   raised since the last request (e.g. an ATGM run's own floor/ceiling parameters) -- never hold a
+   request below the current floor").
+2. **Discovered gap: `body.py`'s re-point handling does not match the plan's own Co-moving Fields
+   table, and this stage does not fix it (out of scope — poll-loop wiring, Stage 7's).** The table's
+   "engage missiles, ATGM run active, new target" row says `atgm` should **keep** `phase`/
+   in-flight/`selected_step` and only reset the range latches + update `contact_id`. The actual
+   Stage 1 code (`body.py`'s engage-apply block, `AtgmRunState(contact_id=atgm_contact_id)`) always
+   constructs a **wholesale-fresh** state on every `engage … missiles`, including a re-point while
+   an ATGM run is already active — which was harmless when `AtgmRunState` carried only `contact_id`
+   (Stage 1/2), but is a real latent bug now that `phase`/`in_flight_since_sim`/`selected_step`
+   exist: a re-point mid-flight would silently forget the missile is in flight, the moment Stage 7
+   wires `decide` into the poll loop. Neither Stage 1's implementation nor its review caught this
+   (the review's own "four rows Stage 1 claims" list does not include this one). This is why the
+   plan's own "a re-point mid-flight keeps the missile" Stage 3 test is **not** in
+   `test_atgm_run.py`: `decide` itself never touches `contact_id` or re-points anything — that
+   operation is entirely the caller's (`body.py`'s) job, and there is no `decide`-level behaviour
+   to test for it today. Flagged here, in `docs/STRUCTURE.md`'s `atgm_run.py` entry, and restated
+   explicitly so Stage 7 does not re-introduce the current (wrong) behaviour unexamined.
+3. **"A re-point resets the latches" (plan's own range-calls test) is tested as "a fresh
+   `AtgmRunState` has untouched latches at its dataclass defaults," not end-to-end through a
+   re-point.** `decide` never constructs an `AtgmRunState` itself except via `replace()` on the one
+   it was given — the reset-on-re-point is entirely a construction-site property (the caller
+   building fresh), the same shape `attack_run.AttackRunState`'s own re-point reset already has.
+   `test_a_fresh_atgm_run_state_has_untouched_range_latches` pins the one thing `decide` can
+   promise; the construction-site behaviour itself is (today, incorrectly per point 2 above) Stage
+   1's code, not Stage 3's.
+4. **`own_feed_fresh` is accepted on `AtgmInputs` but intentionally unused by `decide`'s own
+   backstop logic.** Round 8's own wording for Decision N1 — *"after 25 s leave the flight
+   silently... by 25 s the missile is physically gone, whatever the feed says"* — reads as the
+   25 s flight-elapsed timer being the backstop's **sole** trigger, covering both named causes
+   (Hook not loaded, and a genuinely long flight) through the one mechanism, rather than a second,
+   earlier trigger keyed on feed staleness specifically. `own_feed_fresh` stays on the dataclass for
+   Stage 5's eventual producer and for parity with the plan's own state-param list, but no test
+   exercises it changing `decide`'s behaviour, because none should.
+5. **The second-launch-while-in-flight case (plan's own test list) needed a flag `decide` could not
+   derive from `state`/`inputs` alone.** Both a just-entered and an already-standing `IN_FLIGHT`
+   have `in_flight_since_sim is not None`, so `_in_flight_tick` cannot tell "this poll's launch
+   already handled by the block above" apart from "a genuine second launch" without help.
+   `decide`'s own local `just_launched` flag, passed through as `already_in_flight=not
+   just_launched`, is the fix — documented in both functions' docstrings rather than left as an
+   unexplained boolean parameter.
+6. **Comment pruned, per implementer.md's "prune the comment you are standing next to":**
+   `docs/STRUCTURE.md`'s `atgm_run.py` entry's own "the state machine, range latches and tracked
+   missile are Stage 3" sentence (Stage 1/2's forward-reference to this stage) was deleted and
+   replaced with what Stage 3 actually built, rather than left stale beside the new content — one
+   comment block, the one this stage's own edit sits directly beside.
+7. **No cross-key tuning coupling** — confirmed by inspection: the seven new tunables are read
+   independently (two plain lookup dicts keyed by `family_of`'s return value, not by each other),
+   and none of them is asserted against another constant anywhere in `src/`.

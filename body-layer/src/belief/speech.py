@@ -198,7 +198,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -587,6 +587,60 @@ def render_observ_on_wait() -> OutgoingSpeech:
     no line at all, when it is already on, since turning on an already-on
     switch has nothing to announce)."""
     return OutgoingSpeech(text="Observ on, wait.", template="attack_run")
+
+
+def render_range_state(*, in_range: bool) -> OutgoingSpeech:
+    """The ATGM run's per-run range call (`[[BL-B67]]` Stage 3, "Range
+    calls", round 7's *"per run, but only if out of range first. If run
+    starts in range, say nothing."*) -- `belief.atgm_run._maybe_range_call`
+    is the only caller, and only ever reaches here once for "Out of
+    range." and once for "In range.", never twice for either in the same
+    run (its own docstring has the latch bookkeeping)."""
+    return OutgoingSpeech(
+        text="In range." if in_range else "Out of range.", template="attack_run"
+    )
+
+
+#: Display word for each missile family (`belief.atgm_run.family_of`'s
+#: own two keys) -- capitalised, the word a pilot would actually use.
+_ATGM_FAMILY_DISPLAY: Final[Mapping[str, str]] = {
+    "shturm": "Shturm",
+    "ataka": "Ataka",
+}
+
+
+def render_atgm_launch(family: str | None, seconds: int | None) -> OutgoingSpeech:
+    """The ATGM run's launch line (`[[BL-B67]]` Stage 3, round 6: *"could
+    well use it as primary signal"* -- `S_EVENT_SHOT` + the weapon object
+    is what triggers this). `family`/`seconds` are **both-or-neither**:
+    `belief.atgm_run._render_launch_line` passes `None` for both the
+    moment either the family or the believed range is unknown, per the
+    plan's own "no invented number" -- never guess a flight time for a
+    missile family this code cannot name, and never name a family with
+    no time to go with it. `"Missile."` is the fallback either way, and
+    `seconds == 1` speaks the singular ("1 second."), not "1 seconds.\""""
+    if family is None or seconds is None:
+        return OutgoingSpeech(text="Missile.", template="attack_run")
+    label = _ATGM_FAMILY_DISPLAY.get(family, family.capitalize())
+    unit = "second" if seconds == 1 else "seconds"
+    return OutgoingSpeech(text=f"{label}, {seconds} {unit}.", template="attack_run")
+
+
+def render_impact() -> OutgoingSpeech:
+    """*"Impact."* -- the ATGM run's own tracked missile reporting gone
+    (`[[BL-B67]]` Stage 3), spoken only on the confirmed-gone path;
+    `belief.atgm_run`'s backstop exit (Decision N1: *"after 25 s leave
+    the flight silently"*) never reaches this function at all."""
+    return OutgoingSpeech(text="Impact.", template="attack_run")
+
+
+def render_no_more_missiles() -> OutgoingSpeech:
+    """*"No more missiles."* -- no ATGM loaded, at run start (round 7,
+    decision 5) or once the last loaded station empties mid-run
+    (`[[BL-B67]]` Stage 3). The run itself does not end: Petrovich keeps
+    tracking so a guns/rockets attack can follow (round 4's *"keep
+    tracking for guns/rockets\""*)."""
+    return OutgoingSpeech(text="No more missiles.", template="attack_run")
 
 
 #: One row of an alignment word table (`plans/attack-run/plan.md`

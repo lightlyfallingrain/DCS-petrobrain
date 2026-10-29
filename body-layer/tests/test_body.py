@@ -4530,6 +4530,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
         *,
         resolving_optic: object = None,
         vertical: bool = True,
+        guidance_floor: object = None,
     ) -> AttackRunState | None:
         captured["resolving_optic"] = resolving_optic
         done.set()
@@ -4648,6 +4649,7 @@ def test_engage_missiles_constructs_atgm_run_state_same_poll_as_attack_run_state
         *,
         resolving_optic: object = None,
         vertical: bool = True,
+        guidance_floor: object = None,
     ) -> AttackRunState | None:
         # No real `attack_target` task exists in this fixture -- the real
         # `drain_attack_run` would read that absence as "selection gone"
@@ -4691,6 +4693,7 @@ def test_engage_without_missiles_ends_a_standing_atgm_run(
         *,
         resolving_optic: object = None,
         vertical: bool = True,
+        guidance_floor: object = None,
     ) -> AttackRunState | None:
         # Same reason as the sibling test above: no real `attack_target`
         # task exists here, and this test is not about that row.
@@ -4733,6 +4736,7 @@ def test_disengage_ends_both_the_attack_run_and_the_atgm_run(
         *,
         resolving_optic: object = None,
         vertical: bool = True,
+        guidance_floor: object = None,
     ) -> AttackRunState | None:
         done.set()
         return state
@@ -4765,6 +4769,7 @@ def test_lost_contact_ends_the_atgm_run_alongside_the_attack_run(
         *,
         resolving_optic: object = None,
         vertical: bool = True,
+        guidance_floor: object = None,
     ) -> AttackRunState | None:
         done.set()
         return None

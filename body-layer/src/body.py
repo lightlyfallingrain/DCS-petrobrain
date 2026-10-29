@@ -3919,6 +3919,20 @@ def _run_crew_text_poll_loop(
                             # guidance has no elevation axis); unaffected
                             # when no ATGM run is engaged.
                             vertical=runner.atgm_run_state is None,
+                            # `[[BL-B67]]` Stage 3 -- settles Stage 1/2's
+                            # own flagged deferral ("Keeping the look
+                            # through launch"): the guidance ladder's
+                            # floor is sight tier for the whole ATGM run,
+                            # never naked-eye/binoculars, since the
+                            # 9K113's guidance is sight-only. Same
+                            # granularity as `vertical` above, not
+                            # narrowed to `home_phase is SIGHTING` -- see
+                            # `attack_run.decide`'s own docstring.
+                            guidance_floor=(
+                                SIGHT_WIDE_OPTIC
+                                if runner.atgm_run_state is not None
+                                else UNAIDED_OPTIC
+                            ),
                         )
                         # `[[BL-B67]]` Stage 1 -- "run ends with attack_
                         # run_state" (drop target/cancel/lost contact, all

@@ -40,7 +40,7 @@ from belief.percept import Percept
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import render_alignment
 from perception.naked_eye_source import ATTACK_TARGET_LOS_MAX_AGE_S
-from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+from perception.optics import BINOCULAR_OPTIC, SIGHT_WIDE_OPTIC, UNAIDED_OPTIC
 from perception.source import OwnshipState, RelativeDirection
 
 _RELATIVE_DIRECTION_PATTERN = re.compile(
@@ -1685,6 +1685,42 @@ class TestRequestedOptic:
         )
         assert new_state.last_contact_id == "CONTACT_2"
         assert new_state.requested_optic is UNAIDED_OPTIC
+
+    def test_guidance_floor_raises_the_request_even_for_a_near_target(
+        self,
+    ) -> None:
+        """`[[BL-B67]]` Stage 3 settles Stage 1/2's own flagged deferral:
+        `guidance_floor=SIGHT_WIDE_OPTIC` must request at least sight
+        tier even for a target well within naked-eye range, where the
+        default floor (`UNAIDED_OPTIC`) would otherwise request the
+        naked eye -- `guidance_request_for`'s own "never hold a request
+        below the current floor" clause, exercised through `decide`."""
+        near = _contact_at(bearing_deg=0.0, range_m=1000.0)
+        state, _speech = decide(
+            AttackRunState(),
+            now_sim=0.0,
+            ownship=_ownship(),
+            contact=near,
+            guidance_floor=SIGHT_WIDE_OPTIC,
+        )
+        assert state.requested_optic is SIGHT_WIDE_OPTIC
+
+    def test_guidance_floor_default_is_byte_identical_to_unaided(self) -> None:
+        """Every pre-existing caller omits `guidance_floor` -- confirming
+        the default still resolves to the same `UNAIDED_OPTIC` floor as
+        before this keyword existed."""
+        near = _contact_at(bearing_deg=0.0, range_m=1000.0)
+        with_default, _ = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=near
+        )
+        explicit, _ = decide(
+            AttackRunState(),
+            now_sim=0.0,
+            ownship=_ownship(),
+            contact=near,
+            guidance_floor=UNAIDED_OPTIC,
+        )
+        assert with_default.requested_optic is explicit.requested_optic
 
 
 # -- `BL-B71` review's required fix: `_no_look_cause` must test range   -
