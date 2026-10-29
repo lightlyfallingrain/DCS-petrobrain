@@ -148,6 +148,7 @@ from belief.speech import (
     render_no_contact,
     render_no_target,
     render_no_view,
+    render_observ_on_wait,
     render_point_readback,
     render_radio_check,
     render_readback,
@@ -1234,6 +1235,18 @@ class CrewConsole:
     #: loop the moment it is applied, so a command that is never repeated
     #: does not re-fire every poll thereafter.
     attack_run_transition: Literal["engage", "disengage"] | None = None
+    #: `engage ... missiles`'s own one-shot weapon slot (`[[BL-B67]]`,
+    #: `plans/bl-b67-atgm-run/plan.md` Stage 1) -- `_handle_engage`'s own
+    #: `slots.get("weapon")` reading, set alongside `attack_run_
+    #: transition` and consumed by `drain_atgm_engage` the same poll
+    #: `body.py`'s engage-apply block applies that transition. `"missiles"`
+    #: starts (or continues) an ATGM run; anything else (`"guns"`/
+    #: `"rockets"`/`None`, a bare `engage`) ends any standing one. Reset to
+    #: `None` at the top of every `handle_command` dispatch, the same
+    #: convention `attack_run_transition` already follows, so a stale
+    #: weapon slot from an earlier dispatch this poll loop has not yet
+    #: consumed cannot leak into an unrelated later command.
+    attack_run_weapon: str | None = None
     #: "Observ on"/"Observ off"'s one-shot signal to `body.py`'s poll
     #: loop -- `BL-B64` Stage 2, direction §6 (`docs/concept/9K113.md`'s
     #: "Observ" glossary: *"Turn on OBSERV in guidance unit, tell pilot
@@ -1611,9 +1624,11 @@ class CrewConsole:
         `_pending_mentions`, `on_ground`, `sight_ready`,
         `enrichment`, `refused`, `_positional_reply_overflow_
         warned`) resets to its declared
-        default -- see `refused`'s own field docstring for why resetting
-        it here is correct even though a mission (re)start is exactly the
-        event that might need to set it right back. `on_ground` resetting
+        default (`attack_run_weapon` among them, `[[BL-B67]]`'s own
+        one-shot weapon slot) -- see `refused`'s own field docstring for
+        why resetting it here is correct even though a mission (re)start
+        is exactly the event that might need to set it right back.
+        `on_ground` resetting
         to `True` is harmless either way: `body._check_for_new_mission`
         re-evaluates it from live telemetry the very next poll, same as
         `enrichment`."""
@@ -2136,6 +2151,9 @@ class CrewConsole:
         # dispatch this poll loop has not yet consumed cannot leak into an
         # unrelated later command's evaluation this same poll.
         self.attack_run_transition = None
+        # Same reset, same reason, for `[[BL-B67]]`'s weapon slot
+        # (`attack_run_weapon`'s own docstring).
+        self.attack_run_weapon = None
         # Same reset, same reason, for OBSERV (`observ_transition`'s own
         # docstring).
         self.observ_transition = None
@@ -3261,11 +3279,16 @@ class CrewConsole:
         attack_target`) and registers (or moves) the standing task, then
         starts the run on whichever contact ends up selected -- a bare
         `engage`/`engage target` with no slots instead starts the run on
-        whatever is already selected. The weapon slot, if present, is
-        accepted and discarded (Decision 15: "nothing reads it yet" --
-        `_parse_target_slots` has no weapon field, so it is simply never
-        read here either, the same "accepted into the grammar, never
-        consumed" shape the plan describes).
+        whatever is already selected. **The weapon slot is now read**
+        (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1, superseding
+        Decision 15's "nothing reads it yet" -- `plans/attack-run/plan.md`
+        Decision 15 is marked `REVISED` there): `"missiles"` gates on the
+        guidance unit's readiness and, once engaged, starts (or continues)
+        an ATGM run via `attack_run_weapon`/`drain_atgm_engage`; any other
+        value (including `None`, a bare `engage`) is still read into
+        `attack_run_weapon` but never gates anything -- `_parse_target_
+        slots` still has no weapon field of its own, so this reads
+        `slots.get("weapon")` directly rather than through it.
 
         **`[[BL-B102]]`'s `referent` slot** ("engage it"/"engage that") is
         itself a positive signal the player means a specific contact, not
@@ -3273,6 +3296,20 @@ class CrewConsole:
         the same branch a what/where descriptor does (select-then-engage
         via `_resolve_referent_target`), rather than being read as the
         bare "resume the already-selected run" form below."""
+        weapon_raw = slots.get("weapon") if slots is not None else None
+        weapon = weapon_raw if isinstance(weapon_raw, str) else None
+        # `[[BL-B67]]` Stage 1 (`plans/bl-b67-atgm-run/plan.md`, Decision
+        # 3: *"ok"*) -- gated synchronously here, before anything else
+        # this handler does (target resolution included), the same
+        # posture `_handle_observ_on`'s own readiness gate already has:
+        # a request that arrives before the guidance unit is ready is
+        # refused outright, with **neither** `attack_run_state` nor
+        # `atgm_run_state` ever created (`body.py`'s engage-apply block
+        # never runs, since `attack_run_transition` is never set) --
+        # never accepted and silently never engaging. Only `"missiles"`
+        # is gated: guns/rockets need no guidance unit at all.
+        if weapon == "missiles" and not self.sight_ready:
+            return [render_unable("GUIDANCE_NOT_READY").text]
         descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
         referent = bool(slots.get("referent")) if slots is not None else False
         if (
@@ -3331,6 +3368,13 @@ class CrewConsole:
         if result is None:
             return [f"no such contact: {contact_id}"]
         self.attack_run_transition = "engage"
+        # `[[BL-B67]]` Stage 1 -- the weapon slot, now actually consumed
+        # (Decision 15's old "accepted and discarded" no longer applies
+        # to `"missiles"`; guns/rockets still carry it through unread by
+        # anything but the readiness gate above). `body.py`'s engage-
+        # apply block reads this via `drain_atgm_engage`, the same poll
+        # it applies `attack_run_transition`.
+        self.attack_run_weapon = weapon
         # `BL-B66` Stage 4 (plan §4/Co-moving Fields): "ARMED ... any
         # attack run start" (procedures direction §4). Converges on the
         # same field `_handle_weapons_armed` sets -- engaging while
@@ -3357,6 +3401,47 @@ class CrewConsole:
         caller, not here)."""
         self.attack_run_transition = "disengage"
         return [render_attack_run_off().text]
+
+    def drain_atgm_engage(self, now_sim: float, *, observ_is_on: bool) -> str | None:
+        """One-shot signal consumed by `body.py`'s engage-apply block, the
+        same poll it applies `attack_run_transition == "engage"`
+        (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1) -- the
+        contact id to start (or continue) an ATGM run on, or `None` when
+        this engage carried no `"missiles"` weapon slot, in which case
+        the caller ends any standing ATGM run instead (Co-moving Fields:
+        "engage without missiles while ATGM active").
+
+        `attack_run_weapon` is `_handle_engage`'s own one-shot slot;
+        consumed here (reset to `None`), the same one-shot-signal
+        convention `attack_run_transition` itself already uses -- so a
+        stale weapon value from an earlier dispatch this poll loop has
+        not yet applied cannot leak into a later one. Re-reads `self.
+        _active_attack_target_task()` rather than being handed the
+        contact id directly: `_handle_engage` has already registered (or
+        moved) that task by the time this runs, the same "already
+        selected" read `drain_attack_run` itself performs.
+
+        **Speaks "Observ on, wait." and sets `observ_transition = "on"`**
+        -- the same effector trigger `_handle_observ_on`'s own command
+        path fires, but driven by `engage ... missiles` rather than a
+        separate pilot command (plan Goal: "He brings OBSERV up").
+        `observ_is_on` is the caller's current `OpticState.home_phase is
+        SIGHTING` reading -- a true no-op (no speech, no transition) when
+        OBSERV is already on, since turning on an already-on switch has
+        nothing to announce. The readiness gate itself already ran,
+        synchronously, inside `_handle_engage` (Decision 3) -- by the
+        time this method runs, the guidance unit is known ready."""
+        weapon = self.attack_run_weapon
+        self.attack_run_weapon = None
+        if weapon != "missiles":
+            return None
+        target_task = self._active_attack_target_task()
+        if target_task is None or target_task.contact_id is None:
+            return None
+        if not observ_is_on:
+            self._print([render_observ_on_wait().text], now_sim)
+            self.observ_transition = "on"
+        return target_task.contact_id
 
     def _handle_where_is_it(self, slots: dict[str, int | str] | None) -> list[str]:
         """ "Where is it?" (`plans/attack-run-los/plan.md` F3) -- the
@@ -3453,6 +3538,7 @@ class CrewConsole:
         ownship: OwnshipState,
         *,
         resolving_optic: Optic | None = None,
+        vertical: bool = True,
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
@@ -3480,6 +3566,12 @@ class CrewConsole:
         `belief.attack_run.decide`'s own `resolving_optic`. `None` (its
         default) for a caller with no optic ladder, read by `decide` as
         `UNAIDED_OPTIC`.
+
+        `vertical` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1)
+        is passed straight through to `decide`'s own keyword of the same
+        name -- `False` for an ATGM run (`body.py`'s caller sets it from
+        `runner.atgm_run_state is None`), `True` (the default) for every
+        pre-existing caller.
 
         **Resolves the target's `belief.groups.Group` and passes it to
         `decide` as of Stage 7** -- tier 2's own projection input (Decision
@@ -3535,6 +3627,7 @@ class CrewConsole:
             contact=contact,
             group=group,
             resolving_optic=resolving_optic,
+            vertical=vertical,
         )
         if speech is None:
             return new_state

@@ -578,6 +578,17 @@ def render_attack_run_off() -> OutgoingSpeech:
     return OutgoingSpeech(text="Attack run off.", template="attack_run")
 
 
+def render_observ_on_wait() -> OutgoingSpeech:
+    """`engage ... missiles`'s own OBSERV-up line (`[[BL-B67]]`, `plans/
+    bl-b67-atgm-run/plan.md` Stage 1, Goal: *"He brings OBSERV up, arms,
+    selects a loaded pylon..."*) -- spoken once, on the poll an ATGM run
+    starts with OBSERV not already on (`belief.crew_console.drain_atgm_
+    engage`'s own `observ_is_on` check, not this function: a true no-op,
+    no line at all, when it is already on, since turning on an already-on
+    switch has nothing to announce)."""
+    return OutgoingSpeech(text="Observ on, wait.", template="attack_run")
+
+
 #: One row of an alignment word table (`plans/attack-run/plan.md`
 #: Decision 11 REVISED, rule 1): `(threshold_deg, positive_phrase,
 #: negative_phrase)`, descending by `threshold_deg` -- the table's own
