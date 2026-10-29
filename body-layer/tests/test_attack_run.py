@@ -44,7 +44,7 @@ from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 from perception.source import OwnshipState, RelativeDirection
 
 _RELATIVE_DIRECTION_PATTERN = re.compile(
-    r"\brelative_direction\b|\bRelativeDirection\b"
+    r"\brelative_direction\b|\bRelativeDirection\b|\baim_unit_direction\b"
 )
 
 
@@ -114,9 +114,12 @@ def test_belief_never_references_relative_direction_except_sanctioned_readers() 
     """`plans/attack-run/plan.md` Decision 16 item 4: no file under
     `belief/` may mention `relative_direction`/`RelativeDirection` except
     `percept.py` (the projection) and `attack_run.py` (the one consumer).
-    Word-boundary-aware so it does not false-positive on
-    `body_relative_direction`/`alignment_direction`, which legitimately
-    appear throughout `belief/contacts.py` and elsewhere."""
+    `aim_unit_direction` (`plans/bl-b67-atgm-run/plan.md` Stage 2) joins
+    the same fence, under the same two files -- it is the same ownship-
+    relative boundary's second field, not a second exception. Word-
+    boundary-aware so it does not false-positive on `body_relative_
+    direction`/`alignment_direction`, which legitimately appear
+    throughout `belief/contacts.py` and elsewhere."""
     belief_dir = pathlib.Path(inspect.getfile(attack_run_module)).parent
     assert belief_dir.name == "belief"
 
@@ -325,6 +328,56 @@ def test_decide_oblique_heading_and_banked_ownship_does_not_mix_axes() -> None:
     assert level[1] == pytest.approx(banked[1], abs=1e-3)
 
 
+def test_decide_vertical_false_drops_the_elevation_word() -> None:
+    """`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1: `vertical=
+    False` is a flagged departure scoped to the ATGM run -- the same
+    geometry that speaks an azimuth-plus-elevation conjunction with
+    `vertical=True` (the default) speaks the azimuth word alone with it
+    `False`. Both axes are clearly off their own gate here (azimuth
+    ~11.3 deg > 5.0, elevation ~-11.3 deg beyond the 10.0 deg gate) so
+    the comparison is unambiguous."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=200.0, up_m=-200.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(), relative=relative
+    )
+
+    _vertical_state, vertical_speech = decide(
+        AttackRunState(), now_sim=0.1, ownship=_ownship(), contact=contact
+    )
+    _azimuth_state, azimuth_only_speech = decide(
+        AttackRunState(),
+        now_sim=0.1,
+        ownship=_ownship(),
+        contact=contact,
+        vertical=False,
+    )
+
+    assert vertical_speech is not None and azimuth_only_speech is not None
+    assert vertical_speech.text == "Come right, a little lower."
+    assert azimuth_only_speech.text == "Come right."
+
+
+def test_decide_vertical_false_still_speaks_lined_up() -> None:
+    """Both axes clear their own gate (dead ahead and level) -- `vertical=
+    False` must not change "Lined up." into something else, since there
+    was never an elevation word to drop here."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+
+    _state, speech = decide(
+        AttackRunState(),
+        now_sim=0.1,
+        ownship=_ownship(),
+        contact=contact,
+        vertical=False,
+    )
+
+    assert speech is not None
+    assert speech.text == "Lined up."
+
+
 def test_decide_change_driven_cadence_resuppresses_unchanged_errors() -> None:
     """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §1: emit if and only
     if the rendered text differs from the last *spoken* one -- text
@@ -403,6 +456,50 @@ def test_seen_world_direction_carries_the_look_time() -> None:
     seen = seen_world_direction(contact)
     assert seen is not None
     assert seen.t_look == pytest.approx(42.5)
+
+
+def test_seen_world_direction_single_unit_prefers_aim_unit_direction() -> None:
+    """`[[BL-B67]]` Stage 2, "Single unit, never a cluster": `single_unit=
+    True` reads `percept.aim_unit_direction` over `percept.relative_
+    direction` when both are set -- here they point in different
+    directions, so the choice is unambiguous."""
+    percept = Percept(
+        t_sim=0.0,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        observation_id="OBS_1",
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+        aim_unit_direction=RelativeDirection(forward_m=0.0, right_m=1000.0, up_m=0.0),
+    )
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    centroid = seen_world_direction(contact, single_unit=False)
+    one_unit = seen_world_direction(contact, single_unit=True)
+
+    assert centroid is not None and one_unit is not None
+    assert centroid.az_true_deg == pytest.approx(0.0, abs=1e-6)
+    assert one_unit.az_true_deg == pytest.approx(90.0, abs=1e-6)
+
+
+def test_seen_world_direction_single_unit_falls_back_without_aim_unit_direction() -> (
+    None
+):
+    """`single_unit=True` with no `aim_unit_direction` set (not a sight-
+    tier look that poll) falls back to `relative_direction` -- it only
+    ever narrows what tier 1 would have used anyway, never loses the
+    look."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+
+    one_unit = seen_world_direction(contact, single_unit=True)
+
+    assert one_unit is not None
+    assert one_unit.az_true_deg == pytest.approx(0.0, abs=1e-6)
 
 
 def test_seen_world_direction_none_without_a_relative_direction() -> None:

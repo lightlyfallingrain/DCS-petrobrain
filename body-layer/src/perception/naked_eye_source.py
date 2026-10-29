@@ -268,14 +268,21 @@ from perception.gaze import (
     gaze_at,
     gaze_for,
 )
-from perception.geometry import GeoPosition, bearing_deg, elevation_deg, range_m
+from perception.geometry import (
+    GeoPosition,
+    angular_delta_deg,
+    bearing_deg,
+    body_relative_direction,
+    elevation_deg,
+    range_m,
+)
 from perception.group_salience import group_salient_ids
 from perception.motion import (
     MOTION_ANGULAR_THRESHOLD_RAD_S,
     MOTION_VELOCITY_MAX_SKEW_S,
     evaluate_motion_gate,
 )
-from perception.optics import UNAIDED_OPTIC, Optic
+from perception.optics import SIGHT_NARROW_OPTIC, SIGHT_WIDE_OPTIC, UNAIDED_OPTIC, Optic
 from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
@@ -550,6 +557,17 @@ class NakedEyePerceptionSource:
     #: by construction) -- `association.filter_player_bubble`'s own
     #: docstring on why that guards the whole added branch at zero cost.
     sight_cone: SightCone | None = None
+    #: `[[BL-B67]]` Stage 2 (`plans/bl-b67-atgm-run/plan.md`, "Single
+    #: unit, never a cluster") -- the sight's own actual pointing
+    #: elevation, `sight_cone.azimuth_deg`'s missing sibling (that class
+    #: carries no elevation field, `perception.association.SightCone`'s
+    #: own docstring). Assigned per poll by `body._apply_active_gaze`
+    #: alongside `sight_cone`, from the same `OpticState.actual_aim_
+    #: elevation_deg` read: `None` whenever `sight_cone` is also `None`
+    #: (no sight optic active this poll). `_build_observation` reads the
+    #: pair together as this poll's gaze centre, for picking the cluster
+    #: member nearest it -- never on its own.
+    gaze_centre_elevation_deg: float | None = None
     #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `body._apply_active_
     #: gaze` whenever `OpticState.hands_busy_until_sim` is active this poll
     #: (`BL-B64` Stage 2, direction §6's "1 s hand movement") -- `poll()`
@@ -1251,7 +1269,13 @@ class NakedEyePerceptionSource:
            reserves `PROVENANCE_EMITTER_FIRING` ("something firing... far")
            for a unit the bypass was actually needed for -- unreachable by
            a cluster check 2 already claimed, since check 2's condition (b)
-           is exactly this branch's precondition negated."""
+           is exactly this branch's precondition negated.
+
+        `aim_unit_direction` (`[[BL-B67]]` Stage 2, "Single unit, never a
+        cluster") is `relative_direction`'s own sibling, but to the one
+        cluster member nearest this poll's gaze centre rather than the
+        centroid -- see that field's own docstring (`perception/
+        source.py`) for when it is set and why."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -1390,6 +1414,65 @@ class NakedEyePerceptionSource:
                 forward_m=forward_m, right_m=right_m, up_m=up_m
             )
 
+        # `[[BL-B67]]` Stage 2 (`plans/bl-b67-atgm-run/plan.md`, "Single
+        # unit, never a cluster") -- the direction to the one member
+        # nearest this poll's gaze centre, under the same `live_los_
+        # clear is True` condition `relative_direction` itself needs
+        # **and** only for a sight-tier optic (the gaze-centre reading
+        # itself, `self.sight_cone`/`self.gaze_centre_elevation_deg`, is
+        # also `None` outside one, the same guard restated so this
+        # block's own intent reads without cross-referencing that
+        # field's docstring). A single-member cluster trivially picks
+        # its own one member -- no special case needed, the "nearest"
+        # search just has one candidate.
+        aim_unit_direction: RelativeDirection | None = None
+        if (
+            live_los_clear is True
+            and self.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
+            and self.sight_cone is not None
+            and self.gaze_centre_elevation_deg is not None
+        ):
+            gaze_az_deg = self.sight_cone.azimuth_deg
+            gaze_el_deg = self.gaze_centre_elevation_deg
+            member_directions = {
+                member.object_id: body_relative_direction(
+                    observer,
+                    GeoPosition(x=member.x, z=member.z, alt_m=member.alt_m),
+                    heading_true_deg=ownship_state.heading_true_deg,
+                    pitch_deg=ownship_state.pitch_deg,
+                    bank_deg=ownship_state.bank_deg,
+                )
+                for member in cluster.members
+            }
+            nearest_member = min(
+                cluster.members,
+                key=lambda member: math.hypot(
+                    angular_delta_deg(
+                        member_directions[member.object_id].azimuth_deg, gaze_az_deg
+                    ),
+                    member_directions[member.object_id].elevation_deg - gaze_el_deg,
+                ),
+            )
+            aim_heading_rad = math.radians(ownship_state.heading_true_deg)
+            aim_north_m = nearest_member.x - observer.x
+            aim_east_m = nearest_member.z - observer.z
+            aim_up_m = nearest_member.alt_m - observer.alt_m
+            aim_forward_m = aim_north_m * math.cos(
+                aim_heading_rad
+            ) + aim_east_m * math.sin(aim_heading_rad)
+            aim_right_m = -aim_north_m * math.sin(
+                aim_heading_rad
+            ) + aim_east_m * math.cos(aim_heading_rad)
+            aim_forward_m, aim_right_m, aim_up_m = perturbed_relative_direction(
+                observation_id=observation_id,
+                forward_m=aim_forward_m,
+                right_m=aim_right_m,
+                up_m=aim_up_m,
+            )
+            aim_unit_direction = RelativeDirection(
+                forward_m=aim_forward_m, right_m=aim_right_m, up_m=aim_up_m
+            )
+
         return Observation(
             id=observation_id,
             contact_id=None,
@@ -1416,6 +1499,7 @@ class NakedEyePerceptionSource:
             apparent_motion=apparent_motion,
             live_los_clear=live_los_clear,
             relative_direction=relative_direction,
+            aim_unit_direction=aim_unit_direction,
         )
 
 

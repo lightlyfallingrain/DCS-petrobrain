@@ -718,6 +718,107 @@ def test_detection_trace_records_relative_direction_set_on_admission() -> None:
     assert admitted[0].relative_direction_set is True
 
 
+def test_aim_unit_direction_picks_the_member_nearest_the_gaze_centre() -> None:
+    """`[[BL-B67]]` Stage 2, "Single unit, never a cluster" -- a two-member
+    cluster (5 m lateral separation at 100 m range, well inside the
+    merge boundary -- confirmed by `perception.clustering.
+    cluster_candidates` directly) aims the one-member direction at
+    whichever member sits nearer this poll's gaze centre, not at the
+    cluster centroid, under a sight-tier optic with the gaze centre set
+    (the same per-poll fields `_apply_active_gaze` assigns)."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=100.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=100.0, lon_deg=5.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+    source.optic = SIGHT_NARROW_OPTIC
+    # Gaze centre close to member 2's own azimuth (~2.86 deg) --
+    # `member 1` is at ~0 deg, so the centroid (~1.43 deg) sits between
+    # both and is not itself close enough to be ambiguous.
+    source.sight_cone = SightCone(azimuth_deg=2.86, half_angle_deg=10.0, depth_m=1000.0)
+    source.gaze_centre_elevation_deg = 0.0
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.aim_unit_direction is not None
+    assert obs.relative_direction is not None
+    # Member 2's own offset (right_m ~= 5.0), not the centroid's (~2.5).
+    assert obs.aim_unit_direction.right_m == pytest.approx(5.0, abs=1e-3)
+    assert obs.relative_direction.right_m == pytest.approx(2.5, abs=1e-3)
+
+
+def test_aim_unit_direction_tracks_the_gaze_centre_across_polls() -> None:
+    """ "sticky across polls as the head moves" -- the same two-member
+    cluster, polled once with the gaze centre near member 1 and once
+    near member 2, picks each member in turn."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=100.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=100.0, lon_deg=5.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+    source.optic = SIGHT_NARROW_OPTIC
+    source.sight_cone = SightCone(azimuth_deg=0.0, half_angle_deg=10.0, depth_m=1000.0)
+    source.gaze_centre_elevation_deg = 0.0
+    # The unchanged cluster must still re-emit on poll 2, for this test's
+    # own comparison -- `"every_poll"`, not the default debounce.
+    source.emit_mode = "every_poll"
+
+    near_member_1 = source.poll(0.0, _ownship())
+    assert len(near_member_1) == 1
+    assert near_member_1[0].aim_unit_direction is not None
+    assert near_member_1[0].aim_unit_direction.right_m == pytest.approx(0.0, abs=1e-3)
+
+    source.sight_cone = SightCone(azimuth_deg=2.86, half_angle_deg=10.0, depth_m=1000.0)
+    near_member_2 = source.poll(1.0, _ownship())
+    assert len(near_member_2) == 1
+    assert near_member_2[0].aim_unit_direction is not None
+    assert near_member_2[0].aim_unit_direction.right_m == pytest.approx(5.0, abs=1e-3)
+
+
+def test_aim_unit_direction_equals_the_centroid_for_a_single_member_cluster() -> None:
+    """A single-member cluster needs no "nearest member" search -- the
+    one candidate trivially wins, so `aim_unit_direction` equals
+    `relative_direction`."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=100.0, lon_deg=0.0)]}
+    source, _client = _source(world_objects)
+    source.optic = SIGHT_NARROW_OPTIC
+    source.sight_cone = SightCone(azimuth_deg=0.0, half_angle_deg=10.0, depth_m=1000.0)
+    source.gaze_centre_elevation_deg = 0.0
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.aim_unit_direction is not None
+    assert obs.relative_direction is not None
+    assert obs.aim_unit_direction == obs.relative_direction
+
+
+def test_aim_unit_direction_none_without_a_sight_tier_optic() -> None:
+    """`single_unit=False` is every pre-existing caller's unchanged
+    behaviour: with the default `UNAIDED_OPTIC` (no gaze centre, no
+    sight tier), `aim_unit_direction` stays `None` even though `live_
+    los_clear` is `True` and `relative_direction` is populated."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.live_los_clear is True
+    assert obs.relative_direction is not None
+    assert obs.aim_unit_direction is None
+
+
 def test_a_candidate_whose_live_los_is_blocked_never_reaches_emission() -> None:
     """The bound, restated at the field level (`perception.source.
     RelativeDirection`'s own docstring): gate 4 is fail-closed (`BL-11`
@@ -2043,6 +2144,7 @@ _PER_POLL_OVERWRITTEN_FIELDS: frozenset[str] = frozenset(
         "scan_plan",
         "optic",
         "sight_cone",
+        "gaze_centre_elevation_deg",
         "suppressed_until_sim",
         "peripheral_stimulus_ids",
     }

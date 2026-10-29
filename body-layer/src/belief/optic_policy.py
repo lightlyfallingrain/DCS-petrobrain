@@ -2191,6 +2191,56 @@ def _idle_sight_search(
     )
 
 
+def _decide_sighting_locked(
+    state: OpticState, now_sim: float, targets: Sequence[LookTarget], contact_id: str
+) -> tuple[OpticState, OpticDecision]:
+    """`sight_lock_contact_id`'s own branch of `_decide_sighting`
+    (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1, "Keeping the
+    look through launch") -- pins the look to `contact_id`, skipping the
+    dwell break (`SIGHT_MAX_DWELL_S`) and the look-finished re-pick
+    entirely: an ATGM run locked onto its target must never glance away
+    or re-pick mid-flight. Points directly at the target's current body
+    direction every poll -- no sweep steps, no natural end -- unlike the
+    ordinary look below, which sweeps a believed-bearing envelope because
+    it does not yet know exactly where the contact is; a locked look
+    exists only once an ATGM run has already selected one specific unit
+    (`[[BL-B67]]` Stage 2's `single_unit` aim), so there is nothing left
+    to sweep for.
+
+    `contact_id` missing from `targets` this poll (masked, or
+    momentarily absent from the candidate list) holds the sight at its
+    last aim rather than losing it. Only ever reached from `_decide_
+    sighting` after its own `sight_steady` check, so `_force_observ_off`
+    still wins over a lock on a violent manoeuvre -- the lock is a
+    tracking preference, not a gyro-safety override."""
+    found = next(
+        (target for target in targets if target.contact_id == contact_id), None
+    )
+    if found is None:
+        return state, OpticDecision(
+            optic=state.look_optic,
+            look_azimuth_deg=state.look_azimuth_deg,
+            look_elevation_deg=state.look_elevation_deg,
+        )
+    new_state = replace(
+        state,
+        look_azimuth_deg=found.azimuth_deg,
+        look_elevation_deg=found.elevation_deg,
+        look_contact_id=contact_id,
+        look_started_sim=(
+            state.look_started_sim
+            if state.look_contact_id == contact_id
+            and state.look_started_sim is not None
+            else now_sim
+        ),
+    )
+    return new_state, OpticDecision(
+        optic=sight_look_optic(found),
+        look_azimuth_deg=found.azimuth_deg,
+        look_elevation_deg=found.elevation_deg,
+    )
+
+
 def _decide_sighting(
     state: OpticState,
     now_sim: float,
@@ -2201,6 +2251,7 @@ def _decide_sighting(
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_point_search: Sequence[tuple[float, float]] = (),
+    sight_lock_contact_id: str | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -2242,9 +2293,18 @@ def _decide_sighting(
     reconstruct a state from inside `decide`'s `SCANNING`-at-home body.
     That is what makes `home_phase`/`hands_busy_until_sim`/`actual_aim_*`
     carry forward automatically rather than needing the explicit
-    carry-forward `decide`'s other two fresh-construction sites require."""
+    carry-forward `decide`'s other two fresh-construction sites require.
+
+    `sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+    Stage 1) hands off to `_decide_sighting_locked` immediately after the
+    `sight_steady` check -- a forced OBSERV-off still wins over the lock,
+    nothing else does. `None` (the default) is every pre-existing
+    caller's unchanged behaviour."""
     if not sight_steady:
         return _force_observ_off(state, now_sim)
+
+    if sight_lock_contact_id is not None:
+        return _decide_sighting_locked(state, now_sim, targets, sight_lock_contact_id)
 
     dwell_started_sim = (
         state.phase_started_sim if state.phase_started_sim is not None else now_sim
@@ -2466,6 +2526,7 @@ def _decide_without_guidance(
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
     sight_point_search: Sequence[tuple[float, float]] = (),
+    sight_lock_contact_id: str | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
     `BL-B71`, renamed and kept otherwise unchanged so that the public
@@ -2480,6 +2541,11 @@ def _decide_without_guidance(
     contact already detected and resolvable is worth more than looking for
     another one, and the user's own sequencing says so (*"detected targets
     then get the dwell behaviour"*).
+
+    `sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+    Stage 1) is threaded straight through to `_decide_sighting`, read
+    only there -- `None` (the default) is a true no-op for every
+    pre-existing caller.
 
     The three `sight_*_search` sequences are `search`'s own sibling for
     the `SIGHTING` branch below (`plans/9k113-scan-procedure/plan.md`
@@ -2640,6 +2706,7 @@ def _decide_without_guidance(
             sight_wide_far_search=sight_wide_far_search,
             sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
             sight_point_search=sight_point_search,
+            sight_lock_contact_id=sight_lock_contact_id,
         )
 
     # state.phase must be SCANNING here (the only phase not already
@@ -2926,10 +2993,17 @@ def decide(
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
     sight_point_search: Sequence[tuple[float, float]] = (),
     guidance_request: Optic | None = None,
+    sight_lock_contact_id: str | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through --
     `_decide_without_guidance`'s ordinary phase dispatch, then `BL-B71`'s
     `_apply_guidance` override on top of it.
+
+    `sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+    Stage 1) is `_decide_without_guidance`'s own parameter of the same
+    name, passed straight through -- `body.py`'s poll loop sets it from
+    `runner.atgm_run_state.contact_id` whenever an ATGM run is engaged.
+    `None` (the default) is a true no-op for every pre-existing caller.
 
     `guidance_request` (`plans/attack-run-sortie-fixes/plan.md` §6/§7)
     defaults to `None` -- a true no-op for every pre-existing caller,
@@ -2960,6 +3034,7 @@ def decide(
         sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
         sight_out_of_regard_search=sight_out_of_regard_search,
         sight_point_search=sight_point_search,
+        sight_lock_contact_id=sight_lock_contact_id,
     )
     if decision.suppressed:
         return new_state, decision

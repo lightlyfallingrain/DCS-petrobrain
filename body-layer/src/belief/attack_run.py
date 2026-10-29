@@ -87,7 +87,7 @@ from perception.geometry import (
 from perception.naked_eye_source import ATTACK_TARGET_LOS_MAX_AGE_S
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import SIGHT_NARROW_OPTIC, UNAIDED_OPTIC, Optic
-from perception.source import OwnshipState
+from perception.source import OwnshipState, RelativeDirection
 from perception.visibility import tier_ranges
 
 #: The 12 o'clock sector's own half-width (Decision 6: one clock hour is
@@ -338,13 +338,15 @@ class AttackRunState:
     terrain_blocked_held: bool = False
 
 
-def _seen_world_offset(percept: Percept) -> tuple[float, float, float] | None:
+def _seen_world_offset(
+    percept: Percept, *, relative: RelativeDirection | None = None
+) -> tuple[float, float, float] | None:
     """The world-frame offset (north_m, east_m, up_m), from the ownship
-    position *at the observing poll* to the target -- `None` when `percept`
-    carries no `relative_direction` at all. Factored out of `_tier1_
+    position *at the observing poll* to the target -- `None` when there is
+    no relative observation to re-derive from. Factored out of `_tier1_
     alignment` (`[[BL-B80]]`, `plans/9k113-sight-pointing/plan.md`, "Aim
     source") as the first half of that function's own derivation: undoing
-    `relative_direction`'s own yaw-only rotation (`contact.last_percept.
+    the observation's own yaw-only rotation (`contact.last_percept.
     relative_direction` is yaw-removed *at the observing poll's own
     heading*, Decision 16's "why a finished angle cannot be carried").
 
@@ -359,11 +361,21 @@ def _seen_world_offset(percept: Percept) -> tuple[float, float, float] | None:
     `sight_head.select_sight_goal` derives from consecutive looks already
     covers both ownship translation and target motion since; adding a
     displacement correction here too would double-count it, per the
-    plan's "Aim source" notes)."""
-    if percept.relative_direction is None:
+    plan's "Aim source" notes).
+
+    `relative` (`[[BL-B67]]` Stage 2, "Single unit, never a cluster") lets
+    `seen_world_direction` substitute `percept.aim_unit_direction` for the
+    cluster-centroid `percept.relative_direction` this function would
+    otherwise read -- `None` (the default) means "read `percept.
+    relative_direction`", which is every pre-existing caller's unchanged
+    behaviour, `_tier1_alignment` included: that function never reads
+    `aim_unit_direction` and never will, since guidance aligns on the
+    cluster the same way it always has."""
+    if relative is None:
+        relative = percept.relative_direction
+    if relative is None:
         return None
     observed = percept.ownship_at_observation
-    relative = percept.relative_direction
     heading_obs_rad = math.radians(observed.heading_true_deg)
     # Undo the observing poll's own yaw-only rotation to recover the
     # world-frame offset (north/east); `up_m` was never rotated by yaw.
@@ -435,19 +447,33 @@ class SeenDirection:
     t_look: float
 
 
-def seen_world_direction(contact: Contact) -> SeenDirection | None:
+def seen_world_direction(
+    contact: Contact, *, single_unit: bool = False
+) -> SeenDirection | None:
     """The world-true direction to `contact`, *as seen* at its last look
     through a sight-tier optic -- `[[BL-B80]]`'s sanctioned second
     consumer of `Percept.relative_direction` (`plans/9k113-sight-pointing/
     plan.md`, "Aim source": *"Petrovich can see the target and point
     sight at it even if belief about world location is incorrect"*).
 
-    `None` when `contact.last_percept` carries no `relative_direction` at
+    `None` when `contact.last_percept` carries no relative observation at
     all (never observed through an optic that reports exact relative
     geometry -- unaided/binocular looks also set it, so **this function
     alone does not know whether the look came through the sight**; that
     is `sight_head.select_sight_goal`'s own `last_sight_look_sim` check,
     per the plan's "Notes on the rule").
+
+    **`single_unit` (`[[BL-B67]]` Stage 2, "Single unit, never a
+    cluster") prefers `percept.aim_unit_direction` over `percept.
+    relative_direction`** when the former is set -- the one-member
+    direction an ATGM run needs rather than the cluster centroid an
+    ordinary sight look is content with. Falls back to `relative_
+    direction` when `aim_unit_direction` is `None` (no sight-tier look
+    admitted this cluster the moment it was last seen), so a caller
+    passing `single_unit=True` never loses the look merely because the
+    one-member signal happened not to be populated that poll -- it only
+    ever *narrows* what tier 1 would have used anyway. `False` (the
+    default) is every pre-existing caller's unchanged behaviour.
 
     **No staleness check** -- unlike `_tier1_alignment`, which gates on
     `ATTACK_RUN_RELATIVE_MAX_AGE_S`. Freshness for the sight goal is an
@@ -457,7 +483,9 @@ def seen_world_direction(contact: Contact) -> SeenDirection | None:
     percept = contact.last_percept
     if percept is None:
         return None
-    offset = _seen_world_offset(percept)
+    offset = _seen_world_offset(
+        percept, relative=percept.aim_unit_direction if single_unit else None
+    )
     if offset is None:
         return None
     north_m, east_m, up_m = offset
@@ -814,6 +842,7 @@ def decide(
     contact: Contact,
     group: Group | None = None,
     resolving_optic: Optic | None = None,
+    vertical: bool = True,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
     """One tick of attack-run guidance: `(new_state, speech)`.
 
@@ -925,7 +954,20 @@ def decide(
     `False` (`plans/attack-run-los/plan.md` Decision 2), for the identical
     reason: a fresh target's terrain occlusion has nothing to do with the
     old one's, so this new instance's plain-dataclass default is already
-    the right answer."""
+    the right answer.
+
+    `vertical` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1) is
+    a **flagged departure from shipped BL-14 behaviour, scoped to the
+    ATGM run only**: `False` drops the elevation word table entirely (the
+    azimuth half of the aligned conjunction still speaks) -- the 9K113's
+    own guidance is azimuth-only, so there is nothing to call "higher"/
+    "a little lower" about. Implemented by forcing `elevation_table` to
+    the empty tuple regardless of tier, which `speech.alignment_phrase`'s
+    own `_alignment_phrase_for` already treats as "the elevation axis
+    found no phrase" (the exact mechanism tier 2's own fail-open
+    elevation case already relies on) -- no second code path, only a
+    different table. `True` (the default) is every pre-existing caller's
+    unchanged behaviour."""
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
 
@@ -943,7 +985,7 @@ def decide(
     azimuth_deg = alignment.azimuth_deg
     elevation_deg = alignment.elevation_deg
     azimuth_table = alignment.azimuth_table
-    elevation_table = alignment.elevation_table
+    elevation_table = alignment.elevation_table if vertical else ()
 
     # Memory updates every tick regardless of tier/cause/emit -- see
     # `AttackRunState`'s own docstring on why this must not wait for a

@@ -28,6 +28,7 @@ import pytest
 
 import body as body_module
 from aircraft_client import AircraftLayerError
+from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
@@ -3528,7 +3529,9 @@ def _f4_scenario(
         import belief.sight_head as sight_head_module
 
         monkeypatch.setattr(
-            sight_head_module, "seen_world_direction", lambda contact: None
+            sight_head_module,
+            "seen_world_direction",
+            lambda contact, *, single_unit=False: None,
         )
 
     # `Entry.t_wall` is the one field two runs differ in regardless of the
@@ -4526,6 +4529,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
         ownship: OwnshipState,
         *,
         resolving_optic: object = None,
+        vertical: bool = True,
     ) -> AttackRunState | None:
         captured["resolving_optic"] = resolving_optic
         done.set()
@@ -4559,6 +4563,219 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
     assert not poll_thread.is_alive()
     assert captured["resolving_optic"] is BINOCULAR_OPTIC
     assert captured["resolving_optic"] is not runner.optic_state.guidance_optic
+
+
+# -- `[[BL-B67]]` Stage 1, Co-moving Fields: the real engage-apply block's
+# `atgm_run_state` lifecycle, driven through the real `_run_crew_text_
+# poll_loop` (the same pattern the optic-divergence test above uses) --
+# the state lives on `body.ConsolePerceptionRunner`, so only the real
+# poll loop can exercise the construction/clearing sites under test. -----
+
+
+def _atgm_poll_loop_fixture(
+    tmp_path: Path,
+) -> tuple[ConsolePerceptionRunner, CrewConsole, FakeConsoleAircraftClient, Path]:
+    from belief.optic_policy import OpticPhase, OpticState
+
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic_state = OpticState(phase=OpticPhase.SCANNING, phase_started_sim=0.0)
+    return runner, crew_console, aircraft_client, db_path
+
+
+def _run_one_atgm_poll(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: FakeConsoleAircraftClient,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    done: threading.Event,
+) -> None:
+    monkeypatch.setattr(runner, "run_once", lambda: None)
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        assert done.wait(timeout=5.0), (
+            "the poll loop never reached the call site under test"
+        )
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+
+
+def test_engage_missiles_constructs_atgm_run_state_same_poll_as_attack_run_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Co-moving Fields: "engage missiles, no ATGM run" -- both fresh,
+    `atgm.contact_id = target`."""
+    runner, crew_console, aircraft_client, db_path = _atgm_poll_loop_fixture(tmp_path)
+    crew_console.attack_run_transition = "engage"
+    crew_console.attack_run_weapon = "missiles"
+
+    done = threading.Event()
+
+    def spy_drain_atgm_engage(now_sim: float, *, observ_is_on: bool) -> str | None:
+        done.set()
+        return "CONTACT_1"
+
+    def passthrough_drain_attack_run(
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+        vertical: bool = True,
+    ) -> AttackRunState | None:
+        # No real `attack_target` task exists in this fixture -- the real
+        # `drain_attack_run` would read that absence as "selection gone"
+        # and return `None`, which is a different Co-moving Fields row
+        # (covered by `test_lost_contact_ends_the_atgm_run_alongside_the_
+        # attack_run` below). Pass `state` through unchanged so this test
+        # asserts only the engage-apply block's own construction.
+        return state
+
+    monkeypatch.setattr(crew_console, "drain_atgm_engage", spy_drain_atgm_engage)
+    monkeypatch.setattr(crew_console, "drain_attack_run", passthrough_drain_attack_run)
+    _run_one_atgm_poll(
+        runner, crew_console, aircraft_client, db_path, monkeypatch, done
+    )
+
+    assert runner.attack_run_state is not None
+    assert runner.atgm_run_state is not None
+    assert runner.atgm_run_state.contact_id == "CONTACT_1"
+
+
+def test_engage_without_missiles_ends_a_standing_atgm_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Co-moving Fields: "engage without `missiles` while ATGM active" --
+    `atgm_run_state is None`; `attack_run_state` fresh (BL-14)."""
+    runner, crew_console, aircraft_client, db_path = _atgm_poll_loop_fixture(tmp_path)
+    runner.atgm_run_state = AtgmRunState(contact_id="CONTACT_1")
+    crew_console.attack_run_transition = "engage"
+    crew_console.attack_run_weapon = "guns"
+
+    done = threading.Event()
+
+    def spy_drain_atgm_engage(now_sim: float, *, observ_is_on: bool) -> str | None:
+        done.set()
+        return None
+
+    def passthrough_drain_attack_run(
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+        vertical: bool = True,
+    ) -> AttackRunState | None:
+        # Same reason as the sibling test above: no real `attack_target`
+        # task exists here, and this test is not about that row.
+        return state
+
+    monkeypatch.setattr(crew_console, "drain_atgm_engage", spy_drain_atgm_engage)
+    monkeypatch.setattr(crew_console, "drain_attack_run", passthrough_drain_attack_run)
+    _run_one_atgm_poll(
+        runner, crew_console, aircraft_client, db_path, monkeypatch, done
+    )
+
+    assert runner.attack_run_state is not None
+    assert runner.atgm_run_state is None
+
+
+def test_disengage_ends_both_the_attack_run_and_the_atgm_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Co-moving Fields: "disengage ... drop target ... lost contact" --
+    `atgm_run_state is None` in the same poll, same as `attack_run_
+    state`."""
+    runner, crew_console, aircraft_client, db_path = _atgm_poll_loop_fixture(tmp_path)
+    runner.attack_run_state = AttackRunState()
+    runner.atgm_run_state = AtgmRunState(contact_id="CONTACT_1")
+    crew_console.attack_run_transition = "disengage"
+
+    done = threading.Event()
+
+    def spy_drain_atgm_engage(now_sim: float, *, observ_is_on: bool) -> str | None:
+        # The `disengage` branch never calls this -- if it did, this
+        # test's `done.wait` would hang and time out, catching the bug.
+        raise AssertionError("drain_atgm_engage must not run on disengage")
+
+    monkeypatch.setattr(crew_console, "drain_atgm_engage", spy_drain_atgm_engage)
+
+    def spy_drain_attack_run(
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+        vertical: bool = True,
+    ) -> AttackRunState | None:
+        done.set()
+        return state
+
+    monkeypatch.setattr(crew_console, "drain_attack_run", spy_drain_attack_run)
+    _run_one_atgm_poll(
+        runner, crew_console, aircraft_client, db_path, monkeypatch, done
+    )
+
+    assert runner.attack_run_state is None
+    assert runner.atgm_run_state is None
+
+
+def test_lost_contact_ends_the_atgm_run_alongside_the_attack_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`drain_attack_run` returning `None` (drop target/cancel/lost
+    contact, all folded into that one return) ends the ATGM run the same
+    poll -- there is nothing left to guide on either."""
+    runner, crew_console, aircraft_client, db_path = _atgm_poll_loop_fixture(tmp_path)
+    runner.attack_run_state = AttackRunState()
+    runner.atgm_run_state = AtgmRunState(contact_id="CONTACT_1")
+
+    done = threading.Event()
+
+    def spy_drain_attack_run(
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+        vertical: bool = True,
+    ) -> AttackRunState | None:
+        done.set()
+        return None
+
+    monkeypatch.setattr(crew_console, "drain_attack_run", spy_drain_attack_run)
+    _run_one_atgm_poll(
+        runner, crew_console, aircraft_client, db_path, monkeypatch, done
+    )
+
+    assert runner.attack_run_state is None
+    assert runner.atgm_run_state is None
 
 
 # -- `plans/attack-run-los/plan.md` F3 -- "where is it?"'s poll-loop

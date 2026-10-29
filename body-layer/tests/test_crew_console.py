@@ -5264,9 +5264,11 @@ def test_engage_bare_resumes_the_already_selected_target(
 def test_engage_accepts_and_ignores_the_weapon_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Decision 15: the weapon token parses and nothing reads it. Pinned
-    so the grammar's own acceptance does not silently change when
-    something does consume it."""
+    """`plans/attack-run/plan.md` Decision 15 is superseded by `[[BL-B67]]`
+    Stage 1: the weapon token now sets `attack_run_weapon`, read by
+    `body.py`'s engage-apply block via `drain_atgm_engage`. A non-
+    `"missiles"` value (here `"rockets"`) gates nothing and starts an
+    ordinary (non-ATGM) run exactly as before."""
     store = ContactStore()
     store.ingest(
         [
@@ -5294,6 +5296,7 @@ def test_engage_accepts_and_ignores_the_weapon_slot(
     assert lines[0].startswith("Attack run, armor,")
     target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
     assert target_task.contact_id == store.contacts[0].id
+    assert console.attack_run_weapon == "rockets"
 
 
 def test_engage_with_no_target_selected_says_so() -> None:
@@ -5301,6 +5304,232 @@ def test_engage_with_no_target_selected_says_so() -> None:
     lines = console.handle_command("engage", now_sim=0.0, slots=None)
     assert lines == ["no target selected"]
     assert console.attack_run_transition is None
+
+
+# -- `[[BL-B67]]` Stage 1: engage ... missiles / the refusal path / -----
+# `drain_atgm_engage` ----------------------------------------------------
+
+
+def test_engage_missiles_refused_when_guidance_unit_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/bl-b67-atgm-run/plan.md` Stage 1, Decision 3 -- gated
+    synchronously, before anything else `_handle_engage` does: no target
+    resolution, no task registration, no `attack_run_transition`/
+    `attack_run_weapon` set. The refusal path starts nothing."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.sight_ready is False  # the safe default
+
+    lines = console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "missiles"}
+    )
+
+    assert lines == ["Unable, guidance unit not ready."]
+    assert console.attack_run_transition is None
+    assert console.attack_run_weapon is None
+    assert console.weapon_safety_transition is None
+    assert [task for task in tasks.tasks if task.kind == "attack_target"] == []
+
+
+def test_engage_missiles_dispatches_when_guidance_unit_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The matching positive case: a ready guidance unit lets `"missiles"`
+    through exactly like any other weapon slot, and records it for
+    `drain_atgm_engage`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.sight_ready = True
+
+    lines = console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "missiles"}
+    )
+
+    assert lines[0].startswith("Attack run, armor,")
+    assert console.attack_run_transition == "engage"
+    assert console.attack_run_weapon == "missiles"
+
+
+def test_engage_guns_never_gated_on_guidance_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only `"missiles"` is gated -- guns/rockets need no guidance unit at
+    all, even with `sight_ready` at its safe default of `False`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(
+        store=store, tasks=TaskStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.sight_ready is False
+
+    lines = console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "guns"}
+    )
+
+    assert lines[0].startswith("Attack run, armor,")
+    assert console.attack_run_transition == "engage"
+
+
+def test_drain_atgm_engage_returns_none_without_a_missiles_slot() -> None:
+    """`weapon != "missiles"` (including `None`, a bare `engage`) ends any
+    standing ATGM run instead of starting/continuing one, and still
+    consumes `attack_run_weapon` (one-shot, same convention as `attack_
+    run_transition`)."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.attack_run_weapon = "guns"
+
+    result = console.drain_atgm_engage(0.0, observ_is_on=True)
+
+    assert result is None
+    assert console.attack_run_weapon is None
+
+
+def test_drain_atgm_engage_returns_none_when_no_target_task() -> None:
+    """`weapon == "missiles"` but no `attack_target` task exists (should
+    not happen in practice, since `_handle_engage` always registers one
+    first) -- fails closed rather than constructing an `AtgmRunState`
+    with no real target."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.attack_run_weapon = "missiles"
+
+    result = console.drain_atgm_engage(0.0, observ_is_on=True)
+
+    assert result is None
+
+
+def test_drain_atgm_engage_speaks_observ_on_wait_when_observ_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan Goal: "He brings OBSERV up, arms, selects a loaded pylon" --
+    "Observ on, wait." is spoken and `observ_transition` is set to `"on"`
+    the poll an ATGM run starts with OBSERV not already on."""
+    import io
+
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    output = io.StringIO()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+        output=output,
+    )
+    console.sight_ready = True
+    console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "missiles"}
+    )
+    printed_after_engage = output.getvalue()
+
+    contact_id = console.drain_atgm_engage(1.0, observ_is_on=False)
+
+    assert contact_id == store.contacts[0].id
+    assert console.observ_transition == "on"
+    assert output.getvalue() == printed_after_engage + "Observ on, wait.\n"
+
+
+def test_drain_atgm_engage_is_silent_when_observ_already_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A true no-op (no line, no transition) when OBSERV is already on --
+    turning on an already-on switch has nothing to announce."""
+    import io
+
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    output = io.StringIO()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+        output=output,
+    )
+    console.sight_ready = True
+    console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "missiles"}
+    )
+    printed_after_engage = output.getvalue()
+
+    contact_id = console.drain_atgm_engage(1.0, observ_is_on=True)
+
+    assert contact_id == store.contacts[0].id
+    assert console.observ_transition is None
+    assert output.getvalue() == printed_after_engage
 
 
 def test_disengage_signals_transition_and_keeps_the_selection(
