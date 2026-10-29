@@ -25,10 +25,12 @@ replacing the old 9K113 cockpit-switch feed) has a top-level `"watch_id"`
 key instead, and a one-shot read reply has a top-level `"read_id"` key
 instead (see `schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
 `schema.PetrovichIndicationSample`/`schema.PetrovichWheelSample`/
-`schema.PttSample`/`schema.Spu8Sample`/`schema.WatchedArgsState`). An old
-`Export.lua`'s cockpit-switch line (top-level `"missl_pw"` key) is dropped
-at DEBUG rather than parsed -- that feed no longer exists on this side.
-`_handle_line` distinguishes them
+`schema.PttSample`/`schema.Spu8Sample`/`schema.WatchedArgsState`). The
+ownship loadout line (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage
+4) has a top-level `"stations"` key instead (`schema.PayloadSample`). An
+old `Export.lua`'s cockpit-switch line (top-level `"missl_pw"` key) is
+dropped at DEBUG rather than parsed -- that feed no longer exists on this
+side. `_handle_line` distinguishes them
 by that key's presence before parsing, rather than trying each parser in
 turn and falling back on failure -- a genuinely malformed line of any kind
 should be logged and dropped once, not misattributed to the wrong schema's
@@ -53,6 +55,7 @@ from typing import Self
 
 from collector.arg_read_broker import ArgReadBroker
 from collector.cache import (
+    PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -63,6 +66,8 @@ from collector.cache import (
     WorldObjectsCache,
 )
 from schema import (
+    PayloadParseError,
+    PayloadSample,
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
     PetrovichWheelParseError,
@@ -107,7 +112,11 @@ logger = logging.getLogger(__name__)
 #: switch line is now dropped at DEBUG rather than parsed), replaced by
 #: two new inbound ops (`watch_args`, `read_args`) and two new line kinds
 #: (`"watch_id"`, `"read_id"`).
-EXPECTED_EXPORT_VERSION = "2026-10-24"
+#: Bumped again 2026-10-29 (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+#: Stage 4) for the new ownship-loadout line (wire key `"stations"`) --
+#: additive only (an old deployed script keeps working, it just never
+#: sends a `"stations"` line, and `PayloadCache` stays empty).
+EXPECTED_EXPORT_VERSION = "2026-10-29"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -174,6 +183,9 @@ class CollectorServer:
         # cockpit_switch_cache above (`plans/effector-sequences/plan.md`
         # Stage 4, decided "remove").
         watched_args_cache: WatchedArgsCache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # PayloadCache simply drops "stations" lines.
+        payload_cache: PayloadCache | None = None,
         # Not optional, unlike every cache above -- a collector with no
         # `ArgReadBroker` simply drops "read_id" lines (the one-shot read
         # reply has nowhere to go without it), same posture as a `None`
@@ -194,6 +206,7 @@ class CollectorServer:
         self._watched_args_cache = watched_args_cache
         self._arg_read_broker = arg_read_broker
         self._sight_servo_cache = sight_servo_cache
+        self._payload_cache = payload_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -480,6 +493,22 @@ class CollectorServer:
             logger.debug("parsed sight-servo sample: %r", sight_servo_sample)
             if self._sight_servo_cache is not None:
                 self._sight_servo_cache.push(sight_servo_sample)
+            return
+
+        if "stations" in data:
+            # `[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4 --
+            # ahead of the telemetry fallthrough for the same reason every
+            # other named kind above is.
+            try:
+                payload_sample = PayloadSample.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except PayloadParseError:
+                logger.warning("dropping malformed payload line: %r", line)
+                return
+            logger.debug("parsed payload sample: %r", payload_sample)
+            if self._payload_cache is not None:
+                self._payload_cache.push(payload_sample)
             return
 
         try:

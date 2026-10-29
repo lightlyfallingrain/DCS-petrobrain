@@ -49,6 +49,15 @@ _WATCHED_ARGS_BODY = {
     "args": {"886": 1.0},
 }
 
+_PAYLOAD_BODY = {
+    "t": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "current_station": 1,
+    "stations": [
+        {"index": 1, "name": "9M114", "count": 4, "container": False},
+    ],
+}
+
 
 def _make_handler(
     triggered_searches: list[str] | None = None,
@@ -75,6 +84,8 @@ def _make_handler(
                 self._respond(200, _SPU8_STATE_BODY)
             elif self.path == "/watched_args/latest":
                 self._respond(200, _WATCHED_ARGS_BODY)
+            elif self.path == "/payload/latest":
+                self._respond(200, _PAYLOAD_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -243,6 +254,21 @@ def test_get_watched_args_latest_returns_parsed_dict(server_url: str) -> None:
     result = client.get_watched_args_latest()
 
     assert result == _WATCHED_ARGS_BODY
+
+
+def test_get_payload_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_payload_latest()
+
+    assert result == _PAYLOAD_BODY
+
+
+def test_get_payload_latest_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.get_payload_latest()
 
 
 @pytest.fixture
