@@ -1,7 +1,92 @@
 # BL-B67 — The 9K113 sight, entry 3 of 3: the ATGM attack run
 
-- [ ] **BL-B67 — The ATGM attack run on the 9K113: azimuth-only guidance, in-range/out-of-range,
-  the launch callout, impact, and resetting the guidance transmitter.** #status/open
+- [~] **BL-B67 — The ATGM attack run on the 9K113: azimuth-only guidance, in-range/out-of-range,
+  the launch callout, impact, and resetting the guidance transmitter.** #status/in-progress
+  #needs-flight
+
+  ## 2026-10-29 — DoD: batch A merged, batch B waiting on the Stage 0 sortie
+
+  **Batch A (Stages 1-4, plus the Stage 0 probe files) passed DoD and merged to `main`.** This is
+  **not** the milestone done — it is the pure-function run machine, the single-unit aim, the
+  aircraft-layer payload feed, and the Stage 0 probe sortie's own Lua, none of which is wired into
+  `body.py`'s poll loop yet. Nothing a pilot does in the cockpit changes behaviour from this merge
+  alone.
+
+  **What landed** (`plans/bl-b67-atgm-run/plan.md`, `implementation.md`, `review.md`,
+  `performance-review.md`, `security-plan-review.md`, `security-review.md` — all in
+  `plans/bl-b67-atgm-run/`):
+  - Stage 1: the `AtgmRunState` lifecycle skeleton in `body.py`, `attack_run_weapon` on
+    `CrewConsole`, the azimuth-only `vertical=False` departure from `BL-14`, the sight lock
+    (`sight_lock_contact_id`) that pins the look and suppresses the dwell break during a run.
+  - Stage 2: `Percept.aim_unit_direction` — single-unit aim (nearest cluster member to the gaze
+    centre) replacing the cluster centroid on the sight-goal path, under the same no-omniscience
+    fence as `relative_direction`.
+  - Stage 3: `belief/atgm_run.py::decide` — the full state machine (Preparing → Tracking →
+    InFlight → Resetting → Selecting), the range-call latches, the in-flight speech hold and its
+    pass-through set, the guidance-ladder floor settle, all seven tunables in `tuning.py`/
+    `defaults.toml`.
+  - Stage 4: the aircraft-layer payload feed end to end (`Export.lua`'s `push_payload_state`,
+    `schema/payload.py`, `PayloadCache`, `GET /payload/latest`, `aircraft_client.
+    get_payload_latest`).
+  - Stage 0: the probe sortie's own disposable Lua (`Export.probe-weapons.lua`,
+    `petrobrain-damage-events-probe-hook.lua`) — reviewed, fixed (see below), not yet flown.
+  - All required Reviewer fixes landed and were verified directly (grepped/read, not taken on
+    report): `CLAUDE.md`/`STRUCTURE.md`'s `aim_unit_direction` sibling-field text (Stages 1-2);
+    `ATGM_MIN_RANGE_M` wired into `_maybe_range_call` and the N2
+    (`CONTACT_ENGAGEMENT_CHANGED`-held-in-flight) test added (Stage 3); the Stage 0 probe's
+    knob-auto-advance delayed `ADVANCE_DELAY_S` past the count-drop rather than switching on the
+    same poll as a launch.
+  - Reviewer/Performance/Security (plan review + batch-A deep analysis) all **APPROVED**, the
+    latter two with no required fixes; Security's one carried-forward item (an independent
+    parser-side length/charset bound on the own-weapon `<type>` field in `schema/firing.py`) is
+    Stage 5's, tracked in `security-plan-review.md`'s re-review ("Required Plan Changes" item 1)
+    and **must land in the same commit as Stage 5**, not after.
+  - **Amended at merge**: `plans/attack-run/plan.md` Decision 15 marked `REVISED` (Stage 1 now
+    reads `attack_run_weapon`/`"missiles"` and gates the ATGM run on it — the decision's "nothing
+    reads it yet" premise no longer holds).
+
+  **The Stage 0 probe sortie is published and ready to fly, not yet flown**:
+  [test card](https://claude.ai/artifact/QyBjsW7tpswWzD63Zigbd5),
+  `docs/acceptance/2026-10-29-bl-b67-stage0-probe.md` — both now name branch `main`. (Both
+  originally named `feature/bl-b67-atgm-run`, correct when published before this merge; DoD
+  caught the staleness by actually reading the live card rather than trusting the plan's own
+  input list, and corrected both — the probe `.lua` files are part of batch A's diff and are on
+  `main` as of this merge.) It answers Q1 (payload shape/timing), Q2 (ATGM object names, for exclusion),
+  Q3 (knob-step↔station mapping), Q5 (Radiation Reset), and the load-bearing Q6
+  (`S_EVENT_SHOT`/`event.weapon` reliability for the 9M114/9M120). `#needs-flight` on this entry
+  covers exactly this sortie.
+
+  **What batch B (Stages 5-7) waits on**: the Stage 0 sortie's answers. If Q6 fails (no
+  `event.weapon`, or `isExist()` doesn't flip as expected), Stage 5 is replaced by the
+  world-object-diff fallback the plan already names as an escalation, not a silent swap. Stage 8
+  (live acceptance of the whole run) additionally waits on `[[BL-B80]]` Flight A (sight-pointing
+  accuracy), per this plan's own stated premise.
+
+  **Milestone-completion question, answered**: this batch does not change what the next milestone
+  should be or invalidate a downstream assumption — batch B was already planned as the next step
+  before this merge, and nothing discovered in Stages 1-4 (the re-point gap, the `ATGM_MIN_RANGE_M`
+  gap, the knob-during-flight risk) changes the plan's own Stage 5-7 design, only adds a named
+  precondition on Stage 7's dispatch (see below) and a card caveat on Stage 0's own flight.
+
+  **Carried forward as a hard precondition on Stage 7's dispatch** (not optional to drop): `body.py`'s
+  engage-apply block must stop building a fresh `AtgmRunState` on every re-point and instead
+  `replace()` the standing one when a run is already active, keeping `phase`/in-flight/
+  `selected_step` per the plan's own Co-moving Fields table — verified inert today only because
+  `atgm_run.decide` is called from nowhere in production code yet (confirmed by grep against the
+  whole tree: the only reference is the dataclass import). The moment Stage 7 wires `decide` in
+  without this fix, a re-point mid-flight silently forgets the missile is in flight. This is the
+  tenth recorded instance of this project's recurring stale-state-on-transition defect shape
+  (`.claude/agent-memory/dod/project_recurring_stale_state_on_transition.md`) — the first where the
+  plan's own table was already correct and only the construction site drifted from it.
+
+  **Carried forward as a flagged risk on the Stage 0 flight itself** (now documented in the test
+  card, Reviewer's required fix for that stage): the probe's auto-advance switches the ATGM
+  selector knob on the same poll the payload count drops, which may be while the first missile is
+  still in flight — unknown whether that disturbs guidance in DCS. Delayed `ADVANCE_DELAY_S` past
+  the drop in the fix that landed, closing the gap the Stage 0 review raised before the sortie was
+  flown, not after.
+
+- [ ] Earlier scope, superseded by `plans/bl-b67-atgm-run/plan.md`:
   **Specification: `docs/concept/9K113.md`** plus
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §5.
   **Missile data: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`, "Addendum,

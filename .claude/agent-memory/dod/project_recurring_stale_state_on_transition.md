@@ -1,6 +1,6 @@
 ---
 name: recurring_stale_state_on_transition
-description: this defect shape -- state that should reset/carry on a transition and doesn't -- has now recurred across two separate features (BL-14's four instances, BL-B64's at least two more); raise it at Architect time for any "mode/phase with more than one field that should move together" feature, not only at Reviewer/Security
+description: this defect shape -- state that should reset/carry on a transition and doesn't -- has now recurred ten times across four features (BL-14 x4, BL-B64/BL-B80 x3, BL-B89/BL-B98 x2, BL-B67 x1); raise it at Architect time for any "mode/phase with more than one field that should move together" feature, not only at Reviewer/Security; BL-B67's instance is the first where the Co-moving Fields table was already correct and the code just didn't follow it
 metadata:
   type: project
 ---
@@ -138,3 +138,38 @@ qualitatively -- but the category has now recurred enough times in one subsystem
 fix (e.g. a lint/grep rule flagging any `replace()`/assignment to a field with more than one
 documented reader, outside that field's own "owning" function) may be cheaper than catching it by
 hand a sixth time.
+
+**Tenth occurrence, 2026-10-29, `BL-B67` (`plans/bl-b67-atgm-run/plan.md`) Stage 3 -- the table was
+correct this time, the code just didn't follow it.** A variant worth distinguishing from #1-#9:
+
+10. The plan's own Co-moving Fields table already named the right behaviour for "engage missiles,
+    ATGM run active, new target" -- re-point `attack_run_state` (existing reset) but keep `atgm`'s
+    `phase`/in-flight/`selected_step`, resetting only the range latches and `contact_id`. The
+    Stage 1 construction site in `body.py` (the engage-apply block) built a wholesale-fresh
+    `AtgmRunState(contact_id=...)` on *every* `engage ... missiles`, including a re-point while a
+    run is already active -- contradicting the table it was built from. Caught at Stage 3 review
+    (not Stage 1's, where the site was written), verified inert by grepping the whole snapshot for
+    `atgm_run.decide` call sites (none in production code yet -- Stage 7 wires it in), and made a
+    named, hard precondition on Stage 7's own dispatch rather than a "nice to remember" note.
+
+Unlike #1-#9, this was not a gap in the table itself (Architect's step 6a worked correctly here) --
+it was an implementation that didn't match an already-correct table, on a construction site written
+one stage before the table's relevant row became live. **This suggests the table's value is being
+spent at write-time but not re-checked at the construction site when it is written** -- the
+Implementer who wrote Stage 1's `AtgmRunState(contact_id=...)` either didn't check it against the
+"new target, run active" row (not yet reachable that stage, so plausibly deferred rather than
+missed), or checked it and the gap was still introduced. Either way: **a Co-moving Fields table
+should be re-checked against the actual construction/dispatch sites again at the stage that first
+makes a table row's transition reachable, not only at the stage that writes the construction site**
+-- DoD flags this as the mechanical gap worth raising at Architect/Reviewer for any future plan that
+stages a state machine's construction site and its activation in different stages.
+
+**Now ten occurrences across four features.** This has recurred enough, in the same subsystem, that
+it is process debt rather than a code-review miss each time -- the DoD role's own instruction asks
+to flag this at the role sequence rather than keep absorbing it at Reviewer. Candidate earlier
+check: when a plan stages a state machine's construction and its wiring-in separately (as BL-B67
+does, Stage 1 builds the site, Stage 7 wires `decide()` in), Architect's step 6a output should
+explicitly ask "does every row of this table hold at every stage boundary between now and the stage
+that makes it reachable, or does a later stage need to re-verify it" -- making the re-check an
+Architect-authored gate on the later stage's own dispatch, rather than relying on whichever Reviewer
+happens to read the construction site again.

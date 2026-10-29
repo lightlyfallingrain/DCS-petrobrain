@@ -225,6 +225,14 @@ the body/brain process, on either Windows or Mac (compute topology note in
   setpoint, the mark-derived body direction (or `null` when invalid),
   error, and the stall flag. A **second** feed from `/cockpit_switch/
   latest` (see `schema.sight_servo`'s own "Departure, stated").
+- `GET /payload/latest` -> the most recent `PayloadSample` (`[[BL-B67]]`,
+  `plans/bl-b67-atgm-run/plan.md` Stage 4) as JSON, or JSON `null` on the
+  same "not an error" basis as every other `/latest` endpoint. The
+  ownship loadout (`LoGetPayloadInfo()` + `LoGetNameByType()`, read at
+  the same 5 Hz export tick, sent only on change) -- which stations hold
+  what and how many, and the currently-selected station. Read-only, no
+  write side: this layer carries the raw values and decides nothing (see
+  `schema.payload`'s own module docstring).
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -263,6 +271,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     LineOfSightCache,
     MissionStartCache,
+    PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -298,6 +307,7 @@ _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
 _WATCHED_ARGS_LATEST_PATH = "/watched_args/latest"
 _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
+_PAYLOAD_LATEST_PATH = "/payload/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
@@ -470,6 +480,15 @@ def _handle_sight_servo_latest(
     return None if sample is None else sample.to_api_dict()
 
 
+def _handle_payload_latest(
+    cache: PayloadCache,
+) -> dict[str, Any] | None:
+    """`null` before the first payload line arrives -- same "not an
+    error" posture as `/sight_servo/latest`."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -501,6 +520,7 @@ def _make_handler(
     watched_args_cache: WatchedArgsCache,
     sight_servo_cache: SightServoCache,
     arg_read_broker: ArgReadBroker | None,
+    payload_cache: PayloadCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -542,6 +562,9 @@ def _make_handler(
                 return
             if path == _SIGHT_SERVO_LATEST_PATH:
                 self._respond_json(200, _handle_sight_servo_latest(sight_servo_cache))
+                return
+            if path == _PAYLOAD_LATEST_PATH:
+                self._respond_json(200, _handle_payload_latest(payload_cache))
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -1059,6 +1082,7 @@ class TelemetryAPIServer:
         watched_args_cache: WatchedArgsCache | None = None,
         sight_servo_cache: SightServoCache | None = None,
         arg_read_broker: ArgReadBroker | None = None,
+        payload_cache: PayloadCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`unit_velocity_cache`/
@@ -1112,6 +1136,9 @@ class TelemetryAPIServer:
         )
         self._sight_servo_cache = (
             sight_servo_cache if sight_servo_cache is not None else SightServoCache()
+        )
+        self._payload_cache = (
+            payload_cache if payload_cache is not None else PayloadCache()
         )
         # `arg_read_broker` defaults to `None`, same posture as
         # `command_sender`/`audio_sender` above --
@@ -1173,6 +1200,7 @@ class TelemetryAPIServer:
                 self._watched_args_cache,
                 self._sight_servo_cache,
                 self._arg_read_broker,
+                self._payload_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

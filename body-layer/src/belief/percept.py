@@ -180,6 +180,15 @@ class Percept:
     exact telemetry, is convertible to one -- see Decision 16 item 4 for
     the full argument.
 
+    `aim_unit_direction` carries `Observation.aim_unit_direction` through
+    unchanged (`plans/bl-b67-atgm-run/plan.md` Stage 2, "Single unit,
+    never a cluster") -- the *one cluster member* direction, not the
+    centroid `relative_direction` carries, set only for a sight-tier
+    look. **Its only sanctioned reader outside this module is `belief.
+    attack_run`**, the exact same fence `relative_direction` itself is
+    under (`test_attack_run.py`): this is a second field on the same
+    narrow boundary, not a second exception.
+
     `emitter_kind` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
     narrowed per that plan's review) is which `perception.emitters.
     EmitterKind` value (if any) made `Observation.provenance` an emitter
@@ -229,6 +238,7 @@ class Percept:
     position_uncertainty: PositionUncertainty | None = None
     live_los_clear: bool | None = None
     relative_direction: RelativeDirection | None = None
+    aim_unit_direction: RelativeDirection | None = None
     emitter_kind: str | None = None
     targets_ownship: bool = False
     firing_visible: bool = False
@@ -255,6 +265,7 @@ def percept_of(observation: Observation) -> Percept:
         position_uncertainty=observation.position_uncertainty,
         live_los_clear=observation.live_los_clear,
         relative_direction=observation.relative_direction,
+        aim_unit_direction=observation.aim_unit_direction,
         emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
         targets_ownship=observation.provenance in _TARGETS_OWNSHIP_PROVENANCE,
         firing_visible=observation.provenance in _VISIBLE_FIRING_PROVENANCE,

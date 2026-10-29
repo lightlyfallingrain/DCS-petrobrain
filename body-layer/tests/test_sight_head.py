@@ -57,6 +57,7 @@ def _contact_seen(
     up_m: float = 0.0,
     t_sim: float = 0.0,
     ownship_heading_deg: float = 0.0,
+    aim_unit_direction: RelativeDirection | None = None,
 ) -> Contact:
     percept = Percept(
         t_sim=t_sim,
@@ -71,6 +72,9 @@ def _contact_seen(
         relative_direction=RelativeDirection(
             forward_m=forward_m, right_m=right_m, up_m=up_m
         ),
+        # `[[BL-B67]]` Stage 2 -- `None` (the default) is every
+        # pre-existing caller's unchanged behaviour.
+        aim_unit_direction=aim_unit_direction,
     )
     return Contact.from_percept(contact_id, percept)
 
@@ -266,6 +270,74 @@ def test_seen_row_selected_when_look_matches_last_sight_look() -> None:
     assert el == pytest.approx(seen.el_deg)
     assert contact_id == "CONTACT_1"
     assert t_look == pytest.approx(5.0)
+
+
+def test_single_unit_prefers_aim_unit_direction_over_the_centroid() -> None:
+    """`[[BL-B67]]` Stage 2, "Single unit, never a cluster" --
+    `single_unit=True` steers the sight at `aim_unit_direction` rather
+    than `relative_direction`, when both are set and differ."""
+    contact = _contact_seen(
+        t_sim=5.0,
+        forward_m=1000.0,
+        right_m=0.0,
+        aim_unit_direction=RelativeDirection(forward_m=0.0, right_m=1000.0, up_m=0.0),
+    )
+    centroid = seen_world_direction(contact, single_unit=False)
+    one_unit = seen_world_direction(contact, single_unit=True)
+    assert centroid is not None and one_unit is not None
+
+    source, az, _el, _rate_az, _rate_el, contact_id, _t_look = select_sight_goal(
+        SightHead(),
+        look_contact=contact,
+        desired_world_az_deg=0.0,
+        desired_world_rate_az_deg_s=0.0,
+        desired_world_el_deg=0.0,
+        desired_world_rate_el_deg_s=0.0,
+        last_sight_look_sim=5.0,
+        now_sim=5.0,
+        single_unit=True,
+    )
+
+    assert source == "seen"
+    assert contact_id == "CONTACT_1"
+    assert az == pytest.approx(one_unit.az_true_deg)
+    assert az != pytest.approx(centroid.az_true_deg)
+
+
+def test_single_unit_false_is_byte_identical_to_the_centroid_default() -> None:
+    """`single_unit=False` (the default) must be the pre-existing
+    behaviour unchanged, even when `aim_unit_direction` is set -- it is
+    only ever read when `single_unit=True`."""
+    contact = _contact_seen(
+        t_sim=5.0,
+        forward_m=1000.0,
+        right_m=0.0,
+        aim_unit_direction=RelativeDirection(forward_m=0.0, right_m=1000.0, up_m=0.0),
+    )
+
+    without_single_unit = select_sight_goal(
+        SightHead(),
+        look_contact=contact,
+        desired_world_az_deg=0.0,
+        desired_world_rate_az_deg_s=0.0,
+        desired_world_el_deg=0.0,
+        desired_world_rate_el_deg_s=0.0,
+        last_sight_look_sim=5.0,
+        now_sim=5.0,
+    )
+    explicit_false = select_sight_goal(
+        SightHead(),
+        look_contact=contact,
+        desired_world_az_deg=0.0,
+        desired_world_rate_az_deg_s=0.0,
+        desired_world_el_deg=0.0,
+        desired_world_rate_el_deg_s=0.0,
+        last_sight_look_sim=5.0,
+        now_sim=5.0,
+        single_unit=False,
+    )
+
+    assert without_single_unit == explicit_false
 
 
 def test_binocular_look_of_same_contact_does_not_steer_the_sight() -> None:

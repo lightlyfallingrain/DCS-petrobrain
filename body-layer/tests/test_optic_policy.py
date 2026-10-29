@@ -1954,6 +1954,98 @@ class TestSightingDwellCycle:
         assert decision.optic is UNAIDED_OPTIC
 
 
+class TestSightLock:
+    """`sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/
+    plan.md` Stage 1, "Keeping the look through launch"): while set, the
+    look is pinned to that one contact, the dwell break and the look-
+    finished re-pick are both skipped, and a forced OBSERV-off still
+    wins over the lock."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_the_lock_pins_the_look_to_the_named_contact(self) -> None:
+        """Two targets are present and, unlocked, `choose_sighting_look`
+        would pick the nearer/more-worthwhile one (`CONTACT_1`) -- the
+        lock overrides that choice entirely."""
+        near = _target("CONTACT_1", azimuth_deg=0.0, range_m=500.0)
+        locked = _target("CONTACT_2", azimuth_deg=20.0, range_m=3000.0)
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[near, locked],
+            steady=True,
+            sight_lock_contact_id="CONTACT_2",
+        )
+        assert state.look_contact_id == "CONTACT_2"
+        assert decision.look_azimuth_deg == pytest.approx(20.0)
+
+    def test_the_lock_suppresses_the_dwell_break(self) -> None:
+        """Unlocked, `now_sim == SIGHT_MAX_DWELL_S` fires the scheduled
+        break (`test_the_scheduled_break_fires_regardless_of_whether_
+        something_is_worth_looking_at` above) -- locked, it must not."""
+        locked = _target("CONTACT_1")
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=SIGHT_MAX_DWELL_S + 100.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[locked],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert state.home_phase is OpticPhase.SIGHTING
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is not UNAIDED_OPTIC
+
+    def test_a_forced_observ_off_still_fires_under_the_lock(self) -> None:
+        """Gyro safety is not traded for tracking: an unsteady poll still
+        drops OBSERV back off, lock or no lock."""
+        locked = _target("CONTACT_1")
+        state, _decision = decide(
+            self._sighting_state(),
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[locked],
+            steady=True,
+            sight_steady=False,
+            sight_lock_contact_id="CONTACT_1",
+        )
+        assert state.home_phase is OpticPhase.SCANNING
+
+    def test_the_lock_holds_the_last_aim_when_the_contact_drops_out(self) -> None:
+        """`contact_id` missing from `targets` this poll (masked, or
+        momentarily absent) holds the sight at its last aim rather than
+        losing it."""
+        locked = _target("CONTACT_1", azimuth_deg=15.0, elevation_deg=-5.0)
+        state, _decision = decide(
+            self._sighting_state(),
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[locked],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+        )
+        assert state.look_azimuth_deg == pytest.approx(15.0)
+
+        state, decision = decide(
+            state,
+            now_sim=2.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+        )
+        assert decision.look_azimuth_deg == pytest.approx(15.0)
+        assert decision.look_elevation_deg == pytest.approx(-5.0)
+
+
 class TestSightLookOptic:
     """`sight_look_optic` in isolation -- `plans/9k113-narrow-search/
     plan.md` Stage 4 Part A, "least capable optic that suffices". Direct

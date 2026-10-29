@@ -57,6 +57,10 @@ is opened and run on its own background thread the same way as
 direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
 reads.
 
+A `PayloadCache` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4) is
+constructed the same way as `sight_servo_cache` -- fed by `CollectorServer`
+from Export.lua's "stations" lines, served by `GET /payload/latest`.
+
 A `WatchedArgsCache` + `ArgReadBroker` pair (`plans/effector-sequences/
 plan.md` Stage 4) replaces the former `CockpitSwitchCache` (decided,
 "remove"). `WatchedArgsCache` is constructed the same way as `spu8_cache`
@@ -94,6 +98,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     LineOfSightCache,
     MissionStartCache,
+    PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -306,6 +311,10 @@ def main() -> None:
     # cache from watched_args_cache above (see `schema.sight_servo`'s
     # own "Departure, stated").
     sight_servo_cache = SightServoCache()
+    # `[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4 -- the ownship
+    # loadout feed, same "latest of one, fed on change" shape as every
+    # cache above.
+    payload_cache = PayloadCache()
 
     collector = CollectorServer(
         cache,
@@ -317,6 +326,7 @@ def main() -> None:
         sight_servo_cache=sight_servo_cache,
         watched_args_cache=watched_args_cache,
         arg_read_broker=arg_read_broker,
+        payload_cache=payload_cache,
         host=args.host,
         port=args.port,
     )
@@ -343,6 +353,7 @@ def main() -> None:
         watched_args_cache=watched_args_cache,
         sight_servo_cache=sight_servo_cache,
         arg_read_broker=arg_read_broker,
+        payload_cache=payload_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

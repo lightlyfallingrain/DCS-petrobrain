@@ -177,3 +177,130 @@ Behaviour for the run is settled except for the deferred OBSERV-refusal response
   object is identified for impact detection.
 - **Flight:** `[[BL-B80]]` Flight A (`docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`) before the
   plan — the run rests on the pointing chain being accurate; plus the cannon→OBSERV-off belief above.
+
+## 2026-10-29 — sixth round: the owed args, and how impact finds its missile
+
+Answers to the "User" and "Desk" items above.
+
+### Pylon selector
+
+> *"pylon selector know is probably `SHSCHO-KNOB-PTR` from
+> @body-layer/config/sequences/mi-24p/switch-reference.md. step 0 is off, steps 1-8 are the
+> pylons."*
+
+`switch-reference.md` row: `SHSCHO-KNOB-PTR`, "Select Station", operator, `multiposition_switch`,
+cmd `[3038]`, arg `[963]`, values *"0 to 0.8 (9 steps)"*. So step *n* = value
+`n × 0.1`, step 0 = OFF, steps 1–8 = pylons. **"Probably"** is the user's word — the knob's
+identity is believed, not yet seen moving in the sim; which step is which physical pylon is not
+stated.
+
+### Launch button
+
+> *"launch button for copilot is OP-STICK-RS-PTR and STICK-RS-PTR for pilot"*
+
+| name | seat | shape | cmd | arg |
+|---|---|---|---|---|
+| `OP-STICK-RS-PTR` | operator (explicit) | `default_button`, 0/1 momentary | 3021 | 187 |
+| `STICK-RS-PTR` | pilot (**defaulted**) | `default_button`, 0/1 momentary | 3001 | 741 |
+
+Launch detection reads the **pilot's** button (arg 741) — the player flies the pilot seat and
+Petrovich operates the other one (round 1's "pilot pressing weapon launch button"). Two notes for
+the plan, not user questions: `switch-reference.md` marks 741's seat as *defaulted*, not explicit,
+so the user's naming is what settles it; and a momentary button read at the export tick can be
+missed by a short tap, so whether a 5 Hz continuous poll is enough is a design question.
+
+### Loadout count
+
+> *"how we read loadout - unknown, but DCS will that that somehow"*
+
+Unknown; desk recon owed (Export API — e.g. a payload/weapons getter — or a cockpit arg).
+
+### The launched missile's object
+
+> *"launched missiles object id - there was an earliear investigation of can we detect tracers
+> that found out that fired missile becomes it's own DCS object, and so has id. We know the
+> missile type we carry and can filter world object by that when launch button is pressed."*
+
+The investigation is `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`,
+"PROBE RESULTS, 2026-09-25": the player's own S-8 rockets appeared in `LoGetWorldObjects` as new
+`C_8` objects at the poll they were fired, and the count settled back; gun rounds never appeared.
+That was measured for **rockets**, not ATGMs — a 9M114 appearing the same way is the expected
+case, not yet observed, and its object `Name` is unknown. Design as the user states it: on launch
+(button + loadout −1), take the new world object whose type matches the carried missile; impact =
+that object leaving the list (round 2).
+
+### Flight A no longer gates the plan
+
+> *"we will work on sight pointing accuracy as well. But start doing what you can with the premise
+> that the sight pointing is (or will be) accurate."*
+
+The "Flight" item in "State at end of 2026-10-26" is **released as a gate on planning and
+building**: the plan takes `[[BL-B80]]`'s pointing chain as accurate (now or once fixed), and
+pointing accuracy is worked separately. Live acceptance of the run still depends on it.
+
+## 2026-10-29 — seventh round: the plan's six decisions
+
+Answers to `plan.md` "Decisions Requiring User Input" (as written at `85862506`).
+
+> *"1 - per run, but only if out of range first. If run starts in range, say nothing."*
+
+Range calls are **per run**, not per missile. **"Out of range" only if the run starts out of range;
+then "In range" once when it comes in. A run that starts in range says neither.** (Overrides the
+plan's once-per-missile recommendation.)
+
+> *"2 - agree. Though sine Pertivich is looking through the sight, he'll only see SAM launch etc
+> from that FOV."*
+
+Agreed: guidance and routine callouts held while the missile flies, urgent threats pass. **But an
+urgent threat reaches him only if it is inside the sight's FOV** — he is looking through the 9K113,
+so a SAM launch outside that field is not seen. No channel may hand him one he could not see.
+
+> *"3 - ok"*
+
+`engage … missiles` with the guidance unit not ready: "Unable, guidance unit not ready.", no run.
+
+> *"4 - that's probably failed launch then. Log it and treat as not launched."*
+
+Missile never seen as an object = **failed launch: log it, treat as not launched.** (Overrides the
+plan's "reset and select next after `ATGM_MAX_FLIGHT_S`".)
+
+> *"5 - yes"*
+
+No ATGM loaded: "No more missiles.", run as a tracking run.
+
+> *"6 - could well use it as primary signal, it'd be very reliable"*
+
+**`S_EVENT_SHOT` (initiator = player, guided weapon) becomes the primary launch signal** — not a
+fallback conditioned on the fire button failing. Design consequence, not a user question: the
+event carries the weapon object itself, which may also answer "which object is our missile" for
+impact detection without name-matching the world-object feed, and the fire-button per-frame feed
+may no longer be needed. The plan is to be revised for it.
+
+## 2026-10-29 — eighth round: the revised plan's N1–N3
+
+> *"N1 - agree"*
+
+Launch confirmed, "gone" never arrives: after 25 s leave the flight silently, no "Impact", press
+reset, select the next missile, log an error.
+
+> *"N2 - skip"*
+
+"Danger <unit>" during the missile's flight: **"skip"** — read as *do not speak it during the
+flight* (the plan recommended letting it through). Asked back the same day; confirmed:
+
+> *"N2 - focus is on guidance during missile flight. Drop the danger callout."*
+
+**No "Danger <unit>" while the missile flies.** Overrides the plan's recommendation.
+
+> *"N3 - explain please"*
+
+Explained (ED's AI Helper target list, the hybrid channel, is not tied to our Petrovich's gaze).
+Answer:
+
+> *"DCS AI list was an early approach to using DCS AI to use the sight for us and what it could
+> detect. Now that we are building our own model, we can completely stop using the DCS AI overlay
+> list. We are moving towards complete (as much as possible) replacing DCS AI Petrovich. We can
+> simply drop reading that list."*
+
+Recorded as `[[BL-B103]]` (merged to `main` as backlog). **Not in this entry's scope**; this run's
+"hold ED-list sightings until impact" rule stays until BL-B103 removes the channel.

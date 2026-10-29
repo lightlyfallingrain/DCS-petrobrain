@@ -320,6 +320,11 @@ break without noticing.
   `MissionMemory`, a `TOOL_SET` result or any other speech, and a differential test proves the
   sight path changes none of them. This is the same perception datum given a second consumer,
   not a second exception beside `detection_trace_writer.py`; a third consumer is a user decision.
+  **`Percept.aim_unit_direction` (`[[BL-B67]]`) is a second field on this same boundary**, not a
+  new consumer: the one cluster member nearest the sight rather than the centroid, read only by
+  `attack_run.py` under the same fence, and reaching only the sight-goal path
+  (`seen_world_direction(..., single_unit=True)`, the ATGM run's aim) — never guidance words,
+  never a position.
 - **Mechanism and calibration never share a commit.** A change to how a gate computes and a change
   to the numbers it computes against are separate commits, so a behaviour shift always has one
   attributable cause. BL-2.6 Stages 6/7 are the worked example.

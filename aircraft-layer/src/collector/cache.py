@@ -39,6 +39,10 @@ single current fact body-layer polls for change (has `sequence` moved
 since it last looked) -- two `onSimulationStart` firings between polls
 mean two mission restarts happened before body-layer ever looked, and
 only the latest one is still relevant.
+
+`PayloadCache` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4) is
+the same "latest of one" shape again, for the ownship loadout feed --
+`Export.lua` sends a line only on change, same reasoning as `PttCache`.
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ from typing import NamedTuple
 from schema import (
     LineOfSightSnapshot,
     MissionStartEvent,
+    PayloadSample,
     PetrovichIndicationSample,
     PetrovichWheelSample,
     PttSample,
@@ -297,6 +302,28 @@ class WatchedArgsCache:
         reads as `None` rather than as confirmation of a watch set the new
         session never installed."""
         self._latest = None
+
+
+class PayloadCache:
+    """Holds the latest `PayloadSample` (`[[BL-B67]]`, `plans/
+    bl-b67-atgm-run/plan.md` Stage 4) -- the ownship loadout feed
+    (`LoGetPayloadInfo()` + `LoGetNameByType()`). Same "latest of one"
+    shape as `PttCache`: `Export.lua` sends a line only on change, and the
+    one question a consumer asks is "what's loaded right now", not a
+    history of past loadouts."""
+
+    def __init__(self) -> None:
+        self._latest: PayloadSample | None = None
+
+    def push(self, sample: PayloadSample) -> None:
+        """Record a newly-received sample as the current loadout state."""
+        self._latest = sample
+
+    def latest(self) -> PayloadSample | None:
+        """Return the most recently pushed sample, or `None` if no
+        payload line has arrived yet this session -- the normal state at
+        startup, same as `PttCache.latest`."""
+        return self._latest
 
 
 class SightServoCache:

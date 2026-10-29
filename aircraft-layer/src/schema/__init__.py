@@ -41,6 +41,7 @@ from .line_of_sight import (
     LineOfSightVerdict,
 )
 from .mission_start import MissionStartEvent, MissionStartParseError
+from .payload import PayloadParseError, PayloadSample, PayloadStation
 from .petrovich_indication import (
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
@@ -75,6 +76,9 @@ __all__ = [
     "LineOfSightVerdict",
     "MissionStartEvent",
     "MissionStartParseError",
+    "PayloadParseError",
+    "PayloadSample",
+    "PayloadStation",
     "PetrovichIndicationParseError",
     "PetrovichIndicationSample",
     "PetrovichWheelParseError",

@@ -146,7 +146,17 @@ mark-derived body direction when valid, error, stall flag), a *second*
 feed from `/cockpit_switch/latest` (that one is change-gated; this one
 changes every frame under the per-frame value-change mechanism, a
 different rate class -- see the plan's Affected Files "Departure,
-stated")."""
+stated").
+
+`get_payload_latest` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage
+4) is this seam's `GET /payload/latest` counterpart to `get_watched_args_
+latest` -- same "not an error" empty-cache posture: an ordinary `get_*`
+read, swallows nothing itself, `None` on an empty cache. The ownship
+loadout (`LoGetPayloadInfo()` + `LoGetNameByType()`, read at the aircraft
+layer's own export tick, sent only on change). Station selection, family
+identification, and the "count dropped without a launch" inference are
+`belief.atgm_run`'s job (Stage 3/5 of the plan), not this client's -- same
+division of labour every other `get_*` method here already has."""
 
 from __future__ import annotations
 
@@ -416,6 +426,22 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /sight_servo/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_payload_latest(self) -> dict[str, Any] | None:
+        """`GET /payload/latest` -> the most recent ownship loadout (see
+        `aircraft-layer/src/schema/payload.py`'s `PayloadSample.
+        to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "current_station", "stations"}`), or `None` if nothing has been
+        received yet -- same "not an error" posture as `get_sight_servo_
+        latest` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4)."""
+        result = self._get_json("/payload/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /payload/latest, got {type(result).__name__}"
             )
         return result
 

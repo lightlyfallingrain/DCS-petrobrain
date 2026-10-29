@@ -133,6 +133,7 @@ from typing import Final, Literal, TextIO
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState
 from belief.attention import (
     _SECTOR_CENTER_DEG,
@@ -409,6 +410,21 @@ class ConsolePerceptionRunner:
     #: apply instead; see that field's own docstring.
     attack_run_state: AttackRunState | None = None
 
+    #: The ATGM run's own companion state (`[[BL-B67]]`, `plans/
+    #: bl-b67-atgm-run/plan.md` Stage 1), carried the same way `attack_
+    #: run_state` is -- replaced wholesale each poll, never mutated.
+    #: `None` means "no ATGM run engaged" -- a bare `attack_run_state`
+    #: (guns/rockets), no run at all, or a mission reset. Set by the same
+    #: engage-apply block that sets `attack_run_state`
+    #: (`_run_crew_text_poll_loop`'s own ordering comment there), from
+    #: `crew_console.drain_atgm_engage`'s returned contact id; ended
+    #: together with `attack_run_state` on disengage/drop target/lost
+    #: contact/engage without `missiles` (see that method's own
+    #: docstring and the plan's Co-moving Fields table). **Never** a
+    #: field on `AttackRunState` itself -- see this module's own
+    #: docstring for why.
+    atgm_run_state: AtgmRunState | None = None
+
     #: The 9K113 guidance unit's own *observed* state (`BL-B66`, `plans/
     #: 9k113-effectors/plan.md` Stages 2-4), carried the same way
     #: `optic_state`/`attack_run_state` are -- replaced wholesale each
@@ -592,6 +608,7 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
+        `atgm_run_state`,
         `guidance_unit_state`, `effector_state`, `watch_args_last_sent_sim`,
         `watched_args_unavailable_warned`, `watch_args_unconfirmed_warned`,
         `sight_head`, `last_sight_look_sim`, `attitude_history`, `optic`,
@@ -828,6 +845,16 @@ class ConsolePerceptionRunner:
                 if self.attack_run_state is not None
                 else None
             ),
+            # `[[BL-B67]]` Stage 1 (`plans/bl-b67-atgm-run/plan.md`,
+            # "Keeping the look through launch") -- the ATGM run's own
+            # target, pinning the look and suppressing the dwell break
+            # while engaged. `None` whenever no ATGM run is engaged, a
+            # true no-op.
+            sight_lock_contact_id=(
+                self.atgm_run_state.contact_id
+                if self.atgm_run_state is not None
+                else None
+            ),
         )
         # `[[BL-B80]]` v2: Petrovich must not perceive through the sight
         # while the simulated head is not `free` yet -- capped to
@@ -891,6 +918,10 @@ class ConsolePerceptionRunner:
                 optic_decision.look_elevation_deg if is_sight_tier else None
             ),
             last_sight_look_sim=self.last_sight_look_sim,
+            # `[[BL-B67]]` Stage 2 (`plans/bl-b67-atgm-run/plan.md`,
+            # "Single unit, never a cluster") -- the one-member aim, not
+            # the cluster centroid, while an ATGM run is engaged.
+            single_unit=self.atgm_run_state is not None,
         )
         sight_head_body_direction = head_body_direction(self.sight_head, ownship)
         updated_optic_state = _apply_active_gaze(
@@ -1548,7 +1579,12 @@ def _apply_active_gaze(
     tests that call this directly with no decision) -- when given, the
     returned `OpticState` (or `None` if nothing changed) is what the
     caller must persist back onto its own `optic_state` field, the same
-    way `run_once` already persists `decide_optic`'s return value."""
+    way `run_once` already persists `decide_optic`'s return value.
+
+    Also assigns `source.gaze_centre_elevation_deg` (`[[BL-B67]]` Stage 2)
+    -- `sight_cone.azimuth_deg`'s own missing elevation sibling, from the
+    same `actual_aim_elevation_deg` read, same `sight_cone is not None`
+    guard."""
     resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
     optic = decision.optic if decision is not None else UNAIDED_OPTIC
     updated_state = optic_state
@@ -1653,11 +1689,19 @@ def _apply_active_gaze(
     suppressed_until_sim = (
         optic_state.hands_busy_until_sim if optic_state is not None else None
     )
+    # `[[BL-B67]]` Stage 2 (`plans/bl-b67-atgm-run/plan.md`, "Single unit,
+    # never a cluster") -- `sight_cone`'s missing elevation sibling,
+    # assigned from the same actual-aim read, same guard (`None`
+    # whenever `sight_cone` is also `None`).
+    gaze_centre_elevation_deg: float | None = None
+    if sight_cone is not None and updated_state is not None:
+        gaze_centre_elevation_deg = updated_state.actual_aim_elevation_deg
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
             source.optic = optic
             source.sight_cone = sight_cone
+            source.gaze_centre_elevation_deg = gaze_centre_elevation_deg
             source.suppressed_until_sim = suppressed_until_sim
     return updated_state
 
@@ -3683,8 +3727,29 @@ def _run_crew_text_poll_loop(
                         if crew_console.attack_run_transition == "engage":
                             runner.attack_run_state = AttackRunState()
                             crew_console.attack_run_transition = None
+                            # `[[BL-B67]]` Stage 1 -- `drain_atgm_engage`
+                            # reads `attack_run_weapon` (consuming it) and
+                            # the just-registered attack-target task, and
+                            # returns the contact id to run on, or `None`
+                            # when this engage carried no `missiles`
+                            # weapon slot. Co-moving Fields: an engage
+                            # without `missiles` while an ATGM run was
+                            # active ends it here, same poll as `attack_
+                            # run_state`'s own fresh re-point above.
+                            atgm_contact_id = crew_console.drain_atgm_engage(
+                                runner.last_t_sim,
+                                observ_is_on=(
+                                    runner.optic_state.home_phase is OpticPhase.SIGHTING
+                                ),
+                            )
+                            runner.atgm_run_state = (
+                                AtgmRunState(contact_id=atgm_contact_id)
+                                if atgm_contact_id is not None
+                                else None
+                            )
                         elif crew_console.attack_run_transition == "disengage":
                             runner.attack_run_state = None
+                            runner.atgm_run_state = None
                             crew_console.attack_run_transition = None
                         # `BL-B64` Stage 2, direction §6 -- the same
                         # one-shot-signal shape `attack_run_transition`
@@ -3849,7 +3914,34 @@ def _run_crew_text_poll_loop(
                             # optic` (read the other direction, into
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
+                            # `[[BL-B67]]` Stage 1 -- azimuth-only
+                            # guidance for the ATGM run (the 9K113's own
+                            # guidance has no elevation axis); unaffected
+                            # when no ATGM run is engaged.
+                            vertical=runner.atgm_run_state is None,
+                            # `[[BL-B67]]` Stage 3 -- settles Stage 1/2's
+                            # own flagged deferral ("Keeping the look
+                            # through launch"): the guidance ladder's
+                            # floor is sight tier for the whole ATGM run,
+                            # never naked-eye/binoculars, since the
+                            # 9K113's guidance is sight-only. Same
+                            # granularity as `vertical` above, not
+                            # narrowed to `home_phase is SIGHTING` -- see
+                            # `attack_run.decide`'s own docstring.
+                            guidance_floor=(
+                                SIGHT_WIDE_OPTIC
+                                if runner.atgm_run_state is not None
+                                else UNAIDED_OPTIC
+                            ),
                         )
+                        # `[[BL-B67]]` Stage 1 -- "run ends with attack_
+                        # run_state" (drop target/cancel/lost contact, all
+                        # of which `drain_attack_run` itself folds into
+                        # returning `None`): the ATGM run has nothing left
+                        # to guide on either, the moment the standing
+                        # attack run ends this way.
+                        if runner.attack_run_state is None:
+                            runner.atgm_run_state = None
                         # `plans/attack-run-los/plan.md` F3 -- "where is
                         # it?"'s one-shot signal, consumed right beside
                         # `drain_attack_run` above with the same inputs

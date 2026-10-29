@@ -523,6 +523,12 @@ picking one and letting the pilot step is strictly better than a "say again".
 missiles]` accepts it into the slots dict; no body-layer code branches on it. One test pins that it
 is accepted and ignored, so the grammar does not change when something does consume it.
 
+**REVISED — `[[BL-B67]]` Stage 1 (2026-10-29).** This decision is superseded: `_handle_engage` now
+reads `slots["weapon"]`, sets `attack_run_weapon` beside `attack_run_transition`, and `"missiles"`
+gates the ATGM run (`body-layer/src/belief/crew_console.py`, `body-layer/src/body.py`). Any other
+value, including a bare `engage`, still runs the unchanged BL-14 guns/rockets path — the "parses and
+is ignored" behaviour this decision describes holds only for those values now, not for `"missiles"`.
+
 **16. The ownship-relative observation: a new perception datum, produced in `perception/`, bounded
 by the look, and read by exactly one consumer.** (§18, added in the amendment pass. This is the
 consequential change and it moves the stage boundaries.)

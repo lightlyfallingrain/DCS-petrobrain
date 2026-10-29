@@ -321,6 +321,21 @@ class Observation:
     #: population rule, which is the only place that ever sets this to
     #: something other than `None`.
     relative_direction: RelativeDirection | None = None
+    #: `[[BL-B67]]` Stage 2 (`plans/bl-b67-atgm-run/plan.md`, "Single
+    #: unit, never a cluster") -- the direction to the one cluster member
+    #: nearest this poll's gaze centre, set under exactly the same
+    #: conditions as `relative_direction` above (admitted, `live_los_
+    #: clear is True`) **and** only while a sight-tier optic is active:
+    #: `relative_direction` is the *cluster centroid*, which for a
+    #: multi-member cluster lands between its members rather than on any
+    #: one of them -- a miss at the ranges a 9K113 run fires at. `None`
+    #: is the default and also the permanent value for every source with
+    #: no gaze centre to compare against (the hybrid channel), and for a
+    #: naked-eye candidate not currently admitted with a clear sightline
+    #: through a sight optic -- see `naked_eye_source.py`'s own
+    #: population rule, the only place that ever sets this to something
+    #: other than `None`.
+    aim_unit_direction: RelativeDirection | None = None
 
 
 @runtime_checkable

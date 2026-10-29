@@ -203,12 +203,20 @@ def select_sight_goal(
     desired_world_rate_el_deg_s: float,
     last_sight_look_sim: float | None,
     now_sim: float,
+    single_unit: bool = False,
 ) -> tuple[AimSource, float, float, float, float, str | None, float | None]:
     """The plan's "Aim source" selection rule, per poll. `look_contact` is
     the contact belief's `decide_optic` chose to look at this poll (`None`
     when idle/searching); `desired_world_*` is belief's own desired world
     direction/rate for that choice (today's design, used for the
     `belief` row and as `held`'s own fallback when nothing was ever seen).
+
+    `single_unit` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 2,
+    "Single unit, never a cluster") is passed straight through to
+    `seen_world_direction`'s own keyword of the same name -- an ATGM run
+    needs the one member nearest the gaze centre, not the cluster
+    centroid an ordinary sight look is content with. `False` (the
+    default) is every pre-existing caller's unchanged behaviour.
 
     Returns `(aim_source, goal_az_deg, goal_el_deg, rate_az_deg_s,
     rate_el_deg_s, seen_contact_id, last_seen_t_look)` -- the caller
@@ -221,7 +229,7 @@ def select_sight_goal(
     through `attack_run.py`'s existing fenced reader."""
     seen: SeenDirection | None = None
     if look_contact is not None:
-        seen = seen_world_direction(look_contact)
+        seen = seen_world_direction(look_contact, single_unit=single_unit)
 
     # `seen` row: the look must be *through the sight*, i.e. the contact's
     # last percept was admitted on the latest sight-tier poll
@@ -307,6 +315,7 @@ def advance_sight_head(
     desired_world_rate_az_deg_s: float = 0.0,
     desired_world_rate_el_deg_s: float = 0.0,
     last_sight_look_sim: float | None = None,
+    single_unit: bool = False,
 ) -> SightHead:
     """Advances the simulated head one poll -- the plan's "Simulated
     head" design-detail paragraph, mode-by-mode:
@@ -326,7 +335,12 @@ def advance_sight_head(
     relative, or `None` when nothing sight-tier is desired this poll (a
     glance away, binocular, capped) -- in that case the head holds its
     own current direction rather than snapping back (plan: "it holds, it
-    does not snap back")."""
+    does not snap back").
+
+    `single_unit` (`[[BL-B67]]` Stage 2) is `select_sight_goal`'s own
+    keyword of the same name, passed straight through -- `body.py`'s
+    poll loop sets it from `runner.atgm_run_state is not None`. `False`
+    (the default) is every pre-existing caller's unchanged behaviour."""
     if not observ_observed:
         return SightHead()
 
@@ -385,6 +399,7 @@ def advance_sight_head(
         desired_world_rate_el_deg_s=desired_world_rate_el,
         last_sight_look_sim=last_sight_look_sim,
         now_sim=ownship.t_sim,
+        single_unit=single_unit,
     )
 
     if (

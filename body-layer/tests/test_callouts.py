@@ -53,6 +53,7 @@ from belief.decay import CALLOUT_OBSERVABILITY_GRACE_S, LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     Event,
@@ -2943,3 +2944,199 @@ def test_observability_exemption_set_membership_is_pinned() -> None:
     per-transition condition at the gate that the new kind's own
     admission-bar argument has to name."""
     assert _OBSERVABILITY_EXEMPT_KINDS == frozenset({CONTACT_ENGAGEMENT_CHANGED})
+
+
+# --- `hold_routine` (`[[BL-B67]]` Stage 3, "Silence while the missile   -
+# --- flies") ------------------------------------------------------------
+
+
+def test_hold_routine_defers_a_routine_event_and_speaks_it_once_cleared() -> None:
+    """A plain `CONTACT_DETECTED` candidate (the `_observation` fixture's
+    own source, `SOURCE_PETROVICH_DETECTION_ASSOCIATED` -- the hybrid
+    channel, per that module's own constant) is neither consumed nor
+    spoken while `hold_routine=True`, and speaks the first tick it is
+    `False` again -- this is also the "hybrid-only contact event" case
+    Stage 3's own test list names separately: the hold gates by event
+    *kind*, never by source, so a hybrid-sourced routine candidate is held
+    by exactly the same mechanism as any other, with no special case
+    needed for it."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    scheduler = CalloutScheduler()
+
+    assert scheduler.tick(store, now_sim=0.0, hold_routine=True) == []
+    # Deferred, not consumed -- still there for the poll the hold lifts.
+    assert len(store.unacknowledged_events) == 1
+
+    assert scheduler.tick(store, now_sim=1.0, hold_routine=False) == ["truck."]
+
+
+def test_hold_routine_still_lets_taking_fire_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one pass-through kind/flag combination (round 7/8's own
+    wording: *"since Petrovich is looking through the sight, he'll only
+    see SAM launch etc from that FOV"*, narrowed to `CONTACT_FIRING_SEEN`
+    with `targets_ownship` -- `tick`'s own docstring). A routine
+    `CONTACT_DETECTED` candidate for the *same* contact is live at the
+    same time and is still held -- proving the pass-through is scoped to
+    the one kind/flag pair, not to "anything about this contact."
+
+    The contact must actually be `callout_observable` -- `_watched_aaa_
+    store`'s own fixture is deliberately astern/masked (built for the
+    exemption tests above, which rely on that), so this test uses `_ownship_
+    heading(_HEADING_CONTACT_AHEAD, ...)` instead, the same dead-ahead
+    geometry `test_engagement_change_speaks_about_a_cockpit_masked_bearing`'s
+    own sibling tests use to get a genuinely visible contact."""
+    _enrichment_context(monkeypatch)  # installs the describe/project fakes
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",
+                classification_level=3,
+            )
+        ],
+        now_sim=0.0,
+    )
+    ownship = _ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=0.0)
+    store.tick(now_sim=0.0, ownship=ownship)
+    contact_id = store.contacts[0].id
+    assert store.callout_observable(store.contacts[0], 0.0)
+    scheduler = CalloutScheduler()
+    enrichment = EnrichmentContext(conn=_FAKE_CONN, theatre="Syria", ownship=ownship)
+
+    store._events.append(
+        Event(
+            id="FIRE_1",
+            contact_id=contact_id,
+            kind=CONTACT_FIRING_SEEN,
+            t_sim=0.0,
+            certainty="observed",
+            targets_ownship=True,
+        )
+    )
+
+    spoken = scheduler.tick(
+        store, now_sim=0.0, enrichment=enrichment, hold_routine=True
+    )
+
+    assert spoken == ["Taking fire, 12 o'clock."]
+    # The routine `CONTACT_DETECTED` for the same contact is still held,
+    # not consumed -- it remains to be spoken once the hold lifts.
+    assert any(
+        event.kind == "CONTACT_DETECTED" for event in store.unacknowledged_events
+    )
+
+
+def test_hold_routine_holds_danger_callout_during_missile_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision N2 (round 8): *"focus is on guidance during missile
+    flight. Drop the danger callout."* -- `CONTACT_ENGAGEMENT_CHANGED`
+    ("Danger <unit>") is held like any other routine kind while
+    `hold_routine=True`, **not** exempted the way the pass-through set
+    exempts `CONTACT_FIRING_SEEN`/`targets_ownship` above. Same
+    dead-ahead/observable geometry as `test_hold_routine_still_lets_
+    taking_fire_through` (so the contact is genuinely `callout_observable`
+    and the hold, not the no-omniscience gate, is what's under test) --
+    the only difference between the two tests is the event kind, which is
+    the point: it proves the hold discriminates between them rather than
+    passing both through."""
+    _enrichment_context(monkeypatch)  # installs the describe/project fakes
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",
+                classification_level=3,
+            )
+        ],
+        now_sim=0.0,
+    )
+    ownship = _ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=0.0)
+    store.tick(now_sim=0.0, ownship=ownship)
+    contact_id = store.contacts[0].id
+    assert store.callout_observable(store.contacts[0], 0.0)
+    # `CONTACT_ENGAGEMENT_CHANGED` is also in `_WATCHED_ONLY_KINDS` --
+    # without this, the event would be skipped at that gate regardless of
+    # `hold_routine`, which would make this test insensitive to the very
+    # mutation it exists to catch (widening the pass-through condition).
+    set_attention(store, contact_id, "watch")
+    scheduler = CalloutScheduler()
+    enrichment = EnrichmentContext(conn=_FAKE_CONN, theatre="Syria", ownship=ownship)
+
+    store._events.append(
+        Event(
+            id="ENGAGE_1",
+            contact_id=contact_id,
+            kind=CONTACT_ENGAGEMENT_CHANGED,
+            t_sim=0.0,
+            certainty="observed",
+            previous_engaged=False,
+            engaged=True,
+        )
+    )
+
+    spoken = scheduler.tick(
+        store, now_sim=0.0, enrichment=enrichment, hold_routine=True
+    )
+
+    assert spoken == []
+    # Deferred, not consumed -- still there for the poll the hold lifts.
+    assert any(
+        event.kind == CONTACT_ENGAGEMENT_CHANGED
+        for event in store.unacknowledged_events
+    )
+
+
+def test_hold_routine_defers_group_disclosure_too() -> None:
+    """Group disclosure mints no `Event` at all (module docstring), so the
+    hold needs its own check in that loop -- `test_group_disclosure_
+    speaks_once_both_members_resolve`'s own fixture, re-ticked under
+    `hold_routine=True`, must speak nothing."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_A",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                dwp_x=0.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_B",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                dwp_x=10.0,
+                dwp_z=0.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    scheduler = CalloutScheduler()
+    # Drain whatever the plain `CONTACT_DETECTED`/group-formation tick
+    # would otherwise speak, under the ordinary (non-held) path, so this
+    # test's own assertion is about the *group* disclosure line only.
+    scheduler.tick(store, now_sim=0.0)
+
+    assert scheduler.tick(store, now_sim=1.0, hold_routine=True) == []

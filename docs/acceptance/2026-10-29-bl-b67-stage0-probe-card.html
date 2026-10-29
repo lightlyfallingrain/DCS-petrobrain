@@ -1,0 +1,220 @@
+<title>ATGM Run Probe Sortie</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, prize block marked in amber. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+.surprise{color:var(--record); font-weight:600; margin-top:10px;}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">BL-B67 · Stage 0 · Windows + DCS · ~10 min</div>
+  <h1>ATGM Run Probe Sortie</h1>
+  <p class="subhead">A logging-only sortie. It tells the ATGM run what DCS reports when you fire a Shturm, how the pylon knob maps to stations, and whether Radiation Reset can be pressed. No Petrovich this flight.</p>
+</header>
+
+<div class="branch-box">
+  <div class="label">BRANCH: main</div>
+  <pre>git fetch origin
+git checkout main
+git pull</pre>
+  <div class="subhead" style="font-size:0.9rem">On the Windows clone. The probe files merged to <code class="i">main</code> with BL-B67 batch A.</div>
+</div>
+
+<div class="note warn"><span class="tag">Not testable this flight</span><br>
+The production pipeline is off: the probe replaces <code class="i">Export.lua</code>, so no collector, no voice, no Petrovich callouts. Nothing here tests the attack run itself.</div>
+
+<div class="note"><strong>The probe moves two switches by itself.</strong> In the first ~20 s it sweeps the pylon knob through all 9 positions, parks on the first loaded station and presses Radiation Reset once. After each launch it moves the knob to the next loaded station <strong>about 25 s after the shot</strong>, never during the missile's flight. Neither can fire or jettison anything.</div>
+
+<h2>Setup</h2>
+<section class="block">
+  <div class="block-num">Setup · Windows</div>
+  <label class="chk"><input type="checkbox" data-k="s1" id="s1"><span><strong>Back up</strong> <code class="i">Saved Games\DCS\Scripts\Export.lua</code>, then copy <code class="i">aircraft-layer\dcs-export\Export.probe-weapons.lua</code> over it.</span></label>
+  <label class="chk"><input type="checkbox" data-k="s2" id="s2"><span>Copy <code class="i">aircraft-layer\dcs-export\petrobrain-damage-events-probe-hook.lua</code> to <code class="i">Saved Games\DCS\Scripts\Hooks\</code>.</span></label>
+  <label class="chk"><input type="checkbox" data-k="s3" id="s3"><span><code class="i">Saved Games\DCS\Config\autoexec.cfg</code> contains <code class="i">net.allow_dostring_in = { "scripting" }</code>.</span></label>
+  <label class="chk"><input type="checkbox" data-k="s4" id="s4"><span>Delete any old <code class="i">Saved Games\DCS\Logs\aircraft_layer_probe_weapons.log</code>.</span></label>
+  <label class="chk"><input type="checkbox" data-k="s5" id="s5"><span>Mission: Mi-24P <strong>air start</strong>, straight and level, two BTRs about 3.5 km ahead. <strong>Shturm on at least one station.</strong> An Ataka station or an S-8 pod is a free extra if the loadout allows.</span></label>
+  <p class="subhead" style="font-size:0.9rem">UNVERIFIED on this machine: file copies and the mission need Windows and DCS.</p>
+</section>
+
+<h2>Flight</h2>
+
+<section class="block">
+  <div class="block-num">Block 1 · first 20 seconds</div>
+  <h3>Hands off the pylon knob</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Start the mission and fly straight. Don't touch the SHSCHO knob.</div>
+    <div class="k expect">Expect</div><div class="v">The knob steps through its positions about 2 s apart, then parks on a loaded station. The Radiation Reset button is pressed once.</div>
+    <div class="k record">Record</div><div class="v record">Did you see the knob move on its own? Which position did it stop at?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b1" id="b1"><span>Done</span></label>
+</section>
+
+<section class="block prize">
+  <div class="block-num">Block 2 · shot 1 <span class="prize-tag">The prize</span></div>
+  <h3>Fire one Shturm at the first BTR</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Guide it in normally. Watch it hit. Then wait about 25 s.</div>
+    <div class="k expect">Expect</div><div class="v">A normal flight. The knob stays put during the flight and moves to the next loaded station roughly 25 s after the shot.</div>
+    <div class="k record">Record</div><div class="v record">
+      <ul>
+        <li>Your DCS mission clock at the moment you saw it hit.</li>
+        <li>Did the flight look normal?</li>
+        <li>Did the knob move afterwards, and roughly when?</li>
+      </ul>
+    </div>
+  </div>
+  <p class="subhead" style="font-size:0.9rem">Why this is the prize: launch and impact for the whole run now rest on DCS's shot event handing over our missile. Nobody has seen that happen for a Shturm yet. Your impact clock is the only way to measure how far the "missile gone" signal lags the explosion you see.</p>
+  <label class="chk"><input type="checkbox" data-k="b2" id="b2"><span>Done</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">Block 3 · shot 2</div>
+  <h3>Fire a second Shturm at the second BTR</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Fire once you're ready. Firing again within 25 s from the same station restarts the knob's wait, which is expected.</div>
+    <div class="k expect">Expect</div><div class="v">Same as shot 1.</div>
+    <div class="k record">Record</div><div class="v record">Mission clock at the visible hit. Anything different from shot 1?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b3" id="b3"><span>Done</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">Block 4 · optional extras</div>
+  <h3>Ataka, then one pair of rockets</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">If loaded: one Ataka at whatever is left. If an S-8 pod is loaded: one pair of rockets at anything.</div>
+    <div class="k expect">Expect</div><div class="v">Rockets are the known case. They only check that the probe is still logging the object feed.</div>
+    <div class="k record">Record</div><div class="v record">Which of these you fired, and the clock at the Ataka hit if you fired one.</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b4" id="b4"><span>Done or skipped</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">Block 5 · end</div>
+  <h3>Exit to the main menu</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Idle a few seconds after the last shot, then exit to the main menu so the logs flush.</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b5" id="b5"><span>Done</span></label>
+</section>
+
+<h2>What the logs answer</h2>
+<div class="tbl"><table>
+  <tr><th>Q</th><th>Question</th></tr>
+  <tr><td>Q1</td><td>Does the payload read work on the Mi-24P, and when does the missile count drop relative to the shot?</td></tr>
+  <tr><td>Q2</td><td>What name does the launched Shturm carry in the object feed? (Used only to stop Petrovich calling out our own missile.)</td></tr>
+  <tr><td>Q3</td><td>Which knob step selects which station, and does a write set an absolute position?</td></tr>
+  <tr><td>Q5</td><td>Does writing 1 then 0 press and release Radiation Reset?</td></tr>
+  <tr><td>Q6</td><td>Does the shot event carry our missile, with its type, and when does it report the missile gone?</td></tr>
+</table></div>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <p style="margin:0 0 6px">Copy into <code class="i">win-mac-sync\from-windows\</code>:</p>
+  <ul>
+    <li><code class="i">Saved Games\DCS\Logs\aircraft_layer_probe_weapons.log</code></li>
+    <li><code class="i">Saved Games\DCS\Logs\dcs.log</code> (the whole file)</li>
+  </ul>
+  <p style="margin:12px 0 6px">And tell me:</p>
+  <ul>
+    <li>The mission clock at each visible hit.</li>
+    <li>Whether each flight looked normal.</li>
+    <li>Whether the knob moved by itself at the start and after each shot.</li>
+  </ul>
+  <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+
+<h2>Restore afterwards</h2>
+<section class="block">
+  <label class="chk"><input type="checkbox" data-k="r1" id="r1"><span>Copy the backed-up <code class="i">Export.lua</code> back into <code class="i">Saved Games\DCS\Scripts\</code>.</span></label>
+  <label class="chk"><input type="checkbox" data-k="r2" id="r2"><span>Optional: delete <code class="i">petrobrain-damage-events-probe-hook.lua</code> from <code class="i">Hooks\</code>. It is safe to leave.</span></label>
+</section>
+</div>
+
+<script>
+const KEY='bl-b67-stage0-probe';
+function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return {};}}
+const saved=load();
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{const s=load(); s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));}catch(e){}
+  });
+});
+</script>

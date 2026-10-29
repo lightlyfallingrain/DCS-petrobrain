@@ -179,7 +179,14 @@ local socket = require("socket.core")
 -- `watch_args`/`read_args` ops and their `"watch_id"`/`"read_id"` reply
 -- lines -- update `aircraft-layer/src/collector/server.py`'s
 -- `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-24"
+--
+-- Bumped again 2026-10-29 (`BL-B67`, `plans/bl-b67-atgm-run/plan.md`
+-- Stage 4) for the new `push_payload_state` loadout line (wire key
+-- "stations", `LoGetPayloadInfo()` + `LoGetNameByType()`) -- additive
+-- only, same reasoning as the SPU-8/sight-servo bumps above. Update
+-- `aircraft-layer/src/collector/server.py`'s `EXPECTED_EXPORT_VERSION`
+-- in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-10-29"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -753,6 +760,12 @@ local watched_args = {}
 local watched_id = nil
 local watched_last_sent = {}
 local watched_force_send = false
+
+--: `BL-B67`, `plans/bl-b67-atgm-run/plan.md` Stage 4 -- the ownship
+--: loadout feed's own change-gate signature (current station + each
+--: station's resolved name/count), read/written only by
+--: `push_payload_state`.
+local payload_last_signature = nil
 
 --: Extracts a 1-16 character `[%w_]` id field (`watch_id`/`read_id`) --
 --: a tighter sibling of `extract_json_string_field` above, which has no
@@ -1909,6 +1922,79 @@ local function push_watched_args_state(t)
     watched_force_send = false
 end
 
+-- Sends the ownship loadout feed's own change-gated line (`BL-B67`,
+-- `plans/bl-b67-atgm-run/plan.md` Stage 4) -- called inside the 5 Hz
+-- export section, same cadence as the telemetry line (and, like
+-- push_watched_args_state above, after the telemetry send has already
+-- succeeded, so `client` is alive and we are actually in the cockpit).
+-- `LoGetPayloadInfo()`'s own documented shape (research doc `aircraft-
+-- layer/research/2026-10-29-bl-b67-loadout-and-atgm-object-recon.md`
+-- Finding 1) is `{CurrentStation, Stations = {{container, weapon =
+-- {l1..l4}, count}, ...}, Cannon = {shells}}`; `Cannon` is not sent --
+-- nothing in the plan reads it yet, and adding an unused field now would
+-- just be one more thing a future reshape has to account for.
+-- `LoGetNameByType` turns each station's four-level `weapon` code into a
+-- display name, falling back to `Export.lua`'s own `"?"` placeholder
+-- (never the raw level numbers) when that call fails or returns a non-
+-- string -- same "send something parseable, not a partial/malformed
+-- line" posture as every other pcall-guarded read in this file. Sent
+-- only when the signature (current station + each station's resolved
+-- name/count) differs from the last line sent; `container` is carried on
+-- the line itself but left out of the signature since it tracks the
+-- station a weapon occupies, not a per-poll-changing quantity -- a
+-- station's container flag changing without its name or count changing
+-- alongside it is not a loadout change this feed exists to report. Must
+-- stay below `safe_call`/`json_escape_string` -- see the no-hoisting
+-- rule in `aircraft-layer/CLAUDE.md`.
+local function push_payload_state(t)
+    if client == nil then
+        return
+    end
+    local okp, payload = pcall(LoGetPayloadInfo)
+    if not okp or type(payload) ~= "table" then
+        return
+    end
+    local current_station = payload.CurrentStation
+    if type(current_station) ~= "number" then
+        return
+    end
+
+    local station_parts = {}
+    local sig_parts = { tostring(current_station) }
+    for i, st in pairs(payload.Stations or {}) do
+        if type(st) == "table" and type(st.count) == "number"
+            and type(st.container) == "boolean" then
+            local weapon = st.weapon or {}
+            local okn, nm = pcall(
+                LoGetNameByType, weapon[1], weapon[2], weapon[3], weapon[4]
+            )
+            local name = (okn and type(nm) == "string") and nm or "?"
+            station_parts[#station_parts + 1] = "{\"index\":" .. tostring(i)
+                .. ",\"name\":" .. json_escape_string(name)
+                .. ",\"count\":" .. tostring(st.count)
+                .. ",\"container\":" .. tostring(st.container) .. "}"
+            sig_parts[#sig_parts + 1] = tostring(i) .. ":" .. name .. ":" .. tostring(st.count)
+        end
+    end
+
+    local signature = table.concat(sig_parts, ";")
+    if signature == payload_last_signature then
+        return
+    end
+
+    local line = "{\"t\":" .. string.format("%.3f", t)
+        .. ",\"current_station\":" .. tostring(current_station)
+        .. ",\"stations\":[" .. table.concat(station_parts, ",") .. "]}\n"
+    local ok, err = client:send(line)
+    if not ok then
+        debug_log("payload send failed: " .. tostring(err))
+        client:close()
+        client = nil
+        return
+    end
+    payload_last_signature = signature
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -2054,6 +2140,14 @@ function LuaExportStop()
     watched_id = nil
     watched_last_sent = {}
     watched_force_send = false
+    -- `BL-B67`, `plans/bl-b67-atgm-run/plan.md` Stage 4: same "a
+    -- stale X must never survive" reasoning as watched_last_sent above --
+    -- a reconnect to the same collector process (no export_version
+    -- re-send) still starts from an empty signature rather than one that
+    -- belonged to the mission that just ended, so the new mission's
+    -- first loadout line is always sent rather than possibly matching a
+    -- leftover signature by coincidence.
+    payload_last_signature = nil
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -2227,6 +2321,10 @@ function LuaExportAfterNextFrame()
     -- worked (we are actually in the cockpit) -- see that function's own
     -- docstring.
     push_watched_args_state(t)
+
+    -- `BL-B67`, `plans/bl-b67-atgm-run/plan.md` Stage 4: same
+    -- reasoning/placement as push_watched_args_state immediately above.
+    push_payload_state(t)
 
     -- LoGetWorldObjects poll, mirroring LoGetSelfData's mechanism exactly:
     -- same throttle (this function only reaches here once per
