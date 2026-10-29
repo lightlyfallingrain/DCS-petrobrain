@@ -289,3 +289,110 @@ counts/names/current-station are compared for exact equality, not within a toler
    needs widening.
 5. **No cross-key tuning coupling** — this stage adds no tunables (none were due; Stage 4's own
    task list in the plan names no tunables).
+
+### Stage 0 — probe sortie (Windows, user flies)
+
+Built per the plan's own Stage 0 description (`plans/bl-b67-atgm-run/plan.md`, "Implementation
+Plan" item 0). **Disposable extensions of two existing, already-committed probes — no new probe
+files, no pipeline code.** The plan names both files explicitly as "Stage 0 only, disposable
+extensions" in its Affected Modules list.
+
+#### Files Changed
+
+- `aircraft-layer/dcs-export/Export.probe-weapons.lua` — extended, not replaced. Added:
+  (1) a per-first-seen-Name key dump (`for k in pairs(obj) do … end`) alongside the existing
+  count/new-name log, settling Q2's "does a missile object carry any field a rocket object
+  doesn't" without guessing a key name in advance; (2) a per-poll `LoGetPayloadInfo()` read
+  (`poll_payload`/`format_payload`), logging each station's `name:count` via `LoGetNameByType`
+  and `CurrentStation`, for Q1; (3) a per-*frame* (not per-poll) watched-arg readback for 963
+  (`SHSCHO-KNOB-PTR`) and 882 (`OP-AIM-RESET-RAD-PTR`), logged only on change, for Q3/Q5's timing;
+  (4) a scripted `SWEEP`/`PARK`/`RESET` state machine (`run_knob_script`) that steps the knob
+  through all 9 positions via `GetDevice(7):performClickableAction(3038, n * 0.1)` (device 7 =
+  `DEV_I9K113`, the same id the production `Export.lua` uses), parks on the first step whose
+  `CurrentStation` correlates with a loaded station, then presses Radiation Reset
+  (`performClickableAction(3029, 1)` then `0` one second later) — for Q3/Q5; (5) a count-drop
+  auto-advance (`maybe_advance_station`) that steps the knob to the next loaded station after a
+  launch, so the pilot never has to touch the knob mid-sortie.
+- `aircraft-layer/dcs-export/petrobrain-damage-events-probe-hook.lua` — extended, not replaced.
+  Added: (1) an `S_EVENT_SHOT` special case in the existing event handler, firing only when the
+  initiator is the player — reads `event.weapon:getTypeName()`/`getDesc().category`/`.guidance`/
+  `.displayName`/`isExist()` at event time and appends them to that event's queued line, keeping
+  the weapon object in a new global, `PB_PROBE_KEPT_WEAPON`, if it exists at launch (same
+  Hook-state-global persistence mechanism `petrobrain-firing-events-hook.lua`'s own
+  `PB_ACTIVE_FIRING_UNITS` already relies on, cited in the new header note rather than
+  re-derived); (2) an `S_EVENT_HIT` special case, appending a marker when `event.weapon` is that
+  same kept object; (3) `WEAPON_EXIST_POLL_CODE`/`pollWeaponExist`, a second `dostring_in` round
+  trip at 5 Hz (`WEAPON_EXIST_POLL_INTERVAL_S = 0.2`), independent of the existing 1 Hz
+  life/event poll, logging `timer.getTime()` (the mission-scripting state's own sim clock, not
+  the Hook state's `DCS.getRealTime()`) the first poll it reads `isExist() == false`, with an
+  alive/dead edge flag (`weaponWasAlive`) so "gone" logs exactly once.
+- `docs/acceptance/2026-10-29-bl-b67-stage0-probe.md` (new) — the sortie card.
+
+Both extensions answer every open question (Q1, Q2, Q3, Q5, Q6) the plan's Stage 0 table lists;
+Q4 is retired per the plan's own revision (fire-button reading dropped in favour of
+`S_EVENT_SHOT`) and was not reintroduced.
+
+#### Deviations From the Plan, and Why
+
+1. **The research note's own Probe 1/2/3 snippets (`aircraft-layer/research/2026-10-29-bl-b67-
+   loadout-and-atgm-object-recon.md`, "Reproducible Test") are minimal hand-flown diffs — they
+   assume a human reads the knob position and presses the fire-trigger-equivalent cockpit
+   controls manually mid-flight.** The plan's own Stage 0 item asks for more: an auto-scripted
+   knob sweep/park/reset and a post-launch auto-advance, so one ~10-minute sortie can exercise
+   several stations without the pilot operating the SHSCHO knob or the Radiation Reset button by
+   hand. Built as the plan's stage text describes (not the research note's simpler snippets),
+   since the plan is the higher-precedence governing input per its own header and the research
+   note explicitly offers its snippets as a starting point ("minimal diff"), not a ceiling.
+2. **`maybe_advance_station`'s "next loaded station" choice assumes the `Stations` array index
+   equals the knob step** — exactly Q3's own open question, not resolved by anything in this probe
+   itself. Said plainly in both the code comment and the sortie card rather than silently treated
+   as settled: if the sweep/park log shows `CurrentStation` after writing step N is *not* N, this
+   logic is choosing the wrong next station, and the log (not the auto-advance's own behaviour) is
+   the thing to trust when reading the flight back.
+3. **No change to `petrobrain-firing-events-hook.lua`** (the production firing-events Hook this
+   plan's later stages will extend) — the probe's `S_EVENT_SHOT`/`S_EVENT_HIT` handling lives
+   entirely in the *probe* Hook (`petrobrain-damage-events-probe-hook.lua`), per the plan's own
+   Affected Modules list naming only the probe file for Stage 0. The production Hook's own
+   own-weapon branch is Stage 5 work, gated on this stage's answers, and was not started here.
+4. **A single kept-weapon slot (`PB_PROBE_KEPT_WEAPON`), not a small set.** If a second missile is
+   fired before the first's `WEAPON_GONE` is logged, the second overwrites the first and the
+   first's own impact is never reported by the 5 Hz poll (though its `S_EVENT_HIT`, if any, would
+   still be checked against whichever object is current at that moment, so a true positive there
+   could attach to the wrong missile). Acceptable for a probe sortie the card scripts as
+   "fire one, wait for impact, fire the next" — flagged here rather than silently fixed, since
+   fixing it (a small ring of kept weapons) would be solving a problem Stage 0's own card design
+   does not create.
+5. **No tunables.** Every new constant (`KNOB_STEP_INTERVAL_S`, `KNOB_SETTLE_S`, `RESET_HOLD_S`,
+   `WEAPON_EXIST_POLL_INTERVAL_S`) lives in a throwaway probe script outside `body-layer`, where
+   the tuning mechanism does not exist (root `CLAUDE.md`'s "Behaviour-affecting constants" section
+   says to declare normally outside `body-layer` and flag the fact) — and more specifically, a
+   Stage 0 probe is deleted once its questions are answered, so a tunable here would never ship
+   and would want the mechanism for no reason. Flagged, not applied.
+
+#### Checks
+
+- `luac5.1 -p` on both edited files: **pass** (`Export.probe-weapons.lua`,
+  `petrobrain-damage-events-probe-hook.lua`).
+- `GETGLOBAL` check (`aircraft-layer/CLAUDE.md`) on both outer files: **clean** — every name is
+  either a genuine DCS API (`GetDevice`, `LoGetModelTime`, `LoGetNameByType`, `LoGetPayloadInfo`,
+  `LoGetWorldObjects`, `log`, `net`, `require`) or Lua stdlib (`io`, `lfs`, `pairs`, `pcall`,
+  `string`, `table`, `tostring`, `type`). No own-helper name leaked as an accidental global.
+- `GETGLOBAL` check on the **extracted** `dostring_in` string literals (`LIFE_CODE`,
+  `EVENT_REGISTER_CODE`, `EVENT_POLL_CODE`, `WEAPON_EXIST_POLL_CODE`, pulled out with a small
+  throwaway script and checked individually, since `luac -p` on the outer file never looks inside
+  a string): **clean**. `PB_PROBE_EVENT_NAMES`/`PB_PROBE_EVENT_QUEUE`/
+  `PB_PROBE_HANDLER_REGISTERED`/`PB_PROBE_KEPT_WEAPON` all appear as `GETGLOBAL` reads, which is
+  expected and correct here — they are deliberately shared globals across separate `dostring_in`
+  calls into the same persistent `"scripting"` state (the file's own pre-existing pattern), not
+  an own-helper-referenced-before-its-`local` bug. No name outside that deliberate set and genuine
+  DCS globals (`coalition`, `ipairs`, `pairs`, `pcall`, `string`, `table`, `timer`, `tostring`,
+  `type`, `world`) appeared.
+- No `ruff`/`mypy`/`pytest` run — this stage touches only `.lua` files, no Python.
+- No live DCS run performed by this session (no DCS access from this machine, same constraint the
+  research note's own header states) — the sortie itself is the user's to fly, per the card.
+
+#### Tests Added
+
+None — per `aircraft-layer/CLAUDE.md`'s own testing section, "`Export.lua` and the live Export.lua
+↔ collector↔API path have no automated test"; this applies equally to a disposable probe
+extension of it. Correctness here is validated by the live flight, not by a test suite.

@@ -62,6 +62,30 @@ A negative result is a real result here. If an AAA unit fires visibly and
 no event naming it ever appears, that reverses the research file's
 Finding 12 and means the naked-eye/LOS tracer channel is the only route to
 perceiving being engaged -- write it up rather than retrying.
+
+STAGE 0 EXTENSION (`plans/bl-b67-atgm-run/plan.md`, BL-B67) -- 2026-10-29,
+now mandatory rather than optional (the plan's own Q6). Answers: does
+`S_EVENT_SHOT` arrive for our own ATGM launch with `event.weapon`
+populated; what do `getTypeName()`/`getDesc().category`/`.guidance`/
+`.displayName` read for it; does `isExist()` hold for the flight and turn
+false at impact, and when; does `S_EVENT_HIT` fire on that same weapon
+object.
+
+  * `handler:onEvent` now special-cases `S_EVENT_SHOT` where the
+    initiator is the player: it reads the weapon's `getTypeName()`/
+    `getDesc()`/`isExist()` at event time and appends them to that
+    event's own queued line, then keeps a reference to the weapon object
+    in `PB_PROBE_KEPT_WEAPON` (a global in the `"scripting"` state, same
+    persistence mechanism `petrobrain-firing-events-hook.lua`'s own
+    `PB_ACTIVE_FIRING_UNITS` already relies on) if it exists at launch.
+  * It also special-cases `S_EVENT_HIT` where `event.weapon` is that same
+    kept object, appending a marker to that event's line.
+  * `WEAPON_EXIST_POLL_CODE`/`pollWeaponExist` poll the kept weapon's
+    `isExist()` at 5 Hz (`WEAPON_EXIST_POLL_INTERVAL_S`), independently of
+    the 1 Hz life/event poll above, and log the sim time
+    (`timer.getTime()`, read inside the `"scripting"` state, not the Hook
+    state's own `DCS.getRealTime()`) it first reads false -- the model
+    time Q6 asks for.
 --]]
 
 log.write("PetrobrainDamageProbe", log.INFO, "Loading - Petrobrain damage/events probe")
@@ -127,15 +151,59 @@ if not PB_PROBE_HANDLER_REGISTERED then
         if ok and n ~= nil then return tostring(n) end
         return "?"
     end
+    --: `PB_PROBE_KEPT_WEAPON` is the one own-launched weapon object this
+    --: probe tracks at a time (the most recent S_EVENT_SHOT where the
+    --: initiator was the player and the weapon existed at launch) -- a
+    --: second launch while the first is still tracked simply overwrites
+    --: it, which is fine for a Stage 0 probe sortie that fires one
+    --: missile, waits for impact, and fires the next.
     local handler = {}
     function handler:onEvent(event)
         if event == nil or event.id == nil then return end
         local eventName = PB_PROBE_EVENT_NAMES[event.id] or ("UNKNOWN_" .. tostring(event.id))
-        PB_PROBE_EVENT_QUEUE[#PB_PROBE_EVENT_QUEUE + 1] = eventName
+        local line = eventName
             .. "|t=" .. tostring(event.time)
             .. "|init=" .. safeName(event.initiator)
             .. "|weapon=" .. safeName(event.weapon)
             .. "|target=" .. safeName(event.target)
+
+        if event.id == world.event.S_EVENT_SHOT then
+            local isPlayer = false
+            local okp, player = pcall(world.getPlayer)
+            if okp and player ~= nil and event.initiator ~= nil then
+                local okn1, playerName = pcall(function() return player:getName() end)
+                local okn2, initName = pcall(function() return event.initiator:getName() end)
+                if okn1 and okn2 and playerName == initName then
+                    isPlayer = true
+                end
+            end
+            if isPlayer and event.weapon ~= nil then
+                local okTn, typeName = pcall(function() return event.weapon:getTypeName() end)
+                local okDesc, desc = pcall(function() return event.weapon:getDesc() end)
+                local okEx, exists = pcall(function() return event.weapon:isExist() end)
+                local category, guidance, displayName = "?", "?", "?"
+                if okDesc and type(desc) == "table" then
+                    category = tostring(desc.category)
+                    guidance = tostring(desc.guidance)
+                    displayName = tostring(desc.displayName)
+                end
+                line = line
+                    .. "|OWN_SHOT typeName=" .. tostring(okTn and typeName or "?")
+                    .. " category=" .. category
+                    .. " guidance=" .. guidance
+                    .. " displayName=" .. displayName
+                    .. " isExist=" .. tostring(okEx and exists or "?")
+                if okEx and exists then
+                    PB_PROBE_KEPT_WEAPON = event.weapon
+                end
+            end
+        elseif event.id == world.event.S_EVENT_HIT then
+            if PB_PROBE_KEPT_WEAPON ~= nil and event.weapon == PB_PROBE_KEPT_WEAPON then
+                line = line .. "|HIT_ON_KEPT_WEAPON"
+            end
+        end
+
+        PB_PROBE_EVENT_QUEUE[#PB_PROBE_EVENT_QUEUE + 1] = line
     end
     world.addEventHandler(handler)
     PB_PROBE_HANDLER_REGISTERED = true
@@ -155,11 +223,43 @@ PB_PROBE_EVENT_QUEUE = {}
 return tostring(#out) .. "|" .. table.concat(out, ";")
 ]]
 
+--: Reads `PB_PROBE_KEPT_WEAPON:isExist()` (set by `EVENT_REGISTER_CODE`'s
+--: own S_EVENT_SHOT handling above) and clears the reference once it
+--: reads false or raises, so a stale dead object cannot be reported as
+--: "gone" twice. `timer.getTime()` is this state's own sim clock -- the
+--: model time Q6 asks for, not the Hook state's wall-clock `getRealTime`.
+local WEAPON_EXIST_POLL_CODE = [[
+local t = timer.getTime()
+if PB_PROBE_KEPT_WEAPON == nil then
+    return "none|" .. tostring(t)
+end
+local ok, exists = pcall(function() return PB_PROBE_KEPT_WEAPON:isExist() end)
+if not ok then
+    PB_PROBE_KEPT_WEAPON = nil
+    return "error|" .. tostring(t)
+end
+if not exists then
+    PB_PROBE_KEPT_WEAPON = nil
+    return "false|" .. tostring(t)
+end
+return "true|" .. tostring(t)
+]]
+
 local petrobrainDamageProbe = {}
 
 local simulationRunning = false
 local nextPollAt = 0
 local registered = false
+
+--: 5 Hz per Stage 0's own requirement (Q6) -- independent of
+--: `POLL_INTERVAL_S` above, which is too coarse to time an impact
+--: against the visible explosion.
+local WEAPON_EXIST_POLL_INTERVAL_S = 0.2
+local nextWeaponPollAt = 0
+--: Tracks the true->false edge so "gone" is logged exactly once, not on
+--: every poll after the weapon stops existing (and not at all while
+--: nothing is being tracked).
+local weaponWasAlive = false
 
 local function logi(message)
     log.write("PetrobrainDamageProbe", log.INFO, message)
@@ -213,11 +313,37 @@ local function pollEvents()
     logi("EVENTS n=" .. tostring(count) .. " -> " .. tostring(entries))
 end
 
+--: Runs at 5 Hz, separately from `pollEvents`'s 1 Hz cadence -- see this
+--: file's "STAGE 0 EXTENSION" header note.
+local function pollWeaponExist()
+    local ok, result = dostring("scripting", WEAPON_EXIST_POLL_CODE)
+    if not ok or type(result) ~= "string" then
+        logi("weapon-exist poll failed: ok=" .. tostring(ok) .. " result=" .. tostring(result))
+        return
+    end
+    local state, t = result:match("^(%a+)|(.*)$")
+    if state == "true" then
+        weaponWasAlive = true
+        return
+    end
+    if state == "false" then
+        if weaponWasAlive then
+            logi("WEAPON_GONE t=" .. tostring(t))
+        end
+        weaponWasAlive = false
+        return
+    end
+    -- "none" or "error": nothing kept right now.
+    weaponWasAlive = false
+end
+
 function petrobrainDamageProbe.onSimulationStart()
     logi("onSimulationStart")
     simulationRunning = true
     registered = false
     nextPollAt = 0
+    nextWeaponPollAt = 0
+    weaponWasAlive = false
 end
 
 function petrobrainDamageProbe.onSimulationFrame()
@@ -225,6 +351,17 @@ function petrobrainDamageProbe.onSimulationFrame()
         return
     end
     local now = DCS.getRealTime()
+
+    -- The 5 Hz weapon-exist poll runs on its own cadence, independent of
+    -- the 1 Hz life/event poll below -- see "STAGE 0 EXTENSION" above.
+    if now >= nextWeaponPollAt then
+        nextWeaponPollAt = now + WEAPON_EXIST_POLL_INTERVAL_S
+        local wok, werr = pcall(pollWeaponExist)
+        if not wok then
+            logi("weapon poll raised: " .. tostring(werr))
+        end
+    end
+
     if now < nextPollAt then
         return
     end
@@ -248,6 +385,7 @@ function petrobrainDamageProbe.onSimulationStop()
     logi("onSimulationStop")
     simulationRunning = false
     registered = false
+    weaponWasAlive = false
 end
 
 DCS.setUserCallbacks(petrobrainDamageProbe)
