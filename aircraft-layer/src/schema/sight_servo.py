@@ -11,10 +11,12 @@ flicker) -- a different rate class that would otherwise flood the
 change-gated line with the servo's own internal churn.
 
 This layer carries the raw values and decides nothing, the same rule
-every other schema here follows: `mode` is one of `Export.lua`'s own five
-strings (`"off"`/`"caged"`/`"hold"`/`"homing"`/`"closed"` -- v3 renamed
-`"open"` to `"homing"`, its meaning changed with it, see the plan's
-"Merged mode"), passed through verbatim, no enum validation added;
+every other schema here follows: `mode` is one of `Export.lua`'s own six
+strings (`"off"`/`"caged"`/`"hold"`/`"homing"`/`"closed"`/`"hands_off"` --
+v3 renamed `"open"` to `"homing"`, its meaning changed with it, see the
+plan's "Merged mode"; `"hands_off"` added by
+`plans/9k113-hands-off-switch/implementation.md` for manual sight
+calibration), passed through verbatim, no enum validation added;
 `mark_azimuth_deg`/`mark_elevation_deg`/`error_azimuth_deg`/
 `error_elevation_deg` are `None` whenever the mark was not valid that
 frame (homing/hold/caged/off). `field_target_azimuth_deg`/

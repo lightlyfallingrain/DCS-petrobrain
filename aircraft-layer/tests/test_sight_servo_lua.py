@@ -57,14 +57,30 @@ def _extract_lua_function(name: str) -> str:
     identical technique to `test_exponent_float_fix.py`'s own helper
     (duplicated rather than imported across test modules, same reasoning
     that module gives: it is small, self-contained, and importing across
-    test files is not this project's convention)."""
+    test files is not this project's convention).
+
+    `--` line comments are skipped while counting, not just while
+    matching the real tokens -- a bare word match on `function`/`if`/`end`
+    also fires inside ordinary prose ("a mission end/restart...", found
+    live while adding `sight_servo_tick`: a stray comment-borne `end`
+    several hundred lines past `run_sight_servo`'s real closing `end`
+    happened to rebalance the count by coincidence, so this extracted an
+    over-long but still-valid chunk for every function so far -- until one
+    more inserted function shifted that coincidence and the count never
+    rebalanced at all, failing with 'end expected ... near <eof>' instead
+    of silently overshooting). Lua's `--[[ ]]` block comments are not
+    handled -- this file's only one is the header above line 107, well
+    before any `local function` this helper is asked to extract."""
     text = _EXPORT_LUA.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
     assert start_match is not None, f"{name} not found in Export.lua"
-    token_re = re.compile(r"\b(function|if|end)\b")
+    token_re = re.compile(r"--[^\n]*|\b(function|if|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
-        if token_match.group(1) == "end":
+        keyword = token_match.group(1)
+        if keyword is None:
+            continue  # a `--` line comment, not a real token
+        if keyword == "end":
             depth -= 1
             if depth == 0:
                 return text[start_match.start() : token_match.end()]
@@ -737,7 +753,9 @@ class _FieldParkResult:
         self.el_write = None if el_write == "none" else float(el_write)
 
 
-def _run_field_park_sequence(frames: list[_FieldParkFrame]) -> list[_FieldParkResult]:
+def _run_field_park_sequence(
+    frames: list[_FieldParkFrame], *, hands_off: bool = False
+) -> list[_FieldParkResult]:
     """Runs the real `run_sight_servo` (v3) against a `GetDevice` mock
     covering device 0's `ARG_OBSERVE`/`ARG_ALIGN_LAMP`/566/555 and device
     `DEV_I9K113`'s `SetCommand`, plus `LoGetSelfData`/`LoGetADIPitchBankYaw`
@@ -755,7 +773,20 @@ def _run_field_park_sequence(frames: list[_FieldParkFrame]) -> list[_FieldParkRe
     zeroed here** -- these tests are about the field-park/homing logic
     and the feed-forward rate, not the wobble mechanism (already covered
     elsewhere), and a zeroed wobble lets `az_write`/`el_write` read back
-    as the bare commanded correction with no reconstruction needed."""
+    as the bare commanded correction with no reconstruction needed.
+
+    `hands_off=True` sets the real `SIGHT_HANDS_OFF` global and calls the
+    real, extracted `sight_servo_tick` every frame (the same function
+    `LuaExportAfterNextFrame` calls in the real file) instead of
+    `run_sight_servo` directly -- `run_sight_servo` itself is not gated
+    (it already sits at Lua 5.1's 60-upvalue ceiling per closure, see its
+    own comment in `Export.lua`); `sight_servo_tick` is the small wrapper
+    that reads the flag, sets `sight_mode = "hands_off"` and skips calling
+    `run_sight_servo` at all. Routing every frame through the real
+    `sight_servo_tick` (not a Python-level mirror of what it does) means a
+    regression in the actual gate -- in either `sight_servo_tick` or
+    `sight_point_quiet`'s own guard -- shows up here, not just in a test
+    that asserts its own assumption."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
@@ -869,8 +900,15 @@ end
             "sight_clip_to_field_body_deg",
             "sight_mark_is_clipped",
             "run_sight_servo",
+            "sight_servo_tick",
         )
     )
+    if hands_off:
+        # Global, not local -- matches the real file's `SIGHT_HANDS_OFF`
+        # being read as an implicit global inside the extracted
+        # `sight_servo_tick`/`sight_point_quiet` bodies, same reasoning as
+        # every other constant in this harness's preamble.
+        lines.append("SIGHT_HANDS_OFF = true")
     lines.append("local out = {}")
     for frame in frames:
         observe_literal = "1.0" if frame.observe else "0.0"
@@ -890,7 +928,9 @@ end
             lines.append(f"sight_goal_rate_el_deg_s = {rate_el}")
             lines.append(f"sight_goal_t_sim = {frame.t}")
         lines.append("frame_log = {}")
-        lines.append(f"run_sight_servo({frame.t})")
+        # Always the real `sight_servo_tick`, never `run_sight_servo`
+        # directly -- see this helper's own docstring on why.
+        lines.append(f"sight_servo_tick({frame.t})")
         lines.append(
             'local az_write, el_write = "none", "none"\n'
             "for _, entry in ipairs(frame_log) do\n"
@@ -1181,3 +1221,159 @@ class TestRunSightServoFieldPark:
             ]
         )
         assert frames[0].field_target_el == pytest.approx(-down_inset, abs=1e-6)
+
+
+def _run_sight_point_quiet(*, hands_off: bool) -> list[str]:
+    """Calls the real, extracted `sight_point_quiet` directly -- not
+    through `run_sight_servo`/`sight_servo_tick` -- against a minimal
+    `GetDevice` mock for `DEV_I9K113` only. Exists because
+    `TestRunSightServoHandsOff` below drives everything through
+    `sight_servo_tick`, whose own early return means `sight_point_quiet`
+    is never actually reached while hands-off there -- so its own guard
+    (the one that would still matter if a future call site reached it a
+    different way) needs a test that cannot be satisfied by that early
+    return alone. Returns the list of writes made (e.g. `["az:1.000000",
+    "el:2.000000"]`, or `[]` if the guard fired)."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    preamble = """
+local DEV_I9K113 = 7
+local CMD_AI_AZ = 3061
+local CMD_AI_ELEV = 3060
+local frame_log = {}
+
+local function GetDevice(id)
+    if id == DEV_I9K113 then
+        return {
+            SetCommand = function(self, cmd, value)
+                if cmd == CMD_AI_AZ then
+                    table.insert(frame_log, "az:" .. string.format("%.6f", value))
+                elseif cmd == CMD_AI_ELEV then
+                    table.insert(frame_log, "el:" .. string.format("%.6f", value))
+                end
+            end,
+        }
+    end
+    return nil
+end
+"""
+    lines = [preamble]
+    lines.extend(
+        _extract_lua_function(name) for name in ("safe_call", "sight_point_quiet")
+    )
+    if hands_off:
+        lines.append("SIGHT_HANDS_OFF = true")
+    lines.append("sight_point_quiet(1.0, 2.0)")
+    lines.append('print(table.concat(frame_log, ","))')
+    script = "\n".join(lines)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    output = result.stdout.strip()
+    return [] if output == "" else output.split(",")
+
+
+class TestSightPointQuietHandsOffGuard:
+    """`sight_point_quiet`'s own `SIGHT_HANDS_OFF` guard, exercised
+    directly rather than through `run_sight_servo`/`sight_servo_tick` --
+    see `_run_sight_point_quiet`'s own docstring for why this is a
+    separate test from `TestRunSightServoHandsOff` below rather than
+    redundant with it."""
+
+    def test_hands_off_blocks_the_write(self) -> None:
+        assert _run_sight_point_quiet(hands_off=True) == []
+
+    def test_unset_writes_both_axes(self) -> None:
+        assert _run_sight_point_quiet(hands_off=False) == [
+            "az:1.000000",
+            "el:2.000000",
+        ]
+
+
+class TestRunSightServoHandsOff:
+    """`SIGHT_HANDS_OFF` (`plans/9k113-hands-off-switch/implementation.md`):
+    with the flag active, no `SetCommand` of any kind reaches the 9K113 device --
+    not the closed-loop correction, not hold mode's dither-only write, and
+    not the OBSERV falling-edge zero write -- and `sight_mode` reports
+    `"hands_off"` rather than whatever the state machine would otherwise
+    compute. With the flag unset (the default), behaviour is unchanged."""
+
+    def test_hands_off_blocks_write_in_closed_mode_with_a_goal(self) -> None:
+        # OBSERV on, align on, a goal present, and a mark that exactly
+        # matches the field target -- the everyday "closed" case when the
+        # flag is not set (confirmed by the unset-behaviour test below).
+        frames = _run_field_park_sequence(
+            [
+                _FieldParkFrame(
+                    0.0,
+                    setpoint=(2.0, 1.0),
+                    m566=_mark_raw(2.0),
+                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                ),
+            ],
+            hands_off=True,
+        )
+        assert frames[0].mode == "hands_off"
+        assert frames[0].az_write is None
+        assert frames[0].el_write is None
+
+    def test_hands_off_blocks_write_in_hold_mode(self) -> None:
+        # No setpoint/goal at all -- "hold" when the flag is not set.
+        frames = _run_field_park_sequence(
+            [_FieldParkFrame(0.0)],
+            hands_off=True,
+        )
+        assert frames[0].mode == "hands_off"
+        assert frames[0].az_write is None
+        assert frames[0].el_write is None
+
+    def test_hands_off_blocks_the_observ_falling_edge_zero_write(self) -> None:
+        # Frame 1: OBSERV on with a goal (would write every frame unset).
+        # Frame 2: OBSERV off -- the one-time (0, 0) write unset. Neither
+        # frame may write anything while hands-off.
+        frames = _run_field_park_sequence(
+            [
+                _FieldParkFrame(
+                    0.0,
+                    setpoint=(2.0, 1.0),
+                    m566=_mark_raw(2.0),
+                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                ),
+                _FieldParkFrame(0.2, observe=False),
+            ],
+            hands_off=True,
+        )
+        assert [r.mode for r in frames] == ["hands_off", "hands_off"]
+        assert all(r.az_write is None for r in frames)
+        assert all(r.el_write is None for r in frames)
+
+    def test_hands_off_unset_leaves_behaviour_unchanged(self) -> None:
+        # Same closed-mode-with-a-goal input as the first test above, but
+        # with the flag left unset (the default): named mutation this
+        # catches is the gate firing even when the flag is off.
+        frames = _run_field_park_sequence(
+            [
+                _FieldParkFrame(
+                    0.0,
+                    setpoint=(2.0, 1.0),
+                    m566=_mark_raw(2.0),
+                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                ),
+            ]
+        )
+        assert frames[0].mode == "closed"
+        assert frames[0].az_write is not None
+        assert frames[0].el_write is not None
