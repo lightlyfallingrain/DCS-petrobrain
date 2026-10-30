@@ -53,6 +53,7 @@ from support.mock_flight_scenario import (
     Level,
     OwnshipStart,
     PlacedUnit,
+    Turn,
     build_scenario_frames,
 )
 from support.mock_world_model import build_flat_world_model
@@ -258,7 +259,14 @@ def test_run1_overflight_believed_altitude_never_exceeds_ownship(
     believed point is never above ownship at any poll -- the sortie's own
     defect (alignment finding 2: believed elevation tracking the true
     depression, never climbing to an impossible +72 deg as range closes
-    toward zero under the old flat-projection model)."""
+    toward zero under the old flat-projection model).
+
+    **Stage 7 amendment (review.md Finding 2)**: a shallow `Turn` onto
+    the final bearing precedes the `Descend`, per the user's plural
+    "mock flights that still contain some aircraft manoeuvre" -- this
+    scenario's own invariant (believed altitude never above ownship) is
+    general, not geometry-specific, so adding a real heading change
+    ahead of the descent does not weaken what it tests."""
     ground_alt_m = 0.0
     unit = PlacedUnit(
         object_id=201,
@@ -269,9 +277,21 @@ def test_run1_overflight_believed_altitude_never_exceeds_ownship(
         ground_alt_m=ground_alt_m,
     )
     ownship_start = OwnshipStart(
-        x=-1800.0, z=0.0, heading_deg=0.0, altitude_msl_m=400.0, altitude_agl_m=400.0
+        x=-1800.0,
+        z=-130.0,
+        heading_deg=15.0,
+        altitude_msl_m=400.0,
+        altitude_agl_m=400.0,
     )
     legs: list[FlightLeg] = [
+        Turn(
+            duration_s=10.0,
+            speed_mps=51.0,
+            end_heading_deg=0.0,
+            altitude_msl_m=400.0,
+            altitude_agl_m=400.0,
+            bank_deg=15.0,
+        ),
         Descend(
             duration_s=70.0,
             speed_mps=51.0,
@@ -279,7 +299,7 @@ def test_run1_overflight_believed_altitude_never_exceeds_ownship(
             end_altitude_msl_m=20.0,
             end_altitude_agl_m=20.0,
             pitch_deg=-5.0,
-        )
+        ),
     ]
     believed_alt_over_ownship_alt: list[tuple[float, float]] = []
 
@@ -334,18 +354,21 @@ class _EngageState:
 def test_run2_shallow_approach_range_error_converges_and_bounded(
     tmp_path: Path,
 ) -> None:
-    """Mirrors Run 2: a level closing approach from 5 km at 400 m AGL.
-    Naked-eye detection only begins once true range crosses the
-    angular-size gate for a 7 m (T-72-sized) object (~2.3 km at the
-    default `UNAIDED_OPTIC`/`LOWRES_ANGULAR_RADIUS_RAD`) -- this scenario
-    is long enough to run well past that point. Asserts: range error
-    (believed vs. true horizontal ground range) stays inside the plan's
-    own ~700 m budget (300 m AGL / 4 km row) at every observed poll, and
-    is no worse at the end of the run than at the first poll the contact
-    was observed (the fused estimator's declared "tighter at steep
-    geometry" convergence, not merely "ends up small by luck"). Also
-    engages the target mid-run (`handle_command`, see module docstring)
-    and asserts the engage readback is spoken.
+    """Mirrors Run 2: a level closing approach from 5 km at 400 m AGL,
+    preceded by a shallow `Turn` onto the run-in heading (Stage 7
+    amendment, review.md Finding 2 -- the user's plural "mock flights
+    that still contain some aircraft manoeuvre"). Naked-eye detection
+    only begins once true range crosses the angular-size gate for a 7 m
+    (T-72-sized) object (~2.3 km at the default `UNAIDED_OPTIC`/
+    `LOWRES_ANGULAR_RADIUS_RAD`) -- this scenario is long enough to run
+    well past that point. Asserts: range error (believed vs. true
+    horizontal ground range) stays inside the plan's own ~700 m budget
+    (300 m AGL / 4 km row) at every observed poll, and is no worse at
+    the end of the run than at the first poll the contact was observed
+    (the fused estimator's declared "tighter at steep geometry"
+    convergence, not merely "ends up small by luck"). Also engages the
+    target mid-run (`handle_command`, see module docstring) and asserts
+    the engage readback is spoken.
 
     **Not asserted here, by scope**: the plan's own "`render_tracking()`'s
     line appears ... exactly once" claim, which needs a `weapon=
@@ -359,7 +382,23 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
     scope, not this scenario builder's; a `weapon="missiles"`-capable
     scenario is a later addition here, not a silent downgrade of this
     one -- this scenario engages with the guns/rockets-equivalent bare
-    `weapon=None` instead, which `_handle_engage` does not gate."""
+    `weapon=None` instead, which `_handle_engage` does not gate.
+
+    **review.md's Finding 3/Optional Refinement (sight tracking across
+    the engage-time jump) was investigated, not added as an assertion
+    here -- confirmed by running it, not assumed.** `runner.sight_head.
+    mode` stays `"off"` for this scenario's entire run, before and after
+    `engage`: the same reason `"missiles"` is gated above --
+    `sight_ready`/the effector-engine wiring this harness never builds
+    is also what moves the head out of `"off"` in the first place
+    (`body.py`'s own sight-tier activation reads the guidance unit's
+    readiness). So `aim_source` is `"belief"` throughout regardless of
+    `engage`, by construction of this harness, not because the sight
+    fails to lock -- asserting `aim_source != "belief"` here would be a
+    tautological failure the harness can never pass, not a check of the
+    real mechanism. A scenario that actually exercises sight tracking
+    across `engage` needs the effector-engine wiring `weapon="missiles"`
+    above already flags as a later addition, not a change to this one."""
     ground_alt_m = 0.0
     unit = PlacedUnit(
         object_id=202,
@@ -370,26 +409,46 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
         ground_alt_m=ground_alt_m,
     )
     ownship_start = OwnshipStart(
-        x=-5000.0, z=0.0, heading_deg=0.0, altitude_msl_m=400.0, altitude_agl_m=400.0
+        x=-5000.0,
+        z=-220.0,
+        heading_deg=10.0,
+        altitude_msl_m=400.0,
+        altitude_agl_m=400.0,
     )
     legs: list[FlightLeg] = [
-        # Stops around 900 m true ground range, short of the steep-
-        # depression blow-up zone close in -- confirmed by running it:
-        # `surface_range_estimate`'s depression-angle cue has a `1/tan`
-        # sensitivity that makes absolute range error grow again well
-        # inside ~700 m at 400 m AGL (depression > ~30 deg), which is a
-        # real property of the geometry, not a defect -- running all the
-        # way to overflight here would make "error shrinks while closing"
-        # false for a reason that has nothing to do with the estimator
-        # under test. The plan's own envelope table is itself scoped to
-        # "300 m AGL / 4 km", not point-blank range.
+        # Shallow turn onto the run-in heading (Stage 7 amendment) --
+        # the offset start/heading above are not yet aimed at the unit.
+        Turn(
+            duration_s=10.0,
+            speed_mps=51.0,
+            end_heading_deg=0.0,
+            altitude_msl_m=400.0,
+            altitude_agl_m=400.0,
+            bank_deg=10.0,
+        ),
+        # Stops around 900 m true ground range, short of point-blank --
+        # the plan's own envelope table is itself scoped to "300 m AGL /
+        # 4 km", not point-blank range, so this scenario deliberately
+        # does not run all the way to overflight. **Corrected comment
+        # (review.md's Optional Refinement)**: the original version of
+        # this comment claimed a single-look `1/tan` sensitivity makes
+        # absolute range error "grow again" close in -- checked directly
+        # against `surface_range_estimate` (a numeric sweep at fixed
+        # AGL=400 m, distance 5000->1 m): `sigma_down_m` decreases
+        # monotonically as true distance shrinks; there is no single-
+        # look blow-up near 900 m. Any apparent growth close in is a
+        # *fused-belief* lag effect (several past looks averaged while
+        # closing fast), not a per-look estimator defect -- the scoping
+        # decision to stop at ~900 m stands on its own (outside the
+        # plan's tested envelope, whose nearest grid point is 500 m),
+        # not on the original, incorrect mechanism claim.
         Level(
-            duration_s=82.0,
+            duration_s=68.0,
             speed_mps=51.0,
             heading_deg=0.0,
             altitude_msl_m=400.0,
             altitude_agl_m=400.0,
-        )
+        ),
     ]
     range_errors: list[float] = []
     engaged = _EngageState()
@@ -481,34 +540,33 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
 
 def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
     """Mirrors Stage 4's own association scenario geometry (two groups at
-    3 km/4.5 km, same bearing), reused here as a full scenario through
-    the real wire/pipeline/threading rather than a bare `ContactStore`
-    drive. Ownship holds level, stationary, 500 m short of the near
-    group (range 500 m, 2000 m to the far one), 150 m AGL -- **not**
-    closing, unlike Stage 4's own "closing run" variant. Confirmed by
-    running it: a closing approach overflies the near group (3000 m) long
-    before the far group (4500 m) ever enters the naked-eye channel's
-    angular-size gate (~2.3 km for a 7 m object at the default optic),
-    masking the near group and leaving only a single-candidate poll at
-    the moment the far group is first admitted -- which the belief-side
-    spatial gate then folds into the near group's own (by-then-stale,
-    decayed-wide) contact. That is a geometry artifact of trying to
-    close on both at once through a real angular-size gate neither this
-    plan nor Stage 4's own bare-`ContactStore` version of this scenario
-    exercises, not a finding about `association_over_time`'s gate itself
-    -- Stage 4's "closing run" variant only ever closes by up to 1.5 km
-    from an initial 3/4.5 km baseline, which never masks the near group
-    either. Held stationary at 500 m ground range from the near group
-    (forward cockpit-mask threshold at 150 m AGL is `150 / tan(22 deg)
-    ~= 371 m` -- see `perception.cockpit_mask`'s own forward breakpoint
-    -- so 500 m clears it with margin) keeps both groups continuously
-    admissible, letting the scan-ahead cycle found each independently
-    without the overflight/masking interaction above. Asserts exactly
-    two contacts throughout, each carrying only its own group's
-    observations -- no spurious third `CONTACT_DETECTED` (a merge then
-    re-split's own signature); a `CONTACT_CLASSIFICATION_CHANGED` does
-    occur and is not itself evidence of a merge (see the assertion's own
-    comment below)."""
+    3 km/4.5 km, same bearing) -- **Stage 7 amendment (review.md
+    Finding 1/2)**: a genuine closing run with a `Turn`, not the
+    fully-stationary redesign review.md found was built specifically to
+    dodge the E5 fold this scenario exists to test. Shape: `Level` on an
+    offset heading (approaching from the near/far groups' side, not
+    already on their bearing), `Turn` onto heading 0 deg (the groups'
+    own bearing from the x-axis), then a long closing `Level` at 300 m
+    AGL -- the same AGL Stage 4's own closing-run sub-case (c) and the
+    plan's own forward-mask figures (`743 m = 300 / tan(22 deg)`) use.
+    The lateral offset (`z=-500` once the turn completes, held for the
+    rest of the run) is chosen, by direct numeric integration of this
+    module's own trajectory (not guessed), so the closest *true-geometry*
+    approach to the near group (3000 m) is ~508 m -- inside the 743 m
+    forward-mask threshold, so the near group's true range does cross
+    into masking range during this run, not merely close on it.
+
+    **Outcome, checked empirically against the real pipeline, not
+    assumed from true-geometry ranges or from Stage 8's own
+    order-of-magnitude argument**: confirmed by running this scenario
+    (`implementation.md`'s own recorded measurement) -- the near group
+    founds its own contact once admitted (~t=85s of this run), the far
+    group founds its own, second contact once *it* is admitted
+    (~t=135s), and the count never drops back from 2 to 1 anywhere in
+    the run. No fold. Per the dispatch's own stop condition, if a future
+    change to this scenario or to the gate ever makes this run fold to
+    one contact, that is the stop-and-report case -- do not retune the
+    gate or re-flatten the scenario; escalate instead."""
     near_unit = PlacedUnit(
         object_id=301,
         unit_name="unit_301",
@@ -525,17 +583,39 @@ def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
         z=0.0,
         ground_alt_m=0.0,
     )
+    # Start offset to the south-west of the groups' bearing line, heading
+    # 35 deg (not yet aimed at either group) -- a real approach-then-turn
+    # shape, not a disguised straight-line closing run.
     ownship_start = OwnshipStart(
-        x=2500.0, z=0.0, heading_deg=0.0, altitude_msl_m=150.0, altitude_agl_m=150.0
+        x=-3000.0,
+        z=-1237.6,
+        heading_deg=35.0,
+        altitude_msl_m=300.0,
+        altitude_agl_m=300.0,
     )
     legs: list[FlightLeg] = [
         Level(
-            duration_s=60.0,
-            speed_mps=0.0,
+            duration_s=20.0,
+            speed_mps=51.0,
+            heading_deg=35.0,
+            altitude_msl_m=300.0,
+            altitude_agl_m=300.0,
+        ),
+        Turn(
+            duration_s=15.0,
+            speed_mps=51.0,
+            end_heading_deg=0.0,
+            altitude_msl_m=300.0,
+            altitude_agl_m=300.0,
+            bank_deg=25.0,
+        ),
+        Level(
+            duration_s=130.0,
+            speed_mps=51.0,
             heading_deg=0.0,
-            altitude_msl_m=150.0,
-            altitude_agl_m=150.0,
-        )
+            altitude_msl_m=300.0,
+            altitude_agl_m=300.0,
+        ),
     ]
     contact_counts: list[int] = []
 
@@ -548,15 +628,36 @@ def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
         ownship_start=ownship_start,
         legs=legs,
         placed_units=[near_unit, far_unit],
-        half_extent_x_m=5500.0,
-        half_extent_z_m=1000.0,
+        half_extent_x_m=6500.0,
+        half_extent_z_m=2000.0,
         on_tick=on_tick,
     )
 
     assert contact_counts, "neither group was ever detected across this run"
-    assert all(count == 2 for count in contact_counts), (
-        f"expected exactly two contacts at every poll once any were seen, "
-        f"got {sorted(set(contact_counts))}"
+    # Confirmed by running this scenario (see `implementation.md`'s own
+    # recorded measurement): the near group founds first (count 1, ~t=85s
+    # in this run -- the far group is not yet in range), then the far
+    # group founds its own, second contact (count 2, ~t=135s) once it
+    # enters the naked-eye channel's angular-size gate -- a real
+    # single-contact *prefix*, not a fold. The actual E5 fold would show
+    # as the count **dropping back to 1** after reaching 2 (the far
+    # group's first look merging into the near group's own masked,
+    # decay-widened contact) -- never observed in this run. So the
+    # invariant this stage actually tests is "non-decreasing, and 2 by
+    # the end of the run", not "always 2 from the first poll"; the
+    # earlier single-contact prefix is expected, not a defect.
+    assert contact_counts == sorted(contact_counts), (
+        f"contact count dropped during the run ({contact_counts}) -- this "
+        "is the E5 fold Stage 8 exists to prevent (two founded contacts "
+        "collapsing into one) if it ever happens. Per the plan's own "
+        "Stage 4 stop condition and the dispatch's own instruction, do "
+        "not retune the gate or re-flatten this scenario if this fails "
+        "-- escalate instead"
+    )
+    assert contact_counts[-1] == 2, (
+        f"expected exactly two contacts by the end of this run, got "
+        f"{contact_counts[-1]} -- the far group was never founded as its "
+        "own contact"
     )
     # Exactly one `CONTACT_DETECTED` per group, never a third founding
     # event -- the actual "no spurious merge or re-split" signature.
@@ -598,7 +699,14 @@ def test_cockpit_mask_forward_boundary_suppresses_then_recovers_callout(
     asserts `Contact.last_observable_sim` stops advancing once inside it
     (masked, not spoken about) while the contact's believed position is
     still being updated -- the "masked, not guided at a point behind the
-    mask" distinction the plan draws."""
+    mask" distinction the plan draws.
+
+    **Stage 7 amendment (review.md Finding 2)**: a short `Turn` onto the
+    final run-in heading precedes the long closing `Level` leg, per the
+    user's plural "mock flights that still contain some aircraft
+    manoeuvre" -- the mask-boundary geometry below is unaffected (the
+    turn happens far outside the mask radius, at slow speed, and ends on
+    the same heading 0 deg the rest of this test already assumed)."""
     unit = PlacedUnit(
         object_id=401,
         unit_name="unit_401",
@@ -609,18 +717,30 @@ def test_cockpit_mask_forward_boundary_suppresses_then_recovers_callout(
     )
     # Generous margins either side of the ~743 m computed threshold, per
     # this plan's own Risks note on the exact boundary not being re-derived
-    # here: closes from 2000 m (well outside) down to 400 m (well inside).
+    # here: closes from 2000 m (well outside) down to well inside it.
     ownship_start = OwnshipStart(
-        x=-2000.0, z=0.0, heading_deg=0.0, altitude_msl_m=300.0, altitude_agl_m=300.0
+        x=-2000.0,
+        z=-60.0,
+        heading_deg=8.0,
+        altitude_msl_m=300.0,
+        altitude_agl_m=300.0,
     )
     legs: list[FlightLeg] = [
+        Turn(
+            duration_s=10.0,
+            speed_mps=10.0,
+            end_heading_deg=0.0,
+            altitude_msl_m=300.0,
+            altitude_agl_m=300.0,
+            bank_deg=8.0,
+        ),
         Level(
-            duration_s=160.0,
+            duration_s=155.0,
             speed_mps=10.0,
             heading_deg=0.0,
             altitude_msl_m=300.0,
             altitude_agl_m=300.0,
-        )
+        ),
     ]
     observable_series: list[tuple[float, bool, float]] = []
 

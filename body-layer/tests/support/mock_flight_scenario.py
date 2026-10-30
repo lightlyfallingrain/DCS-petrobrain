@@ -9,15 +9,17 @@ consumes (`list[{"telemetry", "world_objects", "petrovich_indication",
 a manoeuvre scenario is legs integrated into a trajectory, which code is
 for.
 
-**Only `Level`/`Descend` are implemented**, not the plan's full
-`Level`/`Climb`/`Descend`/`Turn`/`RunIn`/`Hover` sketch -- these two are
-the only kinds Stage 7's own four scenarios actually need (a closing or
+**`Level`/`Descend`/`Turn` are implemented**, not the plan's full
+`Level`/`Climb`/`Descend`/`Turn`/`RunIn`/`Hover` sketch -- these are the
+only kinds Stage 7's own four scenarios actually need (a closing or
 shallow-approach run is `Level` or `Descend` at a constant heading; the
 pitched-recovery cockpit-mask case is a `Descend` to a lower altitude and
-steeper nose-down pitch, same heading throughout). Per the plan's own "how
-a later feature adds a scenario" step, a scenario needing `Climb`/`Turn`/
-`RunIn`/`Hover` adds that leg kind here when it is actually needed, rather
-than this module carrying four untested kinds up front.
+steeper nose-down pitch, same heading throughout; `Turn` was added by the
+Stage 7 amendment, review.md Finding 2, for a real heading-change
+manoeuvre). Per the plan's own "how a later feature adds a scenario" step,
+a scenario needing `Climb`/`RunIn`/`Hover` adds that leg kind here when it
+is actually needed, rather than this module carrying untested kinds up
+front.
 
 Integration is dead-reckoning only (heading/pitch/altitude applied once
 per poll tick, straight-line in x/z) -- no aerodynamics, no world-model
@@ -81,10 +83,28 @@ class Descend:
     pitch_deg: float
 
 
+@dataclass(frozen=True, slots=True)
+class Turn:
+    """Heading ramps linearly from whatever the ownship holds when this
+    leg begins to `end_heading_deg` over `duration_s`, at constant
+    speed/altitude. `bank_deg` is a stated telemetry value for the turn's
+    duration (dead-reckoning only, per the module docstring -- not derived
+    from a standard-rate-turn formula), mirroring how `pitch_deg` is
+    already a leg parameter rather than a derived quantity."""
+
+    duration_s: float
+    speed_mps: float
+    end_heading_deg: float
+    altitude_msl_m: float
+    altitude_agl_m: float
+    bank_deg: float
+    pitch_deg: float = 0.0
+
+
 #: The builder's own leg vocabulary (module docstring) -- extend with a
 #: new dataclass plus a branch in `build_scenario_frames` when a scenario
 #: genuinely needs one, not speculatively.
-FlightLeg = Level | Descend
+FlightLeg = Level | Descend | Turn
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +161,7 @@ def build_scenario_frames(
     z = ownship_start.z
     heading_deg = ownship_start.heading_deg
     pitch_deg = 0.0
+    bank_deg = 0.0
     altitude_msl_m = ownship_start.altitude_msl_m
     altitude_agl_m = ownship_start.altitude_agl_m
     speed_mps = 0.0
@@ -156,6 +177,7 @@ def build_scenario_frames(
                 z=z,
                 heading_deg=heading_deg,
                 pitch_deg=pitch_deg,
+                bank_deg=bank_deg,
                 speed_mps=speed_mps,
                 altitude_msl_m=altitude_msl_m,
                 altitude_agl_m=altitude_agl_m,
@@ -168,32 +190,59 @@ def build_scenario_frames(
 
     for leg in legs:
         n_steps = max(1, round(leg.duration_s / poll_interval_s))
-        heading_deg = leg.heading_deg
         pitch_deg = leg.pitch_deg
         speed_mps = leg.speed_mps
-        heading_rad = math.radians(heading_deg)
-        dx = speed_mps * poll_interval_s * math.cos(heading_rad)
-        dz = speed_mps * poll_interval_s * math.sin(heading_rad)
         start_altitude_msl_m = altitude_msl_m
         start_altitude_agl_m = altitude_agl_m
-        if isinstance(leg, Level):
+        if isinstance(leg, (Level, Turn)):
             end_altitude_msl_m = leg.altitude_msl_m
             end_altitude_agl_m = leg.altitude_agl_m
         else:
             end_altitude_msl_m = leg.end_altitude_msl_m
             end_altitude_agl_m = leg.end_altitude_agl_m
-        for step in range(1, n_steps + 1):
-            x += dx
-            z += dz
-            t_sim += poll_interval_s
-            fraction = step / n_steps
-            altitude_msl_m = start_altitude_msl_m + fraction * (
-                end_altitude_msl_m - start_altitude_msl_m
-            )
-            altitude_agl_m = start_altitude_agl_m + fraction * (
-                end_altitude_agl_m - start_altitude_agl_m
-            )
-            emit()
+
+        if isinstance(leg, Turn):
+            # Heading is interpolated per step (entry heading -> leg's own
+            # end_heading_deg), unlike Level/Descend, whose heading/dx/dz
+            # are fixed once for the whole leg -- a Turn is the one leg
+            # kind whose own direction of travel changes within itself.
+            start_heading_deg = heading_deg
+            end_heading_deg = leg.end_heading_deg
+            bank_deg = leg.bank_deg
+            for step in range(1, n_steps + 1):
+                fraction = step / n_steps
+                heading_deg = start_heading_deg + fraction * (
+                    end_heading_deg - start_heading_deg
+                )
+                heading_rad = math.radians(heading_deg)
+                x += speed_mps * poll_interval_s * math.cos(heading_rad)
+                z += speed_mps * poll_interval_s * math.sin(heading_rad)
+                t_sim += poll_interval_s
+                altitude_msl_m = start_altitude_msl_m + fraction * (
+                    end_altitude_msl_m - start_altitude_msl_m
+                )
+                altitude_agl_m = start_altitude_agl_m + fraction * (
+                    end_altitude_agl_m - start_altitude_agl_m
+                )
+                emit()
+            bank_deg = 0.0
+        else:
+            heading_deg = leg.heading_deg
+            heading_rad = math.radians(heading_deg)
+            dx = speed_mps * poll_interval_s * math.cos(heading_rad)
+            dz = speed_mps * poll_interval_s * math.sin(heading_rad)
+            for step in range(1, n_steps + 1):
+                x += dx
+                z += dz
+                t_sim += poll_interval_s
+                fraction = step / n_steps
+                altitude_msl_m = start_altitude_msl_m + fraction * (
+                    end_altitude_msl_m - start_altitude_msl_m
+                )
+                altitude_agl_m = start_altitude_agl_m + fraction * (
+                    end_altitude_agl_m - start_altitude_agl_m
+                )
+                emit()
 
     return frames
 
@@ -206,6 +255,7 @@ def _build_frame(
     z: float,
     heading_deg: float,
     pitch_deg: float,
+    bank_deg: float,
     speed_mps: float,
     altitude_msl_m: float,
     altitude_agl_m: float,
@@ -219,7 +269,7 @@ def _build_frame(
         "position_y_m": altitude_msl_m,
         "position_z_m": z,
         "pitch_rad": math.radians(pitch_deg),
-        "bank_rad": 0.0,
+        "bank_rad": math.radians(bank_deg),
         "yaw_rad": 0.0,
         "heading_true_rad": math.radians(heading_deg % 360.0),
         "ias_mps": speed_mps,
