@@ -274,7 +274,7 @@ class AttackRunState:
     relative height from the last look instead [of reading `Contact.
     last_alt_m`]" -- the target's own altitude (MSL), reconstructed as
     `percept.ownship_at_observation.alt_m + relative.up_m` the last time
-    tier 1 held a fresh relative observation (`_remembered_target_alt_m`
+    tier 1 held a fresh relative observation (`remembered_target_alt_m`
     below). Updated on **every** tick tier 1 succeeds, whether or not that
     tick actually speaks -- it is memory, not a speech baseline, so it
     must not go stale just because a steady run stays under the
@@ -498,7 +498,7 @@ def seen_world_direction(
     return SeenDirection(az_true_deg=az_true_deg, el_deg=el_deg, t_look=percept.t_sim)
 
 
-def _remembered_target_alt_m(contact: Contact) -> float | None:
+def remembered_target_alt_m(contact: Contact) -> float | None:
     """Decision 4 REVISED's honest crew reconstruction of the target's own
     altitude (MSL): `percept.ownship_at_observation.alt_m + relative.
     up_m`. **Not** `Contact.last_alt_m`, which is the ownship's own
@@ -510,7 +510,24 @@ def _remembered_target_alt_m(contact: Contact) -> float | None:
     Deliberately not staleness-checked the way `_tier1_alignment` is: this
     is memory, called by `decide` only once tier 1 has already confirmed
     the percept's `relative_direction` is fresh, so the one call site
-    already guarantees it."""
+    already guarantees it.
+
+    **Public, not module-private** (`plans/atgm-run-sight-tracking/debug.md`):
+    `body._look_targets` is a second, sanctioned caller, exactly the
+    pattern `seen_world_direction` already set for `belief/sight_head.py`
+    -- a derived number crosses out of this module's own fenced reading of
+    `Percept.relative_direction`, never the percept/field itself. The
+    9K113's own "belief" aim row (`sight_head.select_sight_goal`'s
+    fallback when there is no `seen`/`held` track) used to read `Contact.
+    last_position.alt_m` -- i.e. this exact ownship-altitude-at-last-look
+    value Decision 4 REVISED rejected for attack-run guidance -- for the
+    sight's own gimbal goal, and nothing had ever fixed that second,
+    independent occurrence of the same defect. A contact observed once
+    while the aircraft is high and not re-observed until well after a long
+    descent/climb pins the sight at an elevation tens of degrees from the
+    real target, which also starves it of ever being re-admitted into the
+    sight's field of view (the belief goal never points anywhere near
+    truth), so `aim_source` never recovers to `seen` on its own."""
     percept = contact.last_percept
     if percept is None or percept.relative_direction is None:
         return None
@@ -782,7 +799,7 @@ def _current_alignment(
     if alignment is not None:
         tier = 1
         azimuth_deg, elevation_deg = alignment
-        target_alt_m = _remembered_target_alt_m(contact)
+        target_alt_m = remembered_target_alt_m(contact)
         azimuth_table: tuple[_WordTableRow, ...] = AZIMUTH_WORD_TABLE
         elevation_table: tuple[_WordTableRow, ...] = ELEVATION_WORD_TABLE
     else:

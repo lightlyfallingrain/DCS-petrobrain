@@ -143,3 +143,18 @@
   incorrectly excluded close, genuinely-worth-a-look targets. Caught by the review asking *why*
   the existing window's lower bound exists before reusing its shape, not by checking whether the
   new predicate "looked like" the old one.
+- **`atgm_run.decide`'s own Stage 3-7 state machine (range calls, launch/impact speech, the
+  "Shturm, N seconds." line) is not wired into `body.py`'s poll loop at all** — only Stage 1
+  (constructing/tearing down `AtgmRunState` at engage/disengage) is live. The bearing-line
+  depression search and "Tracking." callout (`fix/atgm-run-sight-tracking`, 2026-10-30) therefore
+  could not reuse that module's `(state, speech, actions)` return shape and were implemented
+  directly in the poll loop instead, via `CrewConsole.drain_sight_lock_tracking`. Not a conflict
+  today, but a seam for whoever wires Stage 7: two independently-driven speech sources will then
+  sit over the same run.
+- **The generator's "first sentence" for a tunable's `defaults.toml` comment is actually the
+  *last* `#:` paragraph before the assignment, not the first one in the block** —
+  `generate_defaults.py`'s `_comment_block_above` walks upward and stops at a blank `#:` line. A
+  comment written as two paragraphs separated by a blank line renders only the second one; the
+  fix is one continuous paragraph with no blank-line break, not a wording change. A fourth
+  instance of the standing "verify the rendered file, not the source comment" trap above, with its
+  own distinct mechanism.

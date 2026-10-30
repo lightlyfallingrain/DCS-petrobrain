@@ -134,7 +134,7 @@ from typing import Final, Literal, TextIO
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.atgm_run import AtgmRunState
-from belief.attack_run import AttackRunState
+from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
     _SECTOR_CENTER_DEG,
     _SECTOR_HALF_WIDTH_DEG,
@@ -142,7 +142,7 @@ from belief.attention import (
 )
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
 from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
@@ -855,6 +855,16 @@ class ConsolePerceptionRunner:
                 if self.atgm_run_state is not None
                 else None
             ),
+            # `plans/atgm-run-sight-tracking/plan.md` -- whether the
+            # locked contact was already resolved through the sight as of
+            # the *previous* poll (read before `advance_sight_head` below
+            # updates `self.sight_head` for this one), so `_decide_
+            # sighting_locked` knows whether to stare at the believed
+            # point (already seen) or sweep depression along the believed
+            # bearing around it (not yet re-acquired). The same one-poll
+            # lag `guidance_request`/`sight_lock_contact_id` above already
+            # accept.
+            sight_lock_seen=_sight_lock_seen(self.sight_head, self.atgm_run_state),
         )
         # `[[BL-B80]]` v2: Petrovich must not perceive through the sight
         # while the simulated head is not `free` yet -- capped to
@@ -1148,6 +1158,30 @@ def _active_gaze(
     return FREE_SCAN_PLAN
 
 
+def _look_target_position(contact: Contact) -> GeoPosition:
+    """`contact.last_position`, with its altitude corrected when a better
+    one is known -- `plans/atgm-run-sight-tracking/debug.md`.
+    `contact.last_position.alt_m` is `Contact.last_alt_m`, the flat-
+    projection altitude: *the ownship's own altitude at the contact's most
+    recent look*, not the target's (that field's own docstring; Decision 4
+    REVISED found and rejected the same assumption for attack-run
+    guidance). Fine while looks are frequent and the aircraft's own
+    altitude barely changes between them; wrong, and silently so, once a
+    contact goes a long time unobserved while the aircraft climbs or
+    descends -- exactly an ATGM run's own shape: pick a target, then fly
+    the approach. `belief.attack_run.remembered_target_alt_m` is the
+    already-reviewed fix for this (Decision 4 REVISED's own "remember the
+    relative height instead"), reconstructed from the last tier-1 look's
+    `relative_direction.up_m` rather than the look-time ownship altitude
+    bare. `None` (no tier-1 look has ever succeeded for this contact)
+    leaves `contact.last_position` exactly as before -- no worse than
+    today, never a new guess."""
+    better_alt_m = remembered_target_alt_m(contact)
+    if better_alt_m is None:
+        return contact.last_position
+    return replace(contact.last_position, alt_m=better_alt_m)
+
+
 def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget]:
     """Every live contact, as the binocular policy needs to see it.
 
@@ -1165,13 +1199,18 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
     judgement made from the mark, and a Petrovich who sized the window by
     what the thing really is would be deciding with knowledge he does not
     have.
+
+    **`target_position` is `_look_target_position`, not `contact.
+    last_position` directly** (`plans/atgm-run-sight-tracking/debug.md`) --
+    see that function's own docstring for why the altitude needs
+    correcting before it reaches `body_relative_direction`'s elevation.
     """
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     return [
         look_target_for(
             contact.id,
             observer=observer,
-            target_position=contact.last_position,
+            target_position=_look_target_position(contact),
             heading_true_deg=ownship.heading_true_deg,
             pitch_deg=ownship.pitch_deg,
             bank_deg=ownship.bank_deg,
@@ -1185,6 +1224,28 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
         )
         for contact in store.contacts
     ]
+
+
+def _sight_lock_seen(
+    sight_head: SightHead, atgm_run_state: AtgmRunState | None
+) -> bool:
+    """Whether the ATGM run's locked contact is currently resolved
+    *through the 9K113 sight itself* -- `sight_head.aim_source == "seen"`
+    for that exact contact, never merely `sight_head.aim_source == "seen"`
+    on its own, which can be `True` for an entirely different contact an
+    ordinary (unlocked) `SIGHTING` look just admitted.
+
+    One function so `run_once`'s `sight_lock_seen` keyword to `decide_
+    optic` (`plans/atgm-run-sight-tracking/plan.md`, the bearing-line
+    depression search) and the poll loop's own "Tracking." edge detector
+    (`crew_console.drain_sight_lock_tracking`) never disagree about what
+    "seen" means for this feature. `False` whenever no ATGM run is
+    engaged."""
+    return (
+        atgm_run_state is not None
+        and sight_head.aim_source == "seen"
+        and sight_head.seen_contact_id == atgm_run_state.contact_id
+    )
 
 
 #: The band a binocular search sweeps: from where the naked eye runs out
@@ -3381,6 +3442,16 @@ def _run_crew_text_poll_loop(
                             slew_trace_base=slew_trace_base,
                         )
                     )
+                # `plans/atgm-run-sight-tracking/plan.md` -- captured
+                # *before* `run_once` advances `runner.sight_head` for
+                # this poll, the same "diff across `run_once`" shape
+                # `was_on_ground` below uses for the takeoff edge. The
+                # "Tracking." callout (after `drain_attack_run` below has
+                # settled this poll's `atgm_run_state`) compares this
+                # against the post-`run_once` value.
+                sight_lock_seen_before_poll = _sight_lock_seen(
+                    runner.sight_head, runner.atgm_run_state
+                )
                 runner.run_once()
                 if runner.optic_state.point_clear_label is not None:
                     # `plans/9k113-scan-procedure/plan-stage2.md` -- a
@@ -3942,6 +4013,24 @@ def _run_crew_text_poll_loop(
                         # attack run ends this way.
                         if runner.attack_run_state is None:
                             runner.atgm_run_state = None
+                        # `plans/atgm-run-sight-tracking/plan.md` -- "say
+                        # 'Tracking.' when on target": fires exactly on
+                        # the False->True edge of `_sight_lock_seen`
+                        # across this one poll (not every poll the
+                        # contact stays seen), and again after a later
+                        # loss once it is re-acquired -- `drain_sight_
+                        # lock_tracking`'s own edge check, mirroring
+                        # `drain_guidance_unit_ready`'s shape. Placed after
+                        # the run-ends fold-in above so a run that just
+                        # ended this same poll reads as "not seen" rather
+                        # than racing its own teardown.
+                        crew_console.drain_sight_lock_tracking(
+                            runner.last_t_sim,
+                            previously_seen=sight_lock_seen_before_poll,
+                            seen=_sight_lock_seen(
+                                runner.sight_head, runner.atgm_run_state
+                            ),
+                        )
                         # `plans/attack-run-los/plan.md` F3 -- "where is
                         # it?"'s one-shot signal, consumed right beside
                         # `drain_attack_run` above with the same inputs

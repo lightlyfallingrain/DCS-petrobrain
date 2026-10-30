@@ -7601,3 +7601,53 @@ def test_follow_that_group_resolves_to_a_member_of_the_mentioned_group(
 
     assert lines == ["Watching two."]
     assert all(c.attention == "watch" for c in store.contacts)
+
+
+class TestDrainSightLockTracking:
+    """`CrewConsole.drain_sight_lock_tracking` (`plans/
+    atgm-run-sight-tracking/plan.md`, user: *"Say 'tracking' when on
+    target."*) -- speaks "Tracking." exactly on the `False -> True` edge
+    of the caller's own `previously_seen`/`seen` pair, the same edge-only
+    shape `drain_guidance_unit_ready` already uses for the 960 lamp."""
+
+    def _console(self) -> tuple[CrewConsole, object]:
+        import io
+
+        output = io.StringIO()
+        return CrewConsole(store=ContactStore(), output=output), output
+
+    def test_fires_on_the_false_to_true_edge(self) -> None:
+        console, output = self._console()
+        console.drain_sight_lock_tracking(1.0, previously_seen=False, seen=True)
+        assert output.getvalue() == "Tracking.\n"
+
+    def test_silent_while_not_yet_seen(self) -> None:
+        console, output = self._console()
+        console.drain_sight_lock_tracking(1.0, previously_seen=False, seen=False)
+        assert output.getvalue() == ""
+
+    def test_silent_on_every_poll_it_stays_seen(self) -> None:
+        """The edge fires once; a second poll that is still `seen` must
+        not repeat it."""
+        console, output = self._console()
+        console.drain_sight_lock_tracking(1.0, previously_seen=False, seen=True)
+        output.truncate(0)
+        output.seek(0)
+        console.drain_sight_lock_tracking(2.0, previously_seen=True, seen=True)
+        assert output.getvalue() == ""
+
+    def test_silent_on_the_true_to_false_edge(self) -> None:
+        """Losing the contact says nothing by itself -- only a later
+        re-acquisition speaks again."""
+        console, output = self._console()
+        console.drain_sight_lock_tracking(1.0, previously_seen=True, seen=False)
+        assert output.getvalue() == ""
+
+    def test_fires_again_after_a_loss_and_reacquisition(self) -> None:
+        console, output = self._console()
+        console.drain_sight_lock_tracking(1.0, previously_seen=False, seen=True)
+        console.drain_sight_lock_tracking(2.0, previously_seen=True, seen=True)
+        console.drain_sight_lock_tracking(3.0, previously_seen=True, seen=False)
+        console.drain_sight_lock_tracking(4.0, previously_seen=False, seen=False)
+        console.drain_sight_lock_tracking(5.0, previously_seen=False, seen=True)
+        assert output.getvalue() == "Tracking.\nTracking.\n"

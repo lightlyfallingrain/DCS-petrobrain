@@ -784,6 +784,20 @@ class OpticState:
     #: unrelated, single-optic sweeps.
     sight_search_leg: SightSearchLeg = "wide_near"
 
+    #: When the locked ATGM run's bearing-line depression search
+    #: (`_decide_sighting_locked`, `plans/atgm-run-sight-tracking/
+    #: plan.md`) last (re)started -- the sweep's own per-poll clock,
+    #: separate from `look_started_sim` (which that same function also
+    #: carries forward, unread by the sweep itself, so a future reader
+    #: does not have to untangle two different meanings sharing one
+    #: field). `None` while the lock is not currently sweeping: not yet
+    #: engaged, or the contact is already `sight_lock_seen` (nothing to
+    #: search for) -- cleared on every `sight_lock_seen` poll so a later
+    #: loss resumes the sweep fresh, at its own step 0 (the believed
+    #: point, by then improved by whatever look just ended it), rather
+    #: than wherever an uninterrupted cycle would have reached.
+    sight_lock_search_since_sim: float | None = None
+
     #: A `look <o'clock>`/`look <compass>` currently active, or `None`
     #: (`plans/9k113-scan-procedure/plan-stage2.md`'s "State" section).
     #: Checked by `_decide_sighting`'s idle branch *before* the ordinary
@@ -2191,28 +2205,138 @@ def _idle_sight_search(
     )
 
 
+#: How far, in degrees, the bearing-line search sweeps depression either
+#: side of the believed point before it repeats from the centre -- too
+#: narrow and a large range error (the believed point's own weakness) is
+#: never covered, too wide and most of the cycle is spent looking at
+#: sky/ground nowhere near any target, eating into the dwell against
+#: `SIGHT_MAX_DWELL_S` finding nothing. `plans/atgm-run-sight-tracking/
+#: plan.md`'s own motivating case: a naked-eye/binocular range estimate
+#: ~700 m short at ~2.3 km put the believed depression several degrees
+#: steeper than the real target's, and the fixed altitude (`body._look_
+#: target_position`) does not by itself fix a bad *range*. A starting
+#: value, not a measurement -- comfortably wider than the one traced
+#: error.
+SIGHT_LOCK_SEARCH_BAND_HALF_DEG: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_LOCK_SEARCH_BAND_HALF_DEG",
+    15.0,
+    lo=5.0,
+    hi=35.0,
+    status="judgement",
+)
+
+#: How much consecutive bearing-line search steps overlap, as a fraction
+#: of the sight's own field of view at the look's resolved optic --
+#: toward 0.0 tiles the band edge-to-edge and risks a real target sitting
+#: exactly on a seam between two steps and never entering either one's
+#: field of view for a whole poll; too high wastes steps re-covering
+#: ground the previous step already swept. A starting value, not a
+#: measurement.
+SIGHT_LOCK_SEARCH_STEP_OVERLAP_FRACTION: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_LOCK_SEARCH_STEP_OVERLAP_FRACTION",
+    0.3,
+    lo=0.0,
+    hi=0.8,
+    status="judgement",
+)
+
+#: How long, in seconds, the bearing-line search dwells on each
+#: depression step before moving to the next -- too short and the
+#: sight's own slew rate (`belief.sight_head.SLEW_EL_DPS`) cannot actually
+#: reach a step before it moves on again, too long and a real target only
+#: one step away takes longer to be looked at. The sweep is *detection*,
+#: not identification (the run is already locked onto a known
+#: `contact_id`), so this mirrors `SEARCH_STEP_S`'s own "fast, not
+#: dwelling" framing rather than a GLASSING-style identification dwell;
+#: longer than `SEARCH_STEP_S` itself for the slew-rate reason above. A
+#: starting value, not a measurement.
+SIGHT_LOCK_SEARCH_STEP_S: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_LOCK_SEARCH_STEP_S",
+    1.5,
+    lo=0.3,
+    hi=5.0,
+    status="judgement",
+)
+
+
+def _bearing_line_search_offsets(
+    step_deg: float, band_half_width_deg: float
+) -> tuple[float, ...]:
+    """The bearing-line search's own depression offsets from the believed
+    point, centre outward -- `plans/atgm-run-sight-tracking/plan.md`:
+    *"Sweep from the believed depression outward (nearer/further:
+    steeper/shallower) within a bounded band."*
+
+    Index 0 is always `0.0` (the believed depression itself -- the
+    trustworthy-bearing, uncertain-range point the belief already
+    supplies), so a search that has just lost the contact always tries
+    there first. Then alternately `+step_deg` (a *larger* elevation --
+    shallower, i.e. the "further" error direction: a more distant target
+    at the same altitude difference subtends a smaller depression angle)
+    and `-step_deg` ("nearer"/steeper), growing outward until the band's
+    own edge -- never only one side, since belief does not know which way
+    the range estimate erred.
+
+    **Not `_step_centres_deg`.** That helper tiles a span in non-
+    overlapping-ish buckets and does not guarantee a bucket centred
+    exactly on `0.0` once the bucket count is even -- this function's
+    whole point is that step 0 *is* the believed point exactly, so it is
+    built directly instead."""
+    step = max(step_deg, 0.01)
+    offsets = [0.0]
+    n = 1
+    while n * step <= band_half_width_deg:
+        offsets.append(n * step)
+        offsets.append(-n * step)
+        n += 1
+    return tuple(offsets)
+
+
 def _decide_sighting_locked(
-    state: OpticState, now_sim: float, targets: Sequence[LookTarget], contact_id: str
+    state: OpticState,
+    now_sim: float,
+    targets: Sequence[LookTarget],
+    contact_id: str,
+    *,
+    sight_lock_seen: bool = False,
 ) -> tuple[OpticState, OpticDecision]:
     """`sight_lock_contact_id`'s own branch of `_decide_sighting`
     (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1, "Keeping the
     look through launch") -- pins the look to `contact_id`, skipping the
     dwell break (`SIGHT_MAX_DWELL_S`) and the look-finished re-pick
     entirely: an ATGM run locked onto its target must never glance away
-    or re-pick mid-flight. Points directly at the target's current body
-    direction every poll -- no sweep steps, no natural end -- unlike the
-    ordinary look below, which sweeps a believed-bearing envelope because
-    it does not yet know exactly where the contact is; a locked look
-    exists only once an ATGM run has already selected one specific unit
-    (`[[BL-B67]]` Stage 2's `single_unit` aim), so there is nothing left
-    to sweep for.
+    or re-pick mid-flight.
+
+    **While `sight_lock_seen`** (`body._sight_lock_seen`'s own reading of
+    `SightHead.aim_source`, threaded through one poll lagged like
+    `sight_lock_contact_id` itself) -- the contact is already resolved
+    through the sight this run -- points directly at the target's
+    current body direction every poll, no sweep, exactly as this
+    function always did before `plans/atgm-run-sight-tracking/plan.md`.
+
+    **While not `sight_lock_seen`** (the run-2 trace that plan fixes:
+    bearing correct, range -- and so depression -- wrong), the believed
+    point is only the sweep's own *centre*: azimuth still follows the
+    believed world bearing every poll (`found.azimuth_deg`, re-derived
+    fresh from the current ownship position each time this runs, so it
+    tracks as the aircraft closes), but elevation steps through
+    `_bearing_line_search_offsets` around the believed depression --
+    nearer then further, repeating -- until a later poll admits the
+    contact and `sight_lock_seen` turns `True`. No separate "last seen
+    depression" bookkeeping is needed for a later loss to resume from
+    the right place: `found.elevation_deg` is `_look_targets`' own fresh
+    read of `contact.last_position` every poll, which a successful
+    admission has already improved by the time the sweep needs to
+    restart.
 
     `contact_id` missing from `targets` this poll (masked, or
     momentarily absent from the candidate list) holds the sight at its
-    last aim rather than losing it. Only ever reached from `_decide_
-    sighting` after its own `sight_steady` check, so `_force_observ_off`
-    still wins over a lock on a violent manoeuvre -- the lock is a
-    tracking preference, not a gyro-safety override."""
+    last aim rather than losing it -- including the search's own clock,
+    unread in that branch but left exactly as it was, same as `look_
+    started_sim`. Only ever reached from `_decide_sighting` after its own
+    `sight_steady` check, so `_force_observ_off` still wins over a lock
+    on a violent manoeuvre -- the lock is a tracking preference, not a
+    gyro-safety override."""
     found = next(
         (target for target in targets if target.contact_id == contact_id), None
     )
@@ -2222,22 +2346,55 @@ def _decide_sighting_locked(
             look_azimuth_deg=state.look_azimuth_deg,
             look_elevation_deg=state.look_elevation_deg,
         )
+
+    look_optic = sight_look_optic(found)
+    look_started_sim = (
+        state.look_started_sim
+        if state.look_contact_id == contact_id and state.look_started_sim is not None
+        else now_sim
+    )
+
+    if sight_lock_seen:
+        new_state = replace(
+            state,
+            look_azimuth_deg=found.azimuth_deg,
+            look_elevation_deg=found.elevation_deg,
+            look_contact_id=contact_id,
+            look_optic=look_optic,
+            look_started_sim=look_started_sim,
+            sight_lock_search_since_sim=None,
+        )
+        return new_state, OpticDecision(
+            optic=look_optic,
+            look_azimuth_deg=found.azimuth_deg,
+            look_elevation_deg=found.elevation_deg,
+        )
+
+    fov_full_width_deg = (look_optic.fov_half_angle_deg or 0.0) * 2.0
+    step_deg = fov_full_width_deg * (1.0 - SIGHT_LOCK_SEARCH_STEP_OVERLAP_FRACTION)
+    offsets = _bearing_line_search_offsets(step_deg, SIGHT_LOCK_SEARCH_BAND_HALF_DEG)
+    search_since_sim = (
+        state.sight_lock_search_since_sim
+        if state.look_contact_id == contact_id
+        and state.sight_lock_search_since_sim is not None
+        else now_sim
+    )
+    index = int((now_sim - search_since_sim) // SIGHT_LOCK_SEARCH_STEP_S) % len(offsets)
+    elevation = found.elevation_deg + offsets[index]
     new_state = replace(
         state,
         look_azimuth_deg=found.azimuth_deg,
-        look_elevation_deg=found.elevation_deg,
+        look_elevation_deg=elevation,
         look_contact_id=contact_id,
-        look_started_sim=(
-            state.look_started_sim
-            if state.look_contact_id == contact_id
-            and state.look_started_sim is not None
-            else now_sim
-        ),
+        look_optic=look_optic,
+        look_started_sim=look_started_sim,
+        sight_lock_search_since_sim=search_since_sim,
+        search_step_index=index,
     )
     return new_state, OpticDecision(
-        optic=sight_look_optic(found),
+        optic=look_optic,
         look_azimuth_deg=found.azimuth_deg,
-        look_elevation_deg=found.elevation_deg,
+        look_elevation_deg=elevation,
     )
 
 
@@ -2252,6 +2409,7 @@ def _decide_sighting(
     sight_narrow_far_sweep_search: Sequence[tuple[float, float]] = (),
     sight_point_search: Sequence[tuple[float, float]] = (),
     sight_lock_contact_id: str | None = None,
+    sight_lock_seen: bool = False,
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -2299,12 +2457,21 @@ def _decide_sighting(
     Stage 1) hands off to `_decide_sighting_locked` immediately after the
     `sight_steady` check -- a forced OBSERV-off still wins over the lock,
     nothing else does. `None` (the default) is every pre-existing
-    caller's unchanged behaviour."""
+    caller's unchanged behaviour. `sight_lock_seen` (`plans/
+    atgm-run-sight-tracking/plan.md`) is `_decide_sighting_locked`'s own
+    parameter of the same name, passed straight through -- read only
+    there, and only while `sight_lock_contact_id` is not `None`."""
     if not sight_steady:
         return _force_observ_off(state, now_sim)
 
     if sight_lock_contact_id is not None:
-        return _decide_sighting_locked(state, now_sim, targets, sight_lock_contact_id)
+        return _decide_sighting_locked(
+            state,
+            now_sim,
+            targets,
+            sight_lock_contact_id,
+            sight_lock_seen=sight_lock_seen,
+        )
 
     dwell_started_sim = (
         state.phase_started_sim if state.phase_started_sim is not None else now_sim
@@ -2527,6 +2694,7 @@ def _decide_without_guidance(
     sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
     sight_point_search: Sequence[tuple[float, float]] = (),
     sight_lock_contact_id: str | None = None,
+    sight_lock_seen: bool = False,
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
     `BL-B71`, renamed and kept otherwise unchanged so that the public
@@ -2545,7 +2713,9 @@ def _decide_without_guidance(
     `sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
     Stage 1) is threaded straight through to `_decide_sighting`, read
     only there -- `None` (the default) is a true no-op for every
-    pre-existing caller.
+    pre-existing caller. `sight_lock_seen` (`plans/
+    atgm-run-sight-tracking/plan.md`) is threaded through the same way,
+    `False` (the default) likewise a true no-op.
 
     The three `sight_*_search` sequences are `search`'s own sibling for
     the `SIGHTING` branch below (`plans/9k113-scan-procedure/plan.md`
@@ -2707,6 +2877,7 @@ def _decide_without_guidance(
             sight_narrow_far_sweep_search=sight_narrow_far_sweep_search,
             sight_point_search=sight_point_search,
             sight_lock_contact_id=sight_lock_contact_id,
+            sight_lock_seen=sight_lock_seen,
         )
 
     # state.phase must be SCANNING here (the only phase not already
@@ -2994,6 +3165,7 @@ def decide(
     sight_point_search: Sequence[tuple[float, float]] = (),
     guidance_request: Optic | None = None,
     sight_lock_contact_id: str | None = None,
+    sight_lock_seen: bool = False,
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through --
     `_decide_without_guidance`'s ordinary phase dispatch, then `BL-B71`'s
@@ -3004,6 +3176,13 @@ def decide(
     name, passed straight through -- `body.py`'s poll loop sets it from
     `runner.atgm_run_state.contact_id` whenever an ATGM run is engaged.
     `None` (the default) is a true no-op for every pre-existing caller.
+
+    `sight_lock_seen` (`plans/atgm-run-sight-tracking/plan.md`) is the
+    same shape: `_decide_without_guidance`'s own parameter of the same
+    name, passed straight through, read only while `sight_lock_contact_
+    id` is not `None`. `body.py`'s poll loop sets it from `body._sight_
+    lock_seen(self.sight_head, self.atgm_run_state)`. `False` (the
+    default) is a true no-op for every pre-existing caller.
 
     `guidance_request` (`plans/attack-run-sortie-fixes/plan.md` §6/§7)
     defaults to `None` -- a true no-op for every pre-existing caller,
@@ -3035,6 +3214,7 @@ def decide(
         sight_out_of_regard_search=sight_out_of_regard_search,
         sight_point_search=sight_point_search,
         sight_lock_contact_id=sight_lock_contact_id,
+        sight_lock_seen=sight_lock_seen,
     )
     if decision.suppressed:
         return new_state, decision

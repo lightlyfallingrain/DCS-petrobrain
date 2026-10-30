@@ -159,6 +159,7 @@ from belief.speech import (
     render_silence_ack,
     render_stand_by,
     render_target_readback,
+    render_tracking,
     render_unable,
     render_watch_group_readback,
     render_watch_nearest_readback,
@@ -1792,6 +1793,31 @@ class CrewConsole:
         if previously_observed is False and ready_observed is True:
             self._print(["Guidance unit ready."], now_sim)
         return ready_observed
+
+    def drain_sight_lock_tracking(
+        self, now_sim: float, *, previously_seen: bool, seen: bool
+    ) -> None:
+        """Speaks "Tracking." exactly on the `False -> True` edge of the
+        ATGM run's locked contact being resolved through the 9K113 sight
+        itself (`plans/atgm-run-sight-tracking/plan.md`, user: *"Say
+        'tracking' when on target."*) -- the same edge-only shape `drain_
+        guidance_unit_ready` already uses for the 960 lamp, read here
+        from `body._sight_lock_seen` instead of a readback arg.
+
+        Both `previously_seen`/`seen` are the caller's own values (`body.
+        py`'s poll loop diffs `_sight_lock_seen` across `run_once`, the
+        same "caller holds the state, this method only edge-detects" split
+        `drain_guidance_unit_ready`'s own docstring states) -- this class
+        holds neither the sight head nor the ATGM run state itself.
+
+        **Never every poll the contact stays seen** -- only the rising
+        edge -- and **spoken again after a later loss and re-acquisition**,
+        since `seen` goes back to `False` the poll the sight loses it
+        (past its own hold window) and the next rising edge fires this
+        again, same as a power-cycled lamp speaks `"Guidance unit ready."`
+        a second time."""
+        if not previously_seen and seen:
+            self._print([render_tracking().text], now_sim)
 
     def drain_config_error(self, now_sim: float, *, intercom_open: bool) -> None:
         """Speaks `CONFIG_ERROR_LINE` exactly once per process, the first

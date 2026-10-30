@@ -89,7 +89,7 @@ from perception.gaze import (
     ScanPlan,
     gaze_at,
 )
-from perception.geometry import GeoPosition
+from perception.geometry import GeoPosition, body_relative_direction
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import SIGHT_NARROW_OPTIC, SIGHT_WIDE_OPTIC
@@ -7858,3 +7858,197 @@ def test_speech_log_sink_binocular_fixed_look_uses_actual_aim_not_stale_scan_pla
     call = writer.calls[0]
     assert call["gaze_label"] == "binocular"
     assert call["gaze_center_deg"] == 12.0
+
+
+# --- `_look_target_position`/`_look_targets`: sight-pointing altitude
+# (`plans/atgm-run-sight-tracking/debug.md`) --------------------------------
+
+
+def _contact_with_one_tier_1_look(
+    *,
+    look_ownship_alt_m: float,
+    up_m: float,
+    bearing_deg: float = 90.0,
+    range_m: float = 2000.0,
+) -> tuple[ContactStore, str]:
+    """One contact, founded by a single tier-1 (sight/naked-eye) look that
+    carries a `relative_direction` -- the one case `remembered_target_alt_m`
+    can reconstruct a real target altitude from. The look's own ownship sits
+    at `(0, 0, look_ownship_alt_m)`, heading true north, so `up_m` is also
+    the vertical component in the look's body frame (heading 0)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            Observation(
+                id="OBS_1",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=bearing_deg,
+                range_m=range_m,
+                ownship_at_observation=OwnshipState(
+                    t_sim=0.0,
+                    x=0.0,
+                    z=0.0,
+                    alt_m=look_ownship_alt_m,
+                    heading_true_deg=0.0,
+                ),
+                derived_world_position=DerivedWorldPosition(
+                    x=range_m, z=0.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+                relative_direction=RelativeDirection(
+                    forward_m=0.0, right_m=range_m, up_m=up_m
+                ),
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    return store, store.contacts[-1].id
+
+
+def test_look_target_position_uses_remembered_altitude_not_ownship_altitude_at_look() -> (
+    None
+):
+    """The bug (`plans/atgm-run-sight-tracking/debug.md`): a contact seen
+    once while the aircraft was at 1500 m, never re-observed, must not be
+    aimed at as if it sat at 1500 m once the aircraft has since descended
+    to 1200 m -- `Contact.last_alt_m` is exactly that stale, flat-projection
+    number (`contact.last_position.alt_m`), while the real target (200 m
+    below the look-time ownship, i.e. MSL 1300 m) stays where it was.
+    `_look_target_position` must resolve to the remembered MSL altitude
+    (1300 m), not the flat one (1500 m)."""
+    store, contact_id = _contact_with_one_tier_1_look(
+        look_ownship_alt_m=1500.0, up_m=-200.0
+    )
+    contact = store.contact(contact_id)
+    assert contact is not None
+
+    # The pre-existing flat-projection value this bug reads today.
+    assert contact.last_position.alt_m == pytest.approx(1500.0)
+
+    corrected = body_module._look_target_position(contact)
+    assert corrected.alt_m == pytest.approx(1300.0)
+    assert corrected.x == contact.last_position.x
+    assert corrected.z == contact.last_position.z
+
+
+def test_look_target_position_falls_back_to_last_position_without_a_tier_1_look() -> (
+    None
+):
+    """No `relative_direction` was ever recorded (e.g. the contact came
+    only from the scope/hybrid channel) -- `remembered_target_alt_m` has
+    nothing to reconstruct from, so `_look_target_position` must return
+    `contact.last_position` exactly as before: no worse than today, never
+    a fabricated altitude."""
+    store = ContactStore()
+    store.ingest(
+        [
+            Observation(
+                id="OBS_1",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=90.0,
+                range_m=2000.0,
+                ownship_at_observation=OwnshipState(
+                    t_sim=0.0, x=0.0, z=0.0, alt_m=1500.0, heading_true_deg=0.0
+                ),
+                derived_world_position=DerivedWorldPosition(
+                    x=2000.0, z=0.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[-1]
+
+    corrected = body_module._look_target_position(contact)
+    assert corrected == contact.last_position
+
+
+def test_look_targets_elevation_does_not_run_away_after_the_aircraft_descends() -> None:
+    """Integration-level regression for the ATGM-run sight-tracking bug:
+    once the aircraft has descended well past the altitude it was at
+    during a contact's one and only look, `_look_targets`' elevation for
+    that contact must track the remembered real altitude, not balloon
+    toward the flat-projection one -- `body_relative_direction` against the
+    corrected altitude is the honest answer; against the stale flat one it
+    is not."""
+    store, contact_id = _contact_with_one_tier_1_look(
+        look_ownship_alt_m=1500.0, up_m=-200.0
+    )
+    contact = store.contact(contact_id)
+    assert contact is not None
+    believed_x, believed_z = contact.last_position.x, contact.last_position.z
+    later_ownship = OwnshipState(
+        t_sim=60.0, x=0.0, z=0.0, alt_m=1200.0, heading_true_deg=0.0
+    )
+
+    targets = body_module._look_targets(store, later_ownship)
+    (target,) = [t for t in targets if t.contact_id == contact_id]
+
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=1200.0)
+    correct = body_relative_direction(
+        observer,
+        GeoPosition(x=believed_x, z=believed_z, alt_m=1300.0),
+        heading_true_deg=0.0,
+        pitch_deg=0.0,
+        bank_deg=0.0,
+    )
+    stale = body_relative_direction(
+        observer,
+        GeoPosition(x=believed_x, z=believed_z, alt_m=1500.0),
+        heading_true_deg=0.0,
+        pitch_deg=0.0,
+        bank_deg=0.0,
+    )
+
+    assert target.elevation_deg == pytest.approx(correct.elevation_deg)
+    assert target.elevation_deg != pytest.approx(stale.elevation_deg)
+
+
+class TestSightLockSeen:
+    """`body._sight_lock_seen` (`plans/atgm-run-sight-tracking/plan.md`)
+    -- the one boolean `run_once`'s `sight_lock_seen` keyword to `decide_
+    optic` and the poll loop's own "Tracking." edge detector both read,
+    so the two can never disagree about what "seen" means for this
+    feature."""
+
+    def test_false_when_no_atgm_run_is_engaged(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, None) is False
+
+    def test_false_when_the_sight_sees_a_different_contact(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_OTHER")
+        state = AtgmRunState(contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, state) is False
+
+    def test_false_when_the_aim_source_is_held_or_belief(self) -> None:
+        from belief.sight_head import SightHead
+
+        state = AtgmRunState(contact_id="CONTACT_1")
+        held = SightHead(aim_source="held", seen_contact_id="CONTACT_1")
+        belief = SightHead(aim_source="belief", seen_contact_id=None)
+        assert body_module._sight_lock_seen(held, state) is False
+        assert body_module._sight_lock_seen(belief, state) is False
+
+    def test_true_when_the_sight_sees_the_locked_contact(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_1")
+        state = AtgmRunState(contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, state) is True

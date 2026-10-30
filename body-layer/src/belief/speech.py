@@ -643,6 +643,17 @@ def render_no_more_missiles() -> OutgoingSpeech:
     return OutgoingSpeech(text="No more missiles.", template="attack_run")
 
 
+def render_tracking() -> OutgoingSpeech:
+    """*"Tracking."* -- the locked contact has just been resolved through
+    the 9K113 sight itself during an engaged ATGM run (`plans/
+    atgm-run-sight-tracking/plan.md`, user: *"Say 'tracking' when on
+    target."*). `belief.crew_console.drain_sight_lock_tracking` is the
+    only caller, and only on the False->True edge of "seen through the
+    sight" -- never every poll it stays seen, and spoken again only after
+    a later loss and re-acquisition."""
+    return OutgoingSpeech(text="Tracking.", template="attack_run")
+
+
 #: One row of an alignment word table (`plans/attack-run/plan.md`
 #: Decision 11 REVISED, rule 1): `(threshold_deg, positive_phrase,
 #: negative_phrase)`, descending by `threshold_deg` -- the table's own
