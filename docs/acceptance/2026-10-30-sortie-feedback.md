@@ -169,3 +169,17 @@ Requirements taken from this:
 2. During a run the sight stays on the target; binoculars/naked eye only as a **quick** glance
    around, not many seconds.
 3. If the belief aim is what is wrong, the belief behaviour is fixed -- not worked around.
+
+### Run 2 traced (main loop, after the run-1 fix landed on `fix/atgm-run-sight-tracking`)
+
+Triangulating the sight's belief goal rays over 744-787 s puts Petrovich's believed target at one
+fixed point: **on the true bearing** (offset purely along the line of sight), but **~700 m short**
+(believed ~1.5 km at 745 s vs the group at ~2.2-2.4 km) and **~420 m too high** (believed MSL
+~1170 m = ownship altitude at the naked-eye looks, true 750 m). So run 2 has the same altitude
+defect as run 1, plus a range error from the naked-eye/binocular looks (662-738 s, 4.7-5.7 km).
+Bearing from those looks was good; range, and therefore depression angle, was not. As the
+aircraft closed on the believed point the aim swung right and steeply down, never crossing the
+real group, so the sight never admitted it.
+
+OBSERV drops at 603.0 s and 788.4 s both coincide with hard bank (-29 deg; +24 -> +58 deg) while
+`observ_commanded` stays True -- DCS dropping the sight, not Petrovich. Nothing re-acquires it.
