@@ -46,8 +46,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import tuning
 from belief.utterance import PartialParse
 
+#: History -- the original 0.60 figure's grounding (current value and why: last paragraph).
 #: Stage 1's measured confidence distribution, recorded as data in
 #: `audio-adapter/research/2026-09-19-corpus-bench-results.md` (a reviewer
 #: caught this comment previously citing `2026-09-19-whisper-model-
@@ -75,8 +77,17 @@ from belief.utterance import PartialParse
 #: band that should have acted, both barely under the (wrong) floor. The
 #: fix validates this number rather than replacing it: pointing it back at
 #: the quantity it was measured on makes it correct again.
-ACT_FLOOR: float = 0.60
+#:
+#: STT confidence at or above which a matched command acts without asking "confirm?", kept above
+#: `CONFIRM_FLOOR` and at or below `ACT_FLOOR_CANCEL` (the loader does not check that ordering) --
+#: lowered 0.60 -> 0.45 on 2026-10-31 because the pilot got many "confirm?" requests per mission
+#: for commands that were mostly heard right (`docs/acceptance/2026-10-31-sortie-feedback.md`). A
+#: judgement value: tune it from the `--speech-log` rows.
+ACT_FLOOR: float = tuning.real(
+    "belief.voice_commands.ACT_FLOOR", 0.45, lo=0.2, hi=0.95, status="judgement"
+)
 
+#: History -- the original 0.80 figure's reasoning (current value and why: last paragraph).
 #: `cancel_task` is the one token that *destroys* state rather than
 #: creating it (Decision 5): a mishearing that lands on it silently kills
 #: a standing task, and the readback naming what was cancelled arrives
@@ -93,7 +104,13 @@ ACT_FLOOR: float = 0.60
 #: honestly means saying plainly that this was *always* an unmeasured
 #: placeholder margin on top of `ACT_FLOOR`, now correctly measured
 #: against the same quantity `ACT_FLOOR` is.
-ACT_FLOOR_CANCEL: float = 0.80
+#:
+#: STT confidence at or above which a state-destroying command (`CANCEL_TOKENS`) acts without
+#: asking "confirm?" -- lowered 0.80 -> 0.60 on 2026-10-31 with `ACT_FLOOR`, for the same reason,
+#: keeping a margin above it. Must stay at or above `ACT_FLOOR`.
+ACT_FLOOR_CANCEL: float = tuning.real(
+    "belief.voice_commands.ACT_FLOOR_CANCEL", 0.60, lo=0.2, hi=0.99, status="judgement"
+)
 
 #: Every token that *destroys* standing state, and therefore every token
 #: held to `ACT_FLOOR_CANCEL`. A set rather than a comparison against one
@@ -132,6 +149,7 @@ CANCEL_TOKENS: frozenset[str] = frozenset(
     }
 )
 
+#: History -- the original 0.35 figure's reasoning (current value and why: last paragraph).
 #: Below this, nothing fires and Petrovich asks the player to say it
 #: again (`belief.speech.render_say_again`) rather than guessing or
 #: sitting silent. **Not measured** -- Stage 1's bench has no data point
@@ -147,7 +165,13 @@ CANCEL_TOKENS: frozenset[str] = frozenset(
 #: measured against either the product or confidence alone, so this
 #: change doesn't validate or invalidate the figure, only makes explicit
 #: which quantity it now gates.
-CONFIRM_FLOOR: float = 0.35
+#:
+#: STT confidence below which a matched command gets "say again" instead of "confirm?" -- lowered
+#: 0.35 -> 0.30 on 2026-10-31 with `ACT_FLOOR`, so the confirm band keeps some width below the
+#: lowered act bar. Must stay below `ACT_FLOOR`.
+CONFIRM_FLOOR: float = tuning.real(
+    "belief.voice_commands.CONFIRM_FLOOR", 0.30, lo=0.0, hi=0.9, status="judgement"
+)
 
 #: How long a confirm-band question stays open before it is dropped
 #: silently, the same as an unrecognised answer (Decision 4 Layer 3).
