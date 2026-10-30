@@ -9,7 +9,6 @@ from pathlib import Path
 
 from belief.effector_registry import (
     DEFAULT_RAW_DUMP_DIR,
-    DEFAULT_SEQUENCES_DIR,
     EffectorDef,
     RegistryError,
     aircraft_dir_name,
@@ -17,7 +16,13 @@ from belief.effector_registry import (
     load_registry,
 )
 
-_DEFAULT_CURATED_PATH = DEFAULT_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
+#: Frozen copy of `config/sequences/` (2026-10-30). Tests that pin the
+#: shipped effector names, sequences or rows read this, not the real
+#: files, so editing the shipped sequences cannot break them (user
+#: direction, 2026-10-30). The raw dump stays the real one: it is
+#: generated from DCS, not hand-edited.
+_FIXTURE_SEQUENCES_DIR = Path(__file__).parent / "fixtures" / "effector_config"
+_DEFAULT_CURATED_PATH = _FIXTURE_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
 _DEFAULT_RAW_DUMP_PATH = DEFAULT_RAW_DUMP_DIR / "mi-24p.toml"
 
 _GOOD_RAW_DUMP = """
@@ -232,10 +237,10 @@ def test_unparsable_curated_file_disables_the_whole_registry(tmp_path: Path) -> 
     assert errors[0].scope == "curated-file"
 
 
-# --- round-trip against the real, committed files --------------------------
+# --- round-trip against the frozen fixture files --------------------------
 
 
-def test_round_trip_against_the_committed_registry() -> None:
+def test_round_trip_against_the_fixture_registry() -> None:
     registry, errors = load_registry(_DEFAULT_RAW_DUMP_PATH, _DEFAULT_CURATED_PATH)
 
     assert errors == []
@@ -272,8 +277,8 @@ def test_aircraft_dir_name_lower_cases_only() -> None:
     assert aircraft_dir_name("mi-24p") == "mi-24p"
 
 
-def test_load_registries_by_aircraft_discovers_the_real_mi24p_directory() -> None:
-    by_aircraft = load_registries_by_aircraft()
+def test_load_registries_by_aircraft_discovers_the_mi24p_directory() -> None:
+    by_aircraft = load_registries_by_aircraft(_FIXTURE_SEQUENCES_DIR)
 
     assert set(by_aircraft) == {"mi-24p"}
     registry, errors = by_aircraft["mi-24p"]

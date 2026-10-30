@@ -1,7 +1,6 @@
 """`tools/render_switch_reference.py`'s "Values" column -- the compact
 human-readable rendering of `generate_effector_registry.py`'s `values`
-field (2026-10-23 follow-up). The staleness test itself is
-`test_render_switch_reference.py`; this covers `_format_value_range`/
+field (2026-10-23 follow-up). This covers `_format_value_range`/
 `_format_values_cell` directly, same `importlib.util` pattern
 `test_generate_effector_registry.py` uses."""
 

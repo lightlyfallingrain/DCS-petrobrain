@@ -692,27 +692,39 @@ class FakeConsoleAircraftClient:
         return self.spu8_state
 
 
-_real_effector_config_cache: (
+#: A frozen copy of `config/sequences/` (one `mi-24p/` subdirectory),
+#: taken 2026-10-30. Tests that pin which switches a sequence writes use
+#: this rather than the shipped files, so the user can keep editing the
+#: shipped sequences and effectors without breaking them -- user
+#: direction, 2026-10-30: "My sequence edits must not break tests." Only
+#: `test_shipped_effector_config_loads_without_errors` reads the real files.
+_FIXTURE_SEQUENCES_DIR = Path(__file__).parent / "fixtures" / "effector_config"
+
+_fixture_effector_config_cache: (
     tuple[dict[tuple[str, str, str], Any], dict[str, Any]] | None
 ) = None
 
 
-def _real_effector_config() -> tuple[dict[tuple[str, str, str], Any], dict[str, Any]]:
-    """The real, committed `config/sequences/mi-24p/` sequences + registry
-    (`plans/effector-sequences/plan.md` Stage 2) -- loaded once and
-    cached (module-level, not an `lru_cache`, so it stays a plain dict a
+def _fixture_effector_config() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    """The frozen fixture copy of the `config/sequences/mi-24p/`
+    sequences + registry (`plans/effector-sequences/plan.md` Stage 2) --
+    loaded once and cached (module-level, not an `lru_cache`, so it stays a plain dict a
     test can pass straight into `_run_crew_text_poll_loop`'s own
     `effector_sequences`/`effector_registry` kwargs). Every poll-loop
     test that exercises a real effector write needs this -- passing
     neither leaves the engine with nothing loaded, so every trigger fires
     into nothing and a test asserting "zero writes" would pass for the
     wrong reason."""
-    global _real_effector_config_cache
-    if _real_effector_config_cache is None:
-        sequences, registry, had_errors, _polled = body_module._load_effector_config()
-        assert not had_errors, "the real committed effector config has load errors"
-        _real_effector_config_cache = (sequences, registry)
-    return _real_effector_config_cache
+    global _fixture_effector_config_cache
+    if _fixture_effector_config_cache is None:
+        sequences, registry, had_errors, _polled = body_module._load_effector_config(
+            _FIXTURE_SEQUENCES_DIR
+        )
+        assert not had_errors, "the fixture effector config has load errors"
+        _fixture_effector_config_cache = (sequences, registry)
+    return _fixture_effector_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -5587,7 +5599,7 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     crew_console.output = io.StringIO()
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -5739,7 +5751,7 @@ def test_guidance_unit_ready_is_silent_on_a_warm_air_start_through_the_real_poll
     runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     crew_console.output = io.StringIO()
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -5824,7 +5836,7 @@ def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_p
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     crew_console.output = io.StringIO()
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -5928,7 +5940,7 @@ def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
         guidance_unit_ready_prev_observed=True,
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -6018,7 +6030,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
     # Not yet ready -- the pre-ready OBSERV-on refusal is checked against
     # this state before the sequence is set up to complete.
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -6141,9 +6153,9 @@ def _effector_config_with_mission_start_sequences() -> tuple[
     synthetic one-row sequence each for `MISSION_START` (writes `observ`)
     and `MISSION_START_IN_AIR` (writes `weapon_safety`) -- see the section
     banner above for why those two and not any of `takeoff`'s own four.
-    A fresh dict copy of `_real_effector_config()`'s cached sequences --
+    A fresh dict copy of `_fixture_effector_config()`'s cached sequences --
     never mutates the module-level cache other tests share."""
-    sequences, registry = _real_effector_config()
+    sequences, registry = _fixture_effector_config()
     merged = dict(sequences)
     merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.MISSION_START.value)] = (
         SequenceFile(
@@ -7160,8 +7172,21 @@ def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
 # --- _load_effector_config (D5/D6) ------------------------------------------
 
 
-def test_load_effector_config_round_trips_the_real_committed_files() -> None:
-    sequences, registry, had_errors, _polled = body_module._load_effector_config()
+def test_shipped_effector_config_loads_without_errors() -> None:
+    """The one test that reads the real, shipped `config/sequences/` --
+    it checks only that the files load, not what they contain, so editing
+    a sequence or adding an effector does not break it; a malformed row
+    or a misspelt effector name does, since in flight that drops the
+    whole sequence file."""
+    _sequences, _registry, had_errors, _polled = body_module._load_effector_config()
+
+    assert had_errors is False
+
+
+def test_load_effector_config_round_trips_the_fixture_files() -> None:
+    sequences, registry, had_errors, _polled = body_module._load_effector_config(
+        _FIXTURE_SEQUENCES_DIR
+    )
 
     assert had_errors is False
     assert set(registry) == {
@@ -7192,7 +7217,9 @@ def test_load_effector_config_logs_the_unverified_effector(
     """Stage 1 review follow-up: `EffectorDef.unverified` (`cplr_distr`)
     had no consumer at all -- surfaced as one startup `INFO` line."""
     with caplog.at_level(logging.INFO, logger="body"):
-        _sequences, registry, _had_errors, _polled = body_module._load_effector_config()
+        _sequences, registry, _had_errors, _polled = body_module._load_effector_config(
+            _FIXTURE_SEQUENCES_DIR
+        )
 
     assert registry["cplr_distr"].unverified is True
     assert any(
@@ -7228,7 +7255,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
     monkeypatch.setattr(
         body_module,
         "load_registries_by_aircraft",
-        lambda: fake_registries_by_aircraft,
+        lambda *_args: fake_registries_by_aircraft,
     )
     monkeypatch.setattr(
         body_module,
@@ -7253,7 +7280,7 @@ def test_load_effector_config_aggregates_errors_from_both_loaders(
 def test_load_effector_config_missing_own_aircraft_directory_is_an_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(body_module, "load_registries_by_aircraft", dict)
+    monkeypatch.setattr(body_module, "load_registries_by_aircraft", lambda *_args: {})
     monkeypatch.setattr(
         body_module, "load_sequences", lambda *_args, **_kwargs: ({}, [])
     )
@@ -7289,7 +7316,7 @@ def test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once(
     )
     crew_console.output = io.StringIO()
     crew_console.silenced = True
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -7370,7 +7397,7 @@ def test_no_spu8_poll_when_config_error_not_pending(tmp_path: Path) -> None:
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     crew_console.output = io.StringIO()
     assert crew_console.config_error_pending is False
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -7448,7 +7475,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     # this test's early polling loops never advance.
     aircraft_client.raw_args = {"886": 0.0}
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
-    effector_sequences, effector_registry = _real_effector_config()
+    effector_sequences, effector_registry = _fixture_effector_config()
     slew_trace_path = tmp_path / "slew.jsonl"
 
     stop_event = threading.Event()
