@@ -730,3 +730,66 @@ tautology.
    independent of separation; widening separation instead increases the
    distance the fold needs to span by exactly as much as it buys in time,
    making it self-defeating for this specific purpose.
+
+### Security fix round (Required Fix, Finding 1)
+
+`plans/bl-b104-ground-contacts-on-ground/security-review.md` Finding 1: the new
+`category`/`subcategory` wire fields were converted with `int(raw)` after only an
+`isinstance(raw, int | float)` type check, so a JSON `NaN` (`ValueError`) or
+`Infinity`/`-Infinity` (`OverflowError`) value would raise uncaught — reachable at the
+operative LAN boundary (`GET /world_objects/latest`'s response body, which `json.loads`
+parses leniently) without a live DCS session at all.
+
+**Files changed:**
+- `aircraft-layer/src/schema/world_objects.py` — `_optional_int` now returns `None` for
+  a non-finite (`not math.isfinite(raw)`) `int | float` value instead of calling `int()`
+  on it, same tri-state discipline ("absent" / "null" / "non-finite" all resolve to
+  `None`) the function already documents. A non-numeric or bool value still raises
+  `WorldObjectParseError` exactly as before — unchanged, confirmed by the existing
+  `test_from_json_line_rejects_non_numeric_category`.
+- `body-layer/src/perception/association.py` — added a module-level `_finite_int`
+  helper (same isinstance-then-isfinite shape as `watched_args.parse_arg_values` and
+  several other existing guards in this codebase, e.g. `aircraft_client.py`,
+  `sight_effector.py`, `position_belief.py` — reusing the established pattern rather
+  than inventing a new one) and used it for both `category_raw`/`subcategory_raw` in
+  `WorldObjectCandidate.from_dict`, replacing the previous unconditional
+  `int(category_raw)`/`int(subcategory_raw)`. Unlike `_optional_int` above, this site had
+  **no** prior type guard at all (this dict comes straight off the HTTP response body,
+  not through `WorldObjectSample.from_dict`), so `_finite_int` also absorbs a
+  non-numeric/bool value to `None` rather than raising — a slightly broader guard than
+  the aircraft-layer side, justified because this call site previously had zero
+  validation and a malformed value here should resolve to "category unknown"
+  (`surface_domain`'s own documented `None` contract), not propagate an uncaught
+  `TypeError`/`ValueError` out of the bare list comprehension in
+  `naked_eye_source.py`'s poll method that the security review traced this to.
+
+### Tests added
+- `aircraft-layer/tests/test_world_objects_schema.py`:
+  `test_from_json_line_treats_nan_category_as_none`,
+  `test_from_json_line_treats_infinity_subcategory_as_none` — NaN on `category`,
+  Infinity on `subcategory`, confirming both resolve to `None` rather than raising.
+- `body-layer/tests/test_association.py`:
+  `test_world_object_candidate_from_dict_treats_nan_category_as_none`,
+  `test_world_object_candidate_from_dict_treats_infinity_subcategory_as_none` —
+  same two inputs, confirming `WorldObjectCandidate.is_surface` resolves to the same
+  "unknown"/"air" outcome a missing category would give rather than raising.
+- Confirmed the failure mode directly before fixing (not just trusting the security
+  review's own repro): `int(float("nan"))` raises `ValueError`, `int(float("inf"))`
+  raises `OverflowError`, run standalone in each subproject's own venv.
+
+### Checks
+**aircraft-layer/** (built a fresh `.venv` with python3.12, `.venv` did not exist in this
+worktree):
+- `ruff format --check`: pass (75 files already formatted)
+- `ruff check`: pass
+- `mypy src` (run from inside `aircraft-layer/`): pass, no issues in 26 source files
+- `pytest -q`: pass, 663 passed
+
+**body-layer/** (same, fresh `.venv` with python3.12 plus `pyproj`/`numpy` per
+`pyproject.toml`'s declared deps):
+- `ruff format --check`: 1 file needed reformatting (`tests/test_association.py`,
+  line-length wrapping on the new test's `def` line) — applied `ruff format`, re-ran
+  clean (190 files formatted)
+- `ruff check`: pass
+- `mypy src` (run from inside `body-layer/`): pass, no issues in 79 source files
+- `pytest -q`: pass, 2858 passed, 4 xfailed (pre-existing, unrelated to this change)

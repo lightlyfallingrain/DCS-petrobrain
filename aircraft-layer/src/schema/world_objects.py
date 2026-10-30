@@ -78,6 +78,7 @@ JSON `null` (see `_optional_int`).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -286,9 +287,10 @@ def _require_number(data: dict[str, Any], field: str) -> float:
 
 
 def _optional_int(data: dict[str, Any], field: str) -> int | None:
-    """`None` when `field` is absent or JSON `null` -- never coerced to 0,
-    same tri-state discipline as `is_ownship`/`unit_name` (module
-    docstring)."""
+    """`None` when `field` is absent, JSON `null`, or a non-finite number
+    (NaN/Infinity -- `int()` raises `ValueError`/`OverflowError` on those,
+    security review finding 1) -- never coerced to 0, same tri-state
+    discipline as `is_ownship`/`unit_name` (module docstring)."""
     raw = data.get(field)
     if raw is None:
         return None
@@ -296,4 +298,6 @@ def _optional_int(data: dict[str, Any], field: str) -> int | None:
         raise WorldObjectParseError(
             f"field {field!r} must be a number or null, got {raw!r}"
         )
+    if not math.isfinite(raw):
+        return None
     return int(raw)

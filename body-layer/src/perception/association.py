@@ -138,6 +138,23 @@ AMBIGUOUS_ASSOCIATION_METHOD: Final[str] = "bearing_range_terrain_ambiguous_asso
 _WORD_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
 
+def _finite_int(raw: Any) -> int | None:
+    """`None` for a JSON `null`/absent `category`/`subcategory` value, and
+    also for a non-finite one (NaN/Infinity -- `int()` raises `ValueError`/
+    `OverflowError` on those) arriving straight off the LAN
+    `GET /world_objects/latest` response body (security review finding 1).
+    Same tri-state discipline `WorldObjectCandidate.from_dict`'s other
+    optional fields already follow -- a bad value is treated as unknown,
+    never fabricated or defaulted."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    if not math.isfinite(raw):
+        return None
+    return int(raw)
+
+
 @dataclass(frozen=True, slots=True)
 class WorldObjectCandidate:
     """One `LoGetWorldObjects` object, in the DCS-native x/z metres
@@ -273,8 +290,8 @@ class WorldObjectCandidate:
             velocity=resolved_velocity,
             live_los_clear=live_los_clear,
             is_surface=surface_domain(
-                None if category_raw is None else int(category_raw),
-                None if subcategory_raw is None else int(subcategory_raw),
+                _finite_int(category_raw),
+                _finite_int(subcategory_raw),
                 agl_m,
             ),
         )
