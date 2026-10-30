@@ -246,3 +246,10 @@
   rather than another single-point correction to `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` — the
   same ambiguity the 2026-10-28 scale-vs-boresight entry above already carried, recurring on the
   very next flight (`[[BL-B80]]`).
+- **`look_sweep`/`_step_centres_deg`'s "the centre step always survives" is not generally true for
+  an even step count** — verified by hand: `half_width=10, fov=6` gives centres
+  `{-7.5, -2.5, 2.5, 7.5}`, none exactly `0.0`. Not a defect in that function; its docstring's
+  "survives the filter" claim is about `within_field_of_regard` filtering a candidate step, not
+  about `0.0` being present in the offset list in the first place. A feature needing "index 0 is
+  exactly the believed point" (the bearing-line depression search, `fix/atgm-run-sight-tracking`,
+  2026-10-30) needed a different, bespoke offset function rather than reusing this one.
