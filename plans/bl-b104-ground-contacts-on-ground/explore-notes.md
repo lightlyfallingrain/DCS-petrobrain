@@ -36,6 +36,14 @@ Architect to consider: two independent estimates of ground distance — one from
 combined, each with its own error, so neither dominates where it is weak. Height still comes from
 the unit's own ground height (AGL 0); that half of the agreed shape is unchanged.
 
+**Confirmed, 2026-10-30** (user, verbatim):
+
+> *"Since our simulation does not really see all the ground features, a statistical model for that
+> will suffice. It'll be faster too."*
+
+So the terrain-reference cue is a statistical error model only — no terrain or feature query, no
+world-model lookup on the live path.
+
 ## Q3 — ships
 
 > *"yes, sea is a very rare case, no special handling for it."*
