@@ -1,10 +1,10 @@
 """Staleness guard for `config/sequences/triggers.md` -- same pattern as
-`test_render_switch_reference.py`/`test_tuning_defaults_toml.py`:
+`test_tuning_defaults_toml.py`:
 regenerates in memory via the tool's own check mode and fails if the
 committed file no longer matches `belief.effector_sequences.
-EffectorTrigger`/`TRIGGER_INFO`, rather than drifting silently. Unlike
-`test_render_switch_reference.py`, this does not depend on the
-Windows-only raw dump -- it can and must pass without one."""
+EffectorTrigger`/`TRIGGER_INFO`, rather than drifting silently. It
+depends on code only -- not on the Windows-only raw dump or the
+hand-edited sequence config -- so it can and must pass without either."""
 
 from __future__ import annotations
 

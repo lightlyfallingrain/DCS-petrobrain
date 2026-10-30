@@ -13,7 +13,6 @@ import pytest
 
 from belief.effector_registry import (
     DEFAULT_RAW_DUMP_DIR,
-    DEFAULT_SEQUENCES_DIR,
     EffectorDef,
     load_registry,
 )
@@ -25,7 +24,13 @@ from belief.effector_sequences import (
     load_sequences,
 )
 
-_DEFAULT_CURATED_PATH = DEFAULT_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
+#: Frozen copy of `config/sequences/` (2026-10-30). Tests that pin the
+#: shipped effector names, sequences or rows read this, not the real
+#: files, so editing the shipped sequences cannot break them (user
+#: direction, 2026-10-30). The raw dump stays the real one: it is
+#: generated from DCS, not hand-edited.
+_FIXTURE_SEQUENCES_DIR = Path(__file__).parent / "fixtures" / "effector_config"
+_DEFAULT_CURATED_PATH = _FIXTURE_SEQUENCES_DIR / "mi-24p" / "effectors.toml"
 _DEFAULT_RAW_DUMP_PATH = DEFAULT_RAW_DUMP_DIR / "mi-24p.toml"
 
 _REGISTRY_FIXTURE = {
@@ -398,25 +403,24 @@ def test_bad_registry_in_one_aircraft_directory_does_not_affect_another(
     assert "unknown effector 'observ'" in errors[0].reason
 
 
-# --- round-trip of each shipped sequence file -------------------------------
+# --- round-trip of each fixture sequence file -------------------------------
 
-#: R13: the real, committed per-aircraft layout. `load_sequences` takes
-#: the *parent* of the aircraft directories (`DEFAULT_SEQUENCES_DIR`),
-#: not the `mi-24p/` directory itself.
-_REAL_SEQUENCES_PARENT_DIR = DEFAULT_SEQUENCES_DIR
+#: R13: the per-aircraft layout. `load_sequences` takes the *parent* of
+#: the aircraft directories, not the `mi-24p/` directory itself.
+_SEQUENCES_PARENT_DIR = _FIXTURE_SEQUENCES_DIR
 
 
 @pytest.fixture(scope="module")
-def real_registries() -> dict[str, dict[str, object]]:
+def fixture_registries() -> dict[str, dict[str, object]]:
     registry, errors = load_registry(_DEFAULT_RAW_DUMP_PATH, _DEFAULT_CURATED_PATH)
     assert errors == []
     return {"mi-24p": registry}
 
 
-def test_every_shipped_sequence_file_round_trips(
-    real_registries: dict[str, dict[str, object]],
+def test_every_fixture_sequence_file_round_trips(
+    fixture_registries: dict[str, dict[str, object]],
 ) -> None:
-    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
+    sequences, errors = load_sequences(_SEQUENCES_PARENT_DIR, fixture_registries)
 
     assert errors == []
     assert set(sequences) == {
@@ -430,13 +434,13 @@ def test_every_shipped_sequence_file_round_trips(
 
 
 def test_takeoff_file_reproduces_todays_switch_order(
-    real_registries: dict[str, dict[str, object]],
+    fixture_registries: dict[str, dict[str, object]],
 ) -> None:
     """R12 (2026-10-23 user correction): the shipped takeoff file no
     longer carries an explicit `!= on` self-condition on any row -- the
     engine's own implicit self-check (Stage 2) is what makes a re-run or
     a warm start a no-op now, not a `condition` cell this loader parses."""
-    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
+    sequences, errors = load_sequences(_SEQUENCES_PARENT_DIR, fixture_registries)
     assert errors == []
     rows = sequences[("Mi-24P", "copilot", "takeoff")].rows
 
@@ -454,9 +458,9 @@ def test_takeoff_file_reproduces_todays_switch_order(
 
 
 def test_observ_and_weapons_files_are_single_unconditional_rows(
-    real_registries: dict[str, dict[str, object]],
+    fixture_registries: dict[str, dict[str, object]],
 ) -> None:
-    sequences, errors = load_sequences(_REAL_SEQUENCES_PARENT_DIR, real_registries)
+    sequences, errors = load_sequences(_SEQUENCES_PARENT_DIR, fixture_registries)
     assert errors == []
 
     observ_on = sequences[("Mi-24P", "copilot", "observ-on")].rows

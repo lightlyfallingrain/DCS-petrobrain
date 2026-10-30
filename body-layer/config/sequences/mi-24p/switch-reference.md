@@ -257,7 +257,7 @@ rather than from this dump).
 | `WEAP-ON-OFF-PTR` | Weapon Control ON/OFF | pilot (defaulted) | default_2_position_tumb | [3009] | [551] |  | 0/1 |  |
 | `WEAP-PUS-ENGAGEMENT-PTR` | Arm Rockets | pilot (defaulted) | default_button | [3019] | [536] |  | 0/1 momentary |  |
 | `WEAP-ROCKET-SELECT-PTR` | Select Rockets LEFT/BOTH/RIGHT | pilot (defaulted) | default_3_position_tumb | [3008] | [531] |  | -1/0/1 |  |
-| `WEAP-SELECT-KNOB-PTR` | Select Weapon | pilot (defaulted) | multiposition_switch | [3007] | [523] |  | 0 to 0.8 (9 steps) |  |
+| `WEAP-SELECT-KNOB-PTR` | Select Weapon | pilot (defaulted) | multiposition_switch | [3007] | [523] |  | 0 to 0.8 (9 steps) | `p_wpn_selector` |
 | `WEAP-SIGHT-CONTROL-ON-OFF-PTR` | Weapon Camera ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [530] |  | 0/1 |  |
 
 ## Device 7 -- I9K113
@@ -399,7 +399,7 @@ rather than from this dump).
 | `LANDING-GEAR-LIGHTS-PTR` | Gear Indication Lights ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [224] |  | 0/1 |  |
 | `LANDING-GEAR-LOCK-PTR` | Gear Lever Lock, UP/DOWN | pilot (defaulted) | default_animated_lever | [3002] | [228] |  | 0/1 |  |
 | `LANDING-GEAR-PTR` | Gear Lever, UP/DOWN | pilot (defaulted) | default_animated_lever | [3001] | [232] |  | 0/1 |  |
-| `PTR-STICK-HIDE-974` | Hide Stick toggle | pilot (defaulted) | default_2_position_tumb | [3031] | [974] |  | 0/1 |  |
+| `PTR-STICK-HIDE-974` | Hide Stick toggle | pilot (defaulted) | default_2_position_tumb | [3031] | [974] |  | 0/1 | `p_hide_stick_ui_helper` |
 | `STICK-BRAKE-FIX-PTR` | Parking Brake Handle | pilot (defaulted) | default_2_position_tumb | [3027] | [736] |  | 0/1 |  |
 | `STICK-BRAKE-PTR` | Wheel Brakes Handle | pilot (explicit) | stick_button | [3026] | [737] |  | 0/1 momentary |  |
 | `WIPER-MODE-PTR-HISPEED` | Windscreen Wiper Control Switch, SPEED 2 | pilot (defaulted) | default_position_tumb | [3020] | [418] |  | 0.25 |  |
@@ -479,7 +479,7 @@ rather than from this dump).
 | `SIGHT-CROSSHAIR-BACKUP-PTR` | Sight Crosshair Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3013] | [568] |  | 0/1 |  |
 | `SIGHT-CROSSHAIR-BRIGHNTNESS-KNOB-PTR` | Sight Crosshair Brightness Adjustment | pilot (defaulted) | default_axis | [3011] | [564] |  | 0 to 1 continuous (gain 0.05) |  |
 | `SIGHT-GRID-BACKUP-PTR` | Sight Grid Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3012] | [569] |  | 0/1 |  |
-| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  | 0 to 1 continuous (gain 0.05) | `sight_grid_brightness` |
+| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  | 0 to 1 continuous (gain 0.05) | `p_sight_grid_brightness` |
 | `SIGHT-HOR-KNOB-PTR` | Sight Crosshair Horizontal Adjustment | pilot (defaulted) | default_axis | [3006] | [566] |  | 0 to 1 continuous (gain 0.0125) |  |
 | `SIGHT-MAN-AUTO-PTR` | Sight mode MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3001] | [553] |  | 0/0.5 |  |
 | `SIGHT-SYNC-UNSYNC-PTR` | Sight mode SYNC/ASYNC | pilot (defaulted) | default_2_position_tumb | [3002] | [554] |  | 0/0.5 |  |
@@ -712,7 +712,7 @@ rather than from this dump).
 | `MAP-LIGHT-PTR` | Map Highlight  BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3011] | [192] |  | -1/0/1 |  |
 | `MAPDISPLAY-HOR-PTR` | Set the horizontall position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3006] | [983] |  | 0 to 1 continuous (gain 0.05) |  |
 | `MAPDISPLAY-POWER-PTR` | Map Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [984] |  | 0/1 |  |
-| `MAPDISPLAY-SCALE-PTR` | Map Scale Selector | pilot (defaulted) | default_2_position_tumb | [3001] | [985] |  | 0/1 |  |
+| `MAPDISPLAY-SCALE-PTR` | Map Scale Selector | pilot (defaulted) | default_2_position_tumb | [3001] | [985] |  | 0/1 | `p_map_scale_selector` |
 | `MAPDISPLAY-VERT-PTR` | Set the vertical position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3004] | [291] |  | 0 to 1 continuous (gain 0.05) |  |
 
 ## Device 47 -- ARC_15_PANEL_P
@@ -843,8 +843,8 @@ rather than from this dump).
 
 | Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  | 0/1 | `intercom_1` |
-| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  | 0/1 | `intercom_2` |
+| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  | 0/1 | `p_intercom_2` |
+| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  | 0/1 | `p_intercom_1` |
 | `SPU8-CV-PTR` | Circular Call Button (N/F) | pilot (defaulted) | default_button | [3008] | [454] |  | 0/1 momentary |  |
 | `SPU8-EXT-PTR` | Radio/ICS Switch | pilot (defaulted) | default_2_position_tumb | [3004] | [456] |  | 0/1 |  |
 | `SPU8-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | pilot (defaulted) | multiposition_switch | [3003] | [455] |  | 0/0.2/0.4/0.6/0.8/1 |  |
@@ -864,7 +864,7 @@ rather than from this dump).
 | `DEV6201-ERASE-PTR` | IFF Transponder Erase Button - Push to erase | pilot (defaulted) | default_button | [3005] | [329] |  | 0/1 momentary |  |
 | `DEV6201-MAIN-BACKUP-PTR` | IFF Transponder Device Selector Switch, WORK/RESERVE | pilot (defaulted) | default_2_position_small_tumb | [3002] | [336] |  | 0/1 |  |
 | `DEV6201-NOT-USED-PTR` | IFF Transponder Device Mode Switch, 1/2 | pilot (defaulted) | default_2_position_small_tumb | [3003] | [332] |  | 0/1 |  |
-| `DEV6201-POWER-PTR` | IFF Transponder Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [383] |  | 0/1 |  |
+| `DEV6201-POWER-PTR` | IFF Transponder Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [383] |  | 0/1 | `p_iff_power` |
 | `DEV6201-SOS-COVER-PTR` | IFF Transponder Disaster Switch Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3006] | [330] |  | 0/1 |  |
 | `DEV6201-SOS-PTR` | IFF Transponder Disaster Switch, ON/OFF | pilot (defaulted) | default_2_position_small_tumb | [3007] | [331] |  | 0/1 |  |
 
@@ -962,7 +962,7 @@ rather than from this dump).
 | `GFORCE-RESET-PTR001` | Check RWR | pilot (defaulted) | default_button | [3004] | [990] |  | 0/1 momentary |  |
 | `MAPDISPLAY-VERT-PTR001` | RWR DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3003] | [989] |  | 0/1 |  |
 | `SIRENA-POWER-PTR` | RWR Power | pilot (defaulted) | default_2_position_tumb | [3001] | [366] |  | 0/1 |  |
-| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  | 0/1 | `rwr_signal` |
+| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  | 0/1 | `p_rwr_signal` |
 
 ## Device 68 -- KM_2
 
