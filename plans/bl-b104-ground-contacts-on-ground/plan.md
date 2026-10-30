@@ -135,12 +135,18 @@ channel.
 ### Implementation Plan
 
 **Stage 1 — Unit domain on the wire and through perception (no belief change).**
-- aircraft-layer: forward the world object's category from `Export.lua` (field and values per the
-  recon note) into an optional schema field; bump `EXPORT_SCRIPT_VERSION`. Old scripts parse with
-  `None`.
-- `perception/domain.py`: `surface_domain(category, ..., agl_m) -> bool | None`. Ground, ships and
-  statics → surface; airplanes and weapons → air; helicopters → air until Stage 5; anything
-  unrecognised or missing → `None`.
+- aircraft-layer: forward `Type.level1` and `Type.level2` from `Export.lua` into two optional
+  integer schema fields (`category`, `subcategory`); bump `EXPORT_SCRIPT_VERSION`. Old scripts
+  parse with `None`. Recon: `LoGetWorldObjects` returns `LoGetObjectById`'s documented shape,
+  `Type = {level1..level4}` included (DCS's own `Export.lua` template comments; the 2026-10-29
+  note's "no Type table" read a Hoggit field-subset example, now corrected).
+- `perception/domain.py`: `surface_domain(category, subcategory, agl_m) -> bool | None`, on the
+  wsType enumeration (community-convergent, not yet read from the installed `wsTypes.lua`):
+  `level1` Ground (2), Navy (3), Static (5) → surface; Weapon (4) → air; Air (1) → air, with
+  helicopters (`level2` = 2) going through Stage 5's height test; Destroyed (6), anything else or
+  missing → `None`. **`Flags.Static` is not the discriminator**: it is the mission-editor "placed
+  without AI" flag, and those units are still ordinary ground vehicles. Static (5) is included as
+  surface because whatever lands there (airfields, wrecks, structures) is on the ground either way.
 - **`None` is treated as air — today's flat model, bit for bit.** Fail direction chosen so an
   un-redeployed `Export.lua` changes nothing rather than guessing; log once per session at WARNING
   when a non-empty poll carries no category at all, so the test card's "redeploy Export.lua" step
@@ -223,10 +229,18 @@ channel.
   behaviour change across every contact and needs its own decision.
 
 **Stage 5 — Helicopters landed or hovering low follow the ground rule (explore Q4).**
-- Gated on the recon note's answer for per-unit height above ground (see Risks). Carrier, join key
-  and coverage per that note; `domain.surface_domain` treats a helicopter as surface iff its AGL is
-  known and ≤ `HELI_SURFACE_AGL_MAX_M` (tunable, default 10 m, judgement; *"a few metres up"*).
-  Unknown AGL → air (today's model).
+- Carrier (recon Q3): `petrobrain-line-of-sight-hook.lua` already runs at 1 Hz in the mission
+  scripting env over the look-wedge candidates and joins by unit name. Add one pcall'd
+  `land.getHeight({x = p.x, y = p.z})` per candidate and publish `agl_m = p.y − height`
+  (`land.getHeight` is already confirmed live by world-model; cost was load-tested). Schema field
+  optional; body-layer joins it beside the LOS verdict.
+- `domain.surface_domain` treats a helicopter as surface iff its AGL is known and
+  ≤ `HELI_SURFACE_AGL_MAX_M` (tunable, default 10 m, judgement; *"a few metres up"*). Unknown AGL →
+  air (today's model). **Height only, no speed condition.** MOOSE pairs height with speed < 1 m/s
+  to recognise "landed", but the user's rule also covers a low hover, and a helicopter passing
+  through a few metres AGL is, for the pilot, at the ground in that moment. `Unit:inAir()` is not
+  used: it does not exist on `StaticObject`, and it reports `true` for a helicopter sitting on a
+  building.
 - Independent of Stages 2–4 and the rarest case in this item; can ship later without holding the
   rest.
 
@@ -281,14 +295,16 @@ and called out on the test card.
 
 ### Risks & Unknowns
 
-- **Category on the wire is a DCS-internals claim.** Two research notes disagree on whether
-  `LoGetWorldObjects` carries `Type.level1..4`; the recon note settles what can be settled from the
-  Mac, and a one-line live check is on the Stage 6 card regardless. If the field were absent, Stage 1
-  falls back to the user's option B (AGL from the LOS hook for every candidate), which is Stage 5's
-  carrier generalised — more wire work, same body-layer shape.
-- **Helicopter AGL coverage**: whatever carries it may only cover units in the current look wedge
-  or bubble; a helicopter admitted outside that coverage falls back to air. Acceptable for a rare
-  case; stated so it is not discovered.
+- **Category values were never read live.** The `Type` field is documented. The enumeration comes
+  from community sources that agree with each other, not from the installed `wsTypes.lua`. Still
+  open: whether mission-placed static vehicles report `level1` 2 or 5 (surface either way under the
+  rule above), and whether helicopters always report `level2` = 2. The Stage 1 WARNING log plus a
+  one-shot `Type` dump on the Stage 6 card settles both. If the field were absent live, Stage 1
+  falls back to option B: AGL from the LOS hook for every candidate, which is Stage 5's carrier
+  generalised. That means more wire work but the same body-layer shape.
+- **Helicopter AGL coverage**: the LOS hook covers the look wedge inside 10 km, which matches what
+  the naked-eye channel admits. A helicopter admitted without a fresh hook record falls back to the
+  air model. Acceptable for a rare case; stated so it is not discovered.
 - **Systematic offset now scales with the fused σ**, so a heavily-observed close contact's floor is
   tighter than today's. Intended (closer = better), but it moves `position_belief`'s floor, which is
   computed from the declared single-look σ — the Stage 3 convergence test pins the interaction.
