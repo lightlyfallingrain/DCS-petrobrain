@@ -66,7 +66,16 @@ already established for the sibling feed (`LoGetWorldObjects`'s own
 `UnitName`) -- `LoGetWorldObjects` and the mission-scripting environment
 share no other identifier. A duplicate `unit_name` within one poll is
 resolved last-entry-wins at this parsing step, the same documented,
-accepted limitation `unit_velocity.py`'s own `from_wire` carries."""
+accepted limitation `unit_velocity.py`'s own `from_wire` carries.
+
+`agl_m` (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5) is a
+fourth, optional field on each entry: `"<unit_name>:<building_clear01>:
+<terrain_clear01>:<agl_m>"`. `None` when the field is absent entirely (an
+older deployed Hook script, pre-Stage-5) or present but empty (the
+Hook's own `land.getHeight` pcall failed that poll) -- never a guessed
+height, same tri-state discipline as `WorldObjectSample.is_ownship`.
+Helicopter-landed/hovering detection is the only consumer; every other
+LOS reader is unaffected by this field's presence or absence."""
 
 from __future__ import annotations
 
@@ -88,11 +97,16 @@ class LineOfSightVerdict:
     unit_name: str
     building_clear: bool
     terrain_clear: bool
+    #: `None` when absent (legacy wire) or empty (the Hook's own pcall
+    #: failed that poll) -- see module docstring. Default `None` keeps
+    #: every pre-Stage-5 construction site compiling.
+    agl_m: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "building_clear": self.building_clear,
             "terrain_clear": self.terrain_clear,
+            "agl_m": self.agl_m,
         }
 
 
@@ -194,26 +208,65 @@ def _parse_int(raw: str, field: str) -> int:
         ) from exc
 
 
+def _looks_like_agl_token(raw: str) -> bool:
+    """`True` for an empty string (no verdict that poll) or anything
+    `float()` accepts -- the shape Stage 5's own Lua side always emits
+    for the fourth field, never for `building_clear01`/`terrain_clear01`
+    (always a literal `"0"`/`"1"`)."""
+    if raw == "":
+        return True
+    try:
+        float(raw)
+    except ValueError:
+        return False
+    return True
+
+
 def _parse_entry(entry: str) -> LineOfSightVerdict:
     # rsplit, not split: a unit_name is not expected to contain a colon, but
     # DCS mission-editor names are free text -- same defensive posture
     # `unit_velocity.py`'s own `_parse_entry` takes toward untrusted
     # Hook-side strings.
-    fields = entry.rsplit(":", 2)
-    if len(fields) != 3:
-        raise LineOfSightParseError(
-            f"expected '<unit_name>:<building_clear01>:<terrain_clear01>', "
-            f"got {entry!r}"
-        )
-    unit_name, building_str, terrain_str = fields
+    #
+    # `agl_m` (Stage 5) is a fourth, optional trailing field, so an entry
+    # may have either shape on the wire (an old, not-yet-redeployed Hook
+    # script still emits three fields). The two are told apart by content,
+    # not a version flag: the Stage-5 wire always emits `building_clear01`/
+    # `terrain_clear01` as a literal `"0"`/`"1"` and `agl_m` as a float-or-
+    # empty token, so a four-way split whose middle two fields are each
+    # `"0"`/`"1"` and whose last is empty-or-numeric is accepted as the
+    # new shape; anything else falls back to the three-field legacy split.
+    # This cannot perfectly disambiguate a colon-containing unit_name in
+    # every case -- the same documented, accepted limitation `unit_
+    # velocity.py`'s own `_parse_entry` already carries for that field.
+    four_fields = entry.rsplit(":", 3)
+    if (
+        len(four_fields) == 4
+        and four_fields[1] in ("0", "1")
+        and four_fields[2] in ("0", "1")
+        and _looks_like_agl_token(four_fields[3])
+    ):
+        unit_name, building_str, terrain_str, agl_str = four_fields
+    else:
+        three_fields = entry.rsplit(":", 2)
+        if len(three_fields) != 3:
+            raise LineOfSightParseError(
+                "expected '<unit_name>:<building_clear01>:<terrain_clear01>"
+                "[:<agl_m>]', "
+                f"got {entry!r}"
+            )
+        unit_name, building_str, terrain_str = three_fields
+        agl_str = ""
     if not unit_name:
         raise LineOfSightParseError(f"empty unit_name in entry {entry!r}")
     building_clear = _parse_bool01(building_str, entry)
     terrain_clear = _parse_bool01(terrain_str, entry)
+    agl_m = None if agl_str == "" else float(agl_str)
     return LineOfSightVerdict(
         unit_name=unit_name,
         building_clear=building_clear,
         terrain_clear=terrain_clear,
+        agl_m=agl_m,
     )
 
 

@@ -116,7 +116,61 @@ def test_to_dict_round_trip_shape() -> None:
     )
     data = snapshot.to_dict()
     assert data["verdicts"] == {
-        "Truck-1": {"building_clear": True, "terrain_clear": False}
+        "Truck-1": {
+            "building_clear": True,
+            "terrain_clear": False,
+            "agl_m": None,
+        }
     }
     assert data["hour_used"] == 0
     assert data["fov_half_deg_used"] == 45
+
+
+def test_entry_with_agl_m_parses() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0:8.5",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.verdicts["Heli-1"].agl_m == 8.5
+    assert snapshot.verdicts["Heli-1"].building_clear is True
+    assert snapshot.verdicts["Heli-1"].terrain_clear is False
+
+
+def test_entry_with_empty_agl_m_is_none() -> None:
+    # The Hook's own land.getHeight pcall failed that poll -- never
+    # coerced to 0.0.
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0:",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.verdicts["Heli-1"].agl_m is None
+
+
+def test_entry_without_agl_field_is_none() -> None:
+    # A pre-Stage-5 Hook script, three fields only.
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.verdicts["Heli-1"].agl_m is None
+
+
+def test_entry_with_negative_agl_m_parses() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0:-3.2",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.verdicts["Heli-1"].agl_m == -3.2
+
+
+def test_to_dict_round_trips_agl_m() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0:8.5",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.to_dict()["verdicts"]["Heli-1"]["agl_m"] == 8.5

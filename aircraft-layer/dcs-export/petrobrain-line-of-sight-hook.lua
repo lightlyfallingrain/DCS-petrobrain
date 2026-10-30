@@ -220,7 +220,13 @@ Wire format (this script -> collector), UDP, one JSON object per poll
     {"payload": "<units_in_bubble>|<units_in_wedge>|<sightlines_computed>|"
                 "<hour_used>|<fov_half_deg_used>|<dcs_model_time_s>|<entries>",
      "bridge_call_ms": <float>}
-`entries` is `"<unit_name>:<building_clear01>:<terrain_clear01>;..."`.
+`entries` is `"<unit_name>:<building_clear01>:<terrain_clear01>:<agl_m>;..."`.
+`agl_m` (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5) is one
+more pcall'd `land.getHeight` per candidate -- `candidate_world_alt -
+terrain_height`, the same cost class this script already pays per
+candidate (two engine calls above). Empty (`""`) when the call failed,
+never a guessed value; a legacy consumer parsing only the first three
+fields of an entry is unaffected (the field is appended, never inserted).
 
 Reuses DCS's own shipped JSON encoder (`Scripts\JSON.lua`) and LuaSocket's
 `package.path`/`cpath` extension, mirroring every other Hook script here.
@@ -590,6 +596,19 @@ local function terrainClear(fromPoint, toPoint)
     return visible == true
 end
 
+-- `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5: the
+-- helicopter landed/hovering-low rule's one building block. DCS's
+-- `land.getHeight` 2D-point convention carries the world z/north-south
+-- coordinate in the `y` field -- the same convention `land.isVisible`
+-- above already uses for its 3D points, documented at the AGL call site
+-- specifically because it is easy to mis-key. `nil` (never a guessed
+-- value) when the pcall fails.
+local function unitAGL(c)
+    local ok, terrainHeight = pcall(land.getHeight, { x = c.x, y = c.z })
+    if not ok or terrainHeight == nil then return nil end
+    return c.y - terrainHeight
+end
+
 local parts = {}
 local sightlinesComputed = 0
 local observerPoint = { x = ox, y = oy + 2.0, z = oz }
@@ -600,8 +619,10 @@ for i = 1, #candidates do
     local targetPoint = { x = c.x, y = c.y + 2.0, z = c.z }
     local bClear = buildingClear(observerPoint, targetPoint)
     local tClear = terrainClear(observerPoint, targetPoint)
+    local agl = unitAGL(c)
     sightlinesComputed = sightlinesComputed + 1
     parts[#parts + 1] = c.name .. ":" .. (bClear and "1" or "0") .. ":" .. (tClear and "1" or "0")
+        .. ":" .. (agl ~= nil and tostring(agl) or "")
 end
 
 -- The units-vs-statics breakdown cannot cross the `dostring_in` boundary

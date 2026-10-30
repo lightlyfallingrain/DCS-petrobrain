@@ -180,11 +180,16 @@ class FakeAircraftClient:
         *,
         blocked_unit_names: frozenset[str] = frozenset(),
         firing: dict[str, Any] | None = None,
+        agl_by_unit_name: dict[str, float] | None = None,
     ) -> None:
         self._world_objects = world_objects
         self._unit_velocity = unit_velocity
         self._blocked_unit_names = blocked_unit_names
         self._firing = firing
+        #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 --
+        #: per-test override for the LOS hook's `agl_m` field. `None`
+        #: (default) omits it entirely, matching a pre-Stage-5 Hook.
+        self._agl_by_unit_name = agl_by_unit_name or {}
         self.world_objects_calls = 0
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
@@ -208,10 +213,13 @@ class FakeAircraftClient:
             if not isinstance(name, str):
                 continue
             blocked = name in self._blocked_unit_names
-            verdicts[name] = {
+            verdict: dict[str, Any] = {
                 "building_clear": not blocked,
                 "terrain_clear": not blocked,
             }
+            if name in self._agl_by_unit_name:
+                verdict["agl_m"] = self._agl_by_unit_name[name]
+            verdicts[name] = verdict
         return {
             "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
             "hour_used": None,
@@ -250,12 +258,14 @@ def _source(
     unit_velocity: dict[str, Any] | None = None,
     blocked_unit_names: frozenset[str] = frozenset(),
     firing: dict[str, Any] | None = None,
+    agl_by_unit_name: dict[str, float] | None = None,
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
     client = FakeAircraftClient(
         world_objects,
         unit_velocity,
         blocked_unit_names=blocked_unit_names,
         firing=firing,
+        agl_by_unit_name=agl_by_unit_name,
     )
     source = NakedEyePerceptionSource(
         aircraft_client=client,  # type: ignore[arg-type]
@@ -1365,6 +1375,77 @@ def test_surface_cluster_range_uses_the_fused_two_cue_estimator() -> None:
     # comparison -- the fused sigma must be tighter (E3).
     _sigma_cross_m, sigma_a_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
     assert observation.position_uncertainty.sigma_down_m < sigma_a_m
+
+
+def test_helicopter_below_agl_threshold_is_treated_as_surface() -> None:
+    # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 -- a
+    # helicopter whose LOS-hook AGL is at or below HELI_SURFACE_AGL_MAX_M
+    # (10 m default) follows the ground rule.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,  # wsType_Air
+                subcategory=2,  # wsType_Helicopter
+                altitude_m=205.0,
+            )
+        ]
+    }
+    source, _client = _source(world_objects, agl_by_unit_name={"unit_1": 5.0})
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m == 205.0
+
+
+def test_helicopter_above_agl_threshold_stays_air() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,
+                subcategory=2,
+            )
+        ]
+    }
+    source, _client = _source(world_objects, agl_by_unit_name={"unit_1": 150.0})
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
+
+
+def test_helicopter_with_no_live_agl_verdict_stays_air() -> None:
+    # The LOS hook's verdict carries no `agl_m` at all this poll (a
+    # pre-Stage-5 Hook, or this object's verdict simply omitting it) --
+    # unknown AGL resolves to air, same unknown-stays-air posture as a
+    # missing category.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,
+                subcategory=2,
+            )
+        ]
+    }
+    source, _client = _source(world_objects)  # no agl_by_unit_name override
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
 
 
 def test_air_cluster_still_uses_perturbed_bearing_range_unchanged() -> None:

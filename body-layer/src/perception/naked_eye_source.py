@@ -748,6 +748,19 @@ class NakedEyePerceptionSource:
                         is not None
                         else None
                     ),
+                    # `plans/bl-b104-ground-contacts-on-ground/plan.md`
+                    # Stage 5 -- the LOS hook's own `agl_m`, joined by the
+                    # same `unit_name` lookup `live_los_clear` above
+                    # already does; consumed only by `is_surface`'s
+                    # helicopter branch. `None` for any candidate outside
+                    # the look wedge this poll (no live verdict at all),
+                    # same unknown-stays-air posture as a missing verdict.
+                    agl_m=(
+                        resolved.agl_m
+                        if (resolved := los_by_object_id.get(obj.get("object_id")))
+                        is not None
+                        else None
+                    ),
                 )
                 for obj in raw_objects
             ]
@@ -1648,6 +1661,12 @@ class _ResolvedLos:
 
     building_clear: bool
     terrain_clear: bool
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 -- the
+    #: carrier this plan reuses rather than opening a new channel (recon's
+    #: own finding 7). `None` when the verdict carries no `agl_m` at all
+    #: (a pre-Stage-5 Hook script) or an explicit `None` (the Hook's own
+    #: `land.getHeight` pcall failed that poll) -- never a guessed height.
+    agl_m: float | None = None
 
     @property
     def live_los_clear(self) -> bool:
@@ -1717,8 +1736,10 @@ def _resolve_los_by_unit_name(
         terrain_clear = verdict.get("terrain_clear")
         if not isinstance(building_clear, bool) or not isinstance(terrain_clear, bool):
             continue
+        agl_raw = verdict.get("agl_m")
+        agl_m = float(agl_raw) if isinstance(agl_raw, int | float) else None
         resolved[object_id] = _ResolvedLos(
-            building_clear=building_clear, terrain_clear=terrain_clear
+            building_clear=building_clear, terrain_clear=terrain_clear, agl_m=agl_m
         )
     return resolved, skew_s, hour_used, fov_half_deg_used
 
