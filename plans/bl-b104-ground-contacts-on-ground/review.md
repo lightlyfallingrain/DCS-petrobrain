@@ -447,3 +447,76 @@ bindings patched) rather than trusting the Implementer's reported numbers. Not i
 re-verified this round: Stage 8's own mechanism code (unchanged by this commit, already confirmed
 in the prior round), the `Turn` leg dataclass and the other four scenario tests (unchanged by this
 commit), and the carried-over Optional Refinements.
+
+---
+
+## 2026-10-30 — Security-fix round (Finding 1, `bff85e99`)
+
+Reviewed commit `bff85e99` alone — the response to `security-review.md`'s Required Fix
+(NaN/Infinity on `category`/`subcategory` raising uncaught `ValueError`/`OverflowError` at both
+`aircraft-layer/src/schema/world_objects.py`'s `_optional_int` and
+`body-layer/src/perception/association.py`'s `WorldObjectCandidate.from_dict`). Inputs:
+`security-review.md`, `implementation.md`'s "Security fix round" section, the two diffed files and
+their two new test files.
+
+**Fix correctness and minimality.** Both sites now check `math.isfinite(raw)` before calling
+`int()`, returning `None` instead of raising — exactly the guard `security-review.md` asked for,
+at exactly the two call sites it named, nothing else touched. `aircraft-layer`'s `_optional_int`
+keeps its existing `isinstance` type-rejection path unchanged (confirmed by the untouched,
+still-passing `test_from_json_line_rejects_non_numeric_category`) and only adds the
+non-finite-to-`None` branch. `body-layer`'s new `_finite_int` absorbs a non-numeric/bool value to
+`None` too, which is *broader* than `_optional_int` — checked this deliberately, not just taken on
+the Implementer's word:
+
+- This call site (`WorldObjectCandidate.from_dict`) had **zero** prior type guard on
+  `category_raw`/`subcategory_raw` — they came straight off `data.get(...)` into `int(...)`
+  unconditionally, so a non-numeric value was already a crash before this fix, same severity as
+  the finding itself. Narrowing `_finite_int` to only guard non-finite numbers (matching
+  `_optional_int`'s shape exactly) would have left that pre-existing, equally-reachable crash in
+  place at the one LAN boundary the security review traced as the operative risk.
+- `surface_domain`'s own contract (`perception/domain.py`) treats `category=None` as "unknown,
+  resolves to air" — the same fallback a non-finite or a non-numeric value should get. Absorbing
+  the broader class to `None` here doesn't fabricate a category; it's the same "bad input ->
+  unknown" tri-state discipline this module already applies to `is_ownship`/`heading_true_deg`/
+  `velocity`/`live_los_clear`, just extended to cover a bad type as well as a bad number at a site
+  that is reachable from any LAN peer serving this endpoint, with or without a live DCS session.
+  Accepted as the right call for this site, not a scope-creep flag.
+
+**Tests are real, confirmed by mutation, not by reading.** Reverted each fix in turn (restored
+`int(category_raw)`/`int(subcategory_raw)` unconditionally at both sites) and re-ran the four new
+tests: all four fail red with exactly the `ValueError`/`OverflowError` the security review's own
+repro predicted (`OverflowError: cannot convert float infinity to integer` at the mutated call
+site in both subprojects). Restored both files afterward; `git status --porcelain` clean. This is
+not a decorative test pair — it demonstrably exercises the vulnerable line.
+
+**No regression.** Grepped both subprojects for every other call site of `_optional_int`/
+`_finite_int` — each has exactly the two call sites the fix touches, no other caller affected.
+Grepped the new Stage 7/8 scenario fixtures (`test_bl_b104_association_scenarios.py`,
+`test_bl_b104_scenario_mock_flights.py`) for a `category` value that is non-numeric/NaN/Infinity —
+none, so no existing scenario coverage silently changes behaviour under the broadened
+`_finite_int` guard.
+
+**Checks**, both subprojects, run from fresh `.venv`s built inside each subproject directory
+(`aircraft-layer/.venv`, `body-layer/.venv`) per `CLAUDE.md`'s CWD-only `mypy` rule:
+
+- `aircraft-layer/`: `ruff format --check` pass (75 files), `ruff check` pass, `mypy src` pass (26
+  files), `pytest -q` — 663 passed. Matches `implementation.md`'s reported counts exactly.
+- `body-layer/`: `ruff format --check` pass (190 files — the one reformat `implementation.md`
+  mentions is already committed), `ruff check` pass, `mypy src` pass (79 files), `pytest -q` —
+  2858 passed, 4 xfailed (pre-existing, unrelated). Matches `implementation.md` exactly.
+
+### Verdict (security-fix round)
+
+**APPROVED.** Finding 1 is closed at both sites named in the security review, the fix is minimal
+and scoped to exactly those two functions, the body-layer side's broader non-numeric/bool
+absorption is justified (closes a second, equally-reachable pre-existing crash at a site with no
+prior guard at all, and matches `surface_domain`'s own unknown-stays-`None` contract) rather than
+scope creep, the four new tests are confirmed by mutation to actually exercise the fixed lines, and
+all mandated checks pass in both touched subprojects with no regression found.
+
+### Review Confidence (security-fix round)
+
+Full read of the diff, both input documents, and the two touched source files in full context
+(not just the diff hunks) — plus mutation-testing all four new tests directly rather than trusting
+the pass/fail report. Not re-verified this round: anything else in the BL-B104 batch (Stages 1-5,
+7, 8), which the prior two rounds above already covered and this commit does not touch.

@@ -154,3 +154,18 @@ re-check (quick, scoped to the two touched functions) → DoD, per `AGENTS.md`'s
 loop. Everything else in this batch — the Lua wiring, the dependency posture, the no-omniscience
 boundary, the `agl_m` parsing path, the LAN API's binding posture (unchanged by this feature) — is
 clean.
+
+### Re-check (Reviewer, 2026-10-30, commit `bff85e99`)
+
+Finding 1 is **closed**. Both call sites named above (`aircraft-layer/src/schema/world_objects.py`
+`_optional_int`, `body-layer/src/perception/association.py` `WorldObjectCandidate.from_dict` via
+the new `_finite_int`) now guard with `math.isfinite()` before `int()`, exactly as required.
+Re-ran the original repro from this finding against the fixed code — `WorldObjectSample.from_dict`
+with `category: float('nan')` now returns `category=None` instead of raising. Confirmed the four
+new tests actually exercise the fix by reverting each guard in turn and re-running: all four go
+red with the predicted `ValueError`/`OverflowError` (mutation-tested, not just read). No new
+boundary issue introduced — the body-layer side's broader non-numeric/bool absorption at
+`_finite_int` is scoped to a site that had no prior type guard at all and matches
+`surface_domain`'s existing unknown-stays-`None` contract, not a new gap. Full detail and the
+mechanical checks (both subprojects, fresh venvs, all pass) in `review.md`'s "2026-10-30 —
+Security-fix round" section. Verdict: **APPROVED**, clears to DoD.
