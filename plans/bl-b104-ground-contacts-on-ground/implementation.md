@@ -335,3 +335,190 @@ this worktree)
 6. **No new behaviour-affecting constant was introduced** — this stage is
    test infrastructure only (no `body-layer/src` changes), so the tuning
    mechanism does not apply here.
+
+## Stage 8 — motion-aware position-uncertainty growth
+
+### Files Changed
+
+- `body-layer/src/belief/association_over_time.py` — new tunable
+  `UNOBSERVED_MOTION_GROWTH_RATE_MPS` (0.3 m/s, `lo=0.0, hi=1.0`,
+  `status="judgement"`); `contact_growth_rate_mps` gains the
+  motion/domain gate (installation components win first, unconditional
+  `0.0`; air contacts — `not contact.on_surface` — take the
+  unconditional class-rate branch regardless of `Contact.motion`, bit-
+  identical to pre-Stage-8; surface contacts with `motion` `"stopped"`
+  or `None` get the tiny rate, `"moving"` gets the class rate).
+- `body-layer/config/defaults.toml` — regenerated.
+- `body-layer/tests/test_association_over_time.py` — four new tests
+  (see below); `_percept` helper gained a `surface_alt_m` parameter.
+
+### Tests Added
+
+- `test_contact_growth_rate_mps_surface_contact_unobserved_motion_is_tiny`
+  — a surface contact with `motion=None` and with
+  `motion=MotionBelief(state="stopped", ...)` both resolve to
+  `UNOBSERVED_MOTION_GROWTH_RATE_MPS`.
+- `test_contact_growth_rate_mps_surface_contact_moving_uses_class_rate`
+  — `motion.state == "moving"` resolves to the class rate (15.0 m/s,
+  `OP_TRUCK`), unchanged from pre-Stage-8.
+- `test_contact_growth_rate_mps_air_contact_stays_bit_identical` — an
+  air contact (`on_surface=False`) resolves to the class rate
+  regardless of `motion` being `None`/`"stopped"`/`"moving"` — the
+  bit-identical guarantee, asserted directly.
+- `test_contact_growth_rate_mps_installation_component_wins_unconditionally`
+  — `0.0` for an installation-component contact regardless of
+  `on_surface` or `motion`.
+
+### Checks (body-layer/)
+
+- ruff format --check: pass
+- ruff check: pass
+- mypy src: pass (79 source files)
+- pytest: pass (2855 passed, 4 xfailed — same 4 pre-existing,
+  unrelated xfails Stages 1–7 already carried)
+
+### Notable Discoveries
+
+1. **The plan's own Stage 8 "Tests this stage extends vs. rewrites"
+   section was checked against the real fixtures before touching
+   anything, and found wrong for both `test_contacts.py` fold-
+   displacement tests it named** — confirmed by running them unmodified
+   (both pass, no code change) and by direct inspection
+   (`contact_growth_rate_mps(contact_d)` returns `15.0`, not the tiny
+   rate). The plan's own pseudocode gates the tiny rate on
+   `contact.on_surface`, and `tests/test_contacts.py`'s `_observation`
+   helper defaults `surface_alt_m=None` and is never overridden by
+   either flagged test — so the contacts those tests build have
+   `on_surface=False` throughout (both at founding and after every
+   fold), which takes the unconditional class-rate branch exactly as
+   before this stage. The plan's assumption that these ground-vehicle-
+   classified contacts would be `on_surface=True` by default did not
+   hold against the actual fixture. **Left unmodified** — the dispatch's
+   permission to rewrite them was not exercised because rewriting would
+   have changed a passing, correct test for no reason. The full
+   `test_contacts.py` suite (79 tests) and the full body-layer suite
+   (2855 passed, 4 xfailed, matching the pre-Stage-8 baseline plus the
+   4 tests actually added) both pass unmodified.
+2. **`test_lost_contact_rejoins_clustering_cleanly_on_reacquisition`'s
+   docstring staleness (plan's own note) is pre-existing and unrelated
+   to Stage 8, for the same reason as above** — its contacts are also
+   `on_surface=False` by the same default, so Stage 8 changes nothing
+   about this test's behaviour either; the docstring's `GATE_GROWTH_
+   RATE_MPS` reference was already stale before this stage (that name
+   is used elsewhere in the module only as a *default-parameter*
+   fallback, not as what this test's own path actually reads). Not
+   touched, per the plan's own "extend/correct the comment, not the
+   test" instruction and the "prune only the comment you are standing
+   next to" rule — this stage did not touch this test or the code path
+   its docstring describes, so pruning it here would be a drive-by
+   edit, not a change local to what this stage actually modified.
+3. **The empirical check this stage's own worked-numbers section asked
+   for (Stage 7 amendment's restored closing-run scenario) was run, and
+   held**: see Stage 7 amendment's own section below for the measured
+   outcome (no fold).
+
+## Stage 7 amendment — Turn leg, real manoeuvres, scenario 3 as a genuine closing run
+
+### Files Changed
+
+- `body-layer/tests/support/mock_flight_scenario.py` — new `Turn`
+  dataclass (heading interpolated per-step, entry heading ->
+  `end_heading_deg`, linear in `step / n_steps`; `bank_deg` a stated,
+  constant telemetry value for the leg's duration, `0.0` elsewhere,
+  same convention as `pitch_deg`). `FlightLeg` widened to
+  `Level | Descend | Turn`. `build_scenario_frames`'s per-leg loop now
+  branches on `isinstance(leg, Turn)` for per-step heading/dx/dz
+  (unlike `Level`/`Descend`, which still compute heading/dx/dz once per
+  leg); `_build_frame` gained a `bank_deg` parameter, threaded into
+  `bank_rad` (previously hardcoded `0.0`).
+- `body-layer/tests/test_bl_b104_scenario_mock_flights.py`:
+  - Scenario 3 (`test_two_groups_one_bearing_stay_two_contacts`)
+    rebuilt as `Level` (offset heading 35°) → `Turn` (35°→0°) → `Level`
+    (closing, 300 m AGL), replacing the fully-stationary redesign.
+    Geometry (start position, offset heading/duration, turn duration/
+    bank, final closing duration) computed by direct numeric
+    integration of the real `build_scenario_frames` trajectory via a
+    throwaway script (not guessed) — see Measurement below.
+  - Scenario 1 (`test_run1_overflight_...`) and scenario 4a
+    (`test_cockpit_mask_forward_boundary_...`) each gained a short
+    `Turn` onto their existing leg's heading, per the main loop's
+    "every scenario should contain at least one non-Level leg";
+    scenario 2 (`test_run2_shallow_approach_...`) gained the same, with
+    its closing `Level` leg's duration retuned (82s → 68s) so the final
+    true range lands close to its original ~900 m (942 m, confirmed by
+    the same throwaway-script integration).
+  - Scenario 3's assertion rewritten from "exactly two contacts at
+    every poll once any were seen" to "non-decreasing, and 2 by the end
+    of the run" — see Measurement below for why.
+  - Scenario 2's "steep-depression blow-up" comment corrected per
+    review.md's Optional Refinement.
+  - Sight-tracking assertion (review.md's Finding 3/Optional
+    Refinement) investigated and **not added** — see Notable Discovery
+    below.
+
+### Measurement — does the restored closing-run scenario 3 fold?
+
+**No.** Run empirically (not assumed from Stage 8's own order-of-
+magnitude argument), via a probe script driving the real threaded
+pipeline and recording `(t_sim, len(store.contacts), [contact ids])`
+every poll:
+
+```
+t= 80.0  contacts=0
+t= 85.0  contacts=1  ['CONTACT_1']   <- near group founds
+...
+t=130.0  contacts=1  ['CONTACT_1']
+t=135.0  contacts=2  ['CONTACT_1', 'CONTACT_2']   <- far group founds
+...
+t=165.0  contacts=2  ['CONTACT_1', 'CONTACT_2']
+```
+
+`store.events` carries exactly two `CONTACT_DETECTED` events (one per
+group), never a third — the count only ever increases, never drops
+from 2 back to 1. The true-geometry closest approach to the near group
+in this run is ~508 m (inside the 743 m, 300 m AGL forward-mask
+threshold), so the near group genuinely is masked during this run, not
+merely closed-on — this is a real exercise of the geometry Finding 1
+described, not a geometry chosen to avoid it (the opposite of the
+redesign review.md flagged).
+
+**Why the original fix's assertion ("always exactly 2 once any were
+seen") was itself wrong, caught by running it rather than assumed**:
+the near group is admitted (founds `CONTACT_1`) well before the far
+group is in range at all — there is a real, expected single-contact
+*prefix* (`t=85` through `t=130`) that is not a fold, just "the far
+group hasn't been seen yet." The actual E5 fold signature is the count
+**dropping back to 1 after reaching 2** (a later look merging into an
+earlier, still-founded contact), which never happens here. The
+assertion was corrected to `contact_counts == sorted(contact_counts)`
+(non-decreasing) and `contact_counts[-1] == 2` (both founded by the
+end) — the invariant that actually distinguishes a fold from a normal,
+staggered founding sequence.
+
+Per the dispatch's own stop condition, since this run does **not**
+fold with Stage 8 in place, no escalation is needed and the gate/
+scenario were not retuned or re-flattened.
+
+### Notable Discoveries
+
+1. **The sight-tracking assertion review.md's Finding 3/Optional
+   Refinement asked for is untestable in this harness, confirmed by
+   running it, not assumed.** `runner.sight_head.mode` stays `"off"`
+   for scenario 2's entire run, before and after `"engage"` —
+   `aim_source` is `"belief"` throughout regardless, for the same
+   reason this scenario already documents `weapon="missiles"` as out
+   of scope: the sight only leaves `"off"` mode once the guidance
+   unit's readiness/effector-engine wiring is in place, which this
+   harness deliberately does not build. Asserting `aim_source !=
+   "belief"` here would be a tautological failure the harness could
+   never pass — not a check of the real mechanism. Recorded in the
+   test's own docstring instead of as an assertion; a scenario that
+   actually exercises sight tracking across `engage` needs the same
+   effector-engine wiring the `weapon="missiles"` note already flags
+   as a later addition.
+2. **Scenario 3's new geometry and scenario 2's retuned duration were
+   both derived by direct numeric integration of the real
+   `build_scenario_frames` function in a throwaway script** (not
+   hand-calculated from first principles) — the same practice this
+   plan's own `implementation.md` already used for scenario 2's
+   original 900 m stopping point, kept rather than reinvented.
