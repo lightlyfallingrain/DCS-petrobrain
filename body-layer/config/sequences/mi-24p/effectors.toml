@@ -45,19 +45,35 @@ values = { on = 1.0, off = 0.0 }
 source_element = "ARMAMENT-POWER-OP-PTR"   # arg 673
 values = { armed = 1.0, safe = 0.0 }
 
-[effectors.rwr_signal]
+[effectors.p_rwr_signal]
 source_element = "SIRENA-SIGNAL-PTR"   # arg 365
 values = { on = 1.0, off = 0.0 }
 
-[effectors.sight_grid_brightness]
+[effectors.p_sight_grid_brightness]
 source_element = "SIGHT-GRID-BRIGHNTNESS-KNOB-PTR"   # arg 567
 values = { off = 0.0, third = 0.3, half = 0.5, full = 1.0 }
 
-[effectors.intercom_1]
+[effectors.p_intercom_2]
 source_element = "SPU8-1-ON-OFF-PTR"   # arg 376
 values = { on = 1.0, off = 0.0 }
 
-[effectors.intercom_2]
+[effectors.p_intercom_1]
 source_element = "SPU8-2-ON-OFF-PTR"   # arg 377
+values = { on = 1.0, off = 0.0 }
+
+[effectors.p_wpn_selector]
+source_element = "WEAP-SELECT-KNOB-PTR"   # arg 523
+values = { off = 0.0, GM_30 = 0.1, FXD_MG_7_62_AND_12_7 = 0.2, FXD_MG_12_7 = 0.3, FXD_MG_7_62 = 0.4, FXD_MG_30 = 0.5, rockets = 0.6, bomb = 0.7, uslp = 0.8 }
+
+[effectors.p_hide_stick_ui_helper]
+source_element = "PTR-STICK-HIDE-974"   # arg 974
+values = { on = 1.0, off = 0.0 }
+
+[effectors.p_map_scale_selector]
+source_element = "MAPDISPLAY-SCALE-PTR"   # arg 985
+values = { up = 1.0, down = 0.0 }
+
+[effectors.p_iff_power]
+source_element = "DEV6201-POWER-PTR"   # arg 383
 values = { on = 1.0, off = 0.0 }
 
