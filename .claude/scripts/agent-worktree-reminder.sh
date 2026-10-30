@@ -30,7 +30,7 @@ prompt=$(echo "$input" | jq -r '.tool_input.prompt // empty' 2>/dev/null || true
 # Every role that reads or verifies code. Explore/general-purpose are read-only
 # searches with no verification claim attached, so they are left out.
 case "$role" in
-    architect|implementer|reviewer|debugger|dod|security|performance-reviewer|investigator) ;;
+    architect|implementer|reviewer|debugger|dod|security|performance-reviewer|investigator|aligner) ;;
     *) exit 0 ;;
 esac
 

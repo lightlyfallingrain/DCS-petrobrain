@@ -79,7 +79,7 @@ Each subproject keeps its **own `.venv`**, and `ruff`/`mypy`/`pytest` are genera
 
 ## Agents
 
-The agent roles are whatever `.claude/agents/` currently holds — read that directory rather than a count written here. They are the template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus this project's own `investigator`. Each role's model is declared in its own file's frontmatter, which is the only place it is true; most are `claude-sonnet-5`. **`dod` runs on sonnet, not haiku** — raised 2026-09-20 (user
+The agent roles are whatever `.claude/agents/` currently holds — read that directory rather than a count written here. They are the template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus this project's own `investigator` and `aligner` (behaviour sanity of a goal and its plan, before and after Architect — `AGENTS.md`, "Behaviour alignment"). Each role's model is declared in its own file's frontmatter, which is the only place it is true; most are `claude-sonnet-5`. **`dod` runs on sonnet, not haiku** — raised 2026-09-20 (user
 direction) after a cheap final gate reported work as verified when it was not; `docs/AGENT_ROLES.md`
 has what that cost, for anyone tempted to downgrade the last gate to save money again. For
 architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
