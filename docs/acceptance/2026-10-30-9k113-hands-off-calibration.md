@@ -37,9 +37,9 @@ just recorded as accepted risk.
    555/566 + gimbal trace (`aircraft_layer_slew_trace.log`), and `aircraft_layer_debug.flag` if you
    want the one-line load-time confirmation (`9K113 hands-off switch is ACTIVE...` in
    `aircraft_layer_debug.log`).
-3. Launch `body.py` with `--slew-trace <path>` so the ownship attitude/position and per-poll servo
-   state are logged alongside the Lua trace (see `body-layer/CLAUDE.md`, "## What this is" →
-   `--slew-trace`).
+3. Run body-layer the same way as on 10-30, so a stamped `dcs-slew-trace-*.jsonl` lands in
+   `body-layer/logs`. It holds the target's true elevation and ownship attitude, which is the
+   ground truth.
 4. Air start, guidance unit warm. OBSERV on. DCS AI Petrovich overlay off (no bearing on this
    test, but keep the usual posture).
 5. **Check `aircraft_layer_debug.log` (or the console) for the hands-off confirmation line before
@@ -48,23 +48,16 @@ just recorded as accepted risk.
 
 ## Do / expect / record
 
-1. **Do:** hover near a ground target at a known, measurable depression angle (e.g. a target at a
-   known range with ownship at a known height AGL — your choice of method for getting a reliable
-   angle). Hand-slew the 9K113 by its own player-axis control onto that target and hold steady for
-   a few seconds.
-   **Expect:** the sight holds where you put it — no drift, no fight from an invisible AI-axis
-   write.
-   **Record:** the target, the geometric depression angle you computed, and roughly when (sim time
-   or wall clock) you held it, so the log rows can be matched up afterward.
-2. **Do:** repeat at a second target with a clearly different depression angle (the plan calls for
-   "near and far target" — pick two angles far enough apart that scale and boresight stop being
-   confusable).
-   **Expect:** same — a steady hold, no contest with Petrovich's servo.
-   **Record:** same as above for the second point.
-3. **Do:** glance at the raw mark readback if you have any way to see it (debug overlay, prior
-   knowledge of the 555/556 args) while holding each point.
-   **Record:** anything you can read off directly — not required, the logs are the real source of
-   truth, but a cross-check is useful.
+1. **Do:** hover with a target ~1-1.5 km out. `set target ...`, then `engage missiles` (Petrovich's
+   simulated sight follows it and logs its truth; nothing reaches the real axes). Hand-slew the
+   9K113 onto the target's centre and hold ~5 s.
+   **Expect:** the sight stays exactly where you put it.
+   **Record:** roughly when you held it, and where the HUD cross sat against the target. No angles
+   needed: the logs carry the truth.
+2. **Do:** repeat with a target ~3-4 km out (or change height so the depression differs by at
+   least 5 degrees).
+   **Expect / Record:** as point 1.
+3. **Do (optional):** glance at the raw mark readback while holding, if you can see it.
 
 **The prize: the two held (target, true depression angle, mark reading) triples.** Everything else
 downstream — the corrected `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` — is derived from these two
@@ -72,7 +65,7 @@ points and nothing else.
 
 ## Bring back
 
-- The two depression-angle/target pairs above, and roughly when you held each one.
+- Roughly when you held each point, and where the HUD cross sat.
 - Whether the hands-off confirmation log line actually appeared at mission start.
 - Whether the 9K113 ever felt like it was fighting your input (a sign the flag did not take
   effect) — should not happen if the confirmation log appeared, but worth saying either way.
