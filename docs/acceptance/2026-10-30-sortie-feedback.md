@@ -93,3 +93,37 @@ puts the mark ~0.9 deg low. The fit predicts the morning's -5.85 deg setpoint ac
 ~-7.3 deg: 1.4 deg low, matching the screenshot. **Scale is weakly constrained**: all points sit
 within 3.3 deg of each other and the aircraft was moving (DCS AI flying); a steeper point
 (-6 to -10 deg) is needed before shipping a scale. Azimuth agrees to ~0.3 deg (hand-tracking noise).
+
+## 3. Further calibration flights (same day)
+
+**Flight 3 (hand-slew, three targets).** User: *"4:00 BTR-60, 6:55 SA-15, last 30 s rocket propelled
+artillery unit ... I'm in the CPG seat and I don't know if the ASP-17 axis update then."* No truth for
+the SA-15 or the artillery (neither ever entered Petrovich's simulated FOV, the only truth source
+then); the mark was on the ASP-17 azimuth edge for both. The BTR-60 hold (truth reconstructed from
+earlier fixes, unit stationary) showed the bus fit still ~0.3-0.5 deg high. The mark *does* update
+with the user in the CPG seat.
+
+**Flight 4 (DCS AI Petrovich tracking).** User: *"This time I used the DCS AI Petrovich (via overlay)
+to track a target with the 9K113 ... That is a precise track."* No truth logged -- body-layer's
+`sight_fov` only lists objects inside Petrovich's own simulated view. Also established: the gimbal
+args in the Lua slew trace stay ~0, so the 555/566 mark is the only reading of 9K113 direction.
+
+**Flight 5 (AI Petrovich tracking, `--detection-trace` on).** User: *"BMD-1 from time 1:10"*.
+Detection trace gives every object's truth every poll. Object 16790016 (BMD-1) matches the mark's
+azimuth to ~0.1 deg -- the tracked unit. 107 unclipped samples, 70-180 s, range 7.1 -> 2.6 km,
+truth elevation -1.7 to -14.5 deg (airframe frame, heading/pitch/bank applied):
+
+| | boresight (raw 555) | deg per unit | rms |
+|---|---|---|---|
+| shipped | 0.83 | 27.0 (1/0.037) | |
+| bus hand-slew fit | 0.850 | 30.7 (1/0.0325) | 0.25 deg |
+| **AI-track fit** | **0.8333** | **36.14 (1/0.0277)** | **0.006 deg** |
+
+Residuals are flat across every depression band, so the gauge is linear. The hand-slew fit was
+off by hand-tracking error and a too-narrow span. With the AI-track calibration the morning's
+-5.85 deg setpoint sat at ~-7.9 deg. Derived field: raw clip 1.0 -> +6.0 deg, raw 0.278 -> -20.1
+deg. Azimuth: shipped calibration agrees to 0.09 deg rms over this (narrow, -3..+0 deg) span; an
+az-scale fit gives 1/0.0362 vs shipped 1/0.039 but the span is too narrow to trust.
+
+Data kept: `aircraft_layer_slew_trace-20261030-140320.log` copy (the Lua log is overwritten on
+DCS restarts), `body-layer/logs/*-20261030-140320.jsonl`.
