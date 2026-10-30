@@ -21,3 +21,13 @@ Two tells that a model is in the wrong space, both present here and both visible
 The correction came from the user's lived experience, not from analysis: *"two apples 20 cm apart at
 50 cm are obviously two side by side, and may be one when one sits behind the other"*. Worth
 pairing with `.claude/skills/explore/SKILL.md` — asking for the non-DCS analogue is what surfaced it.
+
+**A second instance (`BL-B104`, 2026-10-30): fuse two range cues in inverse distance, not metres.**
+Combining a size/terrain-judgement range estimate with a depression-angle-derived one, the natural
+observable for the second cue is `tan(depression) / height` (linear in the angle error), not metres
+(`height / tan(depression)`, heavy-tailed toward long wherever the angle error is a sizeable
+fraction of the angle itself). A Monte Carlo across five AGL/distance geometries showed metre-domain
+fusion is up to **1.74× worse** than the simpler cue alone at some geometries, while 1/distance
+fusion is never worse than either cue alone, anywhere in the grid — the same "state it in the space
+the error is actually linear in" move as the angular-separation case above, this time for range
+rather than position.

@@ -1,9 +1,17 @@
 ---
 name: contact-last-alt-m-flat-projection-trap
-description: Contact.last_alt_m is the ownship's own altitude at a contact's last look, not the target's -- any new precision-pointing consumer that reads it directly (not through attack_run.py's remembered-altitude fix) reintroduces an already-fixed bug.
+description: Contact.last_alt_m is the ownship's own altitude at a contact's last look, not the target's, for AIR contacts only (narrowed by BL-B104, 2026-10-30) -- any new precision-pointing consumer that reads it directly for an air contact (not through attack_run.py's remembered-altitude fix) reintroduces an already-fixed bug; a surface contact's last_alt_m is now its own believed ground height and is safe to read directly.
 metadata:
   type: project
 ---
+
+> **Narrowed by `BL-B104` (2026-10-30, `plans/bl-b104-ground-contacts-on-ground/plan.md`).** This
+> trap now applies to **air contacts only**. For a surface contact (`Contact.on_surface`),
+> `last_alt_m` is the unit's own believed ground height (written from the look's category/
+> subcategory domain resolution), not the ownship's altitude, and `attack_run.
+> remembered_target_alt_m` returns it directly rather than reconstructing from
+> `relative_direction.up_m`. The flat-projection trap described below is unchanged for air
+> contacts — check `Contact.on_surface` before deciding whether a direct read is safe.
 
 Found 2026-10-30 debugging the ATGM-run sight-tracking bug (`plans/atgm-run-sight-tracking/debug.md`,
 branch `fix/atgm-run-sight-tracking`): the 9K113 sight's "belief" aim-source elevation ran away to

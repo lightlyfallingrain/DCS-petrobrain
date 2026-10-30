@@ -15,9 +15,12 @@ guarantees (determinism, an unbiased mean, the stated sigma ratio) holding."""
 
 from __future__ import annotations
 
+import ast
+import inspect
 import math
 import statistics
 
+import perception.estimation as estimation_module
 from perception.estimation import (
     BEARING_SIGMA_DEG,
     RANGE_FRACTIONAL_SIGMA,
@@ -28,6 +31,7 @@ from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
+    surface_range_estimate,
     systematic_bias_m,
 )
 from perception.optics import (
@@ -237,3 +241,200 @@ def test_perturbed_relative_direction_identity_holds_for_degenerate_offset() -> 
     )
 
     assert (forward_m, right_m, up_m) == (0.0, 0.0, 0.0)
+
+
+# -- plans/bl-b104-ground-contacts-on-ground/plan.md Stage 3 --------------
+
+
+def test_surface_range_estimate_cue_b_absent_at_level_look_matches_cue_a() -> None:
+    """`height_above_unit_m == 0.0` (a perfectly level look) must disable
+    cue B entirely and reproduce `perturbed_bearing_range`'s own down
+    component exactly -- same hash domains, same formula, nothing new."""
+    true_range_m = 2000.0
+    _bearing, expected_range_m = perturbed_bearing_range(
+        observation_id="OBS_1",
+        object_id=42,
+        true_bearing_deg=0.0,
+        true_range_m=true_range_m,
+        sigma_cross_m=100.0,
+        sigma_down_m=RANGE_FRACTIONAL_SIGMA * true_range_m,
+    )
+
+    range_m, sigma_down_m = surface_range_estimate(
+        observation_id="OBS_1",
+        object_id=42,
+        true_distance_m=true_range_m,
+        height_above_unit_m=0.0,
+        optic=UNAIDED_OPTIC,
+    )
+
+    assert math.isclose(range_m, expected_range_m)
+    assert math.isclose(sigma_down_m, RANGE_FRACTIONAL_SIGMA * true_range_m)
+
+
+def test_surface_range_estimate_cue_b_absent_when_wrong_sign() -> None:
+    """A unit below the observer (`height_above_unit_m > 0`) whose
+    perceived depression is pushed to or past level/upward by noise must
+    fall back to cue A alone, never a nonsensical negative-distance cue
+    B -- explore-notes Q2's "range then ... from unit angular size"."""
+    # DEPRESSION_SIGMA_DEG default (3.0) applied to a near-zero true
+    # depression is enough noise, at this particular hash draw, to flip
+    # the perceived sign -- found by scanning observation ids rather than
+    # asserted from a derivation, since the draw is a hash, not a formula.
+    true_range_m = 5000.0
+    height_above_unit_m = 1.0  # true depression ~0.011 deg, easily flipped
+    found_absent = False
+    for i in range(50):
+        observation_id = f"OBS_{i}"
+        range_m, _sigma_down_m = surface_range_estimate(
+            observation_id=observation_id,
+            object_id=1,
+            true_distance_m=true_range_m,
+            height_above_unit_m=height_above_unit_m,
+            optic=UNAIDED_OPTIC,
+        )
+        _bearing, cue_a_range_m = perturbed_bearing_range(
+            observation_id=observation_id,
+            object_id=1,
+            true_bearing_deg=0.0,
+            true_range_m=true_range_m,
+            sigma_cross_m=100.0,
+            sigma_down_m=RANGE_FRACTIONAL_SIGMA * true_range_m,
+        )
+        if math.isclose(range_m, cue_a_range_m):
+            found_absent = True
+            break
+    assert found_absent
+
+
+def test_surface_range_estimate_is_deterministic() -> None:
+    args = {
+        "observation_id": "OBS_7",
+        "object_id": 3,
+        "true_distance_m": 3000.0,
+        "height_above_unit_m": 300.0,
+        "optic": UNAIDED_OPTIC,
+    }
+    assert surface_range_estimate(**args) == surface_range_estimate(**args)  # type: ignore[arg-type]
+
+
+def test_surface_range_estimate_never_returns_negative_or_nan() -> None:
+    for agl_m in (50.0, 150.0, 300.0, 500.0, 800.0):
+        for distance_m in (500.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0):
+            for i in range(50):
+                range_m, sigma_down_m = surface_range_estimate(
+                    observation_id=f"OBS_{agl_m}_{distance_m}_{i}",
+                    object_id=i,
+                    true_distance_m=distance_m,
+                    height_above_unit_m=agl_m,
+                    optic=UNAIDED_OPTIC,
+                )
+                assert range_m >= 0.0
+                assert not math.isnan(range_m)
+                assert sigma_down_m >= 0.0
+
+
+def test_surface_range_estimate_unit_above_observer_uses_upward_ray() -> None:
+    """A SAM on a ridge above the helicopter (`height_above_unit_m < 0`,
+    alignment finding 5's vignette) must resolve through cue B the same
+    way a unit below does, via the signed convention -- not treated as
+    "wrong sign" just because the number is negative."""
+    range_m, sigma_down_m = surface_range_estimate(
+        observation_id="OBS_1",
+        object_id=1,
+        true_distance_m=3000.0,
+        height_above_unit_m=-200.0,
+        optic=UNAIDED_OPTIC,
+    )
+    assert range_m > 0.0
+    assert sigma_down_m > 0.0
+
+
+def test_surface_range_estimate_firms_up_at_steep_geometry() -> None:
+    """At a close, steep geometry the fused sigma must be tighter than
+    cue A alone (E3's "firms up close") -- 300 m AGL / 1 km, depression
+    ~17 deg."""
+    true_range_m = 1000.0
+    height_above_unit_m = 300.0
+    _unused_range_m, sigma_a_m = look_sigma_m(true_range_m, UNAIDED_OPTIC)
+    _unused_range_m2, fused_sigma_down_m = surface_range_estimate(
+        observation_id="OBS_1",
+        object_id=1,
+        true_distance_m=true_range_m,
+        height_above_unit_m=height_above_unit_m,
+        optic=UNAIDED_OPTIC,
+    )
+    assert fused_sigma_down_m < sigma_a_m
+
+
+def test_surface_range_estimate_never_worse_than_cue_a_alone() -> None:
+    """E3's "no worse than today" as a property of the fusion arithmetic:
+    the fused sigma must never exceed cue A's own sigma, at any geometry
+    in the Mi-24 envelope."""
+    for agl_m in (50.0, 150.0, 300.0, 500.0, 800.0):
+        for distance_m in (500.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0):
+            _unused_range_m, sigma_a_m = look_sigma_m(distance_m, UNAIDED_OPTIC)
+            _unused_range_m2, fused_sigma_down_m = surface_range_estimate(
+                observation_id="OBS_1",
+                object_id=1,
+                true_distance_m=distance_m,
+                height_above_unit_m=agl_m,
+                optic=UNAIDED_OPTIC,
+            )
+            assert fused_sigma_down_m <= sigma_a_m * 1.0001  # fp slack
+
+
+def test_surface_range_estimate_narrow_sight_tighter_than_naked_eye() -> None:
+    _unused_range_m, naked_eye_sigma_m = surface_range_estimate(
+        observation_id="OBS_1",
+        object_id=1,
+        true_distance_m=2000.0,
+        height_above_unit_m=300.0,
+        optic=UNAIDED_OPTIC,
+    )
+    _unused_range_m2, narrow_sigma_m = surface_range_estimate(
+        observation_id="OBS_1",
+        object_id=1,
+        true_distance_m=2000.0,
+        height_above_unit_m=300.0,
+        optic=SIGHT_NARROW_OPTIC,
+    )
+    assert narrow_sigma_m < naked_eye_sigma_m
+
+
+def test_surface_range_estimate_never_references_relative_direction_channel() -> None:
+    """The no-omniscience fence, made testable (E7): the perceived
+    depression must never be derived from `RelativeDirection`/
+    `RELATIVE_DIRECTION_SIGMA_DEG` -- grep the function's own *executable
+    code*, excluding its docstring (which legitimately mentions both names
+    in prose, explaining the fence itself) and excluding the module as a
+    whole (which legitimately defines both for `perturbed_relative_
+    direction`, a different function)."""
+    tree = ast.parse(inspect.getsource(estimation_module.surface_range_estimate))
+    (func,) = tree.body
+    assert isinstance(func, ast.FunctionDef)
+    body_without_docstring = func.body[1:] if ast.get_docstring(func) else func.body
+    code = "\n".join(ast.unparse(stmt) for stmt in body_without_docstring)
+    assert "relative_direction" not in code.lower()
+    assert "RELATIVE_DIRECTION_SIGMA_DEG" not in code
+
+
+def test_surface_range_estimate_converges_to_a_systematic_offset_not_truth() -> None:
+    """A stationary unit looked at 200 times from a closing track must
+    converge to a point offset from truth by its systematic draw, never
+    to truth itself (E7) -- repeated looks shrink the per-look noise
+    toward zero but never touch the never-redrawn per-object bias."""
+    true_distance_m = 2000.0
+    height_above_unit_m = 300.0
+    samples = [
+        surface_range_estimate(
+            observation_id=f"OBS_{i}",
+            object_id=99,
+            true_distance_m=true_distance_m,
+            height_above_unit_m=height_above_unit_m,
+            optic=UNAIDED_OPTIC,
+        )[0]
+        for i in range(200)
+    ]
+    mean_range_m = statistics.fmean(samples)
+    assert not math.isclose(mean_range_m, true_distance_m, abs_tol=1.0)

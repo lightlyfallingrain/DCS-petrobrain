@@ -9,6 +9,12 @@
 # (gitignored, created by you, sparse -- only the keys you change) and
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
+[belief.association_over_time]
+# How fast an unobserved-moving contact's position uncertainty grows, metres/second, when `Contact.motion` is `"stopped"` or `None` ("never observed moving") -- user direction, 2026-10-30 (explore-notes.md, "E5 fold on a closing run"): "not observed moving -> not expected to move -> tiny growth".
+# status: judgement | range: 0.0 .. 1.0
+# source: belief/association_over_time.py:UNOBSERVED_MOTION_GROWTH_RATE_MPS
+UNOBSERVED_MOTION_GROWTH_RATE_MPS = 0.3
+
 [belief.atgm_run]
 # Ataka's own max engagement range -- same source and caveat as `SHTURM_MAX_RANGE_M`.
 # status: agreed-guess | range: 1000.0 .. 10000.0
@@ -251,6 +257,12 @@ RESIGHT_MIN_INTERVAL_S = 60.0
 # source: mission_memory/admission.py:RESIGHT_MOVE_M
 RESIGHT_MOVE_M = 250.0
 
+[perception.domain]
+# A helicopter at or below this AGL is treated as a ground contact -- "landed or hovering a few metres up" (explore-notes Q4, user: "ground rule").
+# status: judgement | range: 0.0 .. 50.0
+# source: perception/domain.py:HELI_SURFACE_AGL_MAX_M
+HELI_SURFACE_AGL_MAX_M = 10.0
+
 [perception.emitters]
 # Below or at this fraction of `getLife0()` (`life / life0`), a unit is burning and becomes detectable at any range through tree cover; above it, it is not.
 # status: judgement | range: 0.69 .. 0.84
@@ -262,6 +274,11 @@ FIRE_LIFE_FRACTION_MAX = 0.765
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
+
+# How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
+# status: judgement | range: 0.1 .. 14.0
+# source: perception/estimation.py:DEPRESSION_SIGMA_DEG
+DEPRESSION_SIGMA_DEG = 3.0
 
 # Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
 # status: judgement | range: 0.05 .. 1.0

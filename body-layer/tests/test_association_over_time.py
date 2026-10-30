@@ -7,17 +7,21 @@ that module's docstring for the full history)."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 from belief.association_over_time import (
     _FALLBACK_UNCERTAINTY_RADIUS_M,
+    UNOBSERVED_MOTION_GROWTH_RATE_MPS,
     class_compatibility,
+    contact_growth_rate_mps,
     contacts_plausibly_same,
     implied_position,
     passes_gate,
     uncertainty_radius_m,
 )
 from belief.contacts import Contact
+from belief.motion import MotionBelief
 from belief.percept import Percept
 from perception.hybrid_source import (
     SCOPE_UNCERTAINTY_M,
@@ -44,6 +48,7 @@ def _percept(
     ownship: OwnshipState | None = None,
     observation_id: str = "OBS_1",
     position_uncertainty: PositionUncertainty | None = None,
+    surface_alt_m: float | None = None,
 ) -> Percept:
     if position_uncertainty is None:
         position_uncertainty = PositionUncertainty(
@@ -58,6 +63,7 @@ def _percept(
         ownship_at_observation=ownship if ownship is not None else _ownship(),
         observation_id=observation_id,
         position_uncertainty=position_uncertainty,
+        surface_alt_m=surface_alt_m,
     )
 
 
@@ -118,6 +124,40 @@ def test_implied_position_matches_bearing_range_from_observer() -> None:
     # and delta_z ~= range.
     assert math.isclose(position.x, 0.0, abs_tol=1e-6)
     assert math.isclose(position.z, 1000.0, abs_tol=1e-6)
+
+
+def test_implied_position_uses_surface_alt_m_when_set() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2 -- a
+    surface percept's implied position must use its own real ground
+    height, not the flat-projection observer altitude."""
+    percept = _percept(
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+        ),
+    )
+    percept = dataclasses.replace(percept, surface_alt_m=120.0)
+
+    position = implied_position(percept)
+
+    assert position.alt_m == 120.0
+
+
+def test_implied_position_stays_flat_for_air_percept() -> None:
+    """Decision 4: air contacts unchanged -- the observer-altitude flat
+    projection is still used when `surface_alt_m` is `None`."""
+    percept = _percept(
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+        ),
+    )
+
+    position = implied_position(percept)
+
+    assert position.alt_m == 1584.0
 
 
 def test_class_compatibility_same_naked_eye_bucket_is_compatible() -> None:
@@ -384,3 +424,75 @@ def test_contacts_plausibly_same_grows_with_elapsed_time() -> None:
     contact_b = _contact_from(later_percept, contact_id="CONTACT_B")
 
     assert contacts_plausibly_same(contact_a, contact_b, now_sim=100.0)
+
+
+def test_contact_growth_rate_mps_surface_contact_unobserved_motion_is_tiny() -> None:
+    """BL-B104 Stage 8 -- a surface contact (`on_surface`) whose motion has
+    never been seen moving (`motion=None`, "never observed") or was last
+    observed stopped (`motion=MotionBelief(state="stopped", ...)`) both
+    get the tiny, class-independent rate, not the class's plausible speed
+    ("Ural truck" -> `OP_TRUCK`, 15.0 m/s pre-Stage-8)."""
+    unobserved = _contact_from(
+        _percept(classification_raw="Ural truck", surface_alt_m=0.0)
+    )
+    assert unobserved.on_surface is True
+    assert unobserved.motion is None
+    assert contact_growth_rate_mps(unobserved) == UNOBSERVED_MOTION_GROWTH_RATE_MPS
+
+    stopped = dataclasses.replace(
+        unobserved,
+        motion=MotionBelief(state="stopped", confidence=0.9, established_sim=0.0),
+    )
+    assert contact_growth_rate_mps(stopped) == UNOBSERVED_MOTION_GROWTH_RATE_MPS
+
+
+def test_contact_growth_rate_mps_surface_contact_moving_uses_class_rate() -> None:
+    """A surface contact observed `"moving"` gets the class's plausible
+    speed, unchanged from pre-Stage-8 ("Ural truck" -> `OP_TRUCK`,
+    15.0 m/s)."""
+    moving = dataclasses.replace(
+        _contact_from(_percept(classification_raw="Ural truck", surface_alt_m=0.0)),
+        motion=MotionBelief(state="moving", confidence=0.9, established_sim=0.0),
+    )
+    assert contact_growth_rate_mps(moving) == 15.0
+
+
+def test_contact_growth_rate_mps_air_contact_stays_bit_identical() -> None:
+    """BL-B104 Stage 8's own bit-identical guarantee: an air contact
+    (`on_surface` is `False`, including the "category unknown, treated as
+    air" fallback) takes the unconditional class-rate branch regardless of
+    its own `Contact.motion` -- `None`, `"stopped"`, or `"moving"` must all
+    resolve the same way, exactly as before this stage."""
+    air = _contact_from(_percept(classification_raw="Ural truck", surface_alt_m=None))
+    assert air.on_surface is False
+    assert contact_growth_rate_mps(air) == 15.0
+
+    air_stopped = dataclasses.replace(
+        air, motion=MotionBelief(state="stopped", confidence=0.9, established_sim=0.0)
+    )
+    assert contact_growth_rate_mps(air_stopped) == 15.0
+
+    air_moving = dataclasses.replace(
+        air, motion=MotionBelief(state="moving", confidence=0.9, established_sim=0.0)
+    )
+    assert contact_growth_rate_mps(air_moving) == 15.0
+
+
+def test_contact_growth_rate_mps_installation_component_wins_unconditionally() -> None:
+    """An entrenched installation (`profile.installation_component`) stays
+    `0.0` regardless of `on_surface` or `motion` -- checked first, before
+    the motion/domain gate, so a dug-in SA-3 does not start growing at the
+    tiny rate just because `Contact.motion` happens to be `None`."""
+    surface_installation = dataclasses.replace(
+        _contact_from(_percept(classification_raw="5p73 s-125 ln", surface_alt_m=0.0)),
+        motion=MotionBelief(state="moving", confidence=0.9, established_sim=0.0),
+    )
+    assert surface_installation.on_surface is True
+    assert contact_growth_rate_mps(surface_installation) == 0.0
+
+    air_installation = dataclasses.replace(
+        _contact_from(_percept(classification_raw="5p73 s-125 ln", surface_alt_m=None)),
+        motion=MotionBelief(state="moving", confidence=0.9, established_sim=0.0),
+    )
+    assert air_installation.on_surface is False
+    assert contact_growth_rate_mps(air_installation) == 0.0

@@ -62,11 +62,23 @@ the same reasoning `TelemetrySample.altitude_radar_m` (`schema/__init__.py`)
 already applies to a field that can be legitimately absent. The object is
 still included in the snapshot regardless -- flag, never omit (backlog
 decision, `todo/todo.md`).
+
+`category`/`subcategory` (BL-B104 Stage 1, `plans/bl-b104-ground-contacts-on-ground/plan.md`)
+are `LoGetWorldObjects`'s own `Type.level1`/`Type.level2`, passed through
+unconverted -- the wsType enumeration body-layer's `perception.domain` reads
+to tell a ground unit from an air one. `None` on both when the object
+carries no `Type` table at all (an older deployed `Export.lua`, or an object
+type that never had one) -- never fabricated or defaulted to a guessed
+value, same tri-state discipline as `is_ownship`/`unit_name` above. An
+older-than-`EXPORT_SCRIPT_VERSION`-bump `Export.lua` simply omits both keys
+from the wire line, which `from_dict` treats identically to an explicit
+JSON `null` (see `_optional_int`).
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -107,6 +119,10 @@ class WorldObjectSample:
     #: at/after `EXPORT_SCRIPT_VERSION`'s movement-detection bump actually
     #: supplies a real value (module docstring).
     unit_name: str | None = None
+    #: `Type.level1`/`Type.level2` (BL-B104 Stage 1). Default `None` so
+    #: every pre-existing call site keeps compiling; see module docstring.
+    category: int | None = None
+    subcategory: int | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> WorldObjectSample:
@@ -163,6 +179,9 @@ class WorldObjectSample:
                 f"field 'unit_name' must be a string or null, got {unit_name_raw!r}"
             )
 
+        category = _optional_int(data, "category")
+        subcategory = _optional_int(data, "subcategory")
+
         return WorldObjectSample(
             object_id=int(object_id_raw),
             object_type=object_type_raw,
@@ -173,6 +192,8 @@ class WorldObjectSample:
             heading_true_rad=_require_number(data, "heading_true_rad"),
             is_ownship=is_ownship,
             unit_name=unit_name,
+            category=category,
+            subcategory=subcategory,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,6 +207,8 @@ class WorldObjectSample:
             "heading_true_rad": self.heading_true_rad,
             "is_ownship": self.is_ownship,
             "unit_name": self.unit_name,
+            "category": self.category,
+            "subcategory": self.subcategory,
         }
 
 
@@ -261,3 +284,20 @@ def _require_number(data: dict[str, Any], field: str) -> float:
     if isinstance(raw, bool) or not isinstance(raw, int | float):
         raise WorldObjectParseError(f"field {field!r} must be a number, got {raw!r}")
     return float(raw)
+
+
+def _optional_int(data: dict[str, Any], field: str) -> int | None:
+    """`None` when `field` is absent, JSON `null`, or a non-finite number
+    (NaN/Infinity -- `int()` raises `ValueError`/`OverflowError` on those,
+    security review finding 1) -- never coerced to 0, same tri-state
+    discipline as `is_ownship`/`unit_name` (module docstring)."""
+    raw = data.get(field)
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise WorldObjectParseError(
+            f"field {field!r} must be a number or null, got {raw!r}"
+        )
+    if not math.isfinite(raw):
+        return None
+    return int(raw)

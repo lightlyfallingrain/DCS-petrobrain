@@ -31,6 +31,7 @@ from belief.attack_run import (
     _tier2_alignment,
     decide,
     query,
+    remembered_target_alt_m,
     seen_world_direction,
 )
 from belief.contacts import Contact
@@ -86,6 +87,76 @@ def _contact_with_relative_direction(
         relative_direction=relative,
     )
     return Contact.from_percept("CONTACT_1", percept)
+
+
+def test_remembered_target_alt_m_for_a_surface_contact_reads_last_alt_m() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Decision 5 --
+    for a surface contact, `Contact.last_alt_m` is already the unit's own
+    real ground height (Stage 2), so this reads it directly rather than
+    reconstructing from the ownship-relative channel."""
+    percept = Percept(
+        t_sim=0.0,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(alt_m=1584.0),
+        observation_id="OBS_1",
+        surface_alt_m=120.0,
+    )
+    contact = Contact.from_percept("CONTACT_1", percept)
+    assert contact.on_surface is True
+
+    assert remembered_target_alt_m(contact) == 120.0
+
+
+def test_remembered_target_alt_m_for_a_surface_contact_without_a_tier1_look() -> None:
+    """A surface contact's own height never depends on `relative_
+    direction` at all -- unlike the air stopgap, it has no `None` case."""
+    percept = Percept(
+        t_sim=0.0,
+        source="petrovich_detection_associated",
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(alt_m=1584.0),
+        observation_id="OBS_1",
+        surface_alt_m=120.0,
+        relative_direction=None,
+    )
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert remembered_target_alt_m(contact) == 120.0
+
+
+def test_remembered_target_alt_m_for_an_air_contact_unchanged() -> None:
+    """Decision 5: the stopgap stays for air contacts -- reconstructed
+    from the ownship-relative channel, unchanged by this plan."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(alt_m=1500.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=-50.0),
+    )
+    assert contact.on_surface is False
+
+    assert remembered_target_alt_m(contact) == 1450.0
+
+
+def test_remembered_target_alt_m_for_an_air_contact_without_a_tier1_look_is_none() -> (
+    None
+):
+    percept = Percept(
+        t_sim=0.0,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(alt_m=1584.0),
+        observation_id="OBS_1",
+        relative_direction=None,
+    )
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert remembered_target_alt_m(contact) is None
 
 
 def _group(

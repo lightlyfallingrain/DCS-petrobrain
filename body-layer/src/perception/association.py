@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from coordinates import wgs84_to_dcs
+from perception.domain import surface_domain
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.motion import Vec3
 from perception.reporting_names import reporting_name_for
@@ -137,6 +138,23 @@ AMBIGUOUS_ASSOCIATION_METHOD: Final[str] = "bearing_range_terrain_ambiguous_asso
 _WORD_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
 
+def _finite_int(raw: Any) -> int | None:
+    """`None` for a JSON `null`/absent `category`/`subcategory` value, and
+    also for a non-finite one (NaN/Infinity -- `int()` raises `ValueError`/
+    `OverflowError` on those) arriving straight off the LAN
+    `GET /world_objects/latest` response body (security review finding 1).
+    Same tri-state discipline `WorldObjectCandidate.from_dict`'s other
+    optional fields already follow -- a bad value is treated as unknown,
+    never fabricated or defaulted."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    if not math.isfinite(raw):
+        return None
+    return int(raw)
+
+
 @dataclass(frozen=True, slots=True)
 class WorldObjectCandidate:
     """One `LoGetWorldObjects` object, in the DCS-native x/z metres
@@ -192,6 +210,15 @@ class WorldObjectCandidate:
     #: back to world-model's offline `line_of_sight_clear` primitive only
     #: when this is `None`.
     live_los_clear: bool | None = None
+    #: The object's domain -- `True` surface (on the ground), `False` air,
+    #: `None` unknown -- resolved once here via `perception.domain.
+    #: surface_domain` from `WorldObjectSample.category`/`.subcategory`
+    #: (`Type.level1`/`.level2`) and (for a helicopter only) `agl_m`
+    #: (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 1).
+    #: `None` is treated as air everywhere this is consumed -- today's flat
+    #: model, bit for bit, for an un-redeployed `Export.lua` or any other
+    #: unrecognised category.
+    is_surface: bool | None = None
 
     @staticmethod
     def from_dict(
@@ -200,6 +227,7 @@ class WorldObjectCandidate:
         theatre: str,
         velocity: dict[str, float] | None = None,
         live_los_clear: bool | None = None,
+        agl_m: float | None = None,
     ) -> WorldObjectCandidate:
         """Build a candidate from one aircraft-layer `GET /world_objects/latest`
         object dict (`aircraft-layer/src/schema/world_objects.py`'s
@@ -225,7 +253,14 @@ class WorldObjectCandidate:
         skew check; this method just threads the resolved value through,
         same split of responsibility as `velocity` above. `None` (the
         default) keeps every existing `from_dict` call site compiling and
-        behaving exactly as before."""
+        behaving exactly as before.
+
+        `agl_m` is the caller's already-resolved helicopter AGL (Stage 5's
+        LOS-hook carrier) -- same split of responsibility as `velocity`/
+        `live_los_clear` above, consumed only by `is_surface`'s helicopter
+        branch (`perception.domain.surface_domain`). `None` (the default,
+        and every call site before Stage 5) resolves a helicopter to air,
+        same unknown-stays-air posture as a missing category."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
         is_ownship_raw = data.get("is_ownship")
         heading_true_rad = data.get("heading_true_rad")
@@ -238,6 +273,8 @@ class WorldObjectCandidate:
                 z=float(velocity["vz"]),
             )
         )
+        category_raw = data.get("category")
+        subcategory_raw = data.get("subcategory")
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
@@ -252,6 +289,11 @@ class WorldObjectCandidate:
             ),
             velocity=resolved_velocity,
             live_los_clear=live_los_clear,
+            is_surface=surface_domain(
+                _finite_int(category_raw),
+                _finite_int(subcategory_raw),
+                agl_m,
+            ),
         )
 
 

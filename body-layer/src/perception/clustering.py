@@ -266,6 +266,16 @@ class ClusterCandidate:
     size_m: float
     classification_raw: str
     classification_level: int
+    #: The candidate's domain (`perception.domain.surface_domain`'s
+    #: result) -- `True` surface, `False` air, `None` unknown (treated as
+    #: air by every caller, `plans/bl-b104-ground-contacts-on-ground/
+    #: plan.md` Stage 1). Carried through only so `Cluster.is_surface` can
+    #: report it; clustering's own separability predicate never looks at
+    #: it -- callers cluster each domain's candidates in a separate
+    #: `cluster_candidates` call and concatenate the results, so a cluster
+    #: is never mixed by construction (a helicopter crossing a convoy
+    #: cannot drag the convoy into the air model, or vice versa).
+    is_surface: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +306,12 @@ class Cluster:
     classification_raw: str
     classification_level: int
     count_bucket: str
+    #: The cluster's domain -- `ClusterCandidate.is_surface` of its first
+    #: member. Safe to read off one member rather than folding like
+    #: `classification_raw` above: callers cluster each domain separately
+    #: (`ClusterCandidate.is_surface`'s own docstring), so every member of
+    #: one cluster already shares this value by construction.
+    is_surface: bool | None = None
 
 
 def cluster_candidates(
@@ -391,6 +407,7 @@ def _build_cluster(members: list[ClusterCandidate], observer: GeoPosition) -> Cl
         classification_raw=classification_raw,
         classification_level=classification_level,
         count_bucket=count_bucket_for(_extent_count(members, observer)),
+        is_surface=first.is_surface,
     )
 
 

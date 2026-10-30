@@ -233,6 +233,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Final
 
+import tuning
 from belief.classification import class_compatibility
 from belief.percept import Percept
 from belief.position_belief import (
@@ -246,6 +247,27 @@ from perception.source import PositionUncertainty
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
+
+#: How fast an unobserved-moving contact's position uncertainty grows,
+#: metres/second, when `Contact.motion` is `"stopped"` or `None` ("never
+#: observed moving") -- user direction, 2026-10-30 (explore-notes.md,
+#: "E5 fold on a closing run"): "not observed moving -> not expected to
+#: move -> tiny growth". Deliberately a single constant rather than a
+#: per-class one: the user's rule keys on observation, not class -- a
+#: unit's class only matters once it *is* observed moving (see
+#: `plausible_speed_mps` below). Not calibrated against any measurement.
+#: `hi=1.0` is chosen, not a round number: it keeps this rate well below
+#: the shallowest class speed in `plausible_speed_mps`'s table
+#: (`OP_INFANTRY`, 2.0 m/s), so a misconfigured override cannot quietly
+#: turn "tiny" into "about the same as moving," which would silently undo
+#: the rule.
+UNOBSERVED_MOTION_GROWTH_RATE_MPS: Final[float] = tuning.real(
+    "belief.association_over_time.UNOBSERVED_MOTION_GROWTH_RATE_MPS",
+    0.3,
+    lo=0.0,
+    hi=1.0,
+    status="judgement",
+)
 
 #: How many sigma (in the summed covariance's own shape) an incoming
 #: percept's implied position may sit from a contact's last-known position
@@ -285,13 +307,26 @@ def uncertainty_radius_m(percept: Percept) -> float:
 
 def implied_position(percept: Percept) -> GeoPosition:
     """The ground position `percept`'s bearing/range implies, from the
-    observer position it was actually observed from."""
+    observer position it was actually observed from.
+
+    `project_from_bearing_range` assumes the target is at the observer's
+    own altitude (flat, no terrain) -- still correct for an air contact
+    (Decision 4, `plans/bl-b104-ground-contacts-on-ground/plan.md`). For a
+    surface percept, `percept.surface_alt_m` -- the unit's own ground
+    height, read at this look -- replaces that flat assumption, so the
+    implied position sits on the ground rather than floating at
+    ownship's altitude."""
     observer = GeoPosition(
         x=percept.ownship_at_observation.x,
         z=percept.ownship_at_observation.z,
         alt_m=percept.ownship_at_observation.alt_m,
     )
-    return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
+    position = project_from_bearing_range(
+        observer, percept.bearing_deg, percept.range_m
+    )
+    if percept.surface_alt_m is not None:
+        return GeoPosition(x=position.x, z=position.z, alt_m=percept.surface_alt_m)
+    return position
 
 
 #: The isotropic-equivalent `PositionUncertainty` for
@@ -345,11 +380,40 @@ def contact_growth_rate_mps(contact: Contact) -> float:
     `clamp_to_detection_envelope` as well -- the plan's "one table" rule:
     the gate's own inflation and `belief.groups.group_matches`'s
     displacement bound must read `position_belief.plausible_speed_mps`
-    through the same resolution shape, never a second copy of it."""
+    through the same resolution shape, never a second copy of it.
+
+    **BL-B104 Stage 8**: for a surface contact (`on_surface`), the rate is
+    now gated on whether motion has actually been *observed*, not only on
+    class -- `UNOBSERVED_MOTION_GROWTH_RATE_MPS` when `contact.motion` is
+    `"stopped"` or `None` ("never observed moving"), the class rate only
+    once `contact.motion.state == "moving"`. Installation components stay
+    `0.0` unconditionally, checked first: an entrenched SA-3 does not start
+    growing at the tiny rate just because `Contact.motion` happens to be
+    `None`; it is still immobile either way, and `0.0` already says so more
+    strongly than `UNOBSERVED_MOTION_GROWTH_RATE_MPS` would.
+
+    **Air contacts (`not contact.on_surface`) are gated on `on_surface`,
+    not on `contact.motion`, and so stay bit-identical to pre-Stage-8
+    behaviour.** `perception.naked_eye_source` computes `apparent_motion`
+    for every admitted cluster regardless of domain, so an air contact can
+    legitimately carry `Contact.motion.state == "stopped"` (e.g. a
+    helicopter briefly below the naked-eye velocity threshold at one look)
+    or `None` (a contact seen only through the scope/hybrid channel, which
+    supplies no motion percept at all, per `belief.motion`'s own
+    docstring). Gating the tiny rate on `contact.motion` alone would
+    therefore change behaviour for some air contacts; gating on
+    `contact.on_surface` instead means every air contact takes the
+    unconditional class-rate branch regardless of its own `Contact.motion`,
+    exactly as before this stage. Only `on_surface is True` contacts -- the
+    ones this rule is about -- see the new gate."""
     profile = object_model.profile_for(contact.last_class_raw)
-    return plausible_speed_mps(
-        profile.op_class, installation_component=profile.installation_component
-    )
+    if profile.installation_component:
+        return 0.0
+    if not contact.on_surface:
+        return plausible_speed_mps(profile.op_class)
+    if contact.motion is not None and contact.motion.state == "moving":
+        return plausible_speed_mps(profile.op_class)
+    return UNOBSERVED_MOTION_GROWTH_RATE_MPS
 
 
 def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:

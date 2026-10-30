@@ -259,6 +259,7 @@ from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
+    surface_range_estimate,
 )
 from perception.forest import ForestOcclusion
 from perception.gaze import (
@@ -747,6 +748,19 @@ class NakedEyePerceptionSource:
                         is not None
                         else None
                     ),
+                    # `plans/bl-b104-ground-contacts-on-ground/plan.md`
+                    # Stage 5 -- the LOS hook's own `agl_m`, joined by the
+                    # same `unit_name` lookup `live_los_clear` above
+                    # already does; consumed only by `is_surface`'s
+                    # helicopter branch. `None` for any candidate outside
+                    # the look wedge this poll (no live verdict at all),
+                    # same unknown-stays-air posture as a missing verdict.
+                    agl_m=(
+                        resolved.agl_m
+                        if (resolved := los_by_object_id.get(obj.get("object_id")))
+                        is not None
+                        else None
+                    ),
                 )
                 for obj in raw_objects
             ]
@@ -877,11 +891,26 @@ class NakedEyePerceptionSource:
         # operates on the resulting groups, not on individual candidates
         # ahead of the grouping that would have told it they were one thing
         # (module docstring point 5, 2A.5).
+        #
+        # Clustered once per domain and concatenated (`plans/bl-b104-
+        # ground-contacts-on-ground/plan.md` Stage 1): a cluster is never
+        # mixed by construction -- a helicopter crossing a convoy cannot
+        # drag the convoy into the air model, or vice versa. `is_surface
+        # is not True` (rather than `is False`) puts unknown-domain
+        # candidates (`None`) in the same group as air, matching every
+        # other consumer's "unknown stays air" posture.
+        surface_cluster_candidates = [
+            self._cluster_candidate(candidate, result)
+            for candidate, result in visible
+            if candidate.is_surface is True
+        ]
+        air_cluster_candidates = [
+            self._cluster_candidate(candidate, result)
+            for candidate, result in visible
+            if candidate.is_surface is not True
+        ]
         clusters = cluster_candidates(
-            [
-                self._cluster_candidate(candidate, result)
-                for candidate, result in visible
-            ],
+            surface_cluster_candidates,
             observer,
             # UNAIDED_OPTIC.presence_range_mult -- the only optic
             # `check_visibility` is called with today (no optic-selection
@@ -890,6 +919,10 @@ class NakedEyePerceptionSource:
             # multiplier is what keeps `clustering._separable`'s floor (A)
             # slack for whichever optic actually admitted these
             # candidates -- see that module's docstring.
+            UNAIDED_OPTIC.presence_range_mult,
+        ) + cluster_candidates(
+            air_cluster_candidates,
+            observer,
             UNAIDED_OPTIC.presence_range_mult,
         )
 
@@ -1080,6 +1113,7 @@ class NakedEyePerceptionSource:
             size_m=profile.size_m,
             classification_raw=classification_raw,
             classification_level=classification_level,
+            is_surface=candidate.is_surface,
         )
 
     @staticmethod
@@ -1303,6 +1337,23 @@ class NakedEyePerceptionSource:
             sigma_cross_m=sigma_cross_m,
             sigma_down_m=sigma_down_m,
         )
+        # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3: a
+        # surface cluster's *range* comes from the two-cue fused estimator
+        # instead of cue A alone -- bearing is untouched (same
+        # `perturbed_bearing_range` call above, whose own range output is
+        # simply discarded here). `true_range_m` is already the horizontal
+        # ground distance (the centroid above is pinned to `ownship_state.
+        # alt_m`), and `height_above_unit_m` is the observer's true,
+        # signed height above the cluster's own real ground height.
+        if cluster.is_surface is True:
+            height_above_unit_m = ownship_state.alt_m - cluster.centroid_alt_m
+            estimated_range_m, sigma_down_m = surface_range_estimate(
+                observation_id=observation_id,
+                object_id=bias_object_id,
+                true_distance_m=true_range_m,
+                height_above_unit_m=height_above_unit_m,
+                optic=self.optic,
+            )
         for member in cluster.members:
             self._object_id_to_last_observation_id[member.object_id] = observation_id
 
@@ -1500,6 +1551,9 @@ class NakedEyePerceptionSource:
             live_los_clear=live_los_clear,
             relative_direction=relative_direction,
             aim_unit_direction=aim_unit_direction,
+            surface_alt_m=(
+                cluster.centroid_alt_m if cluster.is_surface is True else None
+            ),
         )
 
 
@@ -1607,6 +1661,12 @@ class _ResolvedLos:
 
     building_clear: bool
     terrain_clear: bool
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 -- the
+    #: carrier this plan reuses rather than opening a new channel (recon's
+    #: own finding 7). `None` when the verdict carries no `agl_m` at all
+    #: (a pre-Stage-5 Hook script) or an explicit `None` (the Hook's own
+    #: `land.getHeight` pcall failed that poll) -- never a guessed height.
+    agl_m: float | None = None
 
     @property
     def live_los_clear(self) -> bool:
@@ -1676,8 +1736,10 @@ def _resolve_los_by_unit_name(
         terrain_clear = verdict.get("terrain_clear")
         if not isinstance(building_clear, bool) or not isinstance(terrain_clear, bool):
             continue
+        agl_raw = verdict.get("agl_m")
+        agl_m = float(agl_raw) if isinstance(agl_raw, int | float) else None
         resolved[object_id] = _ResolvedLos(
-            building_clear=building_clear, terrain_clear=terrain_clear
+            building_clear=building_clear, terrain_clear=terrain_clear, agl_m=agl_m
         )
     return resolved, skew_s, hour_used, fov_half_deg_used
 

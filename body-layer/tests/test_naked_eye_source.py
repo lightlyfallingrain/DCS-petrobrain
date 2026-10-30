@@ -28,6 +28,7 @@ import pytest
 from perception import association, object_model
 from perception.association import SightCone
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.estimation import look_sigma_m
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_EMITTER_BURNING,
@@ -37,7 +38,7 @@ from perception.naked_eye_source import (
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
-from perception.optics import SIGHT_NARROW_OPTIC
+from perception.optics import SIGHT_NARROW_OPTIC, UNAIDED_OPTIC
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 from replay import replay
 
@@ -117,6 +118,9 @@ def _world_object(
     lon_deg: float,
     is_ownship: bool | None = False,
     unit_name: str | None | object = _AUTO_UNIT_NAME,
+    category: int | None = None,
+    subcategory: int | None = None,
+    altitude_m: float = 500.0,
 ) -> dict[str, Any]:
     # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4, `BL-11`
     # Stage 4): the live-LOS join key (`naked_eye_source._resolve_los_by_
@@ -133,9 +137,11 @@ def _world_object(
         "coalition": 1.0,
         "lat_deg": lat_deg,
         "lon_deg": lon_deg,
-        "altitude_m": 500.0,
+        "altitude_m": altitude_m,
         "heading_true_rad": 0.0,
         "is_ownship": is_ownship,
+        "category": category,
+        "subcategory": subcategory,
     }
     if resolved_name is not None:
         obj["unit_name"] = resolved_name
@@ -174,11 +180,16 @@ class FakeAircraftClient:
         *,
         blocked_unit_names: frozenset[str] = frozenset(),
         firing: dict[str, Any] | None = None,
+        agl_by_unit_name: dict[str, float] | None = None,
     ) -> None:
         self._world_objects = world_objects
         self._unit_velocity = unit_velocity
         self._blocked_unit_names = blocked_unit_names
         self._firing = firing
+        #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 --
+        #: per-test override for the LOS hook's `agl_m` field. `None`
+        #: (default) omits it entirely, matching a pre-Stage-5 Hook.
+        self._agl_by_unit_name = agl_by_unit_name or {}
         self.world_objects_calls = 0
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
@@ -202,10 +213,13 @@ class FakeAircraftClient:
             if not isinstance(name, str):
                 continue
             blocked = name in self._blocked_unit_names
-            verdicts[name] = {
+            verdict: dict[str, Any] = {
                 "building_clear": not blocked,
                 "terrain_clear": not blocked,
             }
+            if name in self._agl_by_unit_name:
+                verdict["agl_m"] = self._agl_by_unit_name[name]
+            verdicts[name] = verdict
         return {
             "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
             "hour_used": None,
@@ -244,12 +258,14 @@ def _source(
     unit_velocity: dict[str, Any] | None = None,
     blocked_unit_names: frozenset[str] = frozenset(),
     firing: dict[str, Any] | None = None,
+    agl_by_unit_name: dict[str, float] | None = None,
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
     client = FakeAircraftClient(
         world_objects,
         unit_velocity,
         blocked_unit_names=blocked_unit_names,
         firing=firing,
+        agl_by_unit_name=agl_by_unit_name,
     )
     source = NakedEyePerceptionSource(
         aircraft_client=client,  # type: ignore[arg-type]
@@ -1274,6 +1290,178 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
 
     assert len(observations) == 1
     assert observations[0].count_bucket == "OP_1UNIT"
+
+
+def test_mixed_domain_candidates_never_share_a_cluster() -> None:
+    # A ground vehicle and a helicopter at the same angular position --
+    # close enough to merge under ordinary (same-domain) clustering --
+    # must still end up as two separate Observations, never one mixed
+    # cluster, because `plans/bl-b104-ground-contacts-on-ground/plan.md`
+    # Stage 1 clusters each domain separately and concatenates.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "BMP-2",
+                lat_deg=500.0,
+                lon_deg=0.0,
+                category=2,  # wsType_Ground
+            ),
+            _world_object(
+                2,
+                "Mi-8",
+                lat_deg=500.0,
+                lon_deg=0.0,
+                category=1,  # wsType_Air
+                subcategory=1,  # wsType_Airplane (not helicopter -> stays air)
+            ),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 2
+    surface_flags = {o.surface_alt_m is not None for o in observations}
+    assert surface_flags == {True, False}  # one surface, one air -- never merged
+
+
+def test_air_only_poll_is_unchanged_by_domain_split() -> None:
+    # An air-only (no category at all, today's un-redeployed Export.lua
+    # shape) poll must produce exactly the observations it would have
+    # before the domain split existed -- one clustered Observation for
+    # two close candidates, same as `test_two_close_candidates_emit_one_
+    # clustered_observation` above.
+    world_objects = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=520.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_1UNIT"
+    assert observations[0].surface_alt_m is None
+
+
+def test_surface_cluster_range_uses_the_fused_two_cue_estimator() -> None:
+    # Ownship at 500 m MSL, a ground unit at 200 m MSL (300 m AGL),
+    # 1000 m due north -- a steep-ish look where the fused sigma should
+    # be tighter than cue A alone (E3's "firms up close").
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "BMP-2",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=2,  # wsType_Ground
+                altitude_m=200.0,
+            ),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.surface_alt_m == 200.0
+    assert observation.position_uncertainty is not None
+    # Cue A alone (today's formula) for the same true geometry, for
+    # comparison -- the fused sigma must be tighter (E3).
+    _sigma_cross_m, sigma_a_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
+    assert observation.position_uncertainty.sigma_down_m < sigma_a_m
+
+
+def test_helicopter_below_agl_threshold_is_treated_as_surface() -> None:
+    # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 5 -- a
+    # helicopter whose LOS-hook AGL is at or below HELI_SURFACE_AGL_MAX_M
+    # (10 m default) follows the ground rule.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,  # wsType_Air
+                subcategory=2,  # wsType_Helicopter
+                altitude_m=205.0,
+            )
+        ]
+    }
+    source, _client = _source(world_objects, agl_by_unit_name={"unit_1": 5.0})
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m == 205.0
+
+
+def test_helicopter_above_agl_threshold_stays_air() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,
+                subcategory=2,
+            )
+        ]
+    }
+    source, _client = _source(world_objects, agl_by_unit_name={"unit_1": 150.0})
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
+
+
+def test_helicopter_with_no_live_agl_verdict_stays_air() -> None:
+    # The LOS hook's verdict carries no `agl_m` at all this poll (a
+    # pre-Stage-5 Hook, or this object's verdict simply omitting it) --
+    # unknown AGL resolves to air, same unknown-stays-air posture as a
+    # missing category.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Mi-8",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=1,
+                subcategory=2,
+            )
+        ]
+    }
+    source, _client = _source(world_objects)  # no agl_by_unit_name override
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
+
+
+def test_air_cluster_still_uses_perturbed_bearing_range_unchanged() -> None:
+    # No category at all (today's un-redeployed Export.lua shape) -- must
+    # still use the plain cue-A-only formula, never the fused estimator
+    # (Decision 4: air contacts unchanged).
+    world_objects = {"objects": [_world_object(1, "Mi-8", lat_deg=1000.0, lon_deg=0.0)]}
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
+    _sigma_cross_m, sigma_a_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
+    assert observations[0].position_uncertainty is not None
+    assert observations[0].position_uncertainty.sigma_down_m == sigma_a_m
 
 
 #: Three T-72B (`size_m=7.0`, `OP_ARMORED`) at 3000 m -- beyond `LOWRES_

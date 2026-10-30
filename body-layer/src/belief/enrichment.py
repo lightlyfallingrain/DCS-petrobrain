@@ -633,7 +633,16 @@ def _terrain_aware_world_position(
     iteration-count policy (`PROJECTION_ITERATIVE_RANGE_M`, watched-contact
     override) still come from the most recent contributing `Percept` --
     falls back to `contact.last_position` unchanged (already the flat
-    projection) if no contributing observation is still in the log."""
+    projection) if no contributing observation is still in the log.
+
+    **A surface contact short-circuits to `contact.last_position`
+    unchanged** (`plans/bl-b104-ground-contacts-on-ground/plan.md`
+    Decision 0/"no world model elevation grid" -- `contact.on_surface`):
+    it is already on the ground, at its own real height (Stage 2), so
+    there is nothing for a terrain solve to improve, and running one would
+    be a second, independent elevation query the live path does not need."""
+    if contact.on_surface:
+        return contact.last_position
     percepts = _recent_percepts(store, contact)
     if not percepts:
         return contact.last_position

@@ -103,7 +103,12 @@ from belief.contacts import Contact, ContactStore
 from belief.decay import OBJECT_ID_MEMORY_S
 from detection_trace_writer import observation_id_to_contact_id
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
-from perception.geometry import GeoPosition, project_from_bearing_range, range_m
+from perception.geometry import (
+    GeoPosition,
+    horizontal_range_m,
+    project_from_bearing_range,
+    range_m,
+)
 from perception.object_model import DEFAULT_OP_CLASS, profile_for
 from perception.source import OwnshipState
 from perception.visibility import NAKED_EYE_RANGE_CAP_M
@@ -135,6 +140,14 @@ class BeliefTruthRow:
     true_z: float
     believed_x: float
     believed_z: float
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2 -- the
+    #: contact's own believed altitude (`Contact.last_alt_m`) and whether
+    #: the most recent look that fed it was a surface one
+    #: (`Contact.on_surface`). Logged so a sortie can be triaged for
+    #: "believed altitude within a few metres of truth" without a second
+    #: pass against the detection trace.
+    believed_alt_m: float
+    on_surface: bool
     position_error_m: float
     position_uncertainty_m: float
     believed_range_m: float
@@ -205,7 +218,14 @@ def evaluate_pair(
     `BeliefTruthLogWriter.write_poll` calls per matched pair each poll."""
     true_position = project_from_bearing_range(observer, true_bearing_deg, true_range_m)
     believed_position = contact.last_position
-    position_error_m = range_m(true_position, believed_position)
+    # Horizontal-only (`plans/bl-b104-ground-contacts-on-ground/plan.md`
+    # Stage 2): `believed_position.alt_m` is now a surface contact's real
+    # ground height, not the flat-model's observer-altitude placeholder
+    # `true_position` is still built with, so a 3D `range_m` would charge
+    # this comparison for an altitude difference the two positions were
+    # never meant to agree on in the first place -- the thing worth
+    # measuring is whether belief found the right spot on the ground.
+    position_error_m = horizontal_range_m(true_position, believed_position)
     position_uncertainty_m = contact.last_position_uncertainty_m
     believed_range_m = range_m(observer, believed_position)
 
@@ -226,6 +246,8 @@ def evaluate_pair(
         true_z=true_position.z,
         believed_x=believed_position.x,
         believed_z=believed_position.z,
+        believed_alt_m=contact.last_alt_m,
+        on_surface=contact.on_surface,
         position_error_m=position_error_m,
         position_uncertainty_m=position_uncertainty_m,
         believed_range_m=believed_range_m,

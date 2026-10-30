@@ -35,4 +35,27 @@
 - **The same `_extract_lua_function` helper has a second, independent latent bug: it matches the bare words `function`/`if`/`end` anywhere in the raw text, including inside `--` line comments**, not just the loop-truncation gap noted above. A comment reading "a mission end/restart..." several hundred lines past `run_sight_servo`'s real closing `end` happened to rebalance `test_sight_servo_lua.py`'s depth counter by coincidence for every extraction so far, so every existing test using it was (and still is, after the fix) passing against a chunk always longer than intended — confirmed by extracting `run_sight_servo` from the pre-change file: 379 lines, not its real ~230. Adding a new function (`sight_servo_tick`, `9k113-hands-off-switch`) shifted that coincidental rebalancing point past the end of the file, which is what actually surfaced the bug (the generated test script failed to compile at all, `'end' expected ... near '<eof>'`) rather than a wrong extraction being silently accepted. Fixed locally in that file's own copy only (skip `--` line comments while counting; block comments `--[[ ]]` still unhandled) — not shared with `test_exponent_float_fix.py`'s copy, which may have the same issue if a future edit there adds or moves a function near a similarly-worded comment. Same lesson as the loop-truncation bug above: a token-matching extractor that doesn't understand the host language's own comment syntax is not safe to trust just because it has worked so far — "has worked so far" can mean "got lucky on rebalancing," not "is correct."
 - **A DCS scripting-API call documented/modelled as returning two values (`ok, value`) may in fact return one** — check the real call site, not a `pcall`-wrapping snippet's own variable names. `LoGetNameByType` was modelled in a Lua test mock as returning an `(ok, name)` pair, apparently by analogy with `pcall(LoGetNameByType, ...)`'s own two return values (`okn, nm` — `pcall`'s success flag plus the wrapped call's *single* return). An early draft bound the mock's second value to a boolean and read it back as `"?"` by coincidence (not a string, but printable), silently exercising the wrong branch until an assertion on the resolved name caught it (`BL-B67` Stage 4, `aircraft-layer/research/2026-10-29-bl-b67-loadout-and-atgm-object-recon.md` Probe 2). The tell: a `pcall(...)`'s own two-value return is not evidence about the arity of the function it wraps.
 
+- **A scenario's "masked-window-to-admission" gap is structurally bounded by
+  `separation - admission_range + mask_range`, not freely tunable via speed or lateral offset
+  alone.** Widening two groups' separation to lengthen the time one stays masked before the other
+  is admitted is self-defeating: it also widens the down-range distance any fold needs to span by
+  the same amount, so a longer masked window buys nothing. Altitude is the lever that actually
+  works, because raising AGL raises the forward-mask threshold (`AGL / tan(mask_angle)`) without
+  changing the separation the fold has to cover — but raising it too far instead prevents the near
+  unit from ever being admitted at all (`BL-B104`'s own scenario-3 tuning pass found 800 m AGL
+  produced zero detections for the whole run, while 600–700 m AGL all reproduced the fold
+  reliably). Worth checking this bound analytically before iterating on geometry by trial and
+  error for any future scenario needing a similarly long masked window.
+- **A module-level function imported with `from x import f` is a separate binding from `x`'s own
+  module attribute — patching one for a revert/counterfactual check does not touch the other.**
+  If a function is called both from inside its own defining module (resolving the name from that
+  module's globals) and by importers that did `from x import f`, a monkeypatch has to replace both
+  bindings to actually change behaviour everywhere the function is called. `BL-B104`'s own
+  before/after control experiment against `contact_growth_rate_mps` (called internally by
+  `association_over_time._contact_covariance` and, via `from ... import`, by `belief.contacts` and
+  `belief.attack_run`) first patched only the two importers' bindings and observed **no behaviour
+  change at all** — the internal caller never saw the patch. Caught before it reached a committed
+  test, but it is exactly the class of "empirical check that doesn't actually exercise the thing it
+  claims to" this project has been burned by before (see the `caplog` entries above).
+
 - **Recon samples can mislead when they all share one parameter value.** `generate_effector_registry.py`'s `multiposition_switch` support was first written against `clickabledata.lua` samples that happened to all use `delta_ = 0.1` — the real file's `delta_` values span at least `0.1`/`1/9`/fractional-arithmetic forms, and a generalisation fitted to the first sample set (e.g. assuming a nice round step) would have silently mis-rendered `AC-TEMP-KNOB-PTR`'s own `1/9` step (which deliberately overshoots `1.0`, topping out at `1.111111` — ED's own count/delta mismatch, not a bug). Scan the full set of real occurrences of a pattern before generalising a parser rule from a handful of recon samples.

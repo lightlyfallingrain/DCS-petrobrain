@@ -14,6 +14,7 @@ import pytest
 from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.association_over_time import (
+    UNOBSERVED_MOTION_GROWTH_RATE_MPS,
     contact_growth_rate_mps,
     implied_position,
     percept_position_uncertainty,
@@ -70,6 +71,8 @@ def _observation(
     continues_observation_id: str | None = None,
     position_uncertainty: PositionUncertainty | None = None,
     live_los_clear: bool | None = None,
+    surface_alt_m: float | None = None,
+    apparent_motion: bool | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -89,6 +92,8 @@ def _observation(
         continues_observation_id=continues_observation_id,
         position_uncertainty=position_uncertainty,
         live_los_clear=live_los_clear,
+        surface_alt_m=surface_alt_m,
+        apparent_motion=apparent_motion,
     )
 
 
@@ -105,6 +110,57 @@ def test_same_object_observed_twice_nearby_produces_one_contact() -> None:
     assert contact.contributing_observation_ids == ["OBS_1", "OBS_2"]
     assert contact.first_seen_sim == 0.0
     assert contact.last_seen_sim == 1.0
+
+
+def test_from_percept_sets_on_surface_and_last_alt_m_for_a_surface_look() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2."""
+    ownship = OwnshipState(t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0)
+    observation = _observation(
+        obs_id="OBS_1", t_sim=0.0, ownship=ownship, surface_alt_m=120.0
+    )
+    percept = percept_of(observation)
+
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert contact.on_surface is True
+    assert contact.last_alt_m == 120.0
+
+
+def test_from_percept_leaves_on_surface_false_for_an_air_look() -> None:
+    ownship = OwnshipState(t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0)
+    observation = _observation(obs_id="OBS_1", t_sim=0.0, ownship=ownship)
+    percept = percept_of(observation)
+
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert contact.on_surface is False
+    assert contact.last_alt_m == 1584.0
+
+
+def test_record_updates_on_surface_and_last_alt_m_on_a_later_surface_look() -> None:
+    store = ContactStore()
+    ownship_high = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+    )
+    first = _observation(obs_id="OBS_1", t_sim=0.0, ownship=ownship_high)
+    store.ingest([first], now_sim=0.0)
+    contact = store.contacts[0]
+    assert contact.on_surface is False
+
+    ownship_low = OwnshipState(
+        t_sim=1.0, x=0.0, z=0.0, alt_m=1165.0, heading_true_deg=0.0
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        ownship=ownship_low,
+        continues_observation_id="OBS_1",
+        surface_alt_m=750.0,
+    )
+    store.ingest([second], now_sim=1.0)
+
+    assert contact.on_surface is True
+    assert contact.last_alt_m == 750.0
 
 
 def test_live_los_clear_is_overwritten_not_folded_on_each_record() -> None:
@@ -354,6 +410,138 @@ def test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed() ->
     # not at whatever the unclamped fuse would have produced.
     assert applied_displacement == pytest.approx(bound_m, abs=1e-6)
     assert contact_d.fold_displacement_m == pytest.approx(applied_displacement)
+
+
+def test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact() -> (
+    None
+):
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 8, closing
+    `review.md`'s Finding 6 -- the test above
+    (`test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_
+    speed`) never exercises a surface contact: its D/E/F observations all
+    default `surface_alt_m=None`, so `contact_d.on_surface` stays `False`
+    and `contact_growth_rate_mps` never takes Stage 8's new branch at all
+    -- confirmed by reading `_observation`'s own default, not assumed. This
+    test gives D/E/F `surface_alt_m=0.0` instead, so the fold-displacement
+    bound actually goes through the real `Contact.record` ->
+    `contact_growth_rate_mps` -> `UNOBSERVED_MOTION_GROWTH_RATE_MPS` path
+    Stage 8 added.
+
+    `elapsed_s = 50.0` is deliberate, not arbitrary: it straddles the
+    plan's own Stage 8 worked-numbers section's ~42 s threshold (the
+    elapsed time the pre-Stage-8 unconditional class rate would need, at
+    `OP_ARMORED`'s 8.0 m/s, to close the ~340 m review.md's Finding 5
+    measured against the real `test_two_groups_one_bearing_stay_two_
+    contacts` scenario) -- so this test doubles as that finding's narrower,
+    cheaper differential (review.md's recommendation (b)), without needing
+    the scenario's own multi-second-per-poll timing to land exactly on it.
+
+    **D/E/F geometry (surface, `motion` left at its default `None` --
+    "never observed moving", Stage 8's `UNOBSERVED_MOTION_GROWTH_RATE_MPS`
+    branch) is chosen by direct measurement against the real gate, not
+    guessed**: D at range 1000 m, E at range 1100 m (both bearing 90 deg,
+    `Ural truck`/`OP_TRUCK`), fold F at range 1040 m, `t_sim=50.0` --
+    confirmed to still pass the ambiguous-within-group gate at this
+    elapsed time (the 100 m D/E separation here, vs. the provenance test's
+    50 m, is itself needed for F's own 40 m offset to still read as
+    ambiguous at 50 s elapsed; a tighter group loses the ambiguous match
+    before reaching a offset wide enough to make the clamp bind at all).
+    The unclamped fuse this geometry would produce (measured directly, by
+    patching `contact_growth_rate_mps` to the pre-Stage-8 unconditional
+    class rate in both `belief.contacts` and `belief.association_over_time`
+    -- `Contact.record`'s own clamp call and the spatial gate's covariance
+    inflation each resolve their own imported copy of the name, so both
+    must be patched for a faithful revert) is `~37.2 m`, comfortably clear
+    of the `0.3 m/s * 50.0 s = 15.0 m` bound Stage 8's tiny rate imposes --
+    so the assertion below is a real clamp, not a coincidence of the fuse
+    naturally landing on 15.0 m."""
+    store = ContactStore()
+    contact_d_obs = _observation(
+        obs_id="OBS_SD", t_sim=0.0, bearing_deg=90.0, range_m=1000.0, surface_alt_m=0.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_SE", t_sim=0.0, bearing_deg=90.0, range_m=1100.0, surface_alt_m=0.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_SD"]
+    )
+    assert contact_d.on_surface, "fixture defect: expected a surface contact"
+    assert contact_d.motion is None, (
+        "fixture defect: expected 'never observed moving', not a stale motion claim"
+    )
+    position_before_fold = contact_d.position
+
+    ambiguous_within_group_obs = _observation(
+        obs_id="OBS_SF", t_sim=50.0, bearing_deg=90.0, range_m=1040.0, surface_alt_m=0.0
+    )
+    store.ingest([ambiguous_within_group_obs], now_sim=50.0)
+
+    applied_displacement = math.hypot(
+        contact_d.position.x - position_before_fold.x,
+        contact_d.position.z - position_before_fold.z,
+    )
+    bound_m = contact_growth_rate_mps(contact_d) * 50.0
+    assert bound_m == pytest.approx(UNOBSERVED_MOTION_GROWTH_RATE_MPS * 50.0)
+    assert bound_m == pytest.approx(15.0)
+    # The clamp actually bound: applied displacement sits at the tiny
+    # rate's bound, not at the ~37.2 m the unclamped fuse would produce
+    # (module docstring's measurement) -- the differential this test
+    # exists to prove. Reverting `contact_growth_rate_mps` to the
+    # pre-Stage-8 unconditional class rate (8.0/15.0 m/s depending on
+    # class) makes this assertion fail, since the much wider bound
+    # (750.0 m for this `OP_TRUCK` fixture) would no longer clamp it.
+    assert applied_displacement == pytest.approx(bound_m, abs=1e-6)
+    assert contact_d.fold_displacement_m == pytest.approx(applied_displacement)
+
+    # Contrast case, same elapsed time and fold shape: a surface contact
+    # *with* observed motion takes the class-rate branch instead, per
+    # Stage 8's `contact.motion.state == "moving"` check -- confirming the
+    # gate just exercised is actually Stage 8's motion/domain branch, not
+    # some other on_surface-only rule that happens to always return the
+    # tiny rate.
+    store_moving = ContactStore()
+    contact_g_obs = _observation(
+        obs_id="OBS_SG",
+        t_sim=0.0,
+        bearing_deg=180.0,
+        range_m=1000.0,
+        surface_alt_m=0.0,
+        apparent_motion=True,
+    )
+    contact_h_obs = _observation(
+        obs_id="OBS_SH", t_sim=0.0, bearing_deg=180.0, range_m=1100.0, surface_alt_m=0.0
+    )
+    store_moving.ingest([contact_g_obs, contact_h_obs], now_sim=0.0)
+    store_moving.tick(now_sim=0.0)
+    contact_g = next(
+        c for c in store_moving.contacts if c.contributing_observation_ids == ["OBS_SG"]
+    )
+    assert contact_g.on_surface
+    assert contact_g.motion is not None and contact_g.motion.state == "moving"
+    position_before_fold_moving = contact_g.position
+
+    ambiguous_within_group_obs_moving = _observation(
+        obs_id="OBS_SI",
+        t_sim=50.0,
+        bearing_deg=180.0,
+        range_m=1040.0,
+        surface_alt_m=0.0,
+    )
+    store_moving.ingest([ambiguous_within_group_obs_moving], now_sim=50.0)
+
+    applied_displacement_moving = math.hypot(
+        contact_g.position.x - position_before_fold_moving.x,
+        contact_g.position.z - position_before_fold_moving.z,
+    )
+    bound_m_moving = contact_growth_rate_mps(contact_g) * 50.0
+    assert bound_m_moving == pytest.approx(15.0 * 50.0)  # OP_TRUCK class rate
+    # Not clamped at this much wider bound -- the moving contact's fold
+    # moves by whatever the unclamped fuse produces, unlike the unobserved
+    # case above.
+    assert applied_displacement_moving < bound_m_moving
+    assert applied_displacement_moving != pytest.approx(15.0, abs=1e-6)
 
 
 def test_fold_displacement_m_tracks_the_worst_single_fold_not_an_accumulated_sum() -> (

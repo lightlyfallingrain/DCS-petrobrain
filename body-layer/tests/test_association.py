@@ -216,6 +216,116 @@ def test_world_object_candidate_from_dict_reads_is_ownship_flag() -> None:
     assert candidate.is_ownship is True
 
 
+def test_world_object_candidate_from_dict_resolves_is_surface_for_ground() -> None:
+    candidate = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "BMP-2",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "category": 2,  # wsType_Ground
+        },
+        theatre="Syria",
+    )
+
+    assert candidate.is_surface is True
+
+
+def test_world_object_candidate_from_dict_resolves_is_surface_for_missing_category() -> (
+    None
+):
+    candidate = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "Mi-24P",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+        },
+        theatre="Syria",
+    )
+
+    assert candidate.is_surface is None
+
+
+def test_world_object_candidate_from_dict_resolves_is_surface_for_helicopter_agl() -> (
+    None
+):
+    airborne = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "Mi-8",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "category": 1,  # wsType_Air
+            "subcategory": 2,  # wsType_Helicopter
+        },
+        theatre="Syria",
+        agl_m=150.0,
+    )
+    landed = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 2,
+            "object_type": "Mi-8",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "category": 1,
+            "subcategory": 2,
+        },
+        theatre="Syria",
+        agl_m=5.0,
+    )
+
+    assert airborne.is_surface is False
+    assert landed.is_surface is True
+
+
+def test_world_object_candidate_from_dict_treats_nan_category_as_none() -> None:
+    # Security review finding 1: `category`/`subcategory` arrive straight
+    # off the LAN `GET /world_objects/latest` response body, and Python's
+    # `json.loads` accepts the non-standard `NaN`/`Infinity` literals --
+    # `int(float("nan"))` raises `ValueError` unguarded. Confirm it resolves
+    # to the same "unknown category" outcome a missing field gives
+    # (`is_surface is None`) rather than raising out of `from_dict`.
+    candidate = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "BMP-2",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "category": float("nan"),
+            "subcategory": 1,
+        },
+        theatre="Syria",
+    )
+
+    assert candidate.is_surface is None
+
+
+def test_world_object_candidate_from_dict_treats_infinity_subcategory_as_none() -> None:
+    # Same finding, `OverflowError` branch: `int(float("inf"))` raises
+    # `OverflowError`, not `ValueError`.
+    candidate = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "Mi-8",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "category": 1,
+            "subcategory": float("inf"),
+        },
+        theatre="Syria",
+        agl_m=150.0,
+    )
+
+    assert candidate.is_surface is False
+
+
 def test_filter_ownship_drops_a_candidate_flagged_true() -> None:
     # Replaces the old proximity-radius ownship exclusion: the aircraft-layer
     # now identifies ownship directly via LoGetPlayerPlaneId() (see

@@ -222,7 +222,15 @@ class Percept:
     "something firing... far". Mutually exclusive with `targets_ownship` by
     construction (`naked_eye_source._build_observation`'s fold resolves
     `targets_ownship` first), but not enforced as an invariant here --
-    both default to `False`, same as every other `emitter_kind`."""
+    both default to `False`, same as every other `emitter_kind`.
+
+    `surface_alt_m` carries `Observation.surface_alt_m` through unchanged
+    (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2) -- a
+    surface unit's own ground height at this look, not a position. A
+    closed, purpose-named field (this module's own "how to add a new
+    signal" pattern, a number rather than a free-form string): `None`
+    for every air observation and for every pre-existing construction
+    site."""
 
     t_sim: float
     source: str
@@ -242,6 +250,7 @@ class Percept:
     emitter_kind: str | None = None
     targets_ownship: bool = False
     firing_visible: bool = False
+    surface_alt_m: float | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -269,4 +278,5 @@ def percept_of(observation: Observation) -> Percept:
         emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
         targets_ownship=observation.provenance in _TARGETS_OWNSHIP_PROVENANCE,
         firing_visible=observation.provenance in _VISIBLE_FIRING_PROVENANCE,
+        surface_alt_m=observation.surface_alt_m,
     )

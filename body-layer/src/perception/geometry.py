@@ -110,6 +110,19 @@ def range_m(observer: GeoPosition, target: GeoPosition) -> float:
     return math.sqrt(delta_x * delta_x + delta_z * delta_z + delta_alt * delta_alt)
 
 
+def horizontal_range_m(observer: GeoPosition, target: GeoPosition) -> float:
+    """Ground (horizontal) range from `observer` to `target`, metres --
+    `range_m`'s altitude-excluding sibling. `plans/
+    bl-b104-ground-contacts-on-ground/plan.md` Decision 3: reported range
+    stays slant (`range_m`), but a surface percept's range model and the
+    belief-truth log's position-error comparison both need the horizontal
+    quantity, not conflated with altitude the way a flat-model slant range
+    always was."""
+    delta_x = target.x - observer.x
+    delta_z = target.z - observer.z
+    return math.hypot(delta_x, delta_z)
+
+
 def elevation_deg(observer: GeoPosition, target: GeoPosition) -> float:
     """World-horizon-relative elevation from `observer` to `target`,
     degrees, positive up -- pitch/bank independent by construction (a pure
@@ -137,6 +150,14 @@ def project_from_bearing_range(
     observer's own altitude (ground range == slant range), which is exactly
     the "flat, no terrain" simplification `plans/pb2-contact-memory/plan.md`
     Stage 1 calls for.
+
+    **This flat convention now applies to air contacts alone**
+    (`plans/bl-b104-ground-contacts-on-ground/plan.md` Decision 4): a
+    surface contact's altitude is replaced immediately after this call
+    (`belief.association_over_time.implied_position`, from `Percept.
+    surface_alt_m`), so for a ground unit this function's own "observer's
+    own altitude" assumption is a transient value, corrected before
+    anything reads it.
 
     Deliberately crude, by design -- `belief.association_over_time`'s only
     caller uses this to get an uncertainty-gated candidate position for

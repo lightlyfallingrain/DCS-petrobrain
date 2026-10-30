@@ -40,6 +40,9 @@ def _world_object(
     lat_deg: float,
     lon_deg: float,
     is_ownship: bool | None = False,
+    category: int | None = None,
+    subcategory: int | None = None,
+    altitude_m: float = 500.0,
 ) -> dict[str, Any]:
     return {
         "object_id": object_id,
@@ -47,9 +50,11 @@ def _world_object(
         "coalition": 1.0,
         "lat_deg": lat_deg,
         "lon_deg": lon_deg,
-        "altitude_m": 500.0,
+        "altitude_m": altitude_m,
         "heading_true_rad": 0.0,
         "is_ownship": is_ownship,
+        "category": category,
+        "subcategory": subcategory,
     }
 
 
@@ -241,6 +246,68 @@ def test_new_classification_with_a_confident_candidate_emits_one_observation() -
     assert obs.derived_world_position is not None
     assert obs.derived_world_position.confidence == pytest.approx(0.6)
     assert obs.provenance == "petrovich_indication+world_objects"
+
+
+def test_surface_candidate_carries_surface_alt_m_and_horizontal_range() -> None:
+    # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2/3: a
+    # surface candidate (category 2, wsType_Ground) at a real altitude
+    # below ownship's -- the true range `associate()` itself computes is
+    # slant (includes the altitude difference), but the percept range
+    # must be the horizontal ground distance instead, since belief is
+    # about to place this percept at the unit's own real height.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "Ural-4320",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=2,
+                altitude_m=200.0,  # 300 m below ownship's 500 m
+            )
+        ]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Ural truck"})], world_objects=world_objects
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.surface_alt_m == 200.0
+    # Horizontal distance from (0,0) to (1000,0) is exactly 1000 -- the
+    # slant distance (including the 300 m altitude difference) would be
+    # ~1044 m, a different number this assertion would catch.
+    true_bearing_deg, true_horizontal_range_m = _true_bearing_range(
+        _ownship(), 1000.0, 0.0
+    )
+    _expected_bearing_deg, expected_range_m = _expected_perturbed(
+        obs.id, 1, true_bearing_deg, true_horizontal_range_m
+    )
+    assert obs.range_m == pytest.approx(expected_range_m)
+
+
+def test_air_candidate_still_uses_slant_range_unchanged() -> None:
+    # No category at all -- Decision 4, air contacts unchanged, including
+    # the pre-existing slant-range convention.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1, "Mi-8", lat_deg=1000.0, lon_deg=0.0, altitude_m=700.0
+            )  # 200 m above ownship
+        ]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Mi-8"})], world_objects=world_objects
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
 
 
 def test_ambiguous_candidate_sets_ambiguous_provenance_and_low_confidence() -> None:
