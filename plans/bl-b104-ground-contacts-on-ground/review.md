@@ -170,3 +170,159 @@ suite both pass and the plan's own module boundaries are narrow and unchanged el
 tests` (whole directory) was run as an extra check beyond the mandated command set and its
 pre-existing, unrelated findings are noted but not treated as blocking since they fall outside
 `body-layer/CLAUDE.md`'s own "Commands" list.
+
+---
+
+## Follow-up review, 2026-10-30 — Stage 8 + Stage 7 amendment
+
+Branch `feature/bl-b104-ground-contacts-on-ground`, fast-forwarded cleanly from `54633ef8` to
+`0831944e` (HEAD was a strict ancestor; tree was clean before and after). Reviewed `plan.md`'s new
+Stage 8 and amended Stage 7, `explore-notes.md`'s "E5 fold on a closing run" decision,
+`implementation.md`'s Stage 8 / Stage 7 amendment sections, against the prior `review.md` Findings
+1/2 above.
+
+No venv existed in this worktree; built one (`body-layer/.venv312`, Python 3.12, matching
+`pyproject.toml`'s `>=3.11`) and ran the mandated commands directly — all pass, matching the
+Implementer's own report exactly:
+
+- `ruff format --check src tests`: pass (190 files).
+- `ruff check src tests`: pass.
+- `cd body-layer && mypy src`: pass (79 source files).
+- `pytest`: 2855 passed, 4 xfailed (same 4 pre-existing xfails `main`'s `fix/flexible-sequence-tests`
+  carries, unrelated to this feature).
+
+**Mechanism review (dispatch point 1).** `contact_growth_rate_mps` (`association_over_time.py`
+lines 368-416) matches the plan exactly: installation components return `0.0` unconditionally,
+checked first; `not contact.on_surface` (air contacts) take the unconditional class-rate branch
+regardless of `Contact.motion`, confirmed bit-identical by a dedicated test
+(`test_contact_growth_rate_mps_air_contact_stays_bit_identical`, all three `motion` states);
+surface contacts with `motion is None` or `motion.state == "stopped"` get
+`UNOBSERVED_MOTION_GROWTH_RATE_MPS`; `motion.state == "moving"` gets the class rate. The tunable is
+declared via `tuning.real` with `lo=0.0, hi=1.0, status="judgement"`, and the rendered
+`config/defaults.toml` entry (checked directly, not the source comment) carries the correct first
+sentence, status, range, and source line — the generator's own first-sentence-only truncation did
+not bite here. Both consumers (`Contact.record` and `attack_run._tier2_alignment`) call this one
+function, confirmed by grep — the "one table" rule holds.
+
+### Required Fixes
+
+- **Finding 5 (dispatch point 2 — control experiment): the restored closing-run scenario's "no
+  fold" result is not evidence that Stage 8 fixes the E5 fold, because the scenario does not fold
+  even with Stage 8's fix reverted.** Patched `contact_growth_rate_mps` locally (not committed) to
+  return `plausible_speed_mps(profile.op_class)` unconditionally for every contact — the exact
+  pre-Stage-8 behaviour — and re-ran `test_two_groups_one_bearing_stay_two_contacts`: it still
+  passes, with the identical contact-count trace `implementation.md`'s own Measurement section
+  records (`CONTACT_1` founds at t=85, `CONTACT_2` founds at t=135, count never drops). Instrumented
+  further to find why: `CONTACT_1`'s `last_observable_sim` stops advancing at t=105 and does not
+  resume until `CONTACT_2` founds at t=135 — a **30 s** masked gap, not the geometry's forward-mask
+  "closest approach ~508 m, inside 743 m" claim alone. The plan's own Stage 8 worked-numbers section
+  computed that closing the ~500 m covariance gap by growth alone needs `growth_rate_mps *
+  elapsed_s ≈ 340 m`, which at the **pre-Stage-8** rate (8 m/s, confirmed as `OP_GROUPSOMETHING`'s
+  resolved default — `_DEFAULT_PLAUSIBLE_SPEED_MPS`) needs **≈42 s** unseen. The scenario's actual
+  masked gap is 30 s — short of that threshold even under the old, uncapped growth rate. So this
+  scenario was never going to fold, with or without Stage 8: it does not exercise the mechanism
+  Stage 8 changed, and "No fold, so Finding 1 is resolved" (`implementation.md`'s own conclusion) is
+  not supported by this run. This reopens the prior review's Finding 1 in substance even though its
+  particular form (fully-stationary redesign) is gone — **the E5 closing-run case still has no
+  genuine empirical verification against the real pipeline**, for a different reason than before
+  (insufficient mask duration rather than no motion at all).
+  - This is not a reason to distrust Stage 8's mechanism itself — the function-level unit tests
+    (`test_contact_growth_rate_mps_*`) correctly verify the gate in isolation, and the arithmetic in
+    the plan's own worked-numbers section is sound as an order-of-magnitude argument. What is
+    missing is a scenario (or a more direct test) that actually brackets the ~42 s threshold: one
+    where the masked gap is long enough that the **old** rate would fold and the **new** rate does
+    not, run both ways and shown to differ.
+  - **Required**: either (a) widen scenario 3's masked window past ~45-50 s (slower closing speed
+    on the final leg, or a longer stand-off before the turn, re-derived by the same throwaway-script
+    integration practice already used for this scenario's geometry) and re-run the same before/after
+    control experiment done here to confirm it actually discriminates, or (b) add a narrower,
+    cheaper differential test directly against `Contact.record`/`fold_position`/
+    `clamp_to_detection_envelope` with a contrived elapsed time that straddles the ~42 s threshold
+    for a surface contact (this also closes Finding 6 below). Either way, the claim "Stage 8 fixes
+    the fold" needs a test that is shown, by the same kind of control experiment used here, to fail
+    without Stage 8 and pass with it.
+
+- **Finding 6 (dispatch point 3): no test exercises the fold-displacement bound path
+  (`Contact.record` → `fold_position`/`clamp_to_detection_envelope`) for a surface contact under
+  Stage 8's new rule.** Confirmed the Implementer's own Discovery 1 is correct — `test_contacts.py`'s
+  `_observation` helper defaults `surface_alt_m=None`, never overridden by either fold-displacement
+  test, so `contact_d`/the class-swapped copy are `on_surface=False` throughout and correctly
+  untouched by this stage. But that leaves the actual integration path — a surface contact,
+  `motion=None`/`"stopped"`, folding after a long gap, with the tiny rate feeding the displacement
+  clamp exactly as `Contact.record` line 647 calls it — tested nowhere. The four new
+  `test_association_over_time.py` tests all call `contact_growth_rate_mps` directly on a constructed
+  `Contact`, never through `Contact.record`; `test_bl_b104_association_scenarios.py`'s surface-domain
+  scenarios never leave a contact unseen (every poll re-observes, 2 s cadence) so elapsed-time growth
+  is never exercised there either. **Required**: add a `test_contacts.py` case with a surface
+  contact (`surface_alt_m` set), a motion state of `None` or `"stopped"`, and a controlled elapsed
+  gap, asserting the fold-displacement bound uses `UNOBSERVED_MOTION_GROWTH_RATE_MPS` (not the class
+  rate) through the real `Contact.record` call — the same shape as the existing
+  `test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed` test but with
+  `on_surface=True` and no `motion` override. This single test can also serve as Finding 5's
+  narrower differential test (recommendation (b) above) if given an elapsed time that straddles the
+  ~42 s threshold.
+
+### Dispatch points checked, no fix needed
+
+- **Point 4 (sight-tracking assertion).** Confirmed by re-reading `sight_head.advance_sight_head`:
+  `mode` only leaves `"off"` once `observ_observed` is true, which in production is driven by the
+  898/886 lamp readback through the effector-engine wiring this scenario harness deliberately does
+  not build (same gating the implementer already found for `weapon="missiles"`). There is no cheap
+  alternative assertion available in this harness that would not be tautological (`aim_source`
+  cannot be anything but `"belief"` while `mode` is permanently `"off"`) — forcing `observ_observed`
+  directly would mean calling `advance_sight_head` out-of-band from the scenario's own pipeline,
+  which duplicates `test_sight_head.py`/`test_optic_policy.py`'s existing unit coverage rather than
+  adding anything from this scenario's own belief data. Documenting this in the test's docstring
+  rather than asserting it, as done, is the right call — accepted as-is, matching the original
+  review's framing of this as an Optional Refinement, not a blocker.
+- **Point 5 (non-Level leg per scenario).** All five scenario tests now contain at least one
+  non-Level leg: `test_run1_overflight_...` (Turn + Descend), `test_run2_shallow_approach_...`
+  (Turn), `test_two_groups_one_bearing_stay_two_contacts` (Turn), `test_cockpit_mask_forward_
+  boundary_...` (Turn), and `test_cockpit_mask_pitch_down_recovers_masked_forward_target` (Descend,
+  pre-existing, not touched by this amendment — its own pitch-down leg already satisfied "some
+  aircraft manoeuvre" before Stage 7 amendment was needed). The `Turn` dataclass itself is sound:
+  heading is interpolated per step (`fraction = step / n_steps`, reaching `end_heading_deg` exactly
+  at the last step), `dx`/`dz` are recomputed from the per-step heading (unlike `Level`/`Descend`,
+  which compute once per leg, correctly since their heading is constant), `bank_deg` is held for the
+  leg's duration and reset to `0.0` immediately after, and the exit heading carries forward correctly
+  as the entry heading for whatever leg follows.
+
+### Optional Refinements (carried over / new)
+
+- The plan's own "worth a small backlog item" note (widening `belief.groups.group_matches`'s
+  displacement bound to both sides, now unblocked by `Group.movement_state`) was not minted —
+  `.claude/scripts/mint-id.sh BL-B` was not run and no `BL-B*.md` file for it exists. Low severity
+  (explicitly "worth," not "required," in the plan itself) but worth doing before this is forgotten
+  a second time, per the plan's own framing.
+- Everything from the first review round's Optional Refinements (comment accuracy, the
+  cross-thread `CrewConsole` footgun, the `DEPRESSION_SIGMA_DEG`/`_SIGHT_*_SCALE` coupling) stands
+  unchanged and is not re-verified in this round beyond what Stage 8/7-amendment touched.
+
+### Verdict
+
+NEEDS REVISION
+
+Stages 1-5 and the mechanism half of Stage 8 (the gate logic itself, the tunable, the bit-identical
+air-contact guarantee, the "one table" consumer check) are sound and APPROVED as implemented. The
+two Required Fixes above are both about **verification, not mechanism**: Finding 5 shows the
+scenario built to empirically confirm the E5 fix does not actually discriminate between "fixed" and
+"not fixed," and Finding 6 shows the fold-displacement bound's own integration path for a surface
+contact has no test at all. Recommend resolving both together via a single new `test_contacts.py`
+case that directly exercises `Contact.record`'s fold-displacement bound for a surface,
+unobserved-motion contact across an elapsed gap straddling the ~42 s threshold the plan's own
+arithmetic names, run once with the real code (expect no fold / bounded displacement) and once with
+Stage 8's gate reverted locally (expect the old, wider bound) — the same before/after check performed
+in this review, made a permanent, committed test rather than a one-off reviewer probe. Widening
+scenario 3's masked window is a reasonable alternative or complement, but the direct test is cheaper
+and does not depend on getting integration-harness timing exactly right.
+
+### Review Confidence (this round)
+
+Full read of the new Stage 8 code (`association_over_time.py`), its four new tests, the Stage 7
+amendment's `Turn` dataclass and `build_scenario_frames` changes, and all five scenario tests' legs
+and docstrings. The control experiment (Finding 5) was run directly against the real pipeline, not
+inferred from the plan's arithmetic — both with the shipped code and with a local, uncommitted
+revert of Stage 8's gate, restored and confirmed clean (`git status --porcelain` empty,
+`git diff src/belief/association_over_time.py` empty) before the final test run. Not independently
+re-verified this round: Stages 1-5's own mechanism (unchanged since the prior full read), the
+Lua wiring (unchanged), and the Optional Refinements carried over from the first review round.
