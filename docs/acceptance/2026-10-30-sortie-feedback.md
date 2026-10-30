@@ -41,3 +41,24 @@ view FOV, which is not known, so no degree figure is claimed from it.
 
 Consequence: in DCS the missile follows the sight line, so a low mark means ATGM shots hit short.
 This sits on `[[BL-B80]]` (pointing accuracy) and gates BL-B67 Stage 8.
+
+### Explored with the user
+
+> *"I was hovering, it stayd where it was once it moved for the attack run."*
+
+Constant geometry, so one calibration point only — scale vs boresight not separable from this
+sortie.
+
+Calibration method, user's choice between two:
+
+> *"I can point the 9K113 by hand - Petrovich *must not* write axis values then. This would be the
+> most reliable measurement of 9K113 vs ASP-17 alignment"* — chosen.
+>
+> *"I can manipulate the ASP-17 to point at a target, but then 9K113 sight is separate from that
+> and I would not move it"* — rejected: calibrates the gunsight, not the missile's line.
+
+Consequence: today `run_sight_servo` writes the AI axis every frame while OBSERV and the align lamp
+are on, even with no goal (`hold` dithers). A hands-off switch is needed that suppresses **every**
+axis write, while the Lua slew trace (raw 555/566 + gimbal args, all modes) and body-layer's trace
+(per-object truth elevation, attitude) keep logging. Two depression angles (near and far target,
+hovering) give boresight and scale.
