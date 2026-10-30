@@ -9,6 +9,12 @@
 # (gitignored, created by you, sparse -- only the keys you change) and
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
+[belief.association_over_time]
+# How fast an unobserved-moving contact's position uncertainty grows, metres/second, when `Contact.motion` is `"stopped"` or `None` ("never observed moving") -- user direction, 2026-10-30 (explore-notes.md, "E5 fold on a closing run"): "not observed moving -> not expected to move -> tiny growth".
+# status: judgement | range: 0.0 .. 1.0
+# source: belief/association_over_time.py:UNOBSERVED_MOTION_GROWTH_RATE_MPS
+UNOBSERVED_MOTION_GROWTH_RATE_MPS = 0.3
+
 [belief.atgm_run]
 # Ataka's own max engagement range -- same source and caveat as `SHTURM_MAX_RANGE_M`.
 # status: agreed-guess | range: 1000.0 .. 10000.0
