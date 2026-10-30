@@ -78,3 +78,31 @@ Reading:
   the merge-circle size are **tunables with a judgement default**, to be calibrated in flight
   (`#needs-flight`). The scenario tests must not hard-code a verdict for the ambiguous ~1.25 ratio
   case — only the clear ones (≈1.5 km+ apart at 2–5 km must stay two; one group must not split).
+
+## Goal-check questions answered (user, verbatim, 2026-10-31)
+
+Questions from `alignment.md` (goal check, CONCERNS): Q1 overlapping-in-view units at very low
+altitude — still one blob (2026-09-18 "separability is angular") with relative distance deciding
+only whether *separately seen* things are one group? Q2 a ~1 km column moving along the line of
+sight — one group if neighbour gaps are small? Q3 a group only ever seen from 4–5 km keeps ~±700 m
+on the kneeboard however long he watches — acceptable? Q4 a group lost while only "something" —
+into mission memory too?
+
+> *"Q1 - yes*
+> *Q2 - one group*
+> *Q3 - accept, and this is optics dependent. With binoculars you see better and so can judge unit
+> apparent size better. That'd give a better range estimate. 9K113 has stadimeter and magnification
+> and stabilization. With it distance measurement is much more accurate though not exact.*
+> *Q4 - keep them too in mission memory. Keep all groups in mission memory, regardless of
+> identification level."*
+
+Reading:
+
+- Q1: angular overlap decides whether he can see two things; relative distance decides whether
+  separately seen things are one group. The 2026-09-18 rule stands for the first question.
+- Q2: group membership is by neighbour gap (chain), not total extent.
+- Q3: the stable per-group range error scales with the optic — naked eye largest, binoculars
+  smaller (better apparent-size judgement), 9K113 much smaller (stadimeter, magnification,
+  stabilisation) but not zero. A look through a better optic is new information and may tighten the
+  estimate; a repeat look through the same optic from the same geometry may not.
+- Q4: mission memory keeps every group, at any identification level.
