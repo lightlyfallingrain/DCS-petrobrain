@@ -57,3 +57,20 @@ Ships follow the ground rule at their own surface height. No sea-specific code.
 ## Q5 — air contacts keep today's flat model for now
 
 > *"ok"*
+
+## Scenario mock flights (added after the plan, 2026-10-30)
+
+Asked whether an end-to-end simulated scenario exists without DCS: only `tests/test_mock_flight_chain.py`
+(20 frames, straight north at constant 700 m — no manoeuvre, no sight, no speech asserted). Two
+options were offered: (1) scripted scenarios on the existing mock flight, (2) record a real sortie and
+replay it. User, verbatim:
+
+> *"2 is too cumbersome, not worth all the issues that would bring."*
+>
+> *"1 yes. Simple mock flights that still contain some aircraft manoeuvre"*
+
+So: option 2 is rejected (not backlogged). Option 1 becomes BL-B104 Stage 7 — a small manoeuvre-based
+scenario builder over the existing mock-flight harness (legs such as level / descend / turn / run-in),
+plus scenarios modelled on the 2026-10-30 sortie: run 1 (seen high, ~400 m descent, overflight),
+run 2 (shallow approach from 5 km at ~400 m AGL), and two groups on one bearing. Assertions on belief
+position/height vs truth, sight aim, and speech.
