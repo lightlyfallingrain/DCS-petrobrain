@@ -127,3 +127,13 @@ az-scale fit gives 1/0.0362 vs shipped 1/0.039 but the span is too narrow to tru
 
 Data kept: `aircraft_layer_slew_trace-20261030-140320.log` copy (the Lua log is overwritten on
 DCS restarts), `body-layer/logs/*-20261030-140320.jsonl`.
+
+## 4. First flight on the new calibration (hands-off flag removed)
+
+User's words:
+
+> *"Attack run was commanded, but the ASP-17 showed nowhere near the target. The debug view sometimes
+> showed Petrovich looking at target, other times something completely else and wrong directions."*
+
+Logs: `body-layer/logs/*-20261030-143312.jsonl`. Engage commands at sim 512.6 (`engage target`),
+531.4 (`engage target missiles`), 743.9 (`engage target missiles`), 954.3 (`engage target`).
