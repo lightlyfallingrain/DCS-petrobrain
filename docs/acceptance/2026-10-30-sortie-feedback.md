@@ -62,3 +62,34 @@ are on, even with no goal (`hold` dithers). A hands-off switch is needed that su
 axis write, while the Lua slew trace (raw 555/566 + gimbal args, all modes) and body-layer's trace
 (per-object truth elevation, attitude) keep logging. Two depression angles (near and far target,
 hovering) give boresight and scale.
+
+## 2. Hand-slew calibration, first attempt (same day, hands-off flag active)
+
+User's words:
+
+> *"first attempt at hand slewing. Target: truck. 9K113 on it and ASP-17 crosshair. At about 9:30 -
+> 10:00 mins in the latest mission."*
+>
+> *"I can easily hand slew the 9K113, but then I have to give control of the aircraft to DCS AI and
+> it flies horribly. It's difficult to get to a postion where the DCS AI does not mess up the test
+> by bad flying."*
+
+Logs: `dcs-slew-trace-20261030-132230.jsonl` + `aircraft_layer_slew_trace.log` (model time ends
+561.7 s, so the user's "9:30-10:00" maps to the last tracked window, ~548-561 s). Hands-off
+confirmed in `aircraft_layer_debug.log`; servo_mode `hands_off` throughout. The engaged target
+(`engage truck 12 o'clock missiles`) is an `IKARUS Bus` at ~2.85 km. Two tracking windows:
+416-443 s and 546-562 s. Mark gauge args (ARG_SIGHT_AZ/ELEV) read 0 throughout -- only 566/555
+are usable.
+
+Target truth rotated into the airframe (heading/pitch/bank), against raw 555, 53 samples:
+
+| | boresight (raw) | deg per unit | rms |
+|---|---|---|---|
+| shipped | 0.83 | 27.0 (1/0.037) | |
+| fit | **0.850** | **30.7 (1/0.0325)** | 0.25 deg |
+
+At these depressions (-0.3 to -3.6 deg) the shipped calibration reads ~0.9 deg high, i.e. Petrovich
+puts the mark ~0.9 deg low. The fit predicts the morning's -5.85 deg setpoint actually sat at
+~-7.3 deg: 1.4 deg low, matching the screenshot. **Scale is weakly constrained**: all points sit
+within 3.3 deg of each other and the aircraft was moving (DCS AI flying); a steeper point
+(-6 to -10 deg) is needed before shipping a scale. Azimuth agrees to ~0.3 deg (hand-tracking noise).
