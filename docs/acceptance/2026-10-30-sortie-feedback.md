@@ -202,3 +202,16 @@ bank drop.
 > is, including altitude, ground units are *on the ground*. We may not be certain of the exact
 > ground elevation at that point, but we know for certain that the unit is at AGL 0. Any unit at
 > AGL > 0 is aircraft or weapon in the air."*
+
+Proposed: position a ground contact by following the look ray to the terrain (world-model grid).
+User:
+
+> *"no world model elevation grid"*
+>
+> *"this rule is general one about unit detection and belief. Ground units are *on the ground*."*
+>
+> *"The likely elevation error would be in the same range as the azimuth angular error. The closer
+> the target is, the more we look at it, the better we can tell the exact location, including
+> (ground) elevation (at unit location). Technically that elevation comes from A) unit data B) we
+> can query terrain elevation at that point from DCS, which allows separation of ground unit and
+> air unit"*
