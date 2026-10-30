@@ -897,11 +897,16 @@ The entries are in the order they were written, which is roughly perception → 
   moving) and `belief.association_over_time.contact_growth_rate_mps` for speed (the same per-class
   table position-fusion/group-matching already share, not a second one) — **never written back to
   `Contact.position`**. Tier 2's vertical is the **remembered** relative height
-  (`_remembered_target_alt_m`: `percept.ownship_at_observation.alt_m + relative.up_m`, carried on
+  (`remembered_target_alt_m`: `percept.ownship_at_observation.alt_m + relative.up_m`, carried on
   `AttackRunState.last_known_target_alt_m`), never `Contact.last_alt_m` (the ownship's own
   altitude at the last look, Decision 4's finding) and never a world-model query (Decision 4
   REVISED) — `None` (no elevation word at all) only before the very first tier-1 look this
-  contact has ever had. `TIER2_AZIMUTH_WORD_TABLE` is a separate, narrower one-row table (bare
+  contact has ever had. **`remembered_target_alt_m` is public, not module-private**
+  (`plans/atgm-run-sight-tracking/debug.md`): `body._look_target_position` is a second sanctioned
+  caller, mirroring `seen_world_direction`'s existing role for `belief/sight_head.py` — the
+  9K113's own "belief" aim row had been reading `Contact.last_position.alt_m` directly (the exact
+  value this paragraph's own "never" already rejected for attack-run guidance), a second,
+  independent occurrence of the same defect nothing had caught before that debug pass. `TIER2_AZIMUTH_WORD_TABLE` is a separate, narrower one-row table (bare
   `"right"`/`"left"`, not `"come right"`/`"a bit right"` — those words are structurally
   unreachable through it); the elevation axis reuses `ELEVATION_WORD_TABLE` unchanged in both
   tiers. The three named constants (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/

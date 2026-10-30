@@ -134,7 +134,7 @@ from typing import Final, Literal, TextIO
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.atgm_run import AtgmRunState
-from belief.attack_run import AttackRunState
+from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
     _SECTOR_CENTER_DEG,
     _SECTOR_HALF_WIDTH_DEG,
@@ -142,7 +142,7 @@ from belief.attention import (
 )
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
 from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
@@ -1148,6 +1148,30 @@ def _active_gaze(
     return FREE_SCAN_PLAN
 
 
+def _look_target_position(contact: Contact) -> GeoPosition:
+    """`contact.last_position`, with its altitude corrected when a better
+    one is known -- `plans/atgm-run-sight-tracking/debug.md`.
+    `contact.last_position.alt_m` is `Contact.last_alt_m`, the flat-
+    projection altitude: *the ownship's own altitude at the contact's most
+    recent look*, not the target's (that field's own docstring; Decision 4
+    REVISED found and rejected the same assumption for attack-run
+    guidance). Fine while looks are frequent and the aircraft's own
+    altitude barely changes between them; wrong, and silently so, once a
+    contact goes a long time unobserved while the aircraft climbs or
+    descends -- exactly an ATGM run's own shape: pick a target, then fly
+    the approach. `belief.attack_run.remembered_target_alt_m` is the
+    already-reviewed fix for this (Decision 4 REVISED's own "remember the
+    relative height instead"), reconstructed from the last tier-1 look's
+    `relative_direction.up_m` rather than the look-time ownship altitude
+    bare. `None` (no tier-1 look has ever succeeded for this contact)
+    leaves `contact.last_position` exactly as before -- no worse than
+    today, never a new guess."""
+    better_alt_m = remembered_target_alt_m(contact)
+    if better_alt_m is None:
+        return contact.last_position
+    return replace(contact.last_position, alt_m=better_alt_m)
+
+
 def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget]:
     """Every live contact, as the binocular policy needs to see it.
 
@@ -1165,13 +1189,18 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
     judgement made from the mark, and a Petrovich who sized the window by
     what the thing really is would be deciding with knowledge he does not
     have.
+
+    **`target_position` is `_look_target_position`, not `contact.
+    last_position` directly** (`plans/atgm-run-sight-tracking/debug.md`) --
+    see that function's own docstring for why the altitude needs
+    correcting before it reaches `body_relative_direction`'s elevation.
     """
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     return [
         look_target_for(
             contact.id,
             observer=observer,
-            target_position=contact.last_position,
+            target_position=_look_target_position(contact),
             heading_true_deg=ownship.heading_true_deg,
             pitch_deg=ownship.pitch_deg,
             bank_deg=ownship.bank_deg,
