@@ -195,3 +195,10 @@ bank drop.
 - Search along the bearing in depression: **yes**.
 - Callout when the sight acquires the engaged contact: **"Tracking."**
 - OBSERV after a bank drop: **unchanged** (no automatic re-enable).
+
+### User, on ground units' altitude
+
+> *"while we don't want to break the no-omniscience rule and tell Petrovoch exactly where any unit
+> is, including altitude, ground units are *on the ground*. We may not be certain of the exact
+> ground elevation at that point, but we know for certain that the unit is at AGL 0. Any unit at
+> AGL > 0 is aircraft or weapon in the air."*
