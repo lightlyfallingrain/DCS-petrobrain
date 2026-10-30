@@ -118,3 +118,22 @@ Full read. All checklist items were independently verified against the live file
 implementation record's claims), including two mutation tests (the upvalue ceiling, confirmed and
 reverted cleanly; the module-level state staleness question, confirmed by grepping every assignment
 site) and the full `aircraft-layer` check suite re-run from this worktree.
+
+### Disposition (DoD, 2026-10-30)
+
+User direction, 2026-10-30: *"just let it be, this is testing aid"* — the one Required Fix above
+(gating `handle_cockpit_switch_command` against the 9K113 AI-axis commands while hands-off) is
+**declined**, not deferred. Context behind the decision: body-layer's curated switch sequences
+(`body-layer/config/sequences/mi-24p/switch-reference.md`,
+`body-layer/config/effectors-raw/mi-24p.toml`) do not reference device 7's commands 3060/3061 (or
+3025/3026) at all, so no switch sequence can reach the gap the Required Fix would have closed; the
+feature is a short-lived calibration aid, not a permanent safety boundary, and the cost of the extra
+guard was judged not worth carrying for that surface.
+
+This verdict (**NEEDS REVISION**) is therefore not an open item going into DoD — it is accepted
+residual risk, recorded here rather than actioned. No further Implementer/Reviewer loop is needed
+for this fix.
+
+Separately, user direction 2026-10-30 (*"is this a small change? If so, skip perf and sec"*) skips
+the Performance Reviewer and Security passes for this feature — recorded, not re-litigated, in
+`plans/9k113-hands-off-switch/dod-check.md`.

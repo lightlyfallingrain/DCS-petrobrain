@@ -16,6 +16,33 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
+  **9K113 hands-off switch, DoD-passed 2026-10-30, merged to `main`.** `plans/9k113-hands-off-switch/`
+  (no Architect plan — small, directly-dispatched change; `implementation.md`/`review.md` are the
+  decision record). A load-time flag
+  (`Saved Games\DCS\Scripts\aircraft_layer_sight_hands_off.flag`) sets `SIGHT_HANDS_OFF` in
+  `Export.lua`, which stops `sight_point_quiet`'s `SetCommand(CMD_AI_AZ/CMD_AI_ELEV)` writes and
+  skips `run_sight_servo` entirely via a new `sight_servo_tick` wrapper — so the pilot can hand-slew
+  the real 9K113 head without Petrovich's per-frame servo write fighting the input. Built from
+  sortie feedback 2026-10-30 (`docs/acceptance/2026-10-30-sortie-feedback.md`): the ATGM mark read
+  low in elevation on that sortie, and one observation cannot separate a scale error from a
+  boresight error in `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` — the user chose hand-slewing two
+  known depression angles (near/far target, hovering) over the alternative (walking the ASP-17
+  instead), since hand-slewing the 9K113 itself is *"the most reliable measurement of 9K113 vs
+  ASP-17 alignment"*. Reviewer's one required fix (close the generic `cockpit_switch` channel
+  against the same AI-axis commands) was **declined by the user** — *"just let it be, this is
+  testing aid"* — recorded as accepted residual risk in `review.md`'s Disposition section, not an
+  open item. Performance/Security passes skipped by user direction (small change). `#needs-flight`:
+  the switch itself is untested live — the calibration flight it enables is the next sortie, and its
+  two depression-angle readings are what will actually settle the scale-vs-boresight question above.
+  Card: `docs/acceptance/2026-10-30-9k113-hands-off-calibration.md`,
+  published https://claude.ai/artifact/X1waKvSQkUvDHciBc1AkN8 — branch to fly is `main`.
+  **Milestone-completion note**: this does not change what BL-B80's next step should be — it is
+  purely an enabler for the calibration flight already called for by the 2026-10-28 entry below —
+  but it does mean that flight's result should now be read as the authoritative correction to
+  `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` (superseding the 1/0.037 gimbal-derived guess), since
+  it removes the one confound (Petrovich's own servo write) that made every earlier single-point
+  observation ambiguous.
+
   **Elevation clip-edge probe merged 2026-10-27 (`d641ca3b`)**: `aircraft-layer/dcs-export/Export.probe-9k113-hud-elevation-limits.lua`,
   card `docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`, ~1 min. Its `EDGE UP`/`EDGE DOWN`
   555 values set `ASP17_FIELD_EL_HALF_DEG` and the margin. `#needs-flight`

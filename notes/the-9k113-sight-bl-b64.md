@@ -229,3 +229,20 @@
   rather than the raw setpoint) closes this sight's last remaining field-of-regard-shaped check;
   every other one on this subsystem (the gimbal clamp, intent's ±60° azimuth cap) was already
   checked against its own correct frame/magnitude before this pass.
+- **`run_sight_servo` in `Export.lua` is at Lua 5.1's 60-upvalue-per-closure ceiling** — confirmed
+  live by `luac5.1 -p`: adding a single `if SIGHT_HANDS_OFF then return end` at the top of the
+  function fails the syntax check outright ("function at line 1581/1583 has more than 60
+  upvalues"), not a runtime symptom. The 2026-10-30 hands-off-switch feature had to move its check
+  into a new wrapper function (`sight_servo_tick`, called from `LuaExportAfterNextFrame` in
+  `run_sight_servo`'s place) rather than add one more `if` inside it. Any future change to this
+  function that references one more upvalue needs the same move, not a straightforward edit —
+  there is essentially zero headroom left (`plans/9k113-hands-off-switch/implementation.md`,
+  independently reproduced in `review.md`).
+- **One observation of a sight/mark mismatch cannot separate a scale error from a boresight
+  error.** Both shift a reading in the same direction for a single depression angle; only a second,
+  different depression angle (or a direct, no-feedback-loop measurement) disambiguates them. This
+  is why the 2026-10-30 sortie feedback on a low ATGM mark led to a hands-off calibration switch
+  (hand-slew the real 9K113 to two known angles with Petrovich's own servo write suppressed)
+  rather than another single-point correction to `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` — the
+  same ambiguity the 2026-10-28 scale-vs-boresight entry above already carried, recurring on the
+  very next flight (`[[BL-B80]]`).
