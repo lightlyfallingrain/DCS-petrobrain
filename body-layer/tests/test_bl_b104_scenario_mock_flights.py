@@ -540,33 +540,52 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
 
 def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
     """Mirrors Stage 4's own association scenario geometry (two groups at
-    3 km/4.5 km, same bearing) -- **Stage 7 amendment (review.md
-    Finding 1/2)**: a genuine closing run with a `Turn`, not the
-    fully-stationary redesign review.md found was built specifically to
-    dodge the E5 fold this scenario exists to test. Shape: `Level` on an
-    offset heading (approaching from the near/far groups' side, not
-    already on their bearing), `Turn` onto heading 0 deg (the groups'
-    own bearing from the x-axis), then a long closing `Level` at 300 m
-    AGL -- the same AGL Stage 4's own closing-run sub-case (c) and the
-    plan's own forward-mask figures (`743 m = 300 / tan(22 deg)`) use.
-    The lateral offset (`z=-500` once the turn completes, held for the
-    rest of the run) is chosen, by direct numeric integration of this
-    module's own trajectory (not guessed), so the closest *true-geometry*
-    approach to the near group (3000 m) is ~508 m -- inside the 743 m
-    forward-mask threshold, so the near group's true range does cross
-    into masking range during this run, not merely close on it.
+    3 km/4.5 km, same bearing, `near_unit`/`far_unit` below unchanged) --
+    **Rebuilt per `review.md`'s "Follow-up review, 2026-10-30" Finding 5**:
+    the Stage 7 amendment's first cut of this scenario (51 m/s, 300 m AGL,
+    z=-500 offset) only masked the near group for ~30 s before the far
+    group founded, well short of the ~42 s the plan's own Stage 8
+    worked-numbers section computes the pre-Stage-8 unconditional class
+    rate (`OP_ARMORED`, 8.0 m/s) would need to close the ~340 m gap and
+    fold -- so a "no fold" result there was never evidence Stage 8 fixed
+    anything; the scenario never exercised the mechanism either way
+    (confirmed by the follow-up review's own control experiment: it still
+    does not fold with Stage 8's gate reverted locally).
 
-    **Outcome, checked empirically against the real pipeline, not
-    assumed from true-geometry ranges or from Stage 8's own
-    order-of-magnitude argument**: confirmed by running this scenario
-    (`implementation.md`'s own recorded measurement) -- the near group
-    founds its own contact once admitted (~t=85s of this run), the far
-    group founds its own, second contact once *it* is admitted
-    (~t=135s), and the count never drops back from 2 to 1 anywhere in
-    the run. No fold. Per the dispatch's own stop condition, if a future
-    change to this scenario or to the gate ever makes this run fold to
-    one contact, that is the stop-and-report case -- do not retune the
-    gate or re-flatten the scenario; escalate instead."""
+    **This geometry is a real differential, confirmed the same way**: with
+    `contact_growth_rate_mps` locally reverted (not committed) to the
+    pre-Stage-8 unconditional class rate in both `belief.contacts` and
+    `belief.association_over_time` (`Contact.record`'s own clamp call and
+    the spatial gate's covariance inflation each resolve their own
+    imported copy of the name, so both module-level bindings must be
+    patched for a faithful revert), this scenario **folds to one
+    contact** -- the far group's own look merges into the near group's
+    masked, decay-widened contact instead of founding its own. With
+    Stage 8's shipped gate, it stays two. Both runs' measured contact
+    counts are recorded in `implementation.md`.
+
+    **The lever that actually widens the masked window is altitude, not
+    speed or lateral offset alone** (measured directly, not assumed):
+    `perception.cockpit_mask`'s forward threshold is `AGL / tan(22 deg)`,
+    so flying at 600 m AGL instead of 300 m (both well within this
+    project's own 50-800 m "normal" operating envelope) raises the near
+    group's own masking threshold from ~743 m to ~1485 m true range --
+    still comfortably below the ~1900-2400 m true range where either
+    group typically first gets admitted (so the near group still founds
+    *before* masking, confirmed empirically; AGL values high enough to
+    push the mask threshold past the admission range were tried and
+    produced *zero* detections all run, the unit masked before it could
+    ever be founded at all). Combined with a slower closing speed (12 m/s,
+    ~23 kt -- a cautious, masked low-level approach, per the review's own
+    suggested "slower closing speed" option) and a compressed approach
+    (the offset/turn/closing legs start close enough to the action that
+    the whole run still fits well inside the shared `_THREAD_JOIN_
+    TIMEOUT_S` budget), the near group is masked continuously from ~t=80s
+    to well past the far group's own founding at ~t=150s -- a ~70s+ unseen
+    gap, comfortably past the ~42 s threshold. `ownship_start.z`
+    (`-239.1`) is chosen, by direct numeric integration of this module's
+    own trajectory (not guessed), so the turn completes onto a steady
+    `z=-100.0` lateral offset for the rest of the run."""
     near_unit = PlacedUnit(
         object_id=301,
         unit_name="unit_301",
@@ -585,36 +604,39 @@ def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
     )
     # Start offset to the south-west of the groups' bearing line, heading
     # 35 deg (not yet aimed at either group) -- a real approach-then-turn
-    # shape, not a disguised straight-line closing run.
+    # shape, not a disguised straight-line closing run. Compressed close
+    # to the action (x=600, not -3000) since the slower closing speed
+    # below needs the run's total length kept well under the shared
+    # poll-thread timeout.
     ownship_start = OwnshipStart(
-        x=-3000.0,
-        z=-1237.6,
+        x=600.0,
+        z=-239.1,
         heading_deg=35.0,
-        altitude_msl_m=300.0,
-        altitude_agl_m=300.0,
+        altitude_msl_m=600.0,
+        altitude_agl_m=600.0,
     )
     legs: list[FlightLeg] = [
         Level(
-            duration_s=20.0,
-            speed_mps=51.0,
+            duration_s=15.0,
+            speed_mps=12.0,
             heading_deg=35.0,
-            altitude_msl_m=300.0,
-            altitude_agl_m=300.0,
+            altitude_msl_m=600.0,
+            altitude_agl_m=600.0,
         ),
         Turn(
             duration_s=15.0,
-            speed_mps=51.0,
+            speed_mps=12.0,
             end_heading_deg=0.0,
-            altitude_msl_m=300.0,
-            altitude_agl_m=300.0,
-            bank_deg=25.0,
+            altitude_msl_m=600.0,
+            altitude_agl_m=600.0,
+            bank_deg=15.0,
         ),
         Level(
-            duration_s=130.0,
-            speed_mps=51.0,
+            duration_s=190.0,
+            speed_mps=12.0,
             heading_deg=0.0,
-            altitude_msl_m=300.0,
-            altitude_agl_m=300.0,
+            altitude_msl_m=600.0,
+            altitude_agl_m=600.0,
         ),
     ]
     contact_counts: list[int] = []
@@ -635,16 +657,18 @@ def test_two_groups_one_bearing_stay_two_contacts(tmp_path: Path) -> None:
 
     assert contact_counts, "neither group was ever detected across this run"
     # Confirmed by running this scenario (see `implementation.md`'s own
-    # recorded measurement): the near group founds first (count 1, ~t=85s
+    # recorded measurement): the near group founds first (count 1, ~t=25s
     # in this run -- the far group is not yet in range), then the far
-    # group founds its own, second contact (count 2, ~t=135s) once it
+    # group founds its own, second contact (count 2, ~t=150s) once it
     # enters the naked-eye channel's angular-size gate -- a real
     # single-contact *prefix*, not a fold. The actual E5 fold would show
     # as the count **dropping back to 1** after reaching 2 (the far
     # group's first look merging into the near group's own masked,
-    # decay-widened contact) -- never observed in this run. So the
-    # invariant this stage actually tests is "non-decreasing, and 2 by
-    # the end of the run", not "always 2 from the first poll"; the
+    # decay-widened contact) -- never observed with Stage 8's shipped
+    # gate (and confirmed, separately, to actually happen with the gate
+    # reverted -- see this test's own docstring and `implementation.md`).
+    # So the invariant this stage actually tests is "non-decreasing, and 2
+    # by the end of the run", not "always 2 from the first poll"; the
     # earlier single-contact prefix is expected, not a defect.
     assert contact_counts == sorted(contact_counts), (
         f"contact count dropped during the run ({contact_counts}) -- this "

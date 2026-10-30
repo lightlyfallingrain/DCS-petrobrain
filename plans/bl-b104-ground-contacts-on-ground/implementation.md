@@ -522,3 +522,211 @@ scenario were not retuned or re-flattened.
    hand-calculated from first principles) — the same practice this
    plan's own `implementation.md` already used for scenario 2's
    original 900 m stopping point, kept rather than reinvented.
+
+## Follow-up implementation, 2026-10-30 — review.md's "Follow-up review" Findings 5/6
+
+Both required fixes from `review.md`'s "Follow-up review, 2026-10-30" section
+addressed. No `src/` change — both fixes are test-only, confirmed by
+`git status --porcelain src/` staying empty throughout this round.
+
+### Files Changed
+
+- `body-layer/tests/test_bl_b104_scenario_mock_flights.py` —
+  `test_two_groups_one_bearing_stay_two_contacts` rebuilt with new leg
+  parameters (Finding 5).
+- `body-layer/tests/test_contacts.py` — `_observation` helper gains an
+  `apparent_motion` passthrough param; new test
+  `test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact`
+  (Finding 6, also serves as Finding 5's narrower differential per the
+  review's own recommendation (b)).
+
+### Finding 5 — scenario 3 is now a real differential
+
+**Root cause of the original "no fold" result being unearned**: the
+Stage 7 amendment's geometry (51 m/s closing speed, 300 m AGL, z=-500
+lateral offset) masked the near group for only ~30 s before the far
+group founded — short of the ~42 s the plan's own Stage 8 worked-numbers
+section computes the pre-Stage-8 unconditional class rate (`OP_ARMORED`,
+8.0 m/s) would need to close the ~340 m gap and fold. The scenario never
+exercised the mechanism either way.
+
+**What widens the masked window, measured rather than guessed.** A
+throwaway probe script (`sys.path`-wired to this worktree's `body-layer/
+src` and `../world-model/src`, not committed) ran the real
+`build_scenario_frames` → `MockAircraftLayerServer` → `ConsolePerceptionRunner`
+pipeline directly (reusing the test module's own `_run_scenario` helper
+via `importlib`) across a grid of speed/altitude/offset/separation
+candidates, instrumenting `Contact.last_observable_sim` and true
+ownship-to-unit ranges per poll. Findings, in the order they ruled
+options out:
+
+- **Widening the two groups' own separation (e.g. 3 km/5.9 km instead of
+  3 km/4.5 km) does lengthen the time gap, but is self-defeating**: it
+  also increases the down-range distance the fold needs to span, so the
+  same elapsed time that would have folded at 1500 m separation no
+  longer does at 2900 m. Tried at 35 m/s/300 m AGL/far unit at x=5900:
+  masked window widened to ~105 s, but the scenario still did not fold
+  even with the gate reverted (growth of `8.0 m/s * ~50s ≈ 400m`, nowhere
+  near the ~2900 m needed). Ruled out.
+- **The natural masked-window-to-far-founding gap at the original 300 m
+  AGL is small (~10-25 s) across every speed/offset tried, and is
+  structurally bounded**: the near group's own masking threshold
+  (`AGL / tan(22°)`, ~743 m at 300 m AGL) sits well *inside* the ~1900-
+  2400 m true range where either group typically first gets admitted (a
+  property of the naked-eye admission gate, not of this scenario's
+  geometry), so by the time the near group masks, the far group is
+  usually already close to its own admission range. The maximum
+  achievable gap at a fixed separation is bounded by
+  `separation - admission_range + mask_range`, which caps out well under
+  the ~42 s threshold at 300 m AGL regardless of lateral offset.
+- **Altitude is the lever that actually works**: raising AGL raises the
+  mask threshold (`AGL / tan(22°)`) without changing the separation the
+  fold needs to span. Tried 600/650/700/800 m AGL at 1500 m separation,
+  12 m/s, z=-100 offset, 50 s poll-cadence-consistent elapsed:
+  - **800 m AGL (mask threshold ~1980 m) produced *zero* detections for
+    the entire run** — the mask threshold exceeded the admission range,
+    so the near unit was masked before it could ever be founded at all.
+    Confirms the review's own caution that over-raising AGL breaks the
+    scenario a different way; ruled out.
+  - **600/650/700 m AGL (mask thresholds 1485/1609/1733 m) all produced a
+    genuine fold when reverted**, with Stage 8's shipped gate keeping two
+    contacts in every case. 600 m AGL was selected (closest to the
+    original 300 m, smallest departure, comfortable margin below the
+    admission range).
+- **Total run length (frame count) had to be kept compatible with
+  `_THREAD_JOIN_TIMEOUT_S = 10.0`** (the shared poll-thread deadline every
+  scenario test in this file uses): the slower 12 m/s closing speed
+  needed for a long masked window, combined with the original scenario's
+  far starting point (`x=-3000`), would have produced ~70+ frames
+  (>10 s wall time at the real `_POLL_INTERVAL_S = 0.15s`). Compressing
+  the approach to start near the action (`x=600`, not `-3000` — the
+  offset/turn legs are still real manoeuvre, just spatially closer to
+  the groups) brought the run to 45 frames / ~6.75 s wall time, inside
+  the existing precedent set by this file's other scenarios (34-45
+  frames) and with ~3.25 s of margin below the timeout.
+
+**Final chosen parameters** (`test_two_groups_one_bearing_stay_two_contacts`):
+600 m AGL, 12 m/s closing speed, `ownship_start=(x=600, z=-239.1,
+heading=35°)`, `Level(15s) → Turn(15s, end_heading=0°) → Level(190s)`,
+lateral offset settling to `z=-100.0` after the turn, near/far units
+unchanged at `x=3000`/`x=4500` (separation preserved at 1500 m, matching
+Stage 4's own geometry).
+
+**The required before/after control experiment, run through the real
+test (not a standalone probe), both ways:**
+
+- **With Stage 8's shipped gate** (`pytest -k two_groups_one_bearing`):
+  **PASSED**, 7.32 s wall time. Measured trace: `CONTACT_1` (near group)
+  founds at `t≈25s`; near group's `last_observable_sim` stops advancing
+  (masked) from `t≈75-80s` onward, continuously, through the end of the
+  run; `CONTACT_2` (far group) founds at `t≈150s` — a ~70-75 s unseen gap
+  on the near contact at the moment the far percept arrives, well past
+  the ~42 s threshold; `contact_counts` ends at `[..., 2]`, never drops.
+  Exactly two `CONTACT_DETECTED` events.
+- **With `contact_growth_rate_mps` locally reverted** to the pre-Stage-8
+  unconditional class rate — in **both** `belief.contacts` and `belief.
+  association_over_time`'s own module-level bindings (`Contact.record`'s
+  clamp call resolves its own `from belief.association_over_time import
+  contact_growth_rate_mps` copy; the spatial gate's `_contact_covariance`
+  resolves the name from its own module globals — patching only one of
+  the two leaves the other call site unaffected, confirmed the hard way
+  by a first attempt that patched only `belief.contacts`/`belief.
+  attack_run` and saw no behaviour change at all) — not committed,
+  applied via a one-off `python -c` monkeypatch around `pytest.main(...)`:
+  **FAILED** — `AssertionError: expected exactly two contacts by the end
+  of this run, got 1 -- the far group was never founded as its own
+  contact / assert 1 == 2`. The far group's own look folded into the near
+  group's masked, decay-widened contact instead of founding its own —
+  exactly the E5 fold this scenario exists to catch.
+- Reverted-state `git status --porcelain src/` confirmed empty
+  throughout (the revert never touched a file); the shipped-gate run was
+  re-confirmed passing immediately afterward with no `src/` diff.
+
+Per the dispatch's own stop condition: since the differential confirms
+Stage 8's gate — not the scenario's own geometry — is what prevents the
+fold, no escalation is needed and the gate itself was not retuned.
+
+### Finding 6 — integration coverage for the surface fold-bound path
+
+New test `test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact`
+in `test_contacts.py`, same D/E/F shape as the existing
+`test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed`
+but with `surface_alt_m=0.0` on every observation (`on_surface=True`,
+unlike the existing test's contacts, which default to `on_surface=False`
+and so never exercise Stage 8's branch at all — confirmed by reading
+`_observation`'s own default). Elapsed time is `50.0s` (not the existing
+test's `0.1s`), chosen because it straddles the Stage 8 worked-numbers
+section's own ~42 s threshold — so this test doubles as Finding 5's
+narrower, cheaper differential (the review's own suggested
+recommendation (b)), without needing scenario-level integration timing.
+
+**Geometry derivation, measured not guessed**: D at range 1000 m, E at
+range 1100 m (100 m apart, wider than the existing test's 50 m — needed
+so a 40 m fold offset still reads as ambiguous at 50 s elapsed; a
+tighter D/E group loses the ambiguous match before an offset wide
+enough to make the clamp bind), fold F at range 1040 m. Measured
+directly against the real gate (a throwaway script probing a grid of
+range offsets): at this geometry, the unclamped fuse (measured by
+reverting the gate the same way as Finding 5's control experiment) would
+move the contact **~37.2 m**; Stage 8's shipped tiny rate
+(`UNOBSERVED_MOTION_GROWTH_RATE_MPS = 0.3 m/s`) bounds it to
+`0.3 * 50.0 = 15.0 m` instead — confirmed the clamp actually binds (not a
+coincidence of the fuse landing on 15.0 m independently).
+
+A second contact (G/H/I, same shape, `apparent_motion=True` on the
+founding observation so `Contact.motion.state == "moving"`) contrasts
+the class-rate branch at the same elaped time: bound
+`15.0 m/s * 50.0 s = 750.0 m` (`OP_TRUCK`), far wider than the achievable
+fold, so unclamped — confirming the first case's tiny bound is really
+Stage 8's `on_surface`/`motion` gate and not some other always-tiny rule.
+
+**Control experiment, run the same way as Finding 5's**: with
+`contact_growth_rate_mps` reverted to the pre-Stage-8 unconditional class
+rate in both `belief.contacts` and `belief.association_over_time`, this
+test **FAILS**: `assert 750.0 == 15.0 ± 1.5e-05` — `bound_m` becomes
+`15.0 (OP_TRUCK class rate) * 50.0 = 750.0`, no longer the tiny rate, so
+the clamp no longer binds at `15.0 m` and the first assertion
+(`bound_m == pytest.approx(UNOBSERVED_MOTION_GROWTH_RATE_MPS * 50.0)`)
+fails immediately. Confirms the test is a real differential, not a
+tautology.
+
+### Checks (this round)
+
+- `ruff format --check src tests`: one file (`test_contacts.py`)
+  needed reformatting (a single `_observation(...)` call split across
+  lines by the formatter); reformatted, then re-checked clean.
+- `ruff check src tests`: pass.
+- `cd body-layer && mypy src`: pass, 79 source files (no `src/` changes
+  this round; re-run per the role's own checklist regardless).
+- `pytest tests -q`: **2856 passed, 4 xfailed** (2855 baseline from the
+  prior review round + 1 new test; same 4 pre-existing xfails). Both new/
+  changed tests confirmed passing **by name** in an unfiltered `-v` run,
+  not via a `-k` filter: `test_two_groups_one_bearing_stay_two_contacts`
+  and
+  `test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact`.
+
+### Notable Discoveries (this round)
+
+1. **A module-level function imported with `from x import f` is a
+   separate binding from `x`'s own module attribute, and both must be
+   patched for a faithful revert when the function is called from
+   inside its own defining module as well as by importers.**
+   `contact_growth_rate_mps` is called from `belief.association_over_time`
+   itself (`_contact_covariance`, the spatial gate) and, via
+   `from belief.association_over_time import contact_growth_rate_mps`,
+   from `belief.contacts` (`Contact.record`'s clamp) and `belief.
+   attack_run`. A first control-experiment attempt patched only the two
+   importers' bindings and observed **no behaviour change at all** —
+   the spatial gate, resolving the name from its own module globals,
+   never saw the patch. This is the same class of defect this round's
+   own Finding 5 fix exists to catch (an empirical check that doesn't
+   actually exercise the thing it claims to), caught here before it
+   reached a committed test rather than after.
+2. **The scenario's own masked-window-to-admission gap is structurally
+   bounded by `separation - admission_range + mask_range`, not freely
+   tunable via speed or lateral offset alone** — worth recording because
+   a future scenario needing a similarly long masked window will hit the
+   same ceiling. Altitude is the lever that actually moves `mask_range`
+   independent of separation; widening separation instead increases the
+   distance the fold needs to span by exactly as much as it buys in time,
+   making it self-defeating for this specific purpose.
