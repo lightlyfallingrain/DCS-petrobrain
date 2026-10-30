@@ -166,3 +166,57 @@ AGL; very low is the ambiguous case and the user accepts it as tunable).
   he watches it, where today it tightens with dwell. Is that acceptable?
 - **Q4** — A group that goes lost while still only "group, something": should it also go into
   mission memory, or only groups he had named?
+
+## Plan check — 2026-10-31
+
+**Verdict:** ALIGNED
+
+Traces cleanly. Every E-number and every Q-answer from `explore-notes.md` lands on a named stage,
+and the plan's own "How each alignment item is answered" section cross-references findings 1–6
+correctly against what I read in the code (`stable_range_correlation`, the anchor, the three-part
+draw). The three places where the plan still needs the user's word are already surfaced as its own
+"Decisions Requiring User Input" rather than silently assumed — that is the aligner doing its job,
+not a gap I am re-raising.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (two groups, two callouts) | 2 (gate, worked numbers), 5 (E1a/E1b) | met |
+| E2 (never one group across km) | 3 (clustering unchanged per Q1, `group_salience` along-line check, `groups.py` pinned/capped) | met |
+| E3 (one real group stays one contact) | 1 (shared `Z_near`), 2 (correlated fusion), 5 | met |
+| E4 (spoken range keeps today's error, no jitter, no staring-precision) | 1 (absolute σ unchanged, look-to-look spread ≈0.2σ), 2 (floor binds at same geometry), 5 | met |
+| E5 (improves on closing/angle change, no re-detection) | 1 (geometry-driven decorrelation), 2 (correlated gate/fold), 5 (straight-in, 90° orbit) | met |
+| E6 (ambiguous case stays tunable, no code change) | 1 (`RANGE_LOOK_SHARE`/`RANGE_RELATIVE_SHARE`), 5 (flip tests, no verdict asserted) | met |
+| E7 (lost group still in mission memory) | 4 | met |
+
+**9K113 ranging check (explicitly asked for).** Verified against the live code, not just the plan's
+prose: `BINOCULAR_OPTIC` and `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC` are both wired into live paths
+today (`optic_policy.py`, `attack_run.py`, `sight_head.py`, `naked_eye_source.py` — the "nothing
+selects it yet" docstring in `optics.py` is describing a past state, superseded by
+`plans/binocular-optic/plan.md` and `plans/9k113-sight/plan.md`). The plan's range-scale table
+(unaided 1.0, binocular 0.7 new, sight 0.5/0.3 unchanged) reuses that existing, already-live
+hierarchy and threads it through the new three-part draw by a single multiplier, so the ordering the
+user described — "binoculars better than naked eye... 9K113 with stadimeter/magnification/
+stabilisation much more accurate though not exact" — is preserved (sight tighter than binocular
+tighter than naked eye, none zero because the stable term never vanishes). This is delivered, not
+just asserted.
+
+**The "2.0 vs 2.5 km defaults to two" check.** Not contradicted, but worth a note for the user. The
+plan's own table computes the ambiguous case as "two by default," and getting to "one" needs
+`RANGE_RELATIVE_SHARE`/`RANGE_LOOK_SHARE` to rise from 0.2 to ≈0.3–0.31 — roughly a 50% move, not a
+knife-edge default. The plan does not hard-code a verdict in any test (Stage 5 explicitly tests the
+flip, not an outcome), which is what E6 asked for, and the 0.2 defaults were chosen for the clear
+case and E4's repeat-look spread, not picked to lean the ambiguous case either way. So this is a
+side effect of other calibration targets, not a quiet resolution of "could legitimately be either" —
+but it does mean the *first* flight will likely see "two" for a 2.0/2.5 km pair, and the user should
+know that is where to start nudging the tunables if it feels wrong, not evidence the mechanism is
+mistuned.
+
+### Findings
+1. None that change the plan. The one item above is a note, not a finding against alignment.
+
+### Questions for the user
+- The plan's three "Decisions Requiring User Input" are the live ones: (1) OK to rewrite the
+  exact-offset pins in `test_estimation.py` and `precise-position-belief`'s dwell-convergence
+  assertions as statistical property tests rather than extend them? (2) OK to ship binocular range
+  scale 0.7 as a judgement default, `#needs-flight`? (3) Does "regardless of identification level"
+  (Q4) also mean "regardless of confidence" for mission-memory admission?
