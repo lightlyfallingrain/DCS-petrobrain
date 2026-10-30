@@ -453,6 +453,17 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
   DoD did not pass. Branches that are not DoD-gated features (plans, docs, config) still merge on the
   user's word. **Lapses when there is a second user or developer** — then merges go back to explicit
   approval.
+- **Testing aids take the light path.** User direction, 2026-10-30, after a ~20-line debug flag
+  went through the full role sequence and came out as ~1000 added lines of plans, reviews, DoD
+  reports and notes: *"That seems rather heavy and time consuming for something that is essentially
+  just a helper tool to debug a problem."* A **testing aid** is anything that does not change what
+  Petrovich does in normal flight: a debug or calibration flag, a probe script, a logging tweak, a
+  test card, a log-analysis script. The main loop does it itself in its own worktree: write it, run
+  the touched subproject's checks (see "Verification"), one commit, and merge on the user's word.
+  **No subagents, no `plans/` directory, no review/DoD/security/performance reports, no notes
+  harvest, no agent-memory files.** A short code comment saying what it is for is enough. If the aid
+  ever becomes part of normal flight behaviour, it takes the full sequence then. If unsure which
+  side of the line a change is on, say which you are assuming in one line and proceed.
 - Before starting, surface any ambiguous, contradicting, or missing information and ask for clarification.
 - **All work happens in a worktree — agents and the main loop alike — and the repo root belongs to the user.** Revised 2026-10-09 by user direction; see `AGENTS.md`, "Where work happens", rule 3. Read-mostly roles (Reviewer, DoD, Architect, Investigator) always take `isolation: "worktree"`; a feature's own worktree is named after the feature and lives until it merges. **The user parks the root wherever they like** — usually `main`, so they can add input documents or check out a branch to fly without colliding with anything running. **So naming the branch is the only way they learn what to test**: the root's branch no longer tells them, and that former backstop is gone. Name it in every test card and every acceptance request.
 - **Non-code, cross-cutting updates that aren't part of the current milestone** (skill/config edits, backlog notes, cross-milestone bookkeeping) still do not belong in a feature branch's commits — they take **their own worktree on their own branch**. Committing them on `main` from the root is no longer the way: the root is the user's, and moving its branch under them is what rule 3 now forbids. The user may override this for a given piece of work and has done, to keep one thing to review instead of several.

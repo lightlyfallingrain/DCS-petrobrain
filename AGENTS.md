@@ -311,6 +311,9 @@ blanket skip outlived its premise precisely because nothing forced it to be re-r
 - **Bug fix**: Debugger → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance issue**: Debugger → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Refactor**: Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
+- **Testing aid** (debug/calibration flag, probe, logging tweak — nothing that changes normal-flight
+  behaviour): main loop only → checks → one commit → merge on the user's word. No roles, no reports.
+  Root `CLAUDE.md`, "Workflow", "Testing aids take the light path".
 
 *Explore* precedes Architect on consequential work only — see "Explore Before Deciding" above. It is
 a conversation with the user, not a role, and cannot run as a subagent.
