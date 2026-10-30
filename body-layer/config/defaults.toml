@@ -230,6 +230,22 @@ SLEW_AZ_DPS = 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
 
+[belief.voice_commands]
+# STT confidence at or above which a matched command acts without asking "confirm?", kept above `CONFIRM_FLOOR` and at or below `ACT_FLOOR_CANCEL` (the loader does not check that ordering) -- lowered 0.60 -> 0.45 on 2026-10-31 because the pilot got many "confirm?" requests per mission for commands that were mostly heard right (`docs/acceptance/2026-10-31-sortie-feedback.md`).
+# status: judgement | range: 0.2 .. 0.95
+# source: belief/voice_commands.py:ACT_FLOOR
+ACT_FLOOR = 0.45
+
+# STT confidence at or above which a state-destroying command (`CANCEL_TOKENS`) acts without asking "confirm?" -- lowered 0.80 -> 0.60 on 2026-10-31 with `ACT_FLOOR`, for the same reason, keeping a margin above it.
+# status: judgement | range: 0.2 .. 0.99
+# source: belief/voice_commands.py:ACT_FLOOR_CANCEL
+ACT_FLOOR_CANCEL = 0.6
+
+# STT confidence below which a matched command gets "say again" instead of "confirm?" -- lowered 0.35 -> 0.30 on 2026-10-31 with `ACT_FLOOR`, so the confirm band keeps some width below the lowered act bar.
+# status: judgement | range: 0.0 .. 0.9
+# source: belief/voice_commands.py:CONFIRM_FLOOR
+CONFIRM_FLOOR = 0.3
+
 [body]
 # Bounded fallback for the mission-start resolving window: how many seconds of **wall clock** (not sim time, not a poll count -- see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own docstring for why) `_run_crew_text_poll_loop` may wait for a fresh ownship sample before giving up on `t_sim`-based freshness and firing `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23: the fallback cannot tell a `t_sim` coincidence apart from no fresh sample at all, and only the former is safe to classify airborne from).
 # status: judgement | range: 5.0 .. 120.0
