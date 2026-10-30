@@ -186,7 +186,7 @@ local socket = require("socket.core")
 -- only, same reasoning as the SPU-8/sight-servo bumps above. Update
 -- `aircraft-layer/src/collector/server.py`'s `EXPECTED_EXPORT_VERSION`
 -- in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-29"
+local EXPORT_SCRIPT_VERSION = "2026-10-30"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -544,6 +544,15 @@ end
 -- none (scenery/statics may not) -- the join key the unit-velocity feed
 -- needs, since mission scripting's `Unit:getName()` returns the identical
 -- string. See `WorldObjectSample.unit_name`'s own docstring.
+--
+-- `category`/`subcategory` (BL-B104 Stage 1) are `obj.Type.level1`/
+-- `obj.Type.level2`, passed through as-is -- the wsType enumeration
+-- (`aircraft-layer/research/2026-10-30-world-object-category-and-agl.md`
+-- finding 1: `LoGetWorldObjects` shares `LoGetObjectById`'s documented
+-- `Type = {level1..level4}` shape). `null` when the object carries no
+-- `Type` table at all, never a fabricated value -- see
+-- `WorldObjectSample.category`'s own docstring for how `None` is then
+-- treated on the body-layer side (as air, today's flat model, bit for bit).
 local function encode_world_objects_line(t, world_objects, player_plane_id)
     local parts = {}
     for object_id, obj in pairs(world_objects) do
@@ -553,6 +562,12 @@ local function encode_world_objects_line(t, world_objects, player_plane_id)
             local is_ownship = nil
             if player_plane_id ~= nil then
                 is_ownship = (object_id == player_plane_id)
+            end
+            local category = nil
+            local subcategory = nil
+            if obj.Type ~= nil then
+                category = obj.Type.level1
+                subcategory = obj.Type.level2
             end
             parts[#parts + 1] = "{"
                 .. "\"id\":" .. encode_scalar(object_id)
@@ -564,6 +579,8 @@ local function encode_world_objects_line(t, world_objects, player_plane_id)
                 .. ",\"heading_true_rad\":" .. encode_scalar(obj.Heading)
                 .. ",\"is_ownship\":" .. encode_scalar(is_ownship)
                 .. ",\"unit_name\":" .. encode_scalar(obj.UnitName)
+                .. ",\"category\":" .. encode_scalar(category)
+                .. ",\"subcategory\":" .. encode_scalar(subcategory)
                 .. "}"
         end
     end

@@ -877,11 +877,26 @@ class NakedEyePerceptionSource:
         # operates on the resulting groups, not on individual candidates
         # ahead of the grouping that would have told it they were one thing
         # (module docstring point 5, 2A.5).
+        #
+        # Clustered once per domain and concatenated (`plans/bl-b104-
+        # ground-contacts-on-ground/plan.md` Stage 1): a cluster is never
+        # mixed by construction -- a helicopter crossing a convoy cannot
+        # drag the convoy into the air model, or vice versa. `is_surface
+        # is not True` (rather than `is False`) puts unknown-domain
+        # candidates (`None`) in the same group as air, matching every
+        # other consumer's "unknown stays air" posture.
+        surface_cluster_candidates = [
+            self._cluster_candidate(candidate, result)
+            for candidate, result in visible
+            if candidate.is_surface is True
+        ]
+        air_cluster_candidates = [
+            self._cluster_candidate(candidate, result)
+            for candidate, result in visible
+            if candidate.is_surface is not True
+        ]
         clusters = cluster_candidates(
-            [
-                self._cluster_candidate(candidate, result)
-                for candidate, result in visible
-            ],
+            surface_cluster_candidates,
             observer,
             # UNAIDED_OPTIC.presence_range_mult -- the only optic
             # `check_visibility` is called with today (no optic-selection
@@ -890,6 +905,10 @@ class NakedEyePerceptionSource:
             # multiplier is what keeps `clustering._separable`'s floor (A)
             # slack for whichever optic actually admitted these
             # candidates -- see that module's docstring.
+            UNAIDED_OPTIC.presence_range_mult,
+        ) + cluster_candidates(
+            air_cluster_candidates,
+            observer,
             UNAIDED_OPTIC.presence_range_mult,
         )
 
@@ -1080,6 +1099,7 @@ class NakedEyePerceptionSource:
             size_m=profile.size_m,
             classification_raw=classification_raw,
             classification_level=classification_level,
+            is_surface=candidate.is_surface,
         )
 
     @staticmethod
@@ -1500,6 +1520,9 @@ class NakedEyePerceptionSource:
             live_los_clear=live_los_clear,
             relative_direction=relative_direction,
             aim_unit_direction=aim_unit_direction,
+            surface_alt_m=(
+                cluster.centroid_alt_m if cluster.is_surface is True else None
+            ),
         )
 
 

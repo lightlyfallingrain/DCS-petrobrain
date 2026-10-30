@@ -336,6 +336,14 @@ class Observation:
     #: population rule, the only place that ever sets this to something
     #: other than `None`.
     aim_unit_direction: RelativeDirection | None = None
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2 -- a
+    #: surface cluster's own ground height (`Cluster.centroid_alt_m`, the
+    #: members' own mean height -- hybrid emits the matched candidate's
+    #: `alt_m`), read at this look only. `None` for every air observation
+    #: (today's flat model, unchanged) and for every construction site
+    #: that predates this field. The one fact that lets belief place a
+    #: ground unit at its own height instead of the observer's.
+    surface_alt_m: float | None = None
 
 
 @runtime_checkable

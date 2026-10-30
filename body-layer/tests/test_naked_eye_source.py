@@ -117,6 +117,8 @@ def _world_object(
     lon_deg: float,
     is_ownship: bool | None = False,
     unit_name: str | None | object = _AUTO_UNIT_NAME,
+    category: int | None = None,
+    subcategory: int | None = None,
 ) -> dict[str, Any]:
     # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4, `BL-11`
     # Stage 4): the live-LOS join key (`naked_eye_source._resolve_los_by_
@@ -136,6 +138,8 @@ def _world_object(
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": is_ownship,
+        "category": category,
+        "subcategory": subcategory,
     }
     if resolved_name is not None:
         obj["unit_name"] = resolved_name
@@ -1274,6 +1278,61 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
 
     assert len(observations) == 1
     assert observations[0].count_bucket == "OP_1UNIT"
+
+
+def test_mixed_domain_candidates_never_share_a_cluster() -> None:
+    # A ground vehicle and a helicopter at the same angular position --
+    # close enough to merge under ordinary (same-domain) clustering --
+    # must still end up as two separate Observations, never one mixed
+    # cluster, because `plans/bl-b104-ground-contacts-on-ground/plan.md`
+    # Stage 1 clusters each domain separately and concatenates.
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "BMP-2",
+                lat_deg=500.0,
+                lon_deg=0.0,
+                category=2,  # wsType_Ground
+            ),
+            _world_object(
+                2,
+                "Mi-8",
+                lat_deg=500.0,
+                lon_deg=0.0,
+                category=1,  # wsType_Air
+                subcategory=1,  # wsType_Airplane (not helicopter -> stays air)
+            ),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 2
+    surface_flags = {o.surface_alt_m is not None for o in observations}
+    assert surface_flags == {True, False}  # one surface, one air -- never merged
+
+
+def test_air_only_poll_is_unchanged_by_domain_split() -> None:
+    # An air-only (no category at all, today's un-redeployed Export.lua
+    # shape) poll must produce exactly the observations it would have
+    # before the domain split existed -- one clustered Observation for
+    # two close candidates, same as `test_two_close_candidates_emit_one_
+    # clustered_observation` above.
+    world_objects = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=520.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_1UNIT"
+    assert observations[0].surface_alt_m is None
 
 
 #: Three T-72B (`size_m=7.0`, `OP_ARMORED`) at 3000 m -- beyond `LOWRES_

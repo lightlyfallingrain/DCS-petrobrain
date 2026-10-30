@@ -1160,22 +1160,20 @@ def _active_gaze(
 
 def _look_target_position(contact: Contact) -> GeoPosition:
     """`contact.last_position`, with its altitude corrected when a better
-    one is known -- `plans/atgm-run-sight-tracking/debug.md`.
-    `contact.last_position.alt_m` is `Contact.last_alt_m`, the flat-
-    projection altitude: *the ownship's own altitude at the contact's most
-    recent look*, not the target's (that field's own docstring; Decision 4
-    REVISED found and rejected the same assumption for attack-run
-    guidance). Fine while looks are frequent and the aircraft's own
-    altitude barely changes between them; wrong, and silently so, once a
-    contact goes a long time unobserved while the aircraft climbs or
-    descends -- exactly an ATGM run's own shape: pick a target, then fly
-    the approach. `belief.attack_run.remembered_target_alt_m` is the
-    already-reviewed fix for this (Decision 4 REVISED's own "remember the
-    relative height instead"), reconstructed from the last tier-1 look's
-    `relative_direction.up_m` rather than the look-time ownship altitude
-    bare. `None` (no tier-1 look has ever succeeded for this contact)
-    leaves `contact.last_position` exactly as before -- no worse than
-    today, never a new guess."""
+    one is known -- `plans/atgm-run-sight-tracking/debug.md`, narrowed by
+    `plans/bl-b104-ground-contacts-on-ground/plan.md` Decision 5.
+
+    For a surface contact, `Contact.last_alt_m` is now the unit's own
+    real ground height (Stage 2), so `remembered_target_alt_m` simply
+    returns it and this function is a no-op correction. For an air
+    contact, `contact.last_position.alt_m` is still the old flat-
+    projection altitude -- *the ownship's own altitude at the contact's
+    most recent look*, not the target's -- and `remembered_target_alt_m`
+    reconstructs a better one from the last tier-1 look's `relative_
+    direction.up_m`, same as before this plan landed. `None` (no tier-1
+    look has ever succeeded for this contact) leaves `contact.
+    last_position` exactly as before -- no worse than today, never a new
+    guess."""
     better_alt_m = remembered_target_alt_m(contact)
     if better_alt_m is None:
         return contact.last_position

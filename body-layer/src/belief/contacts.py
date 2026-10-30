@@ -411,9 +411,14 @@ class Contact:
     #: `last_position`/`last_position_uncertainty_m` below, not directly, by
     #: every caller that predates Stage 4.
     position: PositionEstimate
-    #: The most recent look's own flat-projection altitude -- not fused
-    #: (no altitude uncertainty model exists). See `last_position`'s own
-    #: docstring paragraph above.
+    #: The most recent look's own altitude -- not fused (no altitude
+    #: uncertainty model exists). For a surface contact (`on_surface`),
+    #: this is the unit's own real ground height (`Percept.surface_alt_m`,
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2); for an
+    #: air contact it stays the old flat-projection convention (the
+    #: observer's own altitude at the look, `perception.geometry.
+    #: project_from_bearing_range`). See `last_position`'s own docstring
+    #: paragraph above.
     last_alt_m: float
     last_class_raw: str
     classification: ClassificationBelief
@@ -570,6 +575,19 @@ class Contact:
     #: limit (measured: 40.0 → 160.0 m over 60 ticks under `+=`, zero
     #: resets, same incident).
     fold_displacement_m: float = 0.0
+    #: `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2 -- whether
+    #: the most recent percept folded into this contact was a surface one
+    #: (`Percept.surface_alt_m is not None`). Written beside `last_alt_m`
+    #: at the same two sites (`record`, `from_percept`): an overwrite, not
+    #: a fold, same most-recent-look posture as `last_class_raw`/
+    #: `live_los_clear`. `False` is the default -- every pre-existing
+    #: construction site (test fixtures included, and `speech.py`'s
+    #: placeholder `Contact`) keeps the old air-model behaviour unchanged.
+    #: Consumed by `attack_run.remembered_target_alt_m` (a surface
+    #: contact's height is `last_alt_m`, not the ownship-at-look stopgap)
+    #: and by the cockpit-mask checks, which now see the contact's real
+    #: depression instead of the old flat-altitude convention.
+    on_surface: bool = False
 
     @property
     def last_position(self) -> GeoPosition:
@@ -657,6 +675,7 @@ class Contact:
             envelope_clamped, prior_position, max_displacement_m
         )
         self.last_alt_m = look_position.alt_m
+        self.on_surface = percept.surface_alt_m is not None
         self.last_class_raw = percept.classification_raw
         incoming = new_classification_belief(
             value=percept.classification_raw,
@@ -764,6 +783,7 @@ class Contact:
                 _max_detection_range_m(percept.source),
             ),
             last_alt_m=look_position.alt_m,
+            on_surface=percept.surface_alt_m is not None,
             last_class_raw=percept.classification_raw,
             classification=new_classification_belief(
                 value=percept.classification_raw,

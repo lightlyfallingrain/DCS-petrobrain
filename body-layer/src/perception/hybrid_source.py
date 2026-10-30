@@ -299,6 +299,11 @@ class HybridPerceptionSource:
                         sigma_cross_m=SCOPE_UNCERTAINTY_M,
                         sigma_down_m=SCOPE_UNCERTAINTY_M,
                     ),
+                    surface_alt_m=(
+                        result.candidate.alt_m
+                        if result.candidate.is_surface is True
+                        else None
+                    ),
                 )
             )
 

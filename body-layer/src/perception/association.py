@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from coordinates import wgs84_to_dcs
+from perception.domain import surface_domain
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.motion import Vec3
 from perception.reporting_names import reporting_name_for
@@ -192,6 +193,15 @@ class WorldObjectCandidate:
     #: back to world-model's offline `line_of_sight_clear` primitive only
     #: when this is `None`.
     live_los_clear: bool | None = None
+    #: The object's domain -- `True` surface (on the ground), `False` air,
+    #: `None` unknown -- resolved once here via `perception.domain.
+    #: surface_domain` from `WorldObjectSample.category`/`.subcategory`
+    #: (`Type.level1`/`.level2`) and (for a helicopter only) `agl_m`
+    #: (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 1).
+    #: `None` is treated as air everywhere this is consumed -- today's flat
+    #: model, bit for bit, for an un-redeployed `Export.lua` or any other
+    #: unrecognised category.
+    is_surface: bool | None = None
 
     @staticmethod
     def from_dict(
@@ -200,6 +210,7 @@ class WorldObjectCandidate:
         theatre: str,
         velocity: dict[str, float] | None = None,
         live_los_clear: bool | None = None,
+        agl_m: float | None = None,
     ) -> WorldObjectCandidate:
         """Build a candidate from one aircraft-layer `GET /world_objects/latest`
         object dict (`aircraft-layer/src/schema/world_objects.py`'s
@@ -225,7 +236,14 @@ class WorldObjectCandidate:
         skew check; this method just threads the resolved value through,
         same split of responsibility as `velocity` above. `None` (the
         default) keeps every existing `from_dict` call site compiling and
-        behaving exactly as before."""
+        behaving exactly as before.
+
+        `agl_m` is the caller's already-resolved helicopter AGL (Stage 5's
+        LOS-hook carrier) -- same split of responsibility as `velocity`/
+        `live_los_clear` above, consumed only by `is_surface`'s helicopter
+        branch (`perception.domain.surface_domain`). `None` (the default,
+        and every call site before Stage 5) resolves a helicopter to air,
+        same unknown-stays-air posture as a missing category."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
         is_ownship_raw = data.get("is_ownship")
         heading_true_rad = data.get("heading_true_rad")
@@ -238,6 +256,8 @@ class WorldObjectCandidate:
                 z=float(velocity["vz"]),
             )
         )
+        category_raw = data.get("category")
+        subcategory_raw = data.get("subcategory")
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
@@ -252,6 +272,11 @@ class WorldObjectCandidate:
             ),
             velocity=resolved_velocity,
             live_los_clear=live_los_clear,
+            is_surface=surface_domain(
+                None if category_raw is None else int(category_raw),
+                None if subcategory_raw is None else int(subcategory_raw),
+                agl_m,
+            ),
         )
 
 

@@ -251,6 +251,12 @@ RESIGHT_MIN_INTERVAL_S = 60.0
 # source: mission_memory/admission.py:RESIGHT_MOVE_M
 RESIGHT_MOVE_M = 250.0
 
+[perception.domain]
+# A helicopter at or below this AGL is treated as a ground contact -- "landed or hovering a few metres up" (explore-notes Q4, user: "ground rule").
+# status: judgement | range: 0.0 .. 50.0
+# source: perception/domain.py:HELI_SURFACE_AGL_MAX_M
+HELI_SURFACE_AGL_MAX_M = 10.0
+
 [perception.emitters]
 # Below or at this fraction of `getLife0()` (`life / life0`), a unit is burning and becomes detectable at any range through tree cover; above it, it is not.
 # status: judgement | range: 0.69 .. 0.84

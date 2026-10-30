@@ -527,7 +527,18 @@ def remembered_target_alt_m(contact: Contact) -> float | None:
     descent/climb pins the sight at an elevation tens of degrees from the
     real target, which also starves it of ever being re-admitted into the
     sight's field of view (the belief goal never points anywhere near
-    truth), so `aim_source` never recovers to `seen` on its own."""
+    truth), so `aim_source` never recovers to `seen` on its own.
+
+    **Narrowed to air contacts (`plans/bl-b104-ground-contacts-on-ground/
+    plan.md` Decision 5):** for a surface contact (`contact.on_surface`),
+    `contact.last_alt_m` is now the unit's own real ground height
+    (`Percept.surface_alt_m`, Stage 2), so this function returns that
+    directly instead of reconstructing from the ownship-relative channel
+    -- one source of a ground unit's height, not two coexisting answers.
+    This stopgap's reconstruction stays for air contacts, which still have
+    no better source."""
+    if contact.on_surface:
+        return contact.last_alt_m
     percept = contact.last_percept
     if percept is None or percept.relative_direction is None:
         return None

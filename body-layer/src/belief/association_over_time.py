@@ -285,13 +285,26 @@ def uncertainty_radius_m(percept: Percept) -> float:
 
 def implied_position(percept: Percept) -> GeoPosition:
     """The ground position `percept`'s bearing/range implies, from the
-    observer position it was actually observed from."""
+    observer position it was actually observed from.
+
+    `project_from_bearing_range` assumes the target is at the observer's
+    own altitude (flat, no terrain) -- still correct for an air contact
+    (Decision 4, `plans/bl-b104-ground-contacts-on-ground/plan.md`). For a
+    surface percept, `percept.surface_alt_m` -- the unit's own ground
+    height, read at this look -- replaces that flat assumption, so the
+    implied position sits on the ground rather than floating at
+    ownship's altitude."""
     observer = GeoPosition(
         x=percept.ownship_at_observation.x,
         z=percept.ownship_at_observation.z,
         alt_m=percept.ownship_at_observation.alt_m,
     )
-    return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
+    position = project_from_bearing_range(
+        observer, percept.bearing_deg, percept.range_m
+    )
+    if percept.surface_alt_m is not None:
+        return GeoPosition(x=position.x, z=position.z, alt_m=percept.surface_alt_m)
+    return position
 
 
 #: The isotropic-equivalent `PositionUncertainty` for
