@@ -42,6 +42,8 @@ def _contact(
     level: SpecificityLevel = SpecificityLevel.UNKNOWN,
     cardinality: CardinalityBelief | None = None,
     contributing_observation_ids: list[str] | None = None,
+    last_alt_m: float = 0.0,
+    on_surface: bool = False,
 ) -> Contact:
     return Contact(
         id=contact_id,
@@ -53,7 +55,8 @@ def _contact(
             fused_at_sim=0.0,
             fused_covariance=covariance,
         ),
-        last_alt_m=0.0,
+        last_alt_m=last_alt_m,
+        on_surface=on_surface,
         last_class_raw="t-72",
         classification=new_classification_belief(
             value=class_value if class_value is not None else "OP_GROUPSOMETHING",
@@ -91,6 +94,46 @@ def test_position_error_zero_when_believed_matches_truth() -> None:
         ground_truth_count=None,
     )
     assert row.position_error_m < 1e-6
+
+
+def test_position_error_is_horizontal_not_slant() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2: a
+    surface contact's believed altitude is now real (not the flat
+    model's observer-altitude placeholder `project_from_bearing_range`
+    gives `true_position`), so the comparison must ignore altitude
+    entirely -- a 3D comparison would charge this contact for an
+    altitude difference the two positions were never meant to agree on."""
+    contact = _contact(x=0.0, z=1000.0, last_alt_m=120.0, on_surface=True)
+    row = evaluate_pair(
+        t_sim=0.0,
+        contact=contact,
+        object_id=1,
+        object_type="t-72",
+        true_bearing_deg=90.0,
+        true_range_m=1000.0,
+        observer=GeoPosition(x=0.0, z=0.0, alt_m=500.0),
+        ground_truth_count=None,
+    )
+    # true_position sits at (0, 1000, alt=500 -- the observer's own,
+    # flat-model altitude); believed is at (0, 1000, alt=120). A 3D
+    # comparison would show a 380 m error; horizontal shows ~0.
+    assert row.position_error_m < 1e-6
+
+
+def test_row_carries_believed_alt_m_and_on_surface() -> None:
+    contact = _contact(x=0.0, z=1000.0, last_alt_m=120.0, on_surface=True)
+    row = evaluate_pair(
+        t_sim=0.0,
+        contact=contact,
+        object_id=1,
+        object_type="t-72",
+        true_bearing_deg=90.0,
+        true_range_m=1000.0,
+        observer=_OBSERVER,
+        ground_truth_count=None,
+    )
+    assert row.believed_alt_m == 120.0
+    assert row.on_surface is True
 
 
 def test_range_cap_tripwire_fires_beyond_naked_eye_cap() -> None:

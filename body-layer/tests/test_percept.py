@@ -129,6 +129,16 @@ def test_percept_of_maps_non_emitter_provenance_to_none() -> None:
     assert percept.emitter_kind is None
 
 
+def test_percept_of_carries_surface_alt_m_through_unchanged() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2."""
+    for value in (120.0, None):
+        observation = _observation(surface_alt_m=value)
+
+        percept = percept_of(observation)
+
+        assert percept.surface_alt_m == value
+
+
 def test_percept_of_carries_live_los_clear_through_unchanged() -> None:
     """`plans/dcs-driven-los/plan.md` (X-B29) -- a physical fact about
     space, carried through on the same footing as `apparent_motion`."""

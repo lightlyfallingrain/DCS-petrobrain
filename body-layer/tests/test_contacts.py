@@ -70,6 +70,7 @@ def _observation(
     continues_observation_id: str | None = None,
     position_uncertainty: PositionUncertainty | None = None,
     live_los_clear: bool | None = None,
+    surface_alt_m: float | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -89,6 +90,7 @@ def _observation(
         continues_observation_id=continues_observation_id,
         position_uncertainty=position_uncertainty,
         live_los_clear=live_los_clear,
+        surface_alt_m=surface_alt_m,
     )
 
 
@@ -105,6 +107,57 @@ def test_same_object_observed_twice_nearby_produces_one_contact() -> None:
     assert contact.contributing_observation_ids == ["OBS_1", "OBS_2"]
     assert contact.first_seen_sim == 0.0
     assert contact.last_seen_sim == 1.0
+
+
+def test_from_percept_sets_on_surface_and_last_alt_m_for_a_surface_look() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2."""
+    ownship = OwnshipState(t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0)
+    observation = _observation(
+        obs_id="OBS_1", t_sim=0.0, ownship=ownship, surface_alt_m=120.0
+    )
+    percept = percept_of(observation)
+
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert contact.on_surface is True
+    assert contact.last_alt_m == 120.0
+
+
+def test_from_percept_leaves_on_surface_false_for_an_air_look() -> None:
+    ownship = OwnshipState(t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0)
+    observation = _observation(obs_id="OBS_1", t_sim=0.0, ownship=ownship)
+    percept = percept_of(observation)
+
+    contact = Contact.from_percept("CONTACT_1", percept)
+
+    assert contact.on_surface is False
+    assert contact.last_alt_m == 1584.0
+
+
+def test_record_updates_on_surface_and_last_alt_m_on_a_later_surface_look() -> None:
+    store = ContactStore()
+    ownship_high = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+    )
+    first = _observation(obs_id="OBS_1", t_sim=0.0, ownship=ownship_high)
+    store.ingest([first], now_sim=0.0)
+    contact = store.contacts[0]
+    assert contact.on_surface is False
+
+    ownship_low = OwnshipState(
+        t_sim=1.0, x=0.0, z=0.0, alt_m=1165.0, heading_true_deg=0.0
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        ownship=ownship_low,
+        continues_observation_id="OBS_1",
+        surface_alt_m=750.0,
+    )
+    store.ingest([second], now_sim=1.0)
+
+    assert contact.on_surface is True
+    assert contact.last_alt_m == 750.0
 
 
 def test_live_los_clear_is_overwritten_not_folded_on_each_record() -> None:

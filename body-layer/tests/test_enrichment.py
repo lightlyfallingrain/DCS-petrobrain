@@ -57,6 +57,7 @@ def _observation(
     bearing_deg: float = 0.0,
     range_m: float = 1000.0,
     classification_raw: str = "Ural truck",
+    surface_alt_m: float | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -72,6 +73,7 @@ def _observation(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
+        surface_alt_m=surface_alt_m,
     )
 
 
@@ -598,6 +600,47 @@ def test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look(
     # range_m=1200.0.
     assert recorded_ranges[0] == pytest.approx(fused.x, abs=1e-6)
     assert recorded_ranges[0] != pytest.approx(1200.0)
+
+
+def test_terrain_aware_position_short_circuits_for_a_surface_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Decision 0/"no
+    world model elevation grid": a surface contact is already on the
+    ground at its own real height, so no terrain solve runs for it at
+    all -- `contact.last_position` unchanged."""
+    calls: list[float] = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        calls.append(rng)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store = ContactStore()
+    observation = _observation(obs_id="OBS_1", t_sim=0.0, surface_alt_m=120.0)
+    store.ingest([observation], now_sim=0.0)
+    contact = store.contacts[0]
+    assert contact.on_surface is True
+
+    cache = WorldEnrichmentCache()
+    world_position, _facts = cache.get_or_compute(
+        _FAKE_CONN, "Syria", store, contact, now_sim=0.0
+    )
+
+    assert calls == []
+    assert world_position == contact.last_position
 
 
 def test_cache_miss_on_first_lookup_computes_and_stores(

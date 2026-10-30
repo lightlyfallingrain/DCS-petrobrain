@@ -7,6 +7,7 @@ that module's docstring for the full history)."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 from belief.association_over_time import (
@@ -118,6 +119,40 @@ def test_implied_position_matches_bearing_range_from_observer() -> None:
     # and delta_z ~= range.
     assert math.isclose(position.x, 0.0, abs_tol=1e-6)
     assert math.isclose(position.z, 1000.0, abs_tol=1e-6)
+
+
+def test_implied_position_uses_surface_alt_m_when_set() -> None:
+    """`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 2 -- a
+    surface percept's implied position must use its own real ground
+    height, not the flat-projection observer altitude."""
+    percept = _percept(
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+        ),
+    )
+    percept = dataclasses.replace(percept, surface_alt_m=120.0)
+
+    position = implied_position(percept)
+
+    assert position.alt_m == 120.0
+
+
+def test_implied_position_stays_flat_for_air_percept() -> None:
+    """Decision 4: air contacts unchanged -- the observer-altitude flat
+    projection is still used when `surface_alt_m` is `None`."""
+    percept = _percept(
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=1584.0, heading_true_deg=0.0
+        ),
+    )
+
+    position = implied_position(percept)
+
+    assert position.alt_m == 1584.0
 
 
 def test_class_compatibility_same_naked_eye_bucket_is_compatible() -> None:
