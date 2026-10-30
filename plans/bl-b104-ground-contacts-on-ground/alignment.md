@@ -155,3 +155,62 @@ pilot hearing reports he can use.
   (unchanged)?
 - **Q5** — Air contacts keep today's flat model, including its believed altitude = ownship altitude
   at the look — accepted for now?
+
+## Plan check — 2026-10-30
+
+**Verdict:** ALIGNED
+
+All five goal-check questions were answered in `explore-notes.md` before Architect wrote the plan,
+and each answer is traced below next to the expectation it serves.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (never above helicopter/in sky) | 2 | met — `surface_alt_m` from the look's cluster centroid, `implied_position` at that height |
+| E2 (sight acquires, says "Tracking.") | 2+3, sight_head unchanged | met — altitude fixed first (F2), range fused (F1); bearing-line search kept as fallback |
+| E3 (range no worse than today, firms up) | 3 | met — inverse-distance fusion proven (Monte Carlo) never worse than cue A, tightens with closing/looks; test asserts RMS ≤ 1.05×today |
+| E4 (guidance lands on the real unit) | 2 (altitude), bearing untouched | met — bearing was already correct per sortie log; only depth was wrong, and that's what Stages 2–3 fix |
+| E5 (one contact stays one, two stay two) | 4 | met — explicit scenario tests both directions; "stop and report" rather than silently retune if they fail |
+| E6 (air contacts unchanged) | Decision 4 | met — flat model, unchanged, explicit test control point |
+| E7 (not omniscient) | 3, Decision 2 | met — depression perturbed in its own hash domain, grep-pinned away from `RelativeDirection`; convergence test checks it lands on a systematic offset, not truth |
+
+| open assumption (goal check) | plan | status |
+|---|---|---|
+| depression error size, as ground distance not angle | Stage 3, `DEPRESSION_SIGMA_DEG=3.0` reconciled through inverse-distance fusion to ~661–680 m at 300 m/4 km | met — matches explore Q1's "~700 m sounds sensible" |
+| no-intersection fallback (level/above-horizon ray) | Stage 3: cue B absent ⇒ cue A alone | met — matches explore Q2 (size/terrain cue already is cue A) |
+| cluster height | Stage 2: `cluster.centroid_alt_m`, members' own mean | met, with a note below |
+| height read only at a look | Stage 2, explicit | met |
+| which units are "on the ground" | Stage 1 domain rule + Stage 5 helicopters | met — vehicles/infantry/statics/ships/landed-or-low-hover heli, matching the goal check's list exactly |
+| slant vs horizontal conflation | Decision 3 | met — slant stays the *reported* convention (unchanged, normal), horizontal used internally; the conflation removed from projection, not reintroduced in reporting |
+| cockpit-mask readers | dedicated section, tested, on the Stage 6 card | met — named as an intended, felt behaviour change rather than a side effect discovered later |
+| `remembered_target_alt_m` stopgap | Decision 5 | met — narrowed to ground contacts only, air path kept |
+
+### Findings
+
+1. **Cluster height is a single mean per cluster, not "each roughly where it stands."** — lens: World truth
+   - Assumption: the goal check's wording suggested per-member height might matter for a group spread
+     over a slope; the plan uses one centroid height for the whole cluster.
+   - In the sim: a `Contact` already represents a whole cluster as one point (one bearing, one
+     range) in the existing model — this is not a new compromise BL-B104 introduces, it is the
+     existing one-point-per-group representation extended to altitude the same way it already
+     applies to position.
+   - The pilot would see: no difference from today's granularity — a reported group is already one
+     point, now that point also has a real height instead of the ownship's.
+   - Grounded in: `plan.md` Affected Modules, `naked_eye_source.py`'s existing clustering.
+   - Suggests: not a misalignment, noted so a future per-unit-height want (e.g. a scattered group on
+     a ridge where units differ by tens of metres) is a deliberate decision later rather than a
+     rediscovery that this already happened.
+
+2. **`DEPRESSION_SIGMA_DEG = 3.0` and `HELI_SURFACE_AGL_MAX_M = 10` both serve the stated intent, not
+   just a plausible-sounding default.** — lens: Purpose
+   - 3.0° is not applied naively (which the goal check's Finding 1 showed would be worse than today
+     at shallow geometry) — it is fused in inverse distance specifically so the useless cue at
+     shallow angles gets down-weighted, and the plan's own table shows the fused output landing at
+     the user's confirmed ~700 m, not at the naively-computed multi-kilometre error. 10 m matches the
+     user's own words, "a few metres up," as a tunable judgement call, not a guess.
+   - Suggests: nothing — this is the goal check's hardest finding (F1) closed correctly, called out
+     because the dispatch asked specifically whether these defaults serve intent.
+
+### Questions for the user
+
+None outstanding — all five goal-check questions (Q1–Q5) were already settled in `explore-notes.md`
+before this plan was written, and the plan traces to each answer rather than re-deciding it.
