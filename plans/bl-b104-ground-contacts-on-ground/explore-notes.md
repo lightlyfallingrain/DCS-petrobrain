@@ -74,3 +74,30 @@ scenario builder over the existing mock-flight harness (legs such as level / des
 plus scenarios modelled on the 2026-10-30 sortie: run 1 (seen high, ~400 m descent, overflight),
 run 2 (shallow approach from 5 km at ~400 m AGL), and two groups on one bearing. Assertions on belief
 position/height vs truth, sight aim, and speech.
+
+## E5 fold on a closing run — decision (2026-10-30, after review.md Finding 1)
+
+Reviewer found the real E5 case: closing on two groups on one bearing (near 3 km, far 4.5 km), the
+near group goes under the nose and is masked; while unseen its position uncertainty grows at the
+class's plausible speed, and the far group's first look (~2.3 km) lands inside it and folds in. Two
+contacts become one. Main loop proposed capping ground-contact growth at ~15 m/s. User, verbatim:
+
+> *"A unit/group that is not observed moving -> it's not expected to move -> tiny growth of position
+> uncertainty.*
+> *Unit/group that is observed moving -> uncertainty grow at movement speed.*
+>
+> *Most typical case is units being stationary.*
+>
+> *Add turn to the test scenario."*
+
+Reading:
+
+- Growth of an unseen contact's position uncertainty is driven by **whether Petrovich has seen it
+  move**, not only by what class it could be. `Contact.motion` (`belief.motion`, `"moving"` /
+  `"stopped"` / `None`) is the existing belief for that. `"stopped"` **and `None`** ("never seen
+  moving") both mean "not observed moving" → a tiny, tunable growth rate.
+- `"moving"` → growth at movement speed: the class's plausible speed from
+  `position_belief.plausible_speed_mps` unless a believed speed exists to use instead.
+- The accepted cost: a unit that starts moving while unseen may be re-found as a new contact. The user
+  judged that the right trade ("most typical case is units being stationary").
+- Stage 7 gets a real Turn leg, and the two-groups scenario becomes a closing run with manoeuvre.
