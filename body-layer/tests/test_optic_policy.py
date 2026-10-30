@@ -27,6 +27,7 @@ from belief.optic_policy import (
     RETRY_RANGE_FRACTION,
     SEARCH_STEP_S,
     SIGHT_GLANCE_AWAY_S,
+    SIGHT_LOCK_SEARCH_STEP_S,
     SIGHT_MAX_DWELL_S,
     SIGHT_SEARCH_NEAR_M,
     SIGHT_SEARCH_WIDE_MID_M,
@@ -2044,6 +2045,224 @@ class TestSightLock:
         )
         assert decision.look_azimuth_deg == pytest.approx(15.0)
         assert decision.look_elevation_deg == pytest.approx(-5.0)
+
+
+class TestSightLockBearingLineSearch:
+    """Bearing-line depression search (`plans/atgm-run-sight-tracking/
+    plan.md`, run-2 trace): while locked onto a contact that is not
+    currently resolved through the sight itself (`sight_lock_seen=False`),
+    the look sweeps depression around the believed point -- bearing is
+    the trustworthy part of the belief and is never swept -- instead of
+    staring at a point whose range (and so depression) may be wrong."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_not_seen_sweeps_depression_and_crosses_the_true_depression(
+        self,
+    ) -> None:
+        """The run-2 shape: the believed point (short in range) sits at a
+        steeper depression than the real target. The sweep must, over its
+        own cycle, pass close enough to the real depression that the real
+        target would fall inside the look's field of view -- never stare
+        at the wrong believed point forever."""
+        believed_elevation_deg = -10.0
+        target = _target(
+            "CONTACT_1",
+            azimuth_deg=30.0,
+            elevation_deg=believed_elevation_deg,
+            range_m=2200.0,
+            object_type="T-72",
+            current_level="class",
+        )
+        look_optic = sight_look_optic(target)
+        fov_full_width_deg = (look_optic.fov_half_angle_deg or 0.0) * 2.0
+        # Shallower (less negative) than the believed point -- the
+        # "further" error direction a too-short range estimate produces --
+        # well inside the default band.
+        true_elevation_deg = believed_elevation_deg + 8.0
+
+        state = self._sighting_state()
+        covered = False
+        now_sim = 1.0
+        poll_step_s = SIGHT_LOCK_SEARCH_STEP_S / 3.0
+        total_s = SIGHT_LOCK_SEARCH_STEP_S * 30.0
+        while now_sim < 1.0 + total_s:
+            state, decision = decide(
+                state,
+                now_sim=now_sim,
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[target],
+                steady=True,
+                sight_lock_contact_id="CONTACT_1",
+                sight_lock_seen=False,
+            )
+            assert decision.look_azimuth_deg == pytest.approx(30.0)
+            assert decision.look_elevation_deg is not None
+            if (
+                abs(decision.look_elevation_deg - true_elevation_deg)
+                <= fov_full_width_deg / 2.0
+            ):
+                covered = True
+                break
+            now_sim += poll_step_s
+        assert covered
+
+    def test_seen_stares_directly_with_no_sweep(self) -> None:
+        """`sight_lock_seen=True` reproduces the pre-existing "point
+        straight at the believed direction, every poll" behaviour exactly
+        -- no sweep at all once the contact is resolved through the
+        sight itself."""
+        target = _target(
+            "CONTACT_1", azimuth_deg=5.0, elevation_deg=-3.0, range_m=1500.0
+        )
+        state = self._sighting_state()
+        for now_sim in (1.0, 5.0, 12.0):
+            state, decision = decide(
+                state,
+                now_sim=now_sim,
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[target],
+                steady=True,
+                sight_lock_contact_id="CONTACT_1",
+                sight_lock_seen=True,
+            )
+            assert decision.look_azimuth_deg == pytest.approx(5.0)
+            assert decision.look_elevation_deg == pytest.approx(-3.0)
+
+    def test_sweep_azimuth_follows_the_believed_bearing_every_poll(
+        self,
+    ) -> None:
+        """Range is the weak part of the belief, never bearing -- the
+        sweep's azimuth must track the believed bearing as it changes poll
+        to poll (the aircraft closing, or belief simply refining), even
+        while not seen."""
+        state = self._sighting_state()
+        first = _target("CONTACT_1", azimuth_deg=40.0, elevation_deg=-8.0)
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[first],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=False,
+        )
+        assert decision.look_azimuth_deg == pytest.approx(40.0)
+
+        second = _target("CONTACT_1", azimuth_deg=33.0, elevation_deg=-8.0)
+        state, decision = decide(
+            state,
+            now_sim=1.2,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[second],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=False,
+        )
+        assert decision.look_azimuth_deg == pytest.approx(33.0)
+
+    def test_resuming_after_a_loss_starts_the_sweep_fresh_at_the_latest_belief(
+        self,
+    ) -> None:
+        """`sight_lock_search_since_sim` is cleared on every `sight_lock_
+        seen` poll (`_decide_sighting_locked`'s own docstring) -- so a
+        later loss resumes at step 0 (the believed point itself, no
+        offset) using whatever the belief has since improved to, rather
+        than wherever an uninterrupted cycle's clock would otherwise have
+        reached."""
+        stale_target = _target(
+            "CONTACT_1",
+            azimuth_deg=10.0,
+            elevation_deg=-20.0,
+            range_m=2000.0,
+            object_type="T-72",
+            current_level="class",
+        )
+        state = self._sighting_state()
+        state, _decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[stale_target],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=False,
+        )
+        well_into_the_sweep_sim = 1.0 + SIGHT_LOCK_SEARCH_STEP_S * 2.3
+        state, decision = decide(
+            state,
+            now_sim=well_into_the_sweep_sim,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[stale_target],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=False,
+        )
+        # Genuinely swept away from the believed centre by this point.
+        assert decision.look_elevation_deg != pytest.approx(-20.0)
+
+        # Admitted: a fresh look lands and belief improves.
+        improved_target = _target(
+            "CONTACT_1",
+            azimuth_deg=10.0,
+            elevation_deg=-6.0,
+            range_m=2000.0,
+            object_type="T-72",
+            current_level="class",
+        )
+        seen_sim = well_into_the_sweep_sim + 1.0
+        state, decision = decide(
+            state,
+            now_sim=seen_sim,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[improved_target],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=True,
+        )
+        assert decision.look_elevation_deg == pytest.approx(-6.0)
+
+        # Lost again -- the sweep must resume right at the believed point.
+        state, decision = decide(
+            state,
+            now_sim=seen_sim + 0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[improved_target],
+            steady=True,
+            sight_lock_contact_id="CONTACT_1",
+            sight_lock_seen=False,
+        )
+        assert decision.look_elevation_deg == pytest.approx(-6.0)
+
+    def test_no_lock_is_unaffected_by_sight_lock_seen(self) -> None:
+        """`sight_lock_seen` is read only inside the locked branch -- with
+        no `sight_lock_contact_id` at all, passing it (either value) must
+        change nothing."""
+        target = _target("CONTACT_1", azimuth_deg=0.0, elevation_deg=-8.0)
+        state = self._sighting_state()
+        baseline_state, baseline_decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        with_flag_state, with_flag_decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+            sight_lock_seen=False,
+        )
+        assert with_flag_decision == baseline_decision
+        assert with_flag_state == baseline_state
 
 
 class TestSightLookOptic:

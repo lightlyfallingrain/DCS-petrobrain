@@ -152,6 +152,21 @@ POINT_SWEEP_COUNT = 2
 # source: belief/optic_policy.py:SIGHT_GLANCE_AWAY_S
 SIGHT_GLANCE_AWAY_S = 3.0
 
+# How far, in degrees, the bearing-line search sweeps depression either side of the believed point before it repeats from the centre -- too narrow and a large range error (the believed point's own weakness) is never covered, too wide and most of the cycle is spent looking at sky/ground nowhere near any target, eating into the dwell against `SIGHT_MAX_DWELL_S` finding nothing.
+# status: judgement | range: 5.0 .. 35.0
+# source: belief/optic_policy.py:SIGHT_LOCK_SEARCH_BAND_HALF_DEG
+SIGHT_LOCK_SEARCH_BAND_HALF_DEG = 15.0
+
+# How much consecutive bearing-line search steps overlap, as a fraction of the sight's own field of view at the look's resolved optic -- toward 0.0 tiles the band edge-to-edge and risks a real target sitting exactly on a seam between two steps and never entering either one's field of view for a whole poll; too high wastes steps re-covering ground the previous step already swept.
+# status: judgement | range: 0.0 .. 0.8
+# source: belief/optic_policy.py:SIGHT_LOCK_SEARCH_STEP_OVERLAP_FRACTION
+SIGHT_LOCK_SEARCH_STEP_OVERLAP_FRACTION = 0.3
+
+# How long, in seconds, the bearing-line search dwells on each depression step before moving to the next -- too short and the sight's own slew rate (`belief.sight_head.SLEW_EL_DPS`) cannot actually reach a step before it moves on again, too long and a real target only one step away takes longer to be looked at.
+# status: judgement | range: 0.3 .. 5.0
+# source: belief/optic_policy.py:SIGHT_LOCK_SEARCH_STEP_S
+SIGHT_LOCK_SEARCH_STEP_S = 1.5
+
 # The sight's own dwell ceiling, mirroring `MAX_LOOK_S`'s role but much longer -- direction §9 (*"When using 9K113 we typically use it for a longer period of time"*), plan §13. Unlike `MAX_LOOK_S` (which only fires when recognition genuinely is not happening), this is also the *scheduled* break trigger: dwelling at the sight this long, regardless of whether something is still worth looking at, forces a brief naked-eye glance away (`SIGHT_GLANCE_AWAY_S`) before resuming -- direction §9's *"Maybe take eyes off it for a quick glance around and then continue with the sight."* A project modelling choice, tuned from flying like every dwell/scan constant before it.
 # status: judgement | range: 5.0 .. 120.0
 # source: belief/optic_policy.py:SIGHT_MAX_DWELL_S

@@ -8015,3 +8015,40 @@ def test_look_targets_elevation_does_not_run_away_after_the_aircraft_descends() 
 
     assert target.elevation_deg == pytest.approx(correct.elevation_deg)
     assert target.elevation_deg != pytest.approx(stale.elevation_deg)
+
+
+class TestSightLockSeen:
+    """`body._sight_lock_seen` (`plans/atgm-run-sight-tracking/plan.md`)
+    -- the one boolean `run_once`'s `sight_lock_seen` keyword to `decide_
+    optic` and the poll loop's own "Tracking." edge detector both read,
+    so the two can never disagree about what "seen" means for this
+    feature."""
+
+    def test_false_when_no_atgm_run_is_engaged(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, None) is False
+
+    def test_false_when_the_sight_sees_a_different_contact(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_OTHER")
+        state = AtgmRunState(contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, state) is False
+
+    def test_false_when_the_aim_source_is_held_or_belief(self) -> None:
+        from belief.sight_head import SightHead
+
+        state = AtgmRunState(contact_id="CONTACT_1")
+        held = SightHead(aim_source="held", seen_contact_id="CONTACT_1")
+        belief = SightHead(aim_source="belief", seen_contact_id=None)
+        assert body_module._sight_lock_seen(held, state) is False
+        assert body_module._sight_lock_seen(belief, state) is False
+
+    def test_true_when_the_sight_sees_the_locked_contact(self) -> None:
+        from belief.sight_head import SightHead
+
+        head = SightHead(aim_source="seen", seen_contact_id="CONTACT_1")
+        state = AtgmRunState(contact_id="CONTACT_1")
+        assert body_module._sight_lock_seen(head, state) is True
