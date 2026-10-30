@@ -50,3 +50,31 @@ The main loop showed the gate's shape: 3σ ellipse from the summed covariances, 
 - **Side items:** test flights at 1 s; a stationary group going "lost" under the nose should live
   on in mission memory; second-group callout wording (e.g. "second group, beyond") — separate
   backlog item.
+
+## Confirmation (user, verbatim, 2026-10-31)
+
+Asked: (1) absolute number keeps today's error, same/different-group uses relative judgement with a
+near-circular merge zone, both within one look and across looks? (2) a repeat look gives a similar
+range estimate (error mostly a stable per-group offset)? (3) how fine — proposed "different groups
+at a distance ratio ≥ ~1.2", merge circle ≈ ±400 m at 2.4 km, ±700 m at 4.6 km.
+
+> *"1 - yes*
+> *2 - yes. Sighting reapeatedly at distance gives the same cues we already saw the previous time.
+> Only way to make it more accurate is comparing to a map and we're not implementing that. Getting
+> closer helps, as does a different angle to look from, triangulation by ownship movement.*
+> *3 - I'm not sure about 2 and 2.5 km, they could legimately be of same group. And in other case
+> not. Only actual flights will tell how it feels like."*
+
+Reading:
+
+- (1) confirmed as stated.
+- (2) Range error on repeat looks is correlated: same cues, same estimate. It improves only by
+  **closing** (error scales with distance), or by **a different viewing angle** — ownship has moved
+  enough that the line of sight to the group has rotated, so the along-line errors of the two looks
+  are no longer the same axis (triangulation). Comparing against a map is out of scope. So the
+  look-to-look decorrelation should be driven by geometry change (range change, line-of-sight
+  rotation), not by the count of looks.
+- (3) No fixed rule from the user; 2 vs 2.5 km can be either. The relative-distance threshold and
+  the merge-circle size are **tunables with a judgement default**, to be calibrated in flight
+  (`#needs-flight`). The scenario tests must not hard-code a verdict for the ambiguous ~1.25 ratio
+  case — only the clear ones (≈1.5 km+ apart at 2–5 km must stay two; one group must not split).
