@@ -16,6 +16,24 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
+  **Elevation mark calibration re-fitted 2026-10-30, `fix/9k113-el-calibration`
+  (`8bb7e896`), DoD-passed (`plans/9k113-sight-pointing/dod-check-el-calibration.md`).**
+  `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` (0.83/1-0.037 -> 0.8333/1-0.0277) re-fitted against DCS
+  AI Petrovich tracking a real BMD-1 with the hands-off flag on (enabled by the entry immediately
+  below), truth from body-layer's detection trace rotated into the airframe frame — 107 samples,
+  rms 0.006 deg, flat across the -1.7..-14.5 deg span, superseding the 2026-10-28 gimbal-derived
+  guess that put the ATGM cross ~25% short in elevation. Research note:
+  `aircraft-layer/research/2026-10-30-9k113-asp17-elevation-mark-flight-fit.md`; the 2026-10-28
+  note is marked superseded, not deleted. Reviewer APPROVED (`review-el-calibration.md`), one
+  optional refinement fixed in the tip commit. Performance/Security skipped by user direction
+  (small change, two constants, no new code path). **Milestone-completion note**: this does not
+  change what BL-B80's next step should be — it is the correction the hands-off-switch entry below
+  called for, closing the scale-vs-boresight ambiguity that entry named. **`#needs-flight`**: the
+  fit is statistically strong against a recorded trace (not a live observation) — whether the real
+  ATGM cross now visibly sits on the target in actual flight is unconfirmed, and batches with the
+  hands-off-switch calibration flight already outstanding immediately below (one sortie clears
+  both).
+
   **9K113 hands-off switch, DoD-passed 2026-10-30, merged to `main` (`16305757`).** `plans/9k113-hands-off-switch/`
   (no Architect plan — small, directly-dispatched change; `implementation.md`/`review.md` are the
   decision record). A load-time flag
