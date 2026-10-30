@@ -811,7 +811,7 @@ local STALL_WINDOW_S = 0.4
 local STALL_MOVE_EPS = 0.003
 local MARK_BORESIGHT_AZ = 0.500
 local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
--- Matches production's measured 2026-10-28 calibration/field (`Export.
+-- Matches production's flight-fitted 2026-10-30 calibration/field (`Export.
 -- lua`'s own `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_
 -- UP_DEG`/`ASP17_FIELD_EL_DOWN_DEG`), not extracted (same reasoning as
 -- every other constant in this preamble).
@@ -984,8 +984,8 @@ def _mark_raw(
     UNIT_*` -- builds a raw mark arg that will read back as `body_deg`
     once `run_sight_servo` converts it. Defaults (`boresight=0.500,
     scale=0.039`) match the harness's own azimuth constants; elevation
-    callers pass `boresight=_EL_BORESIGHT, scale=_EL_SCALE` to match the harness's
-    (measured 2026-10-28) `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`."""
+    callers pass `boresight=_EL_BORESIGHT, scale=_EL_SCALE` to match the
+    harness's (flight-fitted 2026-10-30) `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`."""
     return boresight + body_deg * scale
 
 
