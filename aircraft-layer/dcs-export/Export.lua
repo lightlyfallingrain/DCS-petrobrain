@@ -356,6 +356,28 @@ do
     end
 end
 
+-- Hands-off switch for manual 9K113 calibration: "I can point the 9K113 by
+-- hand - Petrovich *must not* write axis values then" (user direction,
+-- 2026-10-30; see `plans/9k113-hands-off-switch/implementation.md`). The
+-- pilot hand-slews the sight onto ground targets at known depression
+-- angles to calibrate `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` (declared
+-- below), which this switch exists to protect: `run_sight_servo`'s
+-- per-frame write would otherwise fight the hand input. Touch
+-- `Saved Games\DCS\Scripts\aircraft_layer_sight_hands_off.flag` to enable.
+-- Checked once at load time, same as DEBUG/SLEW_DEBUG above -- there is
+-- no mid-sortie toggle.
+local SIGHT_HANDS_OFF = false
+do
+    local ok, f = pcall(io.open, lfs.writedir() .. "Scripts\\aircraft_layer_sight_hands_off.flag", "r")
+    if ok and f ~= nil then
+        SIGHT_HANDS_OFF = true
+        f:close()
+    end
+end
+if SIGHT_HANDS_OFF then
+    debug_log("9K113 hands-off switch is ACTIVE -- run_sight_servo will not write the AI axis")
+end
+
 local slew_log_file = nil
 local slew_log_buffer = {}
 
@@ -1128,8 +1150,16 @@ end
 
 -- Writes the AI-axis command every frame -- the proven mechanism from
 -- the pointing/dither probes, operating directly on raw command units
--- (`SetCommand` takes `deg/60`-style az, a piecewise-scaled el).
+-- (`SetCommand` takes `deg/60`-style az, a piecewise-scaled el). This is
+-- the only place in the file that calls `SetCommand` on `DEV_I9K113`'s AI
+-- axis, so the `SIGHT_HANDS_OFF` guard lives here rather than at either of
+-- `run_sight_servo`'s two call sites (the per-frame correction and the
+-- OBSERV falling-edge zero write) -- a future third call site is blocked
+-- by construction instead of by remembering to repeat the check.
 local function sight_point_quiet(az_cmd, elev_cmd)
+    if SIGHT_HANDS_OFF then
+        return
+    end
     local dev = safe_call(function() return GetDevice(DEV_I9K113) end)
     if dev == nil then return end
     pcall(dev.SetCommand, dev, CMD_AI_AZ, az_cmd)
@@ -1537,6 +1567,14 @@ end
 -- throttle -- same reasoning as every
 -- other per-frame function in this file.
 --
+-- `SIGHT_HANDS_OFF` is deliberately **not** checked inside this function:
+-- it already sits at Lua 5.1's 60-upvalue ceiling per closure (confirmed
+-- live by `luac5.1 -p` -- adding one more upvalue reference here, even a
+-- single `if SIGHT_HANDS_OFF then return end`, pushed it to 61 and failed
+-- the syntax check outright). `sight_servo_tick` below is the hands-off
+-- gate instead -- the one place besides `sight_point_quiet` itself that
+-- reads the flag.
+--
 -- **Must stay below `safe_call`/`sight_point_quiet`/`sight_rate_limit_
 -- step`/`sight_world_to_body`/`sight_mark_to_body_deg`/`sight_observ_
 -- transition`/`sight_clip_to_field_body_deg`/`sight_mark_is_clipped`** --
@@ -1846,11 +1884,31 @@ local function run_sight_servo(t)
     sight_last_write_el_cmd = write_el_cmd
 end
 
+-- `LuaExportAfterNextFrame`'s single per-frame entry point for the sight
+-- servo (`plans/9k113-hands-off-switch/implementation.md`) -- kept as its
+-- own small function, separate from `run_sight_servo`, purely to stay off
+-- that function's own 60-upvalue ceiling (see its comment above). When
+-- `SIGHT_HANDS_OFF` is set, `run_sight_servo` is not called at all --
+-- `sight_point_quiet`'s own guard would block the writes either way, but
+-- the goal/mark/stall tracking that feeds them would still be meaningless
+-- while the pilot is pointing the sight by hand -- and `sight_mode` is set
+-- to `"hands_off"` every frame instead, so body-layer's slew trace does
+-- not read as normal tracking.
+local function sight_servo_tick(t)
+    if SIGHT_HANDS_OFF then
+        sight_mode = "hands_off"
+        return
+    end
+    run_sight_servo(t)
+end
+
 -- Sends `run_sight_servo`'s own status -- mode (`off|caged|hold|homing|
--- closed`, v3: `open` renamed `homing`, its meaning changed with it, see
--- v3's "Merged mode"), setpoint, the mark-derived body direction (or
--- `null` when invalid), error, the stall flag, and (v3, new)
--- `field_target_*`/`mark_clipped` -- as a **second** feed from
+-- closed|hands_off`, v3: `open` renamed `homing`, its meaning changed with
+-- it, see v3's "Merged mode"; `hands_off` added by
+-- `plans/9k113-hands-off-switch/implementation.md`), setpoint, the
+-- mark-derived body direction (or `null` when invalid), error, the stall
+-- flag, and (v3, new) `field_target_*`/`mark_clipped` -- as a **second**
+-- feed from
 -- `push_cockpit_switch_state`'s own line, wire key "servo_mode" (the
 -- plan's own "Departure, stated": that feed is change-gated, this one
 -- changes every frame under the per-frame wobble, a different rate
@@ -2211,7 +2269,10 @@ function LuaExportAfterNextFrame()
     -- with the per-frame value-change mechanism always on. Must run
     -- every frame regardless of the 5 Hz export throttle below, same
     -- reasoning as every other per-frame function above it.
-    run_sight_servo(t)
+    -- `sight_servo_tick` is the hands-off gate (its own comment says why
+    -- it is a separate function rather than a check inside either of the
+    -- two it wraps).
+    sight_servo_tick(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)
