@@ -175,3 +175,163 @@ See per-stage commit messages for the full list; highlights:
    project_last_alt_m_is_the_ownship_altitude.md` and
    `.claude/agent-memory/debugger/project_contact_last_alt_m_flat_projection_trap.md`
    need amending to say the trap now applies to air contacts only.
+
+## Stage 7 — Manoeuvre-based scenario mock flights
+
+### Files Changed
+
+- `body-layer/tests/support/mock_flight_scenario.py` (new) — `OwnshipStart`,
+  `Level`/`Descend` (`FlightLeg`), `PlacedUnit`, `build_scenario_frames`.
+  Only `Level`/`Descend` are implemented, not the plan's full `Level`/
+  `Climb`/`Descend`/`Turn`/`RunIn`/`Hover` sketch — these two are the only
+  kinds the four scenarios below actually need. A scenario needing
+  `Climb`/`Turn`/`RunIn`/`Hover` adds that leg kind here when one is
+  actually needed, per the plan's own "how a later feature adds a
+  scenario" step.
+- `body-layer/tests/support/mock_world_model.py` — added
+  `build_flat_world_model(db_path, *, region_name, theatre, centre_x,
+  centre_z, half_extent_x_m, half_extent_z_m, origin_x, origin_z,
+  spacing_m, n_rows, n_cols, elevation_m=FLAT_ELEVATION_M)`, the general
+  form of the existing flat-plane builder; `build_mock_world_model` is now
+  a thin wrapper calling it with its original fixed bounds (unchanged
+  behaviour for every existing caller). Needed because the canonical
+  fixture's own small, fixed bounding box (x in [-500, 2000], z in
+  [-500, 500]) does not cover a 5 km closing run.
+- `body-layer/tests/test_bl_b104_scenario_mock_flights.py` (new) — the
+  four scenarios, each driven through the real threaded crew-text loop
+  (`body._run_crew_text_poll_loop`), a persistent `scan_area` "ahead"
+  task (same device `test_mock_flight_chain.py`'s own single-threaded
+  test uses), and a `_ForegroundEnrichment` helper (see Notable
+  Discoveries) for the one scenario that issues a command from the
+  foreground thread.
+
+### Tests Added
+
+- `test_run1_overflight_believed_altitude_never_exceeds_ownship` — a
+  ~400 m descent-and-overflight run; asserts the believed point is never
+  above ownship at any observed poll (the sortie's own overflight defect).
+- `test_run2_shallow_approach_range_error_converges_and_bounded` — a
+  level closing approach from 5 km at 400 m AGL (shortened to stop short
+  of point-blank range, see Notable Discoveries); asserts range error
+  stays within the plan's ~700 m budget throughout and converges
+  (non-increasing) up to the poll "engage" is issued; also asserts
+  `handle_command("engage", ...)` produces a real readback.
+- `test_two_groups_one_bearing_stay_two_contacts` — two T-72-sized groups
+  at 3 km/4.5 km on one bearing, ownship stationary at 500 m from the
+  near group (see Notable Discoveries for why stationary, not closing);
+  asserts exactly two contacts throughout and exactly two
+  `CONTACT_DETECTED` events (no spurious third founding event).
+- `test_cockpit_mask_forward_boundary_suppresses_then_recovers_callout` —
+  closes a forward unit through the ~743 m forward cockpit-mask
+  threshold at 300 m AGL; asserts `Contact.last_observable_sim` stops
+  advancing once inside the believed-masked band.
+- `test_cockpit_mask_pitch_down_recovers_masked_forward_target` —
+  approach, then a level hold well inside the mask radius (masked
+  throughout), then a pitch-down leg; asserts observability resumes once
+  the nose pitches down.
+
+### Checks
+
+**body-layer/** (fresh `.venv` created for this role; none existed in
+this worktree)
+
+- ruff format --check: pass
+- ruff check: pass
+- mypy --strict (`src`): pass (79 source files)
+- mypy (new test support + test file, explicit run per role instruction):
+  pass (3 source files)
+- pytest: pass (2851 passed, 4 xfailed — the 4 xfailed are the same
+  pre-existing, unrelated ones Stage 1-6 already carried)
+- Scenario file run 3x in a row standalone to check for timing-related
+  flakiness: pass every time (20.6s each)
+
+### Notable Discoveries
+
+1. **The plan's own "issuing 'engage target' (`CrewConsole.handle_line`)"
+   does not reach `_handle_engage` at all — confirmed by running it, not
+   assumed.** `handle_line` routes free text through `_handle_utterance`'s
+   contact-reference grammar (`belief.utterance.parse_utterance`), which
+   has no bare-verb entry for "engage target" with no antecedent contact
+   reference; the line is read as unmatched and escalated to the brain
+   layer. This is a plan-prose inaccuracy about which `CrewConsole` method
+   to call, not a `body-layer/src` defect —
+   `CrewConsole.handle_command("engage", now_sim, slots={...})` is the
+   call every existing `engage` test in `test_crew_console.py` already
+   uses, and is what the scenarios call instead.
+
+2. **A genuine class of cross-thread bug, already fixed once in
+   production, had to be fixed again in this test harness — not a new
+   `body-layer/src` defect, but worth flagging because the mechanism is
+   real.** Calling `CrewConsole.handle_command("engage", ...)` from the
+   foreground (test) thread while `ConsolePerceptionRunner`'s background
+   poll thread owns `runner.enrichment` raises
+   `sqlite3.ProgrammingError: SQLite objects created in a thread can only
+   be used in that same thread` — confirmed by running it. This is the
+   *exact* bug `body._run_crew_text_repl`'s own docstring documents fixing
+   for the real REPL thread (BL-B96): "this used to copy
+   `crew_console.enrichment` straight from `runner.enrichment` ...
+   thread-affine ... raised `sqlite3.ProgrammingError`." `_run_crew_text_
+   poll_loop` itself still sets `crew_console.enrichment = runner.
+   enrichment` once per poll (line ~3525) — fine for same-thread callers,
+   a trap for a foreground caller that doesn't know to override it first.
+   Fixed in the test file with `_ForegroundEnrichment` (opens its own
+   `sqlite3.Connection` on the foreground thread, same pattern
+   `_run_crew_text_repl` uses), not in `body-layer/src` — this is test
+   infrastructure calling a dispatcher the way only a REPL-equivalent
+   caller should, and the REPL's own fix pattern was ready to reuse. Worth
+   someone's attention regardless: `_run_crew_text_poll_loop` setting
+   `crew_console.enrichment` to its own thread-local value at all is a
+   footgun for any *other* future caller that drives `CrewConsole` from a
+   third thread and doesn't know this history.
+
+3. **A real, intended behaviour change in scenario 2's range-error
+   series had to be isolated before trusting the test, following this
+   role's own "state what would make X false, run that command" rule.**
+   After issuing "engage" mid-run, the range-error series diverged from
+   its no-engage baseline (identical up to that poll, then jumping from
+   ~2 m to ~148 m at the next two polls) — initially looked like `engage`
+   was corrupting belief position. Isolated by running each piece of
+   `_handle_engage` individually against the same scenario: a read-only
+   `get_contacts` call, `set_attention` alone, and `attack_target_task`
+   alone each left the post-call series bit-for-bit unchanged from the
+   no-engage baseline; only going through the real `_handle_engage` (which
+   also sets `attack_run_transition`, activating `body.py`'s attack-run/
+   gaze machinery every subsequent poll) changed it. Conclusion: engaging
+   changes which polls the naked-eye channel actually looks at this
+   contact (no longer purely the scan-ahead task's own 11->12->1 cycle),
+   which changes which per-look hash draws land on the believed position
+   — a real, intended attention effect, not a position-writing defect.
+   The convergence assertion is scoped to the pre-engage prefix of the
+   series for this reason; the ~700 m budget assertion still covers the
+   whole run including the post-engage polls.
+
+4. **The plan's own "two groups on one bearing ... closes" and "no
+   `CONTACT_CLASSIFICATION_CHANGED` event" both needed correction against
+   the real pipeline, not just the bare-`ContactStore` drive Stage 4's own
+   version of this scenario uses.** A closing run (as literally described)
+   overflies the near group (3 km) and masks it (cockpit mask) well before
+   the far group (4.5 km) ever enters the naked-eye channel's angular-size
+   gate (~2.3 km for a 7 m object at the default optic) — the only poll
+   with a single admitted candidate at that point is the far group's first
+   look, which the belief-side spatial gate folds into the near group's
+   own (by-then masked, decay-widened) contact, collapsing two contacts
+   into one. This is a geometry artifact of closing on both groups at once
+   through a real angular-size gate — neither this plan nor Stage 4's own
+   `ContactStore`-only version of this scenario exercises that gate at
+   all. Fixed by holding ownship stationary (500 m from the near group,
+   2 km from the far one — both continuously admissible, neither masked)
+   instead of closing. Separately, a benign `CONTACT_CLASSIFICATION_
+   CHANGED` event does fire once (one group refining its classification
+   after more looks) and is not itself evidence of a merge — the
+   assertion was changed from "never this event kind" to "exactly two
+   `CONTACT_DETECTED`, never a third."
+
+5. **A fresh `body-layer/.venv` had to be created for this role** — none
+   existed in this worktree (confirmed: `ls .venv` reported "No such file
+   or directory" before any check ran). Built per `body-layer/CLAUDE.md`
+   ("Running the live logger" / dependency list): `pyproj`, `numpy<2.5`,
+   plus `ruff`/`mypy`/`pytest`.
+
+6. **No new behaviour-affecting constant was introduced** — this stage is
+   test infrastructure only (no `body-layer/src` changes), so the tuning
+   mechanism does not apply here.
