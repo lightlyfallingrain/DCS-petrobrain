@@ -137,3 +137,35 @@ User's words:
 
 Logs: `body-layer/logs/*-20261030-143312.jsonl`. Engage commands at sim 512.6 (`engage target`),
 531.4 (`engage target missiles`), 743.9 (`engage target missiles`), 954.3 (`engage target`).
+
+### Log reading (first pass)
+
+The new calibration holds: in `closed` mode the mark sits on its setpoint to ~0.1 deg. The aim is
+the problem. `aim_source` stayed `belief` through both missile runs -- never `seen`.
+
+- Run 1 (531 s): goal azimuth near the nose, goal world elevation climbing +2.5 -> **+72 deg**; setpoint
+  pinned at the +20 deg gimbal, mark parked on the ASP-17 top edge; late in the run goal azimuth
+  swings to 356 then 251 deg.
+- Run 2 (743 s): an MLRS group at bearing ~272 deg, el -2.4 deg in the sim FOV but not admitted
+  (`terrain_los`, `range_or_size`); goal drifts 270 -> 301 deg and down to -27 deg over 45 s while the
+  aircraft turns 271 -> 294 deg.
+
+### Explored with the user
+
+> *"I'm not sure of the target, I just commanded engage target 12 o'clock nearest. I did get guidance
+> to where he believed the target was, but that was way off the actual target."*
+>
+> *"in debug view sight was pointing to side, also binoculars and naked eye while attack run in
+> progress, which sould not happen beside the occasional quick glance around. That should be a
+> *quick* glance, not many seconds."*
+>
+> *"Enganing a target with the 9K113 that he cannot see with 9K113 is utterly pointless. The whole
+> point is that he *sees* it AND tracks it with the 9K113. This must work, it is essential. If problem
+> is in incorrect belief behaviour, that must be fixed."*
+
+Requirements taken from this:
+1. During an ATGM run Petrovich **sees the target through the 9K113 and tracks it** -- the run's
+   whole purpose. Aiming the sight from belief alone is pointless.
+2. During a run the sight stays on the target; binoculars/naked eye only as a **quick** glance
+   around, not many seconds.
+3. If the belief aim is what is wrong, the belief behaviour is fixed -- not worked around.
