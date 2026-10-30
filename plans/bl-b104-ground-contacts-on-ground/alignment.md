@@ -214,3 +214,63 @@ and each answer is traced below next to the expectation it serves.
 
 None outstanding — all five goal-check questions (Q1–Q5) were already settled in `explore-notes.md`
 before this plan was written, and the plan traces to each answer rather than re-deciding it.
+
+## Plan check — 2026-10-30 (amendment: Stage 8 + Stage 7 turn leg)
+
+Scope: only the amendment (`plan.md` lines 433–730), against the user's verbatim decisions it
+cites — explore-notes.md's "E5 fold on a closing run" (growth rule) and "Scenario mock flights"
+(manoeuvre). This amendment is not yet implemented (`implementation.md` still describes the
+pre-review Stage 7); checked as a plan only.
+
+**Verdict:** ALIGNED
+
+| expectation (user's own words) | stage | status |
+|---|---|---|
+| "not observed moving -> tiny growth of position uncertainty" | 8 | met — `motion is None` or `"stopped"` both return `UNOBSERVED_MOTION_GROWTH_RATE_MPS` (0.3 m/s) |
+| "observed moving -> uncertainty grow at movement speed" | 8 | met — `motion.state == "moving"` returns `plausible_speed_mps(profile.op_class)`; no measured per-contact speed exists yet, so class table stands in, matching the plan's own "unless a believed speed exists to use instead" |
+| "most typical case is units being stationary" (None treated same as stopped) | 8 | met — explicit design choice, called out against the narrower `bounded-fold-displacement` precedent that did *not* fold `None` in |
+| installation components (SA-3 etc.) stay immobile | 8 | met, and correctly ordered first — checked before the motion/domain gate, so `0.0` can't be overridden by the new tiny rate |
+| air contacts stay bit-identical (E6) | 8 | met — gated on `Contact.on_surface`, not `Contact.motion`, with the reasoning spelled out for why `motion` alone would have been wrong (an air contact can carry `motion.state == "stopped"` too) |
+| E5 fold itself (two groups stay two) actually fixed, not just the growth rate changed | 8 | **not yet verified** — stage says so itself: an order-of-magnitude argument (340 m needed vs. ≈19 min unseen at 0.3 m/s vs. ≈42 s at the old 8 m/s rate), explicitly not a substitute for running the restored Stage 7 scenario; if it still folds, the plan correctly names this as Stage 4's own stop-and-report case, not something to retune around |
+| "Add turn to the test scenario" | 7 amendment | met — new `Turn` leg kind, scenario 3 rebuilt as a closing run with a turn onto the groups' bearing |
+| "Simple mock flights that still contain some aircraft manoeuvre" (plural) | 7 amendment | **partially met** — scenario 3 (closing run) and scenario 1 (Run 1, gets a `Turn` before the `Descend`) both get real manoeuvre; scenario 2 (shallow approach) is left untouched and stays a pure `Level` leg, same shape Finding 2 flagged |
+
+### Findings
+
+1. **Scenario 2 stays manoeuvre-free; the amendment satisfies review.md's own bar for Finding 2,
+   not the user's plural wording as fully as it could.** — lens: Purpose
+   - Assumption: review.md's Required Fix for Finding 2 accepted "add a leg with real
+     lateral/attitude change ... to at least one scenario" as sufficient — a bar the amendment
+     clears twice over (scenarios 1 and 3). The user's own sentence was *"Simple mock flights that
+     still contain some aircraft manoeuvre"* — plural *flights* — which review.md's Finding 2
+     originally read as applying to each of the two flagged scenarios (2 and 3), not one of them.
+   - In the sim: this is test scaffolding, not something the pilot ever sees — it affects only
+     whether the regression suite exercises a believable flight, not any in-cockpit behaviour. So
+     the stakes are "does this test suite catch what it's meant to", not a player-facing miss.
+   - Suggests: not a blocker, since it meets the review's own accepted resolution and the plan is
+     explicit about which scenario was chosen and why (Run 1's existing descent was the natural
+     fit). Worth a one-line note to the user or Architect that scenario 2 remains pure `Level`,
+     in case "simple mock flights" was meant more broadly than review.md's bar allowed — a quick
+     confirmation avoids relitigating this after Stage 7 ships a second time.
+
+2. **Stage 8's fix for the E5 fold is argued, not yet demonstrated, and the plan is honest about
+   that rather than overclaiming "fixed."** — lens: World truth
+   - In the sim: the worked numbers (340 m needed from growth alone; ≈42 s at the old rate vs.
+     ≈19 min at the new one) are a single-look-formula estimate, explicitly flagged as not
+     accounting for the near contact's real fused covariance or the real elapsed unseen time the
+     restored scenario will produce.
+   - The pilot would see: if the argument doesn't hold once the real scenario runs, exactly the
+     E5 violation goal-aligner's Finding 4 and review.md's Finding 1 already described — two groups
+     folding into one mid-run.
+   - Grounded in: plan.md's own "Does motion-aware growth alone fix review.md Finding 1's real
+     fold?" section, which states the follow-up condition itself.
+   - Suggests: nothing additional — the plan already names the next check (run the restored
+     scenario; stop-and-report if it still folds) and the right owner (Implementer/Reviewer, not
+     a retune). Flagged here only so this check doesn't get skipped once Stage 7's `Turn` leg is
+     in place and the temptation is to call Stage 8 "done" off the arithmetic alone.
+
+### Questions for the user
+
+- Is leaving scenario 2 (shallow approach) as a pure `Level` leg acceptable, or did "simple mock
+  flights that still contain some aircraft manoeuvre" mean every scenario should have one? (Finding 1
+  above — not a blocker either way, since review.md's own bar is met.)
