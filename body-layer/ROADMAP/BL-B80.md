@@ -16,7 +16,7 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
-  **9K113 hands-off switch, DoD-passed 2026-10-30, merged to `main`.** `plans/9k113-hands-off-switch/`
+  **9K113 hands-off switch, DoD-passed 2026-10-30, merged to `main` (`16305757`).** `plans/9k113-hands-off-switch/`
   (no Architect plan — small, directly-dispatched change; `implementation.md`/`review.md` are the
   decision record). A load-time flag
   (`Saved Games\DCS\Scripts\aircraft_layer_sight_hands_off.flag`) sets `SIGHT_HANDS_OFF` in
