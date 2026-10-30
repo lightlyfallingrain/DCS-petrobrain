@@ -106,7 +106,7 @@ always run regardless of exemption.
 
 **Scope (user direction, 2026-10-21): computer and network security only** — code execution, access to the machine, what a LAN port scanner reaches, LLM prompt injection, dependency/framework vulnerabilities. Threat model: a malicious library or an infected LAN machine. Player-experience correctness (DCS limits, callouts, omniscience) is the Reviewer's; full text in `.claude/agents/security.md`, "Scope".
 
-Use for: reviewing a feature plan for CVEs/security anti-patterns (after Architect); deep code-level security analysis before DoD (after Reviewer); on-demand full project security audit.
+Use for: reviewing a feature plan for CVEs/security anti-patterns (on demand only — dropped from the role sequences 2026-10-30, user direction); deep code-level security analysis before DoD (after Reviewer); on-demand full project security audit.
 
 Responsibilities: extract new dependencies and check for known vulnerabilities; reason about the plan/diff like a white-hat hacker; run scripted scans (`security-grep`, `extract-feature-diff`, `extract-plan-deps`) and interpret output; classify findings block/warn/note.
 
@@ -163,22 +163,23 @@ Output: dated findings in the `research/` directory of whichever module the find
 
 ---
 
-## 9. Aligner
+## 9. Goal Aligner and 10. Plan Aligner
 
-Use for: checking that a goal (before Architect) and then its plan (after Architect, before the
-security plan review) makes behavioural sense — in DCS World, for the Mi-24P, from the pilot's seat.
-Added 2026-10-30 (user direction); the three cases that motivated it are in `AGENTS.md`,
-"Behaviour alignment".
+Added 2026-10-30 (user direction). Shared frame, lenses and calibration cases:
+`docs/BEHAVIOUR_ALIGNMENT.md`; the motivating cases are in `AGENTS.md`, "Behaviour alignment".
 
-Responsibilities: restate the goal as what the pilot experiences; name the assumptions a planner
-would have to fill in; test goal and plan against purpose, world truth, unit of action, bounded
-knowledge, whose job, crew sense, the operating envelope, and a non-obvious case.
+**Goal Aligner** (opus) — after Explore, before Architect. Establishes *why* the goal is being done,
+derives the player's expectations from it (E1, E2 … observable in the cockpit), names the open
+assumptions, and asks whether the goal makes sense in DCS World and the player's experience.
+
+**Plan Aligner** (sonnet) — after Architect, before Implementer. Traces each expectation to a plan
+stage: met / missing / contradicted; checks every open assumption was settled the way that serves the
+why. Does not re-derive the why.
 
 Priorities: 1. The user's own words and sortie evidence 2. Project invariants 3. DCS behaviour as the
 player experiences it — and where that rests only on the agent's own reading, a question, not a finding.
 
-Must not: review technique (code, feasibility, performance, security); redesign; run long — it is
-meant to be lightweight.
+Must not: review technique (code, feasibility, performance, security); redesign.
 
 ---
 
@@ -192,7 +193,7 @@ meant to be lightweight.
 - **Security**: plan review — dependency posture, design findings, verdict; deep analysis — dependency status (one line; "no dependency change" is the normal answer), code findings, verdict; risk matrix (probability × impact, options) for low-risk findings.
 - **Definition of Done**: DoD check result (PASS/FAIL per criterion), acceptance testing plan, acceptance feedback, `notes/` entries added, merge readiness verdict.
 - **Investigator**: the question restated, evidence gathered with a strength label per finding, what was reproduced vs. inferred, possible approaches if the direct answer is "not possible", and what remains unresolved.
-- **Aligner**: a verdict (ALIGNED / CONCERNS / MISALIGNED), the pilot's view in a sentence, findings each tied to a lens and to what it is grounded in, and one-line questions for the user.
+- **Goal / Plan Aligner**: a verdict (ALIGNED / CONCERNS / MISALIGNED); the goal check adds the why and numbered player expectations, the plan check an expectation-to-stage table; findings tied to a lens and to their grounding; one-line questions for the user.
 
 ---
 

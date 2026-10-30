@@ -227,10 +227,14 @@ if [ -n "$FEATURE" ]; then
   PLAN_REVIEW="plans/$FEATURE/security-plan-review.md"
   SEC_REVIEW="plans/$FEATURE/security-review.md"
 
-  if [ -f "$PLAN_REVIEW" ] && grep -q "APPROVED" "$PLAN_REVIEW"; then
+  # Plan review is on demand only since 2026-10-30 (AGENTS.md, "Behaviour alignment"): absent is
+  # fine, present must be APPROVED.
+  if [ ! -f "$PLAN_REVIEW" ]; then
+    echo "| \`$PLAN_REVIEW\` | not run (on demand only) |"
+  elif grep -q "APPROVED" "$PLAN_REVIEW"; then
     echo "| \`$PLAN_REVIEW\` | $PASS |"
   else
-    echo "| \`$PLAN_REVIEW\` | $FAIL — run security agent (plan review mode) |"
+    echo "| \`$PLAN_REVIEW\` | $FAIL — plan review present but not APPROVED |"
     OVERALL=1
   fi
 

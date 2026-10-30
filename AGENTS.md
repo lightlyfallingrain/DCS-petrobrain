@@ -15,7 +15,7 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
 ### The four rules
 
 1. **Read-mostly agents always run with `isolation: "worktree"`** — Reviewer, Definition of Done,
-   Architect, Investigator, Aligner, Security, Performance Reviewer. It makes them immune to anything the
+   Architect, Investigator, Goal/Plan Aligner, Security, Performance Reviewer. It makes them immune to anything the
    main loop does.
 
    **Their handoff is not "copy the report back", and getting this wrong loses work silently.** An
@@ -252,15 +252,16 @@ listed seven).
 3. **Reviewer** — reviews completed work against the plan and `CLAUDE.md` before handoff.
 4. **Debugger** — bugs, regressions, unexpected behavior. Reproduce → isolate → fix → verify.
 5. **Performance Reviewer** — runtime cost risk on hot paths / data-intensive changes.
-6. **Security** — plan review (after Architect) and deep analysis (after Reviewer, before DoD); on-demand full audits.
+6. **Security** — deep analysis (after Reviewer, before DoD); plan review and full audits on demand only.
 7. **Definition of Done** — final gate: checks pass, acceptance testing with user, harvest insights into `notes/`.
 8. **Investigator** — this project's own role, not from the template: reconnaissance on unverified
    DCS internals before a plan depends on them. Sits *before* Architect's plan is finalized, not in
    the Implementer→Reviewer→DoD chain. Writes dated findings to the relevant module's `research/`;
    never writes pipeline code. Root `CLAUDE.md`'s "Agents" section has the full remit.
-9. **Aligner** — this project's own role: checks that a goal, then its plan, makes behavioural sense
-   in DCS World for the Mi-24P from the pilot's seat — ideas, not technique. Runs twice, before and
-   after Architect. Writes `plans/<feature>/alignment.md`. See "Behaviour alignment" below.
+9. **Goal Aligner** (opus) — this project's own role: before Architect, settles *why* a goal is
+   being done and what the player would want and expect from it in DCS World — ideas, not technique.
+10. **Plan Aligner** (sonnet) — after Architect, checks the plan delivers those expectations. Both
+   write `plans/<feature>/alignment.md`; see "Behaviour alignment" below.
 
 ---
 
@@ -309,11 +310,11 @@ pass, or something else — and let it override the sequences shown here rather 
 per-sequence.** Do not assume the cadence you last saw still stands: it has changed, and the earlier
 blanket skip outlived its premise precisely because nothing forced it to be re-read.
 
-- **New feature**: Aligner (goal) → *Explore (with the user)* → Architect → Aligner (plan) → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
-- **Performance-sensitive feature**: Aligner (goal) → Architect → Aligner (plan) → Security (plan review) → Implementer → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
+- **New feature**: *Explore (with the user)* → Goal Aligner → Architect → Plan Aligner → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
+- **Performance-sensitive feature**: Goal Aligner → Architect → Plan Aligner → Implementer → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Bug fix**: Debugger → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance issue**: Debugger → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
-- **Refactor**: Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
+- **Refactor**: Architect → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
 
 *Explore* precedes Architect on consequential work only — see "Explore Before Deciding" above. It is
 a conversation with the user, not a role, and cannot run as a subagent.
@@ -322,29 +323,32 @@ a conversation with the user, not a role, and cannot run as a subagent.
 
 **User direction, 2026-10-30.** High-level goals — *"scanning must find contacts"*, *"9K113 slew to
 target"*, *"attack run"* — arrive underspecified, and the gaps were filled with assumptions that were
-wrong about the world and were only caught later by the user: the debug view drawing the scan plan
-rather than where Petrovich actually looks; a detected ground unit placed at ownship elevation; a
-missile guided to the ground between two units because that was the group centrepoint. None was a
-coding error — each was a correct build of an idea that makes no sense in the sim, and every other
-gate checks something else.
+wrong about the world and caught only later by the user: the debug view drawing the scan plan rather
+than where Petrovich actually looks; a detected ground unit placed at ownship elevation; a missile
+guided to the ground between two units because that was the group centrepoint. None was a coding
+error — each was a correct build of an idea that makes no sense in the sim, and every other gate
+checks something else.
 
-So the `aligner` runs twice, **lightweight**:
+The key question is **why** the thing is being done, and whether the behaviour built delivers what
+the player would want and expect because of it. Two roles, because the hard part is the first:
 
-- **Goal check, before Architect** (and before *Explore*, whose conversation its questions seed):
-  does the goal, as stated, make sense in DCS World for the Mi-24P from the pilot's seat — and which
-  open assumptions would a planner have to fill in?
-- **Plan check, after Architect, before the security plan review**: did the plan settle those
-  assumptions sensibly, and does each stage still make sense to the pilot?
+- **`goal-aligner` (opus), after Explore, before Architect** — states the why, derives the player's
+  expectations from it, names the open assumptions a planner would fill in, and asks whether the goal
+  makes sense in DCS World and the player's experience. *"The real challenge is getting it right
+  before the architect"* (user, 2026-10-30), so this one gets the stronger model.
+- **`plan-aligner` (sonnet), after Architect, before Implementer** — traces each expectation to the
+  plan: met, missing, or contradicted.
 
-It checks **ideas, not technique** — DCS simulation and the player's expectations, not the real
-world, and nothing a technical role already owns. **CONCERNS** → settle them, with the user where
-only they can answer, then proceed. **MISALIGNED** → the goal or plan is reassessed before the next
-stage; that is the point of the role, not an escalation to route around. A subagent cannot talk to
-the user, so the aligner writes the questions and the main loop asks them.
+**CONCERNS** → settle them, with the user where only they can answer, then proceed. **MISALIGNED**
+→ the goal or plan is reassessed before the next stage. A subagent cannot talk to the user, so the
+roles write the questions and the main loop asks them. Skip both only for work with no behavioural
+content — refactor, tooling, docs — and say so. Shared frame, lenses and calibration cases:
+`docs/BEHAVIOUR_ALIGNMENT.md`. `alignment-check-reminder.sh` (PreToolUse on `Agent`) reminds at
+architect and implementer dispatch, quiet once the section is on file.
 
-Skip it only for work with no behavioural content — a refactor, tooling, docs — and say so.
-`alignment-check-reminder.sh` (PreToolUse on `Agent`) injects the reminder at architect and
-implementer dispatch and stays quiet once `plans/<feature>/alignment.md` holds the section.
+**Security's plan review left the sequences at the same time** (user direction, 2026-10-30: *"Drop
+the security between AR and I"*). Its deep analysis before DoD still runs and covers dependency
+status; the plan review stays available on demand.
 
 ### A change request from Security or Performance Reviewer re-enters the loop
 

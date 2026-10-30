@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# PreToolUse on Agent: make the aligner's two checks fire at the moments they are owed.
+# PreToolUse on Agent: make the two alignment checks fire at the moments they are owed.
 #
-#   architect dispatch   -> the GOAL check should already exist
-#   implementer dispatch -> the PLAN check should already exist
+#   architect dispatch   -> goal-aligner's GOAL check should already exist
+#   implementer dispatch -> plan-aligner's PLAN check should already exist
 #
-# Why: the aligner (.claude/agents/aligner.md, user direction 2026-10-30) catches a goal or
-# plan that is correct about everything except the world it works in -- a debug view drawing
-# the scan plan instead of the actual gaze, a ground unit at ownship elevation, a missile aimed
-# at a group centroid. Each of those survived every other gate because each gate checks
-# something else, so the check is only worth anything if it actually runs, and a rule that has
-# to be remembered at dispatch time is the shape this project keeps breaking (AGENTS.md, "Where
-# work happens").
+# Why: goal-aligner and plan-aligner (docs/BEHAVIOUR_ALIGNMENT.md, user direction 2026-10-30)
+# catch a goal or plan that is correct about everything except why it is being done -- a debug
+# view drawing the scan plan instead of the actual gaze, a ground unit at ownship elevation, a
+# missile aimed at a group centroid. Each of those survived every other gate because each gate
+# checks something else, so the check is only worth anything if it actually runs, and a rule
+# that has to be remembered at dispatch time is the shape this project keeps breaking
+# (AGENTS.md, "Where work happens").
 #
 # Quiet when the check is on record: it looks for plans/<feature>/alignment.md in any worktree
 # (the file usually lives in the feature's worktree, not the root) and stays silent if the
@@ -52,14 +52,14 @@ else
 fi
 
 if [ "$role" = architect ]; then
-    next="Dispatch the aligner on the goal first (subagent_type \"aligner\", isolation \"worktree\", mode: goal check), then hand Architect its findings. After the plan lands, the aligner runs again on the plan, before the security plan review."
+    next="Dispatch goal-aligner first (subagent_type \"goal-aligner\", isolation \"worktree\"; after Explore if one runs), then hand Architect its why, player expectations and open assumptions. After the plan lands, plan-aligner checks the plan against them before any implementer."
 else
-    next="Dispatch the aligner on the plan (subagent_type \"aligner\", isolation \"worktree\", mode: plan check) before implementation starts."
+    next="Dispatch plan-aligner (subagent_type \"plan-aligner\", isolation \"worktree\") before implementation starts."
 fi
 
 jq -n --arg role "$role" --arg which "$which" --arg where "$where" --arg next "$next" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
-    additionalContext: ("ALIGNMENT CHECK (\($role) dispatch): the aligner'"'"'s \($which) check is owed before this. \($where)\n\n\($next)\n\nThe aligner checks ideas, not technique: does this make sense in DCS World, for the Mi-24P, from the pilot'"'"'s seat? MISALIGNED means reassess the goal or plan before going on, with the user where only they can answer. Skip it only for work with no behavioural content (refactor, tooling, docs), or when the user has waived it -- and say which. AGENTS.md, \"Recommended Role Sequences\".")
+    additionalContext: ("ALIGNMENT CHECK (\($role) dispatch): the \($which) alignment check is owed before this. \($where)\n\n\($next)\n\nThe alignment roles check ideas, not technique: why is this being done, and does it deliver what the player would want and expect in DCS World, for the Mi-24P? MISALIGNED means reassess the goal or plan before going on, with the user where only they can answer. Skip only for work with no behavioural content (refactor, tooling, docs), or when the user has waived it -- and say which. docs/BEHAVIOUR_ALIGNMENT.md.")
   }
 }'

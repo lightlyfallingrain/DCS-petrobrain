@@ -80,7 +80,9 @@ definition, including this one.
 
 ---
 
-## Mode 1 — Plan Review (after Architect, before Implementer)
+## Mode 1 — Plan Review (on demand only)
+
+**Dropped from the role sequences 2026-10-30** (user direction: *"Drop the security between AR and I"*) — the slot between Architect and Implementer went to `plan-aligner`. Run this mode only when the orchestrator or user asks for it, e.g. for a plan introducing a new dependency or network surface; the deep analysis before DoD still covers dependency status.
 
 **Trigger:** Architect has produced `plans/<feature>/plan.md`.
 

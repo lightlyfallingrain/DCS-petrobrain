@@ -30,7 +30,7 @@ input=$(cat)
 role=$(echo "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null || true)
 
 case "$role" in
-    architect|debugger|investigator|aligner) ;;
+    architect|debugger|investigator|goal-aligner) ;;
     *) exit 0 ;;
 esac
 
