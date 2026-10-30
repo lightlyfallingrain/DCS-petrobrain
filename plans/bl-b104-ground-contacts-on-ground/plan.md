@@ -7,6 +7,12 @@ shape), `docs/acceptance/2026-10-30-sortie-feedback.md` §4, `plans/atgm-run-sig
 Recon: `aircraft-layer/research/2026-10-30-world-object-category-and-agl.md` (investigator, this
 pass).
 
+**Amendment, 2026-10-30 (same day), Stage 7/Stage 8**: `review.md` (Findings 1/2, Optional
+Refinements), `explore-notes.md`'s "E5 fold on a closing run — decision" section (added after
+review), `docs/acceptance/2026-10-13-position-uncertainty-direction.md` (the open question this
+amendment closes), `plans/bounded-fold-displacement/plan.md` §6 (the narrower probe of the same
+question, superseded here).
+
 ### Goal
 
 A seen surface unit (vehicle, infantry, static, ship, landed/low-hovering helicopter) is believed
@@ -121,11 +127,26 @@ body-layer, belief:
   them, per the user's *"no world model elevation grid"*).
 - `src/belief_truth_log.py` — compare horizontally; log believed altitude and `on_surface`.
 - `src/tuning.py` consumers / `config/defaults.toml` (regenerated) — `DEPRESSION_SIGMA_DEG`,
-  `HELI_SURFACE_AGL_MAX_M`.
+  `HELI_SURFACE_AGL_MAX_M`, and (Stage 8) `UNOBSERVED_MOTION_GROWTH_RATE_MPS`.
 - Tests: `test_estimation.py`, `test_percept.py`, `test_naked_eye_source.py`,
   `test_hybrid_source.py`, `test_clustering.py`, `test_contacts.py`, `test_association_over_time.py`,
   `test_attack_run.py`, `test_body.py`, `test_enrichment.py`, `test_belief_truth_log.py`, new
   `test_domain.py`; aircraft-layer `test_schema.py`.
+
+Stage 7 amendment / Stage 8 additions (2026-10-30):
+- `body-layer/src/belief/association_over_time.py` — `UNOBSERVED_MOTION_GROWTH_RATE_MPS`
+  (new tunable) and `contact_growth_rate_mps` (motion/domain-gated).
+- `body-layer/tests/test_contacts.py` — two rewritten assertions (see Stage 8's own "tests this
+  stage extends vs. rewrites"), one corrected comment.
+- `body-layer/tests/support/mock_flight_scenario.py` — new `Turn` leg kind, `FlightLeg` widened,
+  `build_scenario_frames`' per-step loop gains a `Turn` branch.
+- `body-layer/tests/test_bl_b104_scenario_mock_flights.py` — scenario 3 rebuilt as a genuine
+  closing run with a turn (not stationary); a real manoeuvre leg added to at least one other
+  scenario; corrected comment on scenario 2's stopping point; two new sight-tracking assertions
+  around the engage-time jump.
+- `body-layer/config/defaults.toml` (regenerated) — `UNOBSERVED_MOTION_GROWTH_RATE_MPS`.
+- New backlog item (`mint-id.sh`, `BL-B` prefix) for `belief.groups.group_matches` test 5's
+  now-unblocked motion-widening (see Stage 8's own note) — not built here.
 
 Not changed: `position_belief.py` (the fused estimate is 2D x/z and stays so — only its inputs
 move), the association gate constants, `sight_head.py`'s bearing-line search (stays the fallback for
@@ -409,6 +430,253 @@ and called out on the test card.
 5. **`remembered_target_alt_m` narrowed, not deleted**: it still serves air contacts and keeps its
    callers; for surface contacts it returns belief's own height.
 
+### Stage 7 amendment (2026-10-30, after review.md Findings 1/2) — a real manoeuvre leg, and a non-stationary two-groups scenario
+
+Reviewer found the E5 fold the plan's own Stage 4 anticipated (its "stop and report" line) actually
+fires in the real pipeline — see Stage 8 below — and found that Stage 7, as implemented, contains
+no aircraft manoeuvre anywhere (two of four scenarios are pure `Level`; scenario 3 was redesigned
+to fully-stationary ownship, `speed_mps=0.0`, specifically to dodge the fold, directly contradicting
+the user's *"simple mock flights that still contain some aircraft manoeuvre"*). Both required fixes
+are resolved together, since Stage 8 removes scenario 3's reason to be stationary.
+
+- **New leg kind, `Turn`** (`body-layer/tests/support/mock_flight_scenario.py`), the first of the
+  plan's own `Climb`/`Turn`/`RunIn`/`Hover` sketch to actually be needed — added now because a
+  scenario needs it, not speculatively, per the module's own stated rule:
+  ```python
+  @dataclass(frozen=True, slots=True)
+  class Turn:
+      """Heading ramps linearly from whatever the ownship holds when this
+      leg begins to `end_heading_deg` over `duration_s`, at constant
+      speed/altitude. `bank_deg` is a stated telemetry value for the turn's
+      duration (dead-reckoning only, per the module docstring — not derived
+      from a standard-rate-turn formula), mirroring how `pitch_deg` is
+      already a leg parameter rather than a derived quantity."""
+
+      duration_s: float
+      speed_mps: float
+      end_heading_deg: float
+      altitude_msl_m: float
+      altitude_agl_m: float
+      bank_deg: float
+      pitch_deg: float = 0.0
+  ```
+  `FlightLeg` becomes `Level | Descend | Turn`. `build_scenario_frames`'s per-leg setup currently
+  computes `heading_rad`/`dx`/`dz` once per leg, outside the per-step loop — a `Turn` needs the
+  heading interpolated **per step** (entry heading at leg start → `end_heading_deg`, linear in
+  `step / n_steps`) and `dx`/`dz` recomputed from that per-step heading, so the per-step loop body
+  needs an `isinstance(leg, Turn)` branch alongside `Level`/`Descend`'s existing one. `bank_deg`
+  feeds the emitted frame's bank/roll telemetry field for the leg's duration (constant, as
+  `pitch_deg` already is for `Descend`), and `0.0` elsewhere, same as today.
+- **Scenario 3 (two groups on one bearing) becomes a genuine closing run with a turn**, replacing
+  the fully-stationary redesign: ownship approaches off-bearing, turns onto the groups' bearing,
+  then closes — the shape the user's "approach offset, turn onto the bearing, close" sketch in the
+  dispatch names, and the shape that actually exercises the real cockpit-mask/angular-size gate
+  Stage 8 is designed against (Stage 4's own "closing run" sub-case (c), not the level/stationary
+  geometry (b) that review.md's Finding 1 shows is insufficient on its own). Exact leg durations/
+  headings/offsets are the Implementer's to compute from the real geometry (mirroring
+  `implementation.md`'s own "exact per-frame numbers were computed by a throwaway script" practice
+  for scenario 2's 900 m stopping point) — but the shape is: `Level` on an offset heading for some
+  seconds, `Turn` onto the groups' bearing, `Level`/closing, long enough to run past both the near
+  group's forward-mask threshold and the far group's own angular-size admission. **If Stage 8's own
+  fix does not make the real pipeline hold two contacts across this run (checked empirically, not
+  assumed from the Stage 8 arithmetic alone), this scenario stays the stop-and-report case Stage 4
+  always was — do not shrink it back to a geometry that avoids the fold.**
+- **At least one other scenario gets a real manoeuvre leg too**, per the user's plural "flights" —
+  the natural fit is Run 1 (scenario 1), which is already a descent toward overflight: add a shallow
+  `Turn` onto the final bearing before the `Descend`, or widen the existing descent into a
+  `Descend`→`Turn`→`Level` sequence — Implementer's choice of shape, not prescribed here, so long
+  as a real heading change occurs somewhere in a scenario other than scenario 3.
+- **Optional refinement (review.md) — the "steep-depression blow-up" comment in scenario 2
+  (`test_run2_shallow_approach_range_error_converges_and_bounded`, around the `Level` leg's
+  `duration_s=82.0`) is factually wrong and should be corrected, not just left.** The reviewer's own
+  numeric sweep shows `surface_range_estimate`'s single-look `sigma_down_m` **decreases**
+  monotonically as true distance shrinks at fixed AGL — there is no `1/tan` single-look blow-up. The
+  comment's claim is plausible for the **fused belief** (several past looks averaged while closing
+  fast is a lag effect, not a single-look sensitivity issue), so reword it to say that, or re-verify
+  the fused series directly before restating a mechanism. The scoping decision itself (stop around
+  900 m, short of the plan's own tested 500 m grid floor) stands either way — only the stated reason
+  changes.
+- **Optional refinement (review.md) — a named sight-tracking assertion across the engage-time
+  position jump.** `test_run2_shallow_approach_range_error_converges_and_bounded`'s `on_tick`
+  already captures `runner.sight_head` each poll (via `runner` in its closure) and already knows
+  the exact poll `engage` was issued (`engaged.pre_engage_count`). Add, immediately before and
+  after that poll: `runner.sight_head.aim_source` is not `"belief"` (i.e. is `"seen"` or `"held"`)
+  across the transition — the same fields `test_body.py`'s `TestSightLock*` tests and
+  `atgm-run-sight-tracking/plan.md`'s own `test_optic_policy.py` tests already read (`SightHead.
+  aim_source`/`world_az_true_deg`/`world_el_deg`). This does not need a new scenario — it is two
+  more assertions on data the test already has.
+
+### Stage 8 — motion-aware position-uncertainty growth (added 2026-10-30, after review.md Finding 1 and `explore-notes.md`'s "E5 fold on a closing run — decision")
+
+**User direction, verbatim** (`explore-notes.md`, same section): *"A unit/group that is not
+observed moving -> it's not expected to move -> tiny growth of position uncertainty. Unit/group
+that is observed moving -> uncertainty grow at movement speed. Most typical case is units being
+stationary."*
+
+**This closes an open question from `docs/acceptance/2026-10-13-position-uncertainty-direction.md`
+("Position uncertainty must key on observed movement"), captured during `BL-12` and never built** —
+that note left the exact shape open (a horizon before the class rate re-opens, decay-proportional
+growth, or an unconditional zero) specifically because the user's own bound, *"a couple of
+minutes,"* needed its own calibration decision. Today's direction resolves it more simply than any
+of that note's three candidate shapes: not zero-until-a-horizon, but **a small, constant, always-on
+rate** whenever motion is not currently believed — no horizon, no decay curve. `plans/bounded-fold-
+displacement/plan.md` §6 probed the narrower form of this question (`0.0` only for `"stopped"`,
+class rate for `None`) and found it did not change that plan's own bound; this stage's rule is
+different (`None` **also** gets the tiny rate, per today's "most typical case is units being
+stationary," which treats "never observed moving" the same as "observed stopped") and is designed
+fresh against the fold here, not against that plan's own displacement bound. **On merge** (role
+step 10): point `docs/acceptance/2026-10-13-position-uncertainty-direction.md` and `plans/bounded-
+fold-displacement/plan.md` §6 at this stage as the entry that finally built the direction, so a
+future reader does not treat either as still open.
+
+**The one resolution point, confirmed by reading the code, not assumed**: `belief.
+association_over_time.contact_growth_rate_mps(contact)` is the single function both of this
+project's own growth-rate consumers call — `belief.contacts.Contact.record` (line 647, the
+spatial-gate's own elapsed-motion inflation and the fold-displacement bound) and `belief.
+attack_run._tier2_alignment` (line 586, projecting a moving target's position forward for
+guidance). `BL-B51`'s "one table, not two" rule means this stage changes **this one function**,
+and both consumers inherit the new rule automatically.
+
+- **New tunable**, declared beside `contact_growth_rate_mps` in `association_over_time.py`:
+  ```python
+  #: How fast an unobserved-moving contact's position uncertainty grows,
+  #: metres/second, when `Contact.motion` is `"stopped"` or `None` ("never
+  #: observed moving") -- user direction, 2026-10-30 (explore-notes.md,
+  #: "E5 fold on a closing run"): "not observed moving -> not expected to
+  #: move -> tiny growth". Deliberately a single constant rather than a
+  #: per-class one: the user's rule keys on observation, not class: a
+  #: unit's class only matters once it *is* observed moving (see
+  #: `plausible_speed_mps` below). Not calibrated against any measurement.
+  UNOBSERVED_MOTION_GROWTH_RATE_MPS: Final[float] = tuning.real(
+      "belief.association_over_time.UNOBSERVED_MOTION_GROWTH_RATE_MPS",
+      0.3, lo=0.0, hi=1.0, status="judgement",
+  )
+  ```
+  `hi=1.0` is chosen, not a round number — it keeps this rate well below the shallowest class
+  speed in `plausible_speed_mps`'s table (`OP_INFANTRY`, 2.0 m/s), so a misconfigured override
+  cannot quietly turn "tiny" into "about the same as moving," which would silently undo the rule.
+- **`contact_growth_rate_mps` gains the motion/domain gate**:
+  ```python
+  def contact_growth_rate_mps(contact: Contact) -> float:
+      profile = object_model.profile_for(contact.last_class_raw)
+      if profile.installation_component:
+          return 0.0
+      if not contact.on_surface:
+          # Air contacts unchanged (explore Q5) -- see the "air contacts
+          # must stay bit-identical" note below for why this is `on_surface`,
+          # not an absence of `contact.motion`.
+          return plausible_speed_mps(profile.op_class)
+      if contact.motion is not None and contact.motion.state == "moving":
+          return plausible_speed_mps(profile.op_class)
+      return UNOBSERVED_MOTION_GROWTH_RATE_MPS
+  ```
+  **Installation components stay `0.0` unconditionally** (today's behaviour), checked first,
+  before the motion/domain gate — an entrenched SA-3 does not start growing at the tiny rate just
+  because `Contact.motion` happens to be `None`; it is still immobile either way, and `0.0` already
+  says so more strongly than `UNOBSERVED_MOTION_GROWTH_RATE_MPS` would.
+- **Air contacts must stay bit-identical — resolved via `Contact.on_surface` (BL-B104 Stage 2),
+  not via `Contact.motion`.** Checked directly: `perception.naked_eye_source` computes
+  `apparent_motion` for every admitted cluster regardless of domain (the velocity-threshold check
+  that feeds `belief.motion.fold_motion` is not gated on `is_surface`), so an air contact can
+  legitimately carry `Contact.motion.state == "stopped"` — e.g. a helicopter briefly below the
+  naked-eye velocity threshold at one look, or a contact that has only ever been seen through the
+  scope/hybrid channel (`Contact.motion is None`, per `belief.motion`'s own docstring: that channel
+  supplies no motion percept at all). Gating the tiny rate on `contact.motion` alone would therefore
+  change behaviour for some air contacts (an aircraft momentarily read as "stopped" or never
+  motion-classified would drop from ~8 m/s to 0.3 m/s mid-flight) — exactly the risk the dispatch
+  flagged. Gating on `contact.on_surface` instead sidesteps this entirely: every air contact
+  (`on_surface is False`, which also covers the "category unknown, treated as air" fallback from
+  Stage 1) takes the unconditional `plausible_speed_mps` branch regardless of its own `Contact.
+  motion`, identical to pre-Stage-8 behaviour bit for bit. Only `on_surface is True` contacts — the
+  ones this whole plan is about — see the new rule.
+- **No believed/measured speed exists to prefer over the class table.** Checked: `Contact` carries
+  no per-contact velocity estimate anywhere (`grep -n "velocity\|speed_mps" src/belief/contacts.py`
+  finds none); the only speed `belief` ever holds is `plausible_speed_mps`'s per-class table and
+  `Group.heading_deg`'s direction-only estimate (no magnitude). So "a believed speed if one exists"
+  resolves to "none exists yet" — the moving branch above is `plausible_speed_mps(profile.op_class)`
+  exactly as `contact_growth_rate_mps` already computed it pre-Stage-8, unchanged. If a future
+  per-contact measured speed is added, this function is the one place to prefer it over the table,
+  per the existing one-function convention.
+- **`belief.groups.group_matches` test 5's displacement bound is deliberately left alone, named
+  rather than silently diverging.** That bound (`groups.py` ~line 1176) already has its own
+  one-sided motion rule — `0.0` when the **observed** cluster's `stopped` flag is set, else the
+  class-table max over `group.composition` — and its own docstring already flags the asymmetry as
+  unfinished: *"`Group` carries no persisted movement state until Stage 4 ... Stage 4 persists
+  `Group.movement_state` and should widen this to both sides then."* `Group.movement_state` **is**
+  now persisted (`group-contact-identity` Stage 4 shipped it), so that widening is now unblocked —
+  but it is a `Group`-level bound over a different data shape (`_ClusterProperties`/`Group`, not
+  `Contact`), it does not call `contact_growth_rate_mps`, and widening it is the explicitly-deferred
+  work of a different plan (`group-contact-identity`), not a silent side effect of this stage. This
+  stage changes `Contact`-level growth only. Flagged here, and worth a small backlog item
+  (`mint-id.sh`) pointing at `groups.py`'s own docstring so the now-unblocked widening is not
+  forgotten a second time.
+- **Does motion-aware growth alone fix review.md Finding 1's real fold? Worked through with real
+  numbers, not assumed.** The fold needs the near contact's gate-covariance (inflated since its
+  last look, plus the far percept's own declared covariance) to cover the 1500 m gap between the
+  two groups' centroids (3 km / 4.5 km) at `GATE_SIGMA_THRESHOLD = 3.0` sigma — i.e. a combined
+  down-range σ ≥ 500 m. Measured directly against `perception.estimation.surface_range_estimate`
+  at 300 m AGL: a single look at the far group's ~2.3 km first-admission range has `sigma_down_m ≈
+  361 m` on its own (3σ ≈ 1083 m — **not** enough on its own to span 1500 m, so this is not simply
+  "the far look's own uncertainty was always wide enough," confirming it's the near contact's
+  *inflation* that was doing the work). The near contact, fused over several looks before masking
+  (at ranges this close the per-look `sigma_down_m` is itself small, 50–90 m), contributes little
+  pre-inflation — so the ~500 m needed is overwhelmingly the `growth_rate_mps × elapsed_s` term.
+  Solving for what growth alone must supply: `sqrt(500² − 361² − ~70²) ≈ 340 m`. At the pre-Stage-8
+  rate (`OP_ARMORED`, 8 m/s) that is **≈ 42 s** of unseen time — entirely plausible for a mask
+  interval during a closing run, and consistent with the fold actually firing. At
+  `UNOBSERVED_MOTION_GROWTH_RATE_MPS = 0.3 m/s`, the same 340 m would need **≈ 19 minutes** unseen —
+  far beyond any plausible mask duration in one pass. **This strongly suggests motion-aware growth
+  alone removes the dominant term causing this specific fold**, but it is an order-of-magnitude
+  argument from the single-look formula, not a replacement for actually running the restored
+  closing-run scenario (Stage 7 amendment above) end to end through the real pipeline, where the
+  near contact's true fused covariance at the moment of masking and the real elapsed unseen time
+  are both whatever the real scenario produces, not the round numbers used here. **If the restored
+  scenario still folds once built and run, that is Stage 4's own stop-and-report condition —
+  escalate it, do not retune the gate or re-flatten the scenario a second time.**
+- **The accepted cost, stated so it is not rediscovered**: a stopped/unobserved-moving surface
+  contact that actually starts moving while unseen is likely to be re-found as a new contact rather
+  than a continuation of the old one, once it has moved further than the tiny rate's covariance
+  covers. The user judged this acceptable (*"most typical case is units being stationary"*).
+- **Tests this stage extends vs. rewrites — checked by reading the assertions, not assumed.** Any
+  test asserting a specific numeric growth-rate value for a `Contact` whose `motion` is at its
+  default (`None`) and whose class would, pre-Stage-8, have supplied a non-trivial class rate must
+  be **rewritten**, because the asserted number itself encodes the old unconditional-class-rate
+  behaviour — extending it (adding a case alongside) is not enough, since the existing case's own
+  expected value changes:
+  - `tests/test_contacts.py::test_fold_displacement_m_is_clamped_...` (the fold-displacement clamp
+    test using `_observation`/`contact_d`, asserting `bound_m = contact_growth_rate_mps(contact_d) *
+    0.1 == pytest.approx(1.5)`) — `contact_d` is never given a `motion` override, so under Stage 8
+    it reads `UNOBSERVED_MOTION_GROWTH_RATE_MPS` (0.3) unless the test now sets `contact.motion =
+    MotionBelief(state="moving", ...)` explicitly to keep exercising the class-rate path this test
+    is actually about. **Rewrite**, not extend: either assert the new (tiny-rate) number, or set
+    `motion` explicitly and keep asserting the class-rate number — the Implementer's call, but the
+    literal `1.5` cannot survive unchanged either way.
+  - `tests/test_contacts.py::test_fold_displacement_m_tracks_the_worst_single_fold_not_an_accumulated_sum`
+    (`correct_order_rate = contact_growth_rate_mps(contact)` vs. `wrong_order_rate = …` on a
+    class-swapped copy, asserting `correct_order_rate != wrong_order_rate`) — both contacts default
+    to `motion=None`, so both would resolve to the same `UNOBSERVED_MOTION_GROWTH_RATE_MPS` under
+    Stage 8, making the two values **equal** and the assertion fail. **Rewrite**: give both
+    contacts `motion=MotionBelief(state="moving", ...)` so the comparison still exercises the
+    class-table branch it is testing (order-of-resolution, not motion-gating).
+  - `tests/test_contacts.py::test_lost_contact_rejoins_clustering_cleanly_on_reacquisition`'s own
+    docstring (not its assertions) claims a long gap's elapsed-motion inflation "grows wide enough
+    that two contacts ... become ambiguous" — under Stage 8, with both contacts' `motion` left at
+    the test's default (`None`), that inflation no longer grows wide over the same gap. The test's
+    actual assertions go through `continues_observation_id` (object-permanence continuity), not the
+    spatial gate, so **behaviour is unaffected** — only the explanatory comment becomes stale.
+    **Extend/correct the comment**, not the test; flagged so a reader does not "fix" a passing test
+    for the wrong reason.
+  - `tests/test_position_belief.py` and `tests/test_groups.py`'s own `GATE_GROWTH_RATE_MPS`/
+    `plausible_speed_mps` references are unaffected (they test `position_belief.py`/`groups.py`
+    directly, not `contact_growth_rate_mps`) — listed here only to record that they were checked and
+    found out of scope, not left unchecked.
+  - New tests for Stage 8 itself: `contact_growth_rate_mps` returns `UNOBSERVED_MOTION_GROWTH_RATE_MPS`
+    for `on_surface=True` contacts with `motion=None` and with `motion=MotionBelief(state="stopped",
+    ...)`; returns the class rate for `on_surface=True, motion=MotionBelief(state="moving", ...)`;
+    returns the class rate unconditionally for `on_surface=False` regardless of `motion` (the
+    bit-identical guarantee, asserted directly rather than inferred); `installation_component` wins
+    over all of the above.
+
 ### Risks & Unknowns
 
 - **Category values were never read live.** The `Type` field is documented. The enumeration comes
@@ -443,6 +711,23 @@ and called out on the test card.
   doesn't set one) — acceptable for a wiring/outcome proof the same way `build_mock_world_model`'s
   flat terrain is acceptable, but worth a one-line docstring note in `mock_flight_scenario.py` so a
   later reader doesn't mistake a leg's kinematics for a flight-model claim.
+- **Stage 8's fold-fix is an order-of-magnitude argument, not a measured guarantee** (see Stage 8's
+  own worked numbers) — the restored closing-run scenario (Stage 7 amendment) must actually be run
+  before this plan can say Finding 1 is resolved rather than merely mitigated. If it still folds,
+  that is Stage 4's own stop-and-report condition, not a reason to retune the gate or re-flatten the
+  scenario.
+- **A stopped/unobserved surface contact that starts moving unseen is likely to be re-founded as a
+  new contact**, accepted by the user (Stage 8's own "accepted cost" note) — stated here too since
+  it is a felt behaviour change in the same family as the cockpit-mask one above, not only a
+  mechanism detail.
+- **`UNOBSERVED_MOTION_GROWTH_RATE_MPS` and `plausible_speed_mps`'s per-class table are a coupling
+  the loader's own per-key bounds cannot see** — both feed the same `contact_growth_rate_mps`
+  resolution, and tuning one without the other changes the ratio between "moving" and "not observed
+  moving" growth, which is the whole point of the rule. Not closing this now, matching the
+  documented, already-accepted posture for the `DEPRESSION_SIGMA_DEG`/`_SIGHT_*_SCALE` coupling
+  review.md's Optional Refinements already noted and `body-layer/CLAUDE.md`'s own
+  `OBSERVED_WINDOW_S`/`POSITION_HALF_LIFE_S` note establishes as this project's standard posture for
+  unclosed per-key couplings.
 
 ### Second-order effect
 
@@ -456,13 +741,20 @@ reuses the two-cue estimator with a different height source.
 (surface contacts now carry their own height in belief), and the `last_alt_m` memories
 (`architect/project_last_alt_m_is_the_ownship_altitude.md`,
 `debugger/project_contact_last_alt_m_flat_projection_trap.md`) to say the trap now applies to air
-contacts only.
+contacts only. **Also** (Stage 8): mark `docs/acceptance/2026-10-13-position-uncertainty-direction.md`
+and `plans/bounded-fold-displacement/plan.md` §6 as built by this stage, with a pointer here, so
+neither reads as still-open direction after this merges.
 
 ### Decisions Requiring User Input
 
-None blocking. Two worth a glance before Stage 3 lands, both tunables with a stated default:
+None blocking. Three worth a glance before the relevant stage lands, all tunables with a stated
+default:
 
 - **`DEPRESSION_SIGMA_DEG` starts at 3.0** — the bearing error's own value, i.e. your sentence read
   as the angle; the fusion turns that into the ~±700 m ground error you called sensible at
   300 m / 4 km. Lower it if Petrovich should firm up sooner when closing.
 - **`HELI_SURFACE_AGL_MAX_M` starts at 10 m** for "landed or hovering a few metres up".
+- **`UNOBSERVED_MOTION_GROWTH_RATE_MPS` starts at 0.3 m/s** (Stage 8) for "tiny growth" on a
+  stopped/never-observed-moving surface contact — a stated judgement call, not measured; raise it
+  if Petrovich should hedge more on a long-unseen "stationary" contact, lower it (toward 0.0) if he
+  should hedge less.
