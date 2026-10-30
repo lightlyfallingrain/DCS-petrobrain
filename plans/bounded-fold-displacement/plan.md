@@ -304,6 +304,17 @@ User direction, 2026-10-13 (`docs/acceptance/2026-10-13-position-uncertainty-dir
 `docs/tree-cover-direction`): *"Position uncertainty caused by movement must be based on whether
 movement is observed or not."* Not designed here. Assessed for whether it breaks the bound.
 
+> **Built by `BL-B104` Stage 8 (2026-10-30, `plans/bl-b104-ground-contacts-on-ground/plan.md`).**
+> This section probed the narrower form of the rule (`0.0` only for `Contact.motion.state ==
+> "stopped"`, class rate for `None`) and found it did not change this plan's own bound. BL-B104
+> Stage 8 built the wider rule the user actually asked for (`None` **also** gets the tiny rate,
+> not just `"stopped"` — "most typical case is units being stationary") as
+> `UNOBSERVED_MOTION_GROWTH_RATE_MPS`, gated on `Contact.on_surface`, in
+> `association_over_time.contact_growth_rate_mps` — the same single resolution function this
+> section already reads. Treat this section as historical analysis of the narrower form, not as
+> still-open direction: the direction is now built, differently and more completely than probed
+> here.
+
 `scratchpad/probe_o2_motion_keyed.py`, with the narrowest honest form of the rule — `0.0` when
 `Contact.motion.state == "stopped"`, class rate when `None`:
 

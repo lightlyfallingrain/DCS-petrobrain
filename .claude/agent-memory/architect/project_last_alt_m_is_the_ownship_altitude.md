@@ -1,9 +1,17 @@
 ---
 name: last-alt-m-is-the-ownship-altitude
-description: Contact.last_alt_m is the OWNSHIP's altitude at the last look, not the target's ground elevation — so any elevation angle or vertical-separation derivation read off Contact.last_position is garbage; the fix is the unit's own altitude from the aircraft feed, NOT a world-model elevation query
+description: Contact.last_alt_m is the OWNSHIP's altitude at the last look, not the target's ground elevation, for AIR contacts only (narrowed by BL-B104, 2026-10-30) — any elevation angle or vertical-separation derivation read off Contact.last_position is garbage for an air contact; a surface contact (Contact.on_surface) now carries its own believed ground height in last_alt_m
 metadata:
   type: project
 ---
+
+> **Narrowed by `BL-B104` (2026-10-30,
+> `plans/bl-b104-ground-contacts-on-ground/plan.md`).** This trap now applies to **air contacts
+> only**. A surface contact (`Contact.on_surface`) has its own believed height written into
+> `last_alt_m` from the look (the unit's own ground height, read from the wire's category/subcategory
+> fields), and `attack_run.remembered_target_alt_m` returns it directly for a surface contact. Air
+> contacts keep exactly the ownship-altitude behaviour this memory describes below — do not assume
+> the narrowing applies to them.
 
 **Found by reading, during the `BL-14` attack-run plan, 2026-10-14.** `Contact.last_position` is a
 property, `GeoPosition(x=position.x, z=position.z, alt_m=self.last_alt_m)`, and `last_alt_m` is set

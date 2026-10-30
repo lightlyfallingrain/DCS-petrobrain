@@ -158,3 +158,13 @@
   fix is one continuous paragraph with no blank-line break, not a wording change. A fourth
   instance of the standing "verify the rendered file, not the source comment" trap above, with its
   own distinct mechanism.
+- **Another instance, distinct mechanism again (`BL-B104`, 2026-10-30): the generator's
+  first-sentence splitter does not split after a period preceded by a digit.**
+  `generate_defaults.py`'s `_SENTENCE_SPLIT` regex has a `(?<!\d)` lookbehind on its sentence
+  boundary, there specifically so a value like `"0.1"` is never mistaken for a sentence end. A
+  comment whose intended first sentence happens to end in a numeral (e.g. "... Stage 3.") silently
+  merges with the following sentence in the rendered `config/defaults.toml`, and this is invisible
+  in a diff of the source comment — only reading the rendered TOML catches it. Every instance of
+  this trap found so far has a different root-cause mechanism, which is the actual argument for
+  "check the rendered file, never the comment" being a standing instruction rather than a one-off
+  fix for whichever mechanism was found most recently.

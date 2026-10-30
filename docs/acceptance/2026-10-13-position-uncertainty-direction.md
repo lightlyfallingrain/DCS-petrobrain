@@ -1,5 +1,15 @@
 # Position uncertainty must key on observed movement — user direction, 2026-10-13
 
+> **Built, 2026-10-30, by `BL-B104` Stage 8** (`plans/bl-b104-ground-contacts-on-ground/plan.md`).
+> The direction below is no longer open: `UNOBSERVED_MOTION_GROWTH_RATE_MPS` (gated on
+> `Contact.on_surface`) resolves through `association_over_time.contact_growth_rate_mps`, the same
+> single function this note already identified as the right seam. The shape chosen was simpler than
+> any of the three candidates "Next step" below sketched: not zero-until-a-horizon, but a small,
+> constant, always-on rate whenever motion is not currently believed (`None` **or** `"stopped"`
+> both get it — "most typical case is units being stationary," user direction, 2026-10-30). Treat
+> this note as historical record of the direction and the open question it left, not as still-open
+> work.
+
 **Captured before any planning pass**, per the standing direction of 2026-10-05. Design direction on
 what Petrovich believes, arriving while `BL-B58` option 2 was being designed — and it bears directly
 on that design, so it was also sent to the architect mid-pass.

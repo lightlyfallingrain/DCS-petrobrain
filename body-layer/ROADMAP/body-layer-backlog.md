@@ -143,6 +143,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B102]] — "that"/"it" in a command means the contact Petrovich last talked about (done, merged `3a9a1a18`, needs flight)
 - [[BL-B103]] — stop reading ED's AI Helper target list; contacts come from our own perception model only
 - [[BL-B104]] — ground contacts are on the ground: position from perceived bearing+depression meeting the unit's ground height, not a guessed range (bug, 2026-10-30)
+- [[BL-B105]] — widen `group_matches` test 5's displacement bound to both sides, now unblocked by `Group.movement_state` (filed 2026-10-30, from `[[BL-B104]]` Stage 8)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

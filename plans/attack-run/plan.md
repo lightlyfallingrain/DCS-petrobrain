@@ -723,6 +723,13 @@ legitimately on the percept (`ownship_at_observation` is report bookkeeping, `up
 own field). That is the honest crew reconstruction — *"it was about a hundred metres below me and I
 was at three hundred"* — and it needs no new field and no world-model query.
 
+> **Narrowed by `BL-B104` (2026-10-30, `plans/bl-b104-ground-contacts-on-ground/plan.md`): for
+> surface contacts, `attack_run.remembered_target_alt_m` now returns `contact.last_alt_m` directly
+> — a surface contact's height is its own believed ground height (`Contact.on_surface`), not the
+> ownship-altitude trap this Decision 4 finding describes. The `last_alt_m`-is-ownship-altitude
+> trap below still holds for air contacts**, which keep the flat/relative reconstruction described
+> here unchanged (BL-B104's own Decision 4, "air contacts unchanged").
+
 **The direction document's residual arithmetic, checked.** §18 states *"~1.2° azimuth / ~0.4°
 elevation of bias-driven error at 1 km"*. Recomputed from `estimation.py`'s own constants
 (`BEARING_SIGMA_DEG = 3.0`, `RANGE_FRACTIONAL_SIGMA = 0.17`, `SYSTEMATIC_BIAS_FRACTION = 0.4`):
