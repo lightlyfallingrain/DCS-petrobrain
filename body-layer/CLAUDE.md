@@ -437,8 +437,9 @@ Belief — observation *consumption*:
   `TRIGGER_INFO` (the single declaration — `effector_engine.py`'s own `EffectorTrigger` is that
   same enum re-exported, not a second copy). `tools/generate_effector_registry.py` (offline, run
   on the Windows DCS machine, Stage 0), `tools/render_switch_reference.py` (regenerates
-  `switch-reference.md`, staleness-checked against both TOML files by
-  `test_switch_reference_matches_the_generator`), and `tools/render_triggers.py` (regenerates
+  `switch-reference.md`; regenerated and staged automatically by the
+  `switch-reference-regen.sh` pre-commit hook whenever a commit touches `effectors.toml` or the raw
+  dump, so editing sequences/effectors never fails a test), and `tools/render_triggers.py` (regenerates
   `triggers.md` from code alone, staleness-checked by `test_render_triggers.py`, no Windows dump
   needed) are dev tools, not run at body-layer startup. Two tunables, `[belief.effector_engine]`
   in `config/defaults.toml`:

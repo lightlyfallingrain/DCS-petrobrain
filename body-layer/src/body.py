@@ -3080,7 +3080,9 @@ def watch_args_due(
     return last_sent_sim is None or now_sim - last_sent_sim >= WATCH_ARGS_RESEND_S
 
 
-def _load_effector_config() -> tuple[
+def _load_effector_config(
+    sequences_dir: Path = DEFAULT_SEQUENCES_DIR,
+) -> tuple[
     dict[tuple[str, str, str], SequenceFile],
     dict[str, EffectorDef],
     bool,
@@ -3107,8 +3109,11 @@ def _load_effector_config() -> tuple[
     surfaced here for visibility rather than silently dropped. The
     registry this function *returns*, however, is only this runtime's
     own aircraft's (`"mi-24p"`) -- a missing directory for it is its own
-    synthetic error, the same severity as an unreadable file."""
-    registries_by_aircraft = load_registries_by_aircraft()
+    synthetic error, the same severity as an unreadable file.
+
+    `sequences_dir` is only ever overridden by tests, which load a frozen
+    copy so that editing the shipped sequences cannot break them."""
+    registries_by_aircraft = load_registries_by_aircraft(sequences_dir)
     own_dir = aircraft_dir_name(EFFECTOR_AIRCRAFT)
 
     banner_lines: list[str] = []
@@ -3126,9 +3131,7 @@ def _load_effector_config() -> tuple[
     registries_only = {
         name: registry for name, (registry, _) in registries_by_aircraft.items()
     }
-    sequences_by_key, sequence_errors = load_sequences(
-        DEFAULT_SEQUENCES_DIR, registries_only
-    )
+    sequences_by_key, sequence_errors = load_sequences(sequences_dir, registries_only)
     for seq_err in sequence_errors:
         where = f":{seq_err.line}" if seq_err.line is not None else ""
         banner_lines.append(f"sequence[{seq_err.file}{where}]: {seq_err.reason}")
@@ -3142,7 +3145,7 @@ def _load_effector_config() -> tuple[
     # omitted-required-arg) do **not** join the banner -- the behaviour
     # is already correct, so that one is logged separately, below.
     polled, polled_errors, polled_warnings = load_polled_config(
-        DEFAULT_SEQUENCES_DIR / own_dir / "polled.toml",
+        sequences_dir / own_dir / "polled.toml",
         own_registry,
         REQUIRED_POLLED_ARGS,
     )

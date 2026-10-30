@@ -21,9 +21,11 @@ to regenerate, a GENERATED header naming the source DCS build and the
 raw dump's own sha256 so the reference and the dump it was rendered
 from can never silently diverge, and deterministic output (sorted by
 device id, then seat, then element name) so a regeneration diffs
-cleanly. `tests/test_render_switch_reference.py` is this tool's own
-staleness guard, the same pattern `tests/test_tuning_defaults_toml.py`
-gives `generate_defaults.py`.
+cleanly. There is no staleness test: the output depends on the
+hand-edited `effectors.toml`, so a test failed on every sequence edit
+(removed 2026-10-30, user direction). Instead the pre-commit hook
+`.claude/scripts/switch-reference-regen.sh` reruns `--write` and stages
+the result whenever a commit touches either source TOML.
 
 Usage (from `body-layer/`):
 

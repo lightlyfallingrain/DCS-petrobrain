@@ -10,9 +10,10 @@
 #
 # Installs:
 #   pre-commit   graphify-dirty-flag.sh   -- records that docs changed
+#   pre-commit   switch-reference-regen.sh -- regenerates body-layer's switch reference
 #   post-commit  graphify-ast-refresh.sh  -- refreshes code structure in the graph
 #
-# Both fail open. Neither can block a commit.
+# All fail open. None can block a commit.
 #
 # If a hook already exists and is not ours, this appends rather than replacing
 # it -- silently discarding someone's existing hook would be worse than doing
@@ -58,6 +59,7 @@ install_hook() {
 
 echo "installing git hooks:"
 install_hook pre-commit  graphify-dirty-flag.sh
+install_hook pre-commit  switch-reference-regen.sh
 install_hook post-commit graphify-ast-refresh.sh
 
 echo

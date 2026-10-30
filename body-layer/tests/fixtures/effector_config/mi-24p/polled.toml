@@ -1,0 +1,12 @@
+# Cockpit state polled continuously (5 Hz) for Petrovich's own use.
+# Everything a sequence file touches is read once, when its trigger fires -- do not list those here
+# unless something needs them all the time. Max 64 args in total, including code-required ones.
+
+# Clickable controls, by their effectors.toml name.
+effectors = ["observ"]                 # 886 OBSERV -- home_phase follows it
+
+# Indicators: not clickable, so not in effectors.toml. By DCS arg number, with a name.
+[indicators.align_lamp]
+arg = 898                              # L5 gyro alignment -- sight head caged -> free
+[indicators.ready_lamp]
+arg = 960                              # guidance unit READY -- sight_ready, "Guidance unit ready"

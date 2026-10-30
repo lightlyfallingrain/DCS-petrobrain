@@ -1,0 +1,63 @@
+# Curated effector registry -- the friendly names a sequence file may
+# use (plan `plans/effector-sequences/plan.md`, "File formats", D5).
+# Hand-written, small; never repeats a device/cmd/arg number -- those
+# are resolved from `body-layer/config/effectors-raw/mi-24p.toml` via
+# `source_element`, the generated dump's own element name (join key).
+#
+# `body-layer/config/sequences/mi-24p/switch-reference.md` lists every control
+# the raw dump knows about, including which ones this file already
+# exposes under which friendly name -- read it before adding an entry.
+#
+# Each entry: `source_element` (required, exact ED element name --
+# never stripped; some names carry a leading space), an optional
+# `index` (which entry of a multi-action element's cmds/args lists;
+# default 0 -- none of this cut's six switches needs it), and `values`
+# (required, named value -> raw arg value to write/compare).
+
+[effectors.missile_power]
+source_element = "WEAP-MISSILES-POWER-OP-PTR"   # arg 773
+values = { on = 1.0, off = 0.0 }
+
+[effectors.cplr_distr]
+source_element = "WEAP-DISTR-POWER-OP-PTR"   # arg 761
+values = { on = 1.0, off = 0.0 }
+# Confirmed as ED's own element 2026-10-23 (Stage 0d), but whether a
+# write to it takes effect in flight is still an open flight question
+# (docs/acceptance/2026-10-17-9k113-procedures-direction.md). The user:
+# "If we get the wrong one, the change is trivial."
+unverified = true
+
+[effectors.sight_power]
+source_element = "PK-PN-POWER-PTR"   # arg 885 -- NOT the ASP-17's own
+# "Sight Power" (WEAP-SIGHT-ON-PFF-PTR, arg 529); this is the 9K113
+# guidance unit's "GUID.UNIT POWER" switch.
+values = { on = 1.0, off = 0.0 }
+
+[effectors.scho_pwr_b1]
+source_element = "SHSCHO-POWER-PTR"   # arg 955
+values = { on = 1.0, off = 0.0 }
+
+[effectors.observ]
+source_element = "PK-OBSERVE-PTR"   # arg 886
+values = { on = 1.0, off = 0.0 }
+
+[effectors.weapon_safety]
+source_element = "ARMAMENT-POWER-OP-PTR"   # arg 673
+values = { armed = 1.0, safe = 0.0 }
+
+[effectors.rwr_signal]
+source_element = "SIRENA-SIGNAL-PTR"   # arg 365
+values = { on = 1.0, off = 0.0 }
+
+[effectors.sight_grid_brightness]
+source_element = "SIGHT-GRID-BRIGHNTNESS-KNOB-PTR"   # arg 567
+values = { off = 0.0, third = 0.3, half = 0.5, full = 1.0 }
+
+[effectors.intercom_1]
+source_element = "SPU8-1-ON-OFF-PTR"   # arg 376
+values = { on = 1.0, off = 0.0 }
+
+[effectors.intercom_2]
+source_element = "SPU8-2-ON-OFF-PTR"   # arg 377
+values = { on = 1.0, off = 0.0 }
+
