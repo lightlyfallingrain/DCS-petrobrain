@@ -183,3 +183,15 @@ real group, so the sight never admitted it.
 
 OBSERV drops at 603.0 s and 788.4 s both coincide with hard bank (-29 deg; +24 -> +58 deg) while
 `observ_commanded` stays True -- DCS dropping the sight, not Petrovich. Nothing re-acquires it.
+
+### Decided
+
+Proposal: when the engaged contact is not in the sight, search along the believed **bearing**,
+sweeping depression, until it is admitted; then track it by what is seen. Re-enable OBSERV after a
+bank drop.
+
+> *"do search as you recommended. Say "tracking" when on target. Leave observ as it is currently"*
+
+- Search along the bearing in depression: **yes**.
+- Callout when the sight acquires the engaged contact: **"Tracking."**
+- OBSERV after a bank drop: **unchanged** (no automatic re-enable).
