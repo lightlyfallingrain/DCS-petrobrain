@@ -145,5 +145,6 @@ Write what emerges into the plan or roadmap **as it emerges**, not afterwards �
 directly where the phrasing carries the reasoning. This project's roadmap entries are load-bearing
 precisely because they preserve *why*, including where an earlier pass was wrong.
 
-Then proceed to Architect with the constraints in hand, and state in the plan which decisions came
-from this conversation rather than from the code.
+Then dispatch `goal-aligner` with the explore notes in hand — it settles *why* the goal is being
+done and what the player expects (`docs/BEHAVIOUR_ALIGNMENT.md`) — and only then Architect, which
+states in the plan which decisions came from this conversation rather than from the code.

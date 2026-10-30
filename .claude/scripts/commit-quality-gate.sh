@@ -222,6 +222,7 @@ check_memory '^plans/[^/]+/implementation\.md$' implementer  "an implementation 
 check_memory '^plans/[^/]+/review\.md$'         reviewer     "a review"
 check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
 check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
+check_memory '^plans/[^/]+/alignment\.md$'      '[a-z]*-aligner' "an alignment check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
 
 # Warn (never block) when a commit adds/modifies a plans/*/dod-check.md without also touching a
