@@ -326,3 +326,124 @@ revert of Stage 8's gate, restored and confirmed clean (`git status --porcelain`
 `git diff src/belief/association_over_time.py` empty) before the final test run. Not independently
 re-verified this round: Stages 1-5's own mechanism (unchanged since the prior full read), the
 Lua wiring (unchanged), and the Optional Refinements carried over from the first review round.
+
+---
+
+## Follow-up review, 2026-10-30 (second round) — verifying `cfe83bb6`'s fixes to Findings 5/6
+
+New commit `cfe83bb6454b104ba3182128d9bddb1353f98146` reviewed against the "Follow-up review,
+2026-10-30" section's two Required Fixes above, `implementation.md`'s newest "Follow-up
+implementation, 2026-10-30" section, and `plan.md` Stages 7–8 (unchanged by this commit). Confirmed
+test-only: `git show --stat cfe83bb6` touches `tests/test_bl_b104_scenario_mock_flights.py`,
+`tests/test_contacts.py`, two agent-memory files, and `implementation.md` — no `src/` file.
+
+HEAD started at `54633ef8` (local `main`'s own latest merge), a strict ancestor of the named tip;
+tree was clean; fast-forwarded with `git merge --ff-only cfe83bb6454b104ba3182128d9bddb1353f98146`.
+
+**Checks, run from inside `body-layer/`** (no venv existed in this fresh worktree; built
+`body-layer/.venv`, Python 3.12.15, matching `pyproject.toml`'s `>=3.11`; `.venv/bin/python`/
+`python3` symlinks resolved to an unrelated system Python 3.15 for unknown reasons — irrelevant,
+since every mandated command (`ruff`, `mypy`, `pytest`) has its own `.venv/bin/<tool>` entry point
+with a hardcoded `#!.../python3.12` shebang, confirmed before relying on it):
+
+- `ruff format --check src tests`: pass (190 files).
+- `ruff check src tests`: pass.
+- `cd body-layer && mypy src`: pass (79 source files).
+- `pytest -q`: **2856 passed, 4 xfailed** — matches the Implementer's own reported count exactly
+  (2855 baseline + 1 new test; same 4 pre-existing xfails from `fix/flexible-sequence-tests` on
+  `main`, unrelated to this feature).
+
+**Verification 1 (Finding 5 — scenario 3 is now a real differential): independently re-run, not
+just read.** Confirmed both target tests (`test_two_groups_one_bearing_stay_two_contacts`,
+`test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact`) **PASS** with the
+shipped code (`.venv/bin/pytest -k "two_groups_one_bearing or ...uses_the_tiny_unobserved_rate..."`
+→ `2 passed`). Then wrote a standalone script (not committed, run via `.venv/bin/python3.12`
+directly against `src`) that monkeypatches `contact_growth_rate_mps` to the pre-Stage-8
+unconditional `plausible_speed_mps(profile.op_class)` rate (installation components still `0.0`)
+in **all three** places that resolve the name — `belief.association_over_time`'s own module
+global (what `_contact_covariance` calls internally), and both importers'
+`from belief.association_over_time import contact_growth_rate_mps` bindings
+(`belief.contacts`, `belief.attack_run`) — then re-ran the same two tests under that revert: **both
+FAIL**.
+  - `test_two_groups_one_bearing_stay_two_contacts` fails with exactly the error
+    `implementation.md` quotes: `AssertionError: expected exactly two contacts by the end of this
+    run, got 1 -- the far group was never founded as its own contact / assert 1 == 2`. The far
+    group's look folds into the near group's masked contact under the reverted (wide) rate, and
+    stays two under the shipped (tiny) rate — a genuine differential confirmed by direct re-run,
+    not inferred from the plan's arithmetic or trusted from the Implementer's report alone.
+  - `test_fold_displacement_m_uses_the_tiny_unobserved_rate_for_a_surface_contact` fails with
+    `assert 750.0 == 15.0 ± 1.5e-05` — the reverted class rate (`OP_TRUCK`, 15 m/s) over 50 s gives
+    750 m, no longer the tiny-rate bound of 15.0 m the shipped code produces. Matches
+    `implementation.md`'s own quoted failure exactly.
+  - `git status --porcelain` stayed empty throughout (the revert script lives in the scratchpad
+    directory, never touched a tracked file).
+- **Judging scenario 3 as a plausible attack-run shape (review dispatch's item 2).** 600 m AGL /
+  12 m/s (~23 kt) is within the project's own 50–800 m AGL "normal" operating envelope
+  (`.claude/agent-memory/reviewer/project_operating_altitude_envelope.md`) and reads as a cautious,
+  masked low-level approach rather than a contrived geometry — the test's own docstring states this
+  framing directly ("a cautious, masked low-level approach"), so it is not left implicit. The
+  measurement this round reproduces (`implementation.md`'s own numbers, re-derived independently
+  via the same `AGL / tan(22°)` formula rather than taken on trust) is the real finding worth
+  surfacing to the user: **at the original 300 m AGL / 51 m/s geometry the mask-to-admission gap
+  was only ~30 s, against a ~42 s fold threshold** — i.e. in the altitude band this project treats
+  as typical, and at a plausible closing speed, Stage 8's fix is only reachable by a fairly narrow
+  margin (needing either a slower closing speed, as here, or a higher AGL within the same
+  envelope). This is not a defect in the fix or the test — both are sound — but it is useful
+  context for the user: a *fast*, *low* closing run (the more aggressive, arguably more common
+  shape for this airframe) sits closer to the edge of where Stage 8's tiny rate alone prevents the
+  fold, and if a future sortie reports a two-group fold on such a run, this measurement is the
+  first place to look, not a regression. Not a required fix — the scenario accurately demonstrates
+  the mechanism for the geometry it uses, and the plan never claimed the fix covers every closing
+  speed/altitude combination.
+
+**Verification 2 (Finding 6 — integration coverage for the surface fold-bound path): confirmed via
+the same before/after run above.** The new `test_fold_displacement_m_uses_the_tiny_unobserved_rate_
+for_a_surface_contact` constructs its contacts with `surface_alt_m=0.0` (unlike the existing
+`test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed`, whose `_observation`
+calls leave `surface_alt_m` at its `None` default, confirmed by reading that test and the helper's
+signature), drives them through the real `ContactStore.ingest`/`Contact.record` path (not a direct
+call to `contact_growth_rate_mps`), and the fold-displacement bound it asserts
+(`bound_m == pytest.approx(UNOBSERVED_MOTION_GROWTH_RATE_MPS * 50.0)`) only holds under the shipped
+gate — confirmed failing under the revert above with the exact number `implementation.md` reports
+(750.0 vs. 15.0). This closes the gap the first review round found: the fold-displacement clamp
+path through `Contact.record` for a surface, unobserved-motion contact is now exercised by a real
+differential test, not just by the gate's own unit tests on a directly-constructed `Contact`.
+
+### Required Fixes
+
+None. Both of the prior round's Required Fixes are resolved, independently confirmed by re-running
+the control experiment this round rather than trusting the Implementer's report.
+
+### Optional Refinements (carried over, unchanged)
+
+- The plan's own "worth a small backlog item" note (widening `belief.groups.group_matches`'s
+  displacement bound to both sides) still has not been minted via `mint-id.sh`. Still low severity,
+  still worth doing before it is forgotten a second time.
+- Everything from the first review round's other Optional Refinements (comment accuracy, the
+  cross-thread `CrewConsole` footgun, the `DEPRESSION_SIGMA_DEG`/`_SIGHT_*_SCALE` coupling) stands
+  unchanged, not re-verified this round.
+
+### Verdict
+
+**APPROVED**
+
+Both Required Fixes from the prior "Follow-up review" round are resolved and independently
+reconfirmed by re-running the before/after control experiment against the real pipeline (not by
+reading the implementer's account of it). Scenario 3's new geometry (600 m AGL, 12 m/s) is a
+genuine differential that folds under the pre-Stage-8 rate and stays two contacts under the shipped
+gate; the new `test_contacts.py` case closes the integration-coverage gap for the surface
+fold-displacement bound through the real `Contact.record` path. The one thing worth the user's
+attention, not a blocker: the mask-to-admission gap at a *faster*, lower-AGL closing run (the
+original 300 m/51 m/s geometry) is only ~30 s against the ~42 s threshold Stage 8's fix needs —
+comfortably inside this project's normal flight envelope — so a fast, low attack run is closer to
+the edge of where this fix prevents the E5 fold than the new, slower scenario demonstrates. Worth
+a line in the merge/test-card notes, not a reason to withhold approval.
+
+### Review Confidence (this round)
+
+Full read of `implementation.md`'s new section and the two changed test files, plus an
+independent re-run of the exact before/after control experiment (both test targets, both module
+bindings patched) rather than trusting the Implementer's reported numbers. Not independently
+re-verified this round: Stage 8's own mechanism code (unchanged by this commit, already confirmed
+in the prior round), the `Turn` leg dataclass and the other four scenario tests (unchanged by this
+commit), and the carried-over Optional Refinements.
