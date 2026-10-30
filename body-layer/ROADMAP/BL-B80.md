@@ -17,7 +17,7 @@
   have caught this — only the live probe could.**
 
   **Elevation mark calibration re-fitted 2026-10-30, `fix/9k113-el-calibration`
-  (`8bb7e896`), DoD-passed (`plans/9k113-sight-pointing/dod-check-el-calibration.md`).**
+  (`8bb7e896`), DoD-passed (`plans/9k113-sight-pointing/dod-check-el-calibration.md`), merged to `main` (`0123c66e`).**
   `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` (0.83/1-0.037 -> 0.8333/1-0.0277) re-fitted against DCS
   AI Petrovich tracking a real BMD-1 with the hands-off flag on (enabled by the entry immediately
   below), truth from body-layer's detection trace rotated into the airframe frame — 107 samples,
