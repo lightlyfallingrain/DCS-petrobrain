@@ -269,6 +269,11 @@ FIRE_LIFE_FRACTION_MAX = 0.765
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
 
+# How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
+# status: judgement | range: 0.1 .. 14.0
+# source: perception/estimation.py:DEPRESSION_SIGMA_DEG
+DEPRESSION_SIGMA_DEG = 3.0
+
 # Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
 # status: judgement | range: 0.05 .. 1.0
 # source: perception/estimation.py:SIGHT_NARROW_RANGE_SIGMA_SCALE

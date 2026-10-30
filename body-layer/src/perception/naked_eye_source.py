@@ -259,6 +259,7 @@ from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
+    surface_range_estimate,
 )
 from perception.forest import ForestOcclusion
 from perception.gaze import (
@@ -1323,6 +1324,23 @@ class NakedEyePerceptionSource:
             sigma_cross_m=sigma_cross_m,
             sigma_down_m=sigma_down_m,
         )
+        # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3: a
+        # surface cluster's *range* comes from the two-cue fused estimator
+        # instead of cue A alone -- bearing is untouched (same
+        # `perturbed_bearing_range` call above, whose own range output is
+        # simply discarded here). `true_range_m` is already the horizontal
+        # ground distance (the centroid above is pinned to `ownship_state.
+        # alt_m`), and `height_above_unit_m` is the observer's true,
+        # signed height above the cluster's own real ground height.
+        if cluster.is_surface is True:
+            height_above_unit_m = ownship_state.alt_m - cluster.centroid_alt_m
+            estimated_range_m, sigma_down_m = surface_range_estimate(
+                observation_id=observation_id,
+                object_id=bias_object_id,
+                true_distance_m=true_range_m,
+                height_above_unit_m=height_above_unit_m,
+                optic=self.optic,
+            )
         for member in cluster.members:
             self._object_id_to_last_observation_id[member.object_id] = observation_id
 

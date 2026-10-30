@@ -92,6 +92,7 @@ from perception.association import (
     filter_player_bubble,
 )
 from perception.estimation import perturbed_bearing_range
+from perception.geometry import GeoPosition, horizontal_range_m
 from perception.source import (
     OBSERVATION_ID_PREFIX_HYBRID,
     DerivedWorldPosition,
@@ -257,11 +258,28 @@ class HybridPerceptionSource:
             # computed -- see SCOPE_UNCERTAINTY_M's docstring above and
             # `perception.estimation`'s module docstring. `object_id` anchors
             # the never-redrawn systematic bias; it never leaves `perception/`.
+            #
+            # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3: a
+            # surface candidate's true range is the horizontal ground
+            # distance, not `associate()`'s own slant range (which, unlike
+            # naked-eye's flat-projection centroid, includes the candidate's
+            # real altitude difference from ownship) -- belief's
+            # `implied_position` is about to place this percept at the
+            # unit's own real height anyway, so a slant-range input here
+            # would double-count that altitude difference into depth.
+            true_range_m = (
+                horizontal_range_m(
+                    GeoPosition(x=ownship_state.x, z=ownship_state.z, alt_m=0.0),
+                    GeoPosition(x=result.candidate.x, z=result.candidate.z, alt_m=0.0),
+                )
+                if result.candidate.is_surface is True
+                else result.range_m
+            )
             estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
                 observation_id=observation_id,
                 object_id=result.candidate.object_id,
                 true_bearing_deg=result.bearing_deg,
-                true_range_m=result.range_m,
+                true_range_m=true_range_m,
                 sigma_cross_m=SCOPE_UNCERTAINTY_M,
                 sigma_down_m=SCOPE_UNCERTAINTY_M,
             )

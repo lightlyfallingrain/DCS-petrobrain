@@ -28,6 +28,7 @@ import pytest
 from perception import association, object_model
 from perception.association import SightCone
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.estimation import look_sigma_m
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_EMITTER_BURNING,
@@ -37,7 +38,7 @@ from perception.naked_eye_source import (
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
-from perception.optics import SIGHT_NARROW_OPTIC
+from perception.optics import SIGHT_NARROW_OPTIC, UNAIDED_OPTIC
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 from replay import replay
 
@@ -119,6 +120,7 @@ def _world_object(
     unit_name: str | None | object = _AUTO_UNIT_NAME,
     category: int | None = None,
     subcategory: int | None = None,
+    altitude_m: float = 500.0,
 ) -> dict[str, Any]:
     # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4, `BL-11`
     # Stage 4): the live-LOS join key (`naked_eye_source._resolve_los_by_
@@ -135,7 +137,7 @@ def _world_object(
         "coalition": 1.0,
         "lat_deg": lat_deg,
         "lon_deg": lon_deg,
-        "altitude_m": 500.0,
+        "altitude_m": altitude_m,
         "heading_true_rad": 0.0,
         "is_ownship": is_ownship,
         "category": category,
@@ -1333,6 +1335,52 @@ def test_air_only_poll_is_unchanged_by_domain_split() -> None:
     assert len(observations) == 1
     assert observations[0].count_bucket == "OP_1UNIT"
     assert observations[0].surface_alt_m is None
+
+
+def test_surface_cluster_range_uses_the_fused_two_cue_estimator() -> None:
+    # Ownship at 500 m MSL, a ground unit at 200 m MSL (300 m AGL),
+    # 1000 m due north -- a steep-ish look where the fused sigma should
+    # be tighter than cue A alone (E3's "firms up close").
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "BMP-2",
+                lat_deg=1000.0,
+                lon_deg=0.0,
+                category=2,  # wsType_Ground
+                altitude_m=200.0,
+            ),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.surface_alt_m == 200.0
+    assert observation.position_uncertainty is not None
+    # Cue A alone (today's formula) for the same true geometry, for
+    # comparison -- the fused sigma must be tighter (E3).
+    _sigma_cross_m, sigma_a_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
+    assert observation.position_uncertainty.sigma_down_m < sigma_a_m
+
+
+def test_air_cluster_still_uses_perturbed_bearing_range_unchanged() -> None:
+    # No category at all (today's un-redeployed Export.lua shape) -- must
+    # still use the plain cue-A-only formula, never the fused estimator
+    # (Decision 4: air contacts unchanged).
+    world_objects = {"objects": [_world_object(1, "Mi-8", lat_deg=1000.0, lon_deg=0.0)]}
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].surface_alt_m is None
+    _sigma_cross_m, sigma_a_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
+    assert observations[0].position_uncertainty is not None
+    assert observations[0].position_uncertainty.sigma_down_m == sigma_a_m
 
 
 #: Three T-72B (`size_m=7.0`, `OP_ARMORED`) at 3000 m -- beyond `LOWRES_

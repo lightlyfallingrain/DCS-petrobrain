@@ -80,6 +80,7 @@ from perception.optics import (
     SIGHT_WIDE_OPTIC,
     Optic,
 )
+from perception.visibility import NAKED_EYE_RANGE_CAP_M
 
 #: Down-range (along line-of-sight) 1-sigma error as a fraction of true
 #: range. Derived, not invented, from ED's own `OP_D*` range-bucket ladder
@@ -188,6 +189,28 @@ _SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC: Final[dict[str, float]] = {
     SIGHT_NARROW_OPTIC.name: (SIGHT_NARROW_OPTIC.fov_half_angle_deg or 1.0)
     / (BINOCULAR_OPTIC.fov_half_angle_deg or 1.0),
 }
+
+
+#: How noisy Petrovich's sense of looking angle (up/down) is, which feeds
+#: a surface unit's estimated range once fused against the size/terrain
+#: judgement cue -- raising it widens the depression cue's own spread,
+#: which the fusion below weighs against cue A automatically, so
+#: Petrovich firms up on a ground unit's range more slowly while closing;
+#: lower it for the opposite effect. `plans/
+#: bl-b104-ground-contacts-on-ground/plan.md` Stage 3: the default (3.0,
+#: the bearing error's own value) is not applied naively -- fused in
+#: inverse distance against cue A, it reconciles the user's *"same range
+#: as the azimuth angular error"* to the ground error he confirmed as
+#: sensible (~700 m at 300 m AGL / 4 km) rather than the several-kilometre
+#: error a naive metre-domain application of the same angle would give at
+#: that geometry (`alignment.md` finding 1).
+DEPRESSION_SIGMA_DEG: Final[float] = tuning.real(
+    "perception.estimation.DEPRESSION_SIGMA_DEG",
+    3.0,
+    lo=0.1,
+    hi=14.0,
+    status="judgement",
+)
 
 
 def _deterministic_unit_gaussian_pair(seed_text: str) -> tuple[float, float]:
@@ -321,3 +344,129 @@ def perturbed_bearing_range(
         bearing_offset_deg = 0.0
     perturbed_bearing_deg = (true_bearing_deg + bearing_offset_deg) % 360.0
     return perturbed_bearing_deg, perturbed_range_m
+
+
+#: Floor for cue A's own down-range draw before it is inverted into
+#: `1/D_A` below -- never 0.0 the way `perturbed_bearing_range`'s general
+#: floor is, because this value is about to be the denominator of a
+#: division (`plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3).
+_CUE_A_MIN_RANGE_M: Final[float] = 1.0
+
+
+def surface_range_estimate(
+    *,
+    observation_id: str,
+    object_id: int,
+    true_distance_m: float,
+    height_above_unit_m: float,
+    optic: Optic,
+) -> tuple[float, float]:
+    """A surface unit's own ground-range estimate, fused from two cues --
+    `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3. See that
+    plan's "The model in one picture" for the derivation; this is its
+    direct translation into code, not a re-derivation.
+
+    `true_distance_m` is the true **horizontal** ground distance to the
+    unit (`D` in the plan's picture) -- the caller already has this as
+    the flat-projection "true range" naked-eye clustering already computes
+    (`centroid.alt_m` pinned to the observer's own altitude). `height_
+    above_unit_m` is the true, **signed** height of the observer above the
+    unit (`h`): positive when the observer looks down at it, negative when
+    the unit is above the observer (a SAM on a ridge) -- the signed
+    convention is what lets a unit above the observer work through the
+    same formula with an upward-looking ray, rather than a special case.
+
+    **Cue A** is today's per-look down-range draw, hashed off
+    `f"look:{observation_id}"` exactly like `perturbed_bearing_range`'s own
+    down component -- same draw, so a cue-B-absent result below is
+    bit-for-bit what `perturbed_bearing_range` already returns, not a
+    second independent estimate that happens to agree.
+
+    **Cue B** is the perceived depression angle: the true depression
+    (`atan2(height_above_unit_m, true_distance_m)`) plus a per-look draw
+    of its own, hashed off a *different* domain (`f"depression:
+    {observation_id}"`) and scaled by `DEPRESSION_SIGMA_DEG` times the
+    optic's existing bearing scale (`_SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC`)
+    -- the same scale `look_sigma_m`'s cross-range term already uses, so
+    the 9K113 narrows this cue the same way it narrows bearing, with no
+    new per-optic constant. **This is the no-omniscience fence, made
+    testable (E7)**: the perceived depression is drawn independently of
+    `RelativeDirection`/`RELATIVE_DIRECTION_SIGMA_DEG` -- nothing here ever
+    reads that channel, by construction (it is not even imported into this
+    module).
+
+    Cue B is **absent** -- the result is cue A alone, unchanged -- whenever
+    the perceived ray does not descend to the unit: `height_above_unit_m`
+    is (effectively) zero, or the perceived depression's sign disagrees
+    with it (a near-level look, a low hover, noise flipping a shallow look
+    level or past it). This is explore-notes Q2's answer: when the
+    perceived direction points level or above the horizon, range falls
+    back to the size/terrain judgement cue (cue A) alone, exactly as today.
+
+    The two cues are **fused in inverse distance** (measured, not taste --
+    see the plan's Monte Carlo comparison), with inverse-variance weights
+    taken at the *true* geometry (`PositionUncertainty`'s own "sigmas
+    declared at the true range" convention): a cue's weight is
+    `(true_distance_m**2 / its own sigma)**2`. The combined `sigma_down_m`
+    returned is the ordinary inverse-variance combination of the two
+    cues' own sigmas -- the shared `true_distance_m**4` scale cancels out
+    of that ratio, so it does not need restating there.
+
+    Finally, one per-object systematic offset is added, hashed off the
+    same `f"bias:{object_id}"` domain `systematic_bias_m` already uses
+    (its down component), but scaled to the *fused* `sigma_down_m` rather
+    than cue A's own -- so a cue-B-absent result's offset is bit-for-bit
+    `systematic_bias_m`'s own down offset (same domain, same scale), and a
+    fused result's offset shrinks smoothly as cue B's weight grows,
+    rather than jumping when the balance crosses some threshold (the plan's
+    own concern about a spurious "new contact" during a closing run)."""
+    _sigma_cross_m, sigma_a_m = look_sigma_m(true_distance_m, optic)
+
+    _look_cross_m, look_down_m = _deterministic_unit_gaussian_pair(
+        f"look:{observation_id}"
+    )
+    cue_a_range_m = max(_CUE_A_MIN_RANGE_M, true_distance_m + look_down_m * sigma_a_m)
+    inverse_a = 1.0 / cue_a_range_m
+    weight_a = (true_distance_m**2 / sigma_a_m) ** 2 if sigma_a_m > 0.0 else 0.0
+
+    true_depression_rad = math.atan2(height_above_unit_m, true_distance_m)
+    bearing_scale = _SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC.get(optic.name, 1.0)
+    sigma_delta_rad = math.radians(DEPRESSION_SIGMA_DEG * bearing_scale)
+    z_depression, _unused = _deterministic_unit_gaussian_pair(
+        f"depression:{observation_id}"
+    )
+    perceived_depression_rad = true_depression_rad + z_depression * sigma_delta_rad
+
+    cue_b_present = (
+        height_above_unit_m != 0.0
+        and perceived_depression_rad != 0.0
+        and (perceived_depression_rad > 0.0) == (height_above_unit_m > 0.0)
+    )
+
+    if cue_b_present:
+        inverse_b = math.tan(perceived_depression_rad) / height_above_unit_m
+        slant_sq_m = height_above_unit_m**2 + true_distance_m**2
+        sigma_b_m = abs(slant_sq_m / height_above_unit_m) * sigma_delta_rad
+        weight_b = (true_distance_m**2 / sigma_b_m) ** 2 if sigma_b_m > 0.0 else 0.0
+        fused_inverse = (weight_a * inverse_a + weight_b * inverse_b) / (
+            weight_a + weight_b
+        )
+        sigma_down_m = (1.0 / sigma_a_m**2 + 1.0 / sigma_b_m**2) ** -0.5
+    else:
+        fused_inverse = inverse_a
+        sigma_down_m = sigma_a_m
+
+    range_cap_m = (
+        optic.range_cap_m if optic.range_cap_m is not None else (NAKED_EYE_RANGE_CAP_M)
+    )
+    fused_range_m = (
+        min(range_cap_m, 1.0 / fused_inverse) if fused_inverse > 0.0 else (range_cap_m)
+    )
+
+    _unused_cross_bias, z_down_bias = _deterministic_unit_gaussian_pair(
+        f"bias:{object_id}"
+    )
+    systematic_offset_m = z_down_bias * SYSTEMATIC_BIAS_FRACTION * sigma_down_m
+    final_range_m = max(0.0, fused_range_m + systematic_offset_m)
+
+    return final_range_m, sigma_down_m
