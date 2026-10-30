@@ -1310,29 +1310,25 @@ local STALL_WINDOW_S = 0.4
 local STALL_MOVE_EPS = 0.003
 
 -- Mark (ASP-17 reticle) calibration. Azimuth: from the dither probe's own
--- measured `MARK_PER_DEG`/boresight. Elevation: measured in flight
--- 2026-10-28 (`docs/acceptance/2026-10-28-sortie-feedback.md` §2)
--- replacing the earlier unmeasured placeholder -- boresight ~0.83 (0.829
--- air start, 0.833 ground start; pilot, verbatim, "about boresight");
--- scale 0.037 raw units/deg is gimbal-derived, not a measured angle: the
--- air run's bottom readback stop (555 = 0.278) is taken as the sourced
--- -15 deg gimbal limit, (0.83 - 0.278) / 15 ~= 0.037, close to azimuth's
--- measured 0.039. The rate-derived 0.030 (commanded 0.5 deg/s against
--- 555 slopes 0.0162/0.0139 up, 0.0140/0.0128 down) was rejected: it puts
--- that stop at -18.4 deg, past the gimbal, and its two supporting figures
--- share the same assumed rate (`plans/9k113-sight-pointing/review-el-
--- field.md`; user chose 0.037, 2026-10-28). Pending a pitch-change check.
+-- measured `MARK_PER_DEG`/boresight. Elevation: fitted 2026-10-30 against
+-- DCS AI Petrovich tracking a BMD-1 with the hands-off flag on, truth from
+-- the detection trace rotated into the airframe -- 107 samples, -1.7 to
+-- -14.5 deg, rms 0.006 deg, linear across the span
+-- (`docs/acceptance/2026-10-30-sortie-feedback.md` §3). Replaces the
+-- 2026-10-28 gimbal-derived 0.83 / 1/0.037, which put the mark ~25% short
+-- in elevation (ATGM cross visibly below the target).
 local MARK_BORESIGHT_AZ = 0.500
 local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
-local MARK_BORESIGHT_EL = 0.83
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.037
+local MARK_BORESIGHT_EL = 0.8333
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.0277
 
 -- Elevation field bounds derived from the raw clip readings
 -- (`ASP17_MARK_EL_RAW_CLIP_UP`/`ASP17_MARK_EL_RAW_CLIP_DOWN` above) and
 -- this calibration -- declared here rather than beside the other
 -- `ASP17_FIELD_*` constants because Lua has no hoisting and this
 -- computation needs `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL` already
--- defined. With the current calibration this is ~= +4.6/-14.9 deg.
+-- defined. With the current calibration this is ~= +6.0/-20.1 deg; the
+-- down side lies past the -15 deg gimbal, so only the up side ever clips.
 local ASP17_FIELD_EL_UP_DEG = (ASP17_MARK_EL_RAW_CLIP_UP - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
 local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - ASP17_MARK_EL_RAW_CLIP_DOWN) * MARK_DEG_PER_UNIT_EL
 

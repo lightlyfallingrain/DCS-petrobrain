@@ -815,8 +815,8 @@ local MARK_DEG_PER_UNIT_AZ = 1.0 / 0.039
 -- lua`'s own `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`/`ASP17_FIELD_EL_
 -- UP_DEG`/`ASP17_FIELD_EL_DOWN_DEG`), not extracted (same reasoning as
 -- every other constant in this preamble).
-local MARK_BORESIGHT_EL = 0.83
-local MARK_DEG_PER_UNIT_EL = 1.0 / 0.037
+local MARK_BORESIGHT_EL = 0.8333
+local MARK_DEG_PER_UNIT_EL = 1.0 / 0.0277
 local ASP17_FIELD_EL_UP_DEG = (1.0 - MARK_BORESIGHT_EL) * MARK_DEG_PER_UNIT_EL
 local ASP17_FIELD_EL_DOWN_DEG = (MARK_BORESIGHT_EL - 0.278) * MARK_DEG_PER_UNIT_EL
 local STALE_TARGET_TIMEOUT_S = 3.0
@@ -970,6 +970,13 @@ end
     return [_FieldParkResult(line) for line in result.stdout.splitlines()]
 
 
+# Elevation mark calibration, duplicated from `Export.lua` like every other
+# harness constant: fitted 2026-10-30 against DCS AI Petrovich tracking a BMD-1
+# (`docs/acceptance/2026-10-30-sortie-feedback.md` §3).
+_EL_BORESIGHT = 0.8333
+_EL_SCALE = 0.0277
+
+
 def _mark_raw(
     body_deg: float, *, boresight: float = 0.500, scale: float = 0.039
 ) -> float:
@@ -977,7 +984,7 @@ def _mark_raw(
     UNIT_*` -- builds a raw mark arg that will read back as `body_deg`
     once `run_sight_servo` converts it. Defaults (`boresight=0.500,
     scale=0.039`) match the harness's own azimuth constants; elevation
-    callers pass `boresight=0.83, scale=0.037` to match the harness's
+    callers pass `boresight=_EL_BORESIGHT, scale=_EL_SCALE` to match the harness's
     (measured 2026-10-28) `MARK_BORESIGHT_EL`/`MARK_DEG_PER_UNIT_EL`."""
     return boresight + body_deg * scale
 
@@ -1004,19 +1011,19 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
                 _FieldParkFrame(
                     0.2,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.0),
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
                 _FieldParkFrame(
                     0.4,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.7),
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
             ]
         )
@@ -1043,7 +1050,7 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(1.0, 0.0),
                     m566=0.667,
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
             ]
         )
@@ -1060,13 +1067,13 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(1.0, 0.0),
                     m566=0.667,
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
                 _FieldParkFrame(
                     0.2,
                     setpoint=(1.0, 0.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
             ]
         )
@@ -1088,7 +1095,7 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(1.0),
-                    m555=_mark_raw(0.5, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(0.5, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
                 # field_target now (3.8, 3.04) (az-limited clip, az's own
                 # inset edge still the smaller scale under the asymmetric
@@ -1101,7 +1108,7 @@ class TestRunSightServoFieldPark:
                     setpoint=(10.0, 8.0),
                     rate=(50.0, 0.0),
                     m566=_mark_raw(3.0),
-                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(1.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
             ]
         )
@@ -1114,8 +1121,12 @@ class TestRunSightServoFieldPark:
         all -- `homing` must, using the same mark-motion definition."""
         frames = _run_field_park_sequence(
             [
-                _FieldParkFrame(0.2, setpoint=(1.0, 0.0), m566=0.667, m555=0.83),
-                _FieldParkFrame(0.7, setpoint=(1.0, 0.0), m566=0.667, m555=0.83),
+                _FieldParkFrame(
+                    0.2, setpoint=(1.0, 0.0), m566=0.667, m555=_EL_BORESIGHT
+                ),
+                _FieldParkFrame(
+                    0.7, setpoint=(1.0, 0.0), m566=0.667, m555=_EL_BORESIGHT
+                ),
             ]
         )
         assert [r.mode for r in frames] == ["homing", "homing"]
@@ -1137,7 +1148,10 @@ class TestRunSightServoFieldPark:
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
-                    float(i), setpoint=(az, 4.2), m566=_mark_raw(0.0), m555=0.83
+                    float(i),
+                    setpoint=(az, 4.2),
+                    m566=_mark_raw(0.0),
+                    m555=_EL_BORESIGHT,
                 )
                 for i, az in enumerate(az_values)
             ]
@@ -1169,13 +1183,13 @@ class TestRunSightServoFieldPark:
                     0.0,
                     setpoint=(10.0, 0.0),
                     m566=_mark_raw(3.8),
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
                 _FieldParkFrame(
                     0.5,
                     setpoint=(20.0, 0.0),
                     m566=_mark_raw(3.79),  # still tracking, not fixed in place
-                    m555=_mark_raw(0.0, boresight=0.83),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT),
                 ),
             ]
         )
@@ -1189,38 +1203,37 @@ class TestRunSightServoFieldPark:
         setpoint far above boresight parks at the (small) up inset edge
         -- the asymmetry the old, superseded symmetric `ASP17_FIELD_EL_
         HALF_DEG` placeholder could never express."""
-        up_inset = (1.0 - 0.83) * (1.0 / 0.037) - 0.5
+        up_inset = (1.0 - _EL_BORESIGHT) * (1.0 / _EL_SCALE) - 0.5
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
                     0.0,
                     setpoint=(0.0, 30.0),
                     m566=_mark_raw(0.0),
-                    m555=_mark_raw(0.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
             ]
         )
         assert frames[0].field_target_el == pytest.approx(up_inset, abs=1e-6)
 
-    def test_elevation_field_target_clips_at_the_down_inset_edge(self) -> None:
-        """With the gimbal-derived scale (1/0.037, 2026-10-28) the measured
-        down bound (~14.9 deg, inset ~14.4) sits just inside the -15 deg
-        gimbal, so the down side is reachable: a setpoint driven to the
-        gimbal extent parks at the down inset edge, not at the gimbal.
-        (Under the rejected 1/0.030 scale the bound was ~18.4 deg and this
-        side was unreachable.)"""
-        down_inset = (0.83 - 0.278) * (1.0 / 0.037) - 0.5
+    def test_elevation_down_field_bound_is_past_the_gimbal(self) -> None:
+        """With the flight-fitted scale (1/0.0277, 2026-10-30) the mark's
+        down bound is ~-20.1 deg (inset ~-19.6), past the -15 deg gimbal,
+        so a setpoint driven far down stops at the gimbal and the field
+        clip never engages on this side."""
+        down_inset = (_EL_BORESIGHT - 0.278) * (1.0 / _EL_SCALE) - 0.5
+        assert down_inset > 15.0
         frames = _run_field_park_sequence(
             [
                 _FieldParkFrame(
                     0.0,
                     setpoint=(0.0, -40.0),
                     m566=_mark_raw(0.0),
-                    m555=_mark_raw(0.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(0.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
             ]
         )
-        assert frames[0].field_target_el == pytest.approx(-down_inset, abs=1e-6)
+        assert frames[0].field_target_el == pytest.approx(-15.0, abs=1e-6)
 
 
 def _run_sight_point_quiet(*, hands_off: bool) -> list[str]:
@@ -1321,7 +1334,7 @@ class TestRunSightServoHandsOff:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(2.0),
-                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(1.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
             ],
             hands_off=True,
@@ -1350,7 +1363,7 @@ class TestRunSightServoHandsOff:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(2.0),
-                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(1.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
                 _FieldParkFrame(0.2, observe=False),
             ],
@@ -1370,7 +1383,7 @@ class TestRunSightServoHandsOff:
                     0.0,
                     setpoint=(2.0, 1.0),
                     m566=_mark_raw(2.0),
-                    m555=_mark_raw(1.0, boresight=0.83, scale=0.037),
+                    m555=_mark_raw(1.0, boresight=_EL_BORESIGHT, scale=_EL_SCALE),
                 ),
             ]
         )

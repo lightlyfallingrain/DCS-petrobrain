@@ -1,5 +1,9 @@
 # 2026-10-28 — ASP-17 elevation mark (arg 555): boresight and clip edges, measured
 
+> **Superseded 2026-10-30 for the scale and boresight**: measured directly against a tracked
+> target, 0.8333 / 1/0.0277 -- `2026-10-30-9k113-asp17-elevation-mark-flight-fit.md`. The raw clip
+> readings below still stand.
+
 Probe `aircraft-layer/dcs-export/Export.probe-9k113-hud-elevation-limits.lua`, card
 `docs/acceptance/2026-10-27-9k113-hud-elevation-limits-probe.md`. DCS 2.9.30.28738, pilot seat,
 DCS AI overlay off, AI elevation axis commanded at 0.05 (nominally 0.5°/s, `v_axis_velocity =
