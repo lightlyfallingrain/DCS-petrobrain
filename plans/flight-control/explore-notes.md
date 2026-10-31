@@ -391,3 +391,19 @@ carries the same invisible per-frame wobble the 9K113 sight axes use (`plans/9k1
 plan.md`, `SERVO_WOBBLE` dither/flicker) -- a requirement, not a stage-0 question. Its amplitude
 must stay below anything visible in the aircraft's motion or the cockpit stick animation; stage 0
 measures that bound and whether the wobble is what makes the write stick against ED's AI.
+
+### Where ED's AI acts (user, verbatim, 2026-10-31)
+
+Main loop relayed the recon's open question: ED's AI may fly through the SAU autopilot.
+
+> *"ED's AI may fly through the SAU autopilot -> does not, SAU is not very capably, DCS AI does
+> manouvres SAU cannot*
+> *Though, DCS AI probably does not use the cockpit controls either, but instead inputs the movemnt
+> somewhere internally. But that needs checking."*
+
+Reading: the SAU path is ruled out by the user's flying experience (ED's AI flies manoeuvres the SAU
+cannot). The user's working belief: ED's AI injects its control somewhere internal, **neither SAU
+nor the cockpit stick/collective/pedal positions** -- to be checked in stage 0. Consequence for the
+probe: stick args (1100-1113) staying where Petrobrain put them proves nothing; pass/fail must be
+judged on the aircraft's actual response (attitude, rates, heading, height) following Petrobrain's
+goal, not ED's AI's.
