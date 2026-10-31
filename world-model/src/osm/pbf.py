@@ -362,11 +362,13 @@ def stream_features(
             **collector.progress_counts(),
         )
 
+    # `flush()` stays inside the heartbeat: the leftover batches it hands to
+    # the callbacks are real DB writes on a cache-miss build.
     with Heartbeat(_report, interval_s=_PROGRESS_LOG_INTERVAL_S):
         collector.apply_file(
             str(pbf_path), locations=True, idx="sparse_mem_array", filters=[key_filter]
         )
-    collector.flush()
+        collector.flush()
     return StreamFeaturesResult(
         relations_skipped=collector.relations_skipped,
         ways_skipped_unresolved_nodes=collector.ways_skipped_unresolved_nodes,
