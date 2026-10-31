@@ -407,3 +407,17 @@ nor the cockpit stick/collective/pedal positions** -- to be checked in stage 0. 
 probe: stick args (1100-1113) staying where Petrobrain put them proves nothing; pass/fail must be
 judged on the aircraft's actual response (attitude, rates, heading, height) following Petrobrain's
 goal, not ED's AI's.
+
+### Fallback to investigate: numeric targets for ED's AI (user, verbatim, 2026-10-31)
+
+> *"one option to investigate: if we need to use the DCS AI to fly, can we input desired heading,
+> alt, speed values directly to it as numbers. Besides very poor controlling, the other problem
+> there is the very poor UI for telling what I want the DCS AI to maintain (heading, alt, speed)."*
+
+Reading: not a reversal of "steering ED's AI is rejected" as the design -- Petrobrain flying stays
+the goal. It is a **fallback to investigate for the parked state, only if the override (S0-P2) and
+the off-switch (S0-P3) both fail**: can Petrobrain set ED's AI's held heading, altitude and speed
+as numbers, so the pilot's spoken "turn heading 3 1 5 / hold 200 / speed 2 2 0" replaces ED's poor
+UI? That would fix one of ED's two problems (the UI), not the other (poor flying). The recon found
+the AI's voice/menu commands are discrete nudges (turn, climb, speed, stop, 180) with constants in
+`HelperAI.lua` and the logic in native code, so a numeric interface is unlikely but unchecked.
