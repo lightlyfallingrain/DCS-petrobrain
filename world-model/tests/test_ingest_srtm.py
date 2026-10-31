@@ -9,8 +9,12 @@ envelope of the test grid's DCS points (via `coordinates.dcs_to_wgs84
 synthetic).
 """
 
+import logging
 from array import array
 
+import pytest
+
+import build.ingest_srtm as ingest_srtm_module
 from build.ingest_srtm import GRID_PROVENANCE_SRTM, ingest_srtm_grid
 from elevation.dem import SrtmTile
 
@@ -112,3 +116,31 @@ def test_ingest_srtm_grid_leaves_void_samples_none() -> None:
 
     assert grid.samples == [[None, None], [None, None]]
     assert stats.points_void_or_uncovered == 4
+
+
+def test_ingest_srtm_grid_logs_progress_via_the_shared_helper(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With the throttle interval forced to zero, every row logs a progress
+    line through `progress.ThrottledProgress` -- proves the migration off
+    the old fixed every-50-rows counter actually wires the shared helper in,
+    not just that the grid still builds correctly."""
+    tile = _uniform_tile(sw_lat=35.0, sw_lon=35.85, span_deg=0.2, value=100.0)
+    monkeypatch.setattr(ingest_srtm_module, "_PROGRESS_LOG_INTERVAL_S", 0.0)
+
+    with caplog.at_level(logging.INFO, logger="build.ingest_srtm"):
+        ingest_srtm_grid(
+            [tile],
+            "Syria",
+            _ORIGIN_X,
+            _ORIGIN_Z,
+            _SPACING_M,
+            _N_ROWS,
+            _N_COLS,
+            source_id=1,
+        )
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == _N_ROWS  # one per row at a zero-second interval
+    assert any(m.startswith("ingest_srtm: 0/2") for m in messages)
+    assert any("sampled=" in m for m in messages)

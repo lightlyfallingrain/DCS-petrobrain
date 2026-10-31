@@ -34,6 +34,7 @@ import osmium
 import pytest
 from osmium.osm import mutable
 
+import osm.pbf
 from osm.features import OsmArea, OsmNode, OsmWay
 from osm.pbf import load_features, stream_features
 
@@ -504,6 +505,43 @@ class TestStreamFeaturesChunking:
         assert len(nodes) == 10
         assert len(ways) == 20  # 10 line ways + 10 closed area ways (see above)
         assert len(areas) == 10
+
+    def test_leftover_partial_batch_is_flushed_inside_the_heartbeat(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The final `flush()` hands the leftover batch to the callbacks --
+        # real DB writes in `build.pipeline` -- so it must still be covered
+        # by the heartbeat, not run after the heartbeat thread has stopped.
+        path = tmp_path / "many.osm.pbf"
+        _write_many_elements_fixture(path, n_tagged_nodes=10, n_ways=10, n_areas=10)
+
+        heartbeat_active = False
+
+        class _RecordingHeartbeat:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def __enter__(self) -> None:
+                nonlocal heartbeat_active
+                heartbeat_active = True
+
+            def __exit__(self, *exc: object) -> None:
+                nonlocal heartbeat_active
+                heartbeat_active = False
+
+        monkeypatch.setattr(osm.pbf, "Heartbeat", _RecordingHeartbeat)
+        flushed_while_active: list[bool] = []
+        stream_features(
+            path,
+            lambda batch: flushed_while_active.append(heartbeat_active),
+            lambda batch: flushed_while_active.append(heartbeat_active),
+            lambda batch: flushed_while_active.append(heartbeat_active),
+            batch_size=3,
+            area_batch_size=3,
+        )
+
+        assert flushed_while_active
+        assert all(flushed_while_active)
 
     def test_streaming_matches_load_features_on_the_same_file(
         self, tmp_path: Path

@@ -14,6 +14,7 @@ parsers, which already have their own fixture-based tests
 (`test_towns_lua.py`, `test_beacons_lua.py`).
 """
 
+import logging
 import sqlite3
 from array import array
 from pathlib import Path
@@ -22,6 +23,7 @@ import osmium
 import osmium.osm.mutable as osmium_mutable
 import pytest
 
+from build import pipeline
 from build.pipeline import build_region
 from build.region import RegionDefinition
 from coordinates import dcs_to_wgs84
@@ -235,6 +237,43 @@ def test_build_region_srtm_tile_paths_becomes_the_primary_elevation_grid(
         )
     finally:
         conn.close()
+
+
+def test_build_region_srtm_tile_loading_logs_progress_inside_its_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """SRTM tile loading used to run before Stage 6 announced itself, so a
+    slow disk went silent with no stage named. It now logs through
+    `progress.ThrottledProgress`, after the stage's "starting" line (see
+    `plans/osm-landcover-optimization/progress-logging.md`)."""
+    tile_path = tmp_path / "N36E037.hgt"
+    _write_fake_hgt_tile(tile_path, value=250)
+
+    monkeypatch.setattr(pipeline, "_PROGRESS_LOG_INTERVAL_S", 0.0)
+    with caplog.at_level(logging.INFO, logger="build.pipeline"):
+        build_region(
+            _TEST_REGION,
+            towns_lua_path=Path("unused-towns.lua"),
+            beacons_lua_path=Path("unused-beacons.lua"),
+            osm_cache_path=None,
+            out_path=tmp_path / "region.sqlite",
+            srtm_tile_paths=[tile_path],
+            srtm_grid_spacing_m=2000.0,
+        )
+
+    messages = [r.getMessage() for r in caplog.records]
+    stage_start = next(
+        i
+        for i, m in enumerate(messages)
+        if m.startswith("[6/") and "SRTM elevation grid" in m and m.endswith("starting")
+    )
+    tile_load = [
+        i for i, m in enumerate(messages) if m.startswith("ingest_srtm.load_tiles: ")
+    ]
+    assert tile_load
+    assert stage_start < tile_load[0]
 
 
 def test_build_region_srtm_tile_paths_given_but_missing_is_skipped_not_an_error(
