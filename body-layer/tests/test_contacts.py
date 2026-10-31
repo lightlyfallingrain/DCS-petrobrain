@@ -712,7 +712,10 @@ def test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw()
         z=look_position.z,
         uncertainty=uncertainty,
         look_bearing_deg=percept.bearing_deg,
+        look_range_m=percept.range_m,
         t_sim=percept.t_sim,
+        observer_x=percept.ownship_at_observation.x,
+        observer_z=percept.ownship_at_observation.z,
         growth_rate_mps=correct_order_rate,
     )
     fused_with_wrong_order = fold_position(
@@ -721,7 +724,10 @@ def test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw()
         z=look_position.z,
         uncertainty=uncertainty,
         look_bearing_deg=percept.bearing_deg,
+        look_range_m=percept.range_m,
         t_sim=percept.t_sim,
+        observer_x=percept.ownship_at_observation.x,
+        observer_z=percept.ownship_at_observation.z,
         growth_rate_mps=wrong_order_rate,
     )
     # The two candidate fusions must actually differ, or this test could

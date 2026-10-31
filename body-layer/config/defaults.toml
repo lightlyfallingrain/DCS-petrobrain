@@ -291,10 +291,40 @@ FIRE_LIFE_FRACTION_MAX = 0.765
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
 
+# Down-range scale for a binocular look, relative to naked eye -- `BL-B106` Q3 (user, 2026-10-31: *"With binoculars you see better and so can judge unit apparent size better. That'd give a better range estimate."*).
+# status: judgement | range: 0.1 .. 1.0
+# source: perception/estimation.py:BINOCULAR_RANGE_SIGMA_SCALE
+BINOCULAR_RANGE_SIGMA_SCALE = 0.7
+
 # How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:DEPRESSION_SIGMA_DEG
 DEPRESSION_SIGMA_DEG = 3.0
+
+# `BL-B106` Stage 1 -- how many degrees of line-of-sight rotation it takes for the `Z_view` field's down-range correlation to fall to about `1/e` (holding range fixed): a smaller value means ownship turning past a group updates its range estimate (via `belief.position_belief`'s correlated fusion/gate) sooner; a larger value means the estimate stays "the same look" longer, e.g.
+# status: judgement | range: 5.0 .. 120.0
+# source: perception/estimation.py:RANGE_DECORRELATION_BEARING_DEG
+RANGE_DECORRELATION_BEARING_DEG = 30.0
+
+# `BL-B106` Stage 1 -- the range *ratio* (closing or opening) at which the `Z_view` field's down-range correlation falls to about `1/e` (holding bearing fixed): raising it makes a closing run keep "the same look"'s error longer before it genuinely updates; lowering it means the estimate tightens sooner as ownship closes.
+# status: judgement | range: 1.1 .. 4.0
+# source: perception/estimation.py:RANGE_DECORRELATION_RANGE_RATIO
+RANGE_DECORRELATION_RANGE_RATIO = 1.5
+
+# The look-to-look share `a` of the three-part down-range draw, coupled to `RANGE_RELATIVE_SHARE` below (both bounded `lo=0.0, hi=0.6` keeps `f*f + a*a <= 0.72 < 1`, so `s = sqrt(1 - f*f - a*a)` can never go imaginary from any combination of independently-valid overrides of the two -- the X-T26 cross-key trap, closed by the shared bound rather than a runtime assertion): how much a *repeat* look from the same geometry still varies, even though the scene and terrain cues are the same.
+# status: judgement | range: 0.0 .. 0.6
+# source: perception/estimation.py:RANGE_LOOK_SHARE
+RANGE_LOOK_SHARE = 0.2
+
+# The range ratio at which the `Z_near` field's correlation between two *different* things falls to about `1/e` -- deliberately much smaller than the `Z_view` field's own decorrelation range ratio (declared above this one), so two things ~200 m apart along a line at a few km (ratio close to 1.0) share nearly all of their `Z_near` term (one real group, E3) while two groups at a 1.2-1.5 ratio or more do not (E1/E2).
+# status: judgement | range: 1.02 .. 1.5
+# source: perception/estimation.py:RANGE_NEAR_DECORRELATION_RANGE_RATIO
+RANGE_NEAR_DECORRELATION_RANGE_RATIO = 1.15
+
+# The relative share `f` of the three-part down-range draw, coupled to `RANGE_LOOK_SHARE` above (see that constant's own docstring for the shared bound that keeps `f*f + a*a < 1`): how much two *different* things seen in the same look, at about the same distance, still differ in their down-range error.
+# status: judgement | range: 0.0 .. 0.6
+# source: perception/estimation.py:RANGE_RELATIVE_SHARE
+RANGE_RELATIVE_SHARE = 0.2
 
 # Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
 # status: judgement | range: 0.05 .. 1.0

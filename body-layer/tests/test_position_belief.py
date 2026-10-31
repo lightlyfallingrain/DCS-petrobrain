@@ -28,6 +28,7 @@ from belief.position_belief import (
     fold_position,
     plausible_speed_mps,
 )
+from perception.estimation import stable_share
 from perception.geometry import GeoPosition
 from perception.source import PositionUncertainty
 
@@ -160,7 +161,14 @@ def test_estimate_from_look_has_no_prior_to_fuse_against() -> None:
     uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
 
     estimate = estimate_from_look(
-        x=1000.0, z=0.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+        x=1000.0,
+        z=0.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=1000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert estimate.x == 1000.0
@@ -179,7 +187,10 @@ def test_fold_position_founding_call_matches_estimate_from_look() -> None:
         "z": 0.0,
         "uncertainty": uncertainty,
         "look_bearing_deg": 0.0,
+        "look_range_m": 1000.0,
         "t_sim": 0.0,
+        "observer_x": 0.0,
+        "observer_z": 0.0,
     }
 
     founded = fold_position(None, **kwargs)  # type: ignore[arg-type]
@@ -206,7 +217,10 @@ def test_fold_position_from_two_crossing_looks_triangulates_tighter_than_either(
         z=0.0,
         uncertainty=uncertainty,
         look_bearing_deg=0.0,
+        look_range_m=1000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     fused = fold_position(
         first,
@@ -214,7 +228,10 @@ def test_fold_position_from_two_crossing_looks_triangulates_tighter_than_either(
         z=0.0,
         uncertainty=uncertainty,
         look_bearing_deg=90.0,
+        look_range_m=1000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert fused.radius_m() < first.radius_m()
@@ -241,7 +258,10 @@ def test_fold_position_converges_toward_truth_plus_systematic_bias_not_truth() -
             z=true_z + bias_z,
             uncertainty=uncertainty,
             look_bearing_deg=bearing,
+            look_range_m=math.hypot(true_x + bias_x, true_z + bias_z),
             t_sim=float(i),
+            observer_x=0.0,
+            observer_z=0.0,
         )
 
     assert estimate is not None
@@ -253,11 +273,21 @@ def test_fold_position_converges_toward_truth_plus_systematic_bias_not_truth() -
 
 def test_fold_position_never_claims_more_precision_than_the_floor() -> None:
     """However many looks are fused, `radius_m()` must never drop below
-    `SYSTEMATIC_BIAS_FRACTION` of a single look's own sigma -- the "the
-    uncertainty floor follows for free" claim, pinned directly by fusing
-    far more looks than would be needed to reach it otherwise."""
+    the declared floor -- `plans/relative-distance-grouping/plan.md`
+    Stage 2's revised floor (cross: `SYSTEMATIC_BIAS_FRACTION *
+    sigma_cross_m`, unchanged; down: `rho_view * stable_share() *
+    sigma_down_m`, geometry-dependent). **Rewritten, not merely signature-
+    patched (`BL-B106` escalation item 1)**: the old test cycled `bearing
+    = i % 360` across 200 folds and compared against the flat pre-stage
+    floor (`0.4 * sigma`, both axes) -- with each poll only 1 degree from
+    the last, `rho_view` stays near 1.0 throughout this run, so the actual
+    floor here is the *higher* `stable_share() * sigma_down_m` one, not
+    the old flat fraction; asserting against the old, lower value would
+    pass trivially without exercising the real floor at all."""
     uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
-    floor = math.sqrt((0.4 * 50.0) ** 2 + (0.4 * 500.0) ** 2)
+    cross_floor = 0.4 * 50.0
+    down_floor = stable_share() * 500.0
+    floor = math.hypot(cross_floor, down_floor)
 
     estimate = None
     for i in range(200):
@@ -268,11 +298,14 @@ def test_fold_position_never_claims_more_precision_than_the_floor() -> None:
             z=0.0,
             uncertainty=uncertainty,
             look_bearing_deg=bearing,
+            look_range_m=1000.0,
             t_sim=float(i),
+            observer_x=0.0,
+            observer_z=0.0,
         )
 
     assert estimate is not None
-    assert estimate.radius_m() >= floor - 1e-6
+    assert estimate.radius_m() >= floor - 1.0
 
 
 def test_bearing_uncertainty_deg_reads_only_the_cross_range_component() -> None:
@@ -289,7 +322,10 @@ def test_bearing_uncertainty_deg_reads_only_the_cross_range_component() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=1000.0),
         look_bearing_deg=0.0,  # elongated along x
+        look_range_m=1000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)  # looking along +x too
 
@@ -308,7 +344,10 @@ def test_bearing_uncertainty_deg_at_zero_range_is_zero() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=10.0),
         look_bearing_deg=0.0,
+        look_range_m=0.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
 
@@ -328,7 +367,10 @@ def test_range_uncertainty_m_reads_only_the_down_range_component() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=1000.0),
         look_bearing_deg=0.0,  # elongated along x
+        look_range_m=1000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)  # looking along +x too
 
@@ -345,7 +387,10 @@ def test_range_uncertainty_m_small_for_a_tight_down_range_estimate() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=1000.0, sigma_down_m=10.0),
         look_bearing_deg=0.0,
+        look_range_m=1000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
 
@@ -360,7 +405,10 @@ def test_radius_m_is_sqrt_of_trace() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=30.0, sigma_down_m=40.0),
         look_bearing_deg=0.0,
+        look_range_m=0.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert estimate.radius_m() == pytest.approx(math.sqrt(30.0**2 + 40.0**2))
@@ -382,7 +430,15 @@ def test_fold_position_near_parallel_disagreeing_looks_holds_prior_not_runaway()
     uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
 
     prior = fold_position(
-        None, x=0.0, z=3000.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+        None,
+        x=0.0,
+        z=3000.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     fused = fold_position(
         prior,
@@ -390,7 +446,10 @@ def test_fold_position_near_parallel_disagreeing_looks_holds_prior_not_runaway()
         z=5000.0,
         uncertainty=uncertainty,
         look_bearing_deg=5.0,
+        look_range_m=math.hypot(350.0, 5000.0),
         t_sim=1.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert fused.x == prior.x
@@ -408,7 +467,15 @@ def test_fold_position_perpendicular_looks_still_triangulate_unchanged() -> None
     uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
 
     prior = fold_position(
-        None, x=0.0, z=3000.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+        None,
+        x=0.0,
+        z=3000.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     fused = fold_position(
         prior,
@@ -416,7 +483,10 @@ def test_fold_position_perpendicular_looks_still_triangulate_unchanged() -> None
         z=3000.0,
         uncertainty=uncertainty,
         look_bearing_deg=90.0,
+        look_range_m=math.hypot(3000.0, 3000.0),
         t_sim=1.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert math.isclose(fused.x, 2983.15625, rel_tol=1e-4)
@@ -425,30 +495,34 @@ def test_fold_position_perpendicular_looks_still_triangulate_unchanged() -> None
     assert fused.radius_m() < prior.radius_m()
 
 
-def test_fold_position_repeated_identical_look_still_tightens() -> None:
-    """The failure mode a bearing-only guard would have introduced (caught
-    live by `tests/test_optic_policy.py`'s pre-existing calibration test):
-    fusing the *same* look, from the *same* bearing, repeatedly, must keep
-    tightening the estimate -- ordinary repeated-measurement averaging, not
-    ill-conditioned triangulation, even though every pair of looks here is
-    maximally near-parallel (bearing separation zero). Uses the same
-    (60, 800) sigma pair as this file's other new tests -- a different
-    pair, (157.08, 510.0) (an ordinary 3km naked-eye look,
-    `look_sigma_m(3000.0, UNAIDED_OPTIC)`), was tried first and exposed a separate,
-    pre-existing latent bug in `Covariance2D.inverse`'s determinant floor
-    (an absolute `1e-9`, calibrated for covariance-scale determinants
-    ~1e9, but an information-matrix determinant after only one fold can
-    legitimately be ~1e-10, below the floor, silently corrupting the
-    result). Reported in `plans/position-belief-runaway/debug.md` as a
-    separate finding, initially out of scope -- the review that followed
-    found it reachable at ordinary naked-eye ranges (beyond ~2.7km) and
-    load-bearing for this very guard's own correctness, so it was fixed as
-    a required follow-up (see that file's 2026-09-25 addendum) and the
-    floor is now relative to each matrix's own trace, not an absolute
-    constant. `test_fold_position_repeated_identical_look_is_exact_at_
-    floor_triggering_sigma` below is the regression pin for that fix using
-    this exact (157.08, 510.0) pair."""
+def test_fold_position_repeated_identical_look_does_not_keep_tightening() -> None:
+    """**Rewritten, not merely signature-patched (`BL-B106` escalation
+    item 1) -- this test used to be named `..._still_tightens` and assert
+    the opposite of what follows.** Pre-`BL-B106`, every look's down-range
+    error was redrawn independently, so fusing the *same* look repeatedly
+    was ordinary repeated-measurement averaging and kept tightening. Under
+    the correlated model, a look from the *same* bearing and range through
+    the *same* optic is **maximally correlated** with the anchor
+    (`rho_view == rho_near == 1.0`) -- physically, restating the identical
+    sighting again gives no new information about the stable part of the
+    error, which is most of it (module docstring of `perception.
+    estimation`: `s`, the `Z_view` share, dominates at the defaults). So
+    the estimate must **not** keep shrinking fold after fold the way it
+    did before this plan -- it settles near the single-look radius, not
+    below it, which is exactly `test_fold_position_never_claims_more_
+    precision_than_the_floor`'s revised floor in miniature."""
     uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
+
+    single_look_radius = estimate_from_look(
+        x=3000.0,
+        z=0.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
+    ).radius_m()
 
     estimate = None
     for _ in range(5):
@@ -458,15 +532,17 @@ def test_fold_position_repeated_identical_look_still_tightens() -> None:
             z=0.0,
             uncertainty=uncertainty,
             look_bearing_deg=0.0,
+            look_range_m=3000.0,
             t_sim=0.0,
+            observer_x=0.0,
+            observer_z=0.0,
         )
     assert estimate is not None
     assert estimate.x == pytest.approx(3000.0)
     assert estimate.z == pytest.approx(0.0)
-    single_look_radius = estimate_from_look(
-        x=3000.0, z=0.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
-    ).radius_m()
-    assert estimate.radius_m() < single_look_radius
+    # Within a small tolerance of the single-look radius -- not strictly
+    # tighter (the old, now-wrong claim) and not looser either.
+    assert estimate.radius_m() == pytest.approx(single_look_radius, rel=0.05)
 
 
 def test_fold_position_moderate_near_parallel_residual_still_fuses() -> None:
@@ -477,7 +553,15 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses() -> None:
     uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
 
     prior = fold_position(
-        None, x=0.0, z=3000.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+        None,
+        x=0.0,
+        z=3000.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     fused = fold_position(
         prior,
@@ -485,7 +569,10 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses() -> None:
         z=3100.0,
         uncertainty=uncertainty,
         look_bearing_deg=5.0,
+        look_range_m=math.hypot(30.0, 3100.0),
         t_sim=1.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert (fused.x, fused.z) != (prior.x, prior.z)
@@ -523,7 +610,10 @@ def test_hold_recovery_time_is_bounded_independent_of_poll_interval() -> None:
             z=3000.0,
             uncertainty=uncertainty,
             look_bearing_deg=0.0,
+            look_range_m=3000.0,
             t_sim=0.0,
+            observer_x=0.0,
+            observer_z=0.0,
         )
         estimate = founding
         t_sim = 0.0
@@ -535,7 +625,10 @@ def test_hold_recovery_time_is_bounded_independent_of_poll_interval() -> None:
                 z=5000.0,
                 uncertainty=uncertainty,
                 look_bearing_deg=5.0,
+                look_range_m=math.hypot(350.0, 5000.0),
                 t_sim=t_sim,
+                observer_x=0.0,
+                observer_z=0.0,
             )
             if (estimate.x, estimate.z) != (founding.x, founding.z):
                 return t_sim
@@ -567,7 +660,10 @@ def test_clamp_to_detection_envelope_is_a_no_op_within_range() -> None:
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0),
         look_bearing_deg=0.0,
+        look_range_m=3000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     result = clamp_to_detection_envelope(fused, None, observer, max_range_m=10000.0)
@@ -620,7 +716,10 @@ def test_clamp_to_detection_envelope_founding_look_passes_through_unchanged() ->
         z=0.0,
         uncertainty=PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0),
         look_bearing_deg=0.0,
+        look_range_m=15000.0,
         t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     result = clamp_to_detection_envelope(fused, None, observer, max_range_m=10000.0)
@@ -739,7 +838,10 @@ def test_fold_position_repeated_identical_look_is_exact_at_floor_triggering_sigm
             z=0.0,
             uncertainty=uncertainty,
             look_bearing_deg=0.0,
+            look_range_m=3000.0,
             t_sim=0.0,
+            observer_x=0.0,
+            observer_z=0.0,
         )
         assert estimate is not None
         assert estimate.x == pytest.approx(3000.0, abs=1e-6)
@@ -760,7 +862,15 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses_at_floor_trig
     uncertainty = PositionUncertainty(sigma_cross_m=157.08, sigma_down_m=510.0)
 
     prior = fold_position(
-        None, x=0.0, z=3000.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+        None,
+        x=0.0,
+        z=3000.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
     fused = fold_position(
         prior,
@@ -768,7 +878,10 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses_at_floor_trig
         z=3005.0,
         uncertainty=uncertainty,
         look_bearing_deg=5.0,
+        look_range_m=math.hypot(100.0, 3005.0),
         t_sim=1.0,
+        observer_x=0.0,
+        observer_z=0.0,
     )
 
     assert (fused.x, fused.z) != (prior.x, prior.z)

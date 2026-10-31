@@ -172,10 +172,30 @@ class PositionUncertainty:
     `sigma_down_m` -- 1-sigma error along the line of sight (range error).
     Both are declared at the observation's own true range; `belief.
     position_belief` is what turns this pair into a 2x2 covariance oriented
-    along `Observation.bearing_deg`/`Percept.bearing_deg`."""
+    along `Observation.bearing_deg`/`Percept.bearing_deg`.
+
+    `sigma_down_stable_m`/`optic_class` -- `plans/
+    relative-distance-grouping/plan.md` (`BL-B106`) Stage 1. `sigma_down_m`
+    is the look's *total* down-range sigma; `sigma_down_stable_m` is the
+    portion of it that is geometry-correlated rather than redrawn every
+    look (`perception.estimation.stable_down_sigma_m`) -- what `belief.
+    position_belief.correlated_innovation` needs to know how much of this
+    look's error a *different* look, at a related geometry, plausibly
+    shares. `optic_class` is the active optic's own `Optic.name` -- the
+    field-seed key that makes two looks through different optics
+    independent (module docstring of `perception.estimation`). Both
+    perceived metadata, same footing as `sigma_cross_m`/`sigma_down_m`:
+    a channel's own honest statement of its error model, never a truth
+    field. Defaulted (`0.0`/`""`) so every pre-`BL-B106` construction site
+    (test fixtures included) keeps compiling; `""` is read by `belief/` as
+    "unknown optic," never matching any real optic class, so an
+    uninstrumented look is treated as uncorrelated with anything (the
+    conservative, wider gate -- `correlated_innovation`'s own docstring)."""
 
     sigma_cross_m: float
     sigma_down_m: float
+    sigma_down_stable_m: float = 0.0
+    optic_class: str = ""
 
 
 @dataclass(frozen=True, slots=True)

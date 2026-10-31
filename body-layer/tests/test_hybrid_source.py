@@ -20,6 +20,7 @@ from perception import association
 from perception.estimation import perturbed_bearing_range
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.hybrid_source import (
+    _SCOPE_OPTIC_CLASS,
     SCOPE_UNCERTAINTY_M,
     SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     HybridPerceptionSource,
@@ -124,6 +125,8 @@ def _expected_perturbed(
         true_range_m=true_range_m,
         sigma_cross_m=SCOPE_UNCERTAINTY_M,
         sigma_down_m=SCOPE_UNCERTAINTY_M,
+        optic_class=_SCOPE_OPTIC_CLASS,
+        poll_key=100.0,
     )
 
 

@@ -25,6 +25,7 @@ from belief.contacts import ContactStore
 from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
+    stable_down_sigma_m,
     surface_range_estimate,
 )
 from perception.geometry import GeoPosition, bearing_deg, horizontal_range_m
@@ -70,13 +71,14 @@ def _observation_for_look(
         true_range_m=true_distance_m,
         sigma_cross_m=sigma_cross_m,
         sigma_down_m=sigma_down_m_a,
+        optic_class=UNAIDED_OPTIC.name,
+        poll_key=t_sim,
     )
     estimated_range_m, sigma_down_m = surface_range_estimate(
-        observation_id=observation_id,
-        object_id=bias_object_id,
         true_distance_m=true_distance_m,
         height_above_unit_m=ownship.alt_m - _GROUP_ALT_M,
         optic=UNAIDED_OPTIC,
+        poll_key=t_sim,
     )
 
     return Observation(
@@ -94,7 +96,10 @@ def _observation_for_look(
         classification_level=_CLASSIFICATION_LEVEL,
         continues_observation_id=continues_observation_id,
         position_uncertainty=PositionUncertainty(
-            sigma_cross_m=sigma_cross_m, sigma_down_m=sigma_down_m
+            sigma_cross_m=sigma_cross_m,
+            sigma_down_m=sigma_down_m,
+            sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+            optic_class=UNAIDED_OPTIC.name,
         ),
         surface_alt_m=_GROUP_ALT_M,
     )
@@ -209,6 +214,91 @@ def test_two_groups_on_one_bearing_stay_two_contacts_at_150m_agl() -> None:
         if len(store.contacts) == 2:
             successes += 1
     assert successes / _SEED_COUNT >= _MIN_SUCCESS_FRACTION
+
+
+def _observation_at_declared_geometry(
+    *,
+    observation_id: str,
+    t_sim: float,
+    ownship: OwnshipState,
+    bearing_deg: float,
+    range_m: float,
+) -> Observation:
+    """One look reported at *exactly* `bearing_deg`/`range_m` -- no
+    perturbation draw -- with the declared sigma `perception.estimation.
+    look_sigma_m`/`RANGE_FRACTIONAL_SIGMA` would give that range. Used only
+    by the E1 fold worked-check below, which needs the plan's own exact
+    numbers (`plan.md` Stage 2, "Worked check"), not one hash realisation
+    of the random field -- `perception.estimation`'s own field model is
+    exercised elsewhere (`test_estimation.py`'s property tests); this test
+    is about the *gate*, not the draw."""
+    _sigma_cross_m, sigma_down_m = look_sigma_m(range_m, UNAIDED_OPTIC)
+    return Observation(
+        id=observation_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=0.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        classification_raw=_CLASSIFICATION_RAW,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
+        ownship_at_observation=ownship,
+        derived_world_position=None,
+        provenance="test",
+        classification_level=_CLASSIFICATION_LEVEL,
+        position_uncertainty=PositionUncertainty(
+            sigma_cross_m=100.0,
+            sigma_down_m=sigma_down_m,
+            sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+            optic_class=UNAIDED_OPTIC.name,
+        ),
+    )
+
+
+def test_far_group_seen_alone_then_near_group_appears_stays_two_contacts() -> None:
+    """`BL-B106` Stage 0/Stage 2's own "Worked check" -- the exact fold
+    `explore-notes.md` recorded in the post-merge 1 s analysis of
+    `BL-B104`'s own scenario flights: a contact founded from a single
+    look at 4.6 km, then a second look at 2.4 km (the real range of a
+    *different* object, same bearing) six seconds later. Declared
+    geometry, not a perturbed draw (`_observation_at_declared_geometry`),
+    so this is a test of the **gate**, not of one hash realisation.
+
+    **Confirmed xfail (strict) against Stage 0/1 alone, before Stage 2
+    landed**: today's isotropic/absolute gate budgeted the two looks'
+    sigmas independently -- `sqrt(782^2 + 409^2) * 3 ~= 2646 m`,
+    comfortably wider than the 2.2 km real separation, so the look
+    merged (the bug). **Stage 2's correlated gate fixes it** -- the
+    `xfail` marker was removed once this test started passing (confirmed
+    by running it: it reported `XPASS(strict)` the moment `belief.
+    association_over_time.passes_gate` started routing through
+    `belief.position_belief.correlated_innovation`), matching the plan's
+    own worked numbers (`S along ~= (410 m)^2`, "the 2.2 km offset is
+    about 5 sigma")."""
+    store = ContactStore()
+    ownship = OwnshipState(t_sim=0.0, x=0.0, z=0.0, alt_m=0.0, heading_true_deg=0.0)
+    far_look = _observation_at_declared_geometry(
+        observation_id="FAR_T0",
+        t_sim=0.0,
+        ownship=ownship,
+        bearing_deg=0.0,
+        range_m=4600.0,
+    )
+    store.ingest([far_look], 0.0)
+    assert len(store.contacts) == 1
+
+    near_look = _observation_at_declared_geometry(
+        observation_id="NEAR_T1",
+        t_sim=6.0,
+        ownship=ownship,
+        bearing_deg=0.0,
+        range_m=2400.0,
+    )
+    store.ingest([near_look], 6.0)
+    assert len(store.contacts) == 2, (
+        f"expected two contacts (far group + near group), got "
+        f"{len(store.contacts)} -- the E1 fold"
+    )
 
 
 def test_two_groups_on_one_bearing_stay_two_contacts_on_a_closing_run() -> None:

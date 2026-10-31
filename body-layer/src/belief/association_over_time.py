@@ -238,11 +238,17 @@ from belief.classification import class_compatibility
 from belief.percept import Percept
 from belief.position_belief import (
     Covariance2D,
+    correlated_innovation,
     covariance_from_uncertainty,
     plausible_speed_mps,
 )
 from perception import object_model
-from perception.geometry import GeoPosition, project_from_bearing_range
+from perception.geometry import (
+    GeoPosition,
+    bearing_deg,
+    horizontal_range_m,
+    project_from_bearing_range,
+)
 from perception.source import PositionUncertainty
 
 if TYPE_CHECKING:
@@ -438,7 +444,23 @@ def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     """Whether `percept` may be merged into `contact` -- the spatial gate and
     the class-compatibility gate must both pass. See module docstring's
-    "Spatial gate" section for the 2D covariance test."""
+    "Spatial gate" section for the 2D covariance test.
+
+    **`BL-B106` Stage 2**: the spatial budget `S` is no longer the plain
+    sum of both sides' own covariances -- it is `belief.position_belief.
+    correlated_innovation`'s `S`, which subtracts out the two sides'
+    *stable* down-range cross-covariance before the Mahalanobis test.
+    The correlation is evaluated on a **hypothesis**, not on the
+    percept's own real geometry (`correlated_innovation`'s own
+    docstring, "For the gate ... the hypothesis"): the bearing/range from
+    *this percept's own observer* to *the contact's believed position* --
+    "if this incoming look really were still looking at this contact, how
+    correlated would its stable error be with the anchor's". This is what
+    rejects a look that is correlation-plausible by geometry alone but
+    whose *actually reported* position disagrees by kilometres (the E1
+    fold case, `plan.md` Stage 2's "Worked check") -- `dx`/`dz` below are
+    still the percept's own real implied position minus the contact's
+    believed one, unchanged."""
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):
@@ -448,8 +470,24 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     dx = percept_position.x - contact.last_position.x
     dz = percept_position.z - contact.last_position.z
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    covariance = _percept_covariance(percept) + _contact_covariance(contact, elapsed_s)
-    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
+    percept_uncertainty = percept_position_uncertainty(percept)
+    observer = GeoPosition(
+        x=percept.ownship_at_observation.x,
+        z=percept.ownship_at_observation.z,
+        alt_m=percept.ownship_at_observation.alt_m,
+    )
+    hypothesis_bearing_deg = bearing_deg(observer, contact.last_position)
+    hypothesis_range_m = horizontal_range_m(observer, contact.last_position)
+    s, _c, _rho_view = correlated_innovation(
+        contact.position,
+        _contact_covariance(contact, elapsed_s),
+        _percept_covariance(percept),
+        correlation_bearing_deg=hypothesis_bearing_deg,
+        correlation_range_m=hypothesis_range_m,
+        correlation_optic_class=percept_uncertainty.optic_class,
+        correlation_sigma_down_stable_m=percept_uncertainty.sigma_down_stable_m,
+    )
+    return s.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
 
 
 def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
@@ -476,7 +514,15 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     not a bug in this gate.
 
     Order of `a`/`b` does not matter -- the covariance sum and the
-    class-compatibility check are both symmetric."""
+    class-compatibility check are both symmetric.
+
+    **`BL-B106` Stage 2**: "the same helper, anchor against anchor" (plan
+    Stage 2) -- when both contacts carry an anchor, `S` is `correlated_
+    innovation`'s, correlated on `b`'s own anchor geometry directly (no
+    hypothesis step: there is no single "current observer" shared by two
+    already-founded contacts the way a fresh percept has one). Falls back
+    to the plain independent sum when either anchor is `None` (the
+    conservative, wider gate -- never tighter from missing data)."""
     if class_compatibility(a.last_class_raw, b.last_class_raw) == "incompatible":
         return False
 
@@ -484,5 +530,19 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     dz = a.last_position.z - b.last_position.z
     elapsed_a = max(0.0, now_sim - a.last_seen_sim)
     elapsed_b = max(0.0, now_sim - b.last_seen_sim)
-    covariance = _contact_covariance(a, elapsed_a) + _contact_covariance(b, elapsed_b)
-    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
+    cov_a = _contact_covariance(a, elapsed_a)
+    cov_b = _contact_covariance(b, elapsed_b)
+    b_anchor = b.position.anchor
+    if a.position.anchor is not None and b_anchor is not None:
+        s, _c, _rho_view = correlated_innovation(
+            a.position,
+            cov_a,
+            cov_b,
+            correlation_bearing_deg=b_anchor.bearing_deg,
+            correlation_range_m=b_anchor.range_m,
+            correlation_optic_class=b_anchor.optic_class,
+            correlation_sigma_down_stable_m=b_anchor.sigma_down_stable_m,
+        )
+    else:
+        s = cov_a + cov_b
+    return s.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2

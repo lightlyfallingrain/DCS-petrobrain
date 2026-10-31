@@ -656,7 +656,10 @@ class Contact:
             z=look_position.z,
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
+            look_range_m=percept.range_m,
             t_sim=percept.t_sim,
+            observer_x=observer.x,
+            observer_z=observer.z,
             growth_rate_mps=growth_rate_mps,
         )
         envelope_clamped = clamp_to_detection_envelope(
@@ -772,7 +775,10 @@ class Contact:
             z=look_position.z,
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
+            look_range_m=percept.range_m,
             t_sim=percept.t_sim,
+            observer_x=observer.x,
+            observer_z=observer.z,
         )
         contact = Contact(
             id=contact_id,
