@@ -130,3 +130,137 @@ the fusion/gate/anchor math was traced by hand against the co-moving-fields tabl
 sites); all four check commands were run and reproduced the implementer's reported numbers
 independently (not re-trusted from the log); the rendered `defaults.toml` was read directly, not
 inferred from the source comments, per this role's own standing instruction.
+
+## Review round 2 (fix round, tip `161448d5`)
+
+Verified the fast-forward first: `HEAD` (`a03b8f54`, `origin/main`) was a strict ancestor of the
+named tip with a clean tree, so `git merge --ff-only 161448d5` was done as instructed rather than
+re-reviewing from a cherry-pick. Read `implementation.md`'s "Review follow-up, 2026-10-31" section,
+`explore-notes.md`'s Q3 and the plan-escalation answers, the full diff of `estimation.py`/
+`position_belief.py` vs round 1's tip, `test_relative_distance_scenarios.py`'s new tests, and the
+rendered `defaults.toml`.
+
+**Fix 2 (the truncated comment) is correctly closed.** `RANGE_DECORRELATION_BEARING_DEG`'s
+rendered comment now reads a complete sentence ("...longer, through a shallow orbit for
+instance.") with no dangling `e.g.`, and `CROSS_OPTIC_RANGE_SHARE`'s own new comment renders as
+one complete sentence with no bare `RANGE_RELATIVE_SHARE` identifier in it (reworded to "the
+relative-share weight's own square..." prose, as `implementation.md` describes) — confirmed by
+reading `config/defaults.toml` directly, not the source. The blank-`#:`-line paragraph-break
+gotcha the implementer found and fixed is a real, separate defect from the `e.g.` one and is
+recorded correctly in their own memory file.
+
+**Fix 1 is not closed. The cross-optic correlation fix does not generalize past the one shipped
+regression scenario, and fails the plan's own declared "clear case" guarantee — required fix,
+not an acceptable-margin judgement call.**
+
+I ran the real code (not inspection) against geometries beyond the single shipped test
+(`test_two_groups_one_bearing_stay_two_contacts`, far 4.6 km / near 2.4 km, ~2.2 km separation),
+using `test_relative_distance_scenarios.py`'s own `_observation`/`_ownship` helpers directly
+against `ContactStore`:
+
+- **The shipped geometry is robust**: 20 different bias-object-id draws at far=4.6 km/near=2.4 km,
+  cross-optic (unaided founding look, binocular reacquisition), all stay two contacts. This part
+  of the implementer's claim holds.
+- **The plan's own declared "clear case" does not survive a cross-optic look.** `plan.md` line 66
+  states, in its own worked-numbers table: *"clear case, 1.5 km apart at ~3 km ... always two
+  (E1)"* — and the same-optic baseline (both looks unaided) confirms this: 10/10 bias draws at
+  far=3.75 km/near=2.25 km (1.5 km apart, centred ~3 km) stay two contacts. **The identical
+  geometry, with the near look through binoculars instead of unaided, folds to one contact in
+  10/10 bias draws** at the shipped default (`CROSS_OPTIC_RANGE_SHARE = 0.6`), and **still folds
+  in 5/5 bias draws at the tunable's own declared `hi = 0.75` bound** — there is no value within
+  the declared range that preserves this case. (`effective_down_correlation` at this geometry: same
+  optic ≈ 0.196, cross optic at the shipped default ≈ 0.118, at `hi` ≈ 0.147 — none close enough to
+  the same-optic value to keep the gate narrow enough.)
+- **A geometry sweep around the shipped point shows the boundary is close by, not a comfortable
+  margin.** far=4.3 km/near=2.1-2.25 km (separation ≈ 2.05-2.2 km) still passes; far=4.3 km/
+  near=2.4-2.7 km (separation ≈ 1.6-1.9 km) folds; far=4.5 km/near=2.7 km (separation 1.8 km) folds
+  for some bias draws and not others. The shipped scenario's own ~2.2 km separation is close to
+  where this starts failing, not comfortably inside a safe region — this is the "fitted to the one
+  scenario" risk the dispatch named, confirmed by running the model rather than reading the
+  comment.
+
+**Why this is required rather than an accepted-risk note**: this is exactly round 1's finding
+recurring at a different geometry. Round 1 flagged that the cross-optic `xfail` reopened E1 under
+Petrovich's own ordinary autonomous behaviour (the scan-then-glass cycle), not a contrived case.
+The fix closes that specific geometry but reopens the *same* failure mode — the plan's own
+baseline same-optic separation guarantee collapsing the moment one look is cross-optic — at a
+separation (1.5-1.9 km at ~3 km) that is, if anything, more representative of ordinary tactical
+spacing than the shipped 2.2 km case. Scaling `Z_view`'s kernel by a flat fraction narrows the
+fold window but does not close it, and the tunable's own declared ceiling cannot close it either,
+so this is not something the user can dial around after merge.
+
+**This is a model decision, same as round 1's finding, not a one-line patch** — I am not
+prescribing the fix. Worth the user's explicit decision before merge: accept a documented, narrower
+guarantee (e.g. "cross-optic separation reliably stays two only above ~2.2 km at this range band";
+if so, `BL-B108.md`'s entry needs to say so, not read as the plan's original claim delivered
+unconditionally), revisit the correlation model itself (the `Z_view`-only flat-share approach may
+be structurally insufficient, same shape of problem Fix 1's own "tried and rejected" `Z_near`
+analysis already demonstrated for a different slot), or decide the shipped scenario's coverage is
+enough for now and carry the gap as a tracked, named risk rather than an implicit one.
+
+**No-omniscience check: direction and bound confirmed, implementer's quoted figure is slightly
+off but inside the test's own tolerance, not a defect.** Re-ran
+`test_cross_optic_fuse_along_sigma_never_beats_the_tighter_optics_own_sigma`'s own scenario
+directly: fused along-sigma comes out **2.1% below** the binocular-alone sigma for
+unaided→binocular, and **2.5% below** for binocular→unaided — both within the test's declared 5%
+tolerance band, both the same direction `implementation.md` describes (a small, bounded tightening
+from genuine partial-correlation information gain, not an explosion toward zero), just measured
+here at roughly 2-2.5% rather than the "~1.5%" quoted. Not required to fix — the test's tolerance
+already covers the real value and the direction/boundedness claim holds — but worth a one-line
+correction in `implementation.md` if that figure is ever cited again.
+
+**Gate/fold symmetry**: confirmed by reading `correlated_innovation` — both `passes_gate`/
+`contacts_plausibly_same` and `fold_position` call the same function; `stable_range_correlation`'s
+`same_optic` comparison and the bearing/range-ratio kernel are symmetric in the two sides by
+construction, and the only difference between gate and fold is which bearing/range the caller
+supplies (hypothesis vs. the look's own), exactly as the module docstring states. No asymmetry
+found.
+
+**E3 across optics** (`test_e3_group_seen_unaided_then_through_binoculars_stays_one_contact`):
+confirmed correct and not fragile the way E1 is — a *higher* correlation only ever helps E3 (it
+wants the fold), so this sibling case is not at risk from the same mechanism that breaks E1's
+clear case.
+
+**Checks re-run independently** (fresh `body-layer/.venv`-equivalent, imports confirmed to resolve
+to this worktree's own `src`): `ruff format --check src tests` (191 files, clean), `ruff check src
+tests` (clean), `mypy src` (79 files, clean), `pytest -q` excluding the slow module (2886 passed,
+4 xfailed, matching `implementation.md`'s own numbers exactly), `test_bl_b104_scenario_mock_
+flights.py` (5 passed, ~117s, confirming the former `xfail` is now a plain pass). **The flaky test**
+(`test_mission_start_reset.py::test_check_for_new_mission_keeps_the_traceback_for_a_non_
+connection_failure`) passes cleanly in isolation and the file is untouched by this plan's diff
+(last touched by unrelated ATGM-run commits) — consistent with the implementer's "pre-existing
+test-order flakiness" claim, not something this change introduced.
+
+### Required Fixes (round 2)
+
+- **`CROSS_OPTIC_RANGE_SHARE` does not deliver the plan's own declared same-optic "clear case"
+  guarantee (1.5 km apart at ~3 km stays two, `plan.md` line 66) once a look is cross-optic, and no
+  value within the tunable's declared `0.0-0.75` range closes the gap** — demonstrated by direct
+  execution, not inspection (see above). This reopens round 1's finding (E1 defeated by Petrovich's
+  own ordinary autonomous optic-switching) at a geometry more representative of ordinary spacing
+  than the one scenario the fix was built and tested against. Needs the user's explicit decision
+  before merge: accept a narrower, documented guarantee; revisit the correlation model; or scope
+  this as a tracked, named gap rather than letting `BL-B108.md` read as E1 unconditionally
+  delivered across optics.
+
+### Optional Refinements (round 2)
+
+- **`implementation.md`'s "~1.5%" no-omniscience figure measured independently at ~2.1-2.5%** —
+  same direction, same order of magnitude, within the test's own 5% tolerance, not a defect worth
+  blocking on, but worth a one-line correction if the figure is cited again.
+- **The geometry sweep that found the fold boundary (far 4.3-5.0 km / near 2.0-2.8 km, 20+ bias
+  draws) is not currently captured as a test.** If the user's decision above is "accept a narrower
+  guarantee," a parametrized sweep test recording where the boundary actually sits would turn this
+  from something only a reviewer's one-off probe currently shows into a regression fence against
+  the boundary moving silently in a future change to `RANGE_DECORRELATION_RANGE_RATIO`/
+  `CROSS_OPTIC_RANGE_SHARE`/the gate threshold.
+
+### Verdict (round 2)
+
+CHANGES REQUIRED
+
+### Review Confidence (round 2)
+
+Full read, plus direct execution of the real code against geometries beyond the plan's own
+dispatch-named scenario (not inspection of the comment/docstring) for the central question (default
+fittedness/robustness). Checks re-run independently and matched the implementer's reported numbers.
