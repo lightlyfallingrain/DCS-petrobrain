@@ -380,3 +380,14 @@ same way the 9K113 slew loop overrides ED's own sight slewing (`plans/9k113-sigh
 `aircraft-layer/research/2026-10-22-9k113-ai-axis-obedience-prior-art.md`). Stage 0 measures
 whether the per-frame write wins, at what write point/rate, and whether ED's AI fights back
 (oscillation, integrator wind-up when its commands are ignored).
+
+### Wobble on the flight axes (user, verbatim, 2026-10-31)
+
+> *"Regardless of how writing control axis values are done, that (invisible) wobble is needed on the
+> conrol axises, similat to 9K113 axises"*
+
+Reading: every flight-axis write (cyclic pitch/roll, pedal, collective), in both control states,
+carries the same invisible per-frame wobble the 9K113 sight axes use (`plans/9k113-sight-pointing/
+plan.md`, `SERVO_WOBBLE` dither/flicker) -- a requirement, not a stage-0 question. Its amplitude
+must stay below anything visible in the aircraft's motion or the cockpit stick animation; stage 0
+measures that bound and whether the wobble is what makes the write stick against ED's AI.
