@@ -269,3 +269,57 @@ So the lift-vector section describes **what the corrections act on**, not a mode
   is **not** a precondition. What stage 0 still needs is the sign and rough size of each response
   and the read side (attitude, rates, IAS, vertical speed, radar altitude, control positions per
   frame) — the inputs a feedback loop closes on.
+
+
+## Goal-check answers (user, verbatim, 2026-10-31)
+
+Questions from `alignment.md` (goal check, CONCERNS, 2026-10-31): 1 stop word; 2 slight bank at
+handover; 3 emergency take-back and "confirm?"; 4 a goal that stalls; 5 naked-eye calls while
+flying; 6 radar vs barometric, trees; 7 what the hands-off time is for; 8 seat jump while he flies.
+
+> *"1 - "level [off|flight]", "stop turn", "[fly] straight"*
+> *2 - heading. Let's say <5 deg bank gets level flight.*
+> *3 - no confirm. No key at this stage, will come back to that if needed.*
+> *4 - no, just fly within parameters*
+> *5 - yes*
+> *6 - AGL, unless player commands barometric. DCS radar alt does to see trees, I believe.*
+> *7 - look out, map, radios, navigation. Also, switch to copilot seat and use the 9K113, this is a
+> key reason for building Petrovich flight controlling. We'll build more proper handling of seat
+> change later, I need the flight controlling to work first.*
+> *8 - no change. This is not really about which seat is controlling the aircraft, but whether AI or
+> human player is controlling. Since player may swap seats at will, Petrovich will too at the same
+> time. Player hands off must remain player hands off and therefore Petrovich flying must remain
+> Petrovich flying.*
+>
+> *General rule: nothing is ever exact when flying old planes. The analogue instruments themselves
+> cannot give exact values and maintaining a given number exactly is not necessary. E.g. 200 km/h
+> desired speed can vary +-10 km/h with no problem. Maintaining 300 m AGL can also vary. Smoothness
+> is more important than maintaining an excat value. As general rule +-10% variation is allowed, but
+> of course goal is to still align with the desired value."*
+
+Reading (main loop):
+
+- (1) Stop/level vocabulary joins the first set: "level", "level off", "level flight", "stop turn",
+  "straight", "fly straight" -> roll out, hold current heading.
+- (2) At takeover, bank < 5 deg is level flight: hold heading. >= 5 deg continues the turn
+  (settled point 3). 5 deg is a tunable judgement default.
+- (3) "I have controls" acts at once, never "confirm?", whatever STT confidence the handover token
+  arrives with. No bound key now.
+- (4) No "unable" callout for a goal not reached. He flies within the aircraft's limits and gets as
+  close as those allow, silently.
+- (5) While flying he still makes naked-eye contact and threat calls and answers "what do you see?".
+  Only the optics (binoculars, 9K113) stop.
+- (6) Height hold is AGL by default, barometric on command. User believes DCS radar altitude sees
+  trees (reads canopy top, not bare ground); stage 0 confirms.
+- (7) Hands-off time: look out, map, radios, navigation -- and **the key case: the player moves to
+  the copilot seat and works the 9K113 while Petrovich flies.** Proper seat-change handling comes
+  later; flight control working comes first.
+- (8) Control authority is AI-vs-human, not seat-bound. When the player swaps seats Petrovich swaps
+  too; if he had the controls he keeps them (from the pilot seat). This refines the 2026-10-21 rule
+  ("Petrovich operates the seat the player does not occupy"): it still holds for *which seat*, and
+  handover state carries across the swap. Stage 0 must probe raw-axis writes with the player in the
+  operator seat -- the key case, not an edge.
+- **General tolerance rule:** hold targets within about +-10% (e.g. 200 +-10 km/h, 300 m AGL
+  loosely), always converging on the value; smoothness beats precision. This governs controller
+  gains and every acceptance test: no test asserts tight tracking; tests assert smooth convergence
+  and staying in band.
