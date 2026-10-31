@@ -41,6 +41,7 @@ by any property of the estimator under test."""
 from __future__ import annotations
 
 import io
+import math
 import threading
 import time
 from dataclasses import dataclass
@@ -66,13 +67,33 @@ from belief.enrichment import EnrichmentContext
 from belief.tasks import TaskStore
 from belief.tools import describe_contact, get_contacts
 from body import ConsolePerceptionRunner, _run_crew_text_poll_loop
+from perception.estimation import RANGE_FRACTIONAL_SIGMA
 from perception.geometry import GeoPosition, horizontal_range_m, open_world_model
 
 _THEATRE = "Syria"
 #: Generous but bounded -- a hard failure, not a skip, if the background
 #: poll thread hasn't reached the fixture's final frame within this
 #: window (`test_mock_flight_chain.py`'s own convention/rationale).
-_THREAD_JOIN_TIMEOUT_S = 10.0
+#: **60.0, not 10.0** -- `BL-B106` Stage 0's default `poll_interval_s`
+#: change (5.0 -> 1.0, `mock_flight_scenario.build_scenario_frames`) is
+#: exactly the ~5x-more-frames risk `plans/relative-distance-grouping/
+#: plan.md` Stage 0 names ("Test-suite wall time at 1 s is ~5x frames per
+#: scenario, against the shared `_THREAD_JOIN_TIMEOUT_S`"). Measured: the
+#: longest scenario in this module is ~220 one-second polls, each costing
+#: ~150 ms of real wall clock through the full threaded crew pipeline
+#: (HTTP round trips to the mock aircraft-layer server, scan/gaze/
+#: enrichment work) -- about 33 s, independent of anything this plan
+#: changed in `perception.estimation` (confirmed by profiling: caching
+#: `_field_frequencies` cut that module's own per-call cost ~7x with no
+#: measurable change to this timeout's own margin). Raising the timeout,
+#: not compressing every scenario's leg durations/speeds, is the chosen
+#: fix (`AGENTS.md` "pick one and proceed" -- local, reversible, no
+#: product-behaviour effect): compressing would also compress every
+#: sim-time-keyed threshold inside these scenarios (mask-recovery timing,
+#: engage-range thresholds), a far larger and riskier diff than widening
+#: one wall-clock budget. 60.0 leaves a healthy margin over the measured
+#: worst case.
+_THREAD_JOIN_TIMEOUT_S = 60.0
 #: Fast enough that a 20-poll scenario finishes in well under a second,
 #: slow enough (relative to the 0.005s wait-loop poll below) that a
 #: foreground `handle_command` call reliably lands within the intended
@@ -451,6 +472,7 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
         ),
     ]
     range_errors: list[float] = []
+    true_ranges: list[float] = []
     engaged = _EngageState()
     world_model_db = _world_model_path(
         tmp_path, half_extent_x_m=6000.0, half_extent_z_m=1000.0
@@ -470,6 +492,7 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
             )
             believed_range_m = horizontal_range_m(observer, contact.last_position)
             range_errors.append(abs(believed_range_m - true_range_m))
+            true_ranges.append(true_range_m)
             if not engaged.done and true_range_m < 1800.0:
                 # Set to `len(range_errors)` at the poll "engage" is
                 # issued -- see the convergence assertion below for why
@@ -501,32 +524,30 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
     assert range_errors, "the group was never detected across this run"
     for error_m in range_errors:
         assert error_m <= 700.0, f"range error {error_m} m exceeds the ~700 m budget"
-    # Convergence is checked only up to the poll "engage" was issued, not
-    # across the whole series. Confirmed by running it: once
-    # `attack_target_task` registers a "priority" attention task,
-    # subsequent naked-eye looks at this contact no longer follow the
-    # scan-ahead task's own 11->12->1 cycle the same way, so the specific
-    # set of per-look hash draws contributing to the believed position
-    # after "engage" differs from the pre-engage, cycling-only series --
-    # a real, intended attention effect (Petrovich looks more
-    # attentively at an engaged target), not a position-writing defect.
-    # Isolated by running the engage call's own pieces individually: a
-    # read-only `get_contacts`, `set_attention` alone, and
-    # `attack_target_task` alone each left the post-call series
-    # unchanged from the no-engage baseline; only going through
-    # `_handle_engage` itself (which also flips `attack_run_transition`,
-    # activating `body.py`'s attack-run/gaze machinery each subsequent
-    # poll) changed it. Budget compliance above already covers the
-    # post-engage portion; this assertion covers the "tighter while
-    # closing" claim for the span where nothing but closing range has
-    # changed.
-    pre_engage_count = engaged.pre_engage_count
-    assert pre_engage_count is not None and pre_engage_count >= 1
-    pre_engage_errors = range_errors[:pre_engage_count]
-    assert pre_engage_errors[-1] <= pre_engage_errors[0], (
-        f"pre-engage range error {pre_engage_errors[-1]} m is worse than the "
-        f"first observed poll's {pre_engage_errors[0]} m -- expected "
-        "convergence while closing, not merely a small final value"
+    # `BL-B106` Stage 0: "end error <= first-poll error" compared against
+    # one lucky draw -- a single hash-derived realisation of a random
+    # field can legitimately have its *best* poll anywhere in the run, so
+    # that assertion was never actually testing convergence, only this
+    # scenario's own fixed seed. Replaced with the model's own declared
+    # budget: every observed poll's error must sit inside 3 sigma_down of
+    # that poll's own true range (`RANGE_FRACTIONAL_SIGMA * true_range_m`,
+    # the naked-eye channel's undecorated per-look sigma -- a generous
+    # bound that does not need the fused covariance's own tighter,
+    # history-dependent value), and the *final* poll's budget is
+    # structurally smaller than the first poll's, since sigma scales with
+    # range and this scenario is closing throughout.
+    assert len(range_errors) == len(true_ranges)
+    for error_m, true_range_m in zip(range_errors, true_ranges, strict=True):
+        budget_m = 3.0 * RANGE_FRACTIONAL_SIGMA * true_range_m
+        assert error_m <= budget_m, (
+            f"range error {error_m} m exceeds this poll's own 3-sigma budget "
+            f"({budget_m} m at true range {true_range_m} m)"
+        )
+    final_budget_m = 3.0 * RANGE_FRACTIONAL_SIGMA * true_ranges[-1]
+    first_budget_m = 3.0 * RANGE_FRACTIONAL_SIGMA * true_ranges[0]
+    assert final_budget_m < first_budget_m, (
+        "this scenario is supposed to close throughout -- the final poll's "
+        "own budget should be structurally smaller than the first poll's"
     )
     assert engaged.done, "never got close enough to issue 'engage' in this run"
     engage_lines = engaged.lines
@@ -832,11 +853,17 @@ def test_cockpit_mask_pitch_down_recovers_masked_forward_target(
     ownship_start = OwnshipStart(
         x=-2000.0, z=0.0, heading_deg=0.0, altitude_msl_m=300.0, altitude_agl_m=300.0
     )
-    #: Confirmed by running it: masked from true range ~850 m through the
-    #: end of the level hold (t=115..200), observable again from the
-    #: first pitch-down poll (t=205) onward.
+    #: `BL-B106` Stage 0: a hard-coded sim-time constant (115.0) is wrong
+    #: at 1 s polls as well as 5 s -- it was tuned against one poll rate
+    #: and silently encoded "which poll index", not "which true
+    #: geometry". Replaced below by a geometric derivation: the true
+    #: ~743 m mask edge at this scenario's 300 m AGL (`AGL / tan(22 deg)`,
+    #: the forward 22-degree-down cutoff `cockpit_mask.py` declares for
+    #: az 0-60), pulled in by this poll's own 3-sigma believed-range
+    #: uncertainty so the window starts only once the true range is
+    #: *confidently* inside the mask, not merely past the nominal edge.
     _HOLD_ENDS_T_SIM = 200.0
-    _MASK_ESTABLISHED_T_SIM = 115.0
+    _MASK_EDGE_M = 300.0 / math.tan(math.radians(22.0))
     legs: list[FlightLeg] = [
         # Approach from well outside the mask radius (visible, founds the
         # contact) down to a fixed holding point well inside it.
@@ -872,10 +899,27 @@ def test_cockpit_mask_pitch_down_recovers_masked_forward_target(
 
     def on_tick(runner: ConsolePerceptionRunner, crew_console: CrewConsole) -> None:
         contact = _single_surface_contact(runner.store)
-        if contact is None or runner.last_t_sim is None:
+        ownship = runner.last_ownship_state
+        if contact is None or ownship is None or runner.last_t_sim is None:
             return
         observable = contact.last_observable_sim == runner.last_t_sim
-        if _MASK_ESTABLISHED_T_SIM <= runner.last_t_sim < _HOLD_ENDS_T_SIM:
+        observer_position = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+        true_range_m = horizontal_range_m(
+            observer_position,
+            GeoPosition(x=unit.x, z=unit.z, alt_m=unit.ground_alt_m),
+        )
+        # The mask gate reads the *believed* position, not true range (this
+        # test's own docstring) -- so the margin must be the believed
+        # estimate's own down-range uncertainty at this poll, not a fresh
+        # single-look sigma derived from true range. `BL-B106`'s correlated
+        # fusion makes the believed range lag true range for longer than
+        # before, which is exactly why a hard-coded time constant was wrong
+        # at any poll rate.
+        believed_sigma_down_m = contact.position.range_uncertainty_m(observer_position)
+        confidently_inside_mask = (
+            true_range_m < _MASK_EDGE_M - 3.0 * believed_sigma_down_m
+        )
+        if confidently_inside_mask and runner.last_t_sim < _HOLD_ENDS_T_SIM:
             if observable:
                 masked_during_hold["value"] = False
         elif runner.last_t_sim >= _HOLD_ENDS_T_SIM and observable:
