@@ -368,3 +368,15 @@ altitude targets through its own commands) as a parked-state path.
 Reading: rejected outright. In the parked state Petrobrain's own loop must fly the aircraft; ED's AI
 is to be replaced, not commanded. ED-AI command interfaces are of interest only as a way to
 **disable or neutralise** it, never as the control path.
+
+### Probable solution: overpower the axes (user, verbatim, 2026-10-31)
+
+> *"Probable solution is to somehow overpower the cyclic, rudder and collective control values that
+> DCS AI sets. Very similar to overpowerring the 9K113 sight slewing."*
+
+Reading: the parked-state hypothesis to probe first is the 9K113 precedent -- Petrobrain writes the
+cyclic (pitch/roll), pedal and collective values every frame so they win over ED's AI writes, the
+same way the 9K113 slew loop overrides ED's own sight slewing (`plans/9k113-sight-pointing/plan.md`,
+`aircraft-layer/research/2026-10-22-9k113-ai-axis-obedience-prior-art.md`). Stage 0 measures
+whether the per-frame write wins, at what write point/rate, and whether ED's AI fights back
+(oscillation, integrator wind-up when its commands are ignored).
