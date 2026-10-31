@@ -1,9 +1,9 @@
 """Tests for `perception.estimation` -- the error model and perturbation
 `plans/precise-position-belief/plan.md` Stages 1-2 introduced, extended by
 `BL-B64` Stage 1b, and restructured by `plans/relative-distance-grouping/
-plan.md` (`BL-B106`) Stage 1.
+plan.md` (`BL-B108`) Stage 1.
 
-**`BL-B106`: the exact-offset pins on the down-range axis are gone,
+**`BL-B108`: the exact-offset pins on the down-range axis are gone,
 replaced by statistical property tests** (plan escalation item 1, user
 answer "ok", 2026-10-31) -- the down-range draw is now a correlated
 three-part model (module docstring), not a single deterministic-per-
@@ -68,7 +68,7 @@ def test_down_range_sigma_dominates_cross_range_sigma() -> None:
 
 
 def test_binocular_optic_gets_its_own_declared_range_scale() -> None:
-    """`BL-B106` Q3 (user, 2026-10-31): binoculars now get a tighter
+    """`BL-B108` Q3 (user, 2026-10-31): binoculars now get a tighter
     absolute down-range sigma than naked eye, `BINOCULAR_RANGE_SIGMA_
     SCALE` (0.7) of it -- closing the live asymmetry `BL-B55`'s roadmap
     entry once flagged. Cross-range is unaffected (binoculars are not a
@@ -87,7 +87,7 @@ def test_sight_optics_get_a_smaller_down_range_sigma_than_the_naked_eye() -> Non
     estimate better than the naked eye's, though still not exact -- the
     down-range sigma must shrink for both sight optics, and narrow (finer
     stadiametric resolution) must shrink it further than wide, and both
-    tighter than binoculars (`BL-B106`)."""
+    tighter than binoculars (`BL-B108`)."""
     _cross_eye, down_eye = look_sigma_m(3000.0, UNAIDED_OPTIC)
     _cross_bino, down_bino = look_sigma_m(3000.0, BINOCULAR_OPTIC)
     _cross_wide, down_wide = look_sigma_m(3000.0, SIGHT_WIDE_OPTIC)
@@ -157,7 +157,7 @@ def test_perturbed_range_is_floored_at_zero() -> None:
 
 
 def test_systematic_bias_never_redrawn_for_the_same_object_id() -> None:
-    """`BL-B106`: the down-range half of the per-object systematic bias is
+    """`BL-B108`: the down-range half of the per-object systematic bias is
     retired (module docstring) -- `systematic_bias_m` now returns a single
     cross-range (bearing) float."""
     sigma_cross_m, _sigma_down_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
@@ -215,7 +215,7 @@ def test_perturbed_relative_direction_identity_holds_for_degenerate_offset() -> 
     assert (forward_m, right_m, up_m) == (0.0, 0.0, 0.0)
 
 
-# -- BL-B106 Stage 1: the correlated three-part down-range model --------
+# -- BL-B108 Stage 1: the correlated three-part down-range model --------
 
 
 def test_absolute_down_range_rms_matches_fractional_sigma() -> None:
@@ -405,7 +405,7 @@ def test_stable_down_sigma_m_is_the_s_and_f_parts_combined() -> None:
 
 
 # -- plans/bl-b104-ground-contacts-on-ground/plan.md Stage 3, restructured
-# by BL-B106 Stage 1 --------------------------------------------------
+# by BL-B108 Stage 1 --------------------------------------------------
 
 
 def test_surface_range_estimate_cue_b_absent_at_level_look_matches_cue_a() -> None:
@@ -576,7 +576,7 @@ def test_surface_range_estimate_never_references_relative_direction_channel() ->
 
 
 def test_surface_range_estimate_cue_b_uses_an_independent_field_from_cue_a() -> None:
-    """`BL-B106`: cue B's depression draw must be keyed on its own seed
+    """`BL-B108`: cue B's depression draw must be keyed on its own seed
     domain (`field_domain="depression"`), not share cue A's realisation --
     across many poll keys at a fixed steep geometry (cue B present
     throughout), the fused result must not just track cue A's own draw one
@@ -620,7 +620,7 @@ def test_surface_range_estimate_converges_to_a_stable_value_not_truth() -> None:
     """Repeated looks from the *same* geometry (poll key varying only the
     small `a`-weighted term) must converge toward the geometry's own
     stable draw, not toward truth (E4: dwell does not make range exact) --
-    the `BL-B106` replacement for the retired per-object bias's own
+    the `BL-B108` replacement for the retired per-object bias's own
     convergence test."""
     true_distance_m = 2000.0
     height_above_unit_m = 300.0

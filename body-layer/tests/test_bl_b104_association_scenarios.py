@@ -256,7 +256,7 @@ def _observation_at_declared_geometry(
 
 
 def test_far_group_seen_alone_then_near_group_appears_stays_two_contacts() -> None:
-    """`BL-B106` Stage 0/Stage 2's own "Worked check" -- the exact fold
+    """`BL-B108` Stage 0/Stage 2's own "Worked check" -- the exact fold
     `explore-notes.md` recorded in the post-merge 1 s analysis of
     `BL-B104`'s own scenario flights: a contact founded from a single
     look at 4.6 km, then a second look at 2.4 km (the real range of a

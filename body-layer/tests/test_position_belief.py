@@ -277,7 +277,7 @@ def test_fold_position_never_claims_more_precision_than_the_floor() -> None:
     Stage 2's revised floor (cross: `SYSTEMATIC_BIAS_FRACTION *
     sigma_cross_m`, unchanged; down: `rho_view * stable_share() *
     sigma_down_m`, geometry-dependent). **Rewritten, not merely signature-
-    patched (`BL-B106` escalation item 1)**: the old test cycled `bearing
+    patched (`BL-B108` escalation item 1)**: the old test cycled `bearing
     = i % 360` across 200 folds and compared against the flat pre-stage
     floor (`0.4 * sigma`, both axes) -- with each poll only 1 degree from
     the last, `rho_view` stays near 1.0 throughout this run, so the actual
@@ -496,9 +496,9 @@ def test_fold_position_perpendicular_looks_still_triangulate_unchanged() -> None
 
 
 def test_fold_position_repeated_identical_look_does_not_keep_tightening() -> None:
-    """**Rewritten, not merely signature-patched (`BL-B106` escalation
+    """**Rewritten, not merely signature-patched (`BL-B108` escalation
     item 1) -- this test used to be named `..._still_tightens` and assert
-    the opposite of what follows.** Pre-`BL-B106`, every look's down-range
+    the opposite of what follows.** Pre-`BL-B108`, every look's down-range
     error was redrawn independently, so fusing the *same* look repeatedly
     was ordinary repeated-measurement averaging and kept tightening. Under
     the correlated model, a look from the *same* bearing and range through

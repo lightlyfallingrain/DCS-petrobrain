@@ -75,7 +75,7 @@ _THEATRE = "Syria"
 #: Generous but bounded -- a hard failure, not a skip, if the background
 #: poll thread hasn't reached the fixture's final frame within this
 #: window (`test_mock_flight_chain.py`'s own convention/rationale).
-#: **60.0, not 10.0** -- `BL-B106` Stage 0's default `poll_interval_s`
+#: **60.0, not 10.0** -- `BL-B108` Stage 0's default `poll_interval_s`
 #: change (5.0 -> 1.0, `mock_flight_scenario.build_scenario_frames`) is
 #: exactly the ~5x-more-frames risk `plans/relative-distance-grouping/
 #: plan.md` Stage 0 names ("Test-suite wall time at 1 s is ~5x frames per
@@ -525,7 +525,7 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
     assert range_errors, "the group was never detected across this run"
     for error_m in range_errors:
         assert error_m <= 700.0, f"range error {error_m} m exceeds the ~700 m budget"
-    # `BL-B106` Stage 0: "end error <= first-poll error" compared against
+    # `BL-B108` Stage 0: "end error <= first-poll error" compared against
     # one lucky draw -- a single hash-derived realisation of a random
     # field can legitimately have its *best* poll anywhere in the run, so
     # that assertion was never actually testing convergence, only this
@@ -563,7 +563,7 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
 @pytest.mark.xfail(
     strict=False,
     reason=(
-        "BL-B106 Stage 2 finding, not fixed here: this scenario's own"
+        "BL-B108 Stage 2 finding, not fixed here: this scenario's own"
         " attention/engage flow raises binoculars partway through, so the"
         " near contact's stored anchor is through UNAIDED_OPTIC while the"
         " far group's later look (once the near group is masked) arrives"
@@ -571,7 +571,7 @@ def test_run2_shallow_approach_range_error_converges_and_bounded(
         " correlation` returns (0.0, 0.0) for a different optic by design"
         " (module docstring: belief must not be able to infer the field's"
         " value exactly from two fully-correlated optics), so the gate"
-        " falls back to the independent sum -- the pre-BL-B106 width -- and"
+        " falls back to the independent sum -- the pre-BL-B108 width -- and"
         " merges. This is the plan's own named, accepted risk"
         " ('Large old absolute error can absorb a new nearby group after a"
         " big geometry change ... Honest under the model ... Watch for it"
@@ -875,7 +875,7 @@ def test_cockpit_mask_pitch_down_recovers_masked_forward_target(
     ownship_start = OwnshipStart(
         x=-2000.0, z=0.0, heading_deg=0.0, altitude_msl_m=300.0, altitude_agl_m=300.0
     )
-    #: `BL-B106` Stage 0: a hard-coded sim-time constant (115.0) is wrong
+    #: `BL-B108` Stage 0: a hard-coded sim-time constant (115.0) is wrong
     #: at 1 s polls as well as 5 s -- it was tuned against one poll rate
     #: and silently encoded "which poll index", not "which true
     #: geometry". Replaced below by a geometric derivation: the true
@@ -933,7 +933,7 @@ def test_cockpit_mask_pitch_down_recovers_masked_forward_target(
         # The mask gate reads the *believed* position, not true range (this
         # test's own docstring) -- so the margin must be the believed
         # estimate's own down-range uncertainty at this poll, not a fresh
-        # single-look sigma derived from true range. `BL-B106`'s correlated
+        # single-look sigma derived from true range. `BL-B108`'s correlated
         # fusion makes the believed range lag true range for longer than
         # before, which is exactly why a hard-coded time constant was wrong
         # at any poll rate.

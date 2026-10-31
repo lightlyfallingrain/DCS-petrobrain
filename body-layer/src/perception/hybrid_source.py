@@ -126,7 +126,7 @@ logger = logging.getLogger(__name__)
 SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 
 #: This channel's own `optic_class` for `perception.estimation`'s
-#: correlated field model (`BL-B106` Stage 1) -- a scope/radar detection is
+#: correlated field model (`BL-B108` Stage 1) -- a scope/radar detection is
 #: not looked at through any of `perception.optics`' named optics, but
 #: still needs a field-seed key distinct from every one of them, so a
 #: scope-channel look and a naked-eye look of the same real object are

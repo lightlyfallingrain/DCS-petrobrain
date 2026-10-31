@@ -348,7 +348,7 @@ class Covariance2D:
         )
 
     def __sub__(self, other: Covariance2D) -> Covariance2D:
-        """`BL-B106` Stage 2 -- `correlated_innovation`'s `S = P_est +
+        """`BL-B108` Stage 2 -- `correlated_innovation`'s `S = P_est +
         P_look - (C + C^T)` needs this; no caller before this stage ever
         subtracted two covariances."""
         return Covariance2D(
@@ -418,7 +418,7 @@ def covariance_from_uncertainty(
 @dataclass(frozen=True, slots=True)
 class LookAnchor:
     """The geometry and optic of the one look `PositionEstimate.anchor`
-    remembers -- `plans/relative-distance-grouping/plan.md` (`BL-B106`)
+    remembers -- `plans/relative-distance-grouping/plan.md` (`BL-B108`)
     Stage 2. Founding sets it from the founding look; every genuine fuse
     sets it to the new look (module docstring's "Co-moving Fields" table
     -- every other `PositionEstimate` construction site carries the prior
@@ -516,7 +516,7 @@ def _down_axis_unit(bearing_deg_value: float) -> tuple[float, float]:
 def _is_valid_covariance(covariance: Covariance2D) -> bool:
     """`False` for a 2x2 matrix that cannot be a real covariance -- a
     negative trace, or a negative determinant (one axis's variance
-    gone negative even though the trace is still positive) -- `BL-B106`
+    gone negative even though the trace is still positive) -- `BL-B108`
     Stage 2's own found defect: the Bar-Shalom-Campo update's `P_est -
     K @ (P_est - C^T)` is **not** guaranteed positive-semidefinite by
     construction the way the old independent information-form sum was
@@ -643,7 +643,7 @@ class PositionEstimate:
     construction (`as_of_sim == fused_at_sim`, `covariance ==
     fused_covariance`); they diverge only across one or more holds.
 
-    `anchor` (`BL-B106` Stage 2) is the one look `correlated_innovation`
+    `anchor` (`BL-B108` Stage 2) is the one look `correlated_innovation`
     reasons from -- `None` only for the `speech.py` placeholder `Contact`
     (module docstring's "Co-moving Fields" table), which has no real look
     behind it at all."""
@@ -724,7 +724,7 @@ def estimate_from_look(
     against -- `fold_position`'s founding case, factored out so a founding
     contact and a re-observed one build their look covariance identically.
 
-    `look_range_m`/`observer_x`/`observer_z` (`BL-B106` Stage 2) are the
+    `look_range_m`/`observer_x`/`observer_z` (`BL-B108` Stage 2) are the
     three numbers `LookAnchor` needs beyond what `uncertainty` already
     carries (`optic_class`/`sigma_down_stable_m`) -- see that dataclass's
     own docstring."""
@@ -763,7 +763,7 @@ def fold_position(
 ) -> PositionEstimate:
     """Fuse one look `(x, z, uncertainty, look_bearing_deg, look_range_m)`
     into `prior` (`None` for a founding percept) -- see module docstring.
-    **`BL-B106` Stage 2**: the fuse itself is now the standard Bar-Shalom-
+    **`BL-B108` Stage 2**: the fuse itself is now the standard Bar-Shalom-
     Campo update for two measurements with a known cross-correlation `C`
     (`correlated_innovation`), not a plain information-form sum of two
     *independent* covariances -- a contact's down-range error is now
@@ -790,7 +790,7 @@ def fold_position(
     and discarded: the look is not fused into the mean or covariance at
     all, only elapsed-time inflation is applied, exactly the "hold"
     outcome `clamp_to_detection_envelope` uses for the other defect.
-    **`BL-B106` Stage 2 adds a second trigger for the same hold branch**:
+    **`BL-B108` Stage 2 adds a second trigger for the same hold branch**:
     `_is_valid_covariance(fused_covariance)` -- the correlated update's
     own `S` can go near-singular when the two sides are highly
     correlated and similar in magnitude (repeated same-geometry looks,
@@ -1062,7 +1062,7 @@ def _apply_floor(
     -- so the floored covariance becomes both the reported `covariance` and
     the new `fused_covariance` base, keeping that invariant intact.
 
-    **`BL-B106` Stage 2: the down-range half of the floor is now `rho_view
+    **`BL-B108` Stage 2: the down-range half of the floor is now `rho_view
     * stable_share() * sigma_down_m` of this look, not a flat fraction.**
     The cross-range half is unchanged (`SYSTEMATIC_BIAS_FRACTION`, bearing
     out of scope). `rho_view` is the same correlation `correlated_

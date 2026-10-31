@@ -125,7 +125,7 @@ def _reference_cohesive(
     production's own pair loop also calls, so importing it could not pin
     the formula. It too was deleted once this copy replaced its only use.
 
-    **`BL-B106` Stage 3** added a second, along-line test to the same
+    **`BL-B108` Stage 3** added a second, along-line test to the same
     predicate (`group_salience._cohesive_from_terms`'s own docstring) --
     mirrored here, per-pair and unhoisted, rather than imported, for the
     same reason the angular test's own copy exists: this file pins the

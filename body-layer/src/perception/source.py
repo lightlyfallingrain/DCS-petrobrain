@@ -175,7 +175,7 @@ class PositionUncertainty:
     along `Observation.bearing_deg`/`Percept.bearing_deg`.
 
     `sigma_down_stable_m`/`optic_class` -- `plans/
-    relative-distance-grouping/plan.md` (`BL-B106`) Stage 1. `sigma_down_m`
+    relative-distance-grouping/plan.md` (`BL-B108`) Stage 1. `sigma_down_m`
     is the look's *total* down-range sigma; `sigma_down_stable_m` is the
     portion of it that is geometry-correlated rather than redrawn every
     look (`perception.estimation.stable_down_sigma_m`) -- what `belief.
@@ -186,7 +186,7 @@ class PositionUncertainty:
     independent (module docstring of `perception.estimation`). Both
     perceived metadata, same footing as `sigma_cross_m`/`sigma_down_m`:
     a channel's own honest statement of its error model, never a truth
-    field. Defaulted (`0.0`/`""`) so every pre-`BL-B106` construction site
+    field. Defaulted (`0.0`/`""`) so every pre-`BL-B108` construction site
     (test fixtures included) keeps compiling; `""` is read by `belief/` as
     "unknown optic," never matching any real optic class, so an
     uninstrumented look is treated as uncorrelated with anything (the

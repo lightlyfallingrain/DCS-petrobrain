@@ -1,11 +1,11 @@
 ---
 name: project-relative-distance-grouping-clean-trace
-description: relative-distance-grouping (BL-B106) plan check — traced cleanly, and the optic-ranging claim was verified against live code, not just plan prose
+description: relative-distance-grouping (BL-B108) plan check — traced cleanly, and the optic-ranging claim was verified against live code, not just plan prose
 metadata:
   type: project
 ---
 
-Plan check for `relative-distance-grouping` (BL-B106) came back ALIGNED. Every E1–E7 and every
+Plan check for `relative-distance-grouping` (BL-B108) came back ALIGNED. Every E1–E7 and every
 Q1–Q4 answer in `explore-notes.md` landed on a named stage in `plan.md`, and the plan's own "How
 each alignment item is answered" table matched what the code showed.
 

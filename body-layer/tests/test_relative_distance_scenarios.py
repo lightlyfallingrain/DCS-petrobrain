@@ -1,4 +1,4 @@
-"""`BL-B106` Stage 5 -- the relative-distance-grouping scenario suite
+"""`BL-B108` Stage 5 -- the relative-distance-grouping scenario suite
 (`plans/relative-distance-grouping/plan.md` Stage 5, E1-E7).
 
 **Built on direct `Observation`/`ContactStore` construction through the

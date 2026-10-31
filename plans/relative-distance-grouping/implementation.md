@@ -151,7 +151,7 @@ No other subproject was touched.
    correlation` returns `(0.0, 0.0)` for a different optic by design
    (no-omniscience: belief must not infer the field's value exactly
    from two fully-correlated optics), so the gate falls back to the
-   independent sum -- the pre-`BL-B106` width -- regardless of how
+   independent sum -- the pre-`BL-B108` width -- regardless of how
    close the geometry otherwise is. Left `xfail(strict=False)`,
    documented, not patched: weakening cross-optic independence to fix
    this one scenario would reopen the omniscience hole the plan's model

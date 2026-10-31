@@ -762,11 +762,11 @@ class TestLookTargetGeometry:
         once its `bearing_uncertainty_deg` narrows inside half a binocular
         field of view.
 
-        **Rewritten, not merely signature-patched (`BL-B106` escalation
-        item 1)**. The pre-`BL-B106` version of this test fused ten looks
+        **Rewritten, not merely signature-patched (`BL-B108` escalation
+        item 1)**. The pre-`BL-B108` version of this test fused ten looks
         from the *same* bearing and relied on independent-per-look fusion
         shrinking the estimate toward the old flat `SYSTEMATIC_BIAS_
-        FRACTION` floor -- exactly the model `BL-B106` replaces. Under the
+        FRACTION` floor -- exactly the model `BL-B108` replaces. Under the
         correlated model, repeated same-bearing looks are maximally
         correlated and do **not** keep tightening (`test_position_belief.
         py::test_fold_position_repeated_identical_look_does_not_keep_
@@ -775,7 +775,7 @@ class TestLookTargetGeometry:
         that case). **Alternating bearings (0, 90 degrees) -- real
         triangulation, decorrelated by `perception.estimation.
         RANGE_DECORRELATION_BEARING_DEG` -- is what now reaches the
-        floor and collapses the sweep**, which is the mechanism `BL-B106`
+        floor and collapses the sweep**, which is the mechanism `BL-B108`
         actually wants rewarded (E5: closing or a different look angle
         genuinely improves the estimate, dwelling from one place does
         not)."""

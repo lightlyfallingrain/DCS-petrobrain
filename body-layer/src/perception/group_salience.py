@@ -78,7 +78,7 @@ from perception.visibility import RESOLUTION_ANGULAR_RADIUS_RAD
 #: duplicated rather than imported -- `perception` must not import
 #: `belief` (project invariant), and this constant is not registered
 #: through `tuning.py` on either side, so there is no shared source to
-#: both read from. `BL-B106` Stage 3's along-line cohesion check uses the
+#: both read from. `BL-B108` Stage 3's along-line cohesion check uses the
 #: same "how many sigma" the belief-side gate trusts, so a change to one
 #: should be mirrored in the other -- see that constant's own docstring.
 _GATE_SIGMA_THRESHOLD: Final[float] = 3.0
@@ -107,7 +107,7 @@ def _resolvable_terms(
     bound has no mass or cohesion to contribute, and never enters the
     union-find pass below.
 
-    **`BL-B106` Stage 3**: `slant_range_m`/`size_m` are hoisted here too,
+    **`BL-B108` Stage 3**: `slant_range_m`/`size_m` are hoisted here too,
     beside the pre-existing terms, for exactly the same reason (module
     docstring's `BL-B40`/`BL-11` history) -- the along-line cohesion check
     the pair loop now also runs needs each candidate's own range and size,
@@ -161,7 +161,7 @@ def _cohesive_from_terms(
     """The cohesion predicate itself, as pure arithmetic over terms the
     caller has already computed: angular separation no greater than
     `GROUP_COHESION_GAP_UNIT_WIDTHS` of the two candidates' mean apparent
-    angular size, **and** (`BL-B106` Stage 3) along-line separation no
+    angular size, **and** (`BL-B108` Stage 3) along-line separation no
     greater than `GROUP_COHESION_GAP_UNIT_WIDTHS` mean unit widths (in
     metres this time, not angle) plus the relative-distance merge
     budget -- `_GATE_SIGMA_THRESHOLD * sqrt(2) * RANGE_RELATIVE_SHARE *

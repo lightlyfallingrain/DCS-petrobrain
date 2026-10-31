@@ -166,14 +166,14 @@ def test_below_confidence_floor_writes_nothing() -> None:
     assert memory.entries == []
 
 
-# --- BL-B106 Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in mission
+# --- BL-B108 Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in mission
 # memory... regardless of identification level") -- the `nameable`
 # (identification-level) gate is gone; `GROUP_ENTRY_CONFIDENCE_FLOOR`
 # stays as the first-entry gate at *every* level.
 
 
 def test_class_level_contact_gets_an_entry_on_founding() -> None:
-    """The unchanged case, restated explicitly for `BL-B106`: a class-level
+    """The unchanged case, restated explicitly for `BL-B108`: a class-level
     claim starts at `_DEFAULT_CONFIDENCE_BY_LEVEL[CLASS]` (0.6), already
     above the floor (0.5), so it is admitted the first time `step` sees
     it -- no reinforcement needed. (`test_group_entry_written_once_
@@ -211,7 +211,7 @@ def test_single_glimpse_presence_only_contact_gets_no_entry() -> None:
 def test_presence_only_contact_gets_an_entry_once_reinforcement_lifts_confidence() -> (
     None
 ):
-    """`BL-B106` Stage 4's whole point: a presence-only contact ("group,
+    """`BL-B108` Stage 4's whole point: a presence-only contact ("group,
     something") that is never classified further still earns a memory
     entry, once enough reinforcing looks lift its confidence to the
     floor -- the `nameable` gate that used to require `CLASS` specificity

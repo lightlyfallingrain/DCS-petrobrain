@@ -62,7 +62,7 @@ from mission_memory.store import MissionMemory
 #: Decision 3's admission floor for the `group` rule: a contact's
 #: classification confidence must be held at or above this value before
 #: its first memory entry is written, at *whatever* identification level
-#: it has (`BL-B106` Stage 4 dropped the separate `CLASS`-specificity
+#: it has (`BL-B108` Stage 4 dropped the separate `CLASS`-specificity
 #: gate this comment used to also require -- user, 2026-10-31: "keep the
 #: confidence floor" while every group is kept regardless of level).
 #: **Reuse-before-declaring per the plan** -- searched for an existing
@@ -300,7 +300,7 @@ def _maybe_write_entry_for_contact(
     phase: PhaseInfo | None,
     enrichment: EnrichmentContext | None,
 ) -> None:
-    """`BL-B106` Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in
+    """`BL-B108` Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in
     mission memory... regardless of identification level"): the
     `nameable` (identification-level) gate is gone -- a presence-only
     "group, something" contact is admitted on exactly the same footing

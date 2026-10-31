@@ -448,7 +448,7 @@ def test_cluster_centroid_alt_m_is_the_mean_of_its_members_own_altitude() -> Non
     assert clusters[0].centroid_alt_m == 500.0
 
 
-# --- BL-B106 Stage 3: the predicate itself is unchanged. Pin tests only --
+# --- BL-B108 Stage 3: the predicate itself is unchanged. Pin tests only --
 
 
 def test_overlapping_units_at_very_low_altitude_still_one_blob() -> None:
@@ -456,7 +456,7 @@ def test_overlapping_units_at_very_low_altitude_still_one_blob() -> None:
     "yes") -- two units at 2.0/2.5 km on one bearing, 30 m AGL: the
     depression difference (~10 arcmin) is still inside one unit's own
     angular size (~11 arcmin) at that altitude, so they still read as one
-    blob by angular overlap alone. `BL-B106` does not touch this
+    blob by angular overlap alone. `BL-B108` does not touch this
     predicate -- relative distance decides grouping only for things
     Petrovich already sees as separate (the 2026-09-18 rule stands)."""
     observer = GeoPosition(x=0.0, z=0.0, alt_m=30.0)
@@ -474,7 +474,7 @@ def test_overlapping_units_at_very_low_altitude_still_one_blob() -> None:
 def test_column_along_los_with_overlapping_neighbours_is_one_cluster() -> None:
     """Q2 (user: "one group") -- a column driving along the line of
     sight, each neighbour close enough to overlap angularly: single-link
-    chaining keeps the whole column one cluster, unchanged by `BL-B106`
+    chaining keeps the whole column one cluster, unchanged by `BL-B108`
     (that plan's relative-distance check lives in `belief.
     association_over_time`/`perception.group_salience`, never here)."""
     observer = GeoPosition(x=0.0, z=0.0, alt_m=200.0)
@@ -493,7 +493,7 @@ def test_separable_units_1500m_apart_in_one_look_are_two_clusters() -> None:
     """E2 (the clear case): units ~1.5 km apart along one line of sight,
     at an ordinary altitude (not Q1's very-low-altitude overlap case),
     are angularly separable and stay two clusters -- the predicate
-    `BL-B106` leaves untouched already gets this right; relative distance
+    `BL-B108` leaves untouched already gets this right; relative distance
     only has to decide the cases angular separability cannot, not
     re-decide this one."""
     observer = GeoPosition(x=0.0, z=0.0, alt_m=300.0)

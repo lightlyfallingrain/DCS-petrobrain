@@ -139,12 +139,12 @@ def test_empty_candidate_list_yields_no_salient_ids() -> None:
     assert group_salient_ids([], _OBSERVER, UNAIDED_OPTIC) == frozenset()
 
 
-# --- BL-B106 Stage 3: the along-line cohesion check ---------------------
+# --- BL-B108 Stage 3: the along-line cohesion check ---------------------
 
 
 def test_units_1km_apart_along_the_los_are_no_longer_mutually_salient() -> None:
     """At 4 km / 200 m AGL, two units a kilometre apart *along the line of
-    sight* used to count as cohesive by the pre-`BL-B106` angular-only
+    sight* used to count as cohesive by the pre-`BL-B108` angular-only
     test (zero cross-range offset means zero angular separation,
     regardless of range) -- `alignment.md`'s "which mechanisms" finding.
     The along-line check this stage adds rejects that pair outright: a

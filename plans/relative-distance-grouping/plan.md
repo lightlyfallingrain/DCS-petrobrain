@@ -1,4 +1,4 @@
-# Relative-distance grouping — plan (`BL-B106`)
+# Relative-distance grouping — plan (`BL-B108`)
 
 Architect pass 2026-10-31, on `feature/relative-distance-grouping` at `c2c3c6b0`. Inputs:
 `explore-notes.md` (the user's own words; the specification), `alignment.md` (goal check,
@@ -354,7 +354,7 @@ constructor (`BL-B71` lesson).
 
 This reverses `precise-position-belief`'s "uncertainty strictly decreases with looks" for
 same-geometry dwell. At merge, add a `Decision REVISED` pointer there and in `watch-reporting`
-Decision 5a-i (step 10). It also unblocks `[[BL-B107]]`, the second-group callout wording, which is
+Decision 5a-i (step 10). It also unblocks `[[BL-B109]]`, the second-group callout wording, which is
 only worth building once two groups on one bearing reliably exist.
 
 ### Decisions Requiring User Input

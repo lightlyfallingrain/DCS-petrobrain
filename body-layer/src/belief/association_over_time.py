@@ -446,7 +446,7 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     the class-compatibility gate must both pass. See module docstring's
     "Spatial gate" section for the 2D covariance test.
 
-    **`BL-B106` Stage 2**: the spatial budget `S` is no longer the plain
+    **`BL-B108` Stage 2**: the spatial budget `S` is no longer the plain
     sum of both sides' own covariances -- it is `belief.position_belief.
     correlated_innovation`'s `S`, which subtracts out the two sides'
     *stable* down-range cross-covariance before the Mahalanobis test.
@@ -516,7 +516,7 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     Order of `a`/`b` does not matter -- the covariance sum and the
     class-compatibility check are both symmetric.
 
-    **`BL-B106` Stage 2**: "the same helper, anchor against anchor" (plan
+    **`BL-B108` Stage 2**: "the same helper, anchor against anchor" (plan
     Stage 2) -- when both contacts carry an anchor, `S` is `correlated_
     innovation`'s, correlated on `b`'s own anchor geometry directly (no
     hypothesis step: there is no single "current observer" shared by two

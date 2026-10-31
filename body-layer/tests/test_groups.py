@@ -1807,7 +1807,7 @@ def test_extent_m_is_persisted_on_the_group() -> None:
     assert store.groups[0].extent_m == pytest.approx(600.0)
 
 
-# --- BL-B106 Stage 3: the cohesion formula is unchanged -- it is already
+# --- BL-B108 Stage 3: the cohesion formula is unchanged -- it is already
 # a top-down world gap (<=140 m backstop, <=500 m caps), so already
 # circular; relative distance's own tightening of the inputs is what was
 # missing (finding 1), not this formula. Pin tests only.

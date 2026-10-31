@@ -1,13 +1,13 @@
 """The perception-side error model and perturbation -- `plans/
 precise-position-belief/plan.md`, restructured by `plans/
-relative-distance-grouping/plan.md` (`BL-B106`) Stage 1. Replaces
+relative-distance-grouping/plan.md` (`BL-B108`) Stage 1. Replaces
 `naked_eye_source.py`'s reporting-vocabulary quantisation (the deleted
 `_quantise_bearing`/`_quantise_range_m`), which snapped every estimate onto
 one of a small number of buckets and, worse, snapped range onto the
 bucket's *upper bound* -- a systematic long bias of up to a full bucket
 width, not a conservative coarsening (plan's "The diagnosis, verified").
 
-**The model, as of `BL-B106`.** A look's down-range (along line-of-sight)
+**The model, as of `BL-B108`.** A look's down-range (along line-of-sight)
 error is no longer one independent-per-look draw plus a never-redrawn
 per-object bias. A real observer judges *relative* distance -- which of two
 things is further, whether a sighting is the thing seen before -- far
@@ -52,7 +52,7 @@ private to this module.
 m` scales `sigma_down_m`/`sigma_cross_m` by the active `Optic`.
 `UNAIDED_OPTIC` is unaffected by construction (both scales 1.0, pinned by
 `test_estimation.py`). `BINOCULAR_OPTIC` now gets a declared range scale
-too (`BINOCULAR_RANGE_SIGMA_SCALE`, `BL-B106`, Q3) -- better apparent-size
+too (`BINOCULAR_RANGE_SIGMA_SCALE`, `BL-B108`, Q3) -- better apparent-size
 judgement through glass tightens the absolute number as well as the
 relative one, between naked eye (1.0, loosest) and the two sight optics
 (0.5/0.3, tightest, stadimeter-aided). Cross-range from the sight's own
@@ -83,10 +83,10 @@ here and combined by `perturbed_bearing_range`:
 - **Cross-range (bearing)** keeps its own per-observation draw
   (`_deterministic_unit_gaussian_pair`, hashed off the observation id) plus
   a never-redrawn per-object systematic bias (`systematic_bias_m`, hashed
-  off the object id). Unchanged by `BL-B106` -- bearing's stable structure
+  off the object id). Unchanged by `BL-B108` -- bearing's stable structure
   is out of scope (plan's "Bearing ... is out of scope and unchanged").
 - **Down-range (range)** is the three-part draw above. **The per-object
-  systematic bias on this axis is retired** (`BL-B106`) -- the correlated
+  systematic bias on this axis is retired** (`BL-B108`) -- the correlated
   field model replaces it: a group's down-range error is now stable
   because it is drawn from a geometry-keyed field, not because an
   object-keyed bias never changes.
@@ -143,7 +143,7 @@ BEARING_SIGMA_DEG: Final[float] = tuning.real(
 #: "Precision is not omniscience, made structural") -- `belief.
 #: position_belief`'s fused-estimate floor is this same fraction of a
 #: single-look sigma, since the bias never averages out across repeated
-#: looks. **`BL-B106`: the down-range half of this bias is retired** -- see
+#: looks. **`BL-B108`: the down-range half of this bias is retired** -- see
 #: module docstring -- so this fraction now governs only the cross-range
 #: floor; the down-range floor is `stable_down_sigma_m` below.
 SYSTEMATIC_BIAS_FRACTION: Final[float] = 0.4
@@ -192,7 +192,7 @@ SIGHT_NARROW_RANGE_SIGMA_SCALE: Final[float] = tuning.real(
 )
 
 #: Down-range scale for a binocular look, relative to naked eye --
-#: `BL-B106` Q3 (user, 2026-10-31: *"With binoculars you see better and so
+#: `BL-B108` Q3 (user, 2026-10-31: *"With binoculars you see better and so
 #: can judge unit apparent size better. That'd give a better range
 #: estimate."*). Between naked eye (1.0, unchanged) and the two sight
 #: optics below (0.5/0.3, stadiametric-aided) -- a judgement default, not
@@ -211,7 +211,7 @@ BINOCULAR_RANGE_SIGMA_SCALE: Final[float] = tuning.real(
 )
 
 #: Down-range scale per optic for `look_sigma_m` below -- `1.0` (no
-#: change) for every optic not named here, which as of `BL-B106` is only
+#: change) for every optic not named here, which as of `BL-B108` is only
 #: `UNAIDED_OPTIC` (module docstring's "unaffected by construction").
 _RANGE_SIGMA_SCALE_BY_OPTIC: Final[dict[str, float]] = {
     BINOCULAR_OPTIC.name: BINOCULAR_RANGE_SIGMA_SCALE,
@@ -269,7 +269,7 @@ DEPRESSION_SIGMA_DEG: Final[float] = tuning.real(
 #: Raising it makes repeated looks jitter more; lowering it makes them
 #: read as nearly identical (the user's own E4: "getting the same cues
 #: ... same estimate"). Judgement default, `#needs-flight` -- "only
-#: actual flights will tell" (explore-notes.md, answer 3). `BL-B106`
+#: actual flights will tell" (explore-notes.md, answer 3). `BL-B108`
 #: Stage 1.
 RANGE_LOOK_SHARE: Final[float] = tuning.real(
     "perception.estimation.RANGE_LOOK_SHARE", 0.2, lo=0.0, hi=0.6, status="judgement"
@@ -282,7 +282,7 @@ RANGE_LOOK_SHARE: Final[float] = tuning.real(
 #: in their down-range error. This is the knob the ambiguous "2.0 km vs
 #: 2.5 km" case (E6) moves on -- raising it widens the merge zone and the
 #: two can read as one group; lowering it narrows it. Judgement default,
-#: `#needs-flight`. `BL-B106` Stage 1.
+#: `#needs-flight`. `BL-B108` Stage 1.
 RANGE_RELATIVE_SHARE: Final[float] = tuning.real(
     "perception.estimation.RANGE_RELATIVE_SHARE",
     0.2,
@@ -291,7 +291,7 @@ RANGE_RELATIVE_SHARE: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: `BL-B106` Stage 1 -- how many degrees of line-of-sight rotation it takes
+#: `BL-B108` Stage 1 -- how many degrees of line-of-sight rotation it takes
 #: for the `Z_view` field's down-range correlation to fall to about `1/e`
 #: (holding range fixed): a smaller value means ownship turning past a
 #: group updates its range estimate (via `belief.position_belief`'s
@@ -308,7 +308,7 @@ RANGE_DECORRELATION_BEARING_DEG: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: `BL-B106` Stage 1 -- the range *ratio* (closing or opening) at which the
+#: `BL-B108` Stage 1 -- the range *ratio* (closing or opening) at which the
 #: `Z_view` field's down-range correlation falls to about `1/e` (holding
 #: bearing fixed): raising it makes a closing run keep "the same look"'s
 #: error longer before it genuinely updates; lowering it means the estimate
@@ -332,7 +332,7 @@ RANGE_DECORRELATION_RANGE_RATIO: Final[float] = tuning.real(
 #: This is the second lever the ambiguous case (E6) moves on, alongside
 #: this module's own relative-share constant -- raising it widens the
 #: ratio at which two things still read as one group. Judgement default,
-#: `#needs-flight`. `BL-B106` Stage 1.
+#: `#needs-flight`. `BL-B108` Stage 1.
 RANGE_NEAR_DECORRELATION_RANGE_RATIO: Final[float] = tuning.real(
     "perception.estimation.RANGE_NEAR_DECORRELATION_RANGE_RATIO",
     1.15,
@@ -612,7 +612,7 @@ def systematic_bias_m(object_id: int, sigma_cross_m: float) -> float:
     confidently-held value rather than truth. `object_id` never leaves
     `perception/`.
 
-    **`BL-B106`: the down-range half of this bias is retired** -- see
+    **`BL-B108`: the down-range half of this bias is retired** -- see
     module docstring. The correlated field model (`_stable_fraction`)
     replaces it for that axis; this function now returns a single float,
     not a pair."""
@@ -673,7 +673,7 @@ def perturbed_bearing_range(
 ) -> tuple[float, float]:
     """One look's perturbed `(bearing_deg, range_m)` estimate: the true
     geometry plus the bearing axis's per-look noise and never-redrawn
-    per-object bias (unchanged by `BL-B106`), plus the range axis's
+    per-object bias (unchanged by `BL-B108`), plus the range axis's
     correlated three-part draw (`_stable_fraction`, module docstring) --
     see module docstring.
 
@@ -728,9 +728,9 @@ def surface_range_estimate(
 ) -> tuple[float, float]:
     """A surface unit's own ground-range estimate, fused from two cues --
     `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3, restructured
-    by `BL-B106` Stage 1. See that plan's "The model in one picture" for
+    by `BL-B108` Stage 1. See that plan's "The model in one picture" for
     cue A/cue B's derivation and fusion; this docstring covers only what
-    `BL-B106` changed: both cues now draw from the correlated three-part
+    `BL-B108` changed: both cues now draw from the correlated three-part
     structure (`_stable_fraction`), each its own seed domain, rather than
     one independent-per-look draw plus a never-redrawn per-object bias.
 
@@ -778,9 +778,9 @@ def surface_range_estimate(
     cues' own sigmas -- the shared `true_distance_m**4` scale cancels out
     of that ratio, so it does not need restating there.
 
-    **`BL-B106`: no final per-object offset is added any more** -- cue A's
+    **`BL-B108`: no final per-object offset is added any more** -- cue A's
     own down-range draw already carries the correlated structure; a second,
-    object-keyed bias layered on top of that (as pre-`BL-B106` code did)
+    object-keyed bias layered on top of that (as pre-`BL-B108` code did)
     would reintroduce exactly the independent-per-object term the plan's
     model replaces."""
     _sigma_cross_m, sigma_a_m = look_sigma_m(true_distance_m, optic)

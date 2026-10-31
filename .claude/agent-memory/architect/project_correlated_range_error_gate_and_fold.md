@@ -1,11 +1,11 @@
 ---
 name: project-correlated-range-error-gate-and-fold
-description: Why a gate-width fix cannot cure a contact fold or split on one bearing. The independent-looks error model is the cause, and the fix is a correlated error with gate and fold sharing one innovation covariance (BL-B106, 2026-10-31)
+description: Why a gate-width fix cannot cure a contact fold or split on one bearing. The independent-looks error model is the cause, and the fix is a correlated error with gate and fold sharing one innovation covariance (BL-B108, 2026-10-31)
 metadata:
   type: project
 ---
 
-On 2026-10-31 (`plans/relative-distance-grouping/plan.md`, `BL-B106`), belief's
+On 2026-10-31 (`plans/relative-distance-grouping/plan.md`, `BL-B108`), belief's
 association gate and fusion still treated every look's along-line range error as independent:
 1.0σ redrawn per look plus a 0.4σ object bias, fused as independent.
 

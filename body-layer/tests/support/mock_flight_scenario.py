@@ -135,7 +135,7 @@ def build_scenario_frames(
     placed_units: list[PlacedUnit],
     *,
     theatre: str,
-    # `BL-B106` Stage 0: 1.0, not 5.0 -- DCS's own real poll rate
+    # `BL-B108` Stage 0: 1.0, not 5.0 -- DCS's own real poll rate
     # (`plans/relative-distance-grouping/plan.md` Stage 0), and the rate
     # the whole relative-distance-grouping model is calibrated against
     # (`perception.estimation`'s `z_look` term, `belief.position_belief`'s
