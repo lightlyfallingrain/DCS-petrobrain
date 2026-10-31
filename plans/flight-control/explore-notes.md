@@ -356,3 +356,15 @@ Reading: two first-class states, each a must-have, possibly with different contr
 **unparked** (no ED AI pilot; player stick may still send input and must be ignored) and **parked**
 (player in copilot seat with park-controls selected; ED's AI pilot is flying and must be overridden).
 Neither is the fallback for the other.
+
+### Steering ED's AI is rejected (user, verbatim, 2026-10-31)
+
+Main loop had floated "Petrobrain could steer ED's AI instead of fighting it" (set its heading/
+altitude targets through its own commands) as a parked-state path.
+
+> *""Petrobrain could steer ED's AI instead of fighting it," -> no. DCS AI flies hoorribly. That is
+> *the* reason I want Petrobrain to replace it."*
+
+Reading: rejected outright. In the parked state Petrobrain's own loop must fly the aircraft; ED's AI
+is to be replaced, not commanded. ED-AI command interfaces are of interest only as a way to
+**disable or neutralise** it, never as the control path.
