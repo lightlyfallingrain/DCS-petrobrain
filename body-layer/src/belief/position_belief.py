@@ -513,6 +513,32 @@ def _down_axis_unit(bearing_deg_value: float) -> tuple[float, float]:
     return math.cos(theta), math.sin(theta)
 
 
+def _is_valid_covariance(covariance: Covariance2D) -> bool:
+    """`False` for a 2x2 matrix that cannot be a real covariance -- a
+    negative trace, or a negative determinant (one axis's variance
+    gone negative even though the trace is still positive) -- `BL-B106`
+    Stage 2's own found defect: the Bar-Shalom-Campo update's `P_est -
+    K @ (P_est - C^T)` is **not** guaranteed positive-semidefinite by
+    construction the way the old independent information-form sum was
+    (that form's `info_sum.inverse()` can only ever produce a valid
+    covariance) -- when the two sides are highly correlated and close in
+    magnitude, `S` can be near-singular, and a near-singular `S^-1`
+    amplified through `K` can push the result negative. `fold_position`'s
+    existing `FUSION_SANITY_SIGMA` mean-residual check alone does not
+    catch this (a wildly wrong but nonsensical covariance can still sit
+    close to one input's own *mean*) -- found empirically, by a dwelled-
+    look scenario whose covariance went negative (`xx = -74033`) after
+    several highly-correlated same-geometry fuses, not by inspection.
+    Checked here, folded into the same ill-conditioning "hold" branch
+    `fold_position` already has, rather than as a second guard, since the
+    remedy (discard this fuse, hold the prior) is identical."""
+    trace = covariance.trace()
+    if trace < 0.0:
+        return False
+    determinant = covariance.xx * covariance.zz - covariance.xz * covariance.xz
+    return determinant >= 0.0
+
+
 def correlated_innovation(
     prior: PositionEstimate,
     prior_covariance: Covariance2D,
@@ -763,7 +789,15 @@ def fold_position(
     own individual covariance, the fusion is treated as ill-conditioned
     and discarded: the look is not fused into the mean or covariance at
     all, only elapsed-time inflation is applied, exactly the "hold"
-    outcome `clamp_to_detection_envelope` uses for the other defect."""
+    outcome `clamp_to_detection_envelope` uses for the other defect.
+    **`BL-B106` Stage 2 adds a second trigger for the same hold branch**:
+    `_is_valid_covariance(fused_covariance)` -- the correlated update's
+    own `S` can go near-singular when the two sides are highly
+    correlated and similar in magnitude (repeated same-geometry looks,
+    exactly the dwell case this plan's own E3/E4 care most about), and an
+    ill-conditioned `S^-1` can push the resulting covariance negative
+    even while the mean still looks plausible -- see that function's own
+    docstring for the dwell scenario that found it."""
     look_covariance = covariance_from_uncertainty(uncertainty, look_bearing_deg)
     look_anchor = LookAnchor(
         observer_x=observer_x,
@@ -810,10 +844,9 @@ def fold_position(
         look_residual_sigma_sq = look_covariance.mahalanobis_squared(
             fused_x - x, fused_z - z
         )
-        if (
-            min(prior_residual_sigma_sq, look_residual_sigma_sq)
-            > FUSION_SANITY_SIGMA**2
-        ):
+        if min(
+            prior_residual_sigma_sq, look_residual_sigma_sq
+        ) > FUSION_SANITY_SIGMA**2 or not _is_valid_covariance(fused_covariance):
             # Hold: elapsed-time inflation still applies (`prior_covariance`
             # above already is that fresh, non-compounding inflation), but
             # `fused_at_sim`/`fused_covariance`/`anchor` carry straight

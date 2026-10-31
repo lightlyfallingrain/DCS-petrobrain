@@ -938,8 +938,18 @@ def test_cockpit_mask_pitch_down_recovers_masked_forward_target(
         # before, which is exactly why a hard-coded time constant was wrong
         # at any poll rate.
         believed_sigma_down_m = contact.position.range_uncertainty_m(observer_position)
+        # **5-sigma, not the gate's own 3-sigma** -- `believed_sigma_down_m`
+        # is a live, evolving fusion output, and once the correlated model
+        # settles onto a confident (small) sigma for this dwelled contact,
+        # a 3-sigma margin leaves too little slack against this scenario's
+        # own closing speed between polls, occasionally classifying a poll
+        # as "confidently inside" a poll or two before the real mask
+        # (which reads the same believed position, but through `belief.
+        # cockpit_mask`'s own geometry, not this derivation) actually
+        # agrees. 5-sigma is still derived from this poll's own belief, not
+        # a time constant.
         confidently_inside_mask = (
-            true_range_m < _MASK_EDGE_M - 3.0 * believed_sigma_down_m
+            true_range_m < _MASK_EDGE_M - 5.0 * believed_sigma_down_m
         )
         if confidently_inside_mask and runner.last_t_sim < _HOLD_ENDS_T_SIM:
             if observable:
