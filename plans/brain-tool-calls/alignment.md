@@ -228,3 +228,63 @@ many tools are dispatchable.
    clearly as your note rather than as something Petrovich saw?
 10. After this milestone, does the brain ever act on its own initiative, or only ever when you have
     spoken?
+
+## Plan check — 2026-10-31
+
+**Verdict:** ALIGNED
+
+Every E and every A traces to a named decision, and every open assumption from the goal check is
+settled the way the why serves, not just left silent. This is a clean trace: the plan's own "What
+exists today" section independently rediscovers the goal check's Finding 1 (the Shilka case) and
+fixes it by construction (D4), rather than planning around it.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 — phrasebook untouched | D4 / Stage 1 | met, as amended by A4 — unprefixed speech is unchanged; a wake-prefixed phrasebook phrase now takes the slow path **by the pilot's own choice** (A4), which the architect flags itself as R7. That reading is faithful: A4's verbatim answer is "Key brain on 'Petrovich, ...'" and the user already set this routing once before, independently, 2026-10-25 (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F2 — the edge decided": *"a leading wake word sends the whole transmission to the brain, command phrasing or not"*). The plan does not weaken E1; it applies the user's own standing decision to it. |
+| E2 — heard speech always answered | D4 (U1), D9 | met — budget expiry speaks `unable NO_ANSWER` rather than discarding silently (today's defect); U1's unprefixed-fallthrough is deterministic ("which one?" / "say again"), never silence. |
+| E3 — brain command = phrasebook effect | D5, D3, Stage 3 | met — dispatch is through `handle_command` with a `Mention` planted first; Stage 3 adds an explicit differential test (brain path vs. phrasebook path, same belief state, must match). |
+| E4 — answers from what Petrovich knows, bounded | D5, D7 | met — query tools wrap only belief/mission-memory/world-model; `ToolObservation` carries no raw coordinates; freshness phrasing ("not seen for four minutes") is in `contacts()`. |
+| E5 — answers current when spoken | D1, D3, D4(revalidation) | met — positions re-rendered at speech time via the existing `_speak_or_defer` lane; superseded turns drop silently (newest wins); a gone contact gets "lost him". |
+| E6 — danger first | D6 | met — threat callouts stay deterministic and never touch Ollama; `drain_brain` runs after `drain_events`; at most one tool execution per poll. |
+| E7 — consequential actions need the pilot's word | U2 | met, pending the user's sign-off on U2 — weapons/sight tokens are excluded from `BRAIN_COMMANDS` entirely (not merely confirmed), which is stronger than E7 asked for and consistent with root `CLAUDE.md`'s "whose job" invariant and A1's own "not likely weapons employment." Not a contradiction of A2 ("read back and do") — A2 describes behaviour for commands the brain is allowed to carry; U2 decides which commands those are. |
+| E8 — pilot knows brain is unavailable | D4, A6 | met — "Unable, no brain." verbatim, on `available()` false. |
+| E9 — pilot's notes stay the pilot's | D8 | met — label is a verbatim contiguous run of the pilot's own words, body-validated; closes `[[BL-B79]]` by construction rather than by flag. |
+
+### Open assumptions (goal check) — all settled, and checked against the plan
+
+All nine (command landing surface, who words the reply, when the brain gets an utterance, act-or-
+confirm, which tools are exposed, what "data" is, conversation state, initiative, flight commands)
+are settled by a named decision (D1–D9) or an explicit, flagged user decision (U1–U4), not left to
+default. None is settled the way the goal check's "would not serve it" column describes.
+
+### Findings
+
+No finding rises to a plan defect. Two things worth the user's eyes, both already named by the
+architect as open decisions rather than buried:
+
+1. **U2's exclusion is a judgment call the plan makes for the user, not yet confirmed.** Lens:
+   whose job.
+   - The goal check's E7 was explicitly the agent's own assumption (flagged Q2, never answered by
+     the user directly — A1 only said weapons employment was "not likely"). The plan resolves Q2 by
+     excluding the whole class rather than asking the user to pick confirm-vs-exclude. The exclusion
+     reads as the safer, more conservative choice and matches a project invariant, but it is still a
+     choice made on the user's behalf that Q2 asked them to make. Worth a one-line confirmation
+     rather than treating it as settled.
+   - *Suggests:* ask U2 directly in the test card, don't let it ship as a quiet default.
+
+2. **U1 is better supported by existing user direction than the plan states.** Lens: evidence.
+   - The plan recommends U1 (no model call on unprefixed, unanchored speech) as the architect's own
+     judgment. A graph check (`gq.sh`) surfaces `plans/inbound-speech/plan.md`'s 2026-09-19
+     "Two-tier routing" design note, user-directed: unprefixed speech is "a command, matched against
+     this vocabulary" — no third path to the brain is described for unprefixed text at all. This
+     makes U1 not just consistent with A4/A10 but arguably the originally-intended design, which
+     strengthens the recommendation rather than leaving it a toss-up. Not a plan defect — a reason
+     to expect the user to say yes quickly.
+
+### Questions for the user
+
+- Confirm U1 (never call the model without the wake word; deterministic "which one?"/"say again"
+  on unprefixed fallthrough) — supported by the 2026-09-19 two-tier routing direction above.
+- Confirm U2 (exclude weapons/sight/flight tokens from the brain entirely in BR-2, "Unable, fixed
+  command only.") rather than confirm-before-acting on them.
+- Confirm U3's wording and U4 (fold BR-B2/BR-B3 into Stage 2).
