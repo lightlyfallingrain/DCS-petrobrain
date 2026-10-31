@@ -144,6 +144,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B103]] — stop reading ED's AI Helper target list; contacts come from our own perception model only
 - [[BL-B104]] — ground contacts are on the ground: position from perceived bearing+depression meeting the unit's ground height, not a guessed range (bug, 2026-10-30)
 - [[BL-B105]] — widen `group_matches` test 5's displacement bound to both sides, now unblocked by `Group.movement_state` (filed 2026-10-30, from `[[BL-B104]]` Stage 8)
+- [[BL-B106]] — async speech: the mouth never blocks the eyes and arms; plan on `main`, not built (F8, 2026-10-20 sortie)
 - [[BL-B108]] — relative-distance grouping: stable, shared range error and a near-circular merge zone, so two groups on one bearing stay two and one group stays one (2026-10-31, `plans/relative-distance-grouping/`)
 - [[BL-B109]] — callout wording for a second group on the same bearing, e.g. "second group, beyond" (split from `[[BL-B108]]`)
 
