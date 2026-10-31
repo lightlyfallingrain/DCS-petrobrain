@@ -323,3 +323,25 @@ Reading (main loop):
   loosely), always converging on the value; smoothness beats precision. This governs controller
   gains and every acceptance test: no test asserts tight tracking; tests assert smooth convergence
   and staying in band.
+
+## The key challenge: parked controls (user, verbatim, 2026-10-31)
+
+> *"note on Petrovich flying while I use the 9K113. DCS requires the "park controls" active for
+> player to be able to use the 9K113. That makes DCS AI Petrovich control the aircraft and any player
+> joystick input is ignored in the parked controls state. That is a key challenge that we must find a
+> workaround to. That it the key feature I need, Petrobrain to overpower the DCS AI flying."*
+
+Reading (main loop):
+
+- In the key case (player in the copilot seat on the 9K113), DCS requires "park controls". In that
+  state **ED's own AI Petrovich flies the aircraft** and player stick input is ignored.
+- So BL-16's central problem in that case is not ignoring the player's stick: it is **overriding
+  (or displacing) ED's AI pilot**, which is actively writing its own control inputs, so that
+  Petrobrain's loop is what flies the aircraft.
+- This is the feature the user needs most. Stage 0 must answer it first: in the parked-controls
+  state, do `LoSetCommand` raw-axis writes (2001-2004) / SAU commands from Export.lua take effect,
+  get overwritten by ED's AI each frame, or fight it? Is there a way to stop or neutralise ED's AI
+  pilot while staying parked (an ED-AI autopilot mode/command, a hold mode it obeys, an Export or
+  hook-level override)? What does ED's AI do when its inputs are contested?
+- If no workaround exists, BL-16's key case is blocked and that must be known before anything else
+  is built.
