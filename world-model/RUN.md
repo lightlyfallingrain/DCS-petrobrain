@@ -167,18 +167,21 @@ recreates** that file on every run; there is no incremental rebuild.
 
 ### 3.3 What you'll see: the 8 stages
 
-Every stage logs `[i/8] <name>: starting` and `[i/8] <name>: done (Ns)`. The long ones also log
-progress in between, so a gap of a minute or two between lines is normal. Several minutes with
-no new line at all during a progress-logging stage is worth reporting.
+Every stage logs `[i/8] <name>: starting` and `[i/8] <name>: done (Ns)`. Every operation inside a
+stage that can take more than ~30s at this scale reports progress through a shared helper
+(`src/progress.py`; see `docs/CONVENTIONS.md`), so a gap of up to about 30s between lines during a
+progress-logging stage is normal, and more than a minute or two with no new line at all is worth
+reporting (see `plans/osm-landcover-optimization/progress-logging.md` for the incident and fix this
+guarantee comes from).
 
 | # | stage | progress lines in between |
 |---|---|---|
 | 1 | `towns.lua` | — (fast) |
 | 2 | `beacons.lua` | — (fast) |
-| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen (N tagged nodes, N ways kept, N areas kept, Ns elapsed)` every ~10–20 s. Low minutes on the first run against the pre-filtered file (§2.4 cuts this from the old "tens of minutes" — a 20 km region's OSM stage measured well under a minute end to end during validation); low minutes when the OSM cache hits too (3.4) |
-| 4 | `Syria.routes (N bytes)` | — (reads the 2.25 GB road file) |
-| 5 | `road junctions` | `ingest_junctions: R roads, N chunks ...` once, then `chunk i/N (x%, J junctions kept, Ts elapsed, ~Ts remaining)` at most every 30 s. The remaining-time figure is rough, since chunk cost varies a lot |
-| 6 | `SRTM elevation grid (N tile(s))` | `ingest_srtm: row i/N (...)` every 50 rows |
+| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: ~Ns/Ns (~x.x%, elements_seen=N, nodes_kept=N, ways_kept=N, areas_kept=N, Ns elapsed, ~Ns remaining)` every 30 s, from a background heartbeat thread (not the parse loop itself — pyosmium's `apply_file` can go silent for a full pass with no Python callback at all under `KeyFilter` + two-pass area assembly). The done/total/percent/remaining figures are a calibrated *estimate* (elapsed time against a file-size-based ETA, marked `~`); the counters alongside them are exact. Low minutes on the first run against the pre-filtered file (§2.4 cuts this from the old "tens of minutes" — a 20 km region's OSM stage measured well under a minute end to end during validation); low minutes when the OSM cache hits too (3.4), which now also logs `osm_cache_read: N/M (...)` progress if the cache is large |
+| 4 | `Syria.routes (N bytes)` | `roadnet.routes: N/N (x.x%, routes=N, Ns elapsed, ~Ns remaining)` every 30 s — `done`/`total` are bytes covered/total in the file (reads the 2.25 GB road file) |
+| 5 | `road junctions` | `ingest_junctions: 0/N (0.0%, roads=R, chunk_size_m=..., padding_m=..., ...)` once (N = chunk count), then `ingest_junctions: i/N (x.x%, junctions_kept=J, Ts elapsed, ~Ts remaining)` at most every 30 s. The remaining-time figure is rough, since chunk cost varies a lot |
+| 6 | `SRTM elevation grid (N tile(s))` | `ingest_srtm.load_tiles: i/N (...)` while reading `.hgt` tiles from disk, then `ingest_srtm: i/N (...)` while resampling onto the storage grid — both every 30 s |
 | 7 | `elevation/surface probe grid` | skipped for `syria-full` (needs `--probe-output` from a live mission probe) |
 | 8 | `terrain semantics (ridge/valley)` | skipped with stage 7. Full-theatre ridge/valley data comes from the separate probe store (`docs/M8_PROBE_STORE.md`) |
 

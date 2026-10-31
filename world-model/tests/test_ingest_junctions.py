@@ -235,8 +235,10 @@ def test_ingest_junctions_streaming_logs_progress(
         _drain_streaming(db_path)
 
     messages = [r.getMessage() for r in caplog.records]
-    assert any("3 roads, 2 chunks" in m for m in messages)
-    assert any(m.startswith("ingest_junctions: chunk 1/2 (50.0%") for m in messages)
+    assert any(
+        m.startswith("ingest_junctions: 0/2") and "roads=3" in m for m in messages
+    )
+    assert any(m.startswith("ingest_junctions: 1/2 (50.0%") for m in messages)
 
 
 def test_ingest_junctions_streaming_progress_is_throttled(
@@ -250,8 +252,8 @@ def test_ingest_junctions_streaming_progress_is_throttled(
         _drain_streaming(db_path)
 
     messages = [r.getMessage() for r in caplog.records]
-    assert any("2 chunks" in m for m in messages)
-    assert not any("ingest_junctions: chunk " in m for m in messages)
+    assert any(m.startswith("ingest_junctions: 0/2") for m in messages)
+    assert len(messages) == 1  # no per-chunk line follows the up-front one
 
 
 def test_ingest_junctions_streaming_empty_store(tmp_path: Path) -> None:

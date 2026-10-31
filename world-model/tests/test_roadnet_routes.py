@@ -14,9 +14,13 @@ undecoded trailer gap, so the resync-between-routes behaviour (not just a
 single well-aligned route) is exercised, matching the real file's structure.
 """
 
+import logging
 import struct
 from pathlib import Path
 
+import pytest
+
+import roadnet.routes as routes_module
 from roadnet.routes import RouteWalkStats, iter_routes
 
 _ROUTES_CLASS_NAME = "landscape4::lRoutesFile"
@@ -198,3 +202,22 @@ def test_iter_routes_never_loads_whole_file_into_a_python_list_of_bytes(
     result = iter_routes(path)
 
     assert inspect.isgenerator(result)
+
+
+def test_iter_routes_logs_progress_via_the_shared_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With the throttle interval forced to zero, the walk logs a progress
+    line through `progress.ThrottledProgress` -- proves the migration off
+    the old manual `time.monotonic()` bookkeeping still gives a heartbeat,
+    not just that parsing is unaffected."""
+    path = _write_fixture(tmp_path)
+    monkeypatch.setattr(routes_module, "_PROGRESS_LOG_INTERVAL_S", 0.0)
+
+    with caplog.at_level(logging.INFO, logger="roadnet.routes"):
+        list(iter_routes(path))
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) >= 2  # at least one line per route boundary
+    assert any(m.startswith("roadnet.routes: ") for m in messages)
+    assert any("routes=" in m for m in messages)
