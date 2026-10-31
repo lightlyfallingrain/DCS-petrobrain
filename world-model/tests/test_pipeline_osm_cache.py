@@ -10,6 +10,7 @@ Mirrors `test_pipeline_build_region.py`'s `_patch_parsers` fixture and
 branch, not a hand-rolled substitute.
 """
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 
@@ -271,6 +272,48 @@ class TestCacheMissThenHitParity:
         # named_place: towns.lua's Aleppo (DCS-sourced) + the OSM node/1
         # place node + the OSM peak node.
         assert report_2.feature_counts["named_place"] == 3
+
+    def test_cache_hit_read_logs_progress_via_the_shared_helper(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """With the throttle interval forced to zero, the cache-hit read
+        loop logs a progress line through `progress.ThrottledProgress` --
+        this loop previously had no progress reporting at all (see
+        `plans/osm-landcover-optimization/progress-logging.md`'s audit)."""
+        pbf_path = tmp_path / "fixture.osm.pbf"
+        _write_fixture_osm_pbf(pbf_path)
+        # Same `out_path` both times -- the cache file is `out_path`'s own
+        # sibling (`osm_cache_store_path`), so only a *second* build against
+        # the *same* `out_path` actually hits it; a different `out_path`
+        # would see an absent sibling cache and take the miss/parse path
+        # instead (see `TestCacheMissThenHitParity`'s own note above).
+        out_path = tmp_path / "region.sqlite"
+
+        build_region(
+            _TEST_REGION,
+            towns_lua_path=Path("unused-towns.lua"),
+            beacons_lua_path=Path("unused-beacons.lua"),
+            osm_cache_path=None,
+            out_path=out_path,
+            osm_pbf_path=pbf_path,
+        )
+
+        monkeypatch.setattr(pipeline, "_PROGRESS_LOG_INTERVAL_S", 0.0)
+        with caplog.at_level(logging.INFO, logger="build.pipeline"):
+            build_region(
+                _TEST_REGION,
+                towns_lua_path=Path("unused-towns.lua"),
+                beacons_lua_path=Path("unused-beacons.lua"),
+                osm_cache_path=None,
+                out_path=out_path,
+                osm_pbf_path=pbf_path,
+            )
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any(m.startswith("osm_cache_read: ") for m in messages)
 
 
 class TestInvalidation:

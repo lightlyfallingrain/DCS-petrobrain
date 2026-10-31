@@ -120,3 +120,14 @@
   fallback to `named_places_within_radius`. See `plans/osm-landcover-optimization/plan.md`,
   `.../review.md` (APPROVED), `.../dod-check.md` (PASS), `.../implementation.md`, and
   `research/2026-09-13-osm-landcover-optimization-validation.md`.
+
+  **Progress-logging follow-up, merged 2026-10-31 on `fix/world-model-progress-logging`.** Built
+  2026-09-14/15 on this feature's branch after the merge and never pushed, so it sat unmerged for
+  six weeks. Long build stages no longer go silent: a shared `src/progress.py`
+  (`ThrottledProgress`, plus a background `Heartbeat` for `osm.pbf`'s `apply_file`, whose
+  filtered and two-pass area-assembly stretches never call back into Python; worst silent gap
+  measured 68.3s → 30.0s). SRTM, junctions and roadnet routes moved onto the helper, and the OSM
+  cache-hit read and SRTM tile loading got logging for the first time. The two required fixes in
+  `plans/osm-landcover-optimization/review-progress-logging.md` were finished at merge: the final
+  `collector.flush()` runs inside the heartbeat, and SRTM tile-load logging has a test that pins it
+  after Stage 6's "starting" line.

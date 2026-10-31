@@ -15,10 +15,11 @@ find_next_point_block`'s scan-forward resync to reach the next route.
 
 import logging
 import mmap
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from progress import ThrottledProgress
 
 from .container import (
     Buffer,
@@ -29,7 +30,13 @@ from .container import (
 )
 
 _CLASS_NAME = "landscape4::lRoutesFile"
-_PROGRESS_LOG_INTERVAL_S = 5.0
+
+# How often the walk below logs progress, in seconds -- migrated onto
+# `progress.py`'s shared helper and its standard 30s interval (this module
+# was ahead of the rest of the project at a 5s interval before that helper
+# existed; unified for consistency, see
+# `plans/osm-landcover-optimization/progress-logging.md`).
+_PROGRESS_LOG_INTERVAL_S = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +134,9 @@ def _walk(
     offset = header.data_offset
     route_index = 0
     total_bytes = len(buf) - header.data_offset
-    last_logged_at = time.monotonic()
+    progress = ThrottledProgress(
+        logger, "roadnet.routes", total=total_bytes, interval_s=_PROGRESS_LOG_INTERVAL_S
+    )
 
     while True:
         found = find_next_point_block(buf, offset)
@@ -137,18 +146,8 @@ def _walk(
         if pos_offset != offset:
             stats.resync_events += 1
 
-        now = time.monotonic()
-        if now - last_logged_at >= _PROGRESS_LOG_INTERVAL_S:
-            last_logged_at = now
-            covered = pos_offset - header.data_offset
-            pct = 100.0 * covered / total_bytes if total_bytes > 0 else 100.0
-            logger.info(
-                "parsing .routes: route %d, byte %d/%d (%.1f%%)",
-                route_index,
-                covered,
-                total_bytes,
-                pct,
-            )
+        covered = pos_offset - header.data_offset
+        progress.maybe_log(done=covered, routes=route_index)
 
         try:
             directions, dir_end = read_point_block(buf, pos_end)

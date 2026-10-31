@@ -81,4 +81,5 @@ known-first-party = [
     "roadnet",
     "terrain",
     "api",
+    "progress",
 ]

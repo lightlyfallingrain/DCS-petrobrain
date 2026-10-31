@@ -76,6 +76,30 @@ like a `type=multipolygon` one). Any other relation type that still passed
 the tag filter (e.g. `type=site`) is not assembled into geometry by this
 module and is counted as `relations_skipped`, preserving the "unsupported
 construct, not a silent drop" precedent for that name.
+
+**Progress reporting (progress-logging fix)**: the old mechanism here logged
+every `_PROGRESS_LOG_INTERVAL_ELEMENTS` raw elements *seen*, counted from
+inside `node()`/`way()`/`relation()`. That undercounted badly: `KeyFilter`
+stops most elements from ever reaching those callbacks, and a closed-way/
+relation two-pass area assembly runs in `apply_file`'s C++ core with no
+Python callback at all -- a real `syria-full`-scale run logged one progress
+line at 68.3s into an 81.0s parse of a single ~160MB pre-filtered extract,
+then nothing until it finished (measured against a tags-filtered Turkey
+extract; see `plans/osm-landcover-optimization/progress-logging.md`).
+`stream_features` now wraps the whole `apply_file` call in `progress.
+Heartbeat` instead: a background thread that logs every `_PROGRESS_LOG_
+INTERVAL_S` regardless of what's happening on the main thread, reading
+`_FeatureCollector`'s running counters. This only works because pyosmium
+4.3.1's `apply_file` releases the GIL periodically on its own even when no
+Python callback fires -- confirmed by measurement (a heartbeat thread ticked
+every ~1.0s throughout a 10.3s filtered `apply_file` call), not assumed; see
+the plan's "GIL release" finding. Since there is no exact byte- or
+element-progress signal available during the silent stretches, the percent-
+complete/ETA the heartbeat reports is a **calibrated estimate** (elapsed
+time against `_PBF_CALIBRATED_BYTES_PER_S` applied to the input file's
+size), always logged via `estimated=True` so it reads as `~` in the log
+line -- the exact counters (`elements_seen`, `nodes_kept`, ...) alongside it
+are real, not estimated.
 """
 
 import logging
@@ -90,22 +114,32 @@ import osmium.filter
 import osmium.osm
 
 from osm.features import OsmArea, OsmFeatureSet, OsmNode, OsmRing, OsmWay
+from progress import Heartbeat, ThrottledProgress
 
 logger = logging.getLogger(__name__)
 
-# How often `_FeatureCollector` logs progress while `apply_file` is running,
-# in raw elements seen (tagged or not -- pyosmium calls back on every element
-# in the file, so this is a real progress signal even though only tagged
-# nodes/geometry-resolved ways are kept). A country-scale merged extract can
-# run `apply_file` for minutes with no other feedback; without this, a long
-# OSM stage looks indistinguishable from a hang. See `docs/M9_OSM_RUN_INSTRUCTIONS.md`.
-_PROGRESS_LOG_INTERVAL_ELEMENTS = 500_000
+# How often the `apply_file` heartbeat logs, in seconds -- this project's
+# standing "at most every 30s, at least every ~30s" convention (see
+# `progress.py`), not a per-module judgment call.
+_PROGRESS_LOG_INTERVAL_S = 30.0
+
+# Rough parse throughput for `stream_features` (KeyFilter + two-pass area
+# assembly included), in bytes/second of *pre-filtered* `.osm.pbf` input --
+# used only to give the heartbeat a rough ETA during `apply_file`'s silent
+# stretches (see the module docstring's "Progress reporting"). Calibrated
+# 2026-09-15 against a real Geofabrik extract: `osmium tags-filter` applied
+# to the full (unclipped) Turkey country extract -> 160,387,119 bytes, 31.6M
+# nodes / 736K ways / 33.8K relations -> `stream_features` end-to-end in
+# 81.0s = ~1.98 MB/s. One data point, not a profiled average across tag
+# densities/relation complexity -- good enough for a rough ETA, not treated
+# as exact (see `plans/osm-landcover-optimization/progress-logging.md`).
+_PBF_CALIBRATED_BYTES_PER_S = 1_980_000
 
 # How many kept nodes/ways `_FeatureCollector` buffers before flushing to its
 # callbacks, in the streaming (`stream_features`) path. Deliberately separate
-# from, and much smaller than, `_PROGRESS_LOG_INTERVAL_ELEMENTS` above, which
-# counts *raw* elements seen (including discarded untagged nodes), not kept
-# objects actually held in memory. At ~8.6M ways total (the stalled
+# from, and much smaller than, the raw *elements seen* count `progress_counts`
+# reports (which includes discarded untagged nodes), not kept objects
+# actually held in memory. At ~8.6M ways total (the stalled
 # `syria-full` run's own progress log), 50,000 keeps peak buffered way
 # objects to roughly 0.5% of the old unbounded case -- tens of MB, not
 # gigabytes -- while keeping the resulting SQLite commit count reasonable
@@ -178,25 +212,23 @@ class _FeatureCollector(osmium.SimpleHandler):
         self._ways_kept_total = 0
         self._areas_kept_total = 0
         self._elements_seen = 0
-        self._started_at = time.monotonic()
 
-    def _log_progress_if_due(self) -> None:
-        self._elements_seen += 1
-        if self._elements_seen % _PROGRESS_LOG_INTERVAL_ELEMENTS != 0:
-            return
-        elapsed_s = time.monotonic() - self._started_at
-        logger.info(
-            "osm.pbf: %d elements seen (%d tagged nodes, %d ways kept, "
-            "%d areas kept, %.1fs elapsed)",
-            self._elements_seen,
-            self._nodes_kept_total,
-            self._ways_kept_total,
-            self._areas_kept_total,
-            elapsed_s,
-        )
+    def progress_counts(self) -> dict[str, int]:
+        """A snapshot of this collector's running counters, safe to call
+        from another thread while `apply_file` is still running (plain
+        attribute reads under the GIL -- see `progress.Heartbeat`'s
+        docstring on why no lock is needed here). Used by `stream_features`'s
+        heartbeat to report real, non-estimated counts alongside its
+        estimated elapsed-time-based ETA."""
+        return {
+            "elements_seen": self._elements_seen,
+            "nodes_kept": self._nodes_kept_total,
+            "ways_kept": self._ways_kept_total,
+            "areas_kept": self._areas_kept_total,
+        }
 
     def node(self, n: osmium.osm.Node) -> None:
-        self._log_progress_if_due()
+        self._elements_seen += 1
         if len(n.tags) == 0:
             return
         self._node_buffer.append(
@@ -213,7 +245,7 @@ class _FeatureCollector(osmium.SimpleHandler):
             self._node_buffer = []
 
     def way(self, w: osmium.osm.Way) -> None:
-        self._log_progress_if_due()
+        self._elements_seen += 1
         if len(w.tags) == 0:
             # Under `KeyFilter`, a way with no tags at all should never
             # reach this callback (fixture-verified) -- this is a defensive
@@ -235,9 +267,10 @@ class _FeatureCollector(osmium.SimpleHandler):
             self._way_buffer = []
 
     def area(self, a: osmium.osm.Area) -> None:
-        # Not `_log_progress_if_due()`'d -- an area is always derived from a
-        # way or relation already counted via `way()`/`relation()` above;
-        # counting it again here would double-count `_elements_seen`.
+        # `_elements_seen` is deliberately not incremented here -- an area
+        # is always derived from a way or relation already counted via
+        # `way()`/`relation()` above; counting it again here would
+        # double-count `_elements_seen`.
         rings: list[OsmRing] = []
         for outer in a.outer_rings():
             outer_points = [
@@ -262,7 +295,7 @@ class _FeatureCollector(osmium.SimpleHandler):
             self._area_buffer = []
 
     def relation(self, r: osmium.osm.Relation) -> None:
-        self._log_progress_if_due()
+        self._elements_seen += 1
         if r.tags.get("type") in _AREA_ASSEMBLED_RELATION_TYPES:
             self.multipolygon_relations_seen += 1
         else:
@@ -304,16 +337,38 @@ def stream_features(
     [osmium.filter.KeyFilter(*_CLASSIFIER_TAG_KEYS)]` restricts which
     elements reach the Python callbacks at all -- see the module docstring.
 
+    The `apply_file` call itself is wrapped in a `progress.Heartbeat` --
+    see the module docstring's "Progress reporting" for why a heartbeat
+    thread is needed here rather than the in-callback throttled logging
+    every other stage uses.
+
     Returns a `StreamFeaturesResult`.
     """
     collector = _FeatureCollector(
         on_nodes, on_ways, on_areas, batch_size, area_batch_size
     )
     key_filter = osmium.filter.KeyFilter(*_CLASSIFIER_TAG_KEYS)
-    collector.apply_file(
-        str(pbf_path), locations=True, idx="sparse_mem_array", filters=[key_filter]
+
+    estimated_total_s = pbf_path.stat().st_size / _PBF_CALIBRATED_BYTES_PER_S
+    reporter = ThrottledProgress(
+        logger, "osm.pbf", total=estimated_total_s, interval_s=_PROGRESS_LOG_INTERVAL_S
     )
-    collector.flush()
+    started_at = time.monotonic()
+
+    def _report() -> None:
+        reporter.log(
+            done=time.monotonic() - started_at,
+            estimated=True,
+            **collector.progress_counts(),
+        )
+
+    # `flush()` stays inside the heartbeat: the leftover batches it hands to
+    # the callbacks are real DB writes on a cache-miss build.
+    with Heartbeat(_report, interval_s=_PROGRESS_LOG_INTERVAL_S):
+        collector.apply_file(
+            str(pbf_path), locations=True, idx="sparse_mem_array", filters=[key_filter]
+        )
+        collector.flush()
     return StreamFeaturesResult(
         relations_skipped=collector.relations_skipped,
         ways_skipped_unresolved_nodes=collector.ways_skipped_unresolved_nodes,

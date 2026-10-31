@@ -49,6 +49,10 @@ Run a single test: `pytest world-model/tests/path/to/test_file.py::test_name -q`
 
 Every coordinate transform or spatial-query function must have at least one test against a known geographic control point (see `../docs/concept/WORLD_MODEL_BUILDER.md` "Validation"). A transform that "looks about right" without a control-point test is not done.
 
+## Progress reporting
+
+Every build operation that can run longer than ~30s at `syria-full` scale must report progress through the shared `src/progress.py` helper (`ThrottledProgress` for a loop that returns to Python regularly; `Heartbeat` for a single call with no Python callback for long stretches). New stages must include it from the start — see `docs/CONVENTIONS.md`'s fuller statement of this rule and `plans/osm-landcover-optimization/progress-logging.md` for why it exists.
+
 ## Structure
 
 - `src/` — pipeline code: DCS extraction, coordinate subsystem, OSM/DEM reconciliation, spatial DB, query API.
