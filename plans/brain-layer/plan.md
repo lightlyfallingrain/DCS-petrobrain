@@ -266,6 +266,13 @@ id check is the whole defence and it is deterministic.
 
 ### D5 — The model classifies against a closed set; it never writes what Petrovich says
 
+> **D5 REVISED in part, 2026-10-31** by `plans/brain-tool-calls/plan.md` D7, on the user's answer
+> (*"when simple answer suffices, use the existing callout style. If those do not support answering,
+> brains own words"*). The model may phrase in exactly one bounded place, the `say` reply form:
+> word-capped, no ids, no positions or numbers (positions are always template-rendered at speech
+> time), citing only offered contacts. D5's guarantee, that no spoken fact is absent from a tool
+> result, is kept. The text below stands unchanged as the original decision.
+
 **Provenance:** user constraint (small-model architecture) + Measurements 2–4.
 
 The model's entire output is one line drawn from a closed vocabulary — `PICK <id> BECAUSE <words>`,

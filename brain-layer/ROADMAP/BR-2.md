@@ -44,6 +44,14 @@
   - Ollama serialises generation (BR-1.2's performance verdict, APPROVED — MONITOR), so a tool call
     inside a model turn has a latency cost that was never measured because nothing could make one.
 
+  **Planned 2026-10-31: `plans/brain-tool-calls/plan.md`** (goal check and the user's answers in
+  `alignment.md` / `explore-notes.md` beside it). Decided there: tool calls ride the existing
+  escalate/poll seam and execute on body's poll thread (no body tool server); `ToolSpec.fn` is
+  never model-called, the brain calls `BrainTool.invoke(ctx, args)` over a body-bound context;
+  commands go through `handle_command` via an explicit allowlist and the `[[BL-B102]]` referent;
+  routing is by wake word; `[[BL-B79]]` closes by making a mark label the pilot's verbatim words.
+  Four user decisions (U1–U4) open. Status stays open until implemented.
+
   **Prerequisite reading**: `plans/brain-layer/plan.md` (BR-1's two stages and the D10 boundary),
   `body-layer/src/belief/tool_api.py`'s own docstring (which records the BL-6 freeze, BL-7's
   rejection of `get_mission_phase`, and BL-8's extension to 17 with the fold-versus-extend
