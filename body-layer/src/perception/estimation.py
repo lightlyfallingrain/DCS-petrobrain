@@ -299,10 +299,10 @@ RANGE_RELATIVE_SHARE: Final[float] = tuning.real(
 #: (holding range fixed): a smaller value means ownship turning past a
 #: group updates its range estimate (via `belief.position_belief`'s
 #: correlated fusion/gate) sooner; a larger value means the estimate stays
-#: "the same look" longer, e.g. through a shallow orbit. Judgement default,
-#: `#needs-flight` -- the user's own "a different angle to look from,
-#: triangulation by ownship movement" (explore-notes.md, answer 2) is what
-#: this constant makes happen.
+#: "the same look" longer, through a shallow orbit for instance. Judgement
+#: default, `#needs-flight` -- the user's own "a different angle to look
+#: from, triangulation by ownship movement" (explore-notes.md, answer 2)
+#: is what this constant makes happen.
 RANGE_DECORRELATION_BEARING_DEG: Final[float] = tuning.real(
     "perception.estimation.RANGE_DECORRELATION_BEARING_DEG",
     30.0,

@@ -271,7 +271,32 @@ first, by calculation, then the fallback it names:
   *realisation* stays independent (no change there) while the *declared*
   correlation used for fusion is a bounded partial value.
 
-**Checks (Fix 1 alone)**: `ruff format --check`, `ruff check`, `mypy
---strict` (79 files) all pass; `test_relative_distance_scenarios.py`
-(12 tests) and `test_bl_b104_scenario_mock_flights.py::test_two_groups_
-one_bearing_stay_two_contacts` pass directly.
+**Fix 2 -- the truncated `defaults.toml` comment.** Reworded `RANGE_
+DECORRELATION_BEARING_DEG`'s `e.g.` into "for example"/"for instance"
+phrasing (the generator's `_SENTENCE_SPLIT` has no abbreviation
+special-case) and regenerated. **Found the same class of defect a second
+time while writing `CROSS_OPTIC_RANGE_SHARE`'s own comment**: a blank
+`#:` line between two paragraphs is the generator's own "shared intro
+paragraph" convention (`_comment_block_above`'s docstring) -- it made the
+renderer pick the *second* paragraph's first sentence, silently dropping
+the first one entirely, rather than truncating mid-sentence. Fixed by
+removing the blank-line break (one continuous comment block). Also
+tripped `test_tuning_comment_renders.py`'s cross-key-constraint guard
+(added since this plan's own Stage 1, not present at first implementation)
+on a second-sentence mention of `RANGE_RELATIVE_SHARE`; reworded that
+mention to prose (no bare identifier) rather than add it to the rendered
+first sentence, since it is explanatory, not a correctness-affecting
+coupling the pilot needs. Regenerated and read every rendered key's first
+sentence directly (`grep` for dangling `e.g.`/mid-word line ends found
+none) rather than re-inferring from the source comments.
+
+**Checks, full suite**: `ruff format --check`, `ruff check`, `mypy
+--strict` (79 files) all pass; `pytest -q` (fast suite, excluding the
+slow scenario-mock-flights module) 2886 passed, 4 xfailed -- one
+unrelated test (`test_mission_start_reset.py::test_check_for_new_
+mission_keeps_the_traceback_for_a_non_connection_failure`) failed once
+under the full run and passed both in isolation and on a clean full
+rerun, consistent with pre-existing test-order flakiness, not this
+change; `test_bl_b104_scenario_mock_flights.py` (slow module) 5 passed
+in ~117s, confirming the former `xfail` is now a plain pass alongside the
+module's other four scenarios.

@@ -306,7 +306,7 @@ CROSS_OPTIC_RANGE_SHARE = 0.6
 # source: perception/estimation.py:DEPRESSION_SIGMA_DEG
 DEPRESSION_SIGMA_DEG = 3.0
 
-# `BL-B108` Stage 1 -- how many degrees of line-of-sight rotation it takes for the `Z_view` field's down-range correlation to fall to about `1/e` (holding range fixed): a smaller value means ownship turning past a group updates its range estimate (via `belief.position_belief`'s correlated fusion/gate) sooner; a larger value means the estimate stays "the same look" longer, e.g.
+# `BL-B108` Stage 1 -- how many degrees of line-of-sight rotation it takes for the `Z_view` field's down-range correlation to fall to about `1/e` (holding range fixed): a smaller value means ownship turning past a group updates its range estimate (via `belief.position_belief`'s correlated fusion/gate) sooner; a larger value means the estimate stays "the same look" longer, through a shallow orbit for instance.
 # status: judgement | range: 5.0 .. 120.0
 # source: perception/estimation.py:RANGE_DECORRELATION_BEARING_DEG
 RANGE_DECORRELATION_BEARING_DEG = 30.0
