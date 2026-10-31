@@ -345,3 +345,14 @@ Reading (main loop):
   hook-level override)? What does ED's AI do when its inputs are contested?
 - If no workaround exists, BL-16's key case is blocked and that must be known before anything else
   is built.
+
+### Two control states (user, verbatim, 2026-10-31)
+
+> *"So there's two states really. When controls are parked (player in copilot seat and selected to
+> park controls) and when they are not. In both cases Petrobrain must be able to control the
+> aircraft. These may need different solutions."*
+
+Reading: two first-class states, each a must-have, possibly with different control paths:
+**unparked** (no ED AI pilot; player stick may still send input and must be ignored) and **parked**
+(player in copilot seat with park-controls selected; ED's AI pilot is flying and must be overridden).
+Neither is the fallback for the other.
