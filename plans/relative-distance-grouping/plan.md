@@ -371,3 +371,318 @@ only worth building once two groups on one bearing reliably exist.
 3. **Mission memory without the confidence floor (Q4)**: retiring `GROUP_ENTRY_CONFIDENCE_FLOOR`'s
    first-entry gate means low-confidence class claims also get entries. Read as "regardless of
    identification level". Confirm that includes "regardless of confidence".
+
+---
+
+## Amendment 2026-10-31: cross-optic error model
+
+Architect pass on `feature/relative-distance-grouping` at `2f6de2cc`, after two review rounds
+left Required Fix 1 open (`review.md`). Every number below comes from running the code: the
+shipped code, and a monkeypatched prototype of the design applied to the real `ContactStore`,
+gate and fold. The prototype was run against the full body-layer suite. Probe scripts are in
+the session scratchpad, not the repo. A short version of each probe is reproduced as a test in
+Stage D.
+
+**This supersedes**, in place and by pointer (`docs/PROCESS.md`, "Superseding a decision"):
+
+- Stage 1, "Per optic class... each has its own field seeds, so a better optic is an
+  **independent** look". → **REVISED** below: tiered (nested) fields.
+- The review follow-up's `CROSS_OPTIC_RANGE_SHARE` (`implementation.md`, "Review follow-up").
+  → **RETIRED** below.
+- Stage 1's `RANGE_DECORRELATION_RANGE_RATIO` default 1.5. → **REVISED** to 4.0 below. This is
+  a calibration change with its own commit.
+- Stage 2, "The gate and the fold see the same `S` by construction". → **REVISED** below. The
+  gate and fold still share one helper. The fold adds a cap that the gate does not.
+- The "model in one picture" table row "relative σ, two things at different distances in one
+  look ≈ √2·f·σ". It was **not true** of the shipped noise at the clear-case ratios (see
+  Verification). It holds under the revised calibration.
+
+### Verification of the current code (hypothesis checked, partly refuted)
+
+**One methodological fact first.** The down-range draw depends only on look geometry, optic and
+poll. `bias_object_id` keys only the *bearing* bias. So the reviewer's "10 bias draws" were 10
+copies of **one** range realisation, which explains why they came out 10/10 or 0/10 and never
+anything in between. Rotating the scene also samples only one realisation, with about 12
+effective samples at a 30° length scale. Honest rates need an **ensemble of field
+realisations**. The probes below get one by salting the field seed, 100–400 realisations each.
+
+Realised correlation of the stable down-range term, ensemble of 400 realisations, shipped code:
+
+| pair | realised ρ | belief declares | RMS of the range-error difference |
+|---|---|---|---|
+| unaided vs binocular, same geometry (3.5 km) | **−0.07** (independent by construction: `optic_class` is in the seed) | **0.575** | 749 m |
+| unaided near 2.25 km vs far 3.75 km, same bearing | **+0.23** | 0.196 (real geometry) | **642 m** |
+| unaided 2.0 vs 2.5 km (E6) | +0.70 | | 309 m |
+| unaided 4.6 → 2.4 km (closing) | +0.12 | | 825 m |
+
+E1 fold rate, shipped code, 100 realisations. Far contact founded from 3 looks, the other group
+seen once 6 s later, same bearing, stationary observer:
+
+| case | 3.0/1.5 | 3.75/2.25 | 4.5/3.0 | 5.0/3.5 | 4.0/2.0 | 4.6/2.4 |
+|---|---|---|---|---|---|---|
+| unaided/unaided, far first | 4% | 9% | 11% | 9% | 4% | 5% |
+| unaided/unaided, near first | 13% | 18% | 20% | 22% | 11% | 12% |
+| far unaided, near binocular, far first | 21% | 46% | 60% | 62% | 32% | 37% |
+| far unaided, near binocular, near first | 31% | 59% | 71% | 73% | 38% | 42% |
+
+The reviewer's literal probe reproduces exactly: same-optic 10/10 two contacts; far unaided and
+near binocular 0/10.
+
+**Root cause, as confirmed:**
+
+1. **Confirmed (main-loop hypothesis, part 1).** The truth-side fields fold `optic_class` into
+   the seed (`_field_value`). Unaided and binocular looks at the same scene therefore draw
+   independent errors (realised ρ ≈ 0). Belief meanwhile declares 0.6 × kernel through
+   `CROSS_OPTIC_RANGE_SHARE`. **Belief and noise disagree.** The tunable narrows a gate around a
+   correlation the noise does not have.
+2. **Refuted (main-loop hypothesis, part 3).** Same-optic separation does **not** come from a
+   shared realised error. At 2.25/3.75 km the two groups' realised errors are only 0.23
+   correlated, because `Z_view` decorrelates at a range ratio of 1.5, which is *inside* the
+   clear-case ratios of 1.4–2.0. Same-optic mostly stays two because the hypothesis gate
+   (ρ ≈ 1 under "same thing") is narrow. It is still not "always two": it fails 4–22% of the
+   time across realisations. The plan's clear-case guarantee did not hold for **any** optic. The
+   reviewer saw 10/10 only because one realisation happened to pass.
+3. **New: an irreducible cross-optic limit.** Under any honest model, an unaided estimate of a
+   group carries blur that a binocular look does not share. The best a binocular look of the
+   same thing can agree with an unaided memory is ±σ_u·√(1 − k²), with k = 0.7, which is
+   0.71σ_u. The gate's 3σ zone along the line is therefore at least about **0.36 × range** (1.37
+   km at 3.75 km). This is physics, not a defect, and it decides the user question below.
+4. **Found on the way (defect).** `surface_range_estimate` evaluates both its fields at
+   `true_bearing_deg=0.0`. For **ground units** the stable error never decorrelates with line-of-
+   sight rotation, so E5b orbit triangulation does not exist in the noise, while belief assumes
+   it does (30°). Belief then over-claims improvement on an orbit. Every probe here, and the
+   reviewer's, used the air-shape helper, so none of them could see it.
+5. **Found on the way (fragility).** Every pinned-scenario test in the suite passes or fails on
+   one fixed field realisation. Changing a length scale swaps the realisation. One test
+   (`test_hybrid_source.py::test_repeated_scope_observations_of_a_stationary_object_do_not_
+   converge_on_truth`) fails for exactly that reason under the prototype.
+
+### The model (Stage A, `perception/estimation.py`)
+
+**A better optic sees the same scene with less blur.** Scene cues (misjudged unit size,
+terrain) are optic-independent, so they cannot shrink with magnification. What magnification
+removes is the observer's own measurement blur. So the tightest optic's error is the shared
+part, and each coarser optic adds its own independent blur on top. Sort the optics by range
+scale k (sight_narrow 0.3 < sight_wide 0.5 < binocular 0.7 < unaided 1.0, read from
+`_RANGE_SIGMA_SCALE_BY_OPTIC` at import, not hard-coded, so a tuned scale reorders correctly):
+
+```
+Z_o(g) = (1/k_o) · Σ_{tiers j with k_j ≤ k_o} sqrt(k_j² − k_{j−1}²) · G_j(g),   k_0 = 0
+```
+
+- `G_j` are unit fields seeded by **tier name**, not by optic class. Each uses the same
+  geometric kernel the field already has, so `Var Z_o = 1`.
+- **Corr(Z_o(g₁), Z_p(g₂)) = (k_p / k_o) · κ(g₁, g₂)** for p tighter than o, where κ is the
+  existing closed-form kernel.
+- Apply this to both `Z_view` and `Z_near`. `z_look` stays per optic and per poll, independent
+  as today.
+- The `"scope"` class (hybrid source) is not in the ladder. It keeps its own independent field,
+  and belief gives it ρ = 0, which is today's behaviour.
+- Implement it inside `_stable_fraction`, through one helper `_tiered_field(field_name,
+  optic_class, coords, length_scales)`. No new abstraction is needed: it replaces the direct
+  `_field_value` calls.
+- **One exported function says how optics correlate:** `optic_range_correlation(a, b) -> float`.
+  It returns `min(k)/max(k)` for two ladder optics, 1.0 for equal classes, and 0.0 if either
+  class is outside the ladder. The realisation (through the tier weights) and belief both read
+  it, so **the two cannot disagree**: they are the same arithmetic.
+- `stable_range_correlation(d_bearing_deg, range_ratio, optic_a, optic_b)` returns
+  `(k·κ_view, k·κ_near)` with `k = optic_range_correlation(a, b)`. Its `same_optic: bool`
+  parameter goes.
+- Add a test seam, `_FIELD_REALISATION_SALT: str = ""`, a module literal (not a tunable: it does
+  not change behaviour). It is folded into `_field_frequencies`'s seed and cache key, so tests can
+  sweep an ensemble of realisations (`monkeypatch` + `cache_clear()`).
+- **Surface fix:** add `true_bearing_deg` to `surface_range_estimate`, pass it from
+  `naked_eye_source`, and use it in both the cue A and cue B fields. This is a behaviour change
+  for ground units, so it gets its own commit.
+
+**Why not "mostly the same error, scaled down" (shared share above k).** If the binocular error
+were close to 0.7 × the unaided error, the difference of the two estimates (≈ 0.3·e_u) would
+reveal the error. The fused estimate would then extrapolate past both: at ρ = 0.9 the fused σ is
+0.91σ_b, and it falls to 0 as ρ → 1. That puts omniscience-by-arithmetic **into the noise
+itself**, not only into the belief. The nested ladder sits exactly at the honest boundary
+ρ = σ_small/σ_large. There, fusing any two optics gives exactly the tighter one, so the two
+weights are never negative.
+
+### Belief side (Stage B, `belief/position_belief.py`, `association_over_time.py`)
+
+- **`correlated_innovation` gains `for_fusion: bool`.** The along-line cross-term becomes
+  `c_down = optic_range_correlation(...) · effective_down_correlation(κ_view, κ_near) · σ_sa ·
+  σ_sb`. When `for_fusion` is set, it is additionally capped:
+  `c_down ≤ min(var_prior_along, var_look_along)`. Each variance is that side's full along-line
+  variance (inflated prior projected on the anchor's line of sight, look covariance projected on
+  the look's). In 1-D this is exactly "neither weight negative", so the fused mean never
+  extrapolates past both inputs. It also covers *closing*: under the new calibration two looks
+  at a 1.9 ratio are about 0.8 correlated, more than σ_near/σ_far ≈ 0.52.
+- **The gate does not cap.** It uses the model ρ, which is the correlation the noise really has.
+  A gate produces accept/reject, never a position, so a calibrated test against the true
+  correlation is honest. The fold's `S` is then ≥ the gate's `S`. Any look the gate accepts sits
+  well inside the fold's `S`, so `FUSION_SANITY_SIGMA` behaves. Capping the gate too was measured
+  and makes things worse: same-optic folds go back up to 4–35%.
+- **The gate tests the look's σ under the hypothesis.** Under "this look is that contact", the
+  look's true range is the hypothesis range. In `passes_gate`, scale the look's `sigma_cross_m`,
+  `sigma_down_m` and `sigma_down_stable_m` by `hypothesis_range_m / percept.range_m`. The reported
+  range is used, so only perceived quantities enter. This makes ρ *and* σ hypothesis-consistent.
+  Today the look's σ is declared at its own real range. Measured: without this change, same-optic
+  near-first folds 3–12% across 3.0–5.0 km. With it, 0–1%.
+- **Floor** (`_apply_floor`): `down_floor = κ_view · s · σ_down_look · min(1, k_anchor /
+  k_look)`. Staring through a worse optic after a better one can never go below the better optic's
+  own stable floor, and a better optic's look is not discounted. `correlated_innovation` returns
+  the **geometric** κ_view (not k-scaled), and the floor applies the optic factor itself.
+- `contacts_plausibly_same`: the same helper, gate mode (no cap), with the optic factor.
+- `LookAnchor` already carries `optic_class` and `sigma_down_stable_m`, so there is **no new
+  field** and no new construction-site work. The Co-moving Fields table is unchanged.
+
+### Calibration (Stage C, its own commit; mechanism and calibration never share one)
+
+- `RANGE_DECORRELATION_RANGE_RATIO` 1.5 → **4.0**, `hi` 4.0 → 8.0. Rewrite the `#:` comment's
+  first sentence for what the pilot notices: *"How far apart in distance two things can be and
+  still have their ranges misjudged together. Higher keeps two groups on one bearing in the right
+  order and spacing, and keeps a group's range error consistent while closing."*
+- Why 4.0 and not a scenario fit. The user's own words: *"2 or 2.5 km and 5 are easy to tell
+  apart at any altitude"*. That needs the stable error shared across a range ratio of about 2. A
+  correlation of 0.8 at ratio 2 needs L ≈ 4. At 1.5 the same pair is 0.08 correlated, which
+  contradicts both the user and the plan's own table.
+- What it does to closing: the *fractional* misjudgement persists while closing (0.78
+  correlated at 4.6 → 2.4 km), and the *absolute* error still shrinks in proportion to range. So
+  E5 ("does improve when the pilot closes") holds, and a different angle still decorrelates
+  (`RANGE_DECORRELATION_BEARING_DEG` unchanged). The fold cap is what stops belief from solving
+  for the shared fraction.
+- **Retire `CROSS_OPTIC_RANGE_SHARE`.** The cross-optic correlation is now derived from
+  `BINOCULAR_RANGE_SIGMA_SCALE` (and the sight scales). A user `tuning.toml` that still sets the
+  key gets the loader's unknown-key warning, which is the intended posture. Regenerate
+  `defaults.toml` and read the **rendered** entry for the changed key.
+
+### Measured on the prototype (stages A–C applied by monkeypatch to the real code)
+
+Ensemble realised correlation (400 realisations): unaided vs binocular at the same geometry
+**0.75** (model 0.7 × 0.96 + f²-part). Near/far at 2.25/3.75 km **0.84**, difference RMS
+**383 m** (was 642). 2.0/2.5 km 0.94, 157 m. Closing 4.6→2.4 km 0.78. **Belief and noise now
+agree.**
+
+E1 fold rate, 100 realisations:
+
+| case | 3.0/1.5 | 3.75/2.25 | 4.5/3.0 | 5.0/3.5 | 4.0/2.0 | 4.6/2.4 | 2.5/2.0 (E6) |
+|---|---|---|---|---|---|---|---|
+| unaided/unaided, far first | 0% | 1% | 0% | 0% | 1% | 0% | 2% |
+| unaided/unaided, near first | 0% | 1% | 1% | 0% | 1% | 0% | 14% |
+| binocular/binocular | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
+| far unaided, near binocular, far first | 18% | 40% | 62% | 67% | 14% | 18% | 87% |
+| far unaided, near binocular, near first | 7% | 19% | 44% | 52% | 5% | 5% | 73% |
+| far binocular, near unaided, far first | 3% | 11% | 40% | 50% | 3% | 3% | 95% |
+| far binocular, near unaided, near first | 0% | 1% | 9% | 25% | 0% | 1% | 68% |
+| **any optics, both groups in the same look** (continuity claim) | 0% | 0% | 0% | 0% | 0% | 0% | — |
+
+Cross-optic, memory only, wider separations (fold %, far first / near first, far unaided and
+near binocular): 3.0/1.0 6/1, 4.0/1.5 3/1, 5.0/2.0 4/1, 5.0/2.5 11/3.
+
+Other checks, prototype applied:
+- Full fast suite: 2885 passed, 1 failed. The failure is the realisation-pinned scope test
+  (point 5 above).
+- `test_bl_b104_scenario_mock_flights.py`: 5/5 passed, including the shipped two-groups test,
+  without `CROSS_OPTIC_RANGE_SHARE`.
+- All of `test_relative_distance_scenarios.py` passed: E3 across optics, E4 dwell, E5a/E5b, and
+  both E6 flip tests.
+- No omniscience: fused along σ / tighter look's σ was at least **0.985** over 72 geometries,
+  for unaided→binocular, binocular→unaided, closing, and mixed. The shipped code reaches 0.886.
+
+**The honest model meets the clear case same-optic (≤1%) and whenever both groups are in the
+same look (0%). It does not meet it cross-optic when the far group is held only in memory.**
+Those numbers follow directly from point 3, they are not a tuning gap, and so this becomes a
+user decision (below). Even the reviewer's literal geometry (3.75/2.25, far unaided then near
+binocular) still folds on the code's one fixed realisation. It sits in the 40% band.
+
+### Implementation stages
+
+**A. Perception mechanism** (`estimation.py`, `naked_eye_source.py`), two commits:
+1. Tiered fields, `optic_range_correlation`, `stable_range_correlation` signature, salt seam.
+2. Surface bearing fix.
+
+`test_estimation.py`'s cross-optic tests are rewritten for the derived ratio: `..._is_partial_
+for_a_different_optic` becomes `optic_range_correlation` property tests. Add an ensemble test:
+realised ρ between optics o and p at the same geometry ≈ k_p/k_o ± 0.1 over ≥ 200
+realisations, for every ladder pair, with `"scope"` ≈ 0.
+
+**B. Belief mechanism** (`position_belief.py`, `association_over_time.py`), one commit. Remove
+the `CROSS_OPTIC_RANGE_SHARE` reads.
+
+**C. Calibration commit.** `RANGE_DECORRELATION_RANGE_RATIO` 4.0 / hi 8.0, retire
+`CROSS_OPTIC_RANGE_SHARE`, regenerate `defaults.toml`.
+
+**D. Tests, docs, entry.**
+- New `tests/test_relative_distance_sweep.py`. It uses the salt seam and the existing
+  `_observation` helper, extended with a `surface: bool` path that goes through
+  `surface_range_estimate` so ground units are covered too. N = 100 realisations per cell.
+  Measured cost was about 1 s per 100 runs per cell.
+  - **E1 same-optic** (unaided/unaided, binocular/binocular, both orders) over far ∈ {3.0, 3.75,
+    4.5, 5.0} km with separation 1.5 km, plus 4.0/2.0 and 4.6/2.4. Assert fold ≤ 3% per cell
+    (measured ≤ 1%).
+  - **E1 in view**: every optic pair, both orders, the first group re-seen in the same poll
+    with `continues_observation_id`. Assert 0 folds.
+  - **E1 cross-optic, memory only**: a characterisation fence, not a guarantee. Assert each
+    cell's rate ≤ the measured value + 10 points, so that a change to the gate, scales or length
+    scales cannot silently widen it (the reviewer's round-2 optional item). Its final form
+    depends on the user decision.
+  - **E3 across optics**: one group, unaided then binocular and the reverse, over realisations.
+    Never two contacts.
+  - **No omniscience**: over realisations and both orders (unaided/binocular, binocular/unaided,
+    closing 4.6→2.4, unaided 4.6 then binocular 2.4):
+    - fused along σ ≥ the floor of the tighter look;
+    - the fused mean lies between the two inputs along the line (no negative weight). Check this
+      directly from the gain, not from errors.
+  - **E6**: the existing flip tests stay. No verdict is asserted on 2.0/2.5.
+- Rewrite `test_hybrid_source.py`'s scope test as an ensemble statement.
+- Leave pinned scenarios that pass in place, but note in each that it rests on one realisation.
+- Add a callout-level check to E1a: two `CONTACT_DETECTED` **callouts spoken**, not only two
+  events. `contacts_plausibly_same` drives merge-echo suppression and its correlation changes in
+  Stage B.
+- `docs/STRUCTURE.md` estimation/position_belief entries.
+- **`BL-B108.md`: state E1 as delivered for same-optic and in-view only**, with the
+  memory-only cross-optic rate, unless the user decision changes it.
+
+### Risks & Unknowns (amendment)
+
+- **How often the memory-only cross-optic case arises in flight is unknown.** It needs the far
+  group to drop out of detection in exactly the poll where the near one is glassed. On one
+  bearing the far group is inside the binocular field, so in-view is the expected case.
+  `sortie-log-triage` can count it (contacts founded within seconds of an optic switch on a
+  bearing already held).
+- **The 1-D cap with non-coincident axes** (after a large bearing change) is approximate. The
+  no-negative-weight sweep test is the guard. If it fails at large Δbearing, project both
+  covariances on a common axis rather than add machinery.
+- **The `RANGE_RELATIVE_SHARE` E6 flip point moves**, because `Z_view` is now shared at 2.0/2.5.
+  The flip tests only assert that a flip exists inside the bounds, and they passed under the
+  prototype. The ≈0.31 figure in Stage 5's text is stale. Re-derive it rather than quote it.
+- **The ground-unit orbit behaviour changes** with the surface fix. E5b for ground units starts
+  to triangulate for real. No test covered it before; the sweep's surface path does.
+
+### Second-order effect
+
+The optic ladder generalises to the 9K113 (`BL-B66`): a sight look is now the shared core of
+every coarser look, so raising the sight on a group Petrovich already holds tightens it without
+extrapolation and without a new correlation constant.
+
+### Decision Requiring User Input (amendment)
+
+**Cross-optic, far group held only in memory.** An unaided range estimate carries blur that a
+binocular look does not share. At the binocular scale of 0.7 you approved, the honest gate along
+the line is about ±0.36 × range wide whenever an unaided memory is compared with a binocular
+look. At ~3–5 km that is about as wide as the 1.5 km "clear case" separation.
+
+Measured fold rates for the memory-only case: 5–67% across the clear-case grid.
+
+The same scenes give 0% when the far group is still in the binocular view (it is on the same
+bearing), and ≤1% same-optic.
+
+Options:
+
+1. **Accept as the honest limit (recommended).** Ship the model. E1 is guaranteed same-optic and
+   in-view. The memory-only cross-optic rate is documented and fenced by a test, and flights
+   tell how often it actually occurs.
+2. **Smaller binocular range advantage**, scale 0.85 instead of 0.7. Measured memory-only folds
+   drop to 3–37% (in-view and same-optic unchanged). This trades away some of what Q3 gave
+   binoculars. It narrows the gap but does not close it.
+3. **Neither; reopen the goal.** For example, treat any optic switch as a fresh look at the
+   whole bearing. That is a perception/attention change outside this feature.
+
+Not offered: any belief-side ρ above what the noise has. That is the round-1/round-2 fix shape,
+and it is what this amendment removes.
