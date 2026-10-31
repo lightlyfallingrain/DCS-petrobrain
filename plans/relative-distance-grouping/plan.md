@@ -238,7 +238,7 @@ above.
 
 **Stage 4: mission memory keeps every group (Q4, E7).**
 - `_maybe_write_entry_for_contact`: drop the `nameable` gate; keep the first-entry confidence gate.
-  The first entry is written at founding, at whatever level, presence or unknown included. The
+  The first entry is written once confidence reaches the floor, at whatever level, presence included. The
   composition records the level and confidence it has, and an unknown-level contact writes an empty
   composition, which is already the total case.
 - Material-change and resight rules are unchanged. Air defence is unchanged.
