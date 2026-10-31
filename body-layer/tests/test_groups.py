@@ -1805,3 +1805,37 @@ def test_extent_m_is_persisted_on_the_group() -> None:
     )
 
     assert store.groups[0].extent_m == pytest.approx(600.0)
+
+
+# --- BL-B106 Stage 3: the cohesion formula is unchanged -- it is already
+# a top-down world gap (<=140 m backstop, <=500 m caps), so already
+# circular; relative distance's own tightening of the inputs is what was
+# missing (finding 1), not this formula. Pin tests only.
+
+
+def test_two_contacts_1500m_apart_along_one_los_never_form_a_group() -> None:
+    """E2: the clear case -- 1500 m is well past every backstop/cap this
+    module declares (the installation cap, 500.0, is the widest), so two
+    contacts that far apart are never one `Group`, whatever their
+    orientation relative to the line of sight (this module's own distance
+    is a plain top-down x/z gap, not a bearing/range one)."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 1500.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_1km_column_with_60m_gaps_is_one_group() -> None:
+    """Q2 (user: "one group") -- a column ~1 km long, each neighbour only
+    60 m from the next: single-link chaining keeps the whole column one
+    `Group`, the same mechanism `test_the_eager_cap_still_chains_a_long_
+    infantry_line` already relies on for a different class."""
+    store = GroupStore()
+    contacts = [_contact(f"C{i}", 0.0, i * 60.0) for i in range(17)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert len(store.groups) == 1
+    assert len(store.groups[0].member_contact_ids) == 17
