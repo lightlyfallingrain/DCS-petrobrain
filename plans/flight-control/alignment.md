@@ -227,3 +227,134 @@ are the opposite of hands-off time.
    map, radios, or something else?
 8. If you jump seats while Petrovich has the controls, should he keep flying from the pilot seat, or
    hand back with an urgent "you have controls!"?
+
+## Plan check — 2026-10-31
+
+**Verdict:** CONCERNS
+
+Checked against: the goal check above; `plans/flight-control/explore-notes.md` in full, including
+the 2026-10-31 "Goal-check answers", "The key challenge: parked controls", "Two control states",
+"Steering ED's AI is rejected", "Probable solution: overpower the axes", and "Wobble on the flight
+axes" sections; `plans/flight-control/plan.md` at `7ab9b500` (P1–P4, A1–A9, Decisions 1–20, D-a to
+D-e); `body-layer/ROADMAP/BL-16.md`; `docs/BEHAVIOUR_ALIGNMENT.md`; and the Windows desk-recon note
+`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md` (merged in at `bd56b82f`, after
+this check had started). The plan traces unusually cleanly against the original E1–E10/F1–F8 — every
+one of goal-check's eight open questions has a user answer (A1–A9) and a matching plan change, and
+the parked-controls material that arrived after the goal check (P1–P4) is folded into Decision 20 and
+the stage-0 gate rather than argued around. The gaps below are two later-arriving user requirements
+the plan's current text does not yet carry, plus one place the plan's own recommendation would
+re-open a decision the user already made.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 handover unambiguous, confirmed, "unable" on refusal | Stage 1, Decision 13 | met |
+| E2 nothing jumps, turn/climb/IAS continue, <5° → level | Stage 1/2, Decision 1 REVISED | met (F2 resolved by A2) |
+| E3 stick does nothing while he flies | Decision 6, S0-1/S0-2, Stage 1 | met, pending Stage 0's measurement — see Finding 3 |
+| E4 short readback on every command | Decision 10 | met |
+| E5 pilot can stop a turn by voice | `level_out`, A1, Decision 12, Stage 2 | met (F1 resolved) |
+| E6 "I have controls" acts at once, no confirm | A3, Decision 13 | met |
+| E7 refuses/climbs/hands-back/says-so | Decision 14 (A4: no call on a stalled goal, by the user's own choice) | met — the open half of E7 was resolved by the user toward silence, not toward a callout; the plan matches that answer |
+| E8 never flies into the ground from current height | Stage 3, Decision 7 | met |
+| E9 optics off, naked eye on while flying | A5, Decision 15 | met |
+| E10 handover speech at today's latency | Decision 19 | met |
+| F1 stop word | A1, Decision 12 | met |
+| F2 turn-vs-drift threshold | A2, Decision 1 REVISED | met |
+| F3 emergency take-back vs. confirm band | A3, Decision 13 | met |
+| F4 goal stalls silently vs. "unable" | A4, Decision 14 | met (user chose silence) |
+| F5 naked-eye calls while flying | A5, Decision 15 | met |
+| F6 AGL clearance over trees/towns | A6, S0-6 (and the new desk-recon's `master`/SAU-marker angle, see Finding 2) | met, pending Stage 0 |
+| F7 near-term value vs. lasting why | A7 | met — pilot-value check rewritten around the key case |
+| F8 seat jump while flying | A8, Decision 17 | met |
+| P1 key case is ED's AI, not the player's stick | Decision 16, S0-P gate | met |
+| P2 two control states, both must-haves, per-state effector | Decision 20, S0-P/S0-c split, go/no-go | met |
+| P3 steering ED's AI rejected as a control path | S0-P3 scoped to off-switches only | met |
+| P4 overpower-the-axes hypothesis probed first | S0-P2 | met |
+| **W1 — invisible wobble required on every flight-axis write, both states** (`explore-notes.md`, "Wobble on the flight axes", 2026-10-31) | none | **missing** — see Finding 1 |
+
+### Findings
+
+1. **The plan has no wobble on the flight axes, and Decision 6 says the opposite of what the user
+   just required.** — lens: purpose, non-obvious case
+   - Assumption: `grep -i wobble plans/flight-control/plan.md` returns nothing. Decision 6 reads
+     *"Stick override: measure first (S0-2), explore options only if it fails"* — wobble/dither/
+     flicker is written up as a fallback tried **only if a held constant write loses**. S0-2's own
+     row frames it the same way: *"flicker fails but dither holds → dither; both fail → Decision
+     6."* S0-P2 frames parked-state wobble the same way, as one candidate among "constant vs.
+     flicker vs. dither" to be compared, not a given.
+   - In the sim: the user's words are unconditional — *"Regardless of how writing control axis
+     values are done, that (invisible) wobble is needed on the control axises, similar to 9K113
+     axises."* Not "if the plain write fails," every frame, both states.
+   - The pilot would see: nothing wrong yet, because this is a measurement-stage gap, not a built
+     behaviour — but if Stage 0 is run against the plan as written, a held constant write that
+     happens to win on the bench (e.g. because the AI only re-asserts its own value at some longer
+     interval) would read as a pass and the wobble would never be built in, until a later flight at
+     a different airspeed or altitude shows the lapse the 9K113 work already measured for the sight
+     axis (intermittent obedience without a per-frame value change, 9K113 run 11).
+   - Grounded in: the user's own words (binding), the 9K113 precedent the plan itself cites for P4
+     (`plans/9k113-sight-pointing/plan.md`, `SERVO_WOBBLE`), and the new desk-recon's own read of
+     *why* the 9K113 override won — *"It won by changing value every frame, which suggests ED's
+     consumer reacts to new input and otherwise falls back to its own source"* — which argues the
+     same mechanism is needed for the flight axes from the start, not as a contingency.
+   - Suggests: Decision 6 is superseded — the wobble is mandatory on cyclic pitch/roll, pedal and
+     collective in both effectors, not a fallback probed only on failure. S0-1/S0-2/S0-P2 should
+     measure the wobble's own bound (how large before it is felt in the aircraft or seen in the
+     cockpit stick/collective/pedal animation), not whether wobble is needed at all. This is a plan
+     text change, not a user decision to make — the user has already made it.
+
+2. **S0-P2's pass criterion may read as a pass on an override that is not actually flying the
+   aircraft.** — lens: world truth, non-obvious case
+   - Assumption: S0-P2 passes when *"the aircraft follows the written value; args track `v`, not the
+     AI, every frame"* — read as the cockpit stick/collective/pedal animation args (1100–1113 per
+     the new desk-recon, generically "cockpit stick/collective/pedal args" in the plan).
+   - In the sim (desk-recon, new): if ED's AI pilot flies through the SAU channel (device 10) rather
+     than writing the stick position directly — a real possibility the recon raises and cannot rule
+     out from the files alone — then the **stick animation args may stay centred while the SAU's own
+     deflection (`au_roll_position`/`au_pitch_position`/`au_rudder_position`/`au_height_position`,
+     Controls Indicator) does the flying**. Reading only 1100–1113 would then show "args track v"
+     regardless of who is actually flying, because the AI's real channel is a different arg the plan
+     does not name.
+   - The pilot would see: a Stage 0 report that says the parked override won, then a Flight 4b where
+     ED's AI is still visibly in command of the aircraft — exactly the failure the go/no-go gate
+     exists to catch before anything is built.
+   - Grounded in: the desk-recon's §6 (`au_*` markers, `LoGetHelicopterFMData().master`, the two
+     plausible paths (a)/(b)) and its own suggested first probe, which the plan's S0-P2 row does not
+     yet cite.
+   - Suggests: S0-P2 and S0-P2a add the Controls Indicator's `au_*` markers and `master` to what is
+     logged and compared, alongside the stick-position args, before declaring a pass. This is a
+     measurement-completeness point for Stage 0a/0b, not a change to what the plan is trying to
+     build.
+
+3. **D-e's recommendation (auto-take on park) would re-open "handover is spoken only," which the
+   user already settled.** — lens: crew sense, whose job
+   - Assumption: D-e asks whether parking without a prior "you have controls" should make Petrobrain
+     take over automatically and say "I have controls," and *recommends* that it should, once S0-12
+     gives a reliable park signal.
+   - In the sim: the 2026-10-25 settled point 2 (carried into `BL-16.md` and the goal check's E1/E6)
+     is *"Handover is spoken only"* — the explore conversation's own second settled item, never
+     revisited. An auto-take on park is not a spoken handover; it is Petrovich taking the controls
+     on a cockpit-switch event the player did not narrate.
+   - The pilot would see: he parks the controls to work the 9K113 (as DCS requires) without having
+     said "you have controls" first, and Petrovich speaks over him anyway — a second, unasked-for way
+     to take the aircraft, which cuts against E1 ("unambiguous... after 'you have controls'") even
+     though D-e's own text frames it as serving A8's spirit.
+   - Grounded in: the 2026-10-25 settled point 2 (`explore-notes.md`, `BL-16.md`), goal check E1/E6.
+   - Suggests: D-e is correctly flagged as "Decisions Requiring User Input" and not yet built, so
+     nothing in the plan has acted on it — but the recommendation itself should be read against
+     "spoken only" before the user answers, since it is the one place in this plan where the
+     Architect's own suggestion, if accepted as written, would contradict a decision already on
+     record rather than fill a genuine gap. (Q1 below.)
+
+4. **Stage 0a's pending input has landed and is folded in; no other action needed here.** — lens:
+   purpose
+   - The 2026-10-31 desk-recon (`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md`)
+     that Stage 0a named as pending is now on the branch. Its headline — park state and the AI pilot
+     are native-code, not Lua, so no flag disables the AI while parked and it must be probed — matches
+     what the plan already assumed (S0-P3's "none → blocker" branch). Nothing in it reverses a plan
+     decision beyond Findings 1 and 2 above.
+
+### Questions for the user
+
+1. D-e recommends Petrovich take the controls automatically when you park without having said "you
+   have controls" first. That is a second way he takes the aircraft, not a spoken one — is that what
+   you want, or should parking without a prior handover leave the controls with ED's AI until you
+   say "you have controls"?
