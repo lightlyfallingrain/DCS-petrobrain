@@ -237,13 +237,15 @@ above.
     must not regress).
 
 **Stage 4: mission memory keeps every group (Q4, E7).**
-- `_maybe_write_entry_for_contact`: drop the `nameable` gate and the first-entry confidence gate.
+- `_maybe_write_entry_for_contact`: drop the `nameable` gate; keep the first-entry confidence gate.
   The first entry is written at founding, at whatever level, presence or unknown included. The
   composition records the level and confidence it has, and an unknown-level contact writes an empty
   composition, which is already the total case.
 - Material-change and resight rules are unchanged. Air defence is unchanged.
-- `GROUP_ENTRY_CONFIDENCE_FLOOR`: grep for other readers. If there are none, retire the key and
-  regenerate `defaults.toml`.
+- `GROUP_ENTRY_CONFIDENCE_FLOOR` **stays** as the first-entry gate (user, 2026-10-31: *"keep the
+  confidence floor"*). Only the `nameable` gate goes. A presence-only claim (0.3) is admitted after
+  enough reinforcement to reach the floor; a class claim (0.6) on founding. Test both, plus that a
+  single-glimpse presence contact gets no entry.
 - Test: a presence-only stationary group goes lost under the nose (cockpit mask, 2 min) and the
   entry is still recallable.
 
@@ -356,6 +358,9 @@ Decision 5a-i (step 10). It also unblocks `[[BL-B107]]`, the second-group callou
 only worth building once two groups on one bearing reliably exist.
 
 ### Decisions Requiring User Input
+
+**Answered 2026-10-31** (`explore-notes.md`, "Plan-escalation answers"): 1 rewrite -- yes; 2 binocular
+0.7 -- yes; 3 -- keep the confidence floor, drop only the identification-level gate.
 
 1. **Pinned tests will be rewritten, not extended.** These are the exact-offset pins in
    `test_estimation.py`, and `precise-position-belief`'s dwell-convergence assertions. They encode

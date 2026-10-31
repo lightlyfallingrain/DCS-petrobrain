@@ -106,3 +106,25 @@ Reading:
   stabilisation) but not zero. A look through a better optic is new information and may tighten the
   estimate; a repeat look through the same optic from the same geometry may not.
 - Q4: mission memory keeps every group, at any identification level.
+
+## Plan-escalation answers (user, verbatim, 2026-10-31)
+
+Asked: (1) rewrite, not extend, the tests built on the independent-looks model (exact-offset pins in
+`test_estimation.py`, `precise-position-belief` dwell-convergence assertions)? (2) binocular range
+scale 0.7 x naked eye as a judgement default, `#needs-flight`? (3) does "regardless of
+identification level" also mean regardless of confidence, or keep a low confidence bar so a single
+glimpse is not remembered?
+
+> *"1 - ok*
+> *2 - ok*
+> *3 - keep the confidence floor"*
+
+Reading (main loop):
+
+- (1) Rewrite them as statistical property tests.
+- (2) Binocular 0.7, judgement default, `#needs-flight`.
+- (3) Stage 4 drops only the `nameable` (identification-level) gate. `GROUP_ENTRY_CONFIDENCE_FLOOR`
+  (0.5) stays, unchanged, as the first-entry gate. Effect at today's constants: a class-level claim
+  starts at 0.6 and is admitted on founding; a presence-only claim starts at 0.3 and needs four
+  reinforcing observations (+0.05 each) to reach 0.5 -- a few seconds of consistent sighting at
+  1 s polls, so a single glimpse is not remembered. The key is not retired.
