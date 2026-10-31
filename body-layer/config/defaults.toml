@@ -296,6 +296,11 @@ BEARING_SIGMA_DEG = 3.0
 # source: perception/estimation.py:BINOCULAR_RANGE_SIGMA_SCALE
 BINOCULAR_RANGE_SIGMA_SCALE = 0.7
 
+# How much of a look's stable down-range correlation survives a switch to a *different* optic, as a fraction of what an identical-geometry look through the *same* optic would share (`BL-B108` review follow-up, 2026-10-31): raising it lets Petrovich treat a reacquisition through binoculars as more of a confirmation of what he already judged from the scene, narrowing the gate sooner; lowering it (toward 0) reopens the pre-fix hole where an optic switch alone makes two distinct groups on one bearing fold into one contact.
+# status: judgement | range: 0.0 .. 0.75
+# source: perception/estimation.py:CROSS_OPTIC_RANGE_SHARE
+CROSS_OPTIC_RANGE_SHARE = 0.6
+
 # How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:DEPRESSION_SIGMA_DEG

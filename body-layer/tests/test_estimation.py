@@ -380,13 +380,28 @@ def test_stable_range_correlation_falls_to_about_one_over_e_at_the_stated_range_
     assert math.isclose(rho_near, math.exp(-1.0), rel_tol=1e-6)
 
 
-def test_stable_range_correlation_is_zero_for_a_different_optic() -> None:
-    """A different optic class is an independent look by construction
-    (module docstring) -- both correlations collapse to zero regardless
-    of geometry."""
+def test_stable_range_correlation_is_partial_for_a_different_optic() -> None:
+    """`BL-B108` review follow-up (2026-10-31): a different optic no
+    longer collapses both correlations to zero. `rho_near` stays zero
+    (`CROSS_OPTIC_RANGE_SHARE`'s own docstring: not worth sharing, its
+    weight in `effective_down_correlation` is already small); `rho_view`
+    is the *same* geometric kernel as the same-optic case, scaled down by
+    `CROSS_OPTIC_RANGE_SHARE` -- exactly `1.0` at identical geometry here,
+    so `rho_view == CROSS_OPTIC_RANGE_SHARE` exactly."""
     rho_view, rho_near = stable_range_correlation(0.0, 1.0, False)
-    assert rho_view == 0.0
+    assert math.isclose(rho_view, estimation_module.CROSS_OPTIC_RANGE_SHARE)
     assert rho_near == 0.0
+
+
+def test_stable_range_correlation_cross_optic_still_decorrelates_by_geometry() -> None:
+    """The cross-optic share scales the geometric kernel, it does not
+    replace it -- rotating past `RANGE_DECORRELATION_BEARING_DEG` still
+    falls to about `1/e` of the baseline, same as the same-optic case."""
+    rho_view, _rho_near = stable_range_correlation(
+        estimation_module.RANGE_DECORRELATION_BEARING_DEG, 1.0, False
+    )
+    expected = estimation_module.CROSS_OPTIC_RANGE_SHARE * math.exp(-1.0)
+    assert math.isclose(rho_view, expected, rel_tol=1e-6)
 
 
 def test_stable_range_correlation_is_one_at_identical_geometry() -> None:

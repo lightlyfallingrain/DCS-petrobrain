@@ -211,3 +211,67 @@ No other subproject was touched.
    bearing approached so the far one shows first; an orbit of one
    group; a straight-in run; a stationary group overflown and asked
    about after 2+ minutes.
+
+### Review follow-up, 2026-10-31 (two required fixes)
+
+**Fix 1 -- the cross-optic `xfail` (E1 reopened by an ordinary optic
+switch).** Built the dispatch's primary candidate's rejected alternative
+first, by calculation, then the fallback it names:
+
+- **Z_near-only share, tried and rejected by calculation, not
+  inspection.** `effective_down_correlation`'s own weights cap `Z_near`'s
+  contribution at the relative-share weight's own square over the
+  combined relative-share-and-stable-share squares -- about 4% at the
+  shipped defaults (`RANGE_RELATIVE_SHARE = 0.2`). The failing scenario
+  (`test_two_groups_one_bearing_stay_two_contacts`, near/far at 3.0/4.5
+  km, unaided anchor vs. binocular look) needs an *effective* cross-optic
+  correlation of about 0.57 to narrow the gate enough to reject the fold
+  (worked by hand against that scenario's own ranges and optic scales,
+  then confirmed by probing `stable_range_correlation`/`effective_down_
+  correlation` directly). `Z_near` alone cannot reach above ~0.04
+  regardless of any bounded scale applied to it, since the relative-share
+  weight is deliberately small by Stage 1's own design -- a structural
+  cap, not a tuning problem.
+- **Built the fallback**: `CROSS_OPTIC_RANGE_SHARE` (new tunable, 0.6,
+  `lo=0.0, hi=0.75`) scales the *same* `Z_view` geometric kernel a
+  same-optic look already uses (bearing/range-ratio decorrelation
+  unchanged), applied in the high-leverage `rho_view` slot instead of
+  `rho_near`'s low-leverage one. `stable_range_correlation(..., same_
+  optic=False)` now returns `(CROSS_OPTIC_RANGE_SHARE * geometric_kernel,
+  0.0)` instead of `(0.0, 0.0)`. Verified against the real scenario, not
+  assumed: ran `test_two_groups_one_bearing_stay_two_contacts` with the
+  `xfail` still attached before touching it -- `XPASS` at the chosen
+  default, confirming the hand-derived ~0.57 threshold -- then removed
+  the marker.
+- **No-omniscience check, run both fuse orders.** A new property test
+  (`test_cross_optic_fuse_along_sigma_never_beats_the_tighter_optics_
+  own_sigma`) fuses a group seen unaided then through binoculars, and
+  the reverse order, and asserts the fused along-line sigma never drops
+  more than 5% below the tighter (binocular) optic's own single-look
+  sigma either way -- Bar-Shalom-Campo fusion with this partial
+  correlation measured at ~1.5% tighter than the binocular-alone sigma
+  at these ranges, bounded and explainable (genuine information gain
+  from a second, imperfectly-correlated look), not approaching exact.
+- **New tests**: `test_e1_far_group_unaided_then_near_group_through_
+  binoculars_stays_two_contacts` (E1 across optics) and `test_e3_group_
+  seen_unaided_then_through_binoculars_stays_one_contact` (E3 across
+  optics, the sibling case the fix must not break) in `test_relative_
+  distance_scenarios.py`, both via `_observation`'s new `optic` parameter
+  (default `UNAIDED_OPTIC`, unchanged for every existing caller).
+  `test_two_groups_one_bearing_stay_two_contacts`'s `xfail` is removed
+  (plain pass); its `import pytest` became unused and was dropped.
+  `test_estimation.py`'s `test_stable_range_correlation_is_zero_for_a_
+  different_optic` is rewritten (it asserted the old, now-false,
+  zero-for-any-different-optic behaviour) into `..._is_partial_for_a_
+  different_optic` plus a new `..._cross_optic_still_decorrelates_by_
+  geometry` test.
+- Updated the module docstring and `stable_range_correlation`/
+  `effective_down_correlation`'s own docstrings, which claimed a
+  different optic was always independent -- now state the field
+  *realisation* stays independent (no change there) while the *declared*
+  correlation used for fusion is a bounded partial value.
+
+**Checks (Fix 1 alone)**: `ruff format --check`, `ruff check`, `mypy
+--strict` (79 files) all pass; `test_relative_distance_scenarios.py`
+(12 tests) and `test_bl_b104_scenario_mock_flights.py::test_two_groups_
+one_bearing_stay_two_contacts` pass directly.

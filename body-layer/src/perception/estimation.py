@@ -35,12 +35,15 @@ shared by every cluster seen in that poll through the same optic -- it is
 what a repeat look from the *same* geometry still varies by, bounded to a
 small share (`RANGE_LOOK_SHARE`) of the total, since a repeat look mostly
 sees the same cues. Each field is keyed by the active optic's own
-`Optic.name` (`optic_class`), so a different optic is a genuinely
-independent look (`belief.position_belief`'s correlated fusion must not be
-able to infer the field's hidden value exactly by combining two optics'
-fully-correlated estimates, which would be omniscience by arithmetic) --
-see `stable_range_correlation`'s own docstring for the closed form belief
-needs.
+`Optic.name` (`optic_class`), so a different optic's field *realisation*
+is always independent (`belief.position_belief`'s correlated fusion must
+not be able to infer the field's hidden value exactly by combining two
+optics' fully-correlated estimates, which would be omniscience by
+arithmetic) -- but the *declared* correlation belief fuses with is not
+forced to zero on an optic switch (`BL-B108` review follow-up,
+`CROSS_OPTIC_RANGE_SHARE`): a different optic is new information, not
+wholly independent information. See `stable_range_correlation`'s own
+docstring for the closed form belief needs.
 
 `stable_range_correlation` is the **only** place `belief/` learns how two
 looks' down-range errors correlate -- it reads these model parameters
@@ -341,6 +344,45 @@ RANGE_NEAR_DECORRELATION_RANGE_RATIO: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: How much of a look's stable down-range correlation survives a switch to
+#: a *different* optic, as a fraction of what an identical-geometry look
+#: through the *same* optic would share (`BL-B108` review follow-up,
+#: 2026-10-31): raising it lets Petrovich treat a reacquisition through
+#: binoculars as more of a confirmation of what he already judged from the
+#: scene, narrowing the gate sooner; lowering it (toward 0) reopens the
+#: pre-fix hole where an optic switch alone makes two distinct groups on
+#: one bearing fold into one contact. Judgement default, `#needs-flight`
+#: -- the user's own words on a better optic (`explore-notes.md`, Q3):
+#: "that'd give a better range estimate ... though not exact," i.e. new
+#: information correlated with, not identical to, the old look's. Applied
+#: to the `Z_view` (geometry) kernel, not `Z_near`, despite the "same
+#: place, same moment" framing that motivated it -- tried first
+#: and rejected by calculation, not by inspection: `Z_near`'s own share of
+#: a look's total stable error is capped at the relative-share weight's
+#: own square over the relative-share-and-stable-share weights' combined
+#: squares (`effective_down_correlation`'s own weights) -- about 4% at
+#: the shipped defaults. The scenario this constant exists to fix (`test_
+#: bl_b104_scenario_mock_flights.py::test_two_groups_one_bearing_stay_
+#: two_contacts`) needs an *effective* cross-optic correlation of about
+#: 0.57 to narrow the gate enough to reject the two-group fold (worked by
+#: hand against that scenario's own near/far ranges and optics); `Z_near`
+#: alone cannot reach above ~0.04 regardless of this constant's value,
+#: since that relative-share weight is deliberately small by Stage 1's
+#: own design. Sharing through `Z_view` instead carries the high-leverage
+#: stable-share-squared weight (~0.96), so a bounded fraction of it
+#: reaches the needed magnitude; `Z_view`'s own geometric kernel (bearing/
+#: range-ratio decorrelation) still applies underneath this scale, so a
+#: cross-optic look still decorrelates with ownship's own movement
+#: exactly as a same-optic one would, just discounted by this fraction at
+#: every geometry.
+CROSS_OPTIC_RANGE_SHARE: Final[float] = tuning.real(
+    "perception.estimation.CROSS_OPTIC_RANGE_SHARE",
+    0.6,
+    lo=0.0,
+    hi=0.75,
+    status="judgement",
+)
+
 #: Number of random-Fourier-feature cosines each field realisation sums --
 #: an internal approximation-quality knob, not a behaviour-affecting
 #: constant (no value in this range changes what Petrovich does, only how
@@ -499,18 +541,32 @@ def stable_range_correlation(
     `rho_near` is `Z_near`'s own kernel, range-ratio only: `exp(-(ln(
     range_ratio) / ln(RANGE_NEAR_DECORRELATION_RANGE_RATIO)) ** 2)`.
 
-    `same_optic is False` makes both `0.0` -- a different optic class is an
-    independent field realisation by construction (`_field_value`'s own
-    seed includes `optic_class`), so two looks through different optics
-    share nothing of their down-range error, whatever their geometry."""
-    if not same_optic:
-        return 0.0, 0.0
+    **`same_optic is False`**: the field *realisations* stay fully
+    independent by construction (`_field_value`'s own seed includes
+    `optic_class` -- belief must never be able to infer either field's
+    hidden value exactly by combining two optics' fully-correlated
+    estimates), but the *declared* correlation this function hands back
+    is no longer forced to zero (`BL-B108` review follow-up, 2026-10-31
+    -- the plan's own zero-correlation argument was against `rho = 1`,
+    not against any `rho > 0`; a different optic looking at the same
+    scene moments later is still new, imperfectly-correlated information,
+    per the user's own words on binoculars, `CROSS_OPTIC_RANGE_SHARE`'s
+    own docstring). `rho_view` is the same geometric kernel as the same-
+    optic case, scaled down by `CROSS_OPTIC_RANGE_SHARE` (bounded well
+    below 1) -- so a cross-optic look still decorrelates with bearing
+    rotation/range ratio exactly as a same-optic one does, just starting
+    from a smaller baseline. `rho_near` stays `0.0`: `Z_near`'s own share
+    of the total is already small by design (`CROSS_OPTIC_RANGE_SHARE`'s
+    own docstring), so sharing it too would add complexity for a
+    negligible effect on `effective_down_correlation`'s output."""
     ratio = max(1.0, range_ratio)
     ln_ratio = math.log(ratio)
     rho_view = math.exp(
         -((d_bearing_deg / RANGE_DECORRELATION_BEARING_DEG) ** 2)
         - (ln_ratio / math.log(RANGE_DECORRELATION_RANGE_RATIO)) ** 2
     )
+    if not same_optic:
+        return CROSS_OPTIC_RANGE_SHARE * rho_view, 0.0
     rho_near = math.exp(
         -((ln_ratio / math.log(RANGE_NEAR_DECORRELATION_RANGE_RATIO)) ** 2)
     )
@@ -530,7 +586,9 @@ def effective_down_correlation(rho_view: float, rho_near: float) -> float:
     This is `1.0` exactly at identical geometry (`rho_view == rho_near ==
     1.0`, matching `Var(stable term) == sigma_down_stable_m ** 2` when
     both looks share one sigma) and `0.0` whenever `stable_range_
-    correlation` already returned `(0.0, 0.0)` (a different optic)."""
+    correlation` returns `(0.0, 0.0)` -- same optic, fully decorrelated
+    geometry. A different optic no longer forces this to `0.0` by itself
+    (`CROSS_OPTIC_RANGE_SHARE`)."""
     s_sq = stable_share() ** 2
     f_sq = RANGE_RELATIVE_SHARE**2
     denom = s_sq + f_sq

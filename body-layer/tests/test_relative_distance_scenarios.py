@@ -34,7 +34,7 @@ from perception.estimation import (
     stable_down_sigma_m,
 )
 from perception.geometry import GeoPosition, bearing_deg, horizontal_range_m
-from perception.optics import UNAIDED_OPTIC
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     Observation,
@@ -55,16 +55,21 @@ def _observation(
     group_z: float,
     bias_object_id: int,
     continues_observation_id: str | None = None,
+    optic: Optic = UNAIDED_OPTIC,
 ) -> Observation:
     """One look at a group's centroid through the real `perception.
     estimation` functions -- the air-target shape (no surface fusion),
     mirroring `naked_eye_source._build_observation`'s own two calls for
-    an air cluster."""
+    an air cluster. `optic` defaults to `UNAIDED_OPTIC` (every pre-cross-
+    optic-fix caller) -- the cross-optic tests below pass `BINOCULAR_
+    OPTIC` for one look in a pair, which is the only thing that changes:
+    `look_sigma_m`'s own per-optic scale and `optic_class`'s seed for the
+    correlated down-range draw."""
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     centroid = GeoPosition(x=group_x, z=group_z, alt_m=ownship.alt_m)
     true_bearing_deg = bearing_deg(observer, centroid)
     true_range_m = horizontal_range_m(observer, centroid)
-    sigma_cross_m, sigma_down_m = look_sigma_m(true_range_m, UNAIDED_OPTIC)
+    sigma_cross_m, sigma_down_m = look_sigma_m(true_range_m, optic)
     estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
         observation_id=observation_id,
         object_id=bias_object_id,
@@ -72,7 +77,7 @@ def _observation(
         true_range_m=true_range_m,
         sigma_cross_m=sigma_cross_m,
         sigma_down_m=sigma_down_m,
-        optic_class=UNAIDED_OPTIC.name,
+        optic_class=optic.name,
         poll_key=t_sim,
     )
     return Observation(
@@ -93,7 +98,7 @@ def _observation(
             sigma_cross_m=sigma_cross_m,
             sigma_down_m=sigma_down_m,
             sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
-            optic_class=UNAIDED_OPTIC.name,
+            optic_class=optic.name,
         ),
     )
 
@@ -179,6 +184,156 @@ def test_e1b_both_groups_seen_in_the_first_look_stay_two_contacts() -> None:
 
     assert len(store.contacts) == 2
     assert _detected_count(store) == 2
+
+
+def test_e1_far_group_unaided_then_near_group_through_binoculars_stays_two_contacts() -> (
+    None
+):
+    """E1 across optics -- the required fix from `review.md`: the far
+    group founds through `UNAIDED_OPTIC`; the near group's look, seconds
+    later from the same (stationary) viewpoint, arrives through
+    `BINOCULAR_OPTIC`. Before the fix, `stable_range_correlation` zeroed
+    the cross-optic correlation outright, so the gate fell back to the
+    independent sum and this folded to one contact
+    (`test_bl_b104_scenario_mock_flights.py::test_two_groups_one_bearing_
+    stay_two_contacts` is the same mechanism through the full pipeline,
+    where the optic switch comes from Petrovich's own autonomous
+    attention/engage flow rather than a scripted look)."""
+    store = ContactStore()
+    last_far: str | None = None
+    for i in range(3):
+        t_sim = i * 2.0
+        ownship = _ownship(t_sim)
+        obs = _observation(
+            observation_id=f"FAR_{i}",
+            t_sim=t_sim,
+            ownship=ownship,
+            group_x=0.0,
+            group_z=4600.0,
+            bias_object_id=1,
+            continues_observation_id=last_far,
+        )
+        store.ingest([obs], t_sim)
+        store.tick(t_sim)
+        last_far = obs.id
+
+    t_sim = 10.0
+    ownship = _ownship(t_sim)
+    near = _observation(
+        observation_id="NEAR_0",
+        t_sim=t_sim,
+        ownship=ownship,
+        group_x=0.0,
+        group_z=2400.0,
+        bias_object_id=2,
+        optic=BINOCULAR_OPTIC,
+    )
+    store.ingest([near], t_sim)
+    store.tick(t_sim)
+
+    assert len(store.contacts) == 2
+    assert _detected_count(store) == 2
+
+
+def test_e3_group_seen_unaided_then_through_binoculars_stays_one_contact() -> None:
+    """E3 across optics -- the sibling case the cross-optic fix must not
+    break: one real, stationary group, first seen unaided, then
+    reacquired seconds later through binoculars from about the same
+    place. Still one contact, no second `CONTACT_DETECTED` (no re-
+    detection callout) -- a different, better optic on the *same* scene
+    is still recognisably the thing just seen, not a reset."""
+    store = ContactStore()
+    group_x, group_z = 0.0, 3000.0
+    t_sim = 0.0
+    ownship = _ownship(t_sim)
+    first = _observation(
+        observation_id="UNAIDED_0",
+        t_sim=t_sim,
+        ownship=ownship,
+        group_x=group_x,
+        group_z=group_z,
+        bias_object_id=1,
+    )
+    store.ingest([first], t_sim)
+    store.tick(t_sim)
+
+    t_sim = 4.0
+    ownship = _ownship(t_sim)
+    second = _observation(
+        observation_id="BINOCULAR_0",
+        t_sim=t_sim,
+        ownship=ownship,
+        group_x=group_x,
+        group_z=group_z,
+        bias_object_id=2,
+        optic=BINOCULAR_OPTIC,
+    )
+    store.ingest([second], t_sim)
+    store.tick(t_sim)
+
+    assert len(store.contacts) == 1
+    assert _detected_count(store) == 1
+
+
+def test_cross_optic_fuse_along_sigma_never_beats_the_tighter_optics_own_sigma() -> (
+    None
+):
+    """No-omniscience check for the cross-optic fix (`review.md`'s
+    required fix 1): fusing a looser look into a tighter one's anchor (or
+    vice versa) through the new partial `CROSS_OPTIC_RANGE_SHARE`
+    correlation must not leave the fused along-line sigma below what the
+    *tighter* of the two optics alone would report at that range --
+    the "a different optic is new information, not an exact one" claim
+    collapses into arithmetic omniscience if fusion can ever claim better
+    than the best single look that went into it. Checked both fuse
+    orders (unaided-then-binocular and binocular-then-unaided): the
+    tighter optic is binocular at this range either way."""
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    group_x, group_z = 0.0, 3000.0
+    _sigma_cross_binocular, sigma_down_binocular = look_sigma_m(3000.0, BINOCULAR_OPTIC)
+
+    for first_optic, second_optic in (
+        (UNAIDED_OPTIC, BINOCULAR_OPTIC),
+        (BINOCULAR_OPTIC, UNAIDED_OPTIC),
+    ):
+        store = ContactStore()
+        first = _observation(
+            observation_id=f"FIRST_{first_optic.name}",
+            t_sim=0.0,
+            ownship=_ownship(0.0),
+            group_x=group_x,
+            group_z=group_z,
+            bias_object_id=1,
+            optic=first_optic,
+        )
+        store.ingest([first], 0.0)
+        store.tick(0.0)
+        second = _observation(
+            observation_id=f"SECOND_{second_optic.name}",
+            t_sim=4.0,
+            ownship=_ownship(4.0),
+            group_x=group_x,
+            group_z=group_z,
+            bias_object_id=2,
+            optic=second_optic,
+        )
+        store.ingest([second], 4.0)
+        store.tick(4.0)
+
+        assert len(store.contacts) == 1, (
+            f"order {first_optic.name}->{second_optic.name}: expected the"
+            " two looks to fuse into one contact, not gate apart"
+        )
+        contact = store.contacts[0]
+        along_sigma_m = contact.position.range_uncertainty_m(observer)
+        # Generous (5%) tolerance for floating-point/finite-K field slack,
+        # not a declared margin -- the fused value should sit at or above
+        # the tighter optic's own full sigma, never meaningfully under it.
+        assert along_sigma_m >= sigma_down_binocular * 0.95, (
+            f"order {first_optic.name}->{second_optic.name}: fused along-"
+            f"sigma {along_sigma_m} m is below the tighter (binocular) "
+            f"optic's own {sigma_down_binocular} m"
+        )
 
 
 # --- E3/E4: one real group, dwelled, looked away from, looked back at --
