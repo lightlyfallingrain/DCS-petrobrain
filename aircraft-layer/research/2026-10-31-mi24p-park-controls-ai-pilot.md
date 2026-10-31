@@ -264,3 +264,93 @@ Log every frame: args 852, 1100–1103 and 1110–1113, the three `BASE_SENSOR_*
 
 Show the Controls Indicator on screen throughout, so the user can watch the stick and SAU markers
 while the log runs.
+
+## 7. Can ED's AI pilot be given heading, altitude and speed as numbers? (fallback question)
+
+Asked 2026-10-31 as a fallback in case both override and switch-off fail. **Short answer: not as
+numbers from code.** Every AI-pilot command is a press/release, and the AI's held targets are kept
+in native code. They are *readable*, though, and the **SAU** (not the AI) has a value-taking
+heading knob.
+
+### No value-taking AI command
+
+- **[file]** Every HELPER_AI binding in every input profile is press/release with
+  `value_down = 1, value_up = 0`: `ShowMenu`, `Up/Down/Left/Right` ("Menu Up" and so on),
+  `HeliControlEXT`, `LineUp_EXT`, `ShootIn_EXT`, `UTurn_EXT`, `Select_or_fireEXT`,
+  `MainWeapSwitch` and `ToggleSubtitles_EXT` (`$M/Input/Mi_24P_AI_Menu/*/default.lua:10-14`,
+  `Mi_24P_op/joystick/default.lua:219-227`, `Mi_24P_op/keyboard/default.lua:201-209`,
+  `Mi_24P_pilot/keyboard/default.lua:763-765`, `Mi_24P_pilot/joystick/default.lua:906-908`).
+  None is an axis, and none carries a non-0/1 value.
+- **[file]** HELPER_AI's only clickables are the three stick engage/disengage buttons
+  (`$S/clickabledata.lua:1147-1153`). There is no `default_axis` on device 30.
+- **[file]** **The Mi-24P cockpit Lua contains no `get_param_handle` calls at all.** A grep of
+  `$S` for `get_param_handle` returned 0 hits. No param names exist to read or set for AI targets.
+- **[inference]** A numeric target would need a call into `avHelperAI_Mi24` that is not
+  registered in Lua. Nothing in the files suggests one exists.
+
+### Nudge step sizes: constants exist, units do not
+
+- **[file]** `$S/HelperAI/HelperAI.lua:13-23`: `long_press_time = 0.5`,
+  `course_change_low_speed = 10`, `alt_change_low_speed = 15`, `course_change_high_speed = 40`,
+  `alt_change_high_speed = 50`, `alt_change_step = 2;`, `baro_alt_threshold = 700`,
+  `course_alt_change_transition_time = 2`, `speed_change_time = 1` and
+  `lag_time_for_ai_pilot = 1`.
+- **[inference]** This shape reads as a **press-and-hold ramp**, not fixed steps:
+  - a press shorter than 0.5 s is a tap, and a longer one is a hold;
+  - a hold changes course or altitude at a "low speed" rate (10 / 15), then after 2 s at a
+    "high speed" rate (40 / 50);
+  - altitude has a separate tap step of 2;
+  - `baro_alt_threshold = 700` probably switches altitude from radar to barometric reference at
+    700 (m?);
+  - speed changes on a 1 s cadence.
+
+  **Units are not stated anywhere.** The course numbers are plausibly deg/s and the altitude
+  numbers m/s, but that is a guess. If the ramp reading holds, a nudge loop is feasible in
+  principle: drive the hold duration as an open-loop "move by X", then correct by taps. It would
+  be slow and coarse, though, and `lag_time_for_ai_pilot = 1` adds about a second of reaction
+  lag. Measure before relying on it.
+- **[inference]** How a nudge is *issued*: the AI-pilot wheel (`ShowMenu` + `Up/Down/Left/Right`,
+  W/A/S/D on keyboard). The pilot voice lines (§2: `Increase_Alt`, `Decreasing_Alt`, `Left`,
+  `Right`, `Speed_Up`, `Slow_Down`, `Coming_Up/Down`, `Direction` "heading to direction") are the
+  acknowledgements. Which wheel direction maps to which nudge in the AI-pilot wheel is not in any
+  file. Read it with `list_indication(10)` while parked.
+
+### Reading the AI's current targets: yes, very probably via `list_indication(6)`
+
+- **[file]** The HelperAI overlay page (`$S/HelperAI/HelperAI_page_common.lua`, loaded by
+  `HelperAI_indicator.lua` for device 30, `$S/device_init.lua:587`) has dedicated **holder** boxes
+  around the compass, each a `ceStringPoly` whose text is set by a native controller:
+  - `speed_text` (`:750`, controller `'speed_text'`, caption `_("IAS")` on `speed_text_top`);
+  - `alt_text` (`:792`, controller `'alt_text'`, caption `_("ALT")`), plus `alt_add_text` (`:802`);
+  - `course_text` (`:846`, controller `'course_text'`);
+  - `mode_text` (`:718`);
+  - `hdg_text`, `az_text` and `el_text` (`:228`, `:283`, `:337`).
+
+  Each box has white and yellow variants (`show_speed_holder_white/yellow`,
+  `show_alt_holder_white/yellow`, `show_mode_holder_white/yellow`).
+- **[file, repo]** That same page is the one `list_indication(6)` returns. Its
+  `middle_list_text` is where the contact list was read
+  (`aircraft-layer/research/2026-09-11-petrovich-detection-readout.md:16, 269`).
+- **[inference]** So while the AI pilot flies, `list_indication(6)` should carry `speed_text`,
+  `alt_text`, `course_text` and `mode_text` with the AI's held IAS, altitude, course and mode as
+  text. Yellow versus white probably means "being changed" versus "held". This gives a
+  closed-loop readback for a nudge loop. It is unverified: the values may only be filled while the
+  overlay is shown.
+
+### The numeric path that does exist: the SAU, not the AI
+
+- **[file]** `$S/clickabledata.lua:537`
+  `elements["SAU-AZ-PTR"] = default_axis(_("Autopilot Route Azimuth"), devices.AUTOPILOT, autopilot_commands.RouteAngle, 262, 0, 1.0 / 6.0, false, true, true)`.
+  That is a relative, cycled knob, arg **262**, gain 1/6. There is also
+  `RouteAngleAXIS` (`command_defs.lua`, autopilot table), and the `DeltaK/H/T` correction knobs
+  (`:527-529`, args 240/234/246, relative, gain 0.1). Each is a value-taking `default_axis`
+  (`$S/clickable_defs.lua:296-316`: `class_type.LEV`, `arg_lim = {{0,1}}`), so
+  `performClickableAction(10, cmd, v)` takes a value. Mode buttons: `RouteOn`, `HoverOn`,
+  `HeightOn` and `SpeedOn` (`:531-540`).
+- **[inference]** The SAU is the aircraft's real autopilot, and it can hold a **numeric route
+  azimuth** (arg 262 maps to an angle at 1/6 per turn), plus altitude (`HeightOn`) and speed
+  (`SpeedOn`) as "hold current". Hold-current is enough for a hold-what-I-have-now loop, with
+  Petrobrain flying the transitions. The desk recon (`2026-10-26-bl16-flight-control-desk-recon.md`)
+  reports speed hold refusing below ~150 km/h IAS and altitude hold needing K/H/T on. Whether the
+  SAU modes are honoured while the stick is parked and the AI flies, and whether they conflict
+  with the AI pilot, is a probe question.
