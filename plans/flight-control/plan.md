@@ -68,6 +68,46 @@ lift-vector-corrections control law; forward flight only (Decision 3); release j
 working the 9K113 from the front, see Decision 16); the actions / params / "when" shape; constants
 through the tuning pattern.
 
+### Amended 2026-10-31 (plan check)
+
+`plans/flight-control/alignment.md`'s "Plan check — 2026-10-31" (CONCERNS, W1/item 2/item 3) and a
+follow-up binding correction from the user changed three things:
+
+- **W1 — wobble is unconditional, not a fallback.** The user, verbatim: *"Regardless of how writing
+  control axis values are done, that (invisible) wobble is needed on the control axises, similar to
+  9K113 axises."* **Decision 6 is superseded** (Decision 6 REVISED, below): every flight-axis write,
+  cyclic pitch/roll, pedal and collective, in both control states, carries the 9K113's
+  `SERVO_WOBBLE` mechanism from the first write, never as something tried only if a plain write
+  fails. S0-2 and S0-P2 now measure the wobble's **invisibility bound** (the smallest amplitude/
+  pattern that still holds the axis, checked against visible aircraft motion and the cockpit stick/
+  collective/pedal animation, args 1100–1113) rather than whether wobble is needed at all, and the
+  first probe writes from `LuaExportBeforeNextFrame` — ED's own documented injection point
+  (`Export.lua:59-64`) — noting the 9K113 override won by changing value every frame, not by
+  writing last (`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md` §6). Wobble
+  amplitude is a tunable (Export.lua constants block, the `SERVO_WOBBLE`/`DITHER_AZ_DEG` pattern —
+  see "Behaviour constants" below, already the right home for it).
+- **Item 2, revised by a later binding correction.** The dispatch's first draft asked S0-P2 to guard
+  against the AI flying through the SAU; the user then corrected that directly, verbatim: *"ED's AI
+  may fly through the SAU autopilot -> does not, SAU is not very capably, DCS AI does manouvres SAU
+  cannot. Though, DCS AI probably does not use the cockpit controls either, but instead inputs the
+  movemnt somewhere internally. But that needs checking."* (`explore-notes.md`, "Where ED's AI
+  acts.") So the plan now carries: the SAU-as-AI-path hypothesis dropped; the working belief that
+  the AI's input is injected internally, neither through the SAU nor the cockpit stick/collective/
+  pedal positions, to be checked rather than assumed (new row S0-P1b); S0-P2/S0-P2a judged on the
+  aircraft's actual attitude/rate/heading/height response, with the stick/collective/pedal args
+  logged only as diagnostics; and the consequence that if the AI's input is summed in after the
+  axis value, overpowering it is a **fight** (a steady counter-deflection), not a clean override —
+  S0-P2a is the row that decides which. SAU off-switch rows (`AutopilotOffOP` 3047,
+  `iCommandAutopilotEmergOFF`) stay only for what Stage 0 needs about the SAU in its own right
+  (S0-P5, Stage 5), not as a way to neutralise the AI pilot (S0-P3). The recon's exact numbers
+  (args 852/952 for the park-stow animation, 1100–1113 for the cockpit stick/collective/pedal
+  positions — not the external-model args 500–503/510–513 — device-30 lever 3011–3013,
+  `HeliControlEXT` 3014, and the `BASE_SENSOR_*_NORMED` param handles) are folded into Stage 0a/0b
+  below, replacing the earlier generic guesses.
+- **Item 3 (D-e) — left for the user, not resolved here.** D-e's auto-take-on-park recommendation
+  conflicts with the 2026-10-25 settled point 2, *"Handover is spoken only"*; a line is added to D-e
+  below flagging the conflict. The decision stays open.
+
 ### Goal
 
 On the spoken handover Petrovich takes the controls from where the pilot left them, keeps doing
@@ -244,7 +284,13 @@ below is **names from `command_defs.lua` / the command surface, not verified beh
    rejected by the user. Does it write the same
    `iCommand` axes the player's stick does (so a per-frame write might displace it), or act below
    the input layer (so nothing written from Export can)? Any `HelperAI.lua` parameter for the
-   pilot's gains or authority?
+   pilot's gains or authority? **Updated 2026-10-31 (binding correction):** the user's own flying
+   experience rules out the SAU as the AI's path — *"ED's AI may fly through the SAU autopilot ->
+   does not, SAU is not very capably, DCS AI does manouvres SAU cannot"* — so the SAU is not probed
+   as an AI-neutralising path (S0-P3 drops it). The working belief, still to be checked (*"DCS AI
+   probably does not use the cockpit controls either, but instead inputs the movemnt somewhere
+   internally. But that needs checking."*): the AI's input is injected internally, neither through
+   the SAU nor the cockpit stick/collective/pedal positions. New row S0-P1b checks this directly.
 3. **Is there a parked state with no active AI pilot** that keeps the 9K113 usable — the Petrovich
    overlay closed vs. open, an AI-off or input-freeze command, an SAU mode the AI defers to? The 9K113 probes flew with "DCS AI Petrovich OFF (overlay closed)"; what that did to the
    *pilot* AI was never recorded.
@@ -253,11 +299,23 @@ below is **names from `command_defs.lua` / the command surface, not verified beh
    displacement.
 5. **Seat and park signal** for S0-12: any Export-readable value that changes with the player's
    seat or the park state (camera position, a cockpit param, which seat's args update — the 874
-   precedent below).
+   precedent below). **Confirmed by the 2026-10-31 desk-recon**: the stick-park stow animation is
+   **arg 852** (pilot's cyclic) and **arg 952** (pedals), a 0..1 lag element with a 0.2 s time
+   constant (`HelperAI.lua:46`); 852 ≈ 1 after the toggle is the cheapest observable, to be
+   confirmed live (direction, settle time) by one probe toggle rather than assumed.
 6. **Radar altimeter and DCS AGL over trees and buildings** (A6).
 7. **Community prior art**: any mod or script that flies a DCS module from Export while an AI crew
    member also flies (the vJoy helicopter-assist project in the 2026-10-26 recon unbinds axes; does
    anything address an AI pilot?).
+8. **Param handles and SAU candidates, confirmed by the 2026-10-31 desk-recon.** ED's own
+   `get_param_handle` example names `BASE_SENSOR_STICK_ROLL_NORMED`, `BASE_SENSOR_STICK_PITCH_NORMED`
+   and `BASE_SENSOR_RUDDER_NORMED` (`Export.lua:1355-1357`) — generic base-sensor params, no
+   documented collective equivalent, and whether the Mi-24P populates them at all is unchecked; a
+   cheap probe alongside S0-P1b. `LoGetHelicopterFMData().master` ("flag that player is actually in
+   control of flight model for multiplayer multicrew sessions") may flip with park state even
+   single-player — log it in the same probe. `AutopilotOffOP` (10, 3047) and
+   `iCommandAutopilotEmergOFF` are **not** AI-neutralising candidates (item 2 above); they are
+   S0-P5's own SAU-off rows, relevant only to whether effector P can lean on the SAU (Stage 5).
 
 The seat precedent behind (2) and (5): with the player in the copilot seat, the 9K113 AI-axis
 writes stopped showing in arg 874 (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`,
@@ -269,13 +327,14 @@ park controls selected, ED's AI flying. Same probe script, its own segments and 
 
 | # | Measures | Pass | Fail → | Decides |
 |---|---|---|---|---|
-| S0-P1 | Baseline: what ED's AI does when parked, hands off, 60 s — attitude, heading, altitude, IAS traces; cockpit stick/collective/pedal args | its behaviour and its control activity recorded (does it hold, drift, follow an order?) | — | what Petrobrain is competing with |
-| S0-P2 | **The user's lead hypothesis, probed first** (P4): overpower ED's AI on the axes, the 9K113 slew precedent. Per-frame `LoSetCommand(2001–2004)` — cyclic pitch/roll, pedal, collective — small sine on each axis, then a held constant; constant vs. flicker vs. dither; both write sites (S0-3); and, if the desk pass finds the AI writes through its own channel (the 9K113's 3060/3061 analogue), that channel too | the aircraft follows the written value; args track `v`, not the AI, every frame | AI wins or the two fight → S0-P3 | **effector P = raw axes?** and which write site / mechanism |
-| S0-P2a | **Does ED's AI fight back?** During a 60 s held override, log the AI's own demand where readable (args between Export writes, or the AI channel) | the AI's demand stays bounded; no visible twitch or oscillation in attitude at the A9 bands | its demand **winds up** (grows while ignored) or the aircraft oscillates as the two alternate → record size/rate; try flicker vs. dither vs. write site; still failing → S0-P3 | whether the override is smooth enough to guide from (A9) |
+| S0-P1 | Baseline: what ED's AI does when parked, hands off, 60 s — attitude, heading, altitude, IAS traces; cockpit stick/collective/pedal args (1100–1113) | its behaviour and its control activity recorded (does it hold, drift, follow an order?) | — | what Petrobrain is competing with |
+| S0-P1b | **New (2026-10-31, "Where ED's AI acts").** Locate where the AI's input actually enters: during S0-P1's baseline, do args 1100–1113 visibly move as the AI flies, and does `LoGetHelicopterFMData()` (attitude, rates, accelerations, `master`) show control activity the args do not? | one of: args move (the AI acts on the control positions — S0-P2's override may simply win); args stay still while FM data shows activity not explained by them (the AI acts internally, per the user's working belief — S0-P2 is a fight, not a cancel); neither shows activity (re-check S0-P1's premise) | ambiguous → log longer, cross-check `master` toggling and the `BASE_SENSOR_*_NORMED` param handles (desk item 8) | which reading S0-P2/S0-P2a apply; confirms args are diagnostics only, never pass/fail |
+| S0-P2 | **The user's lead hypothesis, probed first** (P4): overpower ED's AI on the axes, the 9K113 slew precedent. Per-frame `LoSetCommand(2001–2004)` — cyclic pitch/roll, pedal, collective — carrying the mandatory wobble (Decision 6 REVISED: dither/flicker, never a held constant), both write sites (S0-3), first write from `LuaExportBeforeNextFrame` | **the aircraft's actual response** (attitude, rates, heading, height) follows Petrobrain's commanded goal, not ED's AI's. Args 1100–1113 are logged as diagnostics only and are **never** the pass criterion (2026-10-31: the user's working belief is that the AI's input is injected internally, through neither the SAU nor those args — S0-P1b checks this) | the aircraft keeps following the AI's goal instead, or the response never settles → S0-P3, and S0-P2a decides whether what remains is a fight worth living with | **effector P = raw axes?** and which write site / mechanism |
+| S0-P2a | **Does ED's AI fight back, and is this an override or a fight?** During a 60 s held override, judged on the aircraft's actual attitude/rate/heading/height response, never on the args (2026-10-31: if S0-P1b finds the AI's input is injected internally and summed in after the axis value, the per-frame write plus wobble **counters** the AI's effect rather than replacing it — a **fight**, not an override). Log whatever of the AI's own control activity is readable (args between Export writes) for diagnostics only | the aircraft's response stays bounded and smooth at the A9 bands, whether because the override replaces the AI's input or because the fight settles into a steady counter-deflection | the response **winds up** (growing oscillation or drift) or never converges → record size/rate; try flicker vs. dither vs. write site; still failing → S0-P3 | whether it is an override or a fight, and whether either is smooth enough to guide from (A9) |
 | S0-P2b | **Handback while parked**: stop the override after 60 s held off the AI's own attitude | the AI resumes from where the aircraft is, smoothly | a **jump** (wound-up AI demand released at once) → measure it; candidate mitigations to try in the same segment: hold the override while ramping toward the AI's current demand before stopping, or a one-shot AI reset/off-on if desk item 2 finds one | parked `stop()` shape; D-e's question 2 |
 | S0-P2c | **Handback to the player** (unpark, then stop the override) — the clean path the user actually wants after guidance | the player's stick takes over with no jump beyond Decision 4's accepted stick mismatch, and ED's AI does not get a frame in between | an AI frame or AI wind-up released during the unpark → order the hand-off (stop override only once the unpark has registered, per S0-12) | the release sequence in both states |
-| S0-P3 | Neutralise the AI while staying parked: each candidate from desk item 3 (overlay closed/open, 3055, 3011–3014, an ED-AI command that switches it off or freezes its inputs, SAU channels on with Trimmer), then repeat S0-P2. **Only as off-switches** — a command that makes ED's AI fly a heading or altitude is not a candidate (user, 2026-10-31) | some state exists where the 9K113 still works and the raw writes win | none → **blocker, report to the user** | **effector P = raw axes after neutralising X** |
-| S0-P5 | SAU under parked control: do K/H/T/B and Trimmer act, and does the AI fight them? | documented | — | whether effector P can lean on the SAU |
+| S0-P3 | Neutralise the AI while staying parked: each candidate from desk item 3 (overlay closed/open, 3055, 3011–3014, an ED-AI command that switches it off or freezes its inputs), then repeat S0-P2. **SAU on/off is not a candidate here** (2026-10-31: the user's flying experience rules out the SAU as the AI's path — "Where ED's AI acts" — so SAU rows are probed only for the SAU's own sake, S0-P5/Stage 5, never as a way to neutralise the AI pilot). **Only as off-switches** — a command that makes ED's AI fly a heading or altitude is not a candidate (user, 2026-10-31) | some state exists where the 9K113 still works and the raw writes win | none → **blocker, report to the user** | **effector P = raw axes after neutralising X** |
+| S0-P5 | SAU under parked control, for the SAU's own sake (Stage 5), not as an AI-neutralising path: do K/H/T/B and Trimmer act, does the AI fight them, and do `AutopilotOffOP` (3047) / `iCommandAutopilotEmergOFF` do anything to the SAU itself? | documented | — | whether effector P can lean on the SAU |
 | S0-P6 | Capture at takeover in the parked state: can the control positions ED's AI is holding be read (the S0-6 args), so Petrobrain starts from them with no jump? | positions readable per frame | not readable → escalate (no-jump takeover impossible in this state) | Stage 1 capture, parked |
 
 **Go/no-go after S0-P:** pass at P2 or P3 → continue. **All fail → the key
@@ -290,17 +349,20 @@ without park, if DCS allows that). The original rows, unchanged in substance:
 | # | Measures | Pass | Fail → | Decides |
 |---|---|---|---|---|
 | S0-1 | Per-frame `LoSetCommand(2001/2002/2003/2004, v)` with a small sine on each axis in turn, hands off | aircraft responds, cockpit stick/collective/pedal args follow `v` | stop: no write path; re-explore | everything |
-| S0-2 | Same, **with the physical stick held deflected, then stirred**; constant value vs. flicker (±1e-4) vs. dither, as the 9K113 found | effective control (args) stays on the written value within ±0.01 while the stick moves; no visible aircraft twitch | flicker fails but dither holds → dither; both fail → Decision 6 | override mechanism; Stage 1 |
-| S0-3 | `LuaExportBeforeNextFrame` vs `AfterNextFrame` as the write site | either works; pick the one with no one-frame physical-stick leak in S0-2 | — | where `run_flight_control` is called |
+| S0-2 | Same, **with the physical stick held deflected, then stirred**. Wobble is mandatory on every write (Decision 6 REVISED — not "measure first, explore only if it fails"): this row measures the **invisibility bound**, the smallest flicker (±1e-4 and smaller) or dither amplitude that still holds the axis against the moving stick, checked against both visible aircraft motion and the cockpit stick/collective/pedal animation (args 1100–1103 pilot, 1110–1113 operator) | effective control (args) stays on the written value within ±0.01 while the stick moves; a wobble amplitude found that holds the axis with no visible twitch, in the aircraft or the cockpit animation | neither dither nor flicker holds at any amplitude below the visibility bound → escalate (Decision 6 REVISED has no fallback: wobble is the mechanism, not an option) | override mechanism; wobble amplitude (tunable, Export.lua constants block); Stage 1 |
+| S0-3 | `LuaExportBeforeNextFrame` vs `AfterNextFrame` as the write site. ED's own documented injection point is `BeforeNextFrame` (`Export.lua:59-64`); the 9K113 sight override won from `AfterNextFrame` by changing value every frame, not by writing last (`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md` §6) — so S0-1/S0-2/S0-P2's first probe writes from `BeforeNextFrame`, to see whether write order matters at all once the per-frame value change (wobble) is present | either works; pick the one with no one-frame physical-stick leak in S0-2 | — | where `run_flight_control` is called |
 | S0-4 | Is `v` an **absolute** control position or **relative to trim**? Trim with the Trimmer, then write `v = 0` | documented either way | — | capture (Stage 1): absolute → capture = current args; trim-relative → capture = args − trim |
 | S0-5 | **Release**: stop writing with Petrovich's output ≠ physical stick. Does the axis snap to the physical stick at once, or only when the stick next moves? | documented only | — | nothing — the release jump is not handled (Decision 4) |
-| S0-6 | Read side at frame rate: `LoGetADIPitchBankYaw`, `LoGetAngularVelocity`, `LoGetAccelerationUnits`, `LoGetVectorVelocity`, `LoGetVerticalVelocity`, `LoGetIndicatedAirSpeed`, `LoGetRadarAltimeter` (value + valid, up to what height and bank — **does it read at all?**), `LoGetAltitudeAboveGroundLevel` (fallback — Decision 7), `LoGetAltitudeAboveSeaLevel`, `LoGetMagneticYaw` / `LoGetSelfData().Heading` **compared against the HSI heading card** (Decision 8), `LoGetSlipBallPosition`, stick/collective/pedal draw args. **Added (A6):** a pass at ~50 m and ~150 m over open ground, then forest, then a town, logging radar and DCS AGL side by side, and the cockpit radar-altimeter needle | every quantity the loop closes on is present and changes every frame (not 5 Hz-stepped); each getter's table `debug_dump`ed once; a `get_argument_value` sweep while the pilot moves stick, collective and pedals finds the args that track each. **Over forest/town: the radar-vs-DCS-AGL difference is recorded** (the user believes radar reads the canopy; whether DCS AGL does is unknown) | a quantity stepped or absent → derive it and say so; no control-position arg → escalate; radar never valid → fallback is the only source (Decision 7, already accepted) | Stage 2 inputs; Stage 1 capture; Stage 3 floor and the AGL smoothing time constant; what a spoken "50 m" buys over trees |
+| S0-6 | Read side at frame rate: `LoGetADIPitchBankYaw`, `LoGetAngularVelocity`, `LoGetAccelerationUnits`, `LoGetVectorVelocity`, `LoGetVerticalVelocity`, `LoGetIndicatedAirSpeed`, `LoGetRadarAltimeter` (value + valid, up to what height and bank — **does it read at all?**), `LoGetAltitudeAboveGroundLevel` (fallback — Decision 7), `LoGetAltitudeAboveSeaLevel`, `LoGetMagneticYaw` / `LoGetSelfData().Heading` **compared against the HSI heading card** (Decision 8), `LoGetSlipBallPosition`, stick/collective/pedal draw args — **1100–1103 pilot, 1110–1113 operator**
+(cyclic pitch, cyclic roll, collective, pedals, confirmed by the 2026-10-31 desk-recon,
+`CreateSimpleConnectedGauge`); the external 3D-model args 500–503/510–513 are a different, lower-
+priority observable, not the cockpit positions the loop needs. **Added (A6):** a pass at ~50 m and ~150 m over open ground, then forest, then a town, logging radar and DCS AGL side by side, and the cockpit radar-altimeter needle | every quantity the loop closes on is present and changes every frame (not 5 Hz-stepped); each getter's table `debug_dump`ed once; a `get_argument_value` sweep while the pilot moves stick, collective and pedals finds the args that track each. **Over forest/town: the radar-vs-DCS-AGL difference is recorded** (the user believes radar reads the canopy; whether DCS AGL does is unknown) | a quantity stepped or absent → derive it and say so; no control-position arg → escalate; radar never valid → fallback is the only source (Decision 7, already accepted) | Stage 2 inputs; Stage 1 capture; Stage 3 floor and the AGL smoothing time constant; what a spoken "50 m" buys over trees |
 | S0-7 | Response sign and rough size: a 0.05 step on each axis from trim, 2 s, back | sign, rough gain and lag per axis recorded (no plant model needed — user's addendum) | — | initial gains, rate limits |
 | S0-8 | SAU from code: engage H/K/T/B via device 10 (`performClickableAction`, the `cockpit_switch` op), confirm the letter mapping against cockpit labels, observe hold; hold and release `Trimmer` while off the held attitude — re-reference on release, or fixed? Altitude (`HeightOn`/B, with K/H/T on first) and `SpeedOn` (above 150 km/h): hold or drift over 30 s? `HoverOn`, `RouteOn`: do anything? | each channel: engages yes/no, holds how well, Trimmer behaviour recorded | — | Stage 5 branch (below) |
 | S0-9 | SAU vs raw writes: with K/H/T on, does a written cyclic change get fought (held back by the SAU's limited authority) or followed? | documented | — | whether SAU stays on during manoeuvres (Stage 5) |
 | S0-10 | **Absorbed into S0-P (P1, P2), 2026-10-31.** Was: "repeat S0-1 from the operator seat". The operator seat with park controls is the parked state, probed in its own block above; the operator seat without park (if DCS allows it) is an unparked case, run as S0-1/S0-2/S0-7 again from the front | — | — | — |
 | S0-11 | **Pilot-flown reference manoeuvres** (Decision 11): the user flies a set of known manoeuvres by hand; log the cockpit cyclic, collective and pedal positions (not raw joystick axes) per frame beside the S0-6 telemetry | each manoeuvre's input shape and the aircraft's response are on one time base. **Added (A9):** also record how far the user's own hand-flown speed/height/heading wander in "steady" flight — that is the empirical band | no readable input position → escalate (same as S0-6) | Stage 2 gains, rate limits and step shapes; Stage 2 and 6 reference traces; the default band values (Decision 18) |
-| S0-12 | **New (A8, P2).** **Park-state signal** (required: it selects the flight effector) and seat signal (only if behaviour differs by seat within one state). Desk item 5 and the pending Windows recon first; then sweep: camera position, a cockpit param, which seat's args update (the 874 precedent), the 3055 state | a reliable per-frame signal for parked / unparked; seat documented either way | **no park signal → escalate**: effector selection would have to be spoken or inferred, a user decision | how Lua selects the effector; whether body-layer needs seat state at all |
+| S0-12 | **New (A8, P2).** **Park-state signal** (required: it selects the flight effector) and seat signal (only if behaviour differs by seat within one state). Desk item 5's confirmed candidate: **arg 852** (stick stow, pilot's cyclic) and **arg 952** (pedals stow), a 0..1 lag element settling in ~0.2 s (`HelperAI.lua:46`) — 852 ≈ 1 is the cheapest observable, confirmed live by one probe toggle (direction, settle time); then sweep camera position, a cockpit param, which seat's args update (the 874 precedent), the 3055 state, as a cross-check | a reliable per-frame signal for parked / unparked; seat documented either way | **no park signal → escalate**: effector selection would have to be spoken or inferred, a user decision | how Lua selects the effector; whether body-layer needs seat state at all |
 | S0-13 | **New (A8, P2).** State change **while writing**: with the S0-2 / S0-P winner holding a constant, swap pilot → operator, park, unpark, swap back | no jump at any change; the aircraft stays under the probe's control throughout | a jump or lapse → record size and duration; Lua re-captures on a park change (needs S0-12) | Co-moving Fields' park/seat rows; the effector hand-off; Flight 4b |
 
 **Branches the plan carries until stage 0 lands**
@@ -592,7 +654,13 @@ are new or changed.
   precedent is encouraging but not proof: that was one rate-commanded sight channel, this is four
   flight axes on a flying aircraft. A failure is **reported to the user as a blocker** with the evidence, and the user
   decides — not scoped down by the Architect. The unparked state would still have value (lookout,
-  map, radios, navigation), but whether to build it alone is his call.
+  map, radios, navigation), but whether to build it alone is his call. **(2026-10-31, updated.) The
+  SAU is ruled out as the AI's path** — the user's own flying experience: ED's AI performs
+  manoeuvres the SAU cannot — **and the working belief is that its input is injected internally**,
+  neither through the SAU nor the cockpit stick/collective/pedal args (1100–1113), to be checked
+  (S0-P1b) rather than assumed. If true, "overpowering" the AI is a **fight** — a steady counter-
+  deflection — not a clean override, and S0-P2/S0-P2a are judged on the aircraft's actual response,
+  never on the args, which can read as a pass while the AI is still the one flying.
 - **(2026-10-31) Two effectors, two failure surfaces.** A park change mid-flight is a hand-off
   between two different write mechanisms, one of which may involve switching ED's AI off. A lapse
   of one frame lets ED's AI (parked) or the stick (unparked) in. S0-13 measures it; the Co-moving
@@ -677,6 +745,7 @@ the Architect's options and recommendations are in git history (`ca818317`).
    tracking needed. Mirror case (an attack run requested while he flies) is refused as well,
    because his optics are off; that follows from settled point 2, not a separate decision.
 6. **Stick override: measure first** (S0-2), explore options only if it fails.
+   → **REVISED 2026-10-31** as Decision 6 REVISED below (wobble is unconditional, not a fallback).
 7. **Radar altitude preferred; DCS AGL (`LoGetAltitudeAboveGroundLevel`) is the fallback**
    whenever radar altitude is unavailable or invalid. *"That is acceptable workaround for radar
    alt."* Clarified the same day: *"fallback. We earlier noticed that we get no radar alt reading,
@@ -805,6 +874,36 @@ quoted here only where the words carry the design.
   by the park signal. Neither state is the fallback for the other: a failure in either is a
   blocker reported to the user.
 
+### Decisions (user, 2026-10-31 — from the plan check)
+
+Source: `plans/flight-control/alignment.md`, "Plan check — 2026-10-31" (W1), and a follow-up binding
+correction from the user on item 2's hypothesis (`explore-notes.md`, "Where ED's AI acts"). Verbatim
+quoted where the words carry the design.
+
+- **Decision 6 REVISED** (supersedes 6; W1). *"Regardless of how writing control axis values are
+  done, that (invisible) wobble is needed on the control axises, similar to 9K113 axises."* Wobble
+  — the 9K113's `SERVO_WOBBLE` dither/flicker mechanism, reused rather than rebuilt — is **mandatory
+  on every flight-axis write, cyclic pitch/roll, pedal and collective, in both control states, from
+  the first write**, not a fallback tried only if a held constant fails. S0-2 and S0-P2 measure its
+  **invisibility bound** (the smallest amplitude/pattern that still holds the axis, checked against
+  visible aircraft motion and the cockpit stick/collective/pedal animation, args 1100–1113) rather
+  than whether it is needed at all. The amplitude is a tunable, in the Export.lua constants block
+  (the existing `SERVO_WOBBLE`/`DITHER_AZ_DEG` home — "Behaviour constants" table, unchanged by this
+  revision). The first probe writes from `LuaExportBeforeNextFrame`, ED's own documented injection
+  point, noting the 9K113 override won by changing value every frame, not by writing last.
+- **ED's AI does not act through the SAU; the working belief is internal injection, to be checked.**
+  The user, correcting a hypothesis the dispatch had floated: *"ED's AI may fly through the SAU
+  autopilot -> does not, SAU is not very capably, DCS AI does manouvres SAU cannot. Though, DCS AI
+  probably does not use the cockpit controls either, but instead inputs the movemnt somewhere
+  internally. But that needs checking."* Consequences, all folded into Stage 0b above: S0-P3 drops
+  SAU on/off as an AI-neutralising candidate (SAU rows stay only for S0-P5/Stage 5, the SAU's own
+  behaviour); a new row S0-P1b locates where the AI's input actually enters (do args 1100–1113
+  move, does `LoGetHelicopterFMData()` show activity the args do not); S0-P2/S0-P2a are judged on
+  the aircraft's actual attitude/rate/heading/height response, never on the args, which are logged
+  as diagnostics only; and if the AI's input is summed in after the axis value, "overpowering" it is
+  a **fight** (a steady counter-deflection), not a clean override — S0-P2a is the row that decides
+  which.
+
 ### Decisions Requiring User Input
 
 None of these block Stage 0. D-e should be settled before Stage 1 (it shapes the handover rules);
@@ -824,6 +923,12 @@ D-a to D-c before Stage 4's test card is written.
      *"unable, controls parked"* and keep flying; release only once unparked. That is an
      understood-but-unavailable command, so "unable", not "say again"
      (`project_say_again_vs_unable`), and it still never asks "confirm?" (Decision 13).
+
+  **Flagged at the 2026-10-31 plan check, left open:** question 1's recommendation (auto-take on
+  park) conflicts with the 2026-10-25 settled point 2, *"Handover is spoken only"* — an auto-take is
+  not a spoken handover, it is Petrovich taking the controls on a cockpit-switch event the player
+  did not narrate. The recommendation is not withdrawn, but it should not be read as settled; the
+  user decides, weighing it against the spoken-only rule rather than this plan's framing of A8.
 
 - **D-a — Readback when a goal is clamped (Decision 14).** "Speed 3 5 0" with a 300 limit, or
   "hold 20" with a 30 m floor. **Recommendation:** read back the value he will actually fly
