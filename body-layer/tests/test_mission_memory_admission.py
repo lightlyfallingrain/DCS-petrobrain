@@ -6,6 +6,8 @@ directly into its private dict, which is this codebase's own established
 
 from __future__ import annotations
 
+import pytest
+
 from belief.cardinality import (
     OP_1UNIT,
     OP_TO5UNITS,
@@ -27,6 +29,7 @@ from mission_memory.admission import (
     step,
 )
 from mission_memory.entries import AirDefencePayload, FiredOnPayload, GroupPayload
+from mission_memory.query import recall_memory
 from mission_memory.store import MissionMemory
 
 _ZERO_COV = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
@@ -125,6 +128,35 @@ def test_group_entry_written_once_crossing_the_confidence_floor() -> None:
     assert len(memory.entries) == 1
 
 
+def test_presence_only_stationary_group_lost_under_the_nose_stays_recallable() -> None:
+    """E7 end to end: a presence-only group, once admitted, stays in
+    mission memory through a cockpit-mask "lost" period -- `step` is
+    simply never called again for a masked contact (naked-eye emits no
+    further percept for it), and `recall_memory` reads the append-only
+    log directly, never `ContactStore`'s own current belief, so a
+    contact going stale has no bearing on whether its entry is still
+    recallable two minutes (120 s of sim-time) later."""
+    contact = _contact(
+        level=SpecificityLevel.PRESENCE,
+        confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.05,
+        class_value="OP_GROUPSOMETHING",
+    )
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0)
+    assert len(memory.entries) == 1
+
+    # The contact goes masked here (module docstring: no further percept
+    # reaches `step` for it) -- nothing calls `step` again until well
+    # past a 2-minute "lost" window (120 s of sim-time), and `recall_
+    # memory` never reads `now_sim` at all -- it answers from the
+    # append-only log alone.
+    recalled = recall_memory(memory)
+    assert len(recalled) == 1
+    assert recalled[0]["belief_ref"] == "CONTACT_1"
+
+
 def test_below_confidence_floor_writes_nothing() -> None:
     contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR - 0.1)
     store = _store_with(contact)
@@ -132,6 +164,80 @@ def test_below_confidence_floor_writes_nothing() -> None:
 
     step(memory, store, now_sim=0.0)
     assert memory.entries == []
+
+
+# --- BL-B106 Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in mission
+# memory... regardless of identification level") -- the `nameable`
+# (identification-level) gate is gone; `GROUP_ENTRY_CONFIDENCE_FLOOR`
+# stays as the first-entry gate at *every* level.
+
+
+def test_class_level_contact_gets_an_entry_on_founding() -> None:
+    """The unchanged case, restated explicitly for `BL-B106`: a class-level
+    claim starts at `_DEFAULT_CONFIDENCE_BY_LEVEL[CLASS]` (0.6), already
+    above the floor (0.5), so it is admitted the first time `step` sees
+    it -- no reinforcement needed. (`test_group_entry_written_once_
+    crossing_the_confidence_floor` above already pins this exact
+    behaviour via an explicit confidence; this test pins the *default*
+    class-level confidence crossing the floor on its own.)"""
+    contact = _contact(level=SpecificityLevel.CLASS, confidence=0.6)
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0)
+
+    assert len(memory.entries) == 1
+    assert memory.entries[0].kind == "group"
+
+
+def test_single_glimpse_presence_only_contact_gets_no_entry() -> None:
+    """A presence-only claim starts at `_DEFAULT_CONFIDENCE_BY_LEVEL[
+    PRESENCE]` (0.3), well under `GROUP_ENTRY_CONFIDENCE_FLOOR` (0.5) --
+    a single glimpse of "something out there" is not remembered, exactly
+    as `GROUP_ENTRY_CONFIDENCE_FLOOR`'s own confidence test already
+    enforces for any level; this pins it for the specific presence-only
+    case `explore-notes.md`'s plan-escalation answer describes."""
+    contact = _contact(
+        level=SpecificityLevel.PRESENCE, confidence=0.3, class_value="OP_GROUPSOMETHING"
+    )
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0)
+
+    assert memory.entries == []
+
+
+def test_presence_only_contact_gets_an_entry_once_reinforcement_lifts_confidence() -> (
+    None
+):
+    """`BL-B106` Stage 4's whole point: a presence-only contact ("group,
+    something") that is never classified further still earns a memory
+    entry, once enough reinforcing looks lift its confidence to the
+    floor -- the `nameable` gate that used to require `CLASS` specificity
+    first is gone. `_composition_for` writes this contact's own
+    presence-level value/confidence into the entry (its own docstring:
+    "stays total"), not an empty composition -- empty is only for a
+    contact with no classification value at all (`UNKNOWN`)."""
+    contact = _contact(
+        level=SpecificityLevel.PRESENCE,
+        confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.05,
+        class_value="OP_GROUPSOMETHING",
+    )
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0)
+
+    assert len(memory.entries) == 1
+    entry = memory.entries[0]
+    assert entry.kind == "group"
+    assert isinstance(entry.payload, GroupPayload)
+    assert len(entry.payload.composition) == 1
+    assert entry.payload.composition[0].op_class == "OP_GROUPSOMETHING"
+    assert entry.payload.composition[0].confidence == pytest.approx(
+        GROUP_ENTRY_CONFIDENCE_FLOOR + 0.05
+    )
 
 
 def test_jitter_below_resight_move_m_writes_nothing() -> None:

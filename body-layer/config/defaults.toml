@@ -258,7 +258,7 @@ MISSION_START_RESOLVE_FALLBACK_S = 30.0
 # source: mission_memory/admission.py:FIRED_ON_FOLD_WINDOW_S
 FIRED_ON_FOLD_WINDOW_S = 120.0
 
-# Decision 3's admission floor for the `group` rule: a contact's classification must have reached `CLASS` specificity *and* be held at or above this confidence before its first memory entry is written.
+# Decision 3's admission floor for the `group` rule: a contact's classification confidence must be held at or above this value before its first memory entry is written, at *whatever* identification level it has (`BL-B106` Stage 4 dropped the separate `CLASS`-specificity gate this comment used to also require -- user, 2026-10-31: "keep the confidence floor" while every group is kept regardless of level).
 # status: agreed-guess
 # source: mission_memory/admission.py:GROUP_ENTRY_CONFIDENCE_FLOOR
 GROUP_ENTRY_CONFIDENCE_FLOOR = 0.5
