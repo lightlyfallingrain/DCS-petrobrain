@@ -222,6 +222,31 @@ The entries are in the order they were written, which is roughly perception → 
   (`plans/attack-run/plan.md` Decision 4 REVISED/16) is the mean of the members' own `alt_m` — the
   cluster's real altitude, distinct from the flat-projection convention `naked_eye_source.
   _build_observation` substitutes for `derived_world_position`/`last_alt_m` elsewhere.
+- `src/perception/estimation.py` (`plans/precise-position-belief/plan.md` Stages 1-2,
+  restructured by `plans/relative-distance-grouping/plan.md`/`BL-B108` Stage 1, amended
+  2026-11-01 "cross-optic error model") — the perception-side error model: a look's down-range
+  error is three parts (`s * Z_view + f * Z_near + a * z_look`), where `Z_view`/`Z_near` are
+  deterministic random-Fourier-feature fields over *perceived look geometry* (true bearing, log
+  true range), not object id — this is what makes judging *relative* distance between two things
+  seen together far more precise than the absolute number, and what makes a repeat look from the
+  same geometry read as consistent rather than independently noisy. **The amendment's own
+  addition**: `optic_range_correlation`/`_tiered_field` build each optic's field as a nested
+  ladder on the tightest optic's own shared core (`sight_narrow < sight_wide < binocular <
+  unaided`), so two different optics' field *realisations* correlate at exactly `min(k)/max(k)`
+  of their own range-scale ratio — the honest boundary where fusing any two optics can never
+  extrapolate past either input, replacing a flat `CROSS_OPTIC_RANGE_SHARE` share (retired) that
+  let belief declare more correlation than the noise actually had. `stable_range_correlation`
+  is the **only** place `belief/` learns how two looks' errors correlate (reads model parameters,
+  never a realisation); `view_range_correlation` exposes the plain geometric kernel, un-scaled by
+  the optic factor, for `position_belief`'s floor to apply separately. `_FIELD_REALISATION_SALT`
+  is a test-only seam (folded into the field's cache key) letting tests sweep an *ensemble* of
+  field realisations rather than being pinned to the one fixed draw any geometry would otherwise
+  always see — load-bearing for `tests/test_relative_distance_sweep.py`'s own fold-rate
+  measurements, since a single realisation cannot tell a calibration regression from a lucky
+  hash (review round 2's own root-cause finding). `surface_range_estimate` takes the observer's
+  real `true_bearing_deg` as of the amendment — a pre-amendment defect evaluated both of a ground
+  unit's cues at bearing `0.0` unconditionally, so a surface contact's stable error never
+  decorrelated with ownship's own line-of-sight rotation even though belief assumed it did.
 - `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
   `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
   channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
@@ -322,6 +347,29 @@ The entries are in the order they were written, which is roughly perception → 
   module's own docstring before touching any of the three — it carries two live-flight-found
   defects' worked reasoning (runaway fusion, the no-envelope-gate) plus the fold-displacement
   plan's own.
+
+  **`plans/relative-distance-grouping/plan.md`/`BL-B108` Stage 2, amended 2026-11-01.** The fuse
+  is no longer a plain independent-covariance sum: `correlated_innovation` (one shared helper for
+  both `fold_position` and `belief.association_over_time.passes_gate`/`contacts_plausibly_same`)
+  computes a cross-covariance `C` from the two sides' *stable* (geometry-correlated) down-range
+  error, read from `perception.estimation.stable_range_correlation`/`effective_down_correlation`
+  — never a field realisation, only the model's own declared correlation parameters. The gate and
+  the fold differ only in what bearing/range they feed the correlation: the gate uses a
+  *hypothesis* (current observer to the contact's *believed* position — this, not the incoming
+  look's own real geometry, is what makes the gate reject a look whose implied position disagrees
+  by kilometres even when the hypothesis geometry alone predicts high correlation); the fold uses
+  the look's own real bearing/range, since by fold time the gate has already decided. **The
+  amendment's own addition**: `correlated_innovation`'s `for_fusion: bool` caps `C`'s magnitude at
+  `min(var_prior_along, var_look_along)` (each side's own full along-line variance projected onto
+  its own line of sight) for the fold only, never the gate — the 1-D form of "no fusion weight
+  goes negative," so two optics can never fuse to claim better precision than the tighter one
+  alone. `_apply_floor`'s down-range floor is `kappa_view * stable_share() * sigma_down_m *
+  min(1, k_anchor / k_look)` — the geometric kernel (not optic-scaled) times an explicit optic
+  factor, so staring through a worse optic after a better one can never push the floor below the
+  better optic's own stable floor. `LookAnchor` (one look's geometry/optic/stable-sigma) rides
+  every `PositionEstimate` through every construction site — see the plan's own "Co-moving
+  Fields" table; `dataclasses.replace` everywhere a site derives from an existing estimate, never
+  a fresh constructor.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
   *production*): `percept.py` (`Percept`/`percept_of`, the structural no-omniscience boundary —
   belief code never sees `Observation.derived_world_position` or a DCS object id),
