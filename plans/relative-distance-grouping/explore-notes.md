@@ -173,3 +173,31 @@ Reading (main loop, to confirm with the user):
 - Order: near group first, then A.
 - Counter-example: units spread between A and the village are A's, found by glassing them — group
   membership by neighbour gap (goal-check Q2) still applies.
+
+## Follow-on answers (user, verbatim, 2026-11-01)
+
+Asked: (1) merge now or hold; (2) what the new sighting is before the check; (3) A's area empty
+when checked; (4) village/river as evidence; (5) dot count as a cue.
+
+> *"1 - merge current, then continue with this*
+> *2 - less noise is better, callout when verdict is known*
+> *3 - if unit composition matches A's and the distance is believable for A's movement speed,
+> consider A has moved. Otherwise it's a different group.*
+> *4 - for a player looking at group the surrounding terrain features act as anchors and help tell
+> where the units are and tell one group from another. If that would help in deterministic code,
+> sure, let's do it. But if the effect is minor, then let's not spend resources on it.*
+> *5 - I might not see all units, depends on terrain, buildings, trees, etc. So 3 and 5 units could
+> be same, could be different. 3 and 8 makes me more suspicious. Could be 3 and 5 obscured, but
+> that definately deserves more attention. Etc. The more difference there is the more  suspicious
+> that is."*
+
+Reading (main loop):
+
+- (1) Merge BL-B108 with the fence; the expected-area check is a new feature.
+- (2) No callout for the new sighting until same/different is decided.
+- (3) Area empty: "A moved" only if composition matches and the displacement fits A's plausible
+  speed over the elapsed time; otherwise a different group.
+- (4) Landmark anchoring only if it measurably helps the deterministic decision; measure before
+  building.
+- (5) Count difference is graded suspicion, not a verdict: partial visibility makes small
+  differences weak evidence, large ones strong, and either way it raises the need to look.

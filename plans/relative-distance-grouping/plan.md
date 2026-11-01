@@ -670,6 +670,11 @@ look. At ~3–5 km that is about as wide as the 1.5 km "clear case" separation.
 
 Measured fold rates for the memory-only case: 5–67% across the clear-case grid.
 
+**Superseded figure (review round 3):** the shipped code measures 0–86% (worst: far binocular, near
+unaided, far first, 4.5–5 km), because `passes_gate` rescales the look's σ to the hypothesis range,
+which the prototype did not. The user was told and chose to merge and follow on with an
+"expected-area check" feature (explore-notes, 2026-11-01).
+
 The same scenes give 0% when the far group is still in the binocular view (it is on the same
 bearing), and ≤1% same-optic.
 
