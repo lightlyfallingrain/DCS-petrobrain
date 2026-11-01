@@ -40,9 +40,12 @@ ours."*
 4. **Pedals (2003) did not hold.** In every hold the pedal arg left the commanded value:
    pilot hold sent +0.165, the arg drifted to −0.003; operator holds sent +0.033 / +0.098 / +0.164,
    the arg went to +0.129 / +0.064 / +0.019. Pitch and roll held exactly in the same frames.
-   Unexplained: either the physical pedals were sending, or 2003 is not the Mi-24 pedal input
-   (or a yaw channel sits between). Open — ask the user whether the pedals were touched; if not,
-   the next probe should try the alternative rudder command(s).
+   User, 2026-11-01: *"pedal jumped on probe start, so probably either read or write or both on
+   incorrect arg."* So not the physical pedals. The moves have no consistent sign or ratio
+   (+0.033 → +0.129, +0.098 → +0.064, +0.164 → +0.001), so it is not a simple sign flip. The
+   candidates are: arg 1103 is not the pedal position (or it includes the pedal trim) and/or 2003
+   is not a 1:1 pedal input. **Open:** sweep the pedals against arg 1103 to settle the read side,
+   then send fixed 2003 values to settle the write side.
 
 5. **Seat args cross-fade on control transfer.** Whenever control moved (t≈32.4 during the pilot
    hold, and both park transitions) one seat's args ramp to 0 and the other's ramp up over
