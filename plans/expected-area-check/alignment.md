@@ -240,3 +240,99 @@ auto-advance.
    opened now regardless of what flights show?
 2. Decision 1: does "per sector" mean the half-sweep grain the plan proposes (8 s, two sectors), or
    the finer o'clock-hour grain it considered and rejected for the decay-coupling reason?
+
+## Plan re-check — 2026-11-01
+
+**Verdict:** CONCERNS — the revision resolves both prior concerns cleanly (the "no date" scope
+gap and the sector-grain ambiguity), the three-sector reading matches the user's words, and the
+math underneath Decision 5 checks out. Two things earn a question before this ships, both
+introduced by the revision itself rather than carried over: a scan-order choice the user's own
+sentence does not settle, and a real, quantifiable detection-latency cost in the one sector where
+Petrovich's job matters most — and the plan's mitigation for it rests on an assumption the plan
+does not check.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (two groups stay two) | 2 | met — unchanged from prior check |
+| E2 (one group stays one) | 2 (partial) / BL-B111 | contradicted for 4–10% cross-optic false-split under BL-B110 alone, same as before — but now scheduled with a date (BL-B111 opened now, not conditional on flight counts), not deferred indefinitely |
+| E3 (no callout until verdict, bounded) | 2 | met — unchanged |
+| E4 (look at A's area, debug-visible, B first) | BL-B111 Stage 4 | missing in BL-B110 (unchanged), but now scheduled rather than contingent — resolves the prior top finding |
+| E5 (absence counts only where visible) | BL-B111 Stage 3 | missing in BL-B110, scheduled in BL-B111 (point LOS query, fails closed) |
+| E6 ("moved" only if believable) | BL-B111 Stage 4 | missing in BL-B110, scheduled in BL-B111 |
+| E7 (composition as graded suspicion) | BL-B111 Stage 4 | missing in BL-B110, scheduled in BL-B111 |
+| E8 (never pre-empts a threat/9K113) | BL-B111 Stage 4 rows | met where it will exist — Q2/Q5 rows present in the BL-B111 design |
+
+### Findings
+
+1. **Prior top finding is resolved: E4–E7 now have a date, not a trigger.** — lens: Whose job /
+   Crew sense
+   - The earlier concern was that Decision 2(c) let a quiet flight silently cancel the mechanism
+     the user actually described. Decision 2 as answered (*"as recommended"*) opens `BL-B111` now,
+     unconditionally; the flight duplicate count sets its priority, not its existence
+     (`BL-B111.md`, "opened now so that a quiet flight cannot quietly cancel it"). That is exactly
+     the fix the prior check asked for.
+
+2. **The three-sector reading matches the user's words plainly.** — lens: Grounded in
+   - *"Third of full scan. So basically left right and ahead"* names three regions and the plan's
+     partition (`left` 9–10, `ahead` 11–12–1, `right` 2–3) is a literal thirds split, confirmed
+     against the actual `SECTOR_WEDGE_DEG` constants. No reading judgment is needed here, unlike
+     the prior half-sweep guess.
+
+3. **The scan *order* (left → ahead → right) is the architect's own reading, not the user's
+   words, and is now a cadence the pilot will listen for.** — lens: Grounded in / Crew sense
+   - The user's sentence lists the sectors as *"left right and ahead"* — left, then right, then
+     ahead, if read as a sequence. The plan instead orders the sweep left → ahead → right, with a
+     stated geometric reason (one continuous windscreen sweep, one flick back from 3 to 9, instead
+     of three flicks). That reason is sound on its own terms, but it answers a question the user's
+     sentence probably wasn't posing ("which three regions" vs. "in what order"), the same shape of
+     gap the half-sweep reading had last time — and this time it is not surfaced as a Decision, it
+     is stated as settled.
+   - The pilot would notice: Stage 5's own test card is *"free scan, listening for the left → ahead
+     → right rhythm"* — the order is meant to be audible, which is exactly why a wrong guess here
+     costs a re-card, not just a renumber.
+   - Suggests: a one-line confirmation costs nothing and the plan is already in the habit of
+     asking rather than assuming (Decision 1 is the model for this). Ask it alongside Decision 5
+     below rather than shipping it as a given.
+
+4. **Reshaping the ahead sector to one visit per cycle doubles the worst-case time to first
+   notice a new threat dead ahead, and the plan's stated mitigation is unverified.** — lens:
+   Whose job / The envelope
+   - In the sim: today's table visits 12 o'clock twice per ~16 s cycle (legs at position 0 and 4,
+     ≈8 s apart). The reshaped table visits the ahead block once per 14 s cycle. For a contact that
+     appears in the ahead sector immediately after the eye has just swept past it, the worst-case
+     wait before the naked eye passes that bearing again goes from ≈8 s to ≈14 s — a ≈75% increase,
+     and distinct from the 26–29 s "worst revisit" figure the plan computes, which is about an
+     *already-tracked* contact's certainty decaying between glass steps, not about *first* noticing
+     something new. The plan's own Risks section states the premise ("12 o'clock is seen once per
+     cycle instead of twice") but the arithmetic it follows up with (`_ACQUISITION_RETENTION_
+     WINDOW_S`, the 26–29 s revisit table) answers the decay question, not the first-detection one.
+   - The plan's reason for accepting this is explicit and reasonable on its face: *"the pilot is
+     looking ahead himself, and the flanks are where Petrovich adds the most"* (Stage 1, "How ahead
+     is covered"). That is the right kind of argument — it is the project's own whose-job test,
+     applied correctly in direction. But it is asserted, not checked: nothing in the plan measures
+     or even estimates how often a real threat (AAA, SAM, a vehicle cresting a rise) would appear
+     exactly in the windscreen-ahead bearing where the player's own attention is already loaded
+     with flying the aircraft, rather than scanning — which is a different claim from "the pilot can
+     see directly ahead at all." A player flying low and fast, eyes on instruments or terrain, is
+     not necessarily watching 12 o'clock the instant something appears there.
+   - The pilot would see: a slower naked-eye pickup of a new threat straight ahead than today, with
+     no callout to compensate until that pickup happens — this is the one sector where "Petrovich
+     helps the pilot evade dangerous units" (root `CLAUDE.md`) is least backed up by the player's
+     own eyes if the player's attention is in fact elsewhere.
+   - Suggests: this does not need un-shipping the reshape — the thirds-and-order are the user's own
+     direction and the flank gain is real. It needs either (a) the user confirming the "pilot
+     already looks ahead" assumption is good enough as stated, or (b) a one-line note in the test
+     card asking the user to specifically notice ahead-threat pickup latency on the acceptance
+     flight, since this plan has no other way to measure it before merge.
+
+### Questions for the user
+
+1. The plan sweeps left → ahead → right (one continuous pass, one flick-back). Your words named
+   the three regions but not an order — is that the sweep you want, or did you mean left, then
+   right, then ahead, as the sentence reads literally?
+2. Seeing 12 o'clock once per cycle instead of twice roughly doubles the worst-case time for
+   Petrovich's own eye to first catch a new contact dead ahead (≈8 s → ≈14 s), on top of the
+   26–29 s revisit figure already in the plan. The plan accepts this because you're watching ahead
+   yourself while flying — does that hold even when you're focused on instruments or terrain at low
+   level, or should ahead get a second visit per cycle despite the cost (the plan rejected that: 10
+   legs, four glass steps, under 2.5 s of binoculars per step)?
