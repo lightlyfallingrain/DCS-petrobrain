@@ -68,3 +68,34 @@ Reading (main loop):
   building.
 - (5) Count difference is graded suspicion, not a verdict: partial visibility makes small
   differences weak evidence, large ones strong, and either way it raises the need to look.
+
+## Goal-check answers (user, verbatim, 2026-11-01)
+
+Asked: the five questions in `alignment.md`, "Questions for the user". Q1 was answered by
+correcting the premise it rested on (a glass phase only after the whole naked-eye scan cycle).
+
+> *"A binocular look can start up to about 16 s after the sighting, because the eye scan finishes
+> first -> actually, that should be per sector. naked eye scan of sector, then binoculars on new
+> contants in sector and units that plausibly could get a better identification than existing,
+> move to next sector and repeat*
+> *Q2 - yes*
+> *Q3 - call B as new*
+> *Q4 - tell me about both*
+> *Q5 - yes, check paused, 9K113 on target only"*
+
+Reading (main loop):
+
+- (Q1) **Scan order changes: per sector, not per cycle.** Naked-eye sweep of one sector → glass
+  that sector's new contacts and the ones that could plausibly get a better identification than
+  they have → next sector. This **revises the 2026-09-23 direction** that a glass phase starts
+  only at the end of a naked-eye scan cycle (`belief/optic_policy.py` docstring). Consequence for
+  this feature: B's verdict waits at most one sector's dwell, not a whole cycle, so the hold is
+  short by construction; the expected-area look at A belongs in that same sector's glass step when
+  A's area is in it.
+- (Q2) Firing or threat-type B (AAA/SAM): call out at once; same/different settled after.
+- (Q3) Cannot look at A's area, or the wait runs out: call B out as a new group (missing a group
+  is worse than a possible duplicate).
+- (Q4) Tell the pilot both: "A has moved" with its new position, and "A is no longer where it
+  was" when A's area is seen empty and B is a different group.
+- (Q5) During a 9K113 attack run the check is paused; the sight stays on target; B is called out
+  on what is already known.
