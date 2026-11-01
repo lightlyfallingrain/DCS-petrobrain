@@ -172,8 +172,15 @@ import math
 from dataclasses import dataclass
 from typing import Final
 
-from perception.estimation import SYSTEMATIC_BIAS_FRACTION
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.estimation import (
+    SYSTEMATIC_BIAS_FRACTION,
+    effective_down_correlation,
+    range_sigma_scale_for_optic,
+    stable_range_correlation,
+    stable_share,
+    view_range_correlation,
+)
+from perception.geometry import GeoPosition, angular_delta_deg, bearing_deg, range_m
 from perception.source import PositionUncertainty
 
 #: How fast a contact could plausibly have moved since it was last
@@ -342,6 +349,14 @@ class Covariance2D:
             xx=self.xx + other.xx, zz=self.zz + other.zz, xz=self.xz + other.xz
         )
 
+    def __sub__(self, other: Covariance2D) -> Covariance2D:
+        """`BL-B108` Stage 2 -- `correlated_innovation`'s `S = P_est +
+        P_look - (C + C^T)` needs this; no caller before this stage ever
+        subtracted two covariances."""
+        return Covariance2D(
+            xx=self.xx - other.xx, zz=self.zz - other.zz, xz=self.xz - other.xz
+        )
+
     def scaled(self, factor: float) -> Covariance2D:
         return Covariance2D(
             xx=self.xx * factor, zz=self.zz * factor, xz=self.xz * factor
@@ -403,6 +418,253 @@ def covariance_from_uncertainty(
 
 
 @dataclass(frozen=True, slots=True)
+class LookAnchor:
+    """The geometry and optic of the one look `PositionEstimate.anchor`
+    remembers -- `plans/relative-distance-grouping/plan.md` (`BL-B108`)
+    Stage 2. Founding sets it from the founding look; every genuine fuse
+    sets it to the new look (module docstring's "Co-moving Fields" table
+    -- every other `PositionEstimate` construction site carries the prior
+    anchor through unchanged via `dataclasses.replace`).
+
+    `bearing_deg`/`range_m` are that look's own true bearing/range from
+    `observer_x`/`observer_z` -- the only two numbers `correlated_
+    innovation` needs to say how correlated a *different* look's stable
+    error plausibly is with this one (`perception.estimation.
+    stable_range_correlation`'s own two inputs: bearing separation, range
+    ratio). `observer_x`/`observer_z` are kept for completeness/future
+    use (a consumer that needs to recompute this look's own geometry from
+    scratch) -- `correlated_innovation` itself only reads `bearing_deg`/
+    `range_m`/`optic_class`/`sigma_down_stable_m`.
+
+    `optic_class` is the active optic's own `Optic.name`, and `sigma_
+    down_stable_m` is `perception.estimation.stable_down_sigma_m` of that
+    look's own `sigma_down_m` -- the one perceived quantity `correlated_
+    innovation` needs beyond the correlation coefficient itself (module
+    docstring: "the look's own anchor", singular, one anchor per estimate,
+    not a history -- the plan's own stated "one-anchor approximation")."""
+
+    observer_x: float
+    observer_z: float
+    bearing_deg: float
+    range_m: float
+    optic_class: str
+    sigma_down_stable_m: float
+
+
+@dataclass(frozen=True, slots=True)
+class _Matrix2D:
+    """A general (not necessarily symmetric) real 2x2 matrix -- used only
+    for the correlated-fusion cross-covariance `C`/`C^T` in `fold_
+    position`'s Bar-Shalom-Campo update (`correlated_innovation`'s own
+    docstring). `Covariance2D` (3 independent components) is not enough
+    here: `C`, the cross-covariance between two different looks' stable
+    error terms each along its *own* line-of-sight axis, is generally
+    asymmetric when the two axes differ -- only `C + C^T` (`S`'s own
+    term) is guaranteed symmetric."""
+
+    xx: float
+    xz: float
+    zx: float
+    zz: float
+
+    def transpose(self) -> _Matrix2D:
+        return _Matrix2D(xx=self.xx, xz=self.zx, zx=self.xz, zz=self.zz)
+
+    def __add__(self, other: _Matrix2D) -> _Matrix2D:
+        return _Matrix2D(
+            xx=self.xx + other.xx,
+            xz=self.xz + other.xz,
+            zx=self.zx + other.zx,
+            zz=self.zz + other.zz,
+        )
+
+    def __sub__(self, other: _Matrix2D) -> _Matrix2D:
+        return _Matrix2D(
+            xx=self.xx - other.xx,
+            xz=self.xz - other.xz,
+            zx=self.zx - other.zx,
+            zz=self.zz - other.zz,
+        )
+
+    def apply(self, x: float, z: float) -> tuple[float, float]:
+        return (self.xx * x + self.xz * z, self.zx * x + self.zz * z)
+
+    def matmul(self, other: _Matrix2D) -> _Matrix2D:
+        return _Matrix2D(
+            xx=self.xx * other.xx + self.xz * other.zx,
+            xz=self.xx * other.xz + self.xz * other.zz,
+            zx=self.zx * other.xx + self.zz * other.zx,
+            zz=self.zx * other.xz + self.zz * other.zz,
+        )
+
+    def as_symmetric_covariance(self) -> Covariance2D:
+        """Average `xz`/`zx` into one off-diagonal -- for a matrix the
+        caller already knows is symmetric (up to floating-point residue),
+        never for one that might genuinely not be."""
+        return Covariance2D(xx=self.xx, zz=self.zz, xz=(self.xz + self.zx) / 2.0)
+
+    @staticmethod
+    def from_covariance(covariance: Covariance2D) -> _Matrix2D:
+        return _Matrix2D(
+            xx=covariance.xx, xz=covariance.xz, zx=covariance.xz, zz=covariance.zz
+        )
+
+
+def _down_axis_unit(bearing_deg_value: float) -> tuple[float, float]:
+    theta = math.radians(bearing_deg_value)
+    return math.cos(theta), math.sin(theta)
+
+
+def _is_valid_covariance(covariance: Covariance2D) -> bool:
+    """`False` for a 2x2 matrix that cannot be a real covariance -- a
+    negative trace, or a negative determinant (one axis's variance
+    gone negative even though the trace is still positive) -- `BL-B108`
+    Stage 2's own found defect: the Bar-Shalom-Campo update's `P_est -
+    K @ (P_est - C^T)` is **not** guaranteed positive-semidefinite by
+    construction the way the old independent information-form sum was
+    (that form's `info_sum.inverse()` can only ever produce a valid
+    covariance) -- when the two sides are highly correlated and close in
+    magnitude, `S` can be near-singular, and a near-singular `S^-1`
+    amplified through `K` can push the result negative. `fold_position`'s
+    existing `FUSION_SANITY_SIGMA` mean-residual check alone does not
+    catch this (a wildly wrong but nonsensical covariance can still sit
+    close to one input's own *mean*) -- found empirically, by a dwelled-
+    look scenario whose covariance went negative (`xx = -74033`) after
+    several highly-correlated same-geometry fuses, not by inspection.
+    Checked here, folded into the same ill-conditioning "hold" branch
+    `fold_position` already has, rather than as a second guard, since the
+    remedy (discard this fuse, hold the prior) is identical."""
+    trace = covariance.trace()
+    if trace < 0.0:
+        return False
+    determinant = covariance.xx * covariance.zz - covariance.xz * covariance.xz
+    return determinant >= 0.0
+
+
+def _down_variance_along(covariance: Covariance2D, bearing_deg_value: float) -> float:
+    """The down-range (along-line-of-sight) variance `covariance`
+    projects onto the axis at `bearing_deg_value` -- `PositionEstimate.
+    range_uncertainty_m`'s own projection, factored out so `correlated_
+    innovation`'s fusion cap (`BL-B108` amendment, "Belief side") can read
+    it for an arbitrary covariance/bearing pair, not only `self`'s own."""
+    cos_t, sin_t = _down_axis_unit(bearing_deg_value)
+    return (
+        covariance.xx * cos_t * cos_t
+        + 2.0 * covariance.xz * sin_t * cos_t
+        + covariance.zz * sin_t * sin_t
+    )
+
+
+def correlated_innovation(
+    prior: PositionEstimate,
+    prior_covariance: Covariance2D,
+    look_covariance: Covariance2D,
+    *,
+    correlation_bearing_deg: float,
+    correlation_range_m: float,
+    correlation_optic_class: str,
+    correlation_sigma_down_stable_m: float,
+    for_fusion: bool = False,
+) -> tuple[Covariance2D, _Matrix2D, float]:
+    """`(S, C, kappa_view)` for the correlated-fusion update, used by both
+    `fold_position` (the fuse) and `belief.association_over_time.
+    passes_gate`/`contacts_plausibly_same` (the gate) -- `plans/
+    relative-distance-grouping/plan.md` Stage 2's one shared helper.
+    `kappa_view` is `Z_view`'s own **geometric** kernel (`perception.
+    estimation.view_range_correlation`), *not* scaled by the optic-ladder
+    factor -- returned alongside `S`/`C` so a caller that also needs it
+    (`fold_position`'s own floor) does not re-derive the same geometry a
+    second time; the floor applies its own optic factor separately
+    (`BL-B108` amendment, "Belief side" -- see `_apply_floor`).
+
+    `prior_covariance`/`look_covariance` are each side's own ordinary,
+    already-inflated declared covariance (`P_est`/`P_look`), computed
+    exactly as before this stage -- what changes is `C`, the cross-
+    covariance between the two sides' *stable* (geometry-correlated, not
+    look-to-look) down-range error, which this function adds in.
+
+    **The caller decides what `correlation_bearing_deg`/`correlation_
+    range_m` mean, and that choice is the entire difference between the
+    gate and the fold** (plan's Stage 2 text, "For the gate ... the
+    hypothesis ... For the fold ... the look's own geometry"):
+
+    - **Gate**: the bearing/range from the *current* observer to the
+      contact's *believed* position (`prior.x`/`prior.z`) -- a hypothesis
+      ("if this incoming look really were of this same contact, how
+      correlated would its stable error be with the anchor's"), decoupled
+      from the incoming look's own real, possibly very different,
+      reported geometry. This is what makes the gate reject a look whose
+      *implied position* disagrees by kilometres even though the
+      hypothesis geometry alone would predict high correlation (the E1
+      fold case) -- the correlation answers "how tightly should these
+      agree", the Mahalanobis test below still compares against what the
+      look actually said.
+    - **Fold**: the incoming look's own real bearing/range, directly --
+      by the time a fold happens the gate has already decided this look
+      belongs to this contact, so there is no hypothesis left to test.
+
+    `correlation_optic_class`/`correlation_sigma_down_stable_m` are always
+    the incoming look's own real values (never a hypothesis value) --
+    what correlates is the *actual* optic and sigma of the thing being
+    compared against the anchor, regardless of which bearing/range mode
+    above is in force.
+
+    **`for_fusion` (`BL-B108` amendment, "Belief side")**: when set
+    (`fold_position`'s own call only -- the gate never caps), `C`'s
+    down-range magnitude `c_down` is additionally capped at `min(
+    var_prior_along, var_look_along)`, each side's own full along-line
+    variance projected onto *its own* line-of-sight axis (`_down_
+    variance_along`). In 1-D this is exactly "neither fusion weight goes
+    negative", so the fused mean can never extrapolate past either input
+    -- the honest boundary a flat cross-optic share could violate (module
+    docstring of `perception.estimation`, "Why not 'mostly the same
+    error, scaled down'"). **The gate does not cap**: it tests the model
+    correlation the noise really has, a calibrated test for accept/
+    reject rather than a position, and any look the gate accepts sits
+    well inside the fold's own (larger) `S` by construction.
+
+    `prior.anchor is None` (the `speech.py` placeholder, module docstring
+    "Co-moving Fields") makes `C` the zero matrix and `S` the ordinary
+    independent sum -- the conservative, wider gate; never a *tighter*
+    one from a missing anchor."""
+    anchor = prior.anchor
+    if anchor is None:
+        return (
+            prior_covariance + look_covariance,
+            _Matrix2D(0.0, 0.0, 0.0, 0.0),
+            0.0,
+        )
+
+    d_bearing_deg = angular_delta_deg(correlation_bearing_deg, anchor.bearing_deg)
+    hi = max(correlation_range_m, anchor.range_m)
+    lo = max(1.0, min(correlation_range_m, anchor.range_m))
+    range_ratio_value = hi / lo
+    kappa_view = view_range_correlation(d_bearing_deg, range_ratio_value)
+    rho_view, rho_near = stable_range_correlation(
+        d_bearing_deg, range_ratio_value, anchor.optic_class, correlation_optic_class
+    )
+    rho_eff = effective_down_correlation(rho_view, rho_near)
+    c_down = rho_eff * anchor.sigma_down_stable_m * correlation_sigma_down_stable_m
+    if for_fusion:
+        var_prior_along = _down_variance_along(prior_covariance, anchor.bearing_deg)
+        var_look_along = _down_variance_along(look_covariance, correlation_bearing_deg)
+        max_c_down = max(0.0, min(var_prior_along, var_look_along))
+        c_down = max(-max_c_down, min(max_c_down, c_down))
+
+    anchor_x, anchor_z = _down_axis_unit(anchor.bearing_deg)
+    look_x, look_z = _down_axis_unit(correlation_bearing_deg)
+    c_matrix = _Matrix2D(
+        xx=c_down * anchor_x * look_x,
+        xz=c_down * anchor_x * look_z,
+        zx=c_down * anchor_z * look_x,
+        zz=c_down * anchor_z * look_z,
+    )
+    c_sym = c_matrix + c_matrix.transpose()
+    s = prior_covariance + look_covariance - c_sym.as_symmetric_covariance()
+    return s, c_matrix, kappa_view
+
+
+@dataclass(frozen=True, slots=True)
 class PositionEstimate:
     """One contact's fused believed position: mean (x, z) plus its own 2x2
     covariance and the sim-time it is current as of. Plain floats, no live
@@ -418,7 +680,12 @@ class PositionEstimate:
     fresh inflation from, so repeated holds never compound. On a freshly
     founded or genuinely fused estimate the two pairs are identical by
     construction (`as_of_sim == fused_at_sim`, `covariance ==
-    fused_covariance`); they diverge only across one or more holds."""
+    fused_covariance`); they diverge only across one or more holds.
+
+    `anchor` (`BL-B108` Stage 2) is the one look `correlated_innovation`
+    reasons from -- `None` only for the `speech.py` placeholder `Contact`
+    (module docstring's "Co-moving Fields" table), which has no real look
+    behind it at all."""
 
     x: float
     z: float
@@ -426,6 +693,7 @@ class PositionEstimate:
     as_of_sim: float
     fused_at_sim: float
     fused_covariance: Covariance2D
+    anchor: LookAnchor | None = None
 
     def radius_m(self) -> float:
         """Scalar reduction for every pre-existing caller that wants a
@@ -485,12 +753,29 @@ def estimate_from_look(
     z: float,
     uncertainty: PositionUncertainty,
     look_bearing_deg: float,
+    look_range_m: float,
     t_sim: float,
+    *,
+    observer_x: float,
+    observer_z: float,
 ) -> PositionEstimate:
     """A single look's own `PositionEstimate`, with no prior to fuse
     against -- `fold_position`'s founding case, factored out so a founding
-    contact and a re-observed one build their look covariance identically."""
+    contact and a re-observed one build their look covariance identically.
+
+    `look_range_m`/`observer_x`/`observer_z` (`BL-B108` Stage 2) are the
+    three numbers `LookAnchor` needs beyond what `uncertainty` already
+    carries (`optic_class`/`sigma_down_stable_m`) -- see that dataclass's
+    own docstring."""
     covariance = covariance_from_uncertainty(uncertainty, look_bearing_deg)
+    anchor = LookAnchor(
+        observer_x=observer_x,
+        observer_z=observer_z,
+        bearing_deg=look_bearing_deg,
+        range_m=look_range_m,
+        optic_class=uncertainty.optic_class,
+        sigma_down_stable_m=uncertainty.sigma_down_stable_m,
+    )
     return PositionEstimate(
         x=x,
         z=z,
@@ -498,6 +783,7 @@ def estimate_from_look(
         as_of_sim=t_sim,
         fused_at_sim=t_sim,
         fused_covariance=covariance,
+        anchor=anchor,
     )
 
 
@@ -508,16 +794,25 @@ def fold_position(
     z: float,
     uncertainty: PositionUncertainty,
     look_bearing_deg: float,
+    look_range_m: float,
     t_sim: float,
+    observer_x: float,
+    observer_z: float,
     growth_rate_mps: float = GATE_GROWTH_RATE_MPS,
 ) -> PositionEstimate:
-    """Fuse one look `(x, z, uncertainty, look_bearing_deg)` into `prior`
-    (`None` for a founding percept) via the information-form covariance
-    update -- see module docstring. The result is floored so it can never
-    claim more precision than `SYSTEMATIC_BIAS_FRACTION` of this look's own
-    single-look sigma would allow (the plan's "the uncertainty floor
-    follows for free" -- the systematic bias never averages out, so the
-    fused estimate must never claim to have averaged it away).
+    """Fuse one look `(x, z, uncertainty, look_bearing_deg, look_range_m)`
+    into `prior` (`None` for a founding percept) -- see module docstring.
+    **`BL-B108` Stage 2**: the fuse itself is now the standard Bar-Shalom-
+    Campo update for two measurements with a known cross-correlation `C`
+    (`correlated_innovation`), not a plain information-form sum of two
+    *independent* covariances -- a contact's down-range error is now
+    correlated across looks at a similar geometry (module docstring of
+    `perception.estimation`), and fusing it as independent is exactly
+    the bug this plan exists to fix (the gate budgets the stable error
+    twice and the fold converges on it as if it genuinely averaged out).
+    The result is floored so it can never claim more precision than the
+    current geometry's own stable share would allow (`_apply_floor`,
+    revised this stage).
 
     `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a)
     is passed straight through to `_inflated_since_last_fuse` for the
@@ -526,15 +821,31 @@ def fold_position(
     inflate). Defaults to `GATE_GROWTH_RATE_MPS`, unchanged for every
     pre-Stage-2 caller.
 
-    **Ill-conditioning guard** (module docstring, defect 1): when `prior` is
-    not `None`, the ordinary information-form fused mean is computed first,
-    then checked against `FUSION_SANITY_SIGMA` -- if it does not sit within
-    that many sigma of *either* input, judged against that input's own
-    individual covariance, the fusion is treated as ill-conditioned and
-    discarded: the look is not fused into the mean or covariance at all,
-    only elapsed-time inflation is applied, exactly the "hold" outcome
-    `clamp_to_detection_envelope` uses for the other defect."""
+    **Ill-conditioning guard** (module docstring, defect 1), unchanged in
+    spirit: when `prior` is not `None`, the fused mean is computed first,
+    then checked against `FUSION_SANITY_SIGMA` -- if it does not sit
+    within that many sigma of *either* input, judged against that input's
+    own individual covariance, the fusion is treated as ill-conditioned
+    and discarded: the look is not fused into the mean or covariance at
+    all, only elapsed-time inflation is applied, exactly the "hold"
+    outcome `clamp_to_detection_envelope` uses for the other defect.
+    **`BL-B108` Stage 2 adds a second trigger for the same hold branch**:
+    `_is_valid_covariance(fused_covariance)` -- the correlated update's
+    own `S` can go near-singular when the two sides are highly
+    correlated and similar in magnitude (repeated same-geometry looks,
+    exactly the dwell case this plan's own E3/E4 care most about), and an
+    ill-conditioned `S^-1` can push the resulting covariance negative
+    even while the mean still looks plausible -- see that function's own
+    docstring for the dwell scenario that found it."""
     look_covariance = covariance_from_uncertainty(uncertainty, look_bearing_deg)
+    look_anchor = LookAnchor(
+        observer_x=observer_x,
+        observer_z=observer_z,
+        bearing_deg=look_bearing_deg,
+        range_m=look_range_m,
+        optic_class=uncertainty.optic_class,
+        sigma_down_stable_m=uncertainty.sigma_down_stable_m,
+    )
     if prior is None:
         fused = PositionEstimate(
             x=x,
@@ -543,32 +854,47 @@ def fold_position(
             as_of_sim=t_sim,
             fused_at_sim=t_sim,
             fused_covariance=look_covariance,
+            anchor=look_anchor,
         )
+        kappa_view_at_fuse = 1.0
+        prior_optic_class: str | None = uncertainty.optic_class
     else:
         prior_covariance = _inflated_since_last_fuse(prior, t_sim, growth_rate_mps)
-        info_prior = prior_covariance.inverse()
-        info_look = look_covariance.inverse()
-        info_sum = info_prior + info_look
-        prior_iv_x, prior_iv_z = info_prior.apply(prior.x, prior.z)
-        look_iv_x, look_iv_z = info_look.apply(x, z)
-        fused_covariance = info_sum.inverse()
-        fused_x, fused_z = fused_covariance.apply(
-            prior_iv_x + look_iv_x, prior_iv_z + look_iv_z
+        s, c, kappa_view_at_fuse = correlated_innovation(
+            prior,
+            prior_covariance,
+            look_covariance,
+            correlation_bearing_deg=look_bearing_deg,
+            correlation_range_m=look_range_m,
+            correlation_optic_class=uncertainty.optic_class,
+            correlation_sigma_down_stable_m=uncertainty.sigma_down_stable_m,
+            for_fusion=True,
         )
+        prior_optic_class = (
+            prior.anchor.optic_class if prior.anchor is not None else None
+        )
+        s_inv_matrix = _Matrix2D.from_covariance(s.inverse())
+        p_est_matrix = _Matrix2D.from_covariance(prior_covariance)
+        gain = (p_est_matrix - c).matmul(s_inv_matrix)
+        dx, dz = x - prior.x, z - prior.z
+        correction_x, correction_z = gain.apply(dx, dz)
+        fused_x, fused_z = prior.x + correction_x, prior.z + correction_z
+        fused_covariance = (
+            p_est_matrix - gain.matmul(p_est_matrix - c.transpose())
+        ).as_symmetric_covariance()
         prior_residual_sigma_sq = prior_covariance.mahalanobis_squared(
             fused_x - prior.x, fused_z - prior.z
         )
         look_residual_sigma_sq = look_covariance.mahalanobis_squared(
             fused_x - x, fused_z - z
         )
-        if (
-            min(prior_residual_sigma_sq, look_residual_sigma_sq)
-            > FUSION_SANITY_SIGMA**2
-        ):
+        if min(
+            prior_residual_sigma_sq, look_residual_sigma_sq
+        ) > FUSION_SANITY_SIGMA**2 or not _is_valid_covariance(fused_covariance):
             # Hold: elapsed-time inflation still applies (`prior_covariance`
             # above already is that fresh, non-compounding inflation), but
-            # `fused_at_sim`/`fused_covariance` carry straight through
-            # unchanged -- no real evidence was fused this poll.
+            # `fused_at_sim`/`fused_covariance`/`anchor` carry straight
+            # through unchanged -- no real evidence was fused this poll.
             return PositionEstimate(
                 x=prior.x,
                 z=prior.z,
@@ -576,6 +902,7 @@ def fold_position(
                 as_of_sim=t_sim,
                 fused_at_sim=prior.fused_at_sim,
                 fused_covariance=prior.fused_covariance,
+                anchor=prior.anchor,
             )
         fused = PositionEstimate(
             x=fused_x,
@@ -584,8 +911,9 @@ def fold_position(
             as_of_sim=t_sim,
             fused_at_sim=t_sim,
             fused_covariance=fused_covariance,
+            anchor=look_anchor,
         )
-    return _apply_floor(fused, uncertainty)
+    return _apply_floor(fused, uncertainty, kappa_view_at_fuse, prior_optic_class)
 
 
 def clamp_to_detection_envelope(
@@ -656,6 +984,7 @@ def clamp_to_detection_envelope(
         as_of_sim=fused.as_of_sim,
         fused_at_sim=prior.fused_at_sim,
         fused_covariance=prior.fused_covariance,
+        anchor=prior.anchor,
     )
 
 
@@ -747,6 +1076,7 @@ def clamp_fold_displacement(
             as_of_sim=fused.as_of_sim,
             fused_at_sim=prior.fused_at_sim,
             fused_covariance=prior.fused_covariance,
+            anchor=fused.anchor,
         )
     dx = fused.x - prior.x
     dz = fused.z - prior.z
@@ -761,20 +1091,56 @@ def clamp_fold_displacement(
         as_of_sim=fused.as_of_sim,
         fused_at_sim=fused.fused_at_sim,
         fused_covariance=fused.fused_covariance,
+        anchor=fused.anchor,
     )
 
 
 def _apply_floor(
-    estimate: PositionEstimate, look_uncertainty: PositionUncertainty
+    estimate: PositionEstimate,
+    look_uncertainty: PositionUncertainty,
+    kappa_view: float = 1.0,
+    prior_optic_class: str | None = None,
 ) -> PositionEstimate:
     """Only ever called on a freshly founded or genuinely fused `estimate`
     (`fold_position`'s two non-hold branches), where `as_of_sim ==
     fused_at_sim` and `covariance == fused_covariance` hold by construction
     -- so the floored covariance becomes both the reported `covariance` and
-    the new `fused_covariance` base, keeping that invariant intact."""
+    the new `fused_covariance` base, keeping that invariant intact.
+
+    **`BL-B108` Stage 2: the down-range half of the floor is `kappa_view
+    * stable_share() * sigma_down_m` of this look, not a flat fraction.**
+    The cross-range half is unchanged (`SYSTEMATIC_BIAS_FRACTION`, bearing
+    out of scope). `kappa_view` is the *geometric* correlation `correlated_
+    innovation` just computed for this fuse (`1.0` for a founding look,
+    which is trivially "the same geometry" as itself) -- the plan's own
+    "it binds only at the same geometry": once ownship has turned or
+    closed enough that `kappa_view` has decayed, the down-range floor
+    decays with it, so the estimate is allowed to keep tightening via
+    genuine triangulation rather than being held at a floor calibrated for
+    a geometry that no longer applies.
+
+    **`prior_optic_class` (`BL-B108` amendment, "Belief side")**: the
+    floor is additionally scaled by `min(1, k_anchor / k_look)`, where
+    `k_anchor`/`k_look` are `perception.estimation.range_sigma_scale_
+    for_optic` of `prior_optic_class` (the fuse's prior anchor, before
+    this fuse replaced it -- `None` for a founding look, treated as
+    "no discount") and `look_uncertainty.optic_class` respectively.
+    Staring through a worse optic (`k_look` larger) after a better one
+    (`k_anchor` smaller) can never push the floor below the better
+    optic's own stable floor; a better optic's own look is never
+    discounted (the ratio is capped at `1.0`, never negative or amplified
+    above it)."""
+    k_look = range_sigma_scale_for_optic(look_uncertainty.optic_class)
+    optic_factor = 1.0
+    if prior_optic_class is not None and k_look > 0.0:
+        k_anchor = range_sigma_scale_for_optic(prior_optic_class)
+        optic_factor = min(1.0, k_anchor / k_look)
+    down_floor_m = (
+        kappa_view * stable_share() * look_uncertainty.sigma_down_m * optic_factor
+    )
     floor_trace = (SYSTEMATIC_BIAS_FRACTION * look_uncertainty.sigma_cross_m) ** 2 + (
-        SYSTEMATIC_BIAS_FRACTION * look_uncertainty.sigma_down_m
-    ) ** 2
+        down_floor_m**2
+    )
     current_trace = estimate.covariance.trace()
     if current_trace >= floor_trace:
         return estimate
@@ -791,4 +1157,5 @@ def _apply_floor(
         as_of_sim=estimate.as_of_sim,
         fused_at_sim=estimate.fused_at_sim,
         fused_covariance=floored,
+        anchor=estimate.anchor,
     )

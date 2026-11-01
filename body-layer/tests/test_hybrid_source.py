@@ -12,14 +12,17 @@ world-model's own coordinate-subsystem tests).
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any
 
 import pytest
 
+import perception.estimation as estimation_module
 from perception import association
 from perception.estimation import perturbed_bearing_range
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.hybrid_source import (
+    _SCOPE_OPTIC_CLASS,
     SCOPE_UNCERTAINTY_M,
     SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     HybridPerceptionSource,
@@ -124,6 +127,8 @@ def _expected_perturbed(
         true_range_m=true_range_m,
         sigma_cross_m=SCOPE_UNCERTAINTY_M,
         sigma_down_m=SCOPE_UNCERTAINTY_M,
+        optic_class=_SCOPE_OPTIC_CLASS,
+        poll_key=100.0,
     )
 
 
@@ -632,49 +637,62 @@ def test_every_poll_mode_still_returns_nothing_when_detection_clears() -> None:
 # declaration (the `PositionUncertainty(300, 300)` field) silently did not.
 
 
-def test_repeated_scope_observations_of_a_stationary_object_do_not_converge_on_truth() -> (
-    None
-):
+def test_repeated_scope_observations_of_a_stationary_object_do_not_converge_on_truth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A heavily-observed contact seen only through the scope/hybrid channel
     must NOT converge on exact ground truth behind a cosmetic uncertainty
     band -- the "precise and wrong" behaviour `perception.estimation`'s
-    per-object systematic bias exists to guarantee structurally. Poll a
-    stationary target many times (`emit_mode="every_poll"` so debounce
-    never suppresses a re-observation) and check the mean of the emitted
-    ranges, not any single look: per-look noise should average toward zero
-    across enough looks, but the never-redrawn systematic bias must not --
-    so the mean stays measurably off true range, by roughly the bias this
-    object's id actually draws."""
+    correlated down-range field (cross-range's per-object systematic bias,
+    on the range axis) exists to guarantee structurally. Poll a stationary
+    target many times (`emit_mode="every_poll"` so debounce never
+    suppresses a re-observation) and check the mean of the emitted ranges,
+    not any single look: per-look noise should average toward zero across
+    enough looks, but the stable per-geometry field realisation must not --
+    so the mean stays measurably off true range.
+
+    **`BL-B108` amendment, rewritten as an ensemble statement** (review
+    round 2's own root-cause finding: a single fixed field realisation can
+    land close to zero by chance, which is exactly what this test's own
+    one-shot predecessor could not tell apart from a real defect). Sweep
+    an ensemble of field realisations via `perception.estimation.
+    _FIELD_REALISATION_SALT` and check the *ensemble* RMS departure from
+    truth, not one draw's mean."""
     true_range_m = 1000.0
     world_objects = {
         "objects": [_world_object(1, "Ural-4320", lat_deg=true_range_m, lon_deg=0.0)]
     }
     n_polls = 60
-    client = FakeAircraftClient(
-        [_indication({"middle_list_text": "Ural truck"})] * n_polls,
-        world_objects=world_objects,
-    )
-    source = HybridPerceptionSource(
-        aircraft_client=client,  # type: ignore[arg-type]
-        theatre=_THEATRE,
-        emit_mode="every_poll",
-    )
-
-    ranges_m = [
-        source.poll(100.0 + i * 0.2, _ownship())[0].range_m for i in range(n_polls)
-    ]
-
-    mean_range_m = sum(ranges_m) / len(ranges_m)
-    # The per-object systematic bias is `SYSTEMATIC_BIAS_FRACTION *
-    # SCOPE_UNCERTAINTY_M` on the down-range axis at most -- confirm the
-    # averaged-over-many-looks estimate sits measurably away from truth
-    # (not within a few metres, which per-look noise alone could produce by
-    # chance), demonstrating the bias, not the noise, is what survives
-    # averaging.
-    assert abs(mean_range_m - true_range_m) > 20.0
-    # No single look ever lands on exact truth either -- the mechanical,
-    # unperturbed behaviour this fix replaces.
-    assert all(range_m_value != true_range_m for range_m_value in ranges_m)
+    n_realisations = 20
+    departures_m = []
+    for salt_index in range(n_realisations):
+        monkeypatch.setattr(
+            estimation_module, "_FIELD_REALISATION_SALT", f"hybrid-scope-{salt_index}"
+        )
+        estimation_module._field_frequencies.cache_clear()
+        client = FakeAircraftClient(
+            [_indication({"middle_list_text": "Ural truck"})] * n_polls,
+            world_objects=world_objects,
+        )
+        source = HybridPerceptionSource(
+            aircraft_client=client,  # type: ignore[arg-type]
+            theatre=_THEATRE,
+            emit_mode="every_poll",
+        )
+        ranges_m = [
+            source.poll(100.0 + i * 0.2, _ownship())[0].range_m for i in range(n_polls)
+        ]
+        mean_range_m = sum(ranges_m) / len(ranges_m)
+        departures_m.append(mean_range_m - true_range_m)
+        # No single look ever lands on exact truth either -- the
+        # mechanical, unperturbed behaviour this fix replaces.
+        assert all(range_m_value != true_range_m for range_m_value in ranges_m)
+    rms_departure_m = math.sqrt(sum(d * d for d in departures_m) / len(departures_m))
+    # Per-look noise alone averages toward zero across 60 polls; the
+    # stable per-geometry field realisation does not, so the ensemble's
+    # own RMS departure should sit well above what averaging noise alone
+    # could leave by chance.
+    assert rms_departure_m > 20.0
 
 
 def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:

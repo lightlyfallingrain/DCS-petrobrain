@@ -735,7 +735,10 @@ class TestLookTargetGeometry:
                 sigma_cross_m=sigma_cross_m, sigma_down_m=510.0
             ),
             look_bearing_deg=0.0,
+            look_range_m=3_000.0,
             t_sim=0.0,
+            observer_x=0.0,
+            observer_z=0.0,
         )
 
         target = look_target_for(
@@ -759,27 +762,23 @@ class TestLookTargetGeometry:
         once its `bearing_uncertainty_deg` narrows inside half a binocular
         field of view.
 
-        **A real, non-obvious finding surfaced getting this test to pass
-        honestly**: repeated looks from *crossing* bearings (real
-        triangulation -- the scenario `test_position_belief.py`'s own
-        `test_fold_position_from_two_crossing_looks_triangulates_tighter_
-        than_either` covers, and which shrinks the estimate's *overall*
-        radius the most) do **not** reliably collapse *this specific
-        query's* `bearing_uncertainty_deg` to single-step, even fully
-        converged to the systematic-bias floor -- cross-bearing fusion
-        smears the tightened covariance's orientation away from being
-        aligned with any one observer's own cross-range axis, and a query
-        against a covariance that has become more isotropic can read
-        *worse* along one particular axis than a single, luckily-aligned
-        look would. Repeated looks from **the same bearing** (re-glassing
-        the same contact without much relative-bearing change -- at least
-        as plausible a "well-observed" scenario as an orbiting one)
-        instead **preserve** the naturally favourable down-range-heavy
-        anisotropy while still shrinking magnitude toward the floor, and
-        do reach single-step reliably -- confirmed numerically before
-        writing this test, not assumed. Recorded in `plans/
-        precise-position-belief/implementation.md` as a genuine finding
-        about the plan's own worked claim, not silently smoothed over."""
+        **Rewritten, not merely signature-patched (`BL-B108` escalation
+        item 1)**. The pre-`BL-B108` version of this test fused ten looks
+        from the *same* bearing and relied on independent-per-look fusion
+        shrinking the estimate toward the old flat `SYSTEMATIC_BIAS_
+        FRACTION` floor -- exactly the model `BL-B108` replaces. Under the
+        correlated model, repeated same-bearing looks are maximally
+        correlated and do **not** keep tightening (`test_position_belief.
+        py::test_fold_position_repeated_identical_look_does_not_keep_
+        tightening`), so they no longer reach single-step here either
+        (confirmed by running it: `look_sweep` now returns two steps for
+        that case). **Alternating bearings (0, 90 degrees) -- real
+        triangulation, decorrelated by `perception.estimation.
+        RANGE_DECORRELATION_BEARING_DEG` -- is what now reaches the
+        floor and collapses the sweep**, which is the mechanism `BL-B108`
+        actually wants rewarded (E5: closing or a different look angle
+        genuinely improves the estimate, dwelling from one place does
+        not)."""
         from belief.optic_policy import look_sweep, look_target_for
         from belief.position_belief import fold_position
         from perception.geometry import GeoPosition
@@ -792,18 +791,24 @@ class TestLookTargetGeometry:
         # All folded at the same t_sim (elapsed_s=0 throughout) so the
         # elapsed-motion inflation term never fights the tightening --
         # this test is about how much fusion itself narrows the estimate,
-        # not about a stale contact re-widening between looks. Same
-        # bearing every time -- see the docstring above for why crossing
-        # bearings do not reliably reach single-step here.
+        # not about a stale contact re-widening between looks. Alternating
+        # bearings 90 degrees apart (well past `RANGE_DECORRELATION_
+        # BEARING_DEG`) genuinely decorrelate each look from the last one
+        # fused -- see the docstring above for why same-bearing repeats no
+        # longer reach single-step under the correlated model.
         estimate = None
-        for _ in range(10):
+        for i in range(10):
+            bearing = 0.0 if i % 2 == 0 else 90.0
             estimate = fold_position(
                 estimate,
                 x=3_000.0,
                 z=0.0,
                 uncertainty=uncertainty,
-                look_bearing_deg=0.0,
+                look_bearing_deg=bearing,
+                look_range_m=3_000.0,
                 t_sim=0.0,
+                observer_x=0.0,
+                observer_z=0.0,
             )
         assert estimate is not None
 

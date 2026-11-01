@@ -36,11 +36,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 import tuning
-from belief.classification import (
-    AIR_DEFENSE_OP_CLASSES,
-    SpecificityLevel,
-    parent_class_of,
-)
+from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
@@ -64,8 +60,11 @@ from mission_memory.entries import (
 from mission_memory.store import MissionMemory
 
 #: Decision 3's admission floor for the `group` rule: a contact's
-#: classification must have reached `CLASS` specificity *and* be held at
-#: or above this confidence before its first memory entry is written.
+#: classification confidence must be held at or above this value before
+#: its first memory entry is written, at *whatever* identification level
+#: it has (`BL-B108` Stage 4 dropped the separate `CLASS`-specificity
+#: gate this comment used to also require -- user, 2026-10-31: "keep the
+#: confidence floor" while every group is kept regardless of level).
 #: **Reuse-before-declaring per the plan** -- searched for an existing
 #: "is this nameable yet" threshold on the describe/callout path
 #: (`grep -rn "confidence >=\|CONFIDENCE_FLOOR" src/belief/`, 2026-10-17)
@@ -301,12 +300,22 @@ def _maybe_write_entry_for_contact(
     phase: PhaseInfo | None,
     enrichment: EnrichmentContext | None,
 ) -> None:
+    """`BL-B108` Stage 4 (Q4, E7; user, 2026-10-31: "keep them too in
+    mission memory... regardless of identification level"): the
+    `nameable` (identification-level) gate is gone -- a presence-only
+    "group, something" contact is admitted on exactly the same footing
+    as a class-level one, once `GROUP_ENTRY_CONFIDENCE_FLOOR` is cleared.
+    `GROUP_ENTRY_CONFIDENCE_FLOOR` itself **stays** (the user's plan-
+    escalation answer, "keep the confidence floor") -- a single glimpse
+    still gets no entry; `_composition_for` already writes an empty
+    composition for an `UNKNOWN`-level contact (its own docstring's
+    "stays total"), so there is nothing further to special-case here for
+    the lowest level."""
     classification = contact.classification
     is_air_defence = (
         classification.value is not None
         and parent_class_of(classification.value) in AIR_DEFENSE_OP_CLASSES
     )
-    nameable = classification.level >= SpecificityLevel.CLASS
 
     if is_air_defence:
         _maybe_write_air_defence(
@@ -314,21 +323,21 @@ def _maybe_write_entry_for_contact(
         )
         return
 
-    if not nameable:
-        return
     if classification.confidence < GROUP_ENTRY_CONFIDENCE_FLOOR:
         last = memory.latest_entry(contact.id)
         if last is None:
-            # Not yet nameable confidently enough for a *first* entry.
+            # Not yet confident enough for a *first* entry, at whatever
+            # identification level.
             return
-        # Already has a standing entry from when it was nameable (e.g. a
-        # contradiction knocked confidence back down since) -- Stage 2
-        # does not retract a standing entry on a confidence dip, it only
-        # stops offering new material-change writes until confidence
-        # recovers. Falling through to the material-change check below
-        # with the current (sub-floor) confidence is deliberate: a real
-        # position/class/motion change is still worth recording even
-        # while confidence is temporarily low.
+        # Already has a standing entry from when confidence was at or
+        # above the floor (e.g. a contradiction knocked it back down
+        # since) -- Stage 2 does not retract a standing entry on a
+        # confidence dip, it only stops offering new material-change
+        # writes until confidence recovers. Falling through to the
+        # material-change check below with the current (sub-floor)
+        # confidence is deliberate: a real position/class/motion change
+        # is still worth recording even while confidence is temporarily
+        # low.
     _write_group_entry(memory, contacts, contact, now_sim, theatre, phase, enrichment)
 
 

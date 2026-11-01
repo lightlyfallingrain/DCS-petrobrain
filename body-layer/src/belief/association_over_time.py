@@ -238,11 +238,17 @@ from belief.classification import class_compatibility
 from belief.percept import Percept
 from belief.position_belief import (
     Covariance2D,
+    correlated_innovation,
     covariance_from_uncertainty,
     plausible_speed_mps,
 )
 from perception import object_model
-from perception.geometry import GeoPosition, project_from_bearing_range
+from perception.geometry import (
+    GeoPosition,
+    bearing_deg,
+    horizontal_range_m,
+    project_from_bearing_range,
+)
 from perception.source import PositionUncertainty
 
 if TYPE_CHECKING:
@@ -344,25 +350,22 @@ _FALLBACK_POSITION_UNCERTAINTY: Final = PositionUncertainty(
 
 def percept_position_uncertainty(percept: Percept) -> PositionUncertainty:
     """`percept.position_uncertainty` if declared, else the isotropic
-    `_FALLBACK_POSITION_UNCERTAINTY` -- the single place both this module's
-    own `_percept_covariance` (the gate) and `belief.contacts.Contact.
+    `_FALLBACK_POSITION_UNCERTAINTY` -- the single place both this
+    module's own `passes_gate` (the gate) and `belief.contacts.Contact.
     record`/`from_percept` (the fusion, `plans/precise-position-belief/
     plan.md` Stage 4) resolve "what uncertainty does this percept declare,
     really" from, so the gate and the fused estimate can never silently
-    disagree about a percept missing one."""
+    disagree about a percept missing one.
+
+    **`BL-B108` amendment**: `passes_gate` no longer builds its own look
+    covariance straight from this value at `percept.bearing_deg` (the old
+    `_percept_covariance` helper, removed) -- it scales the magnitude by
+    the hypothesis range first (see that function's own docstring), so
+    the fallback declared here is still the shared starting point, just
+    no longer the final covariance."""
     if percept.position_uncertainty is not None:
         return percept.position_uncertainty
     return _FALLBACK_POSITION_UNCERTAINTY
-
-
-def _percept_covariance(percept: Percept) -> Covariance2D:
-    """The look's own elongated error ellipse, rotated onto world x/z at
-    its own true `bearing_deg` -- via `percept_position_uncertainty` above,
-    so a percept missing a declared uncertainty gets the same isotropic
-    fallback the fused estimate would use for the identical look."""
-    return covariance_from_uncertainty(
-        percept_position_uncertainty(percept), percept.bearing_deg
-    )
 
 
 def contact_growth_rate_mps(contact: Contact) -> float:
@@ -438,7 +441,38 @@ def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     """Whether `percept` may be merged into `contact` -- the spatial gate and
     the class-compatibility gate must both pass. See module docstring's
-    "Spatial gate" section for the 2D covariance test."""
+    "Spatial gate" section for the 2D covariance test.
+
+    **`BL-B108` Stage 2**: the spatial budget `S` is no longer the plain
+    sum of both sides' own covariances -- it is `belief.position_belief.
+    correlated_innovation`'s `S`, which subtracts out the two sides'
+    *stable* down-range cross-covariance before the Mahalanobis test.
+    The correlation is evaluated on a **hypothesis**, not on the
+    percept's own real geometry (`correlated_innovation`'s own
+    docstring, "For the gate ... the hypothesis"): the bearing/range from
+    *this percept's own observer* to *the contact's believed position* --
+    "if this incoming look really were still looking at this contact, how
+    correlated would its stable error be with the anchor's". This is what
+    rejects a look that is correlation-plausible by geometry alone but
+    whose *actually reported* position disagrees by kilometres (the E1
+    fold case, `plan.md` Stage 2's "Worked check") -- `dx`/`dz` below are
+    still the percept's own real implied position minus the contact's
+    believed one, unchanged.
+
+    **`BL-B108` amendment, "Belief side", hypothesis-consistent sigma**:
+    the percept's own declared `sigma_cross_m`/`sigma_down_m`/`sigma_
+    down_stable_m` are scaled by `hypothesis_range_m / percept.range_m`
+    before building the look's own covariance/correlation inputs --
+    "under this hypothesis, what would this look's own sigma be at the
+    hypothesis range" rather than at the range it was actually reported
+    at. Measured (`plan.md` amendment, "Belief side"): without this, a
+    same-optic near-first reacquisition still folds 3-12% of the time
+    across realisations; with it, 0-1%. The percept's own covariance
+    *orientation* stays at `percept.bearing_deg` (where he actually
+    looked), unchanged -- only the sigma *magnitudes* are hypothesis-
+    scaled, and `correlation_bearing_deg`/`correlation_range_m` (the
+    inputs to the correlation kernel itself) are still the hypothesis
+    geometry, unaffected by this scaling."""
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):
@@ -448,8 +482,36 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     dx = percept_position.x - contact.last_position.x
     dz = percept_position.z - contact.last_position.z
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    covariance = _percept_covariance(percept) + _contact_covariance(contact, elapsed_s)
-    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
+    percept_uncertainty = percept_position_uncertainty(percept)
+    observer = GeoPosition(
+        x=percept.ownship_at_observation.x,
+        z=percept.ownship_at_observation.z,
+        alt_m=percept.ownship_at_observation.alt_m,
+    )
+    hypothesis_bearing_deg = bearing_deg(observer, contact.last_position)
+    hypothesis_range_m = horizontal_range_m(observer, contact.last_position)
+    hypothesis_scale = (
+        hypothesis_range_m / percept.range_m if percept.range_m > 0.0 else 1.0
+    )
+    hypothesis_uncertainty = PositionUncertainty(
+        sigma_cross_m=percept_uncertainty.sigma_cross_m * hypothesis_scale,
+        sigma_down_m=percept_uncertainty.sigma_down_m * hypothesis_scale,
+        sigma_down_stable_m=percept_uncertainty.sigma_down_stable_m * hypothesis_scale,
+        optic_class=percept_uncertainty.optic_class,
+    )
+    look_covariance = covariance_from_uncertainty(
+        hypothesis_uncertainty, percept.bearing_deg
+    )
+    s, _c, _kappa_view = correlated_innovation(
+        contact.position,
+        _contact_covariance(contact, elapsed_s),
+        look_covariance,
+        correlation_bearing_deg=hypothesis_bearing_deg,
+        correlation_range_m=hypothesis_range_m,
+        correlation_optic_class=hypothesis_uncertainty.optic_class,
+        correlation_sigma_down_stable_m=hypothesis_uncertainty.sigma_down_stable_m,
+    )
+    return s.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
 
 
 def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
@@ -476,7 +538,15 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     not a bug in this gate.
 
     Order of `a`/`b` does not matter -- the covariance sum and the
-    class-compatibility check are both symmetric."""
+    class-compatibility check are both symmetric.
+
+    **`BL-B108` Stage 2**: "the same helper, anchor against anchor" (plan
+    Stage 2) -- when both contacts carry an anchor, `S` is `correlated_
+    innovation`'s, correlated on `b`'s own anchor geometry directly (no
+    hypothesis step: there is no single "current observer" shared by two
+    already-founded contacts the way a fresh percept has one). Falls back
+    to the plain independent sum when either anchor is `None` (the
+    conservative, wider gate -- never tighter from missing data)."""
     if class_compatibility(a.last_class_raw, b.last_class_raw) == "incompatible":
         return False
 
@@ -484,5 +554,19 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     dz = a.last_position.z - b.last_position.z
     elapsed_a = max(0.0, now_sim - a.last_seen_sim)
     elapsed_b = max(0.0, now_sim - b.last_seen_sim)
-    covariance = _contact_covariance(a, elapsed_a) + _contact_covariance(b, elapsed_b)
-    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
+    cov_a = _contact_covariance(a, elapsed_a)
+    cov_b = _contact_covariance(b, elapsed_b)
+    b_anchor = b.position.anchor
+    if a.position.anchor is not None and b_anchor is not None:
+        s, _c, _kappa_view = correlated_innovation(
+            a.position,
+            cov_a,
+            cov_b,
+            correlation_bearing_deg=b_anchor.bearing_deg,
+            correlation_range_m=b_anchor.range_m,
+            correlation_optic_class=b_anchor.optic_class,
+            correlation_sigma_down_stable_m=b_anchor.sigma_down_stable_m,
+        )
+    else:
+        s = cov_a + cov_b
+    return s.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
