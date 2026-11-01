@@ -167,3 +167,76 @@ was stated for *A's area empty when checked*, not for *not checkable*. That gap 
    he say A is gone from where it was?
 5. **During a 9K113 attack run, is the check suspended** — nothing pulls the sight off the target —
    with B called out on what is known?
+
+## Plan check — 2026-11-01
+
+**Verdict:** CONCERNS — Stage 2 (the recommended ship) delivers the headline ("two groups stay
+two") honestly and the trigger math is sound. But the plan's own Decision 2, recommendation (c),
+means **BL-B110 as merged will not build the mechanism the user described** ("look around the
+area a bit and that would tell me") at all — E4–E7 are deferred indefinitely behind a future
+duplicate count from flight, not a date. That gap is disclosed in the plan's own text, not hidden,
+but it needs the user's explicit sign-off before Stage 2 ships under this entry's title, not an
+auto-advance.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (two groups stay two) | 2 | met — trigger catches most cases; 0–26% residual disclosed, Stage 0 tunes it before Stage 2 ships |
+| E2 (one group stays one) | 2 (partial) / 4 | **contradicted** for 4–10% of cross-optic same-group re-sightings under Stage 2 alone — a real re-sighting is wrongly founded as a new contact; the plan states this trade explicitly, and only Stage 4's `relocate` removes it |
+| E3 (no callout until verdict, bounded) | 2 | met — Q3 collapses "verdict" to "cannot tell → new" with zero hold, so the bound is trivially satisfied; the *real* bounded hold (checking first) is Stage 4 only |
+| E4 (the look is at A's area, debug-visible, B first) | 3–4, conditional | **missing** under the recommended ship — no look at A's area occurs at all in Stages 0–2; see Finding 1 |
+| E5 (absence counts only where visible) | 3, conditional | **missing** under Stages 0–2 — there is no "seen empty" concept without a look |
+| E6 ("moved" only if believable) | 4, conditional | **missing** under Stages 0–2 — no "moved" verdict is ever reached; B is simply founded distinct |
+| E7 (composition as graded suspicion) | 4, conditional | **missing** under Stages 0–2 — composition is never consulted |
+| E8 (never pre-empts a threat/9K113) | N/A in 0–2 (vacuous) / 4 | met — no hold exists yet to interrupt in Stage 2; Stage 4's table has explicit Q2/Q5 rows |
+
+### Findings
+
+1. **Four of eight expectations are deferred with no date, behind a decision the plan's own
+   recommendation answers "not yet."** — lens: Whose job / Crew sense
+   - Assumption a planner might make: "staged by measurement" means the full behaviour arrives
+     later as a matter of course.
+   - In the sim: Decision 2 recommends (c) — ship Stages 0–2, fly, count duplicates with
+     `sortie-log-triage`, and only then decide whether to build the look at all. Nothing commits
+     to building it; a quiet flight with few duplicates is itself a reason never to revisit it.
+   - The pilot would see: the headline defect (a nearer group swallowed into a remembered one)
+     goes away, which is real value. But the crew behaviour the user described in his own worked
+     example — "I raise binoculars... I first check the near group that is B and then A" — never
+     happens. Petrovich never looks at A's believed place, never says "that group has moved," and
+     never uses dot-count suspicion the way the user walked through it. The mechanism asked for
+     is absent, not merely delayed by a known interval.
+   - Grounded in: the goal check's own Why ("the verdict rests on something Petrovich **saw**, not
+     on range arithmetic") and the plan's point 2 under "what the measurement says" (the look
+     "cannot change what the pilot hears" without a visibility source it does not yet have).
+   - Suggests: this is not a defect in the plan — Decision 2 surfaces it correctly, and the
+     architect-memory file this merge carries states the reasoning plainly. The gap is that
+     Decision 2's framing ("if the duplicates matter") lets the user approve a path that silently
+     closes the loop on E4–E7 without separately registering that they are choosing not to build
+     the thing they described, for now, on a trigger (a sortie-log count) that may never fire. When
+     this plan is taken to the user, Decision 2 should be asked as two questions, not one: (i) ship
+     Stages 0–2 now — presumably yes; (ii) is "fly and count duplicates" an acceptable way to
+     decide whether E4–E7 (the look, "moved," composition) are ever built, or should a follow-on
+     entry for Stages 3–4 be opened now regardless of what flights show. Either answer is fine; the
+     plan should not let a recommendation phrased as a staging choice read as a staging choice
+     when it is actually a scope choice.
+
+2. **Q1's sector reading is a defensible choice, correctly left open rather than asserted** — lens:
+   Grounded in / Purpose
+   - The user's words ("per sector... naked eye scan of sector, then binoculars... move to next
+     sector and repeat") name no grain. The plan reads sector as half of `SCAN_PLAN`
+     (`(12,11,10,9)`/`(12,1,2,3)`, 8 s each, two sectors) — confirmed against the actual
+     `SCAN_PLAN` tuple in `gaze.py`, which already splits that way. That is one honest reading, not
+     the only one: a literal "sector" at the grain of a single o'clock hour is equally consistent
+     with the user's sentence, and is exactly the alternative Decision 1 names and rejects — for an
+     engineering reason (decay-coupling overflow past 30 s), not because it was checked against
+     what the user meant by "sector."
+   - Suggests: fine as a recommendation, correctly exposed as Decision 1 rather than built
+     silently. Carry it into that question explicitly: confirm the grain, not just the mechanism.
+
+### Questions for the user
+
+1. Decision 2: if you choose (c) — ship Stages 0–2, fly, count duplicates — do you want that count
+   to be the only thing that decides whether the expected-area look, the "moved" verdict and
+   composition suspicion (E4–E7) ever get built, or should a follow-on entry for Stages 3–4 be
+   opened now regardless of what flights show?
+2. Decision 1: does "per sector" mean the half-sweep grain the plan proposes (8 s, two sectors), or
+   the finer o'clock-hour grain it considered and rejected for the decay-coupling reason?
