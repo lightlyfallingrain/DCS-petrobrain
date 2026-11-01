@@ -239,6 +239,11 @@ unchanged. Fix `enrichment._terrain_aware_world_position` to reproject the fused
 repeated looks from a moving observer converge (uncertainty strictly decreases), converge to
 `truth + systematic_bias` and not to truth, and never below the floor.
 
+> **Decision REVISED 2026-11-01 (`plans/relative-distance-grouping/plan.md`, BL-B108):** repeat
+> looks from the same geometry no longer shrink down-range uncertainty -- the range error is a
+> stable per-group offset (user: same cues, same estimate), decorrelated only by closing, line-of-
+> sight rotation or a better optic. "Strictly decreases" holds for changing geometry only.
+
 **Stage 5 — spend it downstream.**
 `optic_policy.look_target_for` passes the contact's real `bearing_uncertainty_deg`. At 3 km with
 `BEARING_SIGMA_DEG = 3`, a 3σ envelope is ±9°, which is `N = ceil(18/8.5) = 3` steps rather than 4 —
