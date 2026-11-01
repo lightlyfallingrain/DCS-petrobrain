@@ -421,3 +421,38 @@ as numbers, so the pilot's spoken "turn heading 3 1 5 / hold 200 / speed 2 2 0" 
 UI? That would fix one of ED's two problems (the UI), not the other (poor flying). The recon found
 the AI's voice/menu commands are discrete nudges (turn, climb, speed, stop, 180) with constants in
 `HelperAI.lua` and the logic in native code, so a numeric interface is unlikely but unchecked.
+
+### S0-P2 result and the real goal of the parked state (user, verbatim, 2026-11-01)
+
+Probe v2 (`Export.probe-control-command-hold.lua`, findings in
+`aircraft-layer/research/2026-11-01-bl16-command-hold-probe-findings.md`): per-frame
+`LoSetCommand` 2001–2003 flies the aircraft from either seat **unparked**; **parked, ED's AI wins
+outright** (no fight). User:
+
+> *"both pilot and copilot control works, but only when control is not parked. When I press to
+> park controls, DCS AI takes over flying and does it's own thing overriding ours."*
+
+Then the goal restated:
+
+> *"Parking controls enables DCS AI flight and the CPG view so that player can use the 9K113.
+> Now, what we really want, is to keep the CPG view available so that player can look throught the
+> 9K113 and have Petrobrain control the aircraft, not DCS AI. How to accomplish that is the key
+> question.*
+> *AI overlay there makes no difference. Switching the AI off very likely also unparks the controls
+> and CPG view is no longer available.*
+> *We'd need a solution to*
+> *- allow CPG view usage when controls are not parked, AI not flying OR*
+> *- somehow disable AI flight controlling when it's active and instead write our own control
+> values"*
+
+Reading (main loop):
+
+- **Parking is wanted for one thing: the player's 9K113 sight.** ED's AI flying is the unwanted
+  side effect. So the parked-state question is not "beat ED's AI" in general but either route:
+  (R1) the sight without parking, or (R2) parked with ED's AI's authority removed and Petrobrain's
+  values written instead.
+- The overlay is ruled out as an off-switch (user). An AI-off that also unparks fails the goal,
+  because it takes the sight away.
+- v2 log, t=77.4–89.1: while parked the **pilot-seat** args 1100–1103 move with the AI's flying
+  while the operator args read 0, so ED's AI acts as a hand on the pilot's controls (recon §6
+  path (b)), and `LoSetCommand` reaches only the player's own, now-disconnected, controls.
