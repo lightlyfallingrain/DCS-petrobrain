@@ -684,5 +684,9 @@ Options:
 3. **Neither; reopen the goal.** For example, treat any optic switch as a fresh look at the
    whole bearing. That is a perception/attention change outside this feature.
 
+**Answered 2026-11-01 (user, verbatim): "1".** Option 1: ship the model, E1 guaranteed same-optic
+and in-view, memory-only cross-optic rate documented and fenced by a test. Option 3 stays a
+candidate later feature if flights show the case matters.
+
 Not offered: any belief-side ρ above what the noise has. That is the round-1/round-2 fix shape,
 and it is what this amendment removes.

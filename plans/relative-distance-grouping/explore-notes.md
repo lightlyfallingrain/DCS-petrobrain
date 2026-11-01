@@ -128,3 +128,16 @@ Reading (main loop):
   starts at 0.6 and is admitted on founding; a presence-only claim starts at 0.3 and needs four
   reinforcing observations (+0.05 each) to reach 0.5 -- a few seconds of consistent sighting at
   1 s polls, so a single glimpse is not remembered. The key is not retired.
+
+## Cross-optic amendment decision (user, verbatim, 2026-11-01)
+
+Asked: the far group seen by eye, then held only in memory, near group 1.5 km closer later seen
+through binoculars folds 5–67% across 3–5 km (0% when the far group is still in the binocular
+view, ≤1% same-optic). Options: (1) accept as the honest limit, fence with a test; (2) binocular
+scale 0.85 instead of 0.7; (3) re-look along the whole bearing on raising binoculars (own feature).
+
+> *"1"*
+
+Reading (main loop): ship the amendment as written. `BL-B108.md` states E1 for same-optic and
+in-view only, with the memory-only cross-optic rate. Option 3 is a possible later feature, not
+backlogged until flights show the case occurs.
