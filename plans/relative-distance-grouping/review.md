@@ -264,3 +264,187 @@ CHANGES REQUIRED
 Full read, plus direct execution of the real code against geometries beyond the plan's own
 dispatch-named scenario (not inspection of the comment/docstring) for the central question (default
 fittedness/robustness). Checks re-run independently and matched the implementer's reported numbers.
+
+## Review round 3 (amendment, tip `8b045631`)
+
+Verified the fast-forward first: `HEAD` (`d299dd52`, `origin/main` ancestor) was a strict ancestor
+of the tip named at dispatch (`8b045631`, after the orchestrator corrected the expected tip mid-task
+— `origin/main` had advanced with an unrelated aircraft-layer probe merge, so `feature/
+relative-distance-grouping` merged `origin/main` in first; `d0960df9`, the amendment's real tip, is
+that merge's first parent). Clean tree, `git merge --ff-only` done as instructed.
+
+Read the amendment section of `plan.md` ("Amendment 2026-10-31: cross-optic error model"),
+`explore-notes.md`'s "Cross-optic amendment decision" (user, verbatim "1"), `implementation.md`'s
+"Amendment implementation" section, and the full diff of `estimation.py`/`position_belief.py`/
+`association_over_time.py`/`naked_eye_source.py` plus both new/rewritten test files
+(`test_relative_distance_sweep.py`, the `test_relative_distance_scenarios.py`/`test_estimation.py`/
+`test_hybrid_source.py` rewrites) against the review-round-2 tip (`161448d5`).
+
+**1. Noise/belief correlation agreement — verified empirically, not by reading.** Ran the real
+`_tiered_field` realisations (400-realisation ensembles, salted via `_FIELD_REALISATION_SALT`)
+against `optic_range_correlation`/`view_range_correlation`'s declared values for five pairs
+(unaided/binocular same geometry, unaided/unaided and binocular/binocular at a 1.5 range ratio,
+sight_narrow/unaided, scope/unaided). Realised ρ matched declared `k · κ` within sampling noise in
+every case (e.g. unaided/binocular: realised +0.670 vs declared +0.700; scope/unaided: realised
+−0.037 vs declared 0.000). No belief-side ρ exceeds what the noise realises — confirmed by
+measurement, and also follows structurally from `optic_range_correlation` being the single function
+both `_tiered_field` and `stable_range_correlation` read (same code, not merely the same claim).
+
+**2. Implementer's four stated deviations — each checked, not taken on their word.**
+
+- **(a) Stages A-C as one commit, including the calibration change.** Verified the implementer's
+  own justification by reverting `RANGE_DECORRELATION_RANGE_RATIO` to the plan's original `1.5` in
+  this worktree (mechanism/belief changes otherwise untouched) and running
+  `test_e1a_far_group_first_then_near_group_stays_two_contacts`: it fails (the near contact's
+  `CONTACT_DETECTED` would be merge-echo-suppressed) — confirming the mechanism genuinely cannot
+  pass the plan's own E1a scenario without the calibration change, which is the stated reason for
+  not splitting the commit. Reverted immediately after; worktree confirmed clean. This is a
+  reasoned, verified departure from the `CLAUDE.md` "mechanism and calibration never share a
+  commit" invariant, not an unexamined convenience — accept it, but note the invariant's purpose
+  (attributable bisection) is still slightly weakened here; nothing about this diff makes that
+  unattributable in practice since both changes are the *same* amendment and both are explained in
+  one commit message.
+- **(b) Same-optic sweep ceiling 10%, not the plan's own 3%.** Confirmed by reading
+  `test_relative_distance_sweep.py`'s own comment and reasoning: 24 cells at a true ~1-2% rate with
+  `n=100` each makes at least one cell exceed 3% by binomial sampling noise alone reasonably often
+  (one run measured 6% on an otherwise-clean suite). 10% still catches an order-of-magnitude
+  regression; this is a sound, disclosed tradeoff, not a weakened guarantee in practice — accept.
+- **(c) E3 binocular-then-unaided fenced ≥90%, not 100%.** Independently re-measured at N=300 with
+  fresh salts (not the shipped test's own): 98% fold rate, consistent with the implementer's claimed
+  97-99% and comfortably inside the 90% floor. This is a real, explainable, measured property (a
+  tighter-then-looser optic order occasionally sits just past the gate's 3σ edge), not a defect
+  papered over by a loose fence — accept.
+- **(d) `STRUCTURE.md` gaps (`association_over_time.py`, `group_salience.py`) pre-existing.**
+  Confirmed by diffing `STRUCTURE.md` against the merge-base (`f95a5fa1`): neither file had a
+  dedicated entry there either, before this amendment touched anything. `estimation.py`'s own new
+  entry (claimed added) is present and not present at the merge-base. Accept as stated.
+
+**3. Memory-only cross-optic fold rate — the user's approved "5-67%" materially understates the
+shipped code's own honest limit, and this is worth surfacing even though nothing here is a merge
+blocker.**
+
+The user's decision (`explore-notes.md`, verbatim "1") was made against the figures in `plan.md`'s
+"Decision Requiring User Input" section — architect-prototype numbers, "5-67% across the clear-case
+grid." Running the actual shipped code's own `_e1_fold_rate` helper (independent salts, N=300 per
+cell, all 6 geometry pairs × 2 cross-optic orderings × 2 temporal orders = 24 cells) measures
+**0%-86.3%**, not 5-67%:
+
+| far/near km | u_b far-first | u_b near-first | b_u far-first | b_u near-first |
+|---|---|---|---|---|
+| 3.0/1.5 | 20% | 8% | 4% | 0% |
+| 3.75/2.25 | 49% | 23% | 28% | 2% |
+| 4.5/3.0 | 64% | 41% | **72%** | 14% |
+| 5.0/3.5 | 78% | 53% | **86%** | 26% |
+| 4.0/2.0 | 27% | 8% | 2% | 0% |
+| 4.6/2.4 | 26% | 9% | 4% | 0% |
+
+(u_b = far group unaided, near group binocular; b_u = far group binocular, near group unaided.)
+
+The worst cells (**4.5/3.0 and 5.0/3.5 km, far group founded through binoculars, near group then
+seen unaided, far-first** — "b_u far-first") sit at 72% and 86%, not the plan's quoted maximum of
+67%. This is not a reviewer artifact of a different probe: re-running with the shipped test file's
+*own* `salt_prefix` convention at its own `N=60` reproduces the same figures (e.g. 66.67%/88.33% at
+those two cells) — the fence table in `test_relative_distance_sweep.py` itself was built from, and
+correctly covers, these higher numbers (ceilings 0.85/0.95 at those cells), so **the test suite is
+honest about this** — but `plan.md`'s Decision section and `BL-B108.md`'s roadmap entry, which is
+what the user's "1" was actually answering, still say "5-67%."
+
+**Root of the gap, traced, not guessed:** the architect's own prototype table (`plan.md`, "Measured
+on the prototype") shows the *opposite* ordering — "far unaided, near binocular" always higher than
+"far binocular, near unaided" at every geometry (e.g. 62% vs 40% at 4.5/3.0). The shipped code
+inverts this at the two largest/most-separated geometries. Traced via an instrumented
+`correlated_innovation` call: `passes_gate`'s hypothesis-scaling (`BL-B108` amendment, "Belief
+side") multiplies the *second-observed* look's own declared sigma by `hypothesis_range_m /
+percept.range_m`. When the second-observed look is already the *looser* optic (unaided) and that
+ratio is `>1` (far-first order, hypothesis range is the larger, earlier-founded far range), an
+already-loose sigma is scaled further up, which widens `S` and makes the gate's Mahalanobis test
+*more* permissive — the opposite of what narrowing the gate around a *tighter* look does. This is
+an emergent, explainable consequence of the hypothesis-scaling design (confirmed consistent across
+all four order/label combinations' direction of effect), not an obvious coding defect — but it is
+also not a case the architect's simpler prototype measurement surfaced, which is exactly why the
+number the user approved is stale for the shipped mechanism.
+
+**This is a required finding, not an optional one, but it does not block merge on its own**: the
+fence correctly catches and bounds the real behaviour (all 71 sweep tests pass, including these
+cells), and CLAUDE.md's "Direction before speed"/"Talking to the user" sections ask that a finding
+which changes the user's own prior understanding be surfaced before it is silently carried forward
+as settled. Concretely: **`plan.md`'s amendment and `BL-B108.md`'s roadmap entry both need their
+"5-67%" language corrected to reflect the shipped code's own measured range (0-86%, worst case
+binocular-anchor/unaided-reacquisition at 4.5-5.0 km, far-first)**, and the user should be told the
+real worst case before this is treated as a closed decision — not because the model is wrong (it
+is the honest limit the user already agreed to accept), but because "about two-thirds of the time"
+and "folds almost every time" are different things to sign off on, and the user signed off on the
+former.
+
+**4. Surface-bearing fix — confirmed.** `surface_range_estimate` now takes a required
+`true_bearing_deg`, used in both cue A (`field_domain="range"`) and cue B (`field_domain=
+"depression"`)'s `_stable_fraction` calls. `naked_eye_source.py`'s one call site threads the
+observer-to-centroid bearing it already computes (`bearing_deg(observer, centroid)`), not a new
+calculation. A ground unit's stable error now genuinely decorrelates with line-of-sight rotation,
+closing the gap round-1/round-2 never saw because every prior probe used the air-shape helper.
+
+**5. Tunables — rendered `defaults.toml` read directly, correct; retired key fully gone.**
+`BINOCULAR_RANGE_SIGMA_SCALE`, `RANGE_DECORRELATION_BEARING_DEG`, and `RANGE_DECORRELATION_
+RANGE_RATIO`'s rendered first sentences are complete, no `e.g.`-truncation, no stray identifier.
+`grep -rn CROSS_OPTIC_RANGE_SHARE` across the repo finds it only in docstrings/historical plan and
+review text and `defaults.toml` has no entry for it at all — confirmed retired everywhere a live
+reference could matter.
+
+**6. `BL-B108.md` claims E1 for same-optic and in-view only — confirmed, modulo finding 3.** The
+entry correctly scopes the guarantee ("E1 is delivered same-optic and whenever both groups are in
+view") and correctly states the memory-only case is fenced, not solved. Its one inaccuracy is the
+quoted rate itself (see finding 3) — the framing is right, the number needs updating.
+
+**Checks re-run independently, full body-layer suite**: `ruff format --check src tests` (192 files,
+clean), `ruff check src tests` (clean), `cd body-layer && .venv/bin/mypy src` (79 files, clean),
+`pytest tests -q --ignore=tests/test_bl_b104_scenario_mock_flights.py` (2962 passed, 4 xfailed,
+matching `implementation.md`'s own numbers exactly — all 4 xfails confirmed pre-existing and
+unrelated: `test_visibility.py`/`test_vision_calibration.py`'s slice-2A binocular-presence
+regressions), `test_bl_b104_scenario_mock_flights.py` (5 passed, ~117s). No stale `xfail` remains
+anywhere in the touched test files — round 1/2's cross-optic `xfail` is fully replaced by the
+fence.
+
+### Required Fixes (round 3)
+
+- **Correct the "5-67%" memory-only cross-optic fold-rate figure in `plan.md`'s amendment
+  ("Decision Requiring User Input") and `BL-B108.md`'s roadmap entry to the shipped code's own
+  measured range, and resurface the real worst case to the user** — see finding 3 above. The
+  model and the test fence are both honest and correct; the *documentation the user's "1" decision
+  was actually made against* is not. This is cheap to fix (a sentence in each file) and does not
+  require touching any code, test, or the fence table itself.
+
+### Optional Refinements (round 3)
+
+- **The crossover where "far group founded via binoculars, near group reacquired unaided" becomes
+  the worst cross-optic ordering at 4.5+ km (round 3's finding 3) is not documented anywhere in
+  `estimation.py`/`position_belief.py`'s own docstrings**, even though the mechanism (hypothesis-
+  scaling amplifying an already-loose look's sigma when the ratio is `>1`) is traceable and
+  explainable. A one- or two-line docstring note on `passes_gate`'s hypothesis-scaling paragraph
+  would save the next person who measures this from re-deriving it (optional — the fence already
+  guards the behaviour; this is purely for the next reader's time).
+- **Mechanism-and-calibration-in-one-commit (deviation (a))** is a reasoned, verified exception,
+  but if a future amendment needs the same shape (a mechanism change whose own regression test only
+  passes once a coupled calibration constant also moves), consider recording the *pattern* — not
+  just this one instance — as a named, bounded exception to the `CLAUDE.md` invariant, the same way
+  the Security/Performance-Reviewer cadence exemption carries its own stated condition for ending.
+
+### Verdict (round 3)
+
+APPROVED WITH MINOR FIXES
+
+The amendment's mechanism is sound, verified by direct execution rather than inspection on every
+substantive claim (correlation agreement, each stated deviation, the surface fix, the rendered
+tuning file, the retired key). All checks pass and reproduce the implementer's own numbers exactly.
+The one required fix is documentation-only — the "5-67%" figure the user's decision rests on needs
+correcting to the shipped code's real range before this is carried forward as a settled number, but
+nothing here needs re-implementation, and the fence that actually governs CI is already correct.
+
+### Review Confidence (round 3)
+
+Full read, plus direct execution for every point the dispatch named: an empirical correlation
+sweep (noise vs. declared ρ), a revert-and-rerun to verify deviation (a)'s own justification, an
+independent re-measurement of deviation (c)'s fold rate, a `git diff`-against-merge-base check for
+deviation (d), a 24-cell independent ensemble sweep (N=300) for the memory-only fold-rate question
+plus an instrumented trace of `correlated_innovation`'s actual call-site values to find the root of
+the architect-prototype/shipped-code divergence, a grep for the retired tunable, and a direct read
+of the rendered `defaults.toml`. Checks re-run independently and matched exactly.
