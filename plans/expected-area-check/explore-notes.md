@@ -99,3 +99,29 @@ Reading (main loop):
   was" when A's area is seen empty and B is a different group.
 - (Q5) During a 9K113 attack run the check is paused; the sight stays on target; B is called out
   on what is already known.
+
+## Plan-check decisions (user, verbatim, 2026-11-01)
+
+Asked: the four decisions after the plan and plan check (`plan.md` "Decisions", `alignment.md`
+"Plan check"): (1) what a sector is (half-sweep recommended) and several looks per glass step;
+(2) the visibility source / when to build the area look — recommended: ship Stages 0–2 and open a
+separate roadmap entry now for a point line-of-sight query plus Stages 3–4; (3) tests rewritten
+rather than extended; (4) wording for "A moved".
+
+> *"1 - third of full scan. So basically left right and ahead. Multiple looks per glass is ok and
+> expected.*
+> *2 - as recommended*
+> *3 - ok*
+> *4 - ~"A now at...""*
+
+Reading (main loop):
+
+- (1) **Sector = a third of the free scan: left, ahead, right** — not the half-sweep the plan
+  proposed. Several binocular looks in one glass step are expected. The plan's Stage 1 sector
+  definition and its decay-coupling arithmetic must be redone for three sectors.
+- (2) Ship Stages 0–2. Open a separate roadmap entry now for the point line-of-sight query and
+  Stages 3–4 (the area look itself), so it is planned work; the flight duplicate count sets its
+  priority, not whether it happens.
+- (3) The five full-cycle lockout tests and the exact-100% fold test are rewritten.
+- (4) Wording when A is judged moved: approximately *"A now at …"* — neutral, which also covers
+  the "misranged" case Petrovich cannot tell apart.
