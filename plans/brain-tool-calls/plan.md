@@ -518,6 +518,10 @@ proportionate to a goal the user set as the priority.
 
 ### Decisions Requiring User Input
 
+**Answered 2026-11-01 (user, verbatim):** *"1,2,4 - as recommended / 3 - ok, let's try these"*.
+U1, U2 and U4 take the recommendation; U3's wording is accepted as a first try, to be adjusted from
+flight.
+
 - **U1: unprefixed speech that the phrasebook and the free-text grammar both miss.** Today it goes to
   the brain, and is silent under the default client.
   - **Recommend:** never call the model without the wake word. Answer deterministically: "which

@@ -60,3 +60,17 @@ wait for brain; 5 acceptable latency, "stand by"; 6 brain not running; 7 "him" c
 - (9) Pilot-noted locations read back as the pilot's note -- low priority.
 - (10) Brain runs only when prompted by the pilot. No autonomous initiative; avoid unnecessary
   model calls.
+
+## Plan decisions U1–U4 (user, verbatim, 2026-11-01)
+
+> *"1,2,4 - as recommended*
+> *3 - ok, let's try these"*
+
+Reading (main loop):
+
+- U1: no model call without the wake word. Unprefixed misses answer "which one?" (several
+  candidates) or "say again".
+- U2: `engage`, `disengage`, `weapons_armed`, `weapons_safe`, `observ_on`, `observ_off`, `point`
+  excluded from the brain in BR-2; answer "Unable, fixed command only."
+- U3: the five "Unable, …" lines as proposed, a first try; flights may change the wording.
+- U4: BR-B2 and BR-B3 folded into Stage 2.
