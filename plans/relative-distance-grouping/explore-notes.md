@@ -141,3 +141,35 @@ scale 0.85 instead of 0.7; (3) re-look along the whole bearing on raising binocu
 Reading (main loop): ship the amendment as written. `BL-B108.md` states E1 for same-optic and
 in-view only, with the memory-only cross-optic rate. Option 3 is a possible later feature, not
 backlogged until flights show the case occurs.
+
+## Memory-only fold, real rate 0–86%: user's answer (verbatim, 2026-11-01)
+
+Told: the shipped model folds the memory-only cross-optic case up to 86% (far group glassed at
+4.5–5 km, out of view, near group 1.5 km closer then seen by eye), not the 67% first quoted.
+Options: (1) accept; (2) binocular 0.85; (3) re-look along the whole bearing on raising binoculars.
+
+> *"3 but not whole bearing. Check the expected locations/area. That's what I'd do, look around the
+> area a bit and that would tell me if a unit I see is the same one.*
+>
+> *Like: looking ahead, I see couple of dots. I raise binoculars to take a look. That becomes group
+> A, I believe it's 4.5 km away, and I see it's right of village near a river. In a moment I fly
+> over a ridge I was approaching low and then can see some more units ahead. They are also near the
+> river, but a bit different side of the village. Naked eye look immedeiately tells group A has 3
+> dots and this new group B has 2 dots and that they are separate. Raising the binoculars, I first
+> check the near group that is B and then A. That gives me information on both and a clear visual
+> that they are not the same group.*
+>
+> *Counter example. In the above example I fly over the ridge and spot more contancts between group
+> A and the village. Looking with binoculars I see that they all are group A units, just spread
+> wide. I check group B and see that it is separate."*
+
+Reading (main loop, to confirm with the user):
+
+- Same-or-different is settled by **looking where the remembered group should be**, not by the
+  range numbers alone. A focused look at A's expected area (not the whole bearing): A seen there
+  → the new sighting is a different group; A not there → it may be A.
+- Cues a real observer uses, beyond range: **position relative to a visible landmark** (right of
+  the village, by the river), **dot count / composition** (3 vs 2), and the glass look at each.
+- Order: near group first, then A.
+- Counter-example: units spread between A and the village are A's, found by glassing them — group
+  membership by neighbour gap (goal-check Q2) still applies.
