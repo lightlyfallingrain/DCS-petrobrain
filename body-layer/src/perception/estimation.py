@@ -34,16 +34,30 @@ while a tight line's members share theirs. `z_look` is redrawn every poll,
 shared by every cluster seen in that poll through the same optic -- it is
 what a repeat look from the *same* geometry still varies by, bounded to a
 small share (`RANGE_LOOK_SHARE`) of the total, since a repeat look mostly
-sees the same cues. Each field is keyed by the active optic's own
-`Optic.name` (`optic_class`), so a different optic's field *realisation*
-is always independent (`belief.position_belief`'s correlated fusion must
-not be able to infer the field's hidden value exactly by combining two
-optics' fully-correlated estimates, which would be omniscience by
-arithmetic) -- but the *declared* correlation belief fuses with is not
-forced to zero on an optic switch (`BL-B108` review follow-up,
-`CROSS_OPTIC_RANGE_SHARE`): a different optic is new information, not
-wholly independent information. See `stable_range_correlation`'s own
-docstring for the closed form belief needs.
+sees the same cues.
+
+**Cross-optic correlation, as of the `BL-B108` amendment (2026-10-31,
+"cross-optic error model").** `Z_view`/`Z_near` are built from a *tiered*
+(nested) field, not a flat per-optic key: a better optic sees the same
+scene with less blur, so the tightest optic in the range-scale ladder
+(`sight_narrow < sight_wide < binocular < unaided`, by `_RANGE_SIGMA_
+SCALE_BY_OPTIC`'s own `k`) is the shared core every coarser optic's field
+is built on top of, each layer adding its own independent blur
+(`_tiered_field`). Two ladder optics' field *realisations* correlate at
+exactly `min(k)/max(k)` of the geometric kernel -- the honest boundary
+where fusing them never extrapolates past either (see `optic_range_
+correlation`'s own docstring for why this ladder, not a flat shared
+fraction, is the only structure that keeps that true). The `"scope"`
+class (hybrid source) is outside the ladder and keeps its own fully
+independent field, as before. `z_look` stays per-optic, per-poll,
+independent, unchanged. This *replaces* the review follow-up's flat
+`CROSS_OPTIC_RANGE_SHARE` scale (retired, `plan.md` amendment
+"Verification of the current code"): that scale let belief declare a
+cross-optic correlation the noise itself did not have, which review
+round 2 found reopened the plan's own same-optic "clear case" guarantee
+at ordinary tactical spacing. See `stable_range_correlation`'s and
+`optic_range_correlation`'s own docstrings for the closed form belief
+needs.
 
 `stable_range_correlation` is the **only** place `belief/` learns how two
 looks' down-range errors correlate -- it reads these model parameters
@@ -109,6 +123,7 @@ from perception.optics import (
     BINOCULAR_OPTIC,
     SIGHT_NARROW_OPTIC,
     SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
     Optic,
 )
 from perception.visibility import NAKED_EYE_RANGE_CAP_M
@@ -222,6 +237,74 @@ _RANGE_SIGMA_SCALE_BY_OPTIC: Final[dict[str, float]] = {
     SIGHT_NARROW_OPTIC.name: SIGHT_NARROW_RANGE_SIGMA_SCALE,
 }
 
+#: Every optic in the down-range range-scale *ladder* -- `_RANGE_SIGMA_
+#: SCALE_BY_OPTIC` plus `UNAIDED_OPTIC` (unaided has no entry there
+#: because its scale is the unconditional 1.0, module docstring's
+#: "unaffected by construction"). `optic_range_correlation`/`_tiered_
+#: field` below are the only readers -- the `"scope"` class (hybrid
+#: source) is deliberately absent, so it is never treated as a ladder
+#: member. Derived from the already-resolved `tuning.real` scales, not a
+#: second literal copy of them, so a tuned scale reorders the ladder
+#: correctly (`_ladder_sorted` below sorts this fresh).
+_RANGE_SIGMA_SCALE_LADDER: Final[dict[str, float]] = {
+    UNAIDED_OPTIC.name: 1.0,
+    **_RANGE_SIGMA_SCALE_BY_OPTIC,
+}
+
+
+def _ladder_sorted() -> list[tuple[str, float]]:
+    """The ladder's `(optic_name, k)` pairs, tightest (smallest `k`)
+    first -- `_tiered_field`'s own iteration order. A function, not a
+    cached `Final`, for the same reason `stable_share` above is a
+    function: the three per-optic scales are themselves `tuning.real`
+    resolutions, and re-sorting fresh keeps a tuned override's reordering
+    (module docstring's "a tuned scale reorders correctly") from ever
+    being read through a stale sort taken before the override applied."""
+    return sorted(_RANGE_SIGMA_SCALE_LADDER.items(), key=lambda pair: pair[1])
+
+
+def range_sigma_scale_for_optic(optic_class: str) -> float:
+    """The range-scale ladder's own `k` for `optic_class` -- `1.0` (the
+    unaided/no-advantage default) for anything not a declared ladder
+    member, including the `"scope"` class. Exposed so `belief.
+    position_belief`'s revised floor (`BL-B108` amendment, "Belief side")
+    can compute `min(1, k_anchor / k_look)` without reaching into this
+    module's own private `_RANGE_SIGMA_SCALE_LADDER`."""
+    return _RANGE_SIGMA_SCALE_LADDER.get(optic_class, 1.0)
+
+
+def optic_range_correlation(optic_a: str, optic_b: str) -> float:
+    """How correlated two optics' stable-field *realisations* are, by
+    construction -- the one function the realisation (`_tiered_field`)
+    and the declared correlation `belief/` fuses with (`stable_range_
+    correlation`) both read, so **the two cannot disagree** (`BL-B108`
+    amendment, "cross-optic error model"): `1.0` for the same optic
+    class, `min(k_a, k_b) / max(k_a, k_b)` for two different optics both
+    in the range-scale ladder (`_RANGE_SIGMA_SCALE_LADDER`), `0.0` if
+    either class is not a ladder member at all (the `"scope"` class, or
+    an unrecognised/empty `optic_class` -- the same "conservative, wider
+    gate" posture `belief.position_belief.correlated_innovation`'s own
+    `anchor is None` branch already takes for missing data).
+
+    **Why the ladder ratio, not a flat shared fraction** (module
+    docstring's "Cross-optic correlation"): a flat fraction `c` would
+    make the *declared* correlation between optics `o`/`p` the same
+    `c` regardless of how tight either one's own scale is, which lets
+    the fused estimate extrapolate past both inputs whenever `c` exceeds
+    the optics' own honest agreement ceiling `min(k)/max(k)` -- review
+    round 2's finding against the old `CROSS_OPTIC_RANGE_SHARE`. The
+    ladder ratio *is* that ceiling, so fusing any two ladder optics can
+    never claim better than the tighter one alone (see `_tiered_field`'s
+    own docstring for the derivation)."""
+    if optic_a == optic_b:
+        return 1.0
+    k_a = _RANGE_SIGMA_SCALE_LADDER.get(optic_a)
+    k_b = _RANGE_SIGMA_SCALE_LADDER.get(optic_b)
+    if k_a is None or k_b is None or k_a <= 0.0 or k_b <= 0.0:
+        return 0.0
+    return min(k_a, k_b) / max(k_a, k_b)
+
+
 #: Cross-range scale per optic -- **derived from the FOV ratio against
 #: `BINOCULAR_OPTIC`, not an independent judgement constant**
 #: (`BEARING_SIGMA_DEG`'s own docstring: "this is what sets the binocular
@@ -311,18 +394,24 @@ RANGE_DECORRELATION_BEARING_DEG: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: `BL-B108` Stage 1 -- the range *ratio* (closing or opening) at which the
+#: How far apart in distance two things can be and still have their ranges
+#: misjudged together, as a range ratio (closing or opening) at which the
 #: `Z_view` field's down-range correlation falls to about `1/e` (holding
-#: bearing fixed): raising it makes a closing run keep "the same look"'s
-#: error longer before it genuinely updates; lowering it means the estimate
-#: tightens sooner as ownship closes. `1.5` means the far:near ratio has to
-#: grow by half again before the old look's stable error is treated as
-#: mostly gone. Judgement default, `#needs-flight`.
+#: bearing fixed). Higher keeps two groups on one bearing in the right
+#: order and spacing, and keeps a group's range error consistent while
+#: closing; lower makes the estimate tighten sooner as ownship closes.
+#: `BL-B108` amendment, "Calibration" -- raised from the plan's own
+#: original `1.5` default to `4.0`: the user's own words
+#: (`explore-notes.md`: "2 or 2.5 km and 5 are easy to tell apart at any
+#: altitude") need the stable error shared across a range ratio of about
+#: 2, which at `1.5` is only 8% correlated -- contradicting both the user
+#: and the plan's own worked-numbers table -- but is about 80% correlated
+#: at `4.0`. Judgement default, `#needs-flight`.
 RANGE_DECORRELATION_RANGE_RATIO: Final[float] = tuning.real(
     "perception.estimation.RANGE_DECORRELATION_RANGE_RATIO",
-    1.5,
+    4.0,
     lo=1.1,
-    hi=4.0,
+    hi=8.0,
     status="judgement",
 )
 
@@ -344,44 +433,20 @@ RANGE_NEAR_DECORRELATION_RANGE_RATIO: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: How much of a look's stable down-range correlation survives a switch to
-#: a *different* optic, as a fraction of what an identical-geometry look
-#: through the *same* optic would share (`BL-B108` review follow-up,
-#: 2026-10-31): raising it lets Petrovich treat a reacquisition through
-#: binoculars as more of a confirmation of what he already judged from the
-#: scene, narrowing the gate sooner; lowering it (toward 0) reopens the
-#: pre-fix hole where an optic switch alone makes two distinct groups on
-#: one bearing fold into one contact. Judgement default, `#needs-flight`
-#: -- the user's own words on a better optic (`explore-notes.md`, Q3):
-#: "that'd give a better range estimate ... though not exact," i.e. new
-#: information correlated with, not identical to, the old look's. Applied
-#: to the `Z_view` (geometry) kernel, not `Z_near`, despite the "same
-#: place, same moment" framing that motivated it -- tried first
-#: and rejected by calculation, not by inspection: `Z_near`'s own share of
-#: a look's total stable error is capped at the relative-share weight's
-#: own square over the relative-share-and-stable-share weights' combined
-#: squares (`effective_down_correlation`'s own weights) -- about 4% at
-#: the shipped defaults. The scenario this constant exists to fix (`test_
-#: bl_b104_scenario_mock_flights.py::test_two_groups_one_bearing_stay_
-#: two_contacts`) needs an *effective* cross-optic correlation of about
-#: 0.57 to narrow the gate enough to reject the two-group fold (worked by
-#: hand against that scenario's own near/far ranges and optics); `Z_near`
-#: alone cannot reach above ~0.04 regardless of this constant's value,
-#: since that relative-share weight is deliberately small by Stage 1's
-#: own design. Sharing through `Z_view` instead carries the high-leverage
-#: stable-share-squared weight (~0.96), so a bounded fraction of it
-#: reaches the needed magnitude; `Z_view`'s own geometric kernel (bearing/
-#: range-ratio decorrelation) still applies underneath this scale, so a
-#: cross-optic look still decorrelates with ownship's own movement
-#: exactly as a same-optic one would, just discounted by this fraction at
-#: every geometry.
-CROSS_OPTIC_RANGE_SHARE: Final[float] = tuning.real(
-    "perception.estimation.CROSS_OPTIC_RANGE_SHARE",
-    0.6,
-    lo=0.0,
-    hi=0.75,
-    status="judgement",
-)
+#: Test-only seam (`BL-B108` amendment, "Stage A") -- folded into `_field_
+#: frequencies`'s own seed and cache key, never read by any production
+#: code path's actual behaviour (an empty salt is the only value any real
+#: run ever uses, and the arithmetic does not depend on its *value*, only
+#: on it being included in the hash) -- so this is not a tuning key (the
+#: X-T26 inclusion test: no value in this range changes what Petrovich
+#: does). A mutable module literal, not `Final`, so tests can `monkeypatch.
+#: setattr` a fresh string per realisation and `_field_frequencies.cache_
+#: clear()` to force a fresh draw -- the only way to get an *ensemble* of
+#: field realisations rather than the one fixed draw any geometry would
+#: otherwise always see (review round 2's root-cause finding: the old
+#: single-realisation tests could not tell a calibration fix from a lucky
+#: hash).
+_FIELD_REALISATION_SALT: str = ""
 
 #: Number of random-Fourier-feature cosines each field realisation sums --
 #: an internal approximation-quality knob, not a behaviour-affecting
@@ -434,20 +499,26 @@ def _deterministic_uniform(seed_text: str) -> float:
 
 @functools.cache
 def _field_frequencies(
-    field_name: str, optic_class: str, length_scales: tuple[float, ...]
+    field_name: str, optic_class: str, length_scales: tuple[float, ...], salt: str
 ) -> tuple[tuple[tuple[float, ...], float], ...]:
     """The `_FIELD_FOURIER_K` `(w_per_axis, phase)` pairs for one `(field_
-    name, optic_class)` field -- derived once per field and cached, not
-    re-derived (via `hashlib.sha256`, a real cost at `_FIELD_FOURIER_K =
+    name, optic_class, salt)` field -- derived once per field and cached,
+    not re-derived (via `hashlib.sha256`, a real cost at `_FIELD_FOURIER_K =
     256`) on every `_field_value` call. These depend only on `(field_name,
-    optic_class, length_scales)`, never on `coords`, so caching them is
-    exactly the "same field realisation evaluated at different points"
+    optic_class, length_scales, salt)`, never on `coords`, so caching them
+    is exactly the "same field realisation evaluated at different points"
     property `_field_value`'s own docstring already relies on -- this is
-    a performance change, not a behaviour change: `_field_value`'s output
-    is bit-identical before and after."""
+    a performance change, not a behaviour change for the production case
+    (`salt == ""`): `_field_value`'s output there is bit-identical before
+    and after. `salt` exists only so `test_estimation.py`/`test_relative_
+    distance_sweep.py` can force an independent ensemble of realisations
+    at the same `(field_name, optic_class)` via `_FIELD_REALISATION_SALT`
+    -- a production call always passes `""`, which this function's own
+    cache then treats as one more ordinary cache key, not a special
+    case."""
     frequencies = []
     for k in range(_FIELD_FOURIER_K):
-        seed = f"field:{field_name}:{optic_class}:{k}"
+        seed = f"field:{field_name}:{optic_class}:{salt}:{k}"
         w_per_axis = []
         for axis, length_scale in enumerate(length_scales):
             z_w, _unused = _deterministic_unit_gaussian_pair(f"{seed}:w{axis}")
@@ -484,16 +555,75 @@ def _field_value(
     correlated at all.
 
     `optic_class` is folded into the seed so a different optic gets a
-    genuinely independent field (module docstring: belief must not be able
-    to infer this field's value exactly from two fully-correlated optics).
-    `field_name` is folded in the same way so the down-range field and the
-    depression field (`surface_range_estimate`'s cue A/cue B) never share a
-    realisation despite sharing this formula."""
+    genuinely independent field realisation (module docstring: a different
+    optic's field realisation is always independent, by construction --
+    `_tiered_field` below is what turns independent per-tier realisations
+    into a *correlated* reading across optics without this field ever
+    needing to know about another optic). `field_name` is folded in the
+    same way so the down-range field and the depression field (`surface_
+    range_estimate`'s cue A/cue B) never share a realisation despite
+    sharing this formula."""
     total = 0.0
-    for w_per_axis, phase in _field_frequencies(field_name, optic_class, length_scales):
+    for w_per_axis, phase in _field_frequencies(
+        field_name, optic_class, length_scales, _FIELD_REALISATION_SALT
+    ):
         w_dot_u = sum(w * coord for w, coord in zip(w_per_axis, coords))
         total += math.cos(w_dot_u + phase)
     return total * math.sqrt(2.0 / _FIELD_FOURIER_K)
+
+
+def _tiered_field(
+    *,
+    field_name: str,
+    optic_class: str,
+    coords: tuple[float, ...],
+    length_scales: tuple[float, ...],
+) -> float:
+    """`Z_o(g)` for optic `optic_class` -- the tiered (nested) field
+    construction `optic_range_correlation`'s own docstring derives from
+    (`BL-B108` amendment, "The model (Stage A)"):
+
+        Z_o(g) = (1/k_o) * sum_{tiers j, k_j <= k_o} sqrt(k_j^2 -
+                 k_(j-1)^2) * G_j(g),   k_0 = 0
+
+    where the tiers are the range-scale ladder's own optics
+    (`_ladder_sorted`, tightest first) and each `G_j` is `_field_value`'s
+    ordinary independent realisation, seeded by the *tier's* own name,
+    not by `optic_class` -- the shared-core structure: two ladder optics'
+    `Z_o`/`Z_p` share every tier up to the tighter one's own `k`, which is
+    exactly what makes `Corr(Z_o, Z_p) == min(k_o, k_p) / max(k_o, k_p) ==
+    optic_range_correlation(o, p)` fall out of this sum algebraically (the
+    `sqrt(k_j^2 - k_(j-1)^2)` weights are chosen so each `Z_o` has unit
+    variance and the shared-tier covariance telescopes to exactly that
+    ratio -- `_tiered_field`'s own module-docstring cross-reference has
+    the one-paragraph derivation, not repeated here).
+
+    `optic_class` outside the ladder (the `"scope"` class) falls back to
+    `_field_value` directly -- its own fully independent field, unchanged
+    from before this amendment."""
+    k_o = _RANGE_SIGMA_SCALE_LADDER.get(optic_class)
+    if k_o is None or k_o <= 0.0:
+        return _field_value(
+            field_name=field_name,
+            optic_class=optic_class,
+            coords=coords,
+            length_scales=length_scales,
+        )
+    total = 0.0
+    k_prev = 0.0
+    for tier_name, k_tier in _ladder_sorted():
+        if k_tier > k_o:
+            break
+        weight = math.sqrt(max(0.0, k_tier * k_tier - k_prev * k_prev))
+        if weight > 0.0:
+            total += weight * _field_value(
+                field_name=field_name,
+                optic_class=tier_name,
+                coords=coords,
+                length_scales=length_scales,
+            )
+        k_prev = k_tier
+    return total / k_o
 
 
 def stable_share() -> float:
@@ -521,56 +651,61 @@ def stable_down_sigma_m(sigma_down_m: float) -> float:
     return math.sqrt(RANGE_RELATIVE_SHARE**2 + stable_share() ** 2) * sigma_down_m
 
 
-def stable_range_correlation(
-    d_bearing_deg: float, range_ratio: float, same_optic: bool
-) -> tuple[float, float]:
-    """The closed-form correlation `(rho_view, rho_near)` between two
-    looks' down-range stable terms, given the angular separation of their
-    lines of sight (`d_bearing_deg`, unsigned) and the ratio of their true
-    ranges (`range_ratio >= 1.0`, i.e. `max(R1, R2) / min(R1, R2)`) --
-    **the only place `belief/` learns how errors correlate**; it reads
-    these model parameters, never a field realisation (module docstring).
+def view_range_correlation(d_bearing_deg: float, range_ratio: float) -> float:
+    """`Z_view`'s own geometric kernel, *before* any optic-ladder scaling
+    -- `exp(-(d_bearing_deg / RANGE_DECORRELATION_BEARING_DEG) ** 2 -
+    (ln(range_ratio) / ln(RANGE_DECORRELATION_RANGE_RATIO)) ** 2)`, falling
+    to `1/e` when *either* term alone reaches 1 (holding the other at
+    zero), matching `RANGE_DECORRELATION_BEARING_DEG`'s and `RANGE_
+    DECORRELATION_RANGE_RATIO`'s own docstrings.
 
-    `rho_view` is `Z_view`'s own kernel: `exp(-(d_bearing_deg /
-    RANGE_DECORRELATION_BEARING_DEG) ** 2 - (ln(range_ratio) /
-    ln(RANGE_DECORRELATION_RANGE_RATIO)) ** 2)` -- falls to `1/e` when
-    *either* term alone reaches 1 (holding the other at zero), matching
-    `RANGE_DECORRELATION_BEARING_DEG`'s and `RANGE_DECORRELATION_RANGE_
-    RATIO`'s own docstrings.
-
-    `rho_near` is `Z_near`'s own kernel, range-ratio only: `exp(-(ln(
-    range_ratio) / ln(RANGE_NEAR_DECORRELATION_RANGE_RATIO)) ** 2)`.
-
-    **`same_optic is False`**: the field *realisations* stay fully
-    independent by construction (`_field_value`'s own seed includes
-    `optic_class` -- belief must never be able to infer either field's
-    hidden value exactly by combining two optics' fully-correlated
-    estimates), but the *declared* correlation this function hands back
-    is no longer forced to zero (`BL-B108` review follow-up, 2026-10-31
-    -- the plan's own zero-correlation argument was against `rho = 1`,
-    not against any `rho > 0`; a different optic looking at the same
-    scene moments later is still new, imperfectly-correlated information,
-    per the user's own words on binoculars, `CROSS_OPTIC_RANGE_SHARE`'s
-    own docstring). `rho_view` is the same geometric kernel as the same-
-    optic case, scaled down by `CROSS_OPTIC_RANGE_SHARE` (bounded well
-    below 1) -- so a cross-optic look still decorrelates with bearing
-    rotation/range ratio exactly as a same-optic one does, just starting
-    from a smaller baseline. `rho_near` stays `0.0`: `Z_near`'s own share
-    of the total is already small by design (`CROSS_OPTIC_RANGE_SHARE`'s
-    own docstring), so sharing it too would add complexity for a
-    negligible effect on `effective_down_correlation`'s output."""
+    Exposed separately from `stable_range_correlation` because `belief.
+    position_belief`'s revised floor (`BL-B108` amendment, "Belief side")
+    needs the *geometric* kernel on its own, with the optic-ladder factor
+    applied afterwards by the floor itself (`min(1, k_anchor / k_look)`)
+    rather than folded into one opaque number -- the floor and the fusion
+    cross-term read the same geometry differently."""
     ratio = max(1.0, range_ratio)
     ln_ratio = math.log(ratio)
-    rho_view = math.exp(
+    return math.exp(
         -((d_bearing_deg / RANGE_DECORRELATION_BEARING_DEG) ** 2)
         - (ln_ratio / math.log(RANGE_DECORRELATION_RANGE_RATIO)) ** 2
     )
-    if not same_optic:
-        return CROSS_OPTIC_RANGE_SHARE * rho_view, 0.0
-    rho_near = math.exp(
+
+
+def stable_range_correlation(
+    d_bearing_deg: float, range_ratio: float, optic_a: str, optic_b: str
+) -> tuple[float, float]:
+    """The closed-form correlation `(rho_view, rho_near)` between two
+    looks' down-range stable terms, given the angular separation of their
+    lines of sight (`d_bearing_deg`, unsigned), the ratio of their true
+    ranges (`range_ratio >= 1.0`, i.e. `max(R1, R2) / min(R1, R2)`), and
+    the two looks' own optics -- **the only place `belief/` learns how
+    errors correlate**; it reads these model parameters, never a field
+    realisation (module docstring).
+
+    `(rho_view, rho_near) = (k * kappa_view, k * kappa_near)`, where
+    `kappa_view`/`kappa_near` are `Z_view`/`Z_near`'s own geometric
+    kernels (`view_range_correlation` above; `kappa_near` is its `Z_near`
+    mirror, range-ratio only: `exp(-(ln(range_ratio) / ln(RANGE_NEAR_
+    DECORRELATION_RANGE_RATIO)) ** 2)`) and `k = optic_range_correlation(
+    optic_a, optic_b)` -- `1.0` for the same optic (reproducing the
+    pre-amendment same-optic formula exactly), `min(k)/max(k)` for two
+    different ladder optics, `0.0` outside the ladder (`BL-B108`
+    amendment, "The model (Stage A)": **this replaces the review
+    follow-up's flat `CROSS_OPTIC_RANGE_SHARE` scale**, which applied only
+    to `rho_view` and zeroed `rho_near` outright -- the tiered-field
+    derivation scales *both* kernels by the same honest ratio, since both
+    fields are built from the identical nested-tier construction
+    (`_tiered_field`)."""
+    kappa_view = view_range_correlation(d_bearing_deg, range_ratio)
+    ratio = max(1.0, range_ratio)
+    ln_ratio = math.log(ratio)
+    kappa_near = math.exp(
         -((ln_ratio / math.log(RANGE_NEAR_DECORRELATION_RANGE_RATIO)) ** 2)
     )
-    return rho_view, rho_near
+    k = optic_range_correlation(optic_a, optic_b)
+    return k * kappa_view, k * kappa_near
 
 
 def effective_down_correlation(rho_view: float, rho_near: float) -> float:
@@ -583,12 +718,11 @@ def effective_down_correlation(rho_view: float, rho_near: float) -> float:
     `z_look` (`a`-weighted) term never correlates across different polls
     by construction and so contributes nothing here.
 
-    This is `1.0` exactly at identical geometry (`rho_view == rho_near ==
-    1.0`, matching `Var(stable term) == sigma_down_stable_m ** 2` when
-    both looks share one sigma) and `0.0` whenever `stable_range_
-    correlation` returns `(0.0, 0.0)` -- same optic, fully decorrelated
-    geometry. A different optic no longer forces this to `0.0` by itself
-    (`CROSS_OPTIC_RANGE_SHARE`)."""
+    This is `1.0` exactly at identical geometry and optic (`rho_view ==
+    rho_near == 1.0`, matching `Var(stable term) == sigma_down_stable_m
+    ** 2` when both looks share one sigma) and `0.0` whenever `stable_
+    range_correlation` returns `(0.0, 0.0)` -- a different optic outside
+    the ladder, or fully decorrelated geometry."""
     s_sq = stable_share() ** 2
     f_sq = RANGE_RELATIVE_SHARE**2
     denom = s_sq + f_sq
@@ -616,9 +750,15 @@ def _stable_fraction(
     `z_look` is redrawn only by `(field_domain, optic_class, poll_key)` --
     not by observation or object id -- so every cluster seen in the same
     poll through the same optic shares the identical look-to-look term
-    (module docstring's "shared by every cluster in that poll")."""
+    (module docstring's "shared by every cluster in that poll").
+
+    **`BL-B108` amendment**: `z_view`/`z_near` are now `_tiered_field`
+    realisations, not bare `_field_value` ones -- the nested-ladder
+    construction that makes two different ladder optics' realisations
+    correlate at `optic_range_correlation`'s own ratio, rather than being
+    fully independent by construction."""
     ln_range = math.log(max(true_range_m, 1.0))
-    z_view = _field_value(
+    z_view = _tiered_field(
         field_name=f"{field_domain}:view",
         optic_class=optic_class,
         coords=(true_bearing_deg, ln_range),
@@ -627,7 +767,7 @@ def _stable_fraction(
             math.log(RANGE_DECORRELATION_RANGE_RATIO),
         ),
     )
-    z_near = _field_value(
+    z_near = _tiered_field(
         field_name=f"{field_domain}:near",
         optic_class=optic_class,
         coords=(ln_range,),
@@ -780,6 +920,7 @@ _CUE_A_MIN_RANGE_M: Final[float] = 1.0
 def surface_range_estimate(
     *,
     true_distance_m: float,
+    true_bearing_deg: float,
     height_above_unit_m: float,
     optic: Optic,
     poll_key: float,
@@ -840,12 +981,23 @@ def surface_range_estimate(
     own down-range draw already carries the correlated structure; a second,
     object-keyed bias layered on top of that (as pre-`BL-B108` code did)
     would reintroduce exactly the independent-per-object term the plan's
-    model replaces."""
+    model replaces.
+
+    **`true_bearing_deg` (`BL-B108` amendment, "Surface fix")**: the
+    observer's own true bearing to the unit, now threaded into both cues'
+    `_stable_fraction` calls -- a pre-amendment defect (found while
+    verifying the amendment, not by inspection) always evaluated both
+    fields at `true_bearing_deg=0.0`, so a ground unit's stable error
+    never decorrelated with ownship's own line-of-sight rotation, and an
+    orbit's triangulation (`RANGE_DECORRELATION_BEARING_DEG`) did not
+    exist in the noise for surface units at all, even though `belief`
+    assumed it did. Air contacts (`perturbed_bearing_range`) were never
+    affected -- they always passed the real bearing."""
     _sigma_cross_m, sigma_a_m = look_sigma_m(true_distance_m, optic)
 
     down_fraction_a = _stable_fraction(
         field_domain="range",
-        true_bearing_deg=0.0,
+        true_bearing_deg=true_bearing_deg,
         true_range_m=true_distance_m,
         optic_class=optic.name,
         poll_key=poll_key,
@@ -861,7 +1013,7 @@ def surface_range_estimate(
     sigma_delta_rad = math.radians(DEPRESSION_SIGMA_DEG * bearing_scale)
     depression_fraction = _stable_fraction(
         field_domain="depression",
-        true_bearing_deg=0.0,
+        true_bearing_deg=true_bearing_deg,
         true_range_m=true_distance_m,
         optic_class=optic.name,
         poll_key=poll_key,

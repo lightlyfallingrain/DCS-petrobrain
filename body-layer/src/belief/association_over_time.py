@@ -350,25 +350,22 @@ _FALLBACK_POSITION_UNCERTAINTY: Final = PositionUncertainty(
 
 def percept_position_uncertainty(percept: Percept) -> PositionUncertainty:
     """`percept.position_uncertainty` if declared, else the isotropic
-    `_FALLBACK_POSITION_UNCERTAINTY` -- the single place both this module's
-    own `_percept_covariance` (the gate) and `belief.contacts.Contact.
+    `_FALLBACK_POSITION_UNCERTAINTY` -- the single place both this
+    module's own `passes_gate` (the gate) and `belief.contacts.Contact.
     record`/`from_percept` (the fusion, `plans/precise-position-belief/
     plan.md` Stage 4) resolve "what uncertainty does this percept declare,
     really" from, so the gate and the fused estimate can never silently
-    disagree about a percept missing one."""
+    disagree about a percept missing one.
+
+    **`BL-B108` amendment**: `passes_gate` no longer builds its own look
+    covariance straight from this value at `percept.bearing_deg` (the old
+    `_percept_covariance` helper, removed) -- it scales the magnitude by
+    the hypothesis range first (see that function's own docstring), so
+    the fallback declared here is still the shared starting point, just
+    no longer the final covariance."""
     if percept.position_uncertainty is not None:
         return percept.position_uncertainty
     return _FALLBACK_POSITION_UNCERTAINTY
-
-
-def _percept_covariance(percept: Percept) -> Covariance2D:
-    """The look's own elongated error ellipse, rotated onto world x/z at
-    its own true `bearing_deg` -- via `percept_position_uncertainty` above,
-    so a percept missing a declared uncertainty gets the same isotropic
-    fallback the fused estimate would use for the identical look."""
-    return covariance_from_uncertainty(
-        percept_position_uncertainty(percept), percept.bearing_deg
-    )
 
 
 def contact_growth_rate_mps(contact: Contact) -> float:
@@ -460,7 +457,22 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     whose *actually reported* position disagrees by kilometres (the E1
     fold case, `plan.md` Stage 2's "Worked check") -- `dx`/`dz` below are
     still the percept's own real implied position minus the contact's
-    believed one, unchanged."""
+    believed one, unchanged.
+
+    **`BL-B108` amendment, "Belief side", hypothesis-consistent sigma**:
+    the percept's own declared `sigma_cross_m`/`sigma_down_m`/`sigma_
+    down_stable_m` are scaled by `hypothesis_range_m / percept.range_m`
+    before building the look's own covariance/correlation inputs --
+    "under this hypothesis, what would this look's own sigma be at the
+    hypothesis range" rather than at the range it was actually reported
+    at. Measured (`plan.md` amendment, "Belief side"): without this, a
+    same-optic near-first reacquisition still folds 3-12% of the time
+    across realisations; with it, 0-1%. The percept's own covariance
+    *orientation* stays at `percept.bearing_deg` (where he actually
+    looked), unchanged -- only the sigma *magnitudes* are hypothesis-
+    scaled, and `correlation_bearing_deg`/`correlation_range_m` (the
+    inputs to the correlation kernel itself) are still the hypothesis
+    geometry, unaffected by this scaling."""
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):
@@ -478,14 +490,26 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     )
     hypothesis_bearing_deg = bearing_deg(observer, contact.last_position)
     hypothesis_range_m = horizontal_range_m(observer, contact.last_position)
-    s, _c, _rho_view = correlated_innovation(
+    hypothesis_scale = (
+        hypothesis_range_m / percept.range_m if percept.range_m > 0.0 else 1.0
+    )
+    hypothesis_uncertainty = PositionUncertainty(
+        sigma_cross_m=percept_uncertainty.sigma_cross_m * hypothesis_scale,
+        sigma_down_m=percept_uncertainty.sigma_down_m * hypothesis_scale,
+        sigma_down_stable_m=percept_uncertainty.sigma_down_stable_m * hypothesis_scale,
+        optic_class=percept_uncertainty.optic_class,
+    )
+    look_covariance = covariance_from_uncertainty(
+        hypothesis_uncertainty, percept.bearing_deg
+    )
+    s, _c, _kappa_view = correlated_innovation(
         contact.position,
         _contact_covariance(contact, elapsed_s),
-        _percept_covariance(percept),
+        look_covariance,
         correlation_bearing_deg=hypothesis_bearing_deg,
         correlation_range_m=hypothesis_range_m,
-        correlation_optic_class=percept_uncertainty.optic_class,
-        correlation_sigma_down_stable_m=percept_uncertainty.sigma_down_stable_m,
+        correlation_optic_class=hypothesis_uncertainty.optic_class,
+        correlation_sigma_down_stable_m=hypothesis_uncertainty.sigma_down_stable_m,
     )
     return s.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
 
@@ -534,7 +558,7 @@ def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
     cov_b = _contact_covariance(b, elapsed_b)
     b_anchor = b.position.anchor
     if a.position.anchor is not None and b_anchor is not None:
-        s, _c, _rho_view = correlated_innovation(
+        s, _c, _kappa_view = correlated_innovation(
             a.position,
             cov_a,
             cov_b,

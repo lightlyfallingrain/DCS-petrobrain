@@ -26,6 +26,7 @@ import math
 
 import pytest
 
+import belief.callouts as callouts_module
 from belief.contacts import Contact, ContactStore
 from belief.groups import GroupStore
 from perception.estimation import (
@@ -119,7 +120,14 @@ def _detected_count(store: ContactStore) -> int:
 def test_e1a_far_group_first_then_near_group_stays_two_contacts() -> None:
     """E1a: the far group (4.6 km) founds alone; the near group (2.4 km)
     appears a few seconds later, same bearing -- two contacts, two
-    `CONTACT_DETECTED` events."""
+    `CONTACT_DETECTED` events, and (`BL-B108` amendment Stage D)
+    **two callouts actually spoken, not only two events**:
+    `belief.callouts._is_merge_echo_of_earlier_contact` -- the predicate
+    `CalloutScheduler._render_event`'s own `CONTACT_DETECTED`-suppression
+    branch evaluates, driven by `contacts_plausibly_same` -- must say the
+    near contact is *not* a merge echo of the far one. Two live events
+    with the second one silently swallowed by that suppression would
+    still pass the event-count assertion alone."""
     store = ContactStore()
     last_far: str | None = None
     for i in range(3):
@@ -153,6 +161,14 @@ def test_e1a_far_group_first_then_near_group_stays_two_contacts() -> None:
 
     assert len(store.contacts) == 2
     assert _detected_count(store) == 2
+    _far_contact, near_contact = (
+        (store.contacts[0], store.contacts[1])
+        if store.contacts[0].first_seen_sim < store.contacts[1].first_seen_sim
+        else (store.contacts[1], store.contacts[0])
+    )
+    assert not callouts_module._is_merge_echo_of_earlier_contact(
+        near_contact, store, t_sim
+    ), "the near contact's CONTACT_DETECTED would be merge-echo-suppressed"
 
 
 def test_e1b_both_groups_seen_in_the_first_look_stay_two_contacts() -> None:
@@ -279,9 +295,10 @@ def test_cross_optic_fuse_along_sigma_never_beats_the_tighter_optics_own_sigma()
     None
 ):
     """No-omniscience check for the cross-optic fix (`review.md`'s
-    required fix 1): fusing a looser look into a tighter one's anchor (or
-    vice versa) through the new partial `CROSS_OPTIC_RANGE_SHARE`
-    correlation must not leave the fused along-line sigma below what the
+    required fix 1, then the `BL-B108` amendment's tiered-field
+    replacement): fusing a looser look into a tighter one's anchor (or
+    vice versa) through the optic-ladder correlation (`optic_range_
+    correlation`) must not leave the fused along-line sigma below what the
     *tighter* of the two optics alone would report at that range --
     the "a different optic is new information, not an exact one" claim
     collapses into arithmetic omniscience if fusion can ever claim better
@@ -636,7 +653,7 @@ def test_e6_gate_correlation_flips_as_range_look_share_crosses_the_plans_thresho
 
     monkeypatch.setattr(estimation_module, "RANGE_LOOK_SHARE", 0.05)
     rho_view_tight, rho_near_tight = estimation_module.stable_range_correlation(
-        0.0, 1.25, True
+        0.0, 1.25, "unaided", "unaided"
     )
     eff_tight = estimation_module.effective_down_correlation(
         rho_view_tight, rho_near_tight
@@ -644,7 +661,7 @@ def test_e6_gate_correlation_flips_as_range_look_share_crosses_the_plans_thresho
 
     monkeypatch.setattr(estimation_module, "RANGE_LOOK_SHARE", 0.55)
     rho_view_loose, rho_near_loose = estimation_module.stable_range_correlation(
-        0.0, 1.25, True
+        0.0, 1.25, "unaided", "unaided"
     )
     eff_loose = estimation_module.effective_down_correlation(
         rho_view_loose, rho_near_loose

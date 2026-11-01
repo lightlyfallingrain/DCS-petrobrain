@@ -76,6 +76,7 @@ def _observation_for_look(
     )
     estimated_range_m, sigma_down_m = surface_range_estimate(
         true_distance_m=true_distance_m,
+        true_bearing_deg=true_bearing_deg,
         height_above_unit_m=ownship.alt_m - _GROUP_ALT_M,
         optic=UNAIDED_OPTIC,
         poll_key=t_sim,

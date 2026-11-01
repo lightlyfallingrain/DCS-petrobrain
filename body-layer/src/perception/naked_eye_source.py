@@ -1352,6 +1352,7 @@ class NakedEyePerceptionSource:
             height_above_unit_m = ownship_state.alt_m - cluster.centroid_alt_m
             estimated_range_m, sigma_down_m = surface_range_estimate(
                 true_distance_m=true_range_m,
+                true_bearing_deg=true_bearing_deg,
                 height_above_unit_m=height_above_unit_m,
                 optic=self.optic,
                 poll_key=now_sim,

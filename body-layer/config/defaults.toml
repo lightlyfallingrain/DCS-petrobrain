@@ -296,11 +296,6 @@ BEARING_SIGMA_DEG = 3.0
 # source: perception/estimation.py:BINOCULAR_RANGE_SIGMA_SCALE
 BINOCULAR_RANGE_SIGMA_SCALE = 0.7
 
-# How much of a look's stable down-range correlation survives a switch to a *different* optic, as a fraction of what an identical-geometry look through the *same* optic would share (`BL-B108` review follow-up, 2026-10-31): raising it lets Petrovich treat a reacquisition through binoculars as more of a confirmation of what he already judged from the scene, narrowing the gate sooner; lowering it (toward 0) reopens the pre-fix hole where an optic switch alone makes two distinct groups on one bearing fold into one contact.
-# status: judgement | range: 0.0 .. 0.75
-# source: perception/estimation.py:CROSS_OPTIC_RANGE_SHARE
-CROSS_OPTIC_RANGE_SHARE = 0.6
-
 # How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:DEPRESSION_SIGMA_DEG
@@ -311,10 +306,10 @@ DEPRESSION_SIGMA_DEG = 3.0
 # source: perception/estimation.py:RANGE_DECORRELATION_BEARING_DEG
 RANGE_DECORRELATION_BEARING_DEG = 30.0
 
-# `BL-B108` Stage 1 -- the range *ratio* (closing or opening) at which the `Z_view` field's down-range correlation falls to about `1/e` (holding bearing fixed): raising it makes a closing run keep "the same look"'s error longer before it genuinely updates; lowering it means the estimate tightens sooner as ownship closes.
-# status: judgement | range: 1.1 .. 4.0
+# How far apart in distance two things can be and still have their ranges misjudged together, as a range ratio (closing or opening) at which the `Z_view` field's down-range correlation falls to about `1/e` (holding bearing fixed).
+# status: judgement | range: 1.1 .. 8.0
 # source: perception/estimation.py:RANGE_DECORRELATION_RANGE_RATIO
-RANGE_DECORRELATION_RANGE_RATIO = 1.5
+RANGE_DECORRELATION_RANGE_RATIO = 4.0
 
 # The look-to-look share `a` of the three-part down-range draw, coupled to `RANGE_RELATIVE_SHARE` below (both bounded `lo=0.0, hi=0.6` keeps `f*f + a*a <= 0.72 < 1`, so `s = sqrt(1 - f*f - a*a)` can never go imaginary from any combination of independently-valid overrides of the two -- the X-T26 cross-key trap, closed by the shared bound rather than a runtime assertion): how much a *repeat* look from the same geometry still varies, even though the scene and terrain cues are the same.
 # status: judgement | range: 0.0 .. 0.6
