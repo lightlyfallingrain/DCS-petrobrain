@@ -424,3 +424,120 @@ Decision 6 is correctly left unescalated.
   Finding 2 above: if binoculars seem reluctant to re-check a contact that was obscured (tree line,
   bad aspect) rather than one the aircraft is closing on, that is `GLASS_STALL_COOLDOWN_S` (180 s)
   — a single tunable to shorten if three minutes feels too long once flown.
+
+## Plan re-check 3 — 2026-11-02
+
+**Verdict:** ALIGNED. The fifth pass (Stage 0a, the refined optics priority, Decisions 7–11) traces
+cleanly against the goal check and the user's own last three sections of `explore-notes.md`. Every
+constant the plan cites to ground "no binocular look is ever needed for rough location"
+(`RANGE_FRACTIONAL_SIGMA = 0.17`, `BEARING_SIGMA_DEG`) checked out against
+`body-layer/src/perception/estimation.py` on a grep, not just the plan's own table, and
+`SCAN_PLAN`'s default `(12, 11, 10, 9, 12, 1, 2, 3)` was re-confirmed in `perception/gaze.py` —
+unchanged since re-check 2, so the "order already matches the user's words" claim still holds.
+`LookTarget.watched` (`belief/optic_policy.py`) exists exactly as the exact-location predicate
+uses it. No new blocking finding; two points are worth a line to the user, and Decision 10's
+non-escalation is confirmed correct.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (two groups stay two) | 2 | met — unchanged |
+| E2 (one group stays one) | 2 (partial) / BL-B111 | contradicted for 4–10% cross-optic false-split under BL-B110 alone, same as before, dated to BL-B111 — unchanged |
+| E3 (no callout until verdict, bounded) | 2 | met — unchanged |
+| E4 (look at A's area, debug-visible, B first) | BL-B111 Stage 4 | missing in BL-B110 (unchanged), scheduled |
+| E5 (absence counts only where visible) | BL-B111 Stage 3 | missing in BL-B110, scheduled |
+| E6 ("moved" only if believable) | BL-B111 Stage 4 | missing in BL-B110, scheduled |
+| E7 (composition as graded suspicion) | BL-B111 Stage 4 | missing in BL-B110, scheduled |
+| E8 (never pre-empts a threat/9K113) | BL-B111 Stage 4 rows | met where it will exist |
+
+### Findings
+
+1. **The rough-location allowance plateaus at 250 m below 1.25 km, rather than continuing to
+   tighten close in — moot today because the model over-delivers, but the fence itself does not
+   literally track "the closer, the more specific."** — lens: Grounded in / Purpose
+   - The user's own wording (*"the further away we are, the more imprecise the location is
+     allowed to be. At close distances a more specific location can and should be obtained"*)
+     reads as continuous: tighter and tighter as range falls. The built allowance,
+     `max(250 m, 0.2 · R)`, stops tightening once `R` drops below 1.25 km and sits flat at 250 m
+     all the way to zero range.
+   - In the sim: today this costs nothing, because the naked-eye model's actual delivered sigma at
+     close range is already far tighter than the floor (81–85 m down-range at 500 m, against a
+     250 m allowance) — the table in Stage 1 shows this. So the pilot hears the tight figure the
+     model actually produces, not the loose one the fence would still pass.
+   - The pilot would see: nothing different today. The risk is only a silent one — a future change
+     to the naked-eye model (Decision 10's own named risk, `test_estimation.py`'s fence) could
+     degrade close-range precision all the way down to 250 m at, say, 300 m range (80% of the
+     range itself) and still pass this fence, because the fence does not get stricter below
+     1.25 km the way the user's sentence implies it should.
+   - Grounded in: the user's "Decision 7 and the refined priority" section, verbatim, and the
+     allowance definition and table in plan.md, Stage 1, "Priority 1" (confirmed against
+     `RANGE_FRACTIONAL_SIGMA`/`BEARING_SIGMA_DEG` in `perception/estimation.py`).
+   - Suggests: not a blocker — Decision 10 already flags that a naked-eye regression is the one
+     thing that could break this, and the fence exists for exactly that. Worth tightening the fence
+     itself to keep shrinking below 1.25 km (e.g. a pure `0.2 · R` with no floor, since the model
+     already clears it with margin at every measured range) so a future regression at *close*
+     range — the range the user specifically called out — is caught as readily as one far out.
+
+2. **Exact-location looks are gated on `watched`, which is a faithful reading of a standing
+   "look after this" instruction, but leaves a one-off question ungated — plausibly out of this
+   plan's scope, not a contradiction of it.** — lens: Whose job / Grounded in
+   - The user's words, *"anything the player asks for"*, sit in a list about what should earn a
+     binocular look toward exact position. `watched` (`attention.effective_attention`, a voice
+     "watch that truck at three o'clock") is the existing mechanism for "the player singled this
+     contact out," and the plan's grep-confirmed wiring (`LookTarget.watched`) maps it correctly.
+   - What it does not cover: a one-off question — *"where exactly is that group"* — asked without
+     first placing a watch. Nothing in this plan adds a location look triggered by a live query;
+     a query would be answered from whatever belief already exists at ask-time.
+   - The pilot would see: asking about an unwatched group's exact position gets today's belief,
+     not a fresh binocular fix, unless they first say "watch that group."
+   - Grounded in: `explore-notes.md`, "Decision 7 and the refined priority" — the sentence is
+     about optics-priority input, not about live query handling, and the plan's own scoping
+     (excluding an attack-run target, which is also "asked about" in a sense) shows the same
+     judgment call made consistently elsewhere in Stage 1.
+   - Suggests: confirm with the user that `watched` is the intended proxy for "asks for," not a
+     live-query path — likely yes, since a one-off query-triggered look is a different mechanism
+     (crew-query handling, not scan/optics ordering) and is not what this entry's goal covers.
+
+3. **The one real cost of the slow, circling approach profile — the pre-existing eye-aliasing gap
+   growing to ≈40 s worst case — lands in exactly the scenario the user described as the reason for
+   that profile, and the plan leaves it unfixed by design; already disclosed, worth a line in the
+   test card.** — lens: Whose job / The envelope
+   - The user's own reason for the careful, ~100 km/h, sideways/circling approach is *"so that
+     Petrovich has time to scan without us flying headfirst into danger."* The plan's own Risks
+     section states the eye's eight-leg sweep already aliases a crossing contact for ≈28 s quiet,
+     growing to ≈40 s with a full glass budget, at the rotation rates that same approach profile
+     produces (0.5–2°/s) — and that the fix (a perception cone-overlap change) is explicitly out
+     of this entry.
+   - The pilot would see: during exactly the cautious, circling approach meant to buy Petrovich
+     scanning time, a contact crossing a sector-leg boundary at the wrong phase can still go
+     roughly 40 s between naked-eye sightings — longer than the approach is meant to allow for.
+   - Grounded in: plan.md, "Body rotation", "Pre-existing, not introduced, stated", and Risks &
+     Unknowns' "Rotational eye aliasing" entry — both already honest about this, not hidden.
+   - Suggests: not a reason to hold the plan — it stays below the lost/group-expiry cliffs (a
+     debounce delay, not a dropped contact), and the real fix is a separate, named piece of work.
+     Worth one line in the Stage 1 test card asking the user to specifically notice eye pickup
+     latency while circling, since nothing else measures this pre-flight.
+
+4. **Decision 10's non-escalation is correct under `AGENTS.md`'s own bar.** — lens: Whose job
+   - The allowance-as-test-fence choice changes nothing the pilot can hear today (no code path
+     compares a belief to it, confirmed by Stage 1's own "Priority 1" reasoning: no binocular look
+     is ever raised for rough location). It is local, reversible (a test fence, not even a
+     tunable), and matches the inclusion test in root `CLAUDE.md`'s "Behaviour-affecting constants
+     are tunable" section (a constant that does not affect behaviour stays an ordinary literal).
+     Correctly left to the Implementer, not escalated.
+
+### Questions for the user
+
+1. Tighten the rough-location allowance below 1.25 km to keep shrinking with range (e.g. drop the
+   250 m floor and use a pure `0.2 · R`), so the test fence tracks "closer means more specific"
+   continuously rather than plateauing — or is 250 m fine as a floor since the model already beats
+   it with margin at every measured range? (Finding 1; recommendation: tighten the fence, cheap and
+   changes nothing delivered today.)
+2. Confirm `watched` (a standing "watch that contact" instruction) is what you meant by "anything
+   the player asks for" for exact-location looks, rather than a one-off question asked without a
+   watch — the latter isn't built here and would be a different mechanism (crew-query handling).
+   (Finding 2; recommendation: yes, `watched` is the right proxy — a live-query-triggered look is
+   out of this entry's scope.)
+3. One line for the Stage 1 test card: during the circling/sideways approach, specifically notice
+   how quickly Petrovich's eye picks up a new contact crossing from one side sector to another —
+   the pre-existing eye-aliasing gap (Finding 3) can reach ≈40 s there, below the entry's own lost
+   cliffs but worth confirming in the air. (Recommendation: add the line; no plan change needed.)
