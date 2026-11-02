@@ -456,3 +456,44 @@ Reading (main loop):
 - v2 log, t=77.4–89.1: while parked the **pilot-seat** args 1100–1103 move with the AI's flying
   while the operator args read 0, so ED's AI acts as a hand on the pilot's controls (recon §6
   path (b)), and `LoSetCommand` reaches only the player's own, now-disconnected, controls.
+
+### R1 answer and the R2 candidates (user, verbatim, 2026-11-02)
+
+Asked: (R1) when unparked, what is missing, the sight view or the sight's hand controls; and a
+verdict on R2 candidates a–e (a: SAU autopilot off 3047; b: emergency autopilot off; c: HELPER_AI
+"Request Aircraft Control" 3014; d: cockpit lever disengage 3011–3013 instead of the park keybind;
+e: read the AI wheel's options while parked).
+
+> *"I think I tried the probe so that I engaged it from pilot, then switched to copilot and parked
+> the controls there. DCS AI took over.*
+>
+> *R1 - when unparked DCS will not let me activate the CPG view that is needed to look throught
+> the 9K113.*
+>
+> *Canditates*
+> *A - DCS AI does not fly through the autopilot. SAU has nowhere near the control authority that
+> the AI moves like.*
+> *B - because of (a) changes nothing*
+> *C - hands back control and unparks. This is the control I have bound to my joystick, it parks
+> the sight and lets me use the 9K113. On the other hand, might there be some control that only
+> parks controls but does not start the DCS AI?*
+> *D - we should test this, not likely to work, but maybe*
+> *E - a workaround to controlling what DCS AI does, but a clumsy solution and does not rid us of
+> the DCS AI flying*
+>
+> *Go for the windows recon, but windows computer is off at the moment, so later."*
+
+Reading (main loop):
+
+- **R1: the view itself is gated.** Unparked, DCS refuses the CPG sight view. So R1 needs the place
+  where that view switch checks park state; if it is native, R1 is closed.
+- **a, b dropped**: ED's AI does not fly through the SAU (its authority is far beyond the SAU's).
+- **c is the park toggle itself** (the user's bound control). New question for recon: is there a
+  control that parks the controls (sight available) **without** starting ED's AI?
+- **d stays** as a cheap probe-v3 candidate, low odds.
+- **e is the S0-P3b fallback** (steer ED's AI), clumsy and does not remove ED's flying.
+- Probe v2 sequence clarified: hold engaged from the pilot seat, seat swapped, parked in the CPG
+  seat. Same result.
+- **Windows recon: go, deferred** until the Windows machine is on. Targets: (1) what gates the CPG
+  sight view on park state; (2) park without AI start (levers 3011–3013, `set_ai_piloting`, any
+  other park path); (3) how ED's AI writes the pilot-seat controls.
