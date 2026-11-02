@@ -213,3 +213,38 @@ Reading (main loop):
 - **Approach profile for sizing scan timing:** ~100 km/h, with sideways flight and circling at a
   safe distance. Sectors are body-relative, so while circling the ground under each sector rotates;
   a group can move from one sector to another between sweep and glass step.
+
+## Decision 7 and the refined priority (user, verbatim, 2026-11-02)
+
+Asked: Decision 7 — a binocular range fix is overwritten by the next naked-eye look ((a) a new look
+never leaves the belief less certain; (b) build on today's model; (c) leave location looks out);
+whether binoculars give a much better sense of range; Decisions 8 (location before
+classification) and 9 (look follows its contact) as defaults.
+
+> *"Option a*
+>
+> *I'll rephrase the first priority: detection and therefore rough estimate of position is first
+> priority. Exact position is not even needed for all units.*
+>
+> *Refined priority:*
+> *1 detection and rough location (the further away we are, the more imprecise the location is
+> allowed to be. At close distances a more specific location can and should be obtained)*
+> *2 IFF, though that needs expected enemy territory and unit identification (eg. T-72 vs
+> leopard)*
+> *3 classification*
+> *4 exact location (for enemy units especially and mission target units or anything the player
+> asks for)"*
+
+Reading (main loop):
+
+- **Decision 7: (a).**
+- **Priority 1 is detection with a rough position**, served by the scan itself. The allowed
+  position error grows with range; close in, a tighter position can and should be obtained.
+- **Priority 2, IFF,** needs expected enemy territory and identification to unit type (T-72 vs
+  Leopard). Not modelled (BL-B12); until then, identification to type is what serves it.
+- **Priority 3, classification.**
+- **Priority 4, exact location** — only for enemy units, mission targets, or what the player asks
+  about; not for every unit.
+- So **Decision 8 reverses**: a look for exact position ranks after classification, and is limited
+  to those contacts, except where the rough position is worse than the range-scaled allowance
+  (that is priority 1). Binocular range-sense question not answered.
