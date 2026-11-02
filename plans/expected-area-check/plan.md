@@ -36,6 +36,25 @@ and 2 are unchanged. What changed:
   6 (new, default proceeds) accepts the ≤ 2 s overrun and restates the coupling on the real cliffs
   (lost, group expiry).
 
+**Revised 2026-11-02, fourth architect pass, on `2a0fe2b0`**, after the user's answers on mission
+density, optics priority and approach profile (`explore-notes.md`, the last two sections, which
+govern). Stage 1 only. What changed:
+- **Location looks (user: *"do in stage 1"*).** Binoculars can now be raised to fix *where a group
+  is*, not only what it is. The criterion is the expected down-range tightening a binocular look
+  would give at the current range, from BL-B108's own model, judged per group. Location looks rank
+  before classification looks. IFF, the user's (b), is not modelled and is not built.
+- **Finding that changes direction: in today's belief model a location fix does not stick.**
+  Measured on the shipped `fold_position`: a binocular look takes a 3 km contact from ±501 m to
+  ±357 m, and the second naked-eye sweep after it puts it back to ±486 m. That is BL-B108's
+  one-anchor floor, and BL-B108's own plan says to escalate rather than patch it. **Decision 7
+  (OPEN, needs the user)**. Location looks are built only once it is answered. The rest of Stage 1
+  does not wait for it.
+- **Circling and sideways flight checked.** Sectors stay body-relative. The glass step filters on
+  the azimuth at step time, with a margin of half a binocular field, and a look now follows its
+  contact through a turn. Both are measured below. The scenario test flies the user's approach
+  profile as well as a straight line.
+- **Decision 6 ANSWERED:** *"For the overrun - ok."*
+
 ### Goal
 
 When a new sighting B lies on the bearing of a group A that Petrovich holds only in memory, he
@@ -99,6 +118,14 @@ Stages 0–2 (definite):
   rolling budget that gates look starts; sector target filter; `GLASSING` passes a stall cooldown
   to `is_worth_a_look` (new `GLASS_STALL_COOLDOWN_S`); docstring rewritten (it describes the
   2026-09-23 reading). New fields on `OpticState` (Co-moving Fields).
+  Fourth pass: `LookTarget` gains `group_id` and `location_gain_m`; a pure `location_gain_m(...)`
+  computed in `look_target_for`; a pure group reduction; `choose_glass_look` (location bucket
+  first, the `choose_sighting_look` pattern); the `GLASSING` predicate widened to "can still
+  improve **or** worth locating"; the sector filter widened by half a binocular field; the
+  `GLASSING` branch shifts its sweep by the chosen contact's own body-azimuth change each poll.
+  New tunable `LOCATION_LOOK_MIN_GAIN_M`.
+- `body-layer/src/belief/position_belief.py` (fourth pass, **only if Decision 7 is answered (a)**):
+  `_apply_floor` never raises a fused estimate above its own prior's inflated covariance.
 - `body-layer/src/perception/gaze.py`: `ScanPlan` gains a one-pass sweep anchor
   (`sweep_legs`, `sweep_started_sim`), and `gaze_at` honours it. **`SCAN_PLAN`'s default is
   unchanged** (third pass). A public sector table derived from `SCAN_PLAN` by a pure partition
@@ -112,7 +139,8 @@ Stages 0–2 (definite):
 - `body-layer/src/body.py`: build the sector-anchored plan once per poll for every `gaze_at`
   consumer: the naked-eye source, the LOS look-direction push and the debug/eyesight views. Pass
   the sector period, wedge, count and budget to `decide_optic` instead of the hard-wired
-  `SCAN_CYCLE_PERIOD_S`. Reset the sector on a scan-command change.
+  `SCAN_CYCLE_PERIOD_S`. Reset the sector on a scan-command change. Fourth pass: `_look_targets`
+  sets each target's `group_id` from `store.group_for_contact` and applies the group reduction.
 - `body-layer/src/tuning.py`: `_check_scan_decay_coupling` extended to five keys and two
   invariants (Stage 1).
 - `body-layer/src/belief/association_over_time.py`: `passes_gate` gains a keyword
@@ -123,7 +151,9 @@ Stages 0–2 (definite):
 - `body-layer/src/belief/callouts.py`: merge-echo suppression skips a believed-distinct pair.
 - Tests: `test_optic_policy.py`, `test_gaze.py`, `test_body.py`, `test_decay.py`/`test_tuning.py`
   (coupling), `test_relative_distance_sweep.py`, `test_relative_distance_scenarios.py`,
-  `test_callouts.py`, and a new `test_expected_area_trigger.py`.
+  `test_callouts.py`, and a new `test_expected_area_trigger.py`. Fourth pass:
+  `test_position_belief.py` (Decision 7), and the Stage 1 scenario test gains the approach
+  profile.
 - `body-layer/docs/STRUCTURE.md`, `config/defaults.toml` (regenerated), and `body-layer/CLAUDE.md`
   "Tuning". That section describes the three-key coupling; it becomes five keys and two
   invariants. Its 16.0 s cycle figure stays true.
@@ -148,6 +178,9 @@ Stages 3–4 (**moved to `[[BL-B111]]`**, not built in this feature; kept for th
   the same-group false-trigger rate. The candidate to try first is evaluating the hypothesis σ at
   the **tighter** of the two optics, not the look's own. The table, not reasoning, decides it
   (`feedback_noise_field_sweeps_need_an_ensemble`).
+- **Fourth pass:** if Decision 7 is answered (a), the floor change alters the covariance the gate
+  reads (a binocular-grade belief stays tight under later naked-eye looks). So Stage 0's table is
+  taken **on the post-1-floor code**, never before it.
 - **Gate for proceeding:** record the final residual and false-trigger rates in this plan before
   Stage 2 is implemented. If the false-trigger rate exceeds ~10% in any cell, stop and bring it to
   the user, since that is the duplicate rate they would hear.
@@ -160,6 +193,17 @@ govern). The order is ahead first, then sides alternating; the glass budget is 1
 looks are not cut short; selectivity, not a tight timer, is what bounds binocular time. **The
 default `SCAN_PLAN` no longer changes**: today's table already is the order the user described
 (below). That removes the second pass's table reshape and all of its knock-on test-data churn.
+
+*Fourth pass, build order inside Stage 1.* It is still one merge, because the user asked for
+location looks in Stage 1.
+- **1-scan:** the per-sector scan, budget, stall cooldown, sector margin and look-follow. This
+  does not depend on Decision 7.
+- **1-floor:** Decision 7 (a), if chosen. It comes before 1-locate, and BL-B108's tests are
+  re-run before anything else changes.
+- **1-locate:** location looks.
+
+If Decision 7 is not answered by the time 1-scan is reviewed, 1-scan may merge alone and 1-locate
+follows as its own merge. Say so in the hand-off rather than holding 1-scan.
 
 *What the code does today (verified, not taken from the docstring):*
 - A glass phase starts only when `now − phase_started_sim ≥ scan_cycle_period_s`, and `body.py`
@@ -221,9 +265,13 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
   `gaze_at` consumer, so the LOS look-direction push, the naked-eye source and the eyesight view
   (E4: where he actually looks) cannot disagree. The push runs before `decide`, so it can lag one
   poll at a sector boundary. That is harmless at the push's ±90° cone, and stated.
-- **Glass step**, at the sector's end: targets are contacts whose believed body azimuth lies in
-  the swept sector's wedge (union of its legs' ±15° cones) and that pass `is_worth_a_look` (with
-  the stall cooldown below). **Several looks per step are expected** (user Decision 1). Looks run
+- **Glass step**, at the sector's end: targets are contacts whose believed body azimuth **at the
+  glass step** (this poll's `LookTarget`, not where the eye saw it) lies in the swept sector's
+  wedge (union of its legs' ±15° cones) **widened by half a binocular field**
+  (`BINOCULAR_OPTIC.fov_half_angle_deg`, 4.25°; no new constant), and that pass `is_worth_a_look`
+  (with the stall cooldown below, and the fourth pass's location predicate). The margin is there
+  for body rotation (next item). A contact on a boundary can then be glassed in either adjacent
+  step, and the attempted marks stop it being glassed twice. **Several looks per step are expected** (user Decision 1). Looks run
   back to back (`choose_look` per look, unchanged) until none is left or the budget will not admit
   another. Then the next sector.
 - **Glass budget (user re-check: *"four is too short … when binoculars are used, it's better to
@@ -277,6 +325,124 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
     so a contact the aircraft is closing on is still retried as soon as it is worth it. The
     Implementer confirms that the `GLASSING` commit writes `attempted_at_level` (its entry already
     records `pending_attempted_at_level`) instead of assuming it.
+- **Location looks (fourth pass; user: *"priority is a) knowing where the groups are b) iff c)
+  classification"*, and *"do in stage 1"*).** Built only once Decision 7 is answered; see the
+  finding below. Today nothing admits a look for position: `can_still_improve` is the
+  classification ladder only.
+  - **Criterion: the expected down-range tightening, not the optic history.** For a contact at
+    slant range R, `location_gain_m = position.range_uncertainty_m(observer) −
+    look_sigma_m(R, BINOCULAR_OPTIC).sigma_down`, floored at 0. It is 0 when R is beyond binocular
+    *presence* range for the believed type (`tier_ranges`, the same call `improvement_window_m`
+    makes), or when there is no `PositionEstimate`. Both terms already exist:
+    `range_uncertainty_m` is watch-reporting's deadband source, and `look_sigma_m` is the very
+    function perception uses for a binocular look. **Why this and not "position rests only on the
+    naked eye":** the two agree on the common case, but the gain also re-admits a *moving* group
+    whose covariance has grown since its fix (stationary and entrenched classes grow at 0, so they
+    are not re-glassed, which is BL-B112's direction), and it needs no new provenance field on
+    `Contact`. The anchor's `optic_class` cannot serve as provenance: the next naked-eye fuse
+    replaces it.
+  - **What it gives, measured on the shipped `fold_position`** (stationary target, same geometry,
+    naked looks fused first, then one binocular look):
+
+    | R | naked-eye-only belief, 1σ range | binocular look, 1σ | gain before | gain after the look |
+    |---|---|---|---|---|
+    | 1.0 km | 167 m | 119 m | 48 m | 0 |
+    | 2.0 km | 334 m | 238 m | 96 m | 0 |
+    | 2.5 km | 418 m | 298 m | 120 m | 0 |
+    | 3.0 km | 501 m | 357 m | 144 m | 0 |
+    | 5.0 km | 836 m | 595 m | 241 m | 0 |
+
+    The gain is ≈ 0.048 R, which is BL-B108's `BINOCULAR_RANGE_SIGMA_SCALE` (0.7) at work. A look
+    adds nothing in bearing: the model gives binoculars the same bearing σ as the eye. With the
+    default threshold below, location looks start at about **2.1 km**, out to binocular presence
+    range. That is beyond the vehicle classification window (0.5–1.75 km), so in the common case
+    the two do not compete: a group is glassed for where it is while far, and for what it is once
+    closer.
+  - **Group-level (the user cares where *groups* are).** Each target's `location_gain_m` is
+    reduced to the **minimum over its group's members** (`group_for_contact`; an ungrouped
+    contact is its own group), in one pure function applied in `body._look_targets` over every
+    live contact, before any sector filter. So once any member has a binocular-grade fix, the
+    group counts as located and no second location look is spent on its stragglers. In practice
+    one look covers most of a group anyway: the half-field is ±150 m at 2 km and ±300 m at 4 km,
+    and `choose_look` already centres on the direction covering the most targets. A straggler
+    outside the look keeps its own naked-eye range. Propagating one member's fix to its siblings
+    (their stable errors are correlated under BL-B108) is not built here, and is named as a
+    possible follow-on.
+  - **Admission.** `GLASSING` (free scan and commanded sectors, `home_phase is SCANNING`) uses one
+    predicate, `can_still_improve(t) or t.location_gain_m ≥ LOCATION_LOOK_MIN_GAIN_M`. It is
+    passed through the **existing** `can_improve` parameter to both `is_worth_a_look` and
+    `look_is_finished`, so a location-only look neither fails to start nor ends on its first poll.
+    That is the same trap the 9K113 narrow-search review found and fixed this way. `SIGHTING` is
+    unchanged.
+  - **Ordering, composed with `choose_look`.** A new `choose_glass_look` buckets the targets,
+    location-worthy first and then the rest, and runs `choose_look` unchanged (watched count,
+    coverage, nearest) inside the first non-empty bucket. That is `choose_sighting_look`'s
+    pattern, reused rather than re-derived. The cost of reuse: coverage is counted within the
+    bucket. A location look still physically covers, and marks, any classification target in its
+    envelope. Ordering against *watched* is Decision 8.
+  - **No repeat at the same range, from two mechanisms that already exist and compose:**
+    - A look that **fixed** the group drives its `location_gain_m` to ≈ 0 (measured, last
+      column), so the group is no longer location-worthy. This is self-limiting, with no timer.
+    - A look that **did not** fix it (masked, beyond the true type's reach, unsteady) leaves the
+      gain where it was. The existing attempted marks then apply, and because the level did not
+      move, so does the new `GLASS_STALL_COOLDOWN_S` (180 s). The `RETRY_RANGE_FRACTION` escape is
+      unchanged. No new field, and no second cooldown.
+    - Closing range re-admits a group only when the gain earns it again. Measured: fixed at 4 km,
+      then closed to 2.4 km under naked-eye looks, the gain is 106 m, so it is re-admitted. Fixed
+      at 3 km and closed to 1.8 km, it is 80 m, so it is not. **That measurement is taken on
+      today's floor**, so it carries Decision 7's caveat.
+  - **The budget.** Location looks spend the same 12 s rolling budget. With the user's density
+    (*"a handful of groups a few km apart"*), that is about one look per group per encounter,
+    beyond ~2 km. It is a new source of demand, but a bounded one.
+  - **Finding: the fix does not stick on today's floor. This is Decision 7.** The same probe,
+    continued: naked looks every 16 s after a binocular fix at 3 km give **357 m → 356 m → 486
+    m**. The cause is `_apply_floor`'s optic factor, which reads only the *immediate* prior
+    anchor. The first naked fuse after the fix keeps binocular grade (factor 0.7). That fuse
+    replaces the anchor with a naked one, so the next fuse's floor is naked grade and *raises*
+    the covariance above its own prior. That is BL-B108's named "one-anchor approximation", whose
+    plan says *"escalate rather than add a second anchor"*. **Without a change, a location look
+    buys ~30 s of tighter range**, and the group becomes location-worthy again. The stall
+    cooldown then re-glasses it every 180 s for another 30 s. Binoculars raised for nothing
+    lasting is exactly what the user said not to do (*"no use raising them on contacts where
+    additional information is not available"*). Hence: location looks are built only after
+    Decision 7.
+  - New tunable, `status="judgement"`, `#needs-flight`:
+    `belief.optic_policy.LOCATION_LOOK_MIN_GAIN_M`: **100.0** (lo 25.0, hi 500.0). First
+    sentence: *"How much a binocular look must be expected to tighten where Petrovich believes a
+    group is, in metres of range, before he raises binoculars just for that."* Reasoning: a fifth
+    of the spoken half-kilometre step (`speech._format_range_km`). Below it, the pilot would
+    rarely hear a different figure. **There is no cross-key coupling to check:** if
+    `BINOCULAR_RANGE_SIGMA_SCALE` is tuned to 1.0, the gain is 0 and location looks stop, which is
+    the honest consequence (binoculars no better at range), not a violated invariant.
+- **Body rotation: circling and sideways flight (user: *"~100 km/h and could include sideways
+  movement and circling to keep safe distance"*).** Sectors are body-relative, so the ground under
+  them turns whenever the aircraft does. At 28 m/s the rates are small: orbiting at 1.5–3 km turns
+  the body 0.5–1°/s, and a contact abeam at 2 km drifts 0.8°/s even in straight flight. A
+  rate-one turn is 3°/s. Checked by scratch simulation (sector windows at quiet 4 s steps, every
+  start azimuth, both rotation senses):
+  - **An orbited group is the easy case.** Circling a group keeps it at a constant body azimuth,
+    so it sits in its own side sector and is glassed there. It never needs the ahead sector,
+    because glassing is per sector, not ahead only.
+  - **A contact can cross a sector boundary between sweep and step.** Without a margin, at
+    0.5–3°/s the worst wait for a glass step covering it is **28 s** (16 s with no rotation): it
+    misses the outgoing sector's step by a hair and the incoming one's by another. **With the
+    half-field margin it is 16 s at 0.5°/s, 20 s at 1–2°/s, and 28 s only at 3°/s.** Hence the
+    margin in the glass-step item above.
+  - **A look must follow its contact.** Today a `GLASSING` sweep's steps are body azimuths fixed
+    at look start. At 1°/s a 6 s look drifts 6°, which is past the 4.25° half-field. So: each
+    `GLASSING` poll, if the chosen contact (`look_contact_id`) is in this poll's targets, shift
+    `search_pattern_steps` and `look_envelope_azimuth_deg`/elevation by its body-azimuth and
+    elevation change since the last poll. If it is absent, hold, as today. This is the 9K113 lock
+    path's own approach (*"believed world bearing every poll"*) brought to binoculars, with no new
+    field (Co-moving Fields). It is a pre-existing gap that the approach profile makes matter.
+    Decision 9 is for the user to veto it as scope, and the default proceeds.
+  - **Pre-existing, not introduced, stated:** the *eye's* own sweep aliases the same way. Today's
+    table, quiet, at 0.5–2°/s: a contact crossing the 10/11 (or 1/2) leg boundary against the
+    sweep at the wrong phase goes **~28 s** unseen. The sim gave 11 such cases in ~360 starts at
+    1°/s. Add a full glass budget and that is ≈ 40 s, past the 30 s half-life (Decision 6's
+    reasoning, a larger overrun, and rarer still). It stays below the 60 s group expiry and the
+    120 s lost threshold, so I2's cliffs hold. Not fixed here: the fix is a perception cone
+    overlap, outside this entry. The scenario test reports it.
 - Nothing worth a look, or the budget does not admit one → straight on to the next sector, with
   no pause. A commanded narrow sector with nothing to resolve still gets its binocular search
   (`SEARCHING`) at the end of the pass, as today. `SEARCHING` is not counted against the glass
@@ -305,7 +471,9 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
   **So the worst flank revisit is 28 s nominal and 32 s with poll slack, against
   `POSITION_HALF_LIFE_S` = 30 s.** The budget itself fits. The poll slack is what crosses the
   line, by up to 2 s, and only in a window where the whole 12 s was spent. The pendulum would
-  cross it by 6 s. Decision 6 below is whether to accept that, and how the invariant is restated.
+  cross it by 6 s. Decision 6, ANSWERED (*"For the overrun - ok."*), accepts it, with the invariant
+  restated as below. The figures are for a non-rotating body. Rotation is covered under "Body
+  rotation" above.
 - **What crossing the half-life does, verified against the consumers of `certainty_of`/
   `POSITION_HALF_LIFE_S` (not the docstrings):**
   - **A flank contact that was not glassed in that window reads "estimated" instead of "tracked"
@@ -332,7 +500,10 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
     look that taught nothing waits longer still. So a full-budget window needs fresh in-window
     contacts arriving faster than one every ~10 s, or several contacts being closed on at once.
     That is a burst at first contact with a multi-group scene, lasting a cycle or two, not a steady
-    state. A quiet scene is the bare 16 s sweep. The Stage 1 scenario test measures it (below).
+    state. A quiet scene is the bare 16 s sweep. The user confirms the design case (2026-11-02):
+    *"a handful of groups a few km apart, typically. Larger missions have more units and groups,
+    but still spread around."* So busy windows are rare in the missions flown. Location looks add
+    about one look per group per encounter. The Stage 1 scenario test measures it (below).
     Flight confirms it via `sortie-log-triage`'s certainty column. That is unmeasured until then,
     and stated as such.
 - New tunables, `status="judgement"`, `#needs-flight`:
@@ -368,8 +539,10 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
     Past `GROUP_REIDENTIFY_WINDOW_S` (2 × half-life) its group would expire and re-form. Defaults
     32 < min(120, 60). The `1.0` is the poll slack, a literal in `tuning` (`tuning` cannot import
     `body.py`'s `_DEFAULT_POLL_INTERVAL_S`; the comment cites it).
-  - **Not an invariant, per Decision 6:** worst revisit < `POSITION_HALF_LIFE_S`. It is written
-    down as an accepted overrun (≤ 2 s at defaults), with the consequences listed above.
+  - **Not an invariant, per Decision 6 (ANSWERED, *"ok"*):** worst revisit <
+    `POSITION_HALF_LIFE_S`. It is written down as an accepted overrun (≤ 2 s at defaults), with
+    the consequences listed above. `[[BL-B112]]` (motion-aware certainty, queued after this entry)
+    would make it moot for stationary contacts.
 
   `n_sectors` comes from the same partition function `gaze` uses, placed where `tuning` can import
   it without importing `perception.gaze` (which imports `tuning`). The Implementer verifies the
@@ -448,6 +621,41 @@ New tests:
 - the coupling check rejects a violating `tuning.toml` (e.g. `LOST_THRESHOLD_S = 30.0` with
   defaults elsewhere, which violates I2), falling back on every file-set coupled key, and accepts
   the pendulum table at defaults
+
+Fourth pass, new tests:
+- **The scenario test flies the user's approach profile, not only a straight line** (user:
+  *"~100 km/h and could include sideways movement and circling"*). Three legs at 28 m/s and 1 s
+  polls, over a scene of the user's density: three groups 2–3 km apart, first seen at 3–5 km.
+  1. A straight approach (the baseline the revisit formula describes).
+  2. A sideways leg: heading held, track 90° off.
+  3. An orbit of 2.5 km radius around one group, with the others off-centre.
+
+  Measured and reported for each leg: every group gets a location look, and none is location-
+  glassed twice at the same range (that one needs Decision 7); the worst wait from first sighting
+  to a glass step covering the contact (≤ 20 s at ≤ 2°/s); the worst eye revisit, with the
+  rotational aliasing case reported rather than asserted; the fraction of polls with a swept
+  contact "estimated"; and no flank re-acquisition churn. The straight leg alone keeps the
+  existing assertions (worst revisit ≤ `WORST_REVISIT_S`).
+- `location_gain_m`: 0 without a `PositionEstimate`, and 0 beyond binocular presence range; equal to
+  `range_uncertainty_m − σ_b` otherwise; ≈ 0 after a binocular fuse (the table above, as a test).
+- Group reduction: a group with one fixed member is not location-worthy for any member; an
+  ungrouped contact keeps its own gain.
+- A location-only target (outside its classification window) starts a look, and the look does
+  not end on its first poll. It ends once the fuse drops the gain.
+- `choose_glass_look`: an unwatched location target beats a classification target with more
+  coverage; inside a bucket, `choose_look`'s order is unchanged.
+- A failed location look (gain unchanged, level unchanged) is not re-admitted before
+  `GLASS_STALL_COOLDOWN_S`, unless the range has closed to 80%.
+- Sector margin: a contact 3° outside the swept sector's edge is a target, 5° outside is not;
+  a boundary contact is glassed once, not twice.
+- Look follows its contact: under a 2°/s body rotation, the chosen contact stays inside the
+  envelope for the whole look, and every step moves by the same delta; an absent chosen contact
+  leaves the steps unchanged.
+- **Decision 7 (a) only, in `test_position_belief.py`:** binocular fix, then six naked fuses at
+  the same geometry: 1σ range never rises above the post-fix value. A naked-only dwell converges
+  as today (the cap never binds there). Re-run `test_relative_distance_sweep.py` and
+  `test_relative_distance_scenarios.py` as they stand: **if any BL-B108 fence or assertion moves,
+  stop and report** before changing it. That is BL-B108's own escalation rule.
 
 **Stage 2 — Never fold an ambiguous memory-only match (E1 delivered, Q3 as the default).**
 - **Trigger** (`ContactStore.ingest`, gate branch only, never continuity), all of:
@@ -614,7 +822,11 @@ Cards:
   a contact already glassed at the same range is not glassed again every minute;
 - free scan, two groups on one bearing, far one glassed first, then crest a ridge (expect two
   callouts);
-- a commanded o'clock scan, listening for binocular cadence.
+- a commanded o'clock scan, listening for binocular cadence;
+- (fourth pass) the user's own approach: ~100 km/h toward two or three groups at 3–5 km, then a
+  sidestep and an orbit at a safe distance. Watch for binoculars going to each group once while
+  it is far (location), and again once inside classification range, but not every minute. Watch
+  too that a look holds its group through the turn.
 
 The "group moves out of its area while hidden" card belongs to `[[BL-B111]]`.
 
@@ -630,7 +842,14 @@ and the sites in `body.py`). **Three new fields:**
   rolling budget; replaces the scalar `glass_cycle_spent_s` that alternative (b) named, for the
   reason given in Stage 1)
 
-Both fresh-construction sites must carry all three forward explicitly, the BL-B71 lesson. The
+Both fresh-construction sites must carry all three forward explicitly, the BL-B71 lesson.
+
+**Fourth pass: no new `OpticState` field.** Location looks add two `LookTarget` fields, which are
+per-poll inputs and not state. There are two `LookTarget(` sites in `src`: `look_target_for`, and
+`_target_in_current_look`'s probe centre, which takes the defaults. Look-follow moves four
+existing fields together, so it gets the two rows at the end of the table. The delta needs the
+chosen contact's previous azimuth/elevation, and that is already on the state: it is the current
+envelope centre, which is updated each poll. The
 budget check reads `sum(glass_recent_steps_s) + (now − glass_step_started_sim)`.
 
 | Field | Written by | Transition | Must hold true after |
@@ -647,6 +866,8 @@ budget check reads `sum(glass_recent_steps_s) + (now − glass_step_started_sim)
 | `scan_sector_index`, `glass_recent_steps_s` | **external**: OBSERV off (`body.py` observed edge, `_force_observ_off`) | SIGHTING → SCANNING home | index 0, anchored now, step clock `None`, window cleared `()` |
 | `scan_sector_index`, `glass_recent_steps_s` | **external**: OBSERV on | SCANNING → SIGHTING home | unchanged and unread while SIGHTING; step clock `None` |
 | `hands_busy_until_sim` | external | any | no sector/step/window change (a suppressed poll advances nothing, as today) |
+| `search_pattern_steps`, `look_envelope_azimuth_deg`, `look_azimuth_deg`, `look_elevation_deg` (fourth pass, look-follow) | internal (`GLASSING` poll) | chosen contact (`look_contact_id`) present in this poll's targets | every step and the envelope centre shifted by the **same** azimuth/elevation delta (the contact's change since last poll); `look_envelope_half_width_deg`, `phase_started_sim` and the step index unchanged, so the step clock is not reset |
+| same | internal | chosen contact absent this poll | all unchanged (hold, as today) |
 
 `n` is the sector count from the partition (4 with the default table). The window is truncated to
 the new n−1 whenever n changes, which only happens on the plan-change row, where it is cleared
@@ -689,7 +910,7 @@ to be grep-verified at implementation.
   produce the same verdict. "Has moved" asserts motion he did not see. Resolved by user Decision
   4 (neutral "now at").
 - **Worst revisit 28 s nominal, 32 s with poll slack, against `POSITION_HALF_LIFE_S` (30 s)**
-  in a window where the whole 12 s budget is spent. Accepted under Decision 6: a flank contact
+  in a window where the whole 12 s budget is spent. Accepted under Decision 6 (ANSWERED, *"ok"*): a flank contact
   not glassed in that window reads "estimated" for ≤ 2 s. The only spoken effect is a watched
   contact's kilometre-crossing line arriving ≤ 2 s late. How often the full budget is spent is
   unmeasured until flight; the Stage 1 scenario test reports the synthetic figure.
@@ -710,6 +931,33 @@ to be grep-verified at implementation.
   `_ACQUISITION_RETENTION_WINDOW_S` move (16 → 32 s) is what keeps the longer busy revisit from
   turning into re-acquisition churn. The Stage 1 scenario test must show no new-object churn on a
   flank object across a busy cycle before Stage 1 merges.
+- **Location looks are worth less than the user may expect (fourth pass, effort/value).** In the
+  model, a binocular look tightens range by ~30% (≈ 0.048 R: ±501 → ±357 m at 3 km) and bearing
+  not at all. The whole gain is `BINOCULAR_RANGE_SIGMA_SCALE` = 0.7, a judgement value marked
+  `#needs-flight`. The build itself is cheap: one predicate through an existing parameter, one
+  bucket, and two `LookTarget` fields. What makes it worth anything is Decision 7. If flight says
+  binoculars judge range much better than 0.7, that one tunable raises the value of every location
+  look without any code change.
+- **Decision 7 (a) touches BL-B108's fold, merged the day before.** The cap only ever binds when a
+  prior is tighter than this look's own floor, which is the better-optic-then-eye case and the
+  triangulated-then-same-geometry case. The second case is the one the cap changes beyond
+  location looks: a triangulated estimate would no longer be pulled back to single-geometry
+  precision. That is arguably also right ("new evidence never makes the belief less certain"),
+  but it is a BL-B108 behaviour change. Hence BL-B108's tests are re-run first, and any moved
+  fence stops the work.
+- **Rotational eye aliasing (pre-existing):** ~28 s quiet, ≈ 40 s with a full glass budget, for
+  a contact crossing a leg boundary against the sweep at 0.5–2°/s. That is the user's own approach
+  profile. It stays below the group-expiry and lost cliffs. `_ACQUISITION_RETENTION_WINDOW_S` at
+  `WORST_REVISIT_S` (32 s) does not span it, so a flank re-acquisition debounce can re-run in that
+  case. The cost is a debounce delay, not a new contact (object permanence 600 s). The scenario
+  test reports it. A perception-side cone overlap is the fix, and it is not in this entry.
+- **Look-follow tracks the *belief*, not truth.** When a fuse moves the believed mean, the look
+  moves with it. That is where Petrovich believes the group is, so it is honest. A large jump
+  could swing the look off the real group for the rest of that look. That is bounded by
+  `MAX_LOOK_S`, and the attempted marks stop it repeating.
+- **Group reduction leaves stragglers at naked-eye grade.** A group member outside the one look
+  keeps its own ±0.17 R. The group centroid (`groups._centroid_of`, a mean) then mixes graded and
+  ungraded members. Propagating the fix to siblings is a possible follow-on, not built.
 - *(Superseded, third pass: the second pass's "revisit 26 s (29 s with slack) / glass budget 4 s"
   and "reshaping `SCAN_PLAN` to 9 → 3, ahead once per cycle" risks no longer apply.)*
 - **Stages 3–4 (`[[BL-B111]]`), when built:** cross-subproject Lua with a Windows-only
@@ -732,6 +980,15 @@ revisit bound loosens. The `GLASSING` stall cooldown is the first binocular-side
 per-sector glass step is also the slot a future 9K113-at-home check (OBSERV on) would reuse
 through `choose_sighting_look`.
 
+Fourth pass:
+- **Decision 7 (a) reaches beyond binoculars.** A 9K113 stadiametric fix (k = 0.5/0.3) reverts
+  under naked-eye looks today by the same mechanism. The cap keeps it, which helps attack-run
+  alignment on a contact last ranged through the sight.
+- **`[[BL-B112]]`** (motion-aware certainty) and location looks pull the same way. A stationary
+  group's covariance does not grow, so once located it stays located, and BL-B112 would keep its
+  label "tracked" to match.
+- **Stage 0 must be measured on the post-floor code** (Stage 0 note).
+
 ### How each alignment item is answered
 
 - **E1**: Stage 2, for the cases the trigger catches; residuals in Stage 0's table.
@@ -747,6 +1004,19 @@ through `choose_sighting_look`.
   pilot to notice ahead pickup, since nothing else measures it before flight.
 - **Re-check Q3 (glass budget):** Decision 5 ANSWERED (b). The budget gates starts, not lengths,
   and selectivity is the main bound (Stage 1, "Selectivity").
+- **Optics priority (user, 2026-11-02: *"a) knowing where the groups are b) iff c)
+  classification"*):** (a) is location looks, ranked first (Stage 1). (b) is not modelled: every
+  contact is `UNKNOWN`, `[[BL-B12]]` is deferred, and nothing is built for it. (c) is the existing
+  classification ladder, ranked after location. Whether a location fix *lasts* is Decision 7.
+- **Mission density (*"a handful of groups a few km apart"*):** the design case for the budget
+  and revisit figures. Busy windows are rare. Location looks add about one look per group per
+  encounter.
+- **Approach profile (*"~100 km/h … sideways movement and circling"*):** checked under "Body
+  rotation". Added: the sector margin, look-follow, and a scenario test flying the profile.
+  Pre-existing eye aliasing is reported, not fixed.
+- **Tracked vs estimated for stationary units:** `[[BL-B112]]`, queued after this entry (user:
+  *"own item, queue after this"*). It is not built here, and it makes Decision 6 moot for
+  stationary contacts.
 - **E5**: Stage 3. Fail closed. Not seen ≠ empty.
 - **E6**: `plausible_speed_mps` growth.
 - **E7**: `COMPOSITION_MATCH_RATIO`, used only after a look.
@@ -771,7 +1041,9 @@ Decisions 1–4 were asked after the plan check and answered by the user on 2026
 (`explore-notes.md`, "Plan-check decisions", verbatim). The original questions stay below each
 answer. Decision 5 is new, raised by the three-sector arithmetic. The plan re-check's questions
 were answered on 2026-11-02 (`explore-notes.md`, "Plan re-check answers", verbatim): Decision 1a
-and Decision 5 below. Decision 6 is new, raised by that arithmetic.
+and Decision 5 below. Decision 6 is new, raised by that arithmetic. Fourth pass (2026-11-02,
+`explore-notes.md`'s last two sections): Decision 6 answered; Decision 7 open (needs the user);
+Decisions 8–9 proceed on their defaults unless the user says otherwise.
 
 **Decision 1, ANSWERED:** *"third of full scan. So basically left right and ahead. Multiple looks
 per glass is ok and expected."* This **supersedes** the half-sweep recommendation. Stage 1 now
@@ -832,6 +1104,16 @@ unless the user picks (b). The user should still hear about it, because it chang
 will see Petrovich's binoculars stay up.
 → **Answered above: (b), as revised.**
 
+**Decision 6, ANSWERED 2026-11-02: (a).** User: *"For the overrun - ok."* The ≤ 2 s overrun is
+accepted. I1 is kept, and I2 is added on the real cliffs, as built in Stage 1. The user added, in
+the same answer: *"Tracking vs estimated. Again, the unit movement should be considered.
+Stationary unit can be expected to remain stationary. Therefore even if no one looked at it for 30s
+it's not likely to have moved."* That is opened as `[[BL-B112]]`, queued after this entry. It
+would make this overrun moot for stationary contacts. The fourth pass's rotation check found a
+rarer, larger overrun from the eye's own aliasing (≈ 40 s worst, pre-existing; Risks). The same
+reasoning applies to it: it stays below the expiry and lost cliffs.
+
+*Original Decision 6, kept for the record:*
 **Decision 6, OPEN, with a default the Implementer may proceed on: accept a brief overrun of the
 position half-life in a full-budget window.** With the user's 12 s budget, the worst revisit for a
 leg that is not glassed in that window is 28 s nominal and **32 s with poll slack**, against
@@ -859,6 +1141,44 @@ Options:
 It is reversible and local, so per `AGENTS.md`'s escalation rule the Implementer proceeds on (a).
 The user should hear about it, because it is the one place the plan knowingly lets a contact's
 certainty sag between looks.
+→ **Answered above: (a), "ok".**
+
+**Decision 7, OPEN, needs the user: should a binocular location fix stick?** Measured on the
+shipped `fold_position` (Stage 1, "Location looks"): after a binocular look at 3 km, the belief's
+range 1σ goes 501 → 357 m, holds for one more naked-eye sweep, then returns to 486 m. That is
+because `_apply_floor` scales its floor by the *immediate* prior anchor's optic only, and a
+naked-eye fuse replaces that anchor. BL-B108 named this "one-anchor approximation" and said
+*"escalate rather than add a second anchor"*, so it comes to you.
+- **(a) Recommended: a fuse never leaves the belief less certain than it was just before it.**
+  Cap the floor at the prior's own inflated covariance. Growth from elapsed time and plausible
+  speed still applies, so a *moving* group still loosens. This is not a second anchor: it is one
+  `min` in `_apply_floor`, plus a parameter. A located group stays located until it moves or the
+  geometry changes a lot, and a 9K113-ranged contact keeps its range too. **The cost:** it changes
+  BL-B108's fold one day after it merged, and Stage 0's trigger numbers. So BL-B108's tests are
+  re-run first, and if any fence moves the work stops and comes back to you.
+- (b) Build location looks on today's floor. Each fix lasts ~30 s, and the group is then
+  re-glassed once per stall cooldown (180 s) for another ~30 s. That is binoculars raised for
+  nothing lasting, against your *"no use raising them on contacts where additional information is
+  not available"*.
+- (c) Do not build location looks in Stage 1. Open an entry for the floor question and location
+  looks together, after BL-B108's fold has been looked at on its own.
+
+Until this is answered, 1-scan proceeds and 1-floor/1-locate wait (Stage 1, build order).
+
+**Decision 8, default proceeds (local, reversible): location before a *watched* contact's
+classification.** `choose_glass_look` ranks location-worthy targets first, then `choose_look`'s
+watched → coverage → nearest inside each bucket. So an unwatched group's location look comes
+before a watched contact's classification look. That follows your order (*"a) knowing where the
+groups are … c) classification"*). The alternative is watched-first across both, which keeps the
+2026-09-25 *"even more so watched contacts"*. Both are a one-line change in one function. Say if
+you want the watched contact first.
+
+**Decision 9, default proceeds (scope, stated): a binocular look follows its contact through a
+turn.** Today a look's aim is fixed relative to the airframe for its up to 6 s. At the 0.5–3°/s of
+your circling approach, the group drifts out of the field before the look ends. Fixing it is
+small: the four existing fields shift together each poll, with no new state. It is a pre-existing
+gap rather than part of the sector scan, so it is named here as scope added. Without it, location
+looks during an orbit are unreliable. Veto it if you want it as its own entry.
 
 ---
 
