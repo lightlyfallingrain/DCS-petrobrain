@@ -336,3 +336,91 @@ does not check.
    yourself while flying — does that hold even when you're focused on instruments or terrain at low
    level, or should ahead get a second visit per cycle despite the cost (the plan rejected that: 10
    legs, four glass steps, under 2.5 s of binoculars per step)?
+
+## Plan re-check 2 — 2026-11-02
+
+**Verdict:** ALIGNED. Both prior CONCERNS are resolved cleanly, and both resolutions check out
+against the live source, not just the plan's prose: `SCAN_PLAN`'s default is confirmed as
+`(12, 11, 10, 9, 12, 1, 2, 3)` in `perception/gaze.py`, and `GLASSING`'s call to `is_worth_a_look`
+is confirmed to pass no `stall_cooldown_s` today (`belief/optic_policy.py:2918`), matching the gap
+the plan says it closes. One selectivity point is worth a line to the user, not a blocker, and
+Decision 6 is correctly left unescalated.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (two groups stay two) | 2 | met — unchanged |
+| E2 (one group stays one) | 2 (partial) / BL-B111 | contradicted for 4–10% cross-optic false-split under BL-B110 alone, same as before, dated to BL-B111 — unchanged |
+| E3 (no callout until verdict, bounded) | 2 | met — unchanged |
+| E4 (look at A's area, debug-visible, B first) | BL-B111 Stage 4 | missing in BL-B110 (unchanged), scheduled |
+| E5 (absence counts only where visible) | BL-B111 Stage 3 | missing in BL-B110, scheduled |
+| E6 ("moved" only if believable) | BL-B111 Stage 4 | missing in BL-B110, scheduled |
+| E7 (composition as graded suspicion) | BL-B111 Stage 4 | missing in BL-B110, scheduled |
+| E8 (never pre-empts a threat/9K113) | BL-B111 Stage 4 rows | met where it will exist |
+
+### Findings
+
+1. **Both prior CONCERNS resolved, and the resolution is grounded in the user's own words, not a
+   reading of them.** — lens: Grounded in
+   - Order: *"always start from ahead and sweep to left/right alternating"* is read as ahead → left
+     → ahead → right, which is exactly `SCAN_PLAN`'s existing table — verified in
+     `perception/gaze.py` line 299-300, not assumed from the plan's prose. No reshape, no new test
+     churn, and 12 o'clock keeps its ≈8 s worst first-notice (prior finding 4 is moot — the single-
+     visit-per-cycle premise that produced ≈14 s no longer applies, because the table never changed).
+   - Budget: *"four is too short ... 12 s sounds ok"* is built as a 12 s **rolling** per-cycle
+     budget that gates a look's start, never its length, with no per-step cap — a literal reading of
+     "don't limit the time too tightly," not a rounded-off version of it.
+
+2. **Selectivity is matched well, with one real gap the plan already names rather than hides.** —
+   lens: Whose job / Purpose
+   - The user's rule has two parts: (a) raise binoculars only when they can add detection,
+     classification or identification *at the current distance* — already enforced by
+     `can_still_improve`/`tier_ranges`, confirmed unchanged; (b) once raised, don't cut the look
+     short — built exactly as the start-gate/natural-end design.
+   - `GLASS_STALL_COOLDOWN_S` (180 s) closes a third, narrower gap the user did not ask about
+     directly: a look that already happened and taught nothing is currently retried anyway at 64 s
+     at the same range (confirmed live: `GLASSING`'s `is_worth_a_look` call passes no
+     `stall_cooldown_s`, so the long-cooldown branch never engages there today). That is the
+     measured form of "additional information not available at current distance" extended from
+     range to *recency*, and it reuses `BL-B85`'s existing pattern (`SIGHT_STALL_COOLDOWN_S`)
+     rather than inventing a second mechanism — the right call under "do not reinvent the wheel."
+   - The one place this could over-suppress: the user's own composition language (E7, *"3 and 5
+     could be obscured, that deserves more attention"*) describes a case where a look's value
+     depends on *aspect or masking clearing*, not on the aircraft closing range. `GLASS_STALL_
+     COOLDOWN_S`'s only escape is `RETRY_RANGE_FRACTION` (closing to 80% of the attempt range);
+     nothing re-admits a contact whose look failed for a transient reason (a tree line, a bad
+     aspect) if the aircraft does not also close distance in the next 180 s. The plan's own Risks
+     section names this plainly (*"a contact that failed once because of a transient cause... is
+     not glassed again for three minutes"*) and marks the constant `#needs-flight` — so this is not
+     a hidden gap, and E7's actual mechanism (composition suspicion driving a deliberate re-look) is
+     BL-B111 work, not this plan's, so it cannot be contradicted by something not yet built here.
+     Worth one line in the test card so the pilot is listening for it specifically, not just
+     noticing "binoculars came up less than expected" in general.
+
+3. **Decision 6 is correctly left to the Implementer, not the user.** — lens: Whose job / The
+   envelope
+   - The accepted overrun (≤2 s past `POSITION_HALF_LIFE_S`, flank-only, full-budget windows only)
+     was traced against the real consumers (`certainty_of`, `lifecycle_event_kind`,
+     `contacts.py`'s `fresh` gate), confirmed present at the cited call sites. The only audible
+     effect is a watched flank contact's kilometre-crossing line landing up to ~2 s late, in a
+     scenario (12 s of binoculars inside one 16 s cycle) the plan itself says needs a multi-group
+     burst to occur at all.
+   - That is local, reversible (a single tunable, `GLASS_BUDGET_PER_CYCLE_S` or
+     `POSITION_HALF_LIFE_S`), and does not materially change what the pilot hears — exactly
+     `AGENTS.md`'s bar for proceeding without escalation. No finding here; noted because the plan
+     re-check prompt asked the question directly.
+
+4. **The second-order note on BL-B111's hold growing to ≈17 s is the correct place to carry this
+   plan's one real downstream cost, and it is carried.** — lens: Grounded in
+   - With no per-step cap, a busy sector can now spend up to two full 6 s looks before B's own look
+     and A's area-look (BL-B111) get their turn, pushing the structural hold past
+     `CALLOUT_MAX_AGE_S` (10 s). The plan states this is where BL-B111 picks it up as "load-bearing"
+     rather than "required," which is the right escalation target — BL-B111 hasn't been architected
+     yet, so this plan cannot resolve it, only flag it accurately. Confirmed it is flagged
+     (plan.md, "Second-order effect").
+
+### Questions for the user
+
+- None required to proceed. One optional note for the acceptance flight, already reflected in
+  Finding 2 above: if binoculars seem reluctant to re-check a contact that was obscured (tree line,
+  bad aspect) rather than one the aircraft is closing on, that is `GLASS_STALL_COOLDOWN_S` (180 s)
+  — a single tunable to shorten if three minutes feels too long once flown.
