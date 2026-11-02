@@ -125,3 +125,31 @@ Reading (main loop):
 - (3) The five full-cycle lockout tests and the exact-100% fold test are rewritten.
 - (4) Wording when A is judged moved: approximately *"A now at …"* — neutral, which also covers
   the "misranged" case Petrovich cannot tell apart.
+
+## Plan re-check answers (user, verbatim, 2026-11-02)
+
+Asked: (1) the sweep order left → ahead → right, or literal "left, right, ahead"; (2) ahead glassed
+once per cycle (worst first notice of a new threat dead ahead ~14 s instead of ~8 s), or a second
+ahead visit per cycle; (3) Decision 5, glass budget 4 s per step, or (b) 12 s per cycle shared
+across the steps.
+
+> *"1,2 - I meant regions, not order. For order, always start from ahead and sweep to left/right
+> alternating. That way direction of flight is checked more often.*
+> *3 - four is too short. Binoculars should be used to look closer when there is good probability
+> that using them brings a benefit - detection, classification or identification. There's no use
+> raising them on contacts where additional information is not available at current distance.
+> Then when binoculars are used, it's better to not limit the time too tightly. The 12 s sounds
+> ok."*
+
+Reading (main loop):
+
+- (1, 2) "Left right and ahead" named the **regions**, not an order. **Order: start ahead, then
+  alternate sides** — read as ahead → left → ahead → right, repeating, so ahead is swept twice per
+  cycle. This reverses the plan's "ahead once per cycle" call.
+- (3) **4 s per step is rejected; Decision 5 goes to (b), a 12 s budget per cycle.** Looks should
+  not be cut short. The bound on binocular time is to come mainly from **selectivity**: raise
+  them only when a look is likely to add detection, classification or identification at the
+  current distance, not on contacts where nothing more is visible from here.
+- Consequence to settle in the plan: four sector visits (10 legs, 20 s of eye sweep) plus up to
+  12 s of glassing puts the worst flank revisit past the 30 s position half-life. The plan must
+  say how that is handled and what the pilot would notice.
