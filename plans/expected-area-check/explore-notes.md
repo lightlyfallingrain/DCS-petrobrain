@@ -191,3 +191,25 @@ Reading (main loop):
   120 s → lost) whatever the contact's motion; position covariance already grows per class
   (`plausible_speed_mps`, 0 for entrenched). A stationary unit unseen for 30 s should not read as
   less certain in position.
+
+## Location looks, stationary-unit entry, approach profile (user, verbatim, 2026-11-02)
+
+Asked: (1) binocular looks for **position** (a group whose range rests on the naked eye only),
+ranked before classification — in Stage 1 or a separate entry; (2) open a separate entry for
+motion-aware tracked/estimated/lost.
+
+> *"1 - do in stage 1*
+> *2 - own item, queue after this*
+>
+> *Careful approach speed might be ~100 km/h and could include sideways movement and circling to
+> keep safe distance"*
+
+Reading (main loop):
+
+- (1) **Stage 1 gains location looks**: a contact/group whose position rests only on the naked eye
+  is worth a binocular look for position; look choice ranks position before classification (IFF
+  not modelled, BL-B12).
+- (2) Opened as `[[BL-B112]]`, queued after BL-B110.
+- **Approach profile for sizing scan timing:** ~100 km/h, with sideways flight and circling at a
+  safe distance. Sectors are body-relative, so while circling the ground under each sector rotates;
+  a group can move from one sector to another between sweep and glass step.
