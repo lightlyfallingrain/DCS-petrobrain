@@ -10,3 +10,9 @@
   (whose controlled terrain the contact sits in) — not from DCS truth.** Terrain-control data
   doesn't exist in world-model yet either. Not scoped to a specific BL-x milestone. **Do not start
   without the user's instruction.**
+
+  **Hook from `[[BL-B110]]` (2026-11-02):** the user ranks IFF second, after rough location and
+  before classification, and wants exact location *"for enemy units especially"*. BL-B110 ranks
+  type-identification looks before class looks (the input this inference needs) and limits
+  exact-location looks to watched contacts. When this entry is built, "believed enemy" joins that
+  exact-location predicate (`plans/expected-area-check/plan.md`, Stage 1, "Priority 4").

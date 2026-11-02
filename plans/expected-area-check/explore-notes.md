@@ -248,3 +248,10 @@ Reading (main loop):
 - So **Decision 8 reverses**: a look for exact position ranks after classification, and is limited
   to those contacts, except where the rough position is worse than the range-scaled allowance
   (that is priority 1). Binocular range-sense question not answered.
+
+Follow-up (user, verbatim, 2026-11-02), answering whether binoculars give a much better sense of
+range:
+
+> *"Binoculars range sense - keep the current."*
+
+So `BINOCULAR_RANGE_SIGMA_SCALE` stays 0.7 (plan Decision 11).

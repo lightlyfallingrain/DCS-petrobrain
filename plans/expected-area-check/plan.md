@@ -55,6 +55,27 @@ govern). Stage 1 only. What changed:
   profile as well as a straight line.
 - **Decision 6 ANSWERED:** *"For the overrun - ok."*
 
+**Revised 2026-11-02, fifth architect pass, on `cad3783a`**, after the user's answer to Decision 7
+and his refined priority (`explore-notes.md`, "Decision 7 and the refined priority", which
+governs). Stage 0a is new; Stage 1's location looks are reshaped. Everything else stands. What
+changed:
+- **Decision 7 ANSWERED (a)** (*"Option a"*). The floor cap is **Stage 0a**, built first: BL-B108's
+  tests re-run before and after, any moved fence stops the work, and Stage 0's table is taken on
+  the post-0a code.
+- **Priority 1, detection and rough location, needs no binocular look.** The rough-location
+  allowance is defined from what the pilot hears (Stage 1, "Priority 1"). Measured on the shipped
+  estimator, a naked-eye look is **never** worse than it, at any range from 0.5 to 6 km and any
+  altitude from 0 to 800 m AGL, under every shipped tuning key. The scan is the whole answer.
+- **Priority 2/3: a look toward type identification ranks before a look toward a class.** The
+  ladder already makes that distinction, and `choose_sighting_look` already orders by it; the glass
+  step reuses the same bucket. IFF is not built (`[[BL-B12]]`).
+- **Priority 4, exact location, only for what the pilot asked about**: a *watched* contact
+  (effective attention `watch`/`priority`). Enemy units: not modelled (BL-B12). Mission target
+  units: no such notion exists in body-layer (checked). Ranked **after** classification, so
+  **Decision 8 is REVERSED**. The fourth pass's "≥ 100 m tighter, every group, ranked first"
+  criterion and its group reduction are dropped.
+- **Binocular range sense: kept as is** (user: *"Binoculars range sense - keep the current."*).
+
 ### Goal
 
 When a new sighting B lies on the bearing of a group A that Petrovich holds only in memory, he
@@ -118,13 +139,14 @@ Stages 0–2 (definite):
   rolling budget that gates look starts; sector target filter; `GLASSING` passes a stall cooldown
   to `is_worth_a_look` (new `GLASS_STALL_COOLDOWN_S`); docstring rewritten (it describes the
   2026-09-23 reading). New fields on `OpticState` (Co-moving Fields).
-  Fourth pass: `LookTarget` gains `group_id` and `location_gain_m`; a pure `location_gain_m(...)`
-  computed in `look_target_for`; a pure group reduction; `choose_glass_look` (location bucket
-  first, the `choose_sighting_look` pattern); the `GLASSING` predicate widened to "can still
-  improve **or** worth locating"; the sector filter widened by half a binocular field; the
-  `GLASSING` branch shifts its sweep by the chosen contact's own body-azimuth change each poll.
-  New tunable `LOCATION_LOOK_MIN_GAIN_M`.
-- `body-layer/src/belief/position_belief.py` (fourth pass, **only if Decision 7 is answered (a)**):
+  Fourth pass, reshaped by the fifth: `LookTarget` gains `location_gain_m` (computed in
+  `look_target_for`; no `group_id`, no group reduction); `choose_glass_look` with three buckets
+  (type identification, then classification, then exact location; the `choose_sighting_look`
+  pattern); the `GLASSING` predicate widened to "can still improve **or** (watched **and** worth
+  locating)"; the sector filter widened by half a binocular field; the `GLASSING` branch shifts its
+  sweep by the chosen contact's own body-azimuth change each poll. New tunable
+  `EXACT_LOCATION_MIN_GAIN_M` (replaces the fourth pass's `LOCATION_LOOK_MIN_GAIN_M`).
+- `body-layer/src/belief/position_belief.py` (**Stage 0a**, Decision 7 ANSWERED (a)):
   `_apply_floor` never raises a fused estimate above its own prior's inflated covariance.
 - `body-layer/src/perception/gaze.py`: `ScanPlan` gains a one-pass sweep anchor
   (`sweep_legs`, `sweep_started_sim`), and `gaze_at` honours it. **`SCAN_PLAN`'s default is
@@ -139,8 +161,9 @@ Stages 0–2 (definite):
 - `body-layer/src/body.py`: build the sector-anchored plan once per poll for every `gaze_at`
   consumer: the naked-eye source, the LOS look-direction push and the debug/eyesight views. Pass
   the sector period, wedge, count and budget to `decide_optic` instead of the hard-wired
-  `SCAN_CYCLE_PERIOD_S`. Reset the sector on a scan-command change. Fourth pass: `_look_targets`
-  sets each target's `group_id` from `store.group_for_contact` and applies the group reduction.
+  `SCAN_CYCLE_PERIOD_S`. Reset the sector on a scan-command change. (Fifth pass: `_look_targets` needs no change for
+  location; `watched` is already set there, and the fourth pass's `group_id`/group reduction is
+  dropped.)
 - `body-layer/src/tuning.py`: `_check_scan_decay_coupling` extended to five keys and two
   invariants (Stage 1).
 - `body-layer/src/belief/association_over_time.py`: `passes_gate` gains a keyword
@@ -152,8 +175,8 @@ Stages 0–2 (definite):
 - Tests: `test_optic_policy.py`, `test_gaze.py`, `test_body.py`, `test_decay.py`/`test_tuning.py`
   (coupling), `test_relative_distance_sweep.py`, `test_relative_distance_scenarios.py`,
   `test_callouts.py`, and a new `test_expected_area_trigger.py`. Fourth pass:
-  `test_position_belief.py` (Decision 7), and the Stage 1 scenario test gains the approach
-  profile.
+  `test_position_belief.py` (Stage 0a), and the Stage 1 scenario test gains the approach
+  profile. Fifth pass: `test_estimation.py` (the rough-location fence, Stage 1 "Priority 1").
 - `body-layer/docs/STRUCTURE.md`, `config/defaults.toml` (regenerated), and `body-layer/CLAUDE.md`
   "Tuning". That section describes the three-key coupling; it becomes five keys and two
   invariants. Its 16.0 s cycle figure stays true.
@@ -169,6 +192,30 @@ Stages 3–4 (**moved to `[[BL-B111]]`**, not built in this feature; kept for th
 
 ### Implementation Plan
 
+**Stage 0a — A new look never leaves the belief less certain than just before (Decision 7,
+ANSWERED (a)). Built first, before Stage 0's measurements.** Fifth pass.
+- **Why first:** it changes the covariance the trigger's gate reads (a binocular- or
+  sight-grade belief stays tight under later naked-eye looks), so Stage 0's table taken before it
+  would describe code that no longer exists. It is also what makes Stage 1's exact-location looks
+  worth anything.
+- **Order, BL-B108's own escalation rule:** (1) run `test_relative_distance_sweep.py`,
+  `test_relative_distance_scenarios.py` and `test_position_belief.py` on the unchanged code and
+  keep the output; (2) make the change; (3) re-run them as they stand. **If any BL-B108 fence or
+  assertion moves, stop and report it** with both outputs. Do not edit the fence.
+- **The change:** in `_apply_floor`, the floored covariance is capped at the prior's own inflated
+  covariance (`_inflated_since_last_fuse(prior, t_sim, growth)`, the same value the fuse just
+  used): `floor_trace = min(floor_trace, prior_inflated.trace())`. One `min`, one new parameter
+  (the prior's inflated covariance, `None` for a founding look, which leaves the floor as today).
+  Not a second anchor.
+- **What it does not do, stated:** growth from elapsed time at `plausible_speed_mps` still
+  applies, and that rate is per believed **class**, not observed motion. So a fixed armour contact
+  (8 m/s) still loosens between looks: at 3 km, re-seen by eye every 16 s, σ² grows by
+  (8·16)² per cycle, from 357 m back to naked grade in about seven cycles (~110 s), instead of
+  two today. An installation component (growth 0) stays fixed. `[[BL-B112]]` (motion-aware
+  certainty) is where an observed-stationary contact would stop loosening.
+- **Ships with Stage 1's merge** (it is what Stage 1's exact-location look depends on, and Stage
+  1's card covers it). It is a BL-B108 behaviour change, so the card says so.
+
 **Stage 0 — Measure, then fix the trigger's definition (no behaviour change).**
 - Turn the scratch probe into `tests/test_expected_area_trigger.py`, an ensemble over the salt seam
   with BL-B108's `_observation` shape. It reports the three numbers in the table above, plus a
@@ -178,9 +225,8 @@ Stages 3–4 (**moved to `[[BL-B111]]`**, not built in this feature; kept for th
   the same-group false-trigger rate. The candidate to try first is evaluating the hypothesis σ at
   the **tighter** of the two optics, not the look's own. The table, not reasoning, decides it
   (`feedback_noise_field_sweeps_need_an_ensemble`).
-- **Fourth pass:** if Decision 7 is answered (a), the floor change alters the covariance the gate
-  reads (a binocular-grade belief stays tight under later naked-eye looks). So Stage 0's table is
-  taken **on the post-1-floor code**, never before it.
+- **Stage 0's table is taken on the post-0a code**, never before it (fifth pass: Decision 7 is
+  answered (a), and the floor change moved from inside Stage 1 to Stage 0a).
 - **Gate for proceeding:** record the final residual and false-trigger rates in this plan before
   Stage 2 is implemented. If the false-trigger rate exceeds ~10% in any cell, stop and bring it to
   the user, since that is the duplicate rate they would hear.
@@ -194,16 +240,14 @@ looks are not cut short; selectivity, not a tight timer, is what bounds binocula
 default `SCAN_PLAN` no longer changes**: today's table already is the order the user described
 (below). That removes the second pass's table reshape and all of its knock-on test-data churn.
 
-*Fourth pass, build order inside Stage 1.* It is still one merge, because the user asked for
-location looks in Stage 1.
-- **1-scan:** the per-sector scan, budget, stall cooldown, sector margin and look-follow. This
-  does not depend on Decision 7.
-- **1-floor:** Decision 7 (a), if chosen. It comes before 1-locate, and BL-B108's tests are
-  re-run before anything else changes.
-- **1-locate:** location looks.
+*Build order inside Stage 1 (fifth pass).* One merge, together with Stage 0a.
+- **1-scan:** the per-sector scan, budget, stall cooldown, sector margin and look-follow.
+- **1-rank:** the glass step's look order by the user's refined priority (type identification,
+  then classification, then exact location).
+- **1-locate:** exact-location looks for watched contacts. Needs Stage 0a, which is now built
+  first, so nothing waits on a decision.
 
-If Decision 7 is not answered by the time 1-scan is reviewed, 1-scan may merge alone and 1-locate
-follows as its own merge. Say so in the hand-off rather than holding 1-scan.
+(The fourth pass's "1-floor" step is now Stage 0a.)
 
 *What the code does today (verified, not taken from the docstring):*
 - A glass phase starts only when `now − phase_started_sim ≥ scan_cycle_period_s`, and `body.py`
@@ -325,95 +369,118 @@ follows as its own merge. Say so in the hand-off rather than holding 1-scan.
     so a contact the aircraft is closing on is still retried as soon as it is worth it. The
     Implementer confirms that the `GLASSING` commit writes `attempted_at_level` (its entry already
     records `pending_attempted_at_level`) instead of assuming it.
-- **Location looks (fourth pass; user: *"priority is a) knowing where the groups are b) iff c)
-  classification"*, and *"do in stage 1"*).** Built only once Decision 7 is answered; see the
-  finding below. Today nothing admits a look for position: `can_still_improve` is the
-  classification ladder only.
-  - **Criterion: the expected down-range tightening, not the optic history.** For a contact at
-    slant range R, `location_gain_m = position.range_uncertainty_m(observer) −
-    look_sigma_m(R, BINOCULAR_OPTIC).sigma_down`, floored at 0. It is 0 when R is beyond binocular
-    *presence* range for the believed type (`tier_ranges`, the same call `improvement_window_m`
-    makes), or when there is no `PositionEstimate`. Both terms already exist:
-    `range_uncertainty_m` is watch-reporting's deadband source, and `look_sigma_m` is the very
-    function perception uses for a binocular look. **Why this and not "position rests only on the
-    naked eye":** the two agree on the common case, but the gain also re-admits a *moving* group
-    whose covariance has grown since its fix (stationary and entrenched classes grow at 0, so they
-    are not re-glassed, which is BL-B112's direction), and it needs no new provenance field on
-    `Contact`. The anchor's `optic_class` cannot serve as provenance: the next naked-eye fuse
-    replaces it.
-  - **What it gives, measured on the shipped `fold_position`** (stationary target, same geometry,
-    naked looks fused first, then one binocular look):
+- **Optics priority (fifth pass; user, refined, 2026-11-02, verbatim):** *"1 detection and rough
+  location (the further away we are, the more imprecise the location is allowed to be. At close
+  distances a more specific location can and should be obtained) 2 IFF, though that needs expected
+  enemy territory and unit identification (eg. T-72 vs leopard) 3 classification 4 exact location
+  (for enemy units especially and mission target units or anything the player asks for)"*, and
+  *"Exact position is not even needed for all units."* This replaces the fourth pass's *"a)
+  knowing where the groups are b) iff c) classification"* reading, its per-group location looks
+  ranked first, and their group reduction. The fourth pass's text is at `cad3783a` for the record.
 
-    | R | naked-eye-only belief, 1σ range | binocular look, 1σ | gain before | gain after the look |
-    |---|---|---|---|---|
-    | 1.0 km | 167 m | 119 m | 48 m | 0 |
-    | 2.0 km | 334 m | 238 m | 96 m | 0 |
-    | 2.5 km | 418 m | 298 m | 120 m | 0 |
-    | 3.0 km | 501 m | 357 m | 144 m | 0 |
-    | 5.0 km | 836 m | 595 m | 241 m | 0 |
+  - **Priority 1, detection and rough location: the naked-eye scan is the whole answer. No
+    binocular look is raised for it.**
+    - **The allowance, from what the pilot hears.** A contact is called by o'clock (30°, so ±15°)
+      and by range rounded to 0.5 km (`speech._format_range_km`), "very close" under 500 m.
+      Rough location is good enough when 1σ is inside **max(250 m, 0.2 · R)** down-range and
+      inside half an o'clock across. 250 m is half the spoken range step: close in, the figure
+      the pilot hears is the right one. 0.2 · R is "five kilometres means four to six" far out,
+      where the pilot's action (turn away, slow, keep watching) does not change with a finer
+      figure. The allowance tightens in absolute terms as range falls, which is the user's
+      *"further away … more imprecise … close distances a more specific location"*.
+    - **What the model gives after one naked-eye look**, from the shipped `look_sigma_m` and
+      `surface_range_estimate` (cue A fused with the depression cue for a ground unit):
 
-    The gain is ≈ 0.048 R, which is BL-B108's `BINOCULAR_RANGE_SIGMA_SCALE` (0.7) at work. A look
-    adds nothing in bearing: the model gives binoculars the same bearing σ as the eye. With the
-    default threshold below, location looks start at about **2.1 km**, out to binocular presence
-    range. That is beyond the vehicle classification window (0.5–1.75 km), so in the common case
-    the two do not compete: a group is glassed for where it is while far, and for what it is once
-    closer.
-  - **Group-level (the user cares where *groups* are).** Each target's `location_gain_m` is
-    reduced to the **minimum over its group's members** (`group_for_contact`; an ungrouped
-    contact is its own group), in one pure function applied in `body._look_targets` over every
-    live contact, before any sector filter. So once any member has a binocular-grade fix, the
-    group counts as located and no second location look is spent on its stragglers. In practice
-    one look covers most of a group anyway: the half-field is ±150 m at 2 km and ±300 m at 4 km,
-    and `choose_look` already centres on the direction covering the most targets. A straggler
-    outside the look keeps its own naked-eye range. Propagating one member's fix to its siblings
-    (their stable errors are correlated under BL-B108) is not built here, and is named as a
-    possible follow-on.
-  - **Admission.** `GLASSING` (free scan and commanded sectors, `home_phase is SCANNING`) uses one
-    predicate, `can_still_improve(t) or t.location_gain_m ≥ LOCATION_LOOK_MIN_GAIN_M`. It is
-    passed through the **existing** `can_improve` parameter to both `is_worth_a_look` and
-    `look_is_finished`, so a location-only look neither fails to start nor ends on its first poll.
-    That is the same trap the 9K113 narrow-search review found and fixed this way. `SIGHTING` is
-    unchanged.
-  - **Ordering, composed with `choose_look`.** A new `choose_glass_look` buckets the targets,
-    location-worthy first and then the rest, and runs `choose_look` unchanged (watched count,
-    coverage, nearest) inside the first non-empty bucket. That is `choose_sighting_look`'s
-    pattern, reused rather than re-derived. The cost of reuse: coverage is counted within the
-    bucket. A location look still physically covers, and marks, any classification target in its
-    envelope. Ordering against *watched* is Decision 8.
-  - **No repeat at the same range, from two mechanisms that already exist and compose:**
-    - A look that **fixed** the group drives its `location_gain_m` to ≈ 0 (measured, last
-      column), so the group is no longer location-worthy. This is self-limiting, with no timer.
-    - A look that **did not** fix it (masked, beyond the true type's reach, unsteady) leaves the
-      gain where it was. The existing attempted marks then apply, and because the level did not
-      move, so does the new `GLASS_STALL_COOLDOWN_S` (180 s). The `RETRY_RANGE_FRACTION` escape is
-      unchanged. No new field, and no second cooldown.
-    - Closing range re-admits a group only when the gain earns it again. Measured: fixed at 4 km,
-      then closed to 2.4 km under naked-eye looks, the gain is 106 m, so it is re-admitted. Fixed
-      at 3 km and closed to 1.8 km, it is 80 m, so it is not. **That measurement is taken on
-      today's floor**, so it carries Decision 7's caveat.
-  - **The budget.** Location looks spend the same 12 s rolling budget. With the user's density
-    (*"a handful of groups a few km apart"*), that is about one look per group per encounter,
-    beyond ~2 km. It is a new source of demand, but a bounded one.
-  - **Finding: the fix does not stick on today's floor. This is Decision 7.** The same probe,
-    continued: naked looks every 16 s after a binocular fix at 3 km give **357 m → 356 m → 486
-    m**. The cause is `_apply_floor`'s optic factor, which reads only the *immediate* prior
-    anchor. The first naked fuse after the fix keeps binocular grade (factor 0.7). That fuse
-    replaces the anchor with a naked one, so the next fuse's floor is naked grade and *raises*
-    the covariance above its own prior. That is BL-B108's named "one-anchor approximation", whose
-    plan says *"escalate rather than add a second anchor"*. **Without a change, a location look
-    buys ~30 s of tighter range**, and the group becomes location-worthy again. The stall
-    cooldown then re-glasses it every 180 s for another 30 s. Binoculars raised for nothing
-    lasting is exactly what the user said not to do (*"no use raising them on contacts where
-    additional information is not available"*). Hence: location looks are built only after
-    Decision 7.
-  - New tunable, `status="judgement"`, `#needs-flight`:
-    `belief.optic_policy.LOCATION_LOOK_MIN_GAIN_M`: **100.0** (lo 25.0, hi 500.0). First
-    sentence: *"How much a binocular look must be expected to tighten where Petrovich believes a
-    group is, in metres of range, before he raises binoculars just for that."* Reasoning: a fifth
-    of the spoken half-kilometre step (`speech._format_range_km`). Below it, the pilot would
-    rarely hear a different figure. **There is no cross-key coupling to check:** if
-    `BINOCULAR_RANGE_SIGMA_SCALE` is tuned to 1.0, the gain is 0 and location looks stop, which is
-    the honest consequence (binoculars no better at range), not a violated invariant.
+      | R | across (any AGL) | down, 0–50 m AGL | down, 300 m AGL | down, 800 m AGL | allowance (down) |
+      |---|---|---|---|---|---|
+      | 0.5 km | 26 m | 81–85 m | 49 m | 48 m | 250 m |
+      | 1.0 km | 52 m | 168–170 m | 127 m | 91 m | 250 m |
+      | 1.5 km | 79 m | 254–255 m | 216 m | 152 m | 300 m |
+      | 2.0 km | 105 m | 339–340 m | 307 m | 226 m | 400 m |
+      | 3.0 km | 157 m | 509–510 m | 486 m | 397 m | 600 m |
+      | 5.0 km | 262 m | 850 m | 834 m | 758 m | 1000 m |
+
+      Down-range is at most **0.17 · R** (`RANGE_FRACTIONAL_SIGMA`, a plain constant), and only
+      ever smaller with altitude, because the depression cue can only tighten the fuse. Across is
+      3° (`BEARING_SIGMA_DEG`), against the ±15° of an o'clock. **So no contact is ever outside
+      the allowance after a naked-eye look**, at any range, any altitude in the operating
+      envelope, air or ground. Close in, the eye already gives the "more specific location" the
+      user asks for: ±85 m at 500 m, ±49 m from 300 m AGL.
+    - **No shipped tuning key can break it.** `RANGE_FRACTIONAL_SIGMA` is not tunable;
+      `DEPRESSION_SIGMA_DEG` only tightens; `BEARING_SIGMA_DEG` at its `hi` of 14° gives ±14°
+      across, still inside an o'clock; `BINOCULAR_RANGE_SIGMA_SCALE` does not touch the naked eye.
+      Only a code change could, so the conclusion is fenced by a test, not by a tunable (Decision
+      10).
+    - **Between looks, a moving class can drift past it.** Growth at `plausible_speed_mps` (armour
+      8 m/s) takes a 1 km contact past 250 m after ~23 s unseen. That is not a binocular question:
+      the glass step follows the eye's own sweep of that sector, so a contact the eye just saw is
+      fresh, and one it did not see is either masked (binoculars no better) or beyond eye range
+      (binocular re-detection, which free scan deliberately does not do, 2026-09-23). It is the
+      revisit and `[[BL-B112]]`'s question, and nothing is built for it here.
+  - **Priority 2, IFF: not modelled, not built.** `[[BL-B12]]` is deferred (infer from unit-type
+    vocabulary and controlled terrain, never DCS truth; no terrain-control data exists). What serves
+    it today is identification to type (T-72 vs Leopard), which also lets the pilot infer the side
+    himself.
+  - **Priority 2 before 3: a look toward type ranks before a look toward a class.** The ladder
+    makes the distinction already: `current_level == "class"` in its type window
+    (`unaided_type_m`, `binocular_type_m`] is one look from identification; `presence`/`unknown`
+    in its class window is one look from a class. `choose_sighting_look` already ranks exactly that
+    way for the 9K113 (*"first units not yet identified that might be inside identification
+    range… same thing for class"*), so the glass step reuses its bucket. In practice the two rarely
+    compete: for a 7 m vehicle the type window is 250–750 m and the class window 500–1750 m.
+  - **Priority 3, classification:** the existing `can_still_improve` gate, unchanged.
+  - **Priority 4, exact location: only for what the pilot asked about, ranked after
+    classification.**
+    - **Who qualifies, checked in the code, not assumed:**
+      - *Enemy units*: no side is modelled (every contact is `UNKNOWN`, BL-B12). None today.
+        When BL-B12 lands, "believed enemy" joins this predicate; noted on that entry.
+      - *Mission target units*: **no such notion exists in body-layer** (grep: `mission_phase`
+        holds MI-6's route and phases with points, not units; `mission_memory`'s `target_seq`/
+        `target_ref` are attack-run records). Not built. It would come through the Mission
+        Interpreter, which must also filter author-only knowledge first.
+      - *Anything the player asks about*: a **watched** contact, i.e. effective attention
+        `watch` or `priority` (`attention.effective_attention`, a voice "watch that truck at
+        three o'clock" or a watch area). That is `LookTarget.watched`, already set in
+        `body._look_targets`. An attack-run target is not attention-marked and is not added
+        here (the pilot aims that run himself; the 9K113 run has its own sight path).
+    - **Criterion:** `location_gain_m = position.range_uncertainty_m(observer) −
+      look_sigma_m(R, BINOCULAR_OPTIC).sigma_down`, floored at 0; 0 with no `PositionEstimate`,
+      and 0 beyond binocular presence range for the believed type (`tier_ranges`, the call
+      `improvement_window_m` makes). Admitted when the contact is **watched** and the gain is at
+      least `EXACT_LOCATION_MIN_GAIN_M`. Measured gain after naked-eye looks: ≈ 0.05 · R low
+      (26 m at 500 m, 51 m at 1 km, 153 m at 3 km), less from altitude (7 m at 500 m and 26 m at
+      1 km from 300 m AGL). So with the default below, a watched contact is glassed for position
+      from ~0.5 km out at low level and ~1 km out from 300 m AGL; closer, the eye is already as
+      good as binoculars.
+    - **Admission, one predicate:** `can_still_improve(t) or (t.watched and t.location_gain_m ≥
+      EXACT_LOCATION_MIN_GAIN_M)`, passed through the **existing** `can_improve` parameter to
+      both `is_worth_a_look` and `look_is_finished`, so a location-only look neither fails to start
+      nor ends on its first poll (the 9K113 narrow-search trap). `SIGHTING` is unchanged.
+    - **Ordering:** `choose_glass_look` buckets the targets (0: `class` in its type window; 1:
+      any other target `can_still_improve` admits; 2: exact location only) and runs `choose_look`
+      unchanged (watched → coverage → nearest) inside the first non-empty bucket. Buckets 0–1 are
+      `choose_sighting_look`'s own rule; the implementer shares the bucket function rather than
+      writing a second. A location look still physically covers, and marks, any target in its
+      envelope. **This is Decision 8 REVERSED** (location now after classification). Within a
+      bucket, watched still comes first, so the 2026-09-25 *"even more so watched contacts"*
+      stands inside each priority.
+    - **No repeat at the same range**, from mechanisms that already exist: a look that fixed the
+      range drives the gain to ≈ 0, and Stage 0a keeps it there for a growth-0 contact (for a
+      moving class it re-grows over ~7 sweeps, Stage 0a); a look that fixed nothing leaves the
+      level unchanged, so `GLASS_STALL_COOLDOWN_S` (180 s) governs, with the 80 % range escape
+      untouched. So a watched armour group is re-glassed for position at most every ~3 min unless
+      the aircraft closes on it.
+    - **Budget:** watched contacts are few (the pilot names them), so this is a small, bounded
+      demand on the 12 s window, far below the fourth pass's "one look per group per encounter".
+    - New tunable, `status="judgement"`, `#needs-flight`:
+      `belief.optic_policy.EXACT_LOCATION_MIN_GAIN_M`: **25.0** (lo 5.0, hi 500.0). First
+      sentence: *"How much a binocular look must be expected to tighten the range of a contact the
+      pilot asked to watch, in metres, before Petrovich raises binoculars just for its position."*
+      Reasoning: about a vehicle group's own spacing; a smaller improvement is lost inside the
+      group itself. **No cross-key coupling:** `BINOCULAR_RANGE_SIGMA_SCALE` at 1.0 makes the gain
+      0 and location looks stop, the honest consequence.
+    - **Binocular range sense stays as it is** (user, 2026-11-02: *"Binoculars range sense - keep
+      the current."*): `BINOCULAR_RANGE_SIGMA_SCALE` = 0.7, still `#needs-flight`.
 - **Body rotation: circling and sideways flight (user: *"~100 km/h and could include sideways
   movement and circling to keep safe distance"*).** Sectors are body-relative, so the ground under
   them turns whenever the aircraft does. At 28 m/s the rates are small: orbiting at 1.5–3 km turns
@@ -502,8 +569,9 @@ follows as its own merge. Say so in the hand-off rather than holding 1-scan.
     That is a burst at first contact with a multi-group scene, lasting a cycle or two, not a steady
     state. A quiet scene is the bare 16 s sweep. The user confirms the design case (2026-11-02):
     *"a handful of groups a few km apart, typically. Larger missions have more units and groups,
-    but still spread around."* So busy windows are rare in the missions flown. Location looks add
-    about one look per group per encounter. The Stage 1 scenario test measures it (below).
+    but still spread around."* So busy windows are rare in the missions flown. Exact-location looks
+    (fifth pass) are for watched contacts only, so they add little. The Stage 1 scenario test
+    measures it (below).
     Flight confirms it via `sortie-log-triage`'s certainty column. That is unmeasured until then,
     and stated as such.
 - New tunables, `status="judgement"`, `#needs-flight`:
@@ -630,20 +698,30 @@ Fourth pass, new tests:
   2. A sideways leg: heading held, track 90° off.
   3. An orbit of 2.5 km radius around one group, with the others off-centre.
 
-  Measured and reported for each leg: every group gets a location look, and none is location-
-  glassed twice at the same range (that one needs Decision 7); the worst wait from first sighting
+  One group in the scene is watched. Measured and reported for each leg: **no unwatched contact
+  gets a location-only look** (fifth pass: priority 1 needs none); the watched contact gets one
+  where its gain admits it and is not location-glassed twice at the same range inside
+  `GLASS_STALL_COOLDOWN_S`; the worst wait from first sighting
   to a glass step covering the contact (≤ 20 s at ≤ 2°/s); the worst eye revisit, with the
   rotational aliasing case reported rather than asserted; the fraction of polls with a swept
   contact "estimated"; and no flank re-acquisition churn. The straight leg alone keeps the
   existing assertions (worst revisit ≤ `WORST_REVISIT_S`).
 - `location_gain_m`: 0 without a `PositionEstimate`, and 0 beyond binocular presence range; equal to
   `range_uncertainty_m − σ_b` otherwise; ≈ 0 after a binocular fuse (the table above, as a test).
-- Group reduction: a group with one fixed member is not location-worthy for any member; an
-  ungrouped contact keeps its own gain.
-- A location-only target (outside its classification window) starts a look, and the look does
-  not end on its first poll. It ends once the fuse drops the gain.
-- `choose_glass_look`: an unwatched location target beats a classification target with more
-  coverage; inside a bucket, `choose_look`'s order is unchanged.
+- *(Group reduction test dropped, fifth pass: no group reduction.)*
+- A **watched** location-only target (outside its classification window) starts a look, and the
+  look does not end on its first poll. It ends once the fuse drops the gain. The same target
+  **unwatched** is not admitted, whatever its gain.
+- `choose_glass_look` (fifth pass): a `class` contact in its type window beats a `presence`
+  contact in its class window, even one with more coverage or watched; a classification target
+  beats a watched exact-location target; inside a bucket, `choose_look`'s order (watched →
+  coverage → nearest) is unchanged. The sight's `choose_sighting_look` gives the same answer as
+  before on its own existing tests (shared bucket function).
+- Fifth pass, `test_estimation.py`, the rough-location fence (Stage 1, "Priority 1"): over R in
+  0.5–6 km and height above the unit 0–800 m, ground (`surface_range_estimate`) and air
+  (`look_sigma_m`), the naked eye's own declared σ_down ≤ max(250 m, 0.2 · R) and its cross-range
+  angle ≤ 15°. The assertion message says what failing means: priority-1 binocular looks would
+  then be needed, which this plan does not build (Decision 10).
 - A failed location look (gain unchanged, level unchanged) is not re-admitted before
   `GLASS_STALL_COOLDOWN_S`, unless the range has closed to 80%.
 - Sector margin: a contact 3° outside the swept sector's edge is a target, 5° outside is not;
@@ -651,11 +729,14 @@ Fourth pass, new tests:
 - Look follows its contact: under a 2°/s body rotation, the chosen contact stays inside the
   envelope for the whole look, and every step moves by the same delta; an absent chosen contact
   leaves the steps unchanged.
-- **Decision 7 (a) only, in `test_position_belief.py`:** binocular fix, then six naked fuses at
-  the same geometry: 1σ range never rises above the post-fix value. A naked-only dwell converges
-  as today (the cap never binds there). Re-run `test_relative_distance_sweep.py` and
-  `test_relative_distance_scenarios.py` as they stand: **if any BL-B108 fence or assertion moves,
-  stop and report** before changing it. That is BL-B108's own escalation rule.
+- **Stage 0a, in `test_position_belief.py`** (Decision 7 ANSWERED (a)): binocular fix, then six
+  naked fuses at the same geometry, at 16 s spacing. **Growth 0 (installation component):** 1σ
+  range never rises above the post-fix value. **Armour (8 m/s):** after each fuse, 1σ ≤ the
+  prior's inflated 1σ, and it reaches naked grade no sooner than ~6 fuses (the fourth pass's
+  "never rises above the post-fix value" is false for a class with growth, so it is split). A
+  naked-only dwell converges as today (the cap never binds there). A founding look is unchanged.
+  BL-B108's own tests are run before and after, per Stage 0a: **if any fence or assertion moves,
+  stop and report.**
 
 **Stage 2 — Never fold an ambiguous memory-only match (E1 delivered, Q3 as the default).**
 - **Trigger** (`ContactStore.ingest`, gate branch only, never continuity), all of:
@@ -844,8 +925,10 @@ and the sites in `body.py`). **Three new fields:**
 
 Both fresh-construction sites must carry all three forward explicitly, the BL-B71 lesson.
 
-**Fourth pass: no new `OpticState` field.** Location looks add two `LookTarget` fields, which are
-per-poll inputs and not state. There are two `LookTarget(` sites in `src`: `look_target_for`, and
+**Fourth and fifth pass: no new `OpticState` field.** Exact-location looks add one `LookTarget`
+field (`location_gain_m`; the fourth pass's `group_id` is dropped), a per-poll input and not
+state. `watched` already exists. Stage 0a adds no state either: the cap reads the prior the fuse
+already has. There are two `LookTarget(` sites in `src`: `look_target_for`, and
 `_target_in_current_look`'s probe centre, which takes the defaults. Look-follow moves four
 existing fields together, so it gets the two rows at the end of the table. The delta needs the
 chosen contact's previous azimuth/elevation, and that is already on the state: it is the current
@@ -931,16 +1014,23 @@ to be grep-verified at implementation.
   `_ACQUISITION_RETENTION_WINDOW_S` move (16 → 32 s) is what keeps the longer busy revisit from
   turning into re-acquisition churn. The Stage 1 scenario test must show no new-object churn on a
   flank object across a busy cycle before Stage 1 merges.
-- **Location looks are worth less than the user may expect (fourth pass, effort/value).** In the
-  model, a binocular look tightens range by ~30% (≈ 0.048 R: ±501 → ±357 m at 3 km) and bearing
-  not at all. The whole gain is `BINOCULAR_RANGE_SIGMA_SCALE` = 0.7, a judgement value marked
-  `#needs-flight`. The build itself is cheap: one predicate through an existing parameter, one
-  bucket, and two `LookTarget` fields. What makes it worth anything is Decision 7. If flight says
-  binoculars judge range much better than 0.7, that one tunable raises the value of every location
-  look without any code change.
-- **Decision 7 (a) touches BL-B108's fold, merged the day before.** The cap only ever binds when a
-  prior is tighter than this look's own floor, which is the better-optic-then-eye case and the
-  triangulated-then-same-geometry case. The second case is the one the cap changes beyond
+- **A binocular look is worth little for position, in the model (effort/value, fourth pass,
+  narrowed by the fifth).** It tightens range by ~30 % (≈ 0.05 R: ±510 → ±357 m at 3 km) and
+  bearing not at all. That is why priority 1 needs no look, and why exact location is limited to
+  watched contacts. The whole gain is `BINOCULAR_RANGE_SIGMA_SCALE` = 0.7, kept by the user
+  (*"keep the current"*) and still `#needs-flight`. The build is cheap: one predicate through an
+  existing parameter, one bucket, one `LookTarget` field.
+- **The rough-location conclusion rests on `RANGE_FRACTIONAL_SIGMA` = 0.17 being under the 0.2 ·
+  R allowance** (and on the eye's bearing being well inside an o'clock). A later change to the
+  naked-eye model that widens it would silently make priority 1 need binoculars. The
+  `test_estimation.py` fence is what makes that visible (Decision 10).
+- **Type-before-class ordering can delay a watched contact's classification** behind an
+  unwatched contact's identification in the same glass step. Rare (the windows barely overlap:
+  type 250–750 m, class 500–1750 m for a vehicle) and one step long. It is the user's priority
+  order; watched still wins inside each bucket.
+- **Stage 0a (Decision 7 (a)) touches BL-B108's fold, merged the day before.** The cap only ever
+  binds when a prior is tighter than this look's own floor, which is the better-optic-then-eye case
+  and the triangulated-then-same-geometry case. The second case is the one the cap changes beyond
   location looks: a triangulated estimate would no longer be pulled back to single-geometry
   precision. That is arguably also right ("new evidence never makes the belief less certain"),
   but it is a BL-B108 behaviour change. Hence BL-B108's tests are re-run first, and any moved
@@ -955,9 +1045,9 @@ to be grep-verified at implementation.
   moves with it. That is where Petrovich believes the group is, so it is honest. A large jump
   could swing the look off the real group for the rest of that look. That is bounded by
   `MAX_LOOK_S`, and the attempted marks stop it repeating.
-- **Group reduction leaves stragglers at naked-eye grade.** A group member outside the one look
-  keeps its own ±0.17 R. The group centroid (`groups._centroid_of`, a mean) then mixes graded and
-  ungraded members. Propagating the fix to siblings is a possible follow-on, not built.
+- *(Superseded, fifth pass: the fourth pass's group-reduction straggler risk; there is no group
+  reduction. A watched contact's own fix still mixes into its group's mean centroid with
+  naked-grade siblings, which is harmless at rough-location grade.)*
 - *(Superseded, third pass: the second pass's "revisit 26 s (29 s with slack) / glass budget 4 s"
   and "reshaping `SCAN_PLAN` to 9 → 3, ahead once per cycle" risks no longer apply.)*
 - **Stages 3–4 (`[[BL-B111]]`), when built:** cross-subproject Lua with a Windows-only
@@ -987,7 +1077,14 @@ Fourth pass:
 - **`[[BL-B112]]`** (motion-aware certainty) and location looks pull the same way. A stationary
   group's covariance does not grow, so once located it stays located, and BL-B112 would keep its
   label "tracked" to match.
-- **Stage 0 must be measured on the post-floor code** (Stage 0 note).
+- **Stage 0 must be measured on the post-floor code** (now Stage 0a, built first).
+
+Fifth pass:
+- **`[[BL-B12]]` gains a hook, not work.** When believed side exists, "believed enemy" joins the
+  exact-location predicate beside `watched` (the user's *"for enemy units especially"*), and type
+  identification, already ranked second, becomes its input. Noted on BL-B12.
+- **A mission-target notion does not exist in body-layer.** When the Mission Interpreter hands one
+  over (after filtering author-only knowledge), it joins the same predicate. Nothing is built.
 
 ### How each alignment item is answered
 
@@ -1004,13 +1101,22 @@ Fourth pass:
   pilot to notice ahead pickup, since nothing else measures it before flight.
 - **Re-check Q3 (glass budget):** Decision 5 ANSWERED (b). The budget gates starts, not lengths,
   and selectivity is the main bound (Stage 1, "Selectivity").
-- **Optics priority (user, 2026-11-02: *"a) knowing where the groups are b) iff c)
-  classification"*):** (a) is location looks, ranked first (Stage 1). (b) is not modelled: every
-  contact is `UNKNOWN`, `[[BL-B12]]` is deferred, and nothing is built for it. (c) is the existing
-  classification ladder, ranked after location. Whether a location fix *lasts* is Decision 7.
+- **Optics priority, refined (user, 2026-11-02, fifth pass; supersedes the fourth pass's
+  "a) where b) iff c) classification" reading):**
+  1. *Detection and rough location, looser far out, tighter close in*: the naked-eye scan.
+     Allowance max(250 m, 0.2 · R) down-range and half an o'clock across; a naked-eye look is
+     never outside it (Stage 1, "Priority 1", measured table). No binocular look for it.
+  2. *IFF*: not modelled, `[[BL-B12]]` deferred, not built. Identification to type serves it and
+     ranks before classification in the glass step.
+  3. *Classification*: the existing ladder.
+  4. *Exact location*: watched contacts only (what the player asked about), after
+     classification. Enemy units and mission targets: neither exists in body-layer today. Stage 0a
+     makes such a fix last.
+  *"Exact position is not even needed for all units"*: so no unwatched contact gets a
+  location-only look (scenario test asserts it).
 - **Mission density (*"a handful of groups a few km apart"*):** the design case for the budget
-  and revisit figures. Busy windows are rare. Location looks add about one look per group per
-  encounter.
+  and revisit figures. Busy windows are rare. Exact-location looks are watched-only, so they
+  add little.
 - **Approach profile (*"~100 km/h … sideways movement and circling"*):** checked under "Body
   rotation". Added: the sector margin, look-follow, and a scenario test flying the profile.
   Pre-existing eye aliasing is reported, not fixed.
@@ -1043,7 +1149,10 @@ answer. Decision 5 is new, raised by the three-sector arithmetic. The plan re-ch
 were answered on 2026-11-02 (`explore-notes.md`, "Plan re-check answers", verbatim): Decision 1a
 and Decision 5 below. Decision 6 is new, raised by that arithmetic. Fourth pass (2026-11-02,
 `explore-notes.md`'s last two sections): Decision 6 answered; Decision 7 open (needs the user);
-Decisions 8–9 proceed on their defaults unless the user says otherwise.
+Decisions 8–9 proceed on their defaults unless the user says otherwise. Fifth pass (2026-11-02,
+`explore-notes.md`, "Decision 7 and the refined priority" and its follow-up): Decision 7 answered
+(a); Decision 8 REVERSED by the refined priority; Decision 9 stands; Decision 10 is new (default
+proceeds); Decision 11 records the binocular range-sense answer.
 
 **Decision 1, ANSWERED:** *"third of full scan. So basically left right and ahead. Multiple looks
 per glass is ok and expected."* This **supersedes** the half-sweep recommendation. Stage 1 now
@@ -1143,6 +1252,12 @@ The user should hear about it, because it is the one place the plan knowingly le
 certainty sag between looks.
 → **Answered above: (a), "ok".**
 
+**Decision 7, ANSWERED 2026-11-02: (a).** User: *"Option a"*. A new look never leaves the belief
+less certain than just before it. Built as **Stage 0a**, first: BL-B108's tests re-run before and
+after, any moved fence stops the work, Stage 0's measurements are taken after it. Growth at the
+class's plausible speed still applies (Stage 0a, "What it does not do").
+
+*Original Decision 7, kept for the record:*
 **Decision 7, OPEN, needs the user: should a binocular location fix stick?** Measured on the
 shipped `fold_position` (Stage 1, "Location looks"): after a binocular look at 3 km, the belief's
 range 1σ goes 501 → 357 m, holds for one more naked-eye sweep, then returns to 486 m. That is
@@ -1164,7 +1279,21 @@ naked-eye fuse replaces that anchor. BL-B108 named this "one-anchor approximatio
   looks together, after BL-B108's fold has been looked at on its own.
 
 Until this is answered, 1-scan proceeds and 1-floor/1-locate wait (Stage 1, build order).
+→ **Answered above: (a).**
 
+**Decision 8 REVERSED 2026-11-02, by the user's refined priority:** *"1 detection and rough
+location (the further away we are, the more imprecise the location is allowed to be. At close
+distances a more specific location can and should be obtained) 2 IFF, though that needs expected
+enemy territory and unit identification (eg. T-72 vs leopard) 3 classification 4 exact location
+(for enemy units especially and mission target units or anything the player asks for)"*, and
+*"Exact position is not even needed for all units."* So: exact location ranks **after**
+classification, and only for watched contacts; type identification ranks before classification;
+watched still comes first inside each bucket. Priority 1 needs no binocular look (Stage 1,
+"Priority 1"). The fourth pass's "≥ 100 m tighter, every group" criterion
+(`LOCATION_LOOK_MIN_GAIN_M`) and its group reduction are dropped; `EXACT_LOCATION_MIN_GAIN_M`
+(25 m, watched only) replaces it.
+
+*Original Decision 8, kept for the record:*
 **Decision 8, default proceeds (local, reversible): location before a *watched* contact's
 classification.** `choose_glass_look` ranks location-worthy targets first, then `choose_look`'s
 watched → coverage → nearest inside each bucket. So an unwatched group's location look comes
@@ -1179,6 +1308,22 @@ your circling approach, the group drifts out of the field before the look ends. 
 small: the four existing fields shift together each poll, with no new state. It is a pre-existing
 gap rather than part of the sector scan, so it is named here as scope added. Without it, location
 looks during an orbit are unreliable. Veto it if you want it as its own entry.
+→ **Stands (fifth pass).** It now serves classification and identification looks during an orbit
+as much as exact-location ones.
+
+**Decision 10, default proceeds (local, reversible): the rough-location allowance is a test fence,
+not a tunable.** The brief asked for it as a tunable (X-T26 pattern). It is not declared in
+`tuning.py`, because nothing in flight would read it: priority 1 needs no binocular look, so no
+code path compares a belief to the allowance. A key in `defaults.toml` that changes nothing would
+tell anyone tuning it something false. And no shipped tuning key can break the conclusion (Stage 1,
+"Priority 1"); only a code change to the naked-eye model can, which is what a test catches. So the
+allowance, max(250 m, 0.2 · R) down-range and half an o'clock across, lives in
+`test_estimation.py` as the fence. If flight or a later model change ever makes priority-1 looks
+real, the allowance becomes a tunable then, read by the predicate that needs it. Say if you want
+the knob anyway.
+
+**Decision 11, ANSWERED 2026-11-02: binocular range sense unchanged.** User: *"Binoculars range
+sense - keep the current."* `BINOCULAR_RANGE_SIGMA_SCALE` stays 0.7 (`#needs-flight` as before).
 
 ---
 
