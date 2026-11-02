@@ -153,3 +153,41 @@ Reading (main loop):
 - Consequence to settle in the plan: four sector visits (10 legs, 20 s of eye sweep) plus up to
   12 s of glassing puts the worst flank revisit past the 30 s position half-life. The plan must
   say how that is handled and what the pilot would notice.
+
+## Mission density, optics priority, approach speed, stationary units (user, verbatim, 2026-11-02)
+
+Told: plan re-check 2 ALIGNED; Decision 6 (≤ 2 s overrun of the 30 s position half-life in a full
+12 s glass window) proceeding on the default.
+
+> *"The missions I fly are not super busy. There's groups here and there, but not like a real
+> frontline with hundreds or thousands of units. Rather a handful of groups a few km apart,
+> typically. Larger missions have more units and groups, but still spread around. Therefore
+> priority is a) knowing where the groups are b) iff c) classification. Scanning and optics usage
+> should serve these goals.*
+>
+> *While the Hind can fly 250 km/h, when approaching suspected enemy locations it's wise to
+> approach carefully and slower so that Petrovich has time to scan without us flying headfirst
+> into danger.*
+>
+> *For the overrun - ok.*
+> *Tracking vs estimated. Again, the unit movement should be considered. Stationary unit can be
+> expected to remain stationary. Therefore even if no one looked at it for 30s it's not likely to
+> have moved."*
+
+Reading (main loop):
+
+- **Density:** a handful of groups a few km apart is the design case; busy-window worst cases are
+  rare in the missions flown.
+- **Priority for scanning and optics: (a) where the groups are, (b) IFF, (c) classification.**
+  Checked against the code (2026-11-02): the binocular gate `can_still_improve` admits a contact
+  only on the classification ladder (next tier reachable at the believed range); it never admits a
+  look for **position** (a). IFF (b) is not modelled: every contact is `UNKNOWN`, BL-B12 deferred
+  (infer from type vocabulary and terrain control, never DCS truth). `choose_look` orders by
+  watched count, coverage, then nearest.
+- **Approach speed:** careful, slower approach to suspected enemy is the expected tactic; scan
+  timing should be judged at that speed, not at 250 km/h.
+- **Decision 6: ANSWERED, "ok".**
+- **Tracked vs estimated must consider movement.** `certainty_of` is time-only (30 s → estimated,
+  120 s → lost) whatever the contact's motion; position covariance already grows per class
+  (`plausible_speed_mps`, 0 for entrenched). A stationary unit unseen for 30 s should not read as
+  less certain in position.
