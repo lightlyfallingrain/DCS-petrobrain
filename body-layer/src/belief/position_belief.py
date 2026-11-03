@@ -913,7 +913,14 @@ def fold_position(
             fused_covariance=fused_covariance,
             anchor=look_anchor,
         )
-    return _apply_floor(fused, uncertainty, kappa_view_at_fuse, prior_optic_class)
+    prior_inflated_covariance = prior_covariance if prior is not None else None
+    return _apply_floor(
+        fused,
+        uncertainty,
+        kappa_view_at_fuse,
+        prior_optic_class,
+        prior_inflated_covariance,
+    )
 
 
 def clamp_to_detection_envelope(
@@ -1100,6 +1107,7 @@ def _apply_floor(
     look_uncertainty: PositionUncertainty,
     kappa_view: float = 1.0,
     prior_optic_class: str | None = None,
+    prior_inflated_covariance: Covariance2D | None = None,
 ) -> PositionEstimate:
     """Only ever called on a freshly founded or genuinely fused `estimate`
     (`fold_position`'s two non-hold branches), where `as_of_sim ==
@@ -1129,7 +1137,27 @@ def _apply_floor(
     (`k_anchor` smaller) can never push the floor below the better
     optic's own stable floor; a better optic's own look is never
     discounted (the ratio is capped at `1.0`, never negative or amplified
-    above it)."""
+    above it).
+
+    **`prior_inflated_covariance` (`BL-B110` Stage 0a, Decision 7 (a))**: a
+    second, independent cap on the floor -- never above `None` for a
+    founding look (there is no prior to be less certain than). When given
+    (the fuse's own elapsed-motion-inflated prior, `_inflated_since_last_
+    fuse`, the same value the fuse just used as its measurement-update
+    input), `floor_trace` is additionally capped at that covariance's own
+    `trace()`. This answers the question `prior_optic_class` above does
+    not: that scaling only ever discounts the *current look's own* floor
+    relative to a better anchor optic, so a naked-eye fuse after a tight
+    binocular fix still floors at the naked eye's own (scaled-down) share
+    -- which can still be looser than the belief already was a moment
+    earlier. The cap here instead compares against the belief's own prior
+    state directly: a new look may never leave the belief less certain
+    than it was just before the look, full stop. It is not a second
+    anchor -- the prior's own optic-scaled floor is not read here, only
+    its covariance trace, and growth from elapsed time at
+    `plausible_speed_mps` still applies before this call ever sees the
+    prior (it is baked into `prior_inflated_covariance` itself), so a
+    *moving* class still loosens between looks."""
     k_look = range_sigma_scale_for_optic(look_uncertainty.optic_class)
     optic_factor = 1.0
     if prior_optic_class is not None and k_look > 0.0:
@@ -1141,6 +1169,8 @@ def _apply_floor(
     floor_trace = (SYSTEMATIC_BIAS_FRACTION * look_uncertainty.sigma_cross_m) ** 2 + (
         down_floor_m**2
     )
+    if prior_inflated_covariance is not None:
+        floor_trace = min(floor_trace, prior_inflated_covariance.trace())
     current_trace = estimate.covariance.trace()
     if current_trace >= floor_trace:
         return estimate
