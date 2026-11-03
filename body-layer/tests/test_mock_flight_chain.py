@@ -268,61 +268,82 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # **Rewritten 2026-10-05** (sortie debrief Item 4: commanded
-        # "ahead" now cycles 11 -> 12 -> 1 instead of staring at 12). The
-        # 32-count below predates that change and is now wrong -- updated
-        # here by actually running the pipeline poll-by-poll and reading
-        # `Counter(o.source for o in runner.store.observations.values())`,
-        # not by recomputing the old arithmetic by hand:
+        # **Updated for `BL-B110` Stage 1** (`plans/expected-area-check/
+        # plan.md`) -- the previous revision's 23-count predates it and
+        # is now wrong, found by actually running the pipeline poll-by-
+        # poll and reading `Counter(o.source for o in runner.store.
+        # observations.values())`, not by recomputing the old arithmetic
+        # by hand:
         #
         # `Counter({'petrovich_detection_associated': 20,
-        # 'naked_eye_visual_filtered': 3})` -- 23 total, not 32.
+        # 'naked_eye_visual_filtered': 4})` -- 24 total, not 23.
         #
         # - **Hybrid: 20, unchanged.** Hybrid never clusters, has no
         #   elevation gate, and does not use `check_visibility`/`gaze_at`
         #   at all -- this item touches none of its inputs.
-        # - **Naked-eye: 3, down from 16.** Object 101 sits dead ahead
-        #   (bearing 0), so it is only within the naked-eye cone on the
-        #   cycle's 12-o'clock leg -- one poll in three on the `SCANNING`
-        #   dwell cycle (`FOCUS_DWELL_S=2.0s` per leg, polls 5 s apart).
-        #   Of this fixture's 20 polls, the 12-o'clock leg lands on polls
-        #   0, 6, 12, 18 (t=0, 30, 60, 90) -- but poll 18 (t=90) is already
-        #   past the pre-existing cockpit-mask cutoff (x ~ 905, unrelated
-        #   to this change, same cutoff the old 16/20/36 comment named),
-        #   so only 3 of those 4 actually detect. The binocular-search
-        #   interruptions below (t=20, 25, 50, 55) never coincide with a
-        #   12-o'clock leg in this fixture's own timing, so they cost
-        #   nothing additional here -- a coincidence of this fixture's
-        #   specific cadence, not a general claim.
+        # - **Naked-eye: 4, up from 3.** This fixture commands an "ahead"
+        #   scan (see the comment above), and Stage 1 fixes the pre-
+        #   existing wiring defect where a commanded scan's own binocular
+        #   cadence was always the bare 16 s `SCAN_CYCLE_PERIOD_S`
+        #   regardless of what was commanded -- `"ahead"` is 3 legs, so
+        #   its real period is `3 * FOCUS_DWELL_S` = 6 s, not 16 s
+        #   (`plan.md` Stage 1's own "what the code does today": "a
+        #   faster commanded scan plan brings them round sooner... This
+        #   is a wiring defect that ships fixed as a side effect").
+        #   Object 101 (dead ahead the whole flight) is still only
+        #   co-detected on the cycle's 12-o'clock leg, same as before;
+        #   the new fourth detection is `unit_102` ("Infantry AK",
+        #   object 102, see below) -- genuinely binoculars coming round
+        #   often enough, for the first time, to glass it once.
         #
-        # Object 102 never appearing on any channel means the same-poll
-        # co-fold exclusion (`belief.contacts.ContactStore.ingest`'s
-        # pre-scan, `plans/group-contact-model/plan.md` Stage 3a) has
-        # nothing to exclude here any more -- there is only ever one
-        # candidate contact in this fixture.
-        #
-        # The binocular-search mechanism itself (polls at t=20, 25, 50, 55
-        # entering `OpticPhase.SEARCHING`, sweeping a band beyond
-        # naked-eye reach while this fixture's truck is inside naked-eye
-        # range) is unchanged by this item -- see the prior revision of
-        # this comment (git history) for that mechanism's own reasoning.
-        assert len(runner.store.observations) == 23
+        # **Object 102 now appears once** (measured: one naked-eye look
+        # at t=35), where the pre-Stage-1 16 s cadence never brought
+        # binoculars round in time to catch it at all -- the prior
+        # revision's "never appearing on any channel" was a fact about
+        # that timing, not an invariant of the fixture's own geometry.
+        # It founds a second contact (`CONTACT_2` below) and is never
+        # seen again, so the same-poll co-fold exclusion (`belief.
+        # contacts.ContactStore.ingest`'s pre-scan, `plans/
+        # group-contact-model/plan.md` Stage 3a) still has nothing to
+        # exclude -- the two contacts are never candidates for the same
+        # percept at the same poll.
+        assert len(runner.store.observations) == 24
 
         contacts = get_contacts(runner.store, final_t_sim)
 
-        # ONE contact now, not two -- `CONTACT_1` (Hybrid's founding
-        # percept, frame 0), the truck: both sources, `type`-level
-        # `"Ural truck"`. There is no `CONTACT_2` any more (see above).
-        assert len(contacts) == 1
+        # **Two contacts now, not one** (`BL-B110` Stage 1): this
+        # scenario commands a persistent "ahead" scan (see the comment
+        # above), and Stage 1 fixes the pre-existing wiring defect where
+        # a commanded scan's own binocular cadence was always the bare
+        # 16 s `SCAN_CYCLE_PERIOD_S` regardless of what was commanded --
+        # `"ahead"` is 3 legs, so its real period is `3 * FOCUS_DWELL_S`
+        # = 6 s, not 16 s (`plan.md` Stage 1's own "what the code does
+        # today": "a faster commanded scan plan brings them round
+        # sooner... This is a wiring defect that ships fixed as a side
+        # effect"). Binoculars genuinely come round more often as a
+        # result, and on this fixture that is enough to pick up `unit_
+        # 102` ("Infantry AK", object 102) once, at t=35 -- an object
+        # the pre-Stage-1 timing never detected at all (the prior
+        # revision of this comment's own "Object 102 never appearing on
+        # any channel" was a fact about that timing, not an invariant of
+        # the fixture's geometry). Confirmed by actually running the
+        # pipeline, not assumed: the second contact never reappears
+        # after its one look, so it decays to "estimated" by the end of
+        # the run (`last_seen_ago_s: 60.0` at `final_t_sim=95`).
+        assert len(contacts) == 2
 
-        # One founding CONTACT_DETECTED -- no spurious CONTACT_LOST/
-        # REACQUIRED (the truck is continuously visible to Hybrid once
-        # acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the module
-        # docstring's "lower level holds" note -- Hybrid's frame-0
-        # TYPE-level percept already establishes the truck contact, and
-        # every naked-eye percept of it is `lowres`, strictly coarser, so
-        # it folds in without changing what's held).
+        # Two founding CONTACT_DETECTED events -- no spurious CONTACT_
+        # LOST/REACQUIRED for either (the truck is continuously visible
+        # to Hybrid once acquired; the infantry contact is only ever
+        # seen the once, so it has nothing to be lost/reacquired from)
+        # and no CONTACT_CLASSIFICATION_CHANGED for the truck (see the
+        # module docstring's "lower level holds" note -- Hybrid's
+        # frame-0 TYPE-level percept already establishes the truck
+        # contact, and every naked-eye percept of it is `lowres`,
+        # strictly coarser, so it folds in without changing what's
+        # held).
         assert [event.kind for event in runner.store.events] == [
+            "CONTACT_DETECTED",
             "CONTACT_DETECTED",
         ]
 
@@ -341,6 +362,14 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # contact holds `(1, 1)` throughout.
         truck_cardinality = truck["facts"]["cardinality"]
         assert (truck_cardinality["lo"], truck_cardinality["hi"]) == (1, 1)
+
+        infantry = next(c for c in contacts if c["facts"]["id"] == "CONTACT_2")
+        assert infantry["facts"]["classification"]["value"] == "OP_INFANTRY"
+        assert infantry["facts"]["classification"]["level"] == "class"
+        assert infantry["facts"]["certainty"] == "estimated"
+        assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
+        infantry_cardinality = infantry["facts"]["cardinality"]
+        assert (infantry_cardinality["lo"], infantry_cardinality["hi"]) == (1, 1)
 
         described = describe_contact(runner.store, truck["facts"]["id"], final_t_sim)
         assert described is not None

@@ -267,15 +267,29 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m body --print-tuning
 regenerates it from the `tuning.*` declarations in `src/`, and
 `tests/test_tuning_defaults_toml.py` fails CI if a calibration commit forgot to regenerate it.
 
-**A known residual coupling, not fully closed by the loader's own per-key bounds:**
-`belief.decay.py` asserts `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` at import time
-(`OBSERVED_WINDOW_S` being `perception.gaze.SCAN_CYCLE_PERIOD_S`, itself
-`len(SCAN_PLAN) * FOCUS_DWELL_S`). `POSITION_HALF_LIFE_S`'s own declared bounds (`lo=20.0`) sit
-safely above the *default* `SCAN_CYCLE_PERIOD_S` (16.0), but tuning `POSITION_HALF_LIFE_S` down
-*and* `FOCUS_DWELL_S`/`SCAN_PLAN` up at the same time can still violate that assertion and crash
-at import — the loader validates each key against its own declared bounds, not against the other
-keys it is coupled to. Single-key tuning (the motivating case) is safe by a wide margin; tuning
-more than one of these three together is not protected.
+**A cross-key coupling, not closeable by per-key bounds alone, so `tuning._check_scan_decay_
+coupling` enforces it directly.** `belief.decay.py` asserts two invariants over five keys
+(`perception.gaze.FOCUS_DWELL_S`/`SCAN_PLAN`/`GLASS_BUDGET_PER_CYCLE_S`,
+`belief.decay.POSITION_HALF_LIFE_S`/`LOST_THRESHOLD_S`) at import time —
+`BL-B110`'s `plans/expected-area-check/plan.md` Stage 1 extended this from the original three
+keys/one invariant (`plans/configurable-constants/review.md`'s Required Fix 1):
+
+- **I1 (original)**: `OBSERVED_WINDOW_S` (`len(SCAN_PLAN) * FOCUS_DWELL_S`) must stay below
+  `POSITION_HALF_LIFE_S`, or the "tracked" certainty band collapses to nothing for a *quiet* scan.
+- **I2 (new)**: `WORST_REVISIT_S` (`OBSERVED_WINDOW_S + GLASS_BUDGET_PER_CYCLE_S +
+  n_sectors(SCAN_PLAN)` seconds of poll slack) must stay below both `LOST_THRESHOLD_S` and
+  `2 * POSITION_HALF_LIFE_S`, or a flank contact (or its group) would go lost/re-form every *busy*
+  glass-budget cycle, not just on a quiet sweep.
+
+A per-key `lo`/`hi` bound cannot see either coupling on its own — `POSITION_HALF_LIFE_S`'s own
+`lo=20.0` sits safely above the default `OBSERVED_WINDOW_S` (16.0), and `LOST_THRESHOLD_S`'s own
+`lo=30.0` sits below the default `WORST_REVISIT_S` (32.0), each reachable by a single in-bounds
+override. `tuning._check_scan_decay_coupling` is what closes this: before any of the five keys'
+own accessor returns, it checks the combination the override file (plus code defaults for keys it
+does not mention) would resolve to, and if either invariant would be violated, rejects every one
+of the five keys the file actually sets back to its own code default — never crashes, per this
+project's own tuning policy above (a bad combination warns and falls back, exactly like any other
+rejected value).
 
 ## Testing
 
