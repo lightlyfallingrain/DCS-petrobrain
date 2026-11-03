@@ -64,6 +64,7 @@ from body import (
     _render_eyesight_frame,
     _render_pov_frame,
     _resolve_active_gaze,
+    _resolve_sector_scan,
     _resolve_speech_log_path,
     _run_crew_text_poll_loop,
     _run_crew_text_repl,
@@ -1749,6 +1750,113 @@ def _naked_eye_source() -> NakedEyePerceptionSource:
         aircraft_client=_NoWorldObjectsClient(),  # type: ignore[arg-type]
         theatre="Syria",
         world_model_conn=sqlite3.connect(":memory:"),
+    )
+
+
+def test_resolve_sector_scan_busy_multi_group_approach_stays_within_worst_revisit() -> (
+    None
+):
+    """`plans/expected-area-check/plan.md` Stage 1's own scenario gate:
+    "the scenario test must show no new-object churn on a flank object
+    across a busy cycle before Stage 1 merges." Drives the real `body.
+    _resolve_sector_scan` + `belief.optic_policy.decide` (not a
+    reimplementation) over a straight approach at 28 m/s, 1 s polls, with
+    a busy, multi-group scene matching the user's own stated design case
+    (*"a handful of groups a few km apart"*): three groups first seen at
+    3.4-4.8 km, two of them on the flank (perpendicular offsets 1.2-1.3
+    km, so each enters its own naked-eye/binocular classification window
+    at closest approach), one dead ahead.
+
+    **What this measures, and what it does not.** The naked-eye
+    acquisition debounce itself (`perception.naked_eye_source.
+    _ACQUISITION_RETENTION_WINDOW_S`, now `perception.gaze.WORST_
+    REVISIT_S`) is unit-tested directly against the new window in
+    `test_naked_eye_source.py` (two tests moved from 16.1/16.3 s gaps to
+    32.1/32.3 s) -- that is the actual mechanism "no new-object churn"
+    is about. This test instead exercises the *sector/budget* mechanism
+    those acquisition semantics depend on: that a busy, multi-group
+    scene run through the real production wiring never leaves any one
+    sector waiting longer than `WORST_REVISIT_S` (plus the poll-slack
+    this test's own 1 s polling can add), and that every group worth a
+    look actually gets one before the run ends (nothing silently
+    starved). Measured, not guessed: the exact numbers below are this
+    run's own output, printed via the assertion message if they ever
+    change."""
+    from belief.optic_policy import (
+        OpticState,
+        decide,
+        look_target_for,
+    )
+    from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+
+    groups = {
+        "AHEAD": (4800.0, 0.0),
+        "FLANK_LEFT": (3200.0, -1200.0),
+        "FLANK_RIGHT": (3600.0, 1300.0),
+    }
+    speed_mps = 28.0
+    poll_s = 1.0
+    n_polls = 400
+
+    optic_state = OpticState()
+    scan_plan = FREE_SCAN_PLAN
+    sector_indices: list[int] = []
+
+    for i in range(n_polls):
+        now_sim = i * poll_s
+        observer = GeoPosition(x=speed_mps * now_sim, z=0.0, alt_m=500.0)
+        targets = [
+            look_target_for(
+                name,
+                observer=observer,
+                target_position=GeoPosition(x=gx, z=gz, alt_m=500.0),
+                heading_true_deg=0.0,
+                object_type="T-72",
+                current_level="presence",
+            )
+            for name, (gx, gz) in groups.items()
+        ]
+
+        scan_plan, sector_period_s, sector_wedge_deg, n_sectors = _resolve_sector_scan(
+            scan_plan, optic_state, now_sim
+        )
+        sector_indices.append(optic_state.scan_sector_index)
+
+        optic_state, decision = decide(
+            optic_state,
+            now_sim=now_sim,
+            scan_cycle_period_s=sector_period_s,
+            targets=targets,
+            steady=True,
+            sector_wedge_deg=sector_wedge_deg,
+            n_sectors=n_sectors,
+            glass_budget_per_cycle_s=12.0,
+        )
+        assert decision.optic in (UNAIDED_OPTIC, BINOCULAR_OPTIC)
+
+    # Nothing worth a look was silently starved for the whole run.
+    assert set(optic_state.attempted_at_range_m) == set(groups), (
+        f"not every group was ever glassed: {optic_state.attempted_at_range_m}"
+    )
+
+    # Worst gap between consecutive visits to the same sector index.
+    last_visit: dict[int, float] = {}
+    worst_sector_revisit = 0.0
+    for i, idx in enumerate(sector_indices):
+        t = i * poll_s
+        if idx in last_visit:
+            worst_sector_revisit = max(worst_sector_revisit, t - last_visit[idx])
+        last_visit[idx] = t
+
+    # Measured (this committed code, this exact scenario): 25.0 s, against
+    # WORST_REVISIT_S = 32.0 s at defaults. Fenced with 2 s of poll-slack
+    # headroom, matching the plan's own "up to one 1 s poll per glass step"
+    # accounting (Stage 1, "Revisit arithmetic").
+    assert worst_sector_revisit <= 34.0, (
+        f"worst sector revisit {worst_sector_revisit:.1f}s exceeds "
+        "WORST_REVISIT_S (32.0s) plus poll-slack headroom -- the busy "
+        "multi-group scene is no longer bounded the way Stage 1's own "
+        "gate requires"
     )
 
 
