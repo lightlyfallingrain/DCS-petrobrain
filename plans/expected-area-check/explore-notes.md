@@ -267,3 +267,15 @@ recommendation.
 
 Reading (main loop): all three recommendations taken; also read as the go to build (Stages 0a, 0,
 1, then 2).
+
+## Stage 2 decision (user, verbatim, 2026-11-03)
+
+Asked, after Stages 0a/0/1 merged: hold Stage 2 (call a new group out at once) until the
+long-gap stationary false-trigger (7-15% at 120 s, 25-27% at 600 s, gate ~10%) is fixed and
+re-measured, or build it now. Also recommended moving `[[BL-B111]]` up.
+
+> *"Stage 2 -> Hold it until the stationary-group case is fixed."*
+
+Reading (main loop): Stage 2 is not built until a fix brings the stationary binocular→unaided
+long-gap cells under the ~10% gate in Stage 0's harness. Next is an architect pass on that fix
+only. BL-B111 ordering not answered; it stays where it is.
