@@ -18,6 +18,7 @@ import ast
 import inspect
 import math
 import statistics
+from typing import Final
 
 import pytest
 
@@ -760,3 +761,84 @@ def test_surface_range_estimate_converges_to_a_stable_value_not_truth() -> None:
     # sigma -- dwell narrows the reported *spread*, never the bias away.
     _c, sigma_a_m = look_sigma_m(true_distance_m, UNAIDED_OPTIC)
     assert statistics.pstdev(samples) < 0.5 * sigma_a_m
+
+
+# --- BL-B110 Stage 1, "Priority 1": the rough-location fence -------------
+#
+# `plans/expected-area-check/plan.md` Decision 10: the naked eye's own
+# declared down-range sigma must stay at or below `0.2 * R` and its
+# cross-range angle at or below half an o'clock (15 degrees), at every
+# range 0.5-6 km and every height above the unit 0-800 m, air or ground,
+# under every shipped tuning key -- the measured claim that makes Priority
+# 1 ("detection and rough location") need no binocular look at all. This
+# is a test fence, not a tunable (Decision 10, default proceeds): nothing
+# in flight compares a belief to this allowance, so a `defaults.toml` key
+# for it would tell a reader tuning it something false. If this test ever
+# fails, a naked-eye look's own rough-location grade has quietly become
+# worse than the model Stage 1 was built against, and priority-1 looks
+# would need to become real binocular looks after all.
+
+_ROUGH_LOCATION_RANGES_M: Final = (
+    500.0,
+    1_000.0,
+    1_500.0,
+    2_000.0,
+    3_000.0,
+    5_000.0,
+    6_000.0,
+)
+_ROUGH_LOCATION_HEIGHTS_M: Final = (0.0, 50.0, 300.0, 800.0)
+_ROUGH_LOCATION_DOWN_RANGE_FRACTION: Final = 0.2
+_ROUGH_LOCATION_HALF_OCLOCK_DEG: Final = 15.0
+
+
+def test_rough_location_cross_range_angle_stays_inside_half_an_oclock() -> None:
+    """A fixed, range-independent angle (`BEARING_SIGMA_DEG`), checked at
+    its own declared `hi` bound (14.0) -- the worst any shipped override
+    could make it -- against half an o'clock (15 degrees)."""
+    assert BEARING_SIGMA_DEG <= _ROUGH_LOCATION_HALF_OCLOCK_DEG
+    assert 14.0 <= _ROUGH_LOCATION_HALF_OCLOCK_DEG  # the declared `hi` itself
+
+
+@pytest.mark.parametrize("range_m", _ROUGH_LOCATION_RANGES_M)
+def test_rough_location_air_down_range_sigma_stays_at_or_below_0_2_times_range(
+    range_m: float,
+) -> None:
+    """`look_sigma_m`'s own declared sigma, air targets -- no random draw
+    involved, so one call per range is the whole population."""
+    _sigma_cross_m, sigma_down_m = look_sigma_m(range_m, UNAIDED_OPTIC)
+    allowance_m = _ROUGH_LOCATION_DOWN_RANGE_FRACTION * range_m
+    assert sigma_down_m <= allowance_m, (
+        f"R={range_m}: naked-eye sigma_down_m={sigma_down_m:.1f} exceeds "
+        f"the {_ROUGH_LOCATION_DOWN_RANGE_FRACTION:.0%} allowance "
+        f"({allowance_m:.1f})"
+    )
+
+
+@pytest.mark.parametrize("range_m", _ROUGH_LOCATION_RANGES_M)
+@pytest.mark.parametrize("height_above_unit_m", _ROUGH_LOCATION_HEIGHTS_M)
+def test_rough_location_ground_down_range_sigma_stays_at_or_below_0_2_times_range(
+    range_m: float, height_above_unit_m: float
+) -> None:
+    """`surface_range_estimate`'s own declared `sigma_down_m` (the fused
+    cue-A/cue-B value, not a realised range draw) -- whether cue B is
+    "present" depends on a random depression-fraction draw
+    (`poll_key`), so this sweeps an ensemble of poll keys per cell and
+    checks the *worst* declared sigma across it, not just one draw."""
+    worst_sigma_down_m = max(
+        surface_range_estimate(
+            true_distance_m=range_m,
+            true_bearing_deg=0.0,
+            height_above_unit_m=height_above_unit_m,
+            optic=UNAIDED_OPTIC,
+            poll_key=float(poll_key),
+        )[1]
+        for poll_key in range(50)
+    )
+    allowance_m = _ROUGH_LOCATION_DOWN_RANGE_FRACTION * range_m
+    assert worst_sigma_down_m <= allowance_m, (
+        f"R={range_m} height={height_above_unit_m}: worst naked-eye "
+        f"sigma_down_m={worst_sigma_down_m:.1f} over 50 poll keys exceeds "
+        f"the {_ROUGH_LOCATION_DOWN_RANGE_FRACTION:.0%} allowance "
+        f"({allowance_m:.1f})"
+    )

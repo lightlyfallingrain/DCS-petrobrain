@@ -28,8 +28,9 @@ from belief.position_belief import (
     fold_position,
     plausible_speed_mps,
 )
-from perception.estimation import stable_share
+from perception.estimation import look_sigma_m, stable_down_sigma_m, stable_share
 from perception.geometry import GeoPosition
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 from perception.source import PositionUncertainty
 
 
@@ -885,3 +886,204 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses_at_floor_trig
     )
 
     assert (fused.x, fused.z) != (prior.x, prior.z)
+
+
+# --- BL-B110 Stage 0a: a new look never leaves the belief less certain
+# than just before it (Decision 7, ANSWERED (a)). `_apply_floor`'s floor is
+# now additionally capped at the prior's own elapsed-motion-inflated
+# covariance -- see that function's own docstring. All four tests below
+# hold ownship fixed at the origin and the group fixed at (3000, 0) (bearing
+# 0 the whole time), so every look shares one geometry and `kappa_view`
+# stays at or near 1.0 throughout -- the case the plan measured.
+
+
+def _optic_uncertainty(range_m: float, optic: object) -> PositionUncertainty:
+    sigma_cross_m, sigma_down_m = look_sigma_m(range_m, optic)  # type: ignore[arg-type]
+    return PositionUncertainty(
+        sigma_cross_m=sigma_cross_m,
+        sigma_down_m=sigma_down_m,
+        sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+        optic_class=optic.name,  # type: ignore[attr-defined]
+    )
+
+
+def test_stage0a_growth_zero_binocular_fix_never_loosens_under_later_naked_fuses() -> (
+    None
+):
+    """A fixed (growth-0, i.e. an installation component) target, fixed by
+    binoculars, then re-seen by naked eye six times at 16s spacing: the
+    belief's own 1-sigma radius must never rise above the value the
+    binocular fix itself established -- the plan's own measured claim
+    (Stage 0a). `radius_m()` is the exact scalar `_apply_floor` caps
+    (`sqrt(trace)`), not the down-range-only projection."""
+    binocular_uncertainty = _optic_uncertainty(3000.0, BINOCULAR_OPTIC)
+    naked_uncertainty = _optic_uncertainty(3000.0, UNAIDED_OPTIC)
+
+    estimate = fold_position(
+        None,
+        x=3000.0,
+        z=0.0,
+        uncertainty=binocular_uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
+        growth_rate_mps=0.0,
+    )
+    post_fix_radius_m = estimate.radius_m()
+
+    for i in range(1, 7):
+        estimate = fold_position(
+            estimate,
+            x=3000.0,
+            z=0.0,
+            uncertainty=naked_uncertainty,
+            look_bearing_deg=0.0,
+            look_range_m=3000.0,
+            t_sim=float(i) * 16.0,
+            observer_x=0.0,
+            observer_z=0.0,
+            growth_rate_mps=0.0,
+        )
+        assert estimate.radius_m() <= post_fix_radius_m + 1e-6, (
+            f"fuse {i}: {estimate.radius_m()} > {post_fix_radius_m} (post-fix value)"
+        )
+
+
+def test_stage0a_armour_growth_bounded_by_prior_inflation_and_reaches_naked_grade_by_sixth_fuse() -> (
+    None
+):
+    """A moving-class target (armour, 8 m/s) still loosens between looks --
+    the cap tracks the prior's own elapsed-motion inflation, it does not
+    freeze the belief. After each fuse the 1-sigma radius must be no
+    looser than the prior's own inflated 1-sigma radius (the cap binding,
+    or the ordinary fuse landing under it), and by the sixth fuse (~112 s
+    later) it must have reached (within a small tolerance) the
+    naked-eye-only floor -- the cap no longer binds once growth alone has
+    caught up."""
+    growth_rate_mps = 8.0
+    binocular_uncertainty = _optic_uncertainty(3000.0, BINOCULAR_OPTIC)
+    naked_uncertainty = _optic_uncertainty(3000.0, UNAIDED_OPTIC)
+
+    estimate = fold_position(
+        None,
+        x=3000.0,
+        z=0.0,
+        uncertainty=binocular_uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
+        growth_rate_mps=growth_rate_mps,
+    )
+
+    # Independent naked-eye-only reference chain at the same geometry, to
+    # know what "naked grade" means for this range/optic pair.
+    naked_only = fold_position(
+        None,
+        x=3000.0,
+        z=0.0,
+        uncertainty=naked_uncertainty,
+        look_bearing_deg=0.0,
+        look_range_m=3000.0,
+        t_sim=0.0,
+        observer_x=0.0,
+        observer_z=0.0,
+        growth_rate_mps=growth_rate_mps,
+    )
+    for i in range(1, 7):
+        naked_only = fold_position(
+            naked_only,
+            x=3000.0,
+            z=0.0,
+            uncertainty=naked_uncertainty,
+            look_bearing_deg=0.0,
+            look_range_m=3000.0,
+            t_sim=float(i) * 16.0,
+            observer_x=0.0,
+            observer_z=0.0,
+            growth_rate_mps=growth_rate_mps,
+        )
+    naked_grade_radius_m = naked_only.radius_m()
+
+    for i in range(1, 7):
+        prior = estimate
+        prior_inflated_radius_m = (
+            prior.covariance.inflated(16.0, growth_rate_mps).trace() ** 0.5
+        )
+        estimate = fold_position(
+            prior,
+            x=3000.0,
+            z=0.0,
+            uncertainty=naked_uncertainty,
+            look_bearing_deg=0.0,
+            look_range_m=3000.0,
+            t_sim=float(i) * 16.0,
+            observer_x=0.0,
+            observer_z=0.0,
+            growth_rate_mps=growth_rate_mps,
+        )
+        radius_m = estimate.radius_m()
+        assert radius_m <= prior_inflated_radius_m * 1.01 + 1e-6, (
+            f"fuse {i}: {radius_m} exceeds the prior's own inflated "
+            f"1-sigma radius {prior_inflated_radius_m}"
+        )
+
+    assert estimate.radius_m() == pytest.approx(naked_grade_radius_m, rel=0.05)
+
+
+def test_stage0a_naked_only_dwell_cap_never_binds() -> None:
+    """A naked-only dwell (no prior binocular fix) converges exactly as it
+    did before Stage 0a -- the cap only ever compares against the prior's
+    own trace, and a naked-eye fuse chain's own floor is never looser than
+    its own immediately-preceding step, so the cap never actually binds
+    here. Re-runs `test_fold_position_never_claims_more_precision_than_the_
+    floor`'s own scenario and must land at the identical floor."""
+    uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
+    cross_floor = 0.4 * 50.0
+    down_floor = stable_share() * 500.0
+    floor = math.hypot(cross_floor, down_floor)
+
+    estimate = None
+    for i in range(200):
+        bearing = float(i % 360)
+        estimate = fold_position(
+            estimate,
+            x=1000.0,
+            z=0.0,
+            uncertainty=uncertainty,
+            look_bearing_deg=bearing,
+            look_range_m=1000.0,
+            t_sim=float(i),
+            observer_x=0.0,
+            observer_z=0.0,
+        )
+
+    assert estimate is not None
+    assert estimate.radius_m() >= floor - 1.0
+
+
+def test_stage0a_founding_look_unaffected_by_cap() -> None:
+    """A founding look (`prior is None`) passes `prior_inflated_covariance=
+    None` through to `_apply_floor`, which is its pre-Stage-0a default --
+    the founding case is bit-for-bit unchanged."""
+    uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
+    kwargs = {
+        "x": 1000.0,
+        "z": 0.0,
+        "uncertainty": uncertainty,
+        "look_bearing_deg": 0.0,
+        "look_range_m": 1000.0,
+        "t_sim": 0.0,
+        "observer_x": 0.0,
+        "observer_z": 0.0,
+    }
+
+    founded = fold_position(None, **kwargs)  # type: ignore[arg-type]
+    direct = estimate_from_look(**kwargs)  # type: ignore[arg-type]
+
+    assert founded.x == direct.x
+    assert founded.z == direct.z
+    assert founded.covariance == direct.covariance

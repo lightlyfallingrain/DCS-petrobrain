@@ -1408,6 +1408,50 @@ The entries are in the order they were written, which is roughly perception → 
   — `_SECTOR_LEGS`'s per-sector tables generalised to an arbitrary wedge. `gaze_at` picks
   `commanded_sector` over `commanded_legs` over free scan, in that order (mutual exclusivity means
   at most one of the first two is ever set).
+
+  **`BL-B110` Stage 1** (`plans/expected-area-check/plan.md`) adds the per-sector free-scan
+  mechanism, split across three modules so `perception` never has to import `belief`:
+  `perception.geometry.sector_runs_for_legs`/`n_sectors_for_legs` partition an ordered o'clock-hour
+  table into consecutive same-third runs (ahead/left/right, cyclic first/last merge) — placed there,
+  not here, because `tuning.py`'s cross-key coupling check needs it and `gaze.py` itself imports
+  `tuning`. `gaze.py` adds `GLASS_BUDGET_PER_CYCLE_S` (tunable) and derived `WORST_REVISIT_S`
+  (`SCAN_CYCLE_PERIOD_S + GLASS_BUDGET_PER_CYCLE_S + n_sectors(SCAN_PLAN)` seconds of poll slack —
+  `perception.naked_eye_source._ACQUISITION_RETENTION_WINDOW_S` now reads this instead of the bare
+  sweep period), `sector_azimuth_span_deg` (a sector's own union wedge) and the public `sector_legs_
+  for` accessor. `ScanPlan` gains `sweep_legs`/`sweep_started_sim` (the one-pass sector sweep
+  anchor); `gaze_at` honours it with no modulo, holding at the sector's last leg once reached —
+  `FREE_SCAN_PLAN` (no anchor) keeps the pre-Stage-1 absolute-indexing behaviour unchanged, which is
+  why that plan's own test-impact analysis found `test_gaze.py`'s free-scan cycling tests needed no
+  change. `belief.optic_policy.decide`/`_decide_without_guidance` keep `scan_cycle_period_s`'s
+  pre-Stage-1 name and shape (now meaning "this sector's own period") and gain three new, default-
+  backward-compatible parameters (`sector_wedge_deg`/`n_sectors`/`glass_budget_per_cycle_s`) — a
+  deliberate scope decision to avoid a ~130-site mechanical rename across `test_optic_policy.py`;
+  see that plan's own Stage 1 section and `plans/expected-area-check/implementation.md` for the
+  reasoning. `OpticState` gains `scan_sector_index`/`glass_step_started_sim`/`glass_recent_steps_s`
+  (the rolling budget window, length `n_sectors - 1`). New `choose_glass_look` (three buckets: a
+  `class` contact in its type window, then anything else `can_still_improve` admits, then an
+  exact-location-only target for a *watched* contact whose `LookTarget.location_gain_m` -- computed
+  by the new `location_gain_for` -- clears `EXACT_LOCATION_MIN_GAIN_M`), sharing `_classification_
+  bucket`/`choose_look` with the pre-existing `choose_sighting_look` rather than re-deriving the
+  coverage math. `GLASS_STALL_COOLDOWN_S` (and its `_EFFECTIVE_` floor at `OPTIC_RETRY_INTERVAL_S`,
+  mirroring `SIGHT_STALL_COOLDOWN_S`'s own pattern) closes the one selectivity gap `BL-B85` deferred
+  for `GLASSING`: a look that already failed at this range no longer retries at the bare
+  `OPTIC_RETRY_INTERVAL_S` alone. Look-follow (azimuth only, a stated simplification — no new
+  `OpticState` field, per the plan's own Co-moving Fields table) shifts an in-progress look's sweep
+  steps and envelope centre by the chosen contact's own azimuth drift each poll. `body.py`'s new
+  `_resolve_sector_scan` builds one resolved `ScanPlan` plus the sector period/wedge/count once per
+  poll from the *previous* poll's `OpticState`, handed to every `gaze_at` consumer and to
+  `decide_optic` alike (E4) — freezing the free-scan sweep at its last leg while `GLASSING`/
+  `SEARCHING`/`SIGHTING` (the eye is not physically free-sweeping then), anchoring at `now_sim` on
+  the very first poll (matching `decide_optic`'s own first-poll convention, found the hard way when
+  an initial "freeze" reading gave a second poll at the same `t_sim` a different gaze than the
+  first). A commanded scan (a sector, a single o'clock hour, or compass-derived legs) is treated as
+  one sector spanning its own legs, fixing the pre-Stage-1 wiring defect where a faster commanded
+  scan never actually brought binoculars round sooner (`body.py` always passed the bare 16 s
+  `SCAN_CYCLE_PERIOD_S` regardless). Sector bookkeeping resets to its defaults on two external
+  triggers: a genuinely new or cancelled scan command (`ScanPlan.command_t_sim` changing, never
+  heading-driven leg recomputation — a new `_last_scan_command_t_sim` field on the runner tracks
+  this) and OBSERV going off (folded into the existing `home_phase`-reset branch).
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into

@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from belief.optic_policy import (
+    GLASS_STALL_COOLDOWN_S,
     GUIDANCE_OPTIC_HYSTERESIS_FRACTION,
     GUIDANCE_OPTIC_MIN_INTERVAL_S,
     HANDS_BUSY_DURATION_S,
@@ -53,6 +54,7 @@ from belief.optic_policy import (
     sight_can_still_improve,
     sight_look_optic,
 )
+from perception.gaze import GLASS_BUDGET_PER_CYCLE_S
 from perception.optics import (
     BINOCULAR_OPTIC,
     SIGHT_NARROW_OPTIC,
@@ -246,9 +248,14 @@ class TestChooseSightingLook:
 
 
 class TestPhaseCycle:
-    """The lockout is structural: a glass phase is only reachable from the
-    end of a completed scan phase, so "at least one naked eye scan between
-    uses" cannot be violated."""
+    """The lockout is structural: a glass *step* is only reachable from
+    the end of a completed sector sweep, so "at least one naked eye scan
+    between uses" cannot be violated. **Revised by `BL-B110` Stage 1**:
+    the lockout is between *steps*, not between every individual look --
+    several looks may now run back to back inside one step (user
+    Decision 1), covered by `test_a_second_look_follows_immediately_
+    inside_one_glass_step`/`test_the_eye_must_sweep_again_between_glass_
+    steps` below."""
 
     def test_binoculars_are_not_raised_mid_scan(self) -> None:
         """The user's clarification: finish the pass first, so it gathers
@@ -364,9 +371,16 @@ class TestPhaseCycle:
         assert state.phase is OpticPhase.GLASSING
         assert decision.optic is BINOCULAR_OPTIC
 
-    def test_the_scan_must_complete_again_before_the_next_look(self) -> None:
-        """The lockout, demonstrated end to end: a finished look cannot be
-        followed immediately by another."""
+    def test_a_second_look_follows_immediately_inside_one_glass_step(self) -> None:
+        """**Reversed from the pre-`BL-B110` `test_the_scan_must_complete_
+        again_before_the_next_look`** (`plans/expected-area-check/
+        plan.md` Stage 1, Decision 3, approved: *"ok"*): several looks now
+        run back to back within one glass step (user Decision 1), so a
+        second, distinct target still worth it follows the first look's
+        natural end immediately -- the eye does not have to sweep again
+        between them. `glass_budget_per_cycle_s` is left at its default
+        (`None`, unlimited) -- this test is about the phase transition,
+        not the budget arithmetic, which `TestGlassBudget` below covers."""
         state, _ = decide(
             OpticState(phase_started_sim=0.0),
             now_sim=_CYCLE_S,
@@ -374,17 +388,44 @@ class TestPhaseCycle:
             targets=[_target()],
             steady=True,
         )
-        # The look ends.
-        state, _ = decide(
+        assert state.phase is OpticPhase.GLASSING
+        # The first look ends naturally (`MAX_LOOK_S`'s cap); a second,
+        # distinct target is still worth it.
+        state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S,
             scan_cycle_period_s=_CYCLE_S,
             targets=[_target("CONTACT_2")],
             steady=True,
         )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+
+    def test_the_eye_must_sweep_again_between_glass_steps(self) -> None:
+        """The lockout still holds *between steps*, exactly as before:
+        once a glass step genuinely ends (nothing left to look at this
+        step), the next look needs a fresh completed sector sweep."""
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        # The look ends naturally with nothing else worth looking at --
+        # the step itself ends, not just the one look.
+        state, _ = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
         assert state.phase is OpticPhase.SCANNING
 
-        # Immediately afterwards, with something still worth seeing.
+        # Immediately afterwards, with something now worth seeing: still
+        # locked out until the sector sweeps again.
         state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S + 1.0,
@@ -1518,7 +1559,16 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     at all (a stand-off watch, not a close). `OPTIC_RETRY_INTERVAL_S`
     (`plans/sortie-2026-09-26-fixes/decisions.md` Decision 2's own named
     gap in D5: "not even for watched") is what eventually unlocks it
-    instead, alongside (not replacing) the existing range-based retry."""
+    instead, alongside (not replacing) the existing range-based retry.
+
+    **Numbers updated, premise unchanged (`BL-B110` Stage 1)**: `GLASSING`
+    now passes `_EFFECTIVE_GLASS_STALL_COOLDOWN_S` as `is_worth_a_look`'s
+    `stall_cooldown_s` (`plans/expected-area-check/plan.md` Stage 1,
+    "Selectivity") -- since `stalled_target`'s level never moves from
+    `target`'s own, that longer cooldown (180 s, not `OPTIC_RETRY_
+    INTERVAL_S`'s 64 s) now governs here. The loop window widens to stay
+    comfortably past it; the claim this test pins ("eventually unlocks
+    it") is unaffected."""
     target = _target(range_m=1_700.0)  # inside the presence -> class window
     state, _ = decide(
         OpticState(phase_started_sim=0.0),
@@ -1549,8 +1599,8 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     stalled_target = _target(range_m=1_700.0)
     ever_glassed_again = False
     for cycle in range(
-        1, 10
-    ):  # up to ~144 s -- comfortably past OPTIC_RETRY_INTERVAL_S
+        1, 16
+    ):  # up to ~240 s -- comfortably past _EFFECTIVE_GLASS_STALL_COOLDOWN_S (180 s)
         state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S + cycle * _CYCLE_S,
@@ -1565,7 +1615,7 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     assert ever_glassed_again, (
         "a naturally completed look on a contact that never closes range "
         "and never advances classification should still become eligible "
-        "again once OPTIC_RETRY_INTERVAL_S has elapsed"
+        "again once the stall cooldown has elapsed"
     )
 
 
@@ -4146,3 +4196,294 @@ class TestBoundedSightLook:
         assert state.bounded_look is None
         assert state.point_clear_label is None
         assert decision.look_azimuth_deg is not None
+
+
+class TestSectorBudgetAndFilter:
+    """`plans/expected-area-check/plan.md` Stage 1: the rolling glass
+    budget (gates a look's *start*, never its length) and the sector
+    target filter -- exercised directly against `decide`, the real
+    production dispatch, not a reimplementation."""
+
+    def test_budget_gates_look_starts_not_lengths(self) -> None:
+        """Two distinct targets, angularly separated past the binocular
+        field of view (so `choose_look` cannot cover both in one look),
+        both worth a full `MAX_LOOK_S`: the budget (12 s) exactly admits
+        two full looks back to back (6 + 6 = 12 <= 12) and denies a
+        third fresh target's look (12 + 6 = 18 > 12) -- neither
+        completed look is ever cut short."""
+        near = _target("CONTACT_1", azimuth_deg=0.0, range_m=1_000.0)
+        far = _target("CONTACT_2", azimuth_deg=90.0, range_m=1_200.0)
+        fresh = _target("CONTACT_3", azimuth_deg=-90.0, range_m=1_100.0)
+
+        # Sector-complete -> the nearer target starts the step's first
+        # look.
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[near, far],
+            steady=True,
+            n_sectors=4,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_contact_id == "CONTACT_1"
+        assert state.glass_step_started_sim == _CYCLE_S
+        assert decision.optic is BINOCULAR_OPTIC
+
+        # The first look runs its own full MAX_LOOK_S (never cut short),
+        # then the second, distinct target follows immediately -- the
+        # budget admits it (6 + 6 <= 12) -- without the eye sweeping
+        # again in between.
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[near, far],
+            steady=True,
+            n_sectors=4,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_contact_id == "CONTACT_2"
+        # The step clock is carried forward, not reset, by the second look.
+        assert state.glass_step_started_sim == _CYCLE_S
+        assert decision.optic is BINOCULAR_OPTIC
+
+        # The second look also runs its own full MAX_LOOK_S. By now the
+        # step has spent exactly the whole 12 s budget; a third, fresh
+        # target's look is denied, and the step ends.
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + 2 * MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[near, far, fresh],
+            steady=True,
+            n_sectors=4,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+        assert state.scan_sector_index == 1
+        assert state.glass_recent_steps_s == (2 * MAX_LOOK_S,)
+        assert state.glass_step_started_sim is None
+        assert state.phase_started_sim == _CYCLE_S + 2 * MAX_LOOK_S
+
+    def test_sector_target_filter_excludes_targets_outside_the_swept_wedge(
+        self,
+    ) -> None:
+        """A target whose believed azimuth falls outside the swept
+        sector's own wedge is not a candidate at all, however worth a
+        look it would otherwise be."""
+        inside = _target("CONTACT_1", azimuth_deg=0.0)
+        outside = _target("CONTACT_2", azimuth_deg=90.0)
+
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[inside, outside],
+            steady=True,
+            sector_wedge_deg=(-15.0, 15.0),
+            n_sectors=4,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is BINOCULAR_OPTIC
+
+    def test_sector_target_filter_with_nothing_inside_advances_the_sector(
+        self,
+    ) -> None:
+        outside = _target("CONTACT_1", azimuth_deg=90.0)
+
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[outside],
+            steady=True,
+            sector_wedge_deg=(-15.0, 15.0),
+            n_sectors=4,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+        assert state.scan_sector_index == 1
+        assert state.glass_recent_steps_s == (0.0,)
+
+
+class TestGlassStallCooldown:
+    """`plans/expected-area-check/plan.md` Stage 1, "Selectivity": the
+    gap `BL-B85` deferred for `GLASSING` -- a look that already failed
+    at this range is retried anyway after only `OPTIC_RETRY_INTERVAL_S`.
+    `GLASSING` now passes `stall_cooldown_s=_EFFECTIVE_GLASS_STALL_
+    COOLDOWN_S` (180 s, same mechanism `SIGHT_STALL_COOLDOWN_S` already
+    uses)."""
+
+    def test_a_stalled_look_is_not_readmitted_at_the_ordinary_retry_interval(
+        self,
+    ) -> None:
+        target = _target(range_m=1_700.0)  # inside the presence -> class window
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        state, _ = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert state.attempted_at_level["CONTACT_1"] == "presence"
+
+        # The level never moved (still "presence", same range): the
+        # ordinary OPTIC_RETRY_INTERVAL_S (64 s) must not readmit it.
+        still_stalled = _target(range_m=1_700.0)
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S + OPTIC_RETRY_INTERVAL_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[still_stalled],
+            steady=True,
+        )
+        assert decision.optic is UNAIDED_OPTIC
+
+    def test_a_stalled_look_is_readmitted_at_once_after_closing_to_80_percent(
+        self,
+    ) -> None:
+        target = _target(range_m=1_700.0)
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        state, _ = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+
+        # Closed to exactly RETRY_RANGE_FRACTION (0.8) of the attempted
+        # range, one full sector sweep later (the structural scan-must-
+        # complete-again lockout still applies) -- the closing-on escape
+        # fires regardless of the stall cooldown.
+        closed = _target(range_m=1_700.0 * RETRY_RANGE_FRACTION)
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S + _CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[closed],
+            steady=True,
+        )
+        assert decision.optic is BINOCULAR_OPTIC
+
+    def test_a_stalled_look_is_readmitted_after_the_full_stall_cooldown(
+        self,
+    ) -> None:
+        target = _target(range_m=1_700.0)
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        state, _ = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+
+        still_stalled = _target(range_m=1_700.0)
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S + GLASS_STALL_COOLDOWN_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[still_stalled],
+            steady=True,
+        )
+        assert decision.optic is BINOCULAR_OPTIC
+
+
+class TestLookFollow:
+    """`plans/expected-area-check/plan.md` Stage 1, "Body rotation": a
+    binocular look follows its chosen contact's own azimuth drift since
+    last poll (azimuth only, a stated simplification -- see `_decide_
+    without_guidance`'s own GLASSING-branch comment)."""
+
+    def test_look_follows_its_contact_through_azimuth_drift(self) -> None:
+        target = _target(azimuth_deg=0.0, range_m=1_700.0)
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_envelope_azimuth_deg == pytest.approx(0.0)
+        steps_before = state.search_pattern_steps
+
+        drifted = _target(azimuth_deg=5.0, range_m=1_700.0)
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[drifted],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        # The envelope centre and every sweep step shift by the same
+        # +5 degree delta -- checked against the *previous* poll's own
+        # steps, not a specific step index, since `decision.look_
+        # azimuth_deg` reads whichever step this poll's elapsed time
+        # indexes into, not necessarily the sweep's first.
+        assert state.look_envelope_azimuth_deg == pytest.approx(5.0)
+        assert state.search_pattern_steps == tuple(
+            (az + 5.0, el) for az, el in steps_before
+        )
+
+    def test_an_absent_chosen_contact_leaves_the_look_unchanged(self) -> None:
+        target = _target("CONTACT_1", azimuth_deg=0.0, range_m=1_700.0)
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_contact_id == "CONTACT_1"
+        steps_before = state.search_pattern_steps
+        envelope_before = state.look_envelope_azimuth_deg
+
+        # `CONTACT_1` itself is absent this poll; a different contact at
+        # the same geometry keeps the look alive (`look_is_finished`
+        # still sees something in the envelope that can still improve),
+        # so the "absent chosen contact" branch is the one exercised,
+        # not "the look simply ended".
+        other = _target("CONTACT_2", azimuth_deg=0.0, range_m=1_700.0)
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[other],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert state.look_envelope_azimuth_deg == pytest.approx(envelope_before)
+        assert state.search_pattern_steps == steps_before

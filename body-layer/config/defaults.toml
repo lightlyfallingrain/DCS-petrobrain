@@ -123,6 +123,16 @@ EFFECTOR_SEQUENCE_STEP_DELAY_S = 1.0
 BUILT_UP_VILLAGE_MAX_AREA_M2 = 1000000.0
 
 [belief.optic_policy]
+# `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a binocular look must be expected to tighten the range of a contact the pilot asked to watch, in metres, before Petrovich raises binoculars just for its position.
+# status: judgement | range: 5.0 .. 500.0
+# source: belief/optic_policy.py:EXACT_LOCATION_MIN_GAIN_M
+EXACT_LOCATION_MIN_GAIN_M = 25.0
+
+# `plans/expected-area-check/plan.md` (`BL-B110`) Stage 1, "Selectivity" -- `GLASSING`'s own analogue of `SIGHT_STALL_COOLDOWN_S` above, same mechanism (`is_worth_a_look`'s `stall_cooldown_s` branch), not the same number: how long binoculars leave a contact alone after a look at it taught nothing (its classification level unchanged since the last committed attempt), unless the aircraft has closed on it since (`RETRY_RANGE_FRACTION`, untouched either way).
+# status: judgement | range: 60.0 .. 600.0
+# source: belief/optic_policy.py:GLASS_STALL_COOLDOWN_S
+GLASS_STALL_COOLDOWN_S = 180.0
+
 # BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's, and `GUIDANCE_OPTIC_MIN_INTERVAL_S` must exceed the time this band buys (~10 s of closing at 0.25) or a fly-past re-crosses it early, so the two are retuned together.
 # status: agreed-guess | range: 0.05 .. 0.9
 # source: belief/optic_policy.py:GUIDANCE_OPTIC_HYSTERESIS_FRACTION
@@ -341,6 +351,11 @@ SIGHT_WIDE_RANGE_SIGMA_SCALE = 0.5
 # status: judgement | range: 0.5 .. 5.0
 # source: perception/gaze.py:FOCUS_DWELL_S
 FOCUS_DWELL_S = 2.0
+
+# The most binocular time Petrovich spends across one full scan cycle, counted over the last cycle's glass steps, so no part of the windscreen waits longer than one sweep plus this -- `plans/expected-area-check/plan.md` (`BL-B110`) Stage 1, Decision 5 (user: *"four is too short... The 12 s sounds ok"*).
+# status: judgement | range: 6.0 .. 30.0
+# source: perception/gaze.py:GLASS_BUDGET_PER_CYCLE_S
+GLASS_BUDGET_PER_CYCLE_S = 12.0
 
 # Free scan's ordered o'clock-cone table (hard part 8, "Adopt A") -- 12 is deliberately visited twice per cycle (the forward arc gets double the dwell of a flank o'clock), never inlined elsewhere: `gaze_at` and every derived constant below read this tuple directly, so revisiting hard part 8's plan-C alternative (`11, 12, 1` / `10, 9` / `2, 3`, 20 s) is a one-table edit plus `belief.decay.OBSERVED_WINDOW_S`, nothing else.
 # status: judgement

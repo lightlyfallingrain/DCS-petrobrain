@@ -147,6 +147,9 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B106]] — async speech: the mouth never blocks the eyes and arms; plan on `main`, not built (F8, 2026-10-20 sortie)
 - [[BL-B108]] — relative-distance grouping: stable, shared range error and a near-circular merge zone, so two groups on one bearing stay two and one group stays one (2026-10-31, `plans/relative-distance-grouping/`)
 - [[BL-B109]] — callout wording for a second group on the same bearing, e.g. "second group, beyond" (split from `[[BL-B108]]`)
+- [[BL-B110]] — expected-area check: look where a remembered group should be before deciding a new sighting is the same group; callout only once decided (follow-on to `[[BL-B108]]`)
+- [[BL-B111]] — expected-area look: point line-of-sight query through the LOS Hook, then look at a remembered group's area and say "now at …"/"gone" (split from `[[BL-B110]]`, depends on it)
+- [[BL-B112]] — motion-aware contact certainty: a stationary unit stays tracked; lost by plausible movement, not fixed time (queued after `[[BL-B110]]`)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
