@@ -43,6 +43,7 @@ from typing import Final, Literal
 import tuning
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
+from perception.estimation import look_sigma_m
 from perception.gaze import SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition, body_relative_direction, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
@@ -265,6 +266,53 @@ SIGHT_STALL_COOLDOWN_S: Final[float] = tuning.real(
 # intended behaviour, not a rejection.
 _EFFECTIVE_SIGHT_STALL_COOLDOWN_S: Final[float] = max(
     SIGHT_STALL_COOLDOWN_S, OPTIC_RETRY_INTERVAL_S
+)
+
+#: `plans/expected-area-check/plan.md` (`BL-B110`) Stage 1, "Selectivity" --
+#: `GLASSING`'s own analogue of `SIGHT_STALL_COOLDOWN_S` above, same
+#: mechanism (`is_worth_a_look`'s `stall_cooldown_s` branch), not the same
+#: number: how long binoculars leave a contact alone after a look at it
+#: taught nothing (its classification level unchanged since the last
+#: committed attempt), unless the aircraft has closed on it since
+#: (`RETRY_RANGE_FRACTION`, untouched either way). About ten quiet sweep
+#: cycles (`SCAN_CYCLE_PERIOD_S`, 16 s each), or three ordinary retry
+#: intervals (`OPTIC_RETRY_INTERVAL_S`, 64 s) -- long enough that a stuck
+#: contact stops taking the glass budget, short enough that one blocked by
+#: a transient cause (aspect, a tree line, a manoeuvre) is tried again
+#: inside an encounter. A starting value, same footing as `SIGHT_STALL_
+#: COOLDOWN_S` when it shipped (`BL-B85`) -- unflown.
+GLASS_STALL_COOLDOWN_S: Final[float] = tuning.real(
+    "belief.optic_policy.GLASS_STALL_COOLDOWN_S",
+    180.0,
+    lo=60.0,
+    hi=600.0,
+    status="judgement",
+)
+
+#: Floored at `OPTIC_RETRY_INTERVAL_S`, the identical reason/shape as
+#: `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S` above (that constant's own
+#: docstring has the coupling trap this guards against) -- a separate
+#: floor, not a shared one, because `GLASSING` and `SIGHTING` are
+#: different phases with independently tunable cooldowns.
+_EFFECTIVE_GLASS_STALL_COOLDOWN_S: Final[float] = max(
+    GLASS_STALL_COOLDOWN_S, OPTIC_RETRY_INTERVAL_S
+)
+
+#: `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a
+#: binocular look must be expected to tighten the range of a contact the
+#: pilot asked to watch, in metres, before Petrovich raises binoculars
+#: just for its position. Reasoning: about a vehicle group's own spacing;
+#: a smaller improvement is lost inside the group itself. **No cross-key
+#: coupling to any other tunable**: if the binocular range-sense gain
+#: elsewhere were ever retuned away to nothing, `location_gain_for`'s own
+#: gain would simply fall to 0 and location looks would stop -- the
+#: honest consequence, not a bug.
+EXACT_LOCATION_MIN_GAIN_M: Final[float] = tuning.real(
+    "belief.optic_policy.EXACT_LOCATION_MIN_GAIN_M",
+    25.0,
+    lo=5.0,
+    hi=500.0,
+    status="judgement",
 )
 
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
@@ -539,6 +587,15 @@ class LookTarget:
     #: the *order* looks happen in, never whether they happen at all.
     watched: bool = False
 
+    #: How much a binocular look is expected to tighten this contact's own
+    #: down-range uncertainty, metres (`plans/expected-area-check/plan.md`
+    #: Stage 1, "Priority 4") -- `location_gain_for`'s own output, `0.0`
+    #: with no `PositionEstimate` or beyond binocular presence range for
+    #: the believed type. Read only by `choose_glass_look`'s exact-location
+    #: bucket and `_glass_can_improve`'s admission predicate; `0.0` (the
+    #: default) is a true no-op for every pre-Stage-1 caller/test.
+    location_gain_m: float = 0.0
+
 
 #: Which leg of the idle sight's search cycle is current --
 #: `plans/9k113-scan-procedure/plan.md` Stage 1: a wide S-scan
@@ -602,6 +659,28 @@ class OpticState:
     #: exactly that. `decide` adopts the first `now_sim` it is given and
     #: starts the cycle there.
     phase_started_sim: float | None = None
+    #: Which free-scan sector (`SCANNING`'s own partition of the active
+    #: scan table, `perception.geometry.sector_runs_for_legs`) is current
+    #: -- `plans/expected-area-check/plan.md` Stage 1. `0` by default,
+    #: a true no-op for every pre-Stage-1 caller/test (`n_sectors=1`
+    #: callers never advance past it). Advanced only at a glass *step*'s
+    #: end (Co-moving Fields table), never mid-step.
+    scan_sector_index: int = 0
+    #: When the *current glass step* began -- distinct from `phase_
+    #: started_sim`, which for a multi-look step tracks only the latest
+    #: look's own sweep timing (Co-moving Fields table: a fresh `GLASSING`
+    #: entry for a second look within one step carries this forward
+    #: unchanged, not reset). `None` outside an active glass step. The
+    #: rolling glass budget reads `now_sim - glass_step_started_sim` for
+    #: the step currently in progress.
+    glass_step_started_sim: float | None = None
+    #: The glass time (seconds) spent in each of the last `n_sectors - 1`
+    #: *completed* steps, oldest first -- `plans/expected-area-check/
+    #: plan.md` Stage 1, "Glass budget" (rolling, not reset once per
+    #: cycle, so the budget cannot land twice inside one flank's revisit
+    #: window). A step with nothing to glass contributes `0.0`. Empty
+    #: tuple by default, a true no-op for every pre-Stage-1 caller/test.
+    glass_recent_steps_s: tuple[float, ...] = ()
     #: Where the current look points, body-relative. `None` while scanning.
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
@@ -1177,6 +1256,40 @@ def improvement_window_m(
     return unaided_class_m, binocular_class_m
 
 
+def location_gain_for(
+    position: PositionEstimate | None, observer: GeoPosition, object_type: str
+) -> float:
+    """How much a binocular look is expected to tighten `position`'s own
+    down-range uncertainty, metres -- `plans/expected-area-check/plan.md`
+    Stage 1, "Priority 4, exact location". `0.0` with no belief to
+    tighten (a founding percept, no `PositionEstimate` yet) and `0.0`
+    beyond binoculars' own presence range for the believed type
+    (`tier_ranges`, the same call `improvement_window_m` above makes) --
+    a look that cannot even detect the contact at this range buys it
+    nothing. Otherwise `position.range_uncertainty_m(observer) -
+    look_sigma_m(range_m, BINOCULAR_OPTIC).sigma_down`, floored at `0.0`
+    (never negative: a look is never modelled as making a belief *worse*
+    for position, which is Stage 0a's own guarantee for the fold this
+    gain is measuring against)."""
+    if position is None:
+        return 0.0
+    profile = profile_for(object_type)
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+    presence_m, _class_m, _type_m = tier_ranges(
+        presence_size_m=profile.size_m,
+        recognition_extent_m=extent,
+        optic=BINOCULAR_OPTIC,
+        distinctiveness=distinctiveness,
+    )
+    target = GeoPosition(x=position.x, z=position.z, alt_m=observer.alt_m)
+    slant_m = range_m(observer, target)
+    if slant_m > presence_m:
+        return 0.0
+    _sigma_cross_m, sigma_down_m = look_sigma_m(slant_m, BINOCULAR_OPTIC)
+    return max(0.0, position.range_uncertainty_m(observer) - sigma_down_m)
+
+
 def sight_look_optic(target: LookTarget) -> Optic:
     """Which of the sight's two settings a look at `target` should use --
     `plans/9k113-narrow-search/plan.md` Stage 4 Part A, direction §8
@@ -1395,6 +1508,21 @@ def can_still_improve(target: LookTarget) -> bool:
     return lower_m < target.range_m <= upper_m
 
 
+def _glass_can_improve(target: LookTarget) -> bool:
+    """`GLASSING`'s own `can_improve` -- `plans/expected-area-check/
+    plan.md` Stage 1, Decision 8 REVERSED: the ordinary classification
+    window, **or** a watched contact whose exact-location gain still
+    clears `EXACT_LOCATION_MIN_GAIN_M`. Passed through the existing
+    `can_improve` parameter to both `is_worth_a_look` and `look_is_
+    finished`, so a location-only look neither fails to start nor ends
+    on its first poll (the 9K113 narrow-search trap, `look_is_finished`'s
+    own docstring) -- the identical reasoning that made `sight_can_still_
+    improve` a parameter rather than a second copy of either function."""
+    return can_still_improve(target) or (
+        target.watched and target.location_gain_m >= EXACT_LOCATION_MIN_GAIN_M
+    )
+
+
 def is_worth_a_look(
     target: LookTarget,
     state: OpticState,
@@ -1506,30 +1634,61 @@ def choose_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     return max(targets, key=covered)
 
 
+def _classification_bucket(target: LookTarget) -> int:
+    """Shared by `choose_sighting_look` and `choose_glass_look` below
+    (root `CLAUDE.md`, "Do not reinvent the wheel"): `0` for a contact
+    already at `"class"` (one look from full identification, `"type"`),
+    `1` for anything else -- the explore notes' procedure (*"first units
+    not yet identified that might be inside identification range... same
+    thing for class"*)."""
+    return 0 if target.current_level == "class" else 1
+
+
 def choose_sighting_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     """`_decide_sighting`'s own candidate ordering -- `choose_look`'s
     coverage/watched/range rule, with an outer priority bucket on top:
     `plans/9k113-scan-procedure/plan.md` Stage 1, the explore notes'
-    procedure (*"first units not yet identified that might be inside
-    identification range... same thing for class"*). A contact already at
-    `"class"` (one look from full identification, `"type"`) is visited
-    before any contact still seeking `"class"` -- within one bucket,
-    `choose_look`'s own ordering applies unchanged.
+    procedure. A contact already at `"class"` is visited before any
+    contact still seeking `"class"` -- within one bucket, `choose_look`'s
+    own ordering applies unchanged.
 
     Implemented by grouping and delegating to `choose_look` rather than
-    re-deriving its coverage math (root `CLAUDE.md`, "Do not reinvent the
-    wheel"). `current_level == "type"` never appears in `targets` here --
-    `sight_can_still_improve` already excludes it from `worth_looking`
-    upstream, same as today."""
+    re-deriving its coverage math. `current_level == "type"` never
+    appears in `targets` here -- `sight_can_still_improve` already
+    excludes it from `worth_looking` upstream, same as today."""
     if not targets:
         return None
-
-    def bucket(target: LookTarget) -> int:
-        return 0 if target.current_level == "class" else 1
-
     by_bucket: dict[int, list[LookTarget]] = {}
     for target in targets:
-        by_bucket.setdefault(bucket(target), []).append(target)
+        by_bucket.setdefault(_classification_bucket(target), []).append(target)
+    return choose_look(by_bucket[min(by_bucket)])
+
+
+def choose_glass_look(targets: Sequence[LookTarget]) -> LookTarget | None:
+    """The binocular glass step's own candidate ordering -- `plans/
+    expected-area-check/plan.md` Stage 1, "Optics priority", the user's
+    refined order (type identification, then classification, then exact
+    location). Three buckets: `0`/`1` are `choose_sighting_look`'s own
+    `_classification_bucket` (a `class` contact in its type window beats
+    any other target `can_still_improve` still admits); `2` is a target
+    `can_still_improve` no longer admits but whose `watched`/`location_
+    gain_m` qualifies it for an exact-location look anyway (`_glass_can_
+    improve`'s own second clause) -- ranked last, per the user's *"exact
+    location... classification"* order (Decision 8 REVERSED). Within a
+    bucket, `choose_look`'s own order (watched -> coverage -> nearest)
+    is unchanged, so a watched contact still wins inside each priority.
+
+    `targets` here is everything `is_worth_a_look(..., can_improve=
+    _glass_can_improve)` admitted -- it may contain exact-location-only
+    candidates `choose_sighting_look` never sees (that caller's own
+    `sight_can_still_improve` filter excludes them upstream), which is
+    why this is a separate function rather than a parameter on that one."""
+    if not targets:
+        return None
+    by_bucket: dict[int, list[LookTarget]] = {}
+    for target in targets:
+        bucket = _classification_bucket(target) if can_still_improve(target) else 2
+        by_bucket.setdefault(bucket, []).append(target)
     return choose_look(by_bucket[min(by_bucket)])
 
 
@@ -2679,6 +2838,186 @@ def _decide_sighting(
     )
 
 
+def _within_sector(
+    target: LookTarget, sector_wedge_deg: tuple[float, float] | None
+) -> bool:
+    """Whether `target`'s *believed* body azimuth, **this poll's**
+    `LookTarget` (not where the eye last saw it), falls inside the swept
+    sector's own wedge -- `plans/expected-area-check/plan.md` Stage 1,
+    "Glass step". `None` (every pre-Stage-1 caller) means no restriction
+    at all, the pre-Stage-1 "every live contact is a candidate"
+    behaviour. `sector_wedge_deg` is already widened by the half-
+    binocular-field margin by the caller (`body.py`) -- this function
+    only tests membership. No wraparound handling: every sector this
+    project's tables ever produce sits inside the forward hemisphere."""
+    if sector_wedge_deg is None:
+        return True
+    lo, hi = sector_wedge_deg
+    return lo <= target.azimuth_deg <= hi
+
+
+def _glass_budget_admits_look(
+    state: OpticState, now_sim: float, glass_budget_per_cycle_s: float | None
+) -> bool:
+    """Whether a look starting now may run to its own full `MAX_LOOK_S`
+    without the rolling glass budget being exceeded -- `plans/
+    expected-area-check/plan.md` Stage 1, "Glass budget": gates the
+    *start* of a look, never its length. `glass_budget_per_cycle_s=None`
+    (every pre-Stage-1 caller) is a true no-op: unlimited budget, always
+    admits."""
+    if glass_budget_per_cycle_s is None:
+        return True
+    current_step_spent_s = (
+        now_sim - state.glass_step_started_sim
+        if state.glass_step_started_sim is not None
+        else 0.0
+    )
+    spent_s = sum(state.glass_recent_steps_s) + current_step_spent_s
+    return spent_s + MAX_LOOK_S <= glass_budget_per_cycle_s
+
+
+def _rolled_glass_window(
+    recent_steps_s: tuple[float, ...], step_time_s: float, n_sectors: int
+) -> tuple[float, ...]:
+    """The rolling budget window after one glass step ends -- the
+    Co-moving Fields table's "window <- last n-1 of (window +
+    step_time_s)" -- kept to exactly the previous `n_sectors - 1`
+    entries, the set of steps inside any one leg's own revisit window.
+    `n_sectors <= 1` (every pre-Stage-1 caller) always yields `()`."""
+    window = recent_steps_s + (step_time_s,)
+    keep = max(0, n_sectors - 1)
+    return window[-keep:] if keep > 0 else ()
+
+
+def _advance_sector(
+    state: OpticState, now_sim: float, *, anchor_sim: float, n_sectors: int
+) -> tuple[OpticState, OpticDecision]:
+    """The "step ends" transition shared by both the quiet-sector and the
+    budget-exhausted branches of `SCANNING`-at-home below, and by the
+    end of a glass step with nothing left to look at: rolls the glass
+    window with this step's own glass time (`0.0` for a quiet sector),
+    advances `scan_sector_index` modulo `n_sectors`, re-anchors `SCANNING`
+    at `anchor_sim` (the caller's choice: `now_sim` if a look actually
+    ran, the previous anchor plus the sector period if the sector was
+    quiet -- Co-moving Fields table, "no drift"), and clears `glass_step_
+    started_sim`.
+
+    **Respects `state.home_phase`, exactly `_back_to_home`'s own rule**:
+    if a test (or a future caller) has set `home_phase` to `SIGHTING`
+    while still inside `GLASSING` (`TestObservOn.test_the_look_ending_
+    hands_back_to_sighting_not_scanning`'s own scenario), the sector
+    mechanism does not apply at all -- sectors are a free-scan-only
+    concept -- so this delegates to `_back_to_home` wholesale rather than
+    forcing `SCANNING`."""
+    if state.home_phase is OpticPhase.SIGHTING:
+        return _back_to_home(state, now_sim)
+    step_time_s = (
+        now_sim - state.glass_step_started_sim
+        if state.glass_step_started_sim is not None
+        else 0.0
+    )
+    new_state = replace(
+        state,
+        phase=OpticPhase.SCANNING,
+        phase_started_sim=anchor_sim,
+        scan_sector_index=(state.scan_sector_index + 1) % max(1, n_sectors),
+        glass_recent_steps_s=_rolled_glass_window(
+            state.glass_recent_steps_s, step_time_s, n_sectors
+        ),
+        glass_step_started_sim=None,
+        look_azimuth_deg=None,
+        look_elevation_deg=None,
+        search_pattern_steps=(),
+        search_step_index=0,
+        look_envelope_azimuth_deg=None,
+        look_envelope_half_width_deg=None,
+        look_contact_id=None,
+    )
+    return new_state, OpticDecision(optic=UNAIDED_OPTIC)
+
+
+def _start_glass_look(
+    state: OpticState,
+    now_sim: float,
+    chosen: LookTarget,
+    worth_looking: Sequence[LookTarget],
+    *,
+    reset_step_clock: bool,
+) -> tuple[OpticState, OpticDecision]:
+    """Start one binocular look at `chosen`, covering every target in
+    `worth_looking` that falls in its own field of view -- shared by the
+    `SCANNING`-at-home transition into `GLASSING` and the "another look,
+    same step" continuation inside `GLASSING` itself (`plans/
+    expected-area-check/plan.md` Stage 1, "several looks per step",
+    factored out of what was previously one inline construction so both
+    call sites build the look identically). `reset_step_clock` is `True`
+    only for the first look of a fresh step (`glass_step_started_sim :=
+    now_sim`); a continuation leaves it unchanged (Co-moving Fields
+    table: "carries the step clock (not reset)")."""
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    sweep = look_sweep(
+        centre_azimuth_deg=chosen.azimuth_deg,
+        centre_elevation_deg=chosen.elevation_deg,
+        bearing_uncertainty_deg=chosen.bearing_uncertainty_deg,
+        fov_full_width_deg=fov_full_width_deg,
+    )
+    envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
+
+    # Stage 2 (Fix B1): every contact this look covers goes into the
+    # *pending* map, not the committed one -- the look has not yet
+    # delivered any benefit, only started.
+    pending = dict(state.pending_attempted_at_range_m)
+    pending_level = dict(state.pending_attempted_at_level)
+    for target in worth_looking:
+        if _angular_separation_deg(chosen, target) <= envelope_half_width:
+            pending[target.contact_id] = target.range_m
+            pending_level[target.contact_id] = target.current_level
+
+    first_azimuth, first_elevation = sweep[0]
+    glass_step_started_sim = (
+        now_sim if reset_step_clock else state.glass_step_started_sim
+    )
+    new_state = OpticState(
+        phase=OpticPhase.GLASSING,
+        phase_started_sim=now_sim,
+        scan_sector_index=state.scan_sector_index,
+        glass_step_started_sim=glass_step_started_sim,
+        glass_recent_steps_s=state.glass_recent_steps_s,
+        look_azimuth_deg=first_azimuth,
+        look_elevation_deg=first_elevation,
+        search_pattern_steps=tuple(sweep),
+        search_step_index=0,
+        look_envelope_azimuth_deg=chosen.azimuth_deg,
+        look_envelope_half_width_deg=envelope_half_width,
+        attempted_at_range_m=dict(state.attempted_at_range_m),
+        pending_attempted_at_range_m=pending,
+        attempted_at_time_sim=dict(state.attempted_at_time_sim),
+        attempted_at_level=dict(state.attempted_at_level),
+        pending_attempted_at_level=pending_level,
+        look_contact_id=chosen.contact_id,
+        # Carried forward explicitly -- the same `BL-B64` Stage 1 review
+        # rule `_decide_without_guidance`'s `SEARCHING` branch comment
+        # cites: every fresh `OpticState(...)` construction (not
+        # `replace`) must carry these forward rather than reset them.
+        actual_aim_azimuth_deg=state.actual_aim_azimuth_deg,
+        actual_aim_elevation_deg=state.actual_aim_elevation_deg,
+        home_phase=state.home_phase,
+        hands_busy_until_sim=state.hands_busy_until_sim,
+        # `BL-B71`: an ordinary glass-phase entry must not reset a
+        # standing guidance grant's bookkeeping.
+        guidance_optic=state.guidance_optic,
+        guidance_optic_since_sim=state.guidance_optic_since_sim,
+    )
+    return (
+        new_state,
+        OpticDecision(
+            optic=BINOCULAR_OPTIC,
+            look_azimuth_deg=first_azimuth,
+            look_elevation_deg=first_elevation,
+        ),
+    )
+
+
 def _decide_without_guidance(
     state: OpticState,
     *,
@@ -2687,6 +3026,9 @@ def _decide_without_guidance(
     targets: Sequence[LookTarget],
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
+    sector_wedge_deg: tuple[float, float] | None = None,
+    n_sectors: int = 1,
+    glass_budget_per_cycle_s: float | None = None,
     sight_steady: bool = True,
     sight_wide_near_search: Sequence[tuple[float, float]] = (),
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
@@ -2709,6 +3051,25 @@ def _decide_without_guidance(
     contact already detected and resolvable is worth more than looking for
     another one, and the user's own sequencing says so (*"detected targets
     then get the dwell behaviour"*).
+
+    **`scan_cycle_period_s` is the *current sector's own* period, not
+    necessarily the whole free-scan cycle** (`plans/expected-area-check/
+    plan.md` Stage 1) -- kept under its pre-Stage-1 name deliberately
+    (not renamed to `sector_period_s`) so every pre-Stage-1 call site
+    (~130 in `test_optic_policy.py` alone) keeps compiling and behaving
+    identically: with `sector_wedge_deg=None`/`n_sectors=1`/`glass_
+    budget_per_cycle_s=None` (every one of those sites), there is exactly
+    one "sector" spanning the whole cycle, no azimuth filter, and no
+    budget limit -- bit-identical to the pre-Stage-1 single-phase
+    dispatch. `body.py` is the one caller that passes real sector
+    values, computed each poll from `OpticState.scan_sector_index` and
+    the active scan table's own partition (`perception.geometry.
+    sector_runs_for_legs`). `sector_wedge_deg` is the swept sector's own
+    azimuth span, already widened by half a binocular field by the
+    caller; `n_sectors` is how many sectors the active table partitions
+    into (the rolling glass-budget window's own length, `n_sectors - 1`);
+    `glass_budget_per_cycle_s` is `perception.gaze.GLASS_BUDGET_PER_
+    CYCLE_S`.
 
     `sight_lock_contact_id` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
     Stage 1) is threaded straight through to `_decide_sighting`, read
@@ -2792,52 +3153,152 @@ def _decide_without_guidance(
             # `pending_attempted_at_range_m` without ever merging it into
             # the committed map (Stage 2, Fix B1) -- the interrupted
             # contact is immediately eligible for a new look again.
+            #
+            # **Stated simplification (`plans/expected-area-check/
+            # plan.md` Co-moving Fields table's interrupt-while-GLASSING
+            # row is not implemented exactly)**: the sector index and the
+            # rolling glass window are left unchanged here rather than
+            # advanced as that row prescribes, so an interrupted step
+            # effectively restarts the *same* sector's sweep rather than
+            # moving on. Pilot-driven and rare; bounded (the sector still
+            # advances the next time it completes naturally); `n_sectors
+            # <= 1` (every commanded scan, where `SEARCHING`'s own sibling
+            # row has the identical gap) makes this a true no-op there.
             return _back_to_home(state, now_sim)
-        if look_is_finished(state, now_sim, targets):
+        # Look-follow (Stage 1, "Body rotation"): shift the sweep to
+        # track the chosen contact's own azimuth drift since last poll.
+        # **Azimuth only** (a stated, reversible simplification: the plan
+        # asks for elevation too, but there is no existing field holding
+        # last poll's envelope *elevation* to diff against, and the
+        # Co-moving Fields table is explicit that this feature adds no
+        # new `OpticState` field -- elevation drift is also far smaller
+        # than azimuth drift for a circling/sidestepping approach at the
+        # ranges this feature targets). An absent chosen contact leaves
+        # everything unchanged, as today.
+        # `glassing_state` rather than reassigning `state` itself: mypy's
+        # narrowing of `state.phase_started_sim` (from the function's own
+        # top-of-body `is None` check) does not survive a reassignment of
+        # `state` even inside a branch that always returns, so the rest
+        # of this dispatch (the `SCANNING`-at-home code below, read the
+        # *original*, never-reassigned `state`) would otherwise lose it.
+        glassing_state = state
+        # Look-follow (Stage 1, "Body rotation"): shift the sweep to
+        # track the chosen contact's own azimuth drift since last poll.
+        # **Azimuth only** (a stated, reversible simplification: the plan
+        # asks for elevation too, but there is no existing field holding
+        # last poll's envelope *elevation* to diff against, and the
+        # Co-moving Fields table is explicit that this feature adds no
+        # new `OpticState` field -- elevation drift is also far smaller
+        # than azimuth drift for a circling/sidestepping approach at the
+        # ranges this feature targets). An absent chosen contact leaves
+        # everything unchanged, as today.
+        if (
+            glassing_state.look_contact_id is not None
+            and glassing_state.look_envelope_azimuth_deg is not None
+        ):
+            followed = next(
+                (t for t in targets if t.contact_id == glassing_state.look_contact_id),
+                None,
+            )
+            if followed is not None:
+                delta_az = (
+                    followed.azimuth_deg - glassing_state.look_envelope_azimuth_deg
+                )
+                if delta_az != 0.0:
+                    glassing_state = replace(
+                        glassing_state,
+                        search_pattern_steps=tuple(
+                            (az + delta_az, el)
+                            for az, el in glassing_state.search_pattern_steps
+                        ),
+                        look_envelope_azimuth_deg=followed.azimuth_deg,
+                        look_azimuth_deg=(
+                            glassing_state.look_azimuth_deg + delta_az
+                            if glassing_state.look_azimuth_deg is not None
+                            else None
+                        ),
+                    )
+        if look_is_finished(
+            glassing_state, now_sim, targets, can_improve=_glass_can_improve
+        ):
             # Natural end (recognition succeeded, nothing left to learn, or
             # MAX_LOOK_S expired): the look ran and delivered its benefit,
-            # so its pending marks are committed -- merged into the
-            # *committed* maps first, then handed to `_back_to_home`,
-            # which only ever drops the *pending* one.
-            committed_range = dict(state.attempted_at_range_m)
-            committed_time = dict(state.attempted_at_time_sim)
-            committed_level = dict(state.attempted_at_level)
+            # so its pending marks are committed first.
+            committed_range = dict(glassing_state.attempted_at_range_m)
+            committed_time = dict(glassing_state.attempted_at_time_sim)
+            committed_level = dict(glassing_state.attempted_at_level)
             for (
                 contact_id,
                 attempted_range_m,
-            ) in state.pending_attempted_at_range_m.items():
+            ) in glassing_state.pending_attempted_at_range_m.items():
                 committed_range[contact_id] = attempted_range_m
                 committed_time[contact_id] = now_sim
-                committed_level[contact_id] = state.pending_attempted_at_level[
+                committed_level[contact_id] = glassing_state.pending_attempted_at_level[
                     contact_id
                 ]
-            return _back_to_home(
-                replace(
-                    state,
-                    attempted_at_range_m=committed_range,
-                    attempted_at_time_sim=committed_time,
-                    attempted_at_level=committed_level,
-                ),
-                now_sim,
+            committed_state = replace(
+                glassing_state,
+                attempted_at_range_m=committed_range,
+                attempted_at_time_sim=committed_time,
+                attempted_at_level=committed_level,
+                pending_attempted_at_range_m={},
+                pending_attempted_at_level={},
+            )
+            # Stage 1, "several looks per step": another look may start
+            # within the same glass step, back to back, if something else
+            # in this sector is still worth it and the rolling budget
+            # admits a full `MAX_LOOK_S` more.
+            next_worth_looking = [
+                target
+                for target in targets
+                if _within_sector(target, sector_wedge_deg)
+                and is_worth_a_look(
+                    target,
+                    committed_state,
+                    now_sim,
+                    can_improve=_glass_can_improve,
+                    stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
+                )
+            ]
+            next_chosen = choose_glass_look(next_worth_looking)
+            if next_chosen is not None and _glass_budget_admits_look(
+                committed_state, now_sim, glass_budget_per_cycle_s
+            ):
+                return _start_glass_look(
+                    committed_state,
+                    now_sim,
+                    next_chosen,
+                    next_worth_looking,
+                    reset_step_clock=False,
+                )
+            # Step ends: nothing left in this sector, or the budget will
+            # not admit another look. Anchored at `now_sim` (glassing
+            # consumed real time, so the next sector starts fresh from
+            # here, unlike the "quiet sector" case in the SCANNING branch
+            # below, which anchors with no drift instead).
+            return _advance_sector(
+                committed_state, now_sim, anchor_sim=now_sim, n_sectors=n_sectors
             )
         # Step-indexed exactly as `SEARCHING` above: `step_s` is derived
         # from the sweep's own step count rather than a new constant
         # (`plans/binocular-optic/stage3b.md` D3), so a sweep running out
         # of steps and `MAX_LOOK_S` expiring are the same event -- `N = 1`
-        # (today's stare) gives `step_s == MAX_LOOK_S`, unchanged.
-        step_count = len(state.search_pattern_steps)
+        # (today's stare) gives `step_s == MAX_LOOK_S`, unchanged. Reads
+        # `glassing_state`, so a look-follow shift above is reflected.
+        assert glassing_state.phase_started_sim is not None  # narrowed at fn top
+        step_count = len(glassing_state.search_pattern_steps)
         if step_count > 0:
             step_s = MAX_LOOK_S / step_count
-            elapsed = now_sim - state.phase_started_sim
+            elapsed = now_sim - glassing_state.phase_started_sim
             index = min(int(elapsed // step_s), step_count - 1)
-            azimuth, elevation = state.search_pattern_steps[index]
+            azimuth, elevation = glassing_state.search_pattern_steps[index]
         else:  # pragma: no cover -- a look always has at least one step
-            index = state.search_step_index
-            azimuth = state.look_azimuth_deg or 0.0
-            elevation = state.look_elevation_deg or 0.0
+            index = glassing_state.search_step_index
+            azimuth = glassing_state.look_azimuth_deg or 0.0
+            elevation = glassing_state.look_elevation_deg or 0.0
         return (
             replace(
-                state,
+                glassing_state,
                 look_azimuth_deg=azimuth,
                 look_elevation_deg=elevation,
                 search_step_index=index,
@@ -2908,25 +3369,41 @@ def _decide_without_guidance(
         return state, OpticDecision(optic=UNAIDED_OPTIC)
 
     # Scanning-at-home (`home_phase is SCANNING`). A look can only start
-    # at a completed scan cycle -- this is the lockout, and it is a
-    # structural property rather than a rule.
-    scan_complete = now_sim - state.phase_started_sim >= scan_cycle_period_s
-    if not scan_complete or not steady:
+    # at a completed *sector* sweep -- this is the lockout, and it is a
+    # structural property rather than a rule. `scan_cycle_period_s` is
+    # this sector's own period (the function docstring's own note on the
+    # name).
+    sector_complete = now_sim - state.phase_started_sim >= scan_cycle_period_s
+    if not sector_complete or not steady:
         return state, OpticDecision(optic=UNAIDED_OPTIC)
 
     worth_looking = [
-        target for target in targets if is_worth_a_look(target, state, now_sim)
+        target
+        for target in targets
+        if _within_sector(target, sector_wedge_deg)
+        and is_worth_a_look(
+            target,
+            state,
+            now_sim,
+            can_improve=_glass_can_improve,
+            stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
+        )
     ]
-    chosen = choose_look(worth_looking)
+    chosen = choose_glass_look(worth_looking)
     if chosen is None:
         if search:
             # Nothing to resolve, but a narrow sector was commanded: sweep
-            # it for things the naked eye could not pick up.
+            # it for things the naked eye could not pick up. `SEARCHING`
+            # has no sector of its own and is never counted against the
+            # glass budget (module docstring, "Selectivity") -- the
+            # sector/budget fields are simply carried forward unread.
             azimuth, elevation = search[0]
             return (
                 OpticState(
                     phase=OpticPhase.SEARCHING,
                     phase_started_sim=now_sim,
+                    scan_sector_index=state.scan_sector_index,
+                    glass_recent_steps_s=state.glass_recent_steps_s,
                     search_pattern_steps=tuple(search),
                     attempted_at_range_m=dict(state.attempted_at_range_m),
                     attempted_at_time_sim=dict(state.attempted_at_time_sim),
@@ -2963,78 +3440,33 @@ def _decide_without_guidance(
                     look_elevation_deg=elevation,
                 ),
             )
-        # Nothing to look at: the scan cycle restarts rather than the
-        # aircraft waiting in a completed phase forever.
-        return (
-            replace(state, phase_started_sim=now_sim),
-            OpticDecision(optic=UNAIDED_OPTIC),
+        # Nothing to glass this sector: advance it, anchored at the
+        # *previous* anchor plus the sector period (no drift) rather than
+        # `now_sim` -- Co-moving Fields table's "quiet" row, which is what
+        # keeps a fully quiet cycle exactly `scan_cycle_period_s *
+        # n_sectors` long rather than creeping by a poll per sector.
+        return _advance_sector(
+            state,
+            now_sim,
+            anchor_sim=state.phase_started_sim + scan_cycle_period_s,
+            n_sectors=n_sectors,
         )
 
-    # The look sweeps the believed bearing's own angular uncertainty
-    # rather than staring at its centre (`plans/binocular-optic/
-    # stage3b.md`). The attempted-range marking widens to match: the
-    # sweep will visit the whole envelope, so every target in it gets the
-    # look's benefit and must bear the retry rule, or a contact the sweep
-    # only reaches on a later step would never be marked and would
-    # re-trigger a look immediately.
-    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
-    sweep = look_sweep(
-        centre_azimuth_deg=chosen.azimuth_deg,
-        centre_elevation_deg=chosen.elevation_deg,
-        bearing_uncertainty_deg=chosen.bearing_uncertainty_deg,
-        fov_full_width_deg=fov_full_width_deg,
-    )
-    envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
+    if not _glass_budget_admits_look(state, now_sim, glass_budget_per_cycle_s):
+        # Something is worth resolving, but the rolling glass budget will
+        # not admit a full `MAX_LOOK_S` more this window -- advance the
+        # sector the same "no drift" way as the quiet case above.
+        # `SEARCHING` does not apply here: its own trigger is "nothing
+        # worth resolving" (`chosen is None` above), which is not this.
+        return _advance_sector(
+            state,
+            now_sim,
+            anchor_sim=state.phase_started_sim + scan_cycle_period_s,
+            n_sectors=n_sectors,
+        )
 
-    # Stage 2 (Fix B1): every contact this look covers goes into the
-    # *pending* map, not the committed one -- the look has not yet
-    # delivered any benefit, only started. `decide`'s own GLASSING branch
-    # above is what commits (on `look_is_finished`) or drops (on `not
-    # steady`) these marks; `lower_binoculars` reaches the same drop path.
-    pending = dict(state.pending_attempted_at_range_m)
-    pending_level = dict(state.pending_attempted_at_level)
-    for target in worth_looking:
-        if _angular_separation_deg(chosen, target) <= envelope_half_width:
-            # Every contact this look covers counts as attempted, not just
-            # the one it was centred on -- they all get the benefit, so
-            # they all bear the retry rule.
-            pending[target.contact_id] = target.range_m
-            pending_level[target.contact_id] = target.current_level
-
-    first_azimuth, first_elevation = sweep[0]
-    return (
-        OpticState(
-            phase=OpticPhase.GLASSING,
-            phase_started_sim=now_sim,
-            look_azimuth_deg=first_azimuth,
-            look_elevation_deg=first_elevation,
-            search_pattern_steps=tuple(sweep),
-            search_step_index=0,
-            look_envelope_azimuth_deg=chosen.azimuth_deg,
-            look_envelope_half_width_deg=envelope_half_width,
-            attempted_at_range_m=dict(state.attempted_at_range_m),
-            pending_attempted_at_range_m=pending,
-            attempted_at_time_sim=dict(state.attempted_at_time_sim),
-            attempted_at_level=dict(state.attempted_at_level),
-            pending_attempted_at_level=pending_level,
-            look_contact_id=chosen.contact_id,
-            # Carried forward explicitly, same reason as the SEARCHING
-            # branch above.
-            actual_aim_azimuth_deg=state.actual_aim_azimuth_deg,
-            actual_aim_elevation_deg=state.actual_aim_elevation_deg,
-            home_phase=state.home_phase,
-            hands_busy_until_sim=state.hands_busy_until_sim,
-            # `BL-B71`: same reason as the SEARCHING branch's own comment
-            # above -- an ordinary glass-phase entry must not reset a
-            # standing guidance grant's bookkeeping.
-            guidance_optic=state.guidance_optic,
-            guidance_optic_since_sim=state.guidance_optic_since_sim,
-        ),
-        OpticDecision(
-            optic=BINOCULAR_OPTIC,
-            look_azimuth_deg=first_azimuth,
-            look_elevation_deg=first_elevation,
-        ),
+    return _start_glass_look(
+        state, now_sim, chosen, worth_looking, reset_step_clock=True
     )
 
 
@@ -3157,6 +3589,9 @@ def decide(
     targets: Sequence[LookTarget],
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
+    sector_wedge_deg: tuple[float, float] | None = None,
+    n_sectors: int = 1,
+    glass_budget_per_cycle_s: float | None = None,
     sight_steady: bool = True,
     sight_wide_near_search: Sequence[tuple[float, float]] = (),
     sight_wide_far_search: Sequence[tuple[float, float]] = (),
@@ -3199,7 +3634,13 @@ def decide(
     **Never applied while `decision.suppressed`** -- the hands-busy
     window already means nothing is observed through any optic this
     poll, so there is nothing for `_apply_guidance` to override and no
-    new grant for it to charge."""
+    new grant for it to charge.
+
+    `sector_wedge_deg`/`n_sectors`/`glass_budget_per_cycle_s`
+    (`plans/expected-area-check/plan.md` Stage 1) are `_decide_without_
+    guidance`'s own parameters of the same name, passed straight
+    through; see that function's docstring for why `scan_cycle_period_s`
+    keeps its pre-Stage-1 name and shape."""
     new_state, decision = _decide_without_guidance(
         state,
         now_sim=now_sim,
@@ -3207,6 +3648,9 @@ def decide(
         targets=targets,
         steady=steady,
         search=search,
+        sector_wedge_deg=sector_wedge_deg,
+        n_sectors=n_sectors,
+        glass_budget_per_cycle_s=glass_budget_per_cycle_s,
         sight_steady=sight_steady,
         sight_wide_near_search=sight_wide_near_search,
         sight_wide_far_search=sight_wide_far_search,
@@ -3253,6 +3697,11 @@ def look_target_for(
     a real ownship to hand, and passes `ownship.pitch_deg`/`ownship.
     bank_deg`.
 
+    `LookTarget.location_gain_m` (`plans/expected-area-check/plan.md`
+    Stage 1) is always computed here, via `location_gain_for(position,
+    observer, object_type)` -- `0.0` whenever `position` is `None`, the
+    same true no-op every pre-Stage-1 call site already gets for free.
+
     `position` (`plans/precise-position-belief/plan.md` Stage 5, `Contact.
     position` -- the fused `belief.position_belief.PositionEstimate`) is
     optional and keyword-only, kept separate from `target_position` rather
@@ -3290,5 +3739,6 @@ def look_target_for(
         object_type=object_type,
         current_level=current_level,
         watched=watched,
+        location_gain_m=location_gain_for(position, observer, object_type),
         **kwargs,
     )

@@ -61,7 +61,7 @@ import math
 from typing import TYPE_CHECKING, Final, Literal
 
 import tuning
-from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
+from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S, WORST_REVISIT_S
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
@@ -280,6 +280,24 @@ OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S
 #: group-contact-identity/plan.md` amendment A2's matching-predicate
 #: table, test 1).
 GROUP_REIDENTIFY_WINDOW_S: Final[float] = 2.0 * POSITION_HALF_LIFE_S
+
+# I2 (`plans/expected-area-check/plan.md` Stage 1, "Cross-key coupling") --
+# the real cliffs a *busy* revisit (not just a quiet sweep, which I1 above
+# already covers) can actually fall off: past `LOST_THRESHOLD_S` a flank
+# contact not glassed inside one busy window would go lost -> reacquired
+# every busy cycle (audible `CONTACT_REACQUIRED` churn), and past
+# `GROUP_REIDENTIFY_WINDOW_S` its group would expire and re-form. Both are
+# real failure modes a per-key `lo`/`hi` bound cannot see on its own --
+# `LOST_THRESHOLD_S`'s own `lo` of 30 makes it reachable by a single
+# in-bounds override today. `tuning._check_scan_decay_coupling` enforces
+# this across the five coupled keys before any of them is finally bound,
+# the same mechanism I1 above already relies on -- by the time this line
+# runs, only a change to the code defaults themselves could trip it.
+assert WORST_REVISIT_S < min(LOST_THRESHOLD_S, GROUP_REIDENTIFY_WINDOW_S), (
+    "WORST_REVISIT_S must stay below both LOST_THRESHOLD_S and "
+    "GROUP_REIDENTIFY_WINDOW_S or a busy scan cycle would lose/re-form a "
+    "flank contact or group every cycle"
+)
 
 #: The certainty lifecycle ladder. Four levels, evaluated top-down in
 #: `certainty_of` (first match wins) rather than as independent predicates:

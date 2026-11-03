@@ -425,6 +425,68 @@ def test_cross_key_coupling_does_not_override_a_more_specific_rejection(
     assert resolution.rejected["perception.gaze.FOCUS_DWELL_S"].reason == "wrong type"
 
 
+def test_cross_key_coupling_i2_rejects_a_low_lost_threshold_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`plans/expected-area-check/plan.md` Stage 1's new I2 invariant:
+    `LOST_THRESHOLD_S` at its own `lo` (30.0), with every other coupled
+    key at its code default, violates `WORST_REVISIT_S < min(
+    LOST_THRESHOLD_S, GROUP_REIDENTIFY_WINDOW_S)` -- the default `WORST_
+    REVISIT_S` is 32.0 (16 + 12 + 4), which is not below 30.0. Falls back
+    to the code default (120.0), same shape as I1's own rejection."""
+    path = tmp_path / "tuning.toml"
+    path.write_text("[belief.decay]\nLOST_THRESHOLD_S = 30.0\n", encoding="utf-8")
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    lost_threshold = tuning.real(
+        "belief.decay.LOST_THRESHOLD_S", 120.0, lo=30.0, hi=600.0, status="judgement"
+    )
+    assert lost_threshold == 120.0
+
+    resolution = tuning.validate_against_defaults()
+    rejected = resolution.rejected["belief.decay.LOST_THRESHOLD_S"]
+    assert rejected.reason == "invariant violation"
+    assert "WORST_REVISIT_S" in rejected.detail
+
+
+def test_cross_key_coupling_i2_accepts_the_pendulum_table_at_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pendulum alternative (`plan.md` Stage 1, "Alternative
+    considered and not chosen") partitions into the same four sectors as
+    the default table (`perception.geometry.sector_runs_for_legs`), so
+    `WORST_REVISIT_S` is `10 * 2.0 + 12.0 + 4 * 1.0 = 36.0` -- still below
+    `min(LOST_THRESHOLD_S=120, GROUP_REIDENTIFY_WINDOW_S=60) = 60`, so
+    overriding `SCAN_PLAN` to it alone must not trip I2 (or I1: `10 *
+    2.0 = 20.0 < 30.0`)."""
+    path = tmp_path / "tuning.toml"
+    path.write_text(
+        "[perception.gaze]\nSCAN_PLAN = [1, 12, 11, 10, 9, 11, 12, 1, 2, 3]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    scan_plan = tuning.sequence(
+        "perception.gaze.SCAN_PLAN", (12, 11, 10, 9, 12, 1, 2, 3), status="judgement"
+    )
+    assert scan_plan == (1, 12, 11, 10, 9, 11, 12, 1, 2, 3)
+
+    resolution = tuning.validate_against_defaults()
+    assert "perception.gaze.SCAN_PLAN" not in resolution.rejected
+    assert resolution.applied["perception.gaze.SCAN_PLAN"].value == (
+        1,
+        12,
+        11,
+        10,
+        9,
+        11,
+        12,
+        1,
+        2,
+        3,
+    )
+
+
 def test_reviewer_repro_scan_decay_coupling_does_not_crash_the_process(
     tmp_path: Path,
 ) -> None:

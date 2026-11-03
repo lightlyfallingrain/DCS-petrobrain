@@ -246,9 +246,14 @@ class TestChooseSightingLook:
 
 
 class TestPhaseCycle:
-    """The lockout is structural: a glass phase is only reachable from the
-    end of a completed scan phase, so "at least one naked eye scan between
-    uses" cannot be violated."""
+    """The lockout is structural: a glass *step* is only reachable from
+    the end of a completed sector sweep, so "at least one naked eye scan
+    between uses" cannot be violated. **Revised by `BL-B110` Stage 1**:
+    the lockout is between *steps*, not between every individual look --
+    several looks may now run back to back inside one step (user
+    Decision 1), covered by `test_a_second_look_follows_immediately_
+    inside_one_glass_step`/`test_the_eye_must_sweep_again_between_glass_
+    steps` below."""
 
     def test_binoculars_are_not_raised_mid_scan(self) -> None:
         """The user's clarification: finish the pass first, so it gathers
@@ -364,9 +369,16 @@ class TestPhaseCycle:
         assert state.phase is OpticPhase.GLASSING
         assert decision.optic is BINOCULAR_OPTIC
 
-    def test_the_scan_must_complete_again_before_the_next_look(self) -> None:
-        """The lockout, demonstrated end to end: a finished look cannot be
-        followed immediately by another."""
+    def test_a_second_look_follows_immediately_inside_one_glass_step(self) -> None:
+        """**Reversed from the pre-`BL-B110` `test_the_scan_must_complete_
+        again_before_the_next_look`** (`plans/expected-area-check/
+        plan.md` Stage 1, Decision 3, approved: *"ok"*): several looks now
+        run back to back within one glass step (user Decision 1), so a
+        second, distinct target still worth it follows the first look's
+        natural end immediately -- the eye does not have to sweep again
+        between them. `glass_budget_per_cycle_s` is left at its default
+        (`None`, unlimited) -- this test is about the phase transition,
+        not the budget arithmetic, which `TestGlassBudget` below covers."""
         state, _ = decide(
             OpticState(phase_started_sim=0.0),
             now_sim=_CYCLE_S,
@@ -374,17 +386,44 @@ class TestPhaseCycle:
             targets=[_target()],
             steady=True,
         )
-        # The look ends.
-        state, _ = decide(
+        assert state.phase is OpticPhase.GLASSING
+        # The first look ends naturally (`MAX_LOOK_S`'s cap); a second,
+        # distinct target is still worth it.
+        state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S,
             scan_cycle_period_s=_CYCLE_S,
             targets=[_target("CONTACT_2")],
             steady=True,
         )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+
+    def test_the_eye_must_sweep_again_between_glass_steps(self) -> None:
+        """The lockout still holds *between steps*, exactly as before:
+        once a glass step genuinely ends (nothing left to look at this
+        step), the next look needs a fresh completed sector sweep."""
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        # The look ends naturally with nothing else worth looking at --
+        # the step itself ends, not just the one look.
+        state, _ = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
         assert state.phase is OpticPhase.SCANNING
 
-        # Immediately afterwards, with something still worth seeing.
+        # Immediately afterwards, with something now worth seeing: still
+        # locked out until the sector sweeps again.
         state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S + 1.0,
@@ -1518,7 +1557,16 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     at all (a stand-off watch, not a close). `OPTIC_RETRY_INTERVAL_S`
     (`plans/sortie-2026-09-26-fixes/decisions.md` Decision 2's own named
     gap in D5: "not even for watched") is what eventually unlocks it
-    instead, alongside (not replacing) the existing range-based retry."""
+    instead, alongside (not replacing) the existing range-based retry.
+
+    **Numbers updated, premise unchanged (`BL-B110` Stage 1)**: `GLASSING`
+    now passes `_EFFECTIVE_GLASS_STALL_COOLDOWN_S` as `is_worth_a_look`'s
+    `stall_cooldown_s` (`plans/expected-area-check/plan.md` Stage 1,
+    "Selectivity") -- since `stalled_target`'s level never moves from
+    `target`'s own, that longer cooldown (180 s, not `OPTIC_RETRY_
+    INTERVAL_S`'s 64 s) now governs here. The loop window widens to stay
+    comfortably past it; the claim this test pins ("eventually unlocks
+    it") is unaffected."""
     target = _target(range_m=1_700.0)  # inside the presence -> class window
     state, _ = decide(
         OpticState(phase_started_sim=0.0),
@@ -1549,8 +1597,8 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     stalled_target = _target(range_m=1_700.0)
     ever_glassed_again = False
     for cycle in range(
-        1, 10
-    ):  # up to ~144 s -- comfortably past OPTIC_RETRY_INTERVAL_S
+        1, 16
+    ):  # up to ~240 s -- comfortably past _EFFECTIVE_GLASS_STALL_COOLDOWN_S (180 s)
         state, decision = decide(
             state,
             now_sim=_CYCLE_S + MAX_LOOK_S + cycle * _CYCLE_S,
@@ -1565,7 +1613,7 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
     assert ever_glassed_again, (
         "a naturally completed look on a contact that never closes range "
         "and never advances classification should still become eligible "
-        "again once OPTIC_RETRY_INTERVAL_S has elapsed"
+        "again once the stall cooldown has elapsed"
     )
 
 
