@@ -255,3 +255,15 @@ range:
 > *"Binoculars range sense - keep the current."*
 
 So `BINOCULAR_RANGE_SIGMA_SCALE` stays 0.7 (plan Decision 11).
+
+## Plan re-check 3 answers (user, verbatim, 2026-11-03)
+
+Asked: (1) drop the 250 m floor so the rough-location fence is 0.2 · R throughout; (2) "anything
+the player asks for" read as watched contacts, one-off queries later via the brain layer; (3) the
+circling sector-edge blind spot as a test-card watch item, own entry only if noticed. Each with a
+recommendation.
+
+> *"go with recommendations"*
+
+Reading (main loop): all three recommendations taken; also read as the go to build (Stages 0a, 0,
+1, then 2).

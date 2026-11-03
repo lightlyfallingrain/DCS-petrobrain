@@ -382,9 +382,9 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
     binocular look is raised for it.**
     - **The allowance, from what the pilot hears.** A contact is called by o'clock (30°, so ±15°)
       and by range rounded to 0.5 km (`speech._format_range_km`), "very close" under 500 m.
-      Rough location is good enough when 1σ is inside **max(250 m, 0.2 · R)** down-range and
-      inside half an o'clock across. 250 m is half the spoken range step: close in, the figure
-      the pilot hears is the right one. 0.2 · R is "five kilometres means four to six" far out,
+      Rough location is good enough when 1σ is inside **0.2 · R** down-range and
+      inside half an o'clock across (pure proportion, no floor: re-check 3 Question 1, user
+      2026-11-03 *"go with recommendations"*, so the fence keeps tightening close in). 0.2 · R is "five kilometres means four to six" far out,
       where the pilot's action (turn away, slow, keep watching) does not change with a finer
       figure. The allowance tightens in absolute terms as range falls, which is the user's
       *"further away … more imprecise … close distances a more specific location"*.
@@ -393,8 +393,8 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
 
       | R | across (any AGL) | down, 0–50 m AGL | down, 300 m AGL | down, 800 m AGL | allowance (down) |
       |---|---|---|---|---|---|
-      | 0.5 km | 26 m | 81–85 m | 49 m | 48 m | 250 m |
-      | 1.0 km | 52 m | 168–170 m | 127 m | 91 m | 250 m |
+      | 0.5 km | 26 m | 81–85 m | 49 m | 48 m | 100 m |
+      | 1.0 km | 52 m | 168–170 m | 127 m | 91 m | 200 m |
       | 1.5 km | 79 m | 254–255 m | 216 m | 152 m | 300 m |
       | 2.0 km | 105 m | 339–340 m | 307 m | 226 m | 400 m |
       | 3.0 km | 157 m | 509–510 m | 486 m | 397 m | 600 m |
@@ -412,7 +412,7 @@ default `SCAN_PLAN` no longer changes**: today's table already is the order the 
       Only a code change could, so the conclusion is fenced by a test, not by a tunable (Decision
       10).
     - **Between looks, a moving class can drift past it.** Growth at `plausible_speed_mps` (armour
-      8 m/s) takes a 1 km contact past 250 m after ~23 s unseen. That is not a binocular question:
+      8 m/s) takes a 1 km contact past its 200 m allowance within seconds to tens of seconds unseen. That is not a binocular question:
       the glass step follows the eye's own sweep of that sector, so a contact the eye just saw is
       fresh, and one it did not see is either masked (binoculars no better) or beyond eye range
       (binocular re-detection, which free scan deliberately does not do, 2026-09-23). It is the
@@ -719,7 +719,7 @@ Fourth pass, new tests:
   before on its own existing tests (shared bucket function).
 - Fifth pass, `test_estimation.py`, the rough-location fence (Stage 1, "Priority 1"): over R in
   0.5–6 km and height above the unit 0–800 m, ground (`surface_range_estimate`) and air
-  (`look_sigma_m`), the naked eye's own declared σ_down ≤ max(250 m, 0.2 · R) and its cross-range
+  (`look_sigma_m`), the naked eye's own declared σ_down ≤ 0.2 · R and its cross-range
   angle ≤ 15°. The assertion message says what failing means: priority-1 binocular looks would
   then be needed, which this plan does not build (Decision 10).
 - A failed location look (gain unchanged, level unchanged) is not re-admitted before
@@ -894,7 +894,9 @@ answers, as designed below.
 
 **Stage 5 — Docs, entry, test card (BL-B110, after Stages 0–2).** `STRUCTURE.md`; regenerate
 `defaults.toml` and read the **rendered** first sentences; `BL-B110.md` updated with what shipped
-and the measured residual and false-split rates; the test card names `main` and `#needs-flight`.
+and the measured residual and false-split rates; the test card names `main` and `#needs-flight`. The card also carries (re-check 3 Question 3, user 2026-11-03): *while circling or sidestepping,
+watch for a contact that goes unspoken for ~30–40 s as it crosses a sector edge; report it if
+noticed, and it gets its own entry then.*
 Cards:
 - free scan, listening for the ahead → left → ahead → right rhythm: a 4 s eye sweep, binoculars
   on what is worth it there, the next sector. Note too how soon a new contact dead ahead is picked
@@ -1104,7 +1106,7 @@ Fifth pass:
 - **Optics priority, refined (user, 2026-11-02, fifth pass; supersedes the fourth pass's
   "a) where b) iff c) classification" reading):**
   1. *Detection and rough location, looser far out, tighter close in*: the naked-eye scan.
-     Allowance max(250 m, 0.2 · R) down-range and half an o'clock across; a naked-eye look is
+     Allowance 0.2 · R down-range and half an o'clock across; a naked-eye look is
      never outside it (Stage 1, "Priority 1", measured table). No binocular look for it.
   2. *IFF*: not modelled, `[[BL-B12]]` deferred, not built. Identification to type serves it and
      ranks before classification in the glass step.
@@ -1317,7 +1319,7 @@ not a tunable.** The brief asked for it as a tunable (X-T26 pattern). It is not 
 code path compares a belief to the allowance. A key in `defaults.toml` that changes nothing would
 tell anyone tuning it something false. And no shipped tuning key can break the conclusion (Stage 1,
 "Priority 1"); only a code change to the naked-eye model can, which is what a test catches. So the
-allowance, max(250 m, 0.2 · R) down-range and half an o'clock across, lives in
+allowance, 0.2 · R down-range and half an o'clock across, lives in
 `test_estimation.py` as the fence. If flight or a later model change ever makes priority-1 looks
 real, the allowance becomes a tunable then, read by the predicate that needs it. Say if you want
 the knob anyway.
@@ -1361,3 +1363,10 @@ sense - keep the current."* `BINOCULAR_RANGE_SIGMA_SCALE` stays 0.7 (`#needs-fli
    Recommended neutral form: *"That group — now two o'clock, three kilometres."* rather than "has
    moved". Settle it together with `[[BL-B109]]`'s `/explore`.
    → Answered above: ≈ *"A now at …"*.
+
+**Plan re-check 3 questions, ANSWERED 2026-11-03.** User: *"go with recommendations"*.
+1. The rough-location fence is **0.2 · R** with no 250 m floor (edited throughout).
+2. "Anything the player asks for" = **watched contacts** for now; a one-off query without
+   "watch" does not trigger an exact-location look (brain-layer path, later).
+3. The circling sector-edge blind spot (~28 s, ~40 s with a full glass budget) is a **test-card
+   watch item** (Stage 5), its own entry only if noticed in flight.
