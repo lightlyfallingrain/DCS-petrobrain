@@ -231,6 +231,61 @@ ANSWERED (a)). Built first, before Stage 0's measurements.** Fifth pass.
   Stage 2 is implemented. If the false-trigger rate exceeds ~10% in any cell, stop and bring it to
   the user, since that is the duplicate rate they would hear.
 
+**Stage 0 measured, implementer pass 2026-11-03** (on post-0a code, per the gate above):
+`body-layer/tests/test_expected_area_trigger.py`, the ensemble harness on this committed code
+(`n=100-150` trials/cell). Two candidate trigger definitions were tried, both re-evaluating
+`passes_gate` "as if A had been in this very look" via a test-only stand-in for Stage 2's
+not-yet-built `as_if_optic_class` keyword (Stage 2 itself is not built by this merge):
+
+- **Variant 1 (the plan's literal candidate): both the hypothesis σ magnitude and the
+  correlation field-class are set from the tighter of the two optics.** Catches the primary
+  worked case well (far-binocular→near-unaided residual 1-6%), but the same-group, short-gap
+  (6 s) false-trigger rate is 27-48% -- far past the 10% gate, because the substituted sigma is
+  tighter than the look's own real declared noise, so a genuinely same-position reacquisition
+  fails the stricter test from its own ordinary measurement error.
+- **Variant 2 (adopted): only the correlation field-class is set to the tighter optic; the
+  hypothesis σ stays the look's own real declared value, scaled to the hypothesis range exactly
+  as the honest gate already computes it.** Same catch rate on the primary worked case
+  (far-binocular→near-unaided residual 1-5%), and the same-group short-gap false-trigger rate
+  drops to 3-7% -- inside the gate.
+
+**Residual fold** (different groups, memory-only, gap 6 s, `n=100-150`):
+
+| case | honest fold | residual (Variant 2) |
+|---|---|---|
+| far binocular → near unaided, 4.5/3.0 km | 81% | 1.3% |
+| far binocular → near unaided, 5.0/3.5 km | 90% | 4.7% |
+| far unaided → near binocular, 4.5/3.0 km | 70% | 70% (unresolved -- see below) |
+| far unaided → near binocular, 5.0/3.5 km | 73% | 73% (unresolved -- see below) |
+
+**The far-unaided → near-binocular residual is not reduced by either variant** (catch rate ≈0%
+both ways): when the anchor itself was founded through the *looser* optic, the anchor's own wide
+covariance dominates the gate's sum regardless of how tight the new look's hypothesis is made,
+so tightening only the incoming look's side barely moves a sum the anchor's own looseness already
+dominates. This confirms, at this harness's own (larger) measured scale, the Risks section's own
+"survives Stage 2... only a tighter trigger or anchors reach it" -- `[[BL-B111]]`/Stage 2b are
+where this would need to be closed, not Stage 0's own tuning.
+
+**False-trigger rate** (same group, cross-optic reacquisition, Variant 2, `n=150`):
+
+| case | gap | false-trigger rate |
+|---|---|---|
+| binocular → unaided, 2.0/3.0/4.5 km, armour (moving) | 6 s | 3-7% |
+| unaided → binocular, 2.0/3.0/4.5 km, armour (moving) | 6 s | 0% |
+| binocular → unaided, 2.0/4.5 km, installation (stationary) | 120 s | 7-15% |
+| binocular → unaided, 2.0/4.5 km, installation (stationary) | 600 s | **25-27%** |
+| unaided → binocular, any range, any gap | 120 s / 600 s | 0% |
+
+**STOP finding, per this stage's own gate:** the long-gap, stationary, binocular-then-unaided
+same-group cell exceeds the ~10% gate -- 7-15% at 120 s, 25-27% at 600 s. This is reported, not
+engineered around. Stage 2 is not built by this merge (BL-B110 Stages 0a/0/1 only), so nothing
+ships against this gap yet; it is recorded here for whoever builds Stage 2 to resolve first (a
+gap-dependent escape, or a different hypothesis construction for the long-gap case, are the two
+obvious directions, neither tried here since Stage 2 itself is out of scope for this merge). The
+short-gap (6 s) and moving-class (armour, any gap) same-group cells all stay inside the gate.
+`test_expected_area_trigger.py`'s own module docstring carries the full account and the exact
+mechanism measured.
+
 **Stage 1 — Per-sector scan order (user Q1). It ships on its own and changes behaviour for every
 contact.**
 
