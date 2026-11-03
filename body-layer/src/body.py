@@ -217,8 +217,11 @@ from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.forest import ForestOcclusion
 from perception.gaze import (
+    FOCUS_DWELL_S,
     FREE_SCAN_PLAN,
+    GLASS_BUDGET_PER_CYCLE_S,
     SCAN_CYCLE_PERIOD_S,
+    SCAN_PLAN,
     SECTOR_WEDGE_DEG,
     SIGHT_AHEAD_LEGS,
     SIGHT_AHEAD_WINDOW_DWELL_S,
@@ -228,12 +231,15 @@ from perception.gaze import (
     _gaze_for_clock_hour,
     gaze_at,
     legs_within_wedge,
+    sector_azimuth_span_deg,
+    sector_legs_for,
 )
 from perception.geometry import (
     GeoPosition,
     alignment_direction,
     heading_relative_to_body_relative,
     open_world_model,
+    sector_runs_for_legs,
 )
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -508,6 +514,18 @@ class ConsolePerceptionRunner:
         default=None, init=False, repr=False
     )
 
+    #: `plans/expected-area-check/plan.md` Stage 1 (Co-moving Fields,
+    #: "external: scan command issued or cancelled") -- the previous
+    #: poll's `ScanPlan.command_t_sim`, compared by identity change
+    #: (`!=`) against this poll's own, never by heading-driven leg
+    #: recomputation (which can change `commanded_legs`' own tuple value
+    #: poll to poll for the *same* standing compass command without this
+    #: changing). A genuinely new or cancelled scan command resets
+    #: `optic_state.scan_sector_index`/`glass_recent_steps_s` -- a stale
+    #: sector index from a different scan mode's own partition is
+    #: meaningless under the new one. `None` before the first poll.
+    _last_scan_command_t_sim: float | None = field(default=None, init=False, repr=False)
+
     #: `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the last
     #: `MissionStartEvent.sequence` this runner has seen, or `None` before
     #: the first poll of this process. `_check_for_new_mission` compares
@@ -649,6 +667,7 @@ class ConsolePerceptionRunner:
             world_model_store=self.world_model_store,
         )
         self._last_look_direction = None
+        self._last_scan_command_t_sim = None
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -704,12 +723,34 @@ class ConsolePerceptionRunner:
                 ownship.heading_true_deg,
             )
         )
-        self.scan_plan = _active_gaze(
+        commanded_scan_plan = _active_gaze(
             self.tasks,
             ownship.heading_true_deg,
             store=self.store,
             ownship=ownship,
             attack_run_engaged=self.attack_run_state is not None,
+        )
+        # `plans/expected-area-check/plan.md` Stage 1, Co-moving Fields,
+        # "external: scan command issued or cancelled" -- a genuinely new
+        # or cancelled scan command (identified by `command_t_sim`
+        # changing, never by heading-driven leg recomputation) resets the
+        # sector bookkeeping: a stale index from a different scan mode's
+        # own partition means nothing under the new one.
+        if commanded_scan_plan.command_t_sim != self._last_scan_command_t_sim:
+            self._last_scan_command_t_sim = commanded_scan_plan.command_t_sim
+            self.optic_state = replace(
+                self.optic_state,
+                scan_sector_index=0,
+                glass_recent_steps_s=(),
+                glass_step_started_sim=None,
+            )
+        # `plans/expected-area-check/plan.md` Stage 1: one resolved plan,
+        # built once per poll from the *previous* poll's `optic_state`,
+        # and handed to every `gaze_at` consumer below *and* to `decide_
+        # optic` -- see `_resolve_sector_scan`'s own docstring (E4: where
+        # he actually looks).
+        self.scan_plan, sector_period_s, sector_wedge_deg, n_sectors = (
+            _resolve_sector_scan(commanded_scan_plan, self.optic_state, ownship.t_sim)
         )
         # `plans/dcs-driven-los/plan.md` (X-B29): push the look-direction
         # command only on change (SS9b), from the same `scan_plan` that is
@@ -766,19 +807,37 @@ class ConsolePerceptionRunner:
             # revisits a `SCANNING` phase that is already `SCANNING` here
             # to null it -- and a later OBSERV-on would resume there
             # instead of boresight.
+            #
+            # `plans/expected-area-check/plan.md` Stage 1, Co-moving
+            # Fields, "external: OBSERV off": the free-scan sector
+            # resets to 0 with a cleared budget window, the same reset a
+            # genuinely new scan command gets above -- OBSERV was off
+            # (or this is the first time it ever was), so whatever
+            # sector index/window had accumulated belongs to a different
+            # home phase's own bookkeeping.
             self.optic_state = replace(
                 self.optic_state,
                 home_phase=OpticPhase.SCANNING,
                 look_azimuth_deg=None,
                 look_elevation_deg=None,
+                scan_sector_index=0,
+                glass_recent_steps_s=(),
+                glass_step_started_sim=None,
             )
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
-            scan_cycle_period_s=SCAN_CYCLE_PERIOD_S,
+            scan_cycle_period_s=sector_period_s,
             targets=_look_targets(self.store, ownship),
             steady=is_steady(list(self.attitude_history)),
             search=_search_sweep(self.scan_plan, ownship),
+            # `plans/expected-area-check/plan.md` Stage 1: this poll's
+            # swept sector (`_resolve_sector_scan`, above) -- the glass
+            # step's own target filter, sector count (the rolling
+            # budget's own window length) and binocular-time budget.
+            sector_wedge_deg=sector_wedge_deg,
+            n_sectors=n_sectors,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
             # `BL-B64` Stage 2, direction §8 -- the sight's own, higher
             # manoeuvre-tolerance threshold, read from the same attitude
             # history the binocular gate above already samples. A second
@@ -1156,6 +1215,102 @@ def _active_gaze(
                 command_t_sim=task.created_sim,
             )
     return FREE_SCAN_PLAN
+
+
+#: Half the binocular field of view -- the margin the swept sector's own
+#: wedge is widened by before `optic_policy`'s glass step tests a
+#: candidate's believed azimuth against it (`plans/expected-area-check/
+#: plan.md` Stage 1, "Glass step": "widened by half a binocular field...
+#: The margin is there for body rotation"). No new constant: `Optic.
+#: fov_half_angle_deg` already exists for this exact optic.
+_SECTOR_MARGIN_DEG: Final[float] = BINOCULAR_OPTIC.fov_half_angle_deg or 0.0
+
+
+def _resolve_sector_scan(
+    scan_plan: ScanPlan, optic_state: OpticState, now_sim: float
+) -> tuple[ScanPlan, float, tuple[float, float] | None, int]:
+    """This poll's `(resolved_scan_plan, sector_period_s, sector_wedge_
+    deg, n_sectors)` -- `plans/expected-area-check/plan.md` Stage 1's
+    one resolved plan, built once per poll and handed to every `gaze_at`
+    consumer (the naked-eye source, the LOS look-direction push, the
+    eyesight/POV debug views) *and* to `decide_optic`, so none of them
+    can disagree about which sector is swept this poll (E4).
+
+    - **Free scan** (`scan_plan` is `FREE_SCAN_PLAN`): partitioned into
+      the active table's own sectors (`perception.geometry.sector_runs_
+      for_legs`), indexed by `optic_state.scan_sector_index` (the
+      *previous* poll's own index -- `decide_optic` only advances it at
+      a glass step's own end, so every poll within one step reads the
+      same sector). `resolved_scan_plan` carries `sweep_legs`/`sweep_
+      started_sim` -- the sweep anchor is `optic_state.phase_started_sim`
+      while `SCANNING` (the sector's own real sweep-start clock), or,
+      while `GLASSING`/`SEARCHING`/`SIGHTING`, an anchor far enough in
+      the past that the sweep has already reached and holds at its last
+      leg: physically, the eye is not free-sweeping while binoculars (or
+      the sight) are up, so this freezes it at wherever it left off
+      rather than letting it silently keep advancing by absolute time
+      the way the pre-Stage-1 stateless `FREE_SCAN_PLAN` did.
+    - **Commanded** (a sector, a single o'clock hour, or compass-derived
+      legs): treated as *one* sector spanning the whole commanded leg
+      set -- `n_sectors=1`, `sector_period_s` is that set's own length
+      (fixing the pre-Stage-1 wiring defect: a faster commanded scan now
+      genuinely brings binoculars round sooner, `plan.md` Stage 1's own
+      "what the code does today"). `resolved_scan_plan` is `scan_plan`
+      unchanged -- `gaze_at` already cycles `commanded_legs`/
+      `commanded_sector` continuously from `command_t_sim`, which needs
+      no sector anchor of its own.
+    - **Fixed look** (an attack run's own `fixed_look_at`): passed
+      through unchanged, with no sector mechanism at all -- unaffected
+      by this stage, same as every pre-Stage-1 caller."""
+    if scan_plan.fixed_look is not None:
+        return scan_plan, SCAN_CYCLE_PERIOD_S, None, 1
+
+    if scan_plan.commanded_sector is not None:
+        legs = sector_legs_for(scan_plan.commanded_sector)
+    elif scan_plan.commanded_legs is not None:
+        legs = scan_plan.commanded_legs
+    else:
+        legs = None  # free scan, resolved below
+
+    if legs is not None:
+        sector_period_s = len(legs) * FOCUS_DWELL_S
+        lo, hi = sector_azimuth_span_deg(legs)
+        sector_wedge_deg = (lo - _SECTOR_MARGIN_DEG, hi + _SECTOR_MARGIN_DEG)
+        return scan_plan, sector_period_s, sector_wedge_deg, 1
+
+    sectors = sector_runs_for_legs(SCAN_PLAN)
+    n_sectors = len(sectors)
+    sector_index = optic_state.scan_sector_index % n_sectors
+    current_legs = sectors[sector_index]
+    sector_period_s = len(current_legs) * FOCUS_DWELL_S
+    lo, hi = sector_azimuth_span_deg(current_legs)
+    sector_wedge_deg = (lo - _SECTOR_MARGIN_DEG, hi + _SECTOR_MARGIN_DEG)
+
+    if optic_state.phase is OpticPhase.SCANNING:
+        # Anchor at the sector's own real sweep-start clock -- or, on the
+        # very first poll (`phase_started_sim is None`), at `now_sim`
+        # itself, the identical convention `decide_optic`'s own first-
+        # poll branch uses (`replace(state, phase_started_sim=now_sim)`).
+        # Using the real anchor, never `now_sim` unconditionally, is what
+        # keeps a second poll at the *same* `t_sim` (nothing elapsed)
+        # resolve to the identical gaze as the first -- a bare `now_sim`
+        # fallback here would otherwise disagree with the anchor `decide_
+        # optic` commits a moment later this same poll.
+        sweep_started_sim = (
+            optic_state.phase_started_sim
+            if optic_state.phase_started_sim is not None
+            else now_sim
+        )
+    else:
+        # GLASSING/SEARCHING/SIGHTING: freeze the sweep at its last leg
+        # rather than let it advance by absolute time while the eye is
+        # not actually free-sweeping.
+        sweep_started_sim = now_sim - sector_period_s
+
+    resolved_scan_plan = replace(
+        scan_plan, sweep_legs=current_legs, sweep_started_sim=sweep_started_sim
+    )
+    return resolved_scan_plan, sector_period_s, sector_wedge_deg, n_sectors
 
 
 def _look_target_position(contact: Contact) -> GeoPosition:

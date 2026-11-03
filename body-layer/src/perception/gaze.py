@@ -328,6 +328,16 @@ _SECTOR_LEGS: Final[dict[RelativeSector, tuple[int, ...]]] = {
     "full": SCAN_PLAN,
 }
 
+
+def sector_legs_for(sector: RelativeSector) -> tuple[int, ...]:
+    """Public wrapper over `_SECTOR_LEGS` -- `plans/expected-area-check/
+    plan.md` Stage 1: `body.py` needs a commanded sector's own legs to
+    build its one-sector glass-budget period/wedge, the same "public
+    alias" reasoning `SECTOR_WEDGE_DEG` above already gives for not
+    reaching for the private table directly."""
+    return _SECTOR_LEGS[sector]
+
+
 #: Free scan's cycle period, derived rather than stated -- `len(SCAN_PLAN)
 #: * FOCUS_DWELL_S` rather than a bare `16.0`, so a future table edit (hard
 #: part 8's plan C) carries this constant with it automatically.
