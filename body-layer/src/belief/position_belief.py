@@ -817,6 +817,9 @@ def correlated_innovation(
     per_axis_cap = max(0.0, min(var_prior_along, var_look_along))
     psd_cap = _max_c_down_for_psd(sum_covariance, k_xx, k_zz, k_xz)
     max_c_down = min(per_axis_cap, psd_cap)
+    # Clamped to [0, max_c_down], not [-max_c_down, max_c_down]: behaviour-neutral, since
+    # `effective_down_correlation` can only return a value in [0, 1] (`rho_view`/`rho_near` are
+    # both non-negative by construction), so `c_down` was already non-negative in every real case.
     c_down = max(0.0, min(max_c_down, c_down))
 
     c_matrix = _Matrix2D(

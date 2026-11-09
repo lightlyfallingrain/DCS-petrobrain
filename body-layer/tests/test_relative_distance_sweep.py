@@ -371,10 +371,12 @@ _CROSS_OPTIC_MEMORY_ONLY_FENCE: Final[dict[tuple[float, float, str, bool], float
     # honest fold rate to 90-98% (this test's own salt: 96.67%) -- already
     # essentially saturated against a 100% ceiling, so the file's usual
     # "+10 points of headroom" convention has nowhere left to go. Fenced
-    # at 1.0: there is no further widening left for this fence to catch;
-    # it stays as a record, not a guarantee, until/unless a future change
-    # narrows the rate back down, at which point this should be tightened
-    # deliberately rather than left at the ceiling.
+    # at 1.0 deliberately, not as an oversight: `rate <= 1.0` can never
+    # fail, so this cell asserts nothing and catches no regression -- it
+    # is kept only as a record of where this measurement landed, not a
+    # guarantee, until/unless a future change narrows the rate back down,
+    # at which point this should be tightened deliberately rather than
+    # left at the ceiling.
     (5.0, 3.5, "b_u", True): 1.0,
     (5.0, 3.5, "b_u", False): 0.40,
     (4.0, 2.0, "u_b", True): 0.35,
@@ -584,8 +586,13 @@ def test_e3_binocular_then_unaided_folds_almost_always() -> None:
 
 
 def _fuse_two_looks(
-    *, first_optic: Optic, second_optic: Optic, true_range_m: float, salt: str
-) -> tuple[float, float, float, float]:
+    *,
+    first_optic: Optic,
+    second_optic: Optic,
+    true_range_m: float,
+    salt: str,
+    trial: int,
+) -> tuple[float, float, float, float] | None:
     """Found a contact from one look through `first_optic`, fuse a second
     look through `second_optic` at the same true geometry six seconds
     later, and return `(fused_range_m, first_sigma_down_m,
@@ -593,39 +600,76 @@ def _fuse_two_looks(
     no_omniscience_*` below reasons from, read back from the real
     `ContactStore`/perception pipeline rather than calling `position_
     belief.fold_position` in isolation, so this exercises the same code
-    path the scenario tests do."""
+    path the scenario tests do.
+
+    **Per-trial `observation_id`/`t_sim` base** (review required fix,
+    `plans/same-optic-gate-indefinite/review.md`; same recipe as `_e3_
+    fold_rate` above, `feedback_harness_resampling_fix_can_falsify_an_
+    existing_guarantee`): a fixed `observation_id`/`t_sim` pair across
+    every trial freezes the per-look bearing draw and the `z_look` draw to
+    one sample for the whole ensemble, the exact frozen-draw shape that
+    made `_e3_fold_rate`'s old `== 1.0` assertion an artifact rather than a
+    guarantee. `t0 = trial * 1e-3` keeps the 6-second gap exact while
+    giving every trial its own `poll_key`.
+
+    **Returns `None` on a genuine non-fold.** Once resampled, the two
+    looks occasionally do not fold to one contact on the binocular-then-
+    unaided direction -- a real, measured property of the model (see
+    `test_e3_binocular_then_unaided_folds_almost_always`'s own docstring),
+    not a bug -- so callers skip and count these rather than asserting
+    fold on every trial."""
     _fresh_realisation(salt)
+    t0 = trial * 1e-3
     store = ContactStore()
     observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
     first = _observation(
-        observation_id="first",
-        t_sim=0.0,
-        ownship=_ownship(0.0),
+        observation_id=f"first-{trial}",
+        t_sim=t0,
+        ownship=_ownship(t0),
         group_x=0.0,
         group_z=-true_range_m,
         bias_object_id=1,
         optic=first_optic,
     )
     first_sigma_down_m = first.position_uncertainty.sigma_down_m  # type: ignore[union-attr]
-    store.ingest([first], 0.0)
-    store.tick(0.0)
+    store.ingest([first], t0)
+    store.tick(t0)
     second = _observation(
-        observation_id="second",
-        t_sim=6.0,
-        ownship=_ownship(6.0),
+        observation_id=f"second-{trial}",
+        t_sim=t0 + 6.0,
+        ownship=_ownship(t0 + 6.0),
         group_x=0.0,
         group_z=-true_range_m,
         bias_object_id=2,
         optic=second_optic,
     )
     second_sigma_down_m = second.position_uncertainty.sigma_down_m  # type: ignore[union-attr]
-    store.ingest([second], 6.0)
-    store.tick(6.0)
-    assert len(store.contacts) == 1, "expected the two looks to fuse"
+    store.ingest([second], t0 + 6.0)
+    store.tick(t0 + 6.0)
+    if len(store.contacts) != 1:
+        return None
     contact = store.contacts[0]
     fused_sigma_down_m = contact.position.range_uncertainty_m(observer)
     fused_range_m = horizontal_range_m(observer, contact.last_position)
     return fused_range_m, first_sigma_down_m, second_sigma_down_m, fused_sigma_down_m
+
+
+#: The fraction of `_fuse_two_looks` trials allowed to come back `None`
+#: (a genuine non-fold) before a `test_no_omniscience_*` test below treats
+#: it as a problem, rather than the same honest cross-optic-order
+#: asymmetry the sibling E3 fold-rate tests measure on exactly these two
+#: optic orders. Derived from those tests' own floors
+#: (`1 - floor`), not chosen independently: `_E3_FOLD_RATE_FLOOR["u_b"]`
+#: (0.95) for unaided-then-binocular, and `test_e3_binocular_then_
+#: unaided_folds_almost_always`'s own literal 0.90 floor for the reverse
+#: order -- plus a flat +10 percentage points of headroom (this file's own
+#: existing margin convention) since these tests sample far fewer trials
+#: (30, not 100) than the E3 tests the bound is drawn from.
+_FUSE_NONFOLD_CEILING: Final[dict[tuple[str, str], float]] = {
+    (UNAIDED_OPTIC.name, BINOCULAR_OPTIC.name): (1.0 - _E3_FOLD_RATE_FLOOR["u_b"])
+    + 0.10,
+    (BINOCULAR_OPTIC.name, UNAIDED_OPTIC.name): (1.0 - 0.90) + 0.10,
+}
 
 
 def test_no_omniscience_fused_sigma_never_beats_the_tighter_optics_own_sigma() -> None:
@@ -634,19 +678,34 @@ def test_no_omniscience_fused_sigma_never_beats_the_tighter_optics_own_sigma() -
     the tighter one's own single-look sigma -- swept over both fuse
     orders, a closing geometry, and several ranges/realisations, not just
     the one pinned geometry `test_relative_distance_scenarios.py` already
-    checks."""
+    checks.
+
+    This is a claim about fused sigma on trials that **do** fold, not
+    about the fold rate itself -- `_fuse_two_looks`'s per-trial resampling
+    (review required fix) can produce an honest non-fold on some trials,
+    which are skipped and counted rather than asserted away; the skipped
+    fraction is fenced at `_FUSE_NONFOLD_CEILING` so a regression that
+    silently stopped folding almost always is still caught."""
     for first_optic, second_optic in (
         (UNAIDED_OPTIC, BINOCULAR_OPTIC),
         (BINOCULAR_OPTIC, UNAIDED_OPTIC),
     ):
+        skipped = 0
+        n = 0
         for true_range_m in (2000.0, 3000.0, 4500.0):
             for trial in range(10):
-                _range_m, sigma_a, sigma_b, fused_sigma = _fuse_two_looks(
+                n += 1
+                result = _fuse_two_looks(
                     first_optic=first_optic,
                     second_optic=second_optic,
                     true_range_m=true_range_m,
                     salt=f"noomni-{first_optic.name}-{second_optic.name}-{true_range_m}-{trial}",
+                    trial=trial,
                 )
+                if result is None:
+                    skipped += 1
+                    continue
+                _range_m, sigma_a, sigma_b, fused_sigma = result
                 tighter_sigma = min(sigma_a, sigma_b)
                 assert fused_sigma >= tighter_sigma * 0.95, (
                     f"{first_optic.name}->{second_optic.name} at "
@@ -654,6 +713,11 @@ def test_no_omniscience_fused_sigma_never_beats_the_tighter_optics_own_sigma() -
                     f"{fused_sigma} m is below the tighter optic's own "
                     f"{tighter_sigma} m"
                 )
+        ceiling = _FUSE_NONFOLD_CEILING[(first_optic.name, second_optic.name)]
+        assert skipped / n <= ceiling, (
+            f"{first_optic.name}->{second_optic.name}: {skipped}/{n} trials "
+            f"did not fold, exceeding the {ceiling:.0%} ceiling"
+        )
 
 
 def test_no_omniscience_fused_mean_never_extrapolates_past_either_look() -> None:
@@ -662,19 +726,30 @@ def test_no_omniscience_fused_mean_never_extrapolates_past_either_look() -> None
     "between the two looks" collapses to "close to truth, never overshot
     past it in either direction by more than a look's own noise floor")
     -- the observable form of "no fusion weight goes negative" (amendment,
-    "Belief side": `correlated_innovation`'s `for_fusion` cap)."""
+    "Belief side": `correlated_innovation`'s `for_fusion` cap).
+
+    Same skip-and-count posture as the sigma test above: a claim about
+    trials that fold, with the non-fold fraction fenced separately by
+    `_FUSE_NONFOLD_CEILING`."""
     true_range_m = 3000.0
     for first_optic, second_optic in (
         (UNAIDED_OPTIC, BINOCULAR_OPTIC),
         (BINOCULAR_OPTIC, UNAIDED_OPTIC),
     ):
-        for trial in range(10):
-            fused_range_m, sigma_a, sigma_b, _fused_sigma = _fuse_two_looks(
+        skipped = 0
+        n = 30
+        for trial in range(n):
+            result = _fuse_two_looks(
                 first_optic=first_optic,
                 second_optic=second_optic,
                 true_range_m=true_range_m,
                 salt=f"noextra-{first_optic.name}-{second_optic.name}-{trial}",
+                trial=trial,
             )
+            if result is None:
+                skipped += 1
+                continue
+            fused_range_m, sigma_a, sigma_b, _fused_sigma = result
             # Both looks are of the same true range; a fused estimate
             # that overshot past truth by more than a few sigma of the
             # *tighter* look would be extrapolation, not fusion.
@@ -686,3 +761,8 @@ def test_no_omniscience_fused_mean_never_extrapolates_past_either_look() -> None
                 f"({true_range_m} m), past 4 sigma of the tighter look "
                 f"({tighter_sigma} m)"
             )
+        ceiling = _FUSE_NONFOLD_CEILING[(first_optic.name, second_optic.name)]
+        assert skipped / n <= ceiling, (
+            f"{first_optic.name}->{second_optic.name}: {skipped}/{n} trials "
+            f"did not fold, exceeding the {ceiling:.0%} ceiling"
+        )

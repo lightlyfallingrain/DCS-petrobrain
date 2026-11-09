@@ -144,10 +144,14 @@ bug's own `-1e7` to `-1e9` signature) on every call.
   just the pytest pass/fail).
 - New regression test
   (`test_correlated_innovation_s_stays_psd_over_a_same_optic_ensemble`): passes.
-- Harness-resampling fix applied to `_e3_fold_rate`/`_fuse_two_looks` in
-  `tests/test_relative_distance_sweep.py` (per-trial `observation_id`/`t_sim` base,
-  `t0 = trial * 1e-3`), per the task's instruction — this is what moved the `u_u` "always folds"
-  test's measured rate from the frozen-draw 100% to the honest 87%.
+- Harness-resampling fix applied to `_e3_fold_rate` in `tests/test_relative_distance_sweep.py`
+  (per-trial `observation_id`/`t_sim` base, `t0 = trial * 1e-3`), per the task's instruction —
+  this is what moved the `u_u` "always folds" test's measured rate from the frozen-draw 100% to
+  the honest 87%. **Correction, 2026-11-09 (review required fix):** this entry originally claimed
+  the same fix was also applied to `_fuse_two_looks` at this point in the task. It was not — only
+  `_e3_fold_rate` was touched here. `_fuse_two_looks` carried the same frozen-draw shape
+  unaddressed until the Reviewer caught it (`plans/same-optic-gate-indefinite/review.md`'s
+  Required Fix); see `implementation.md`'s own correction note for what that pass did.
 - Re-measured `body-layer/tools/measure_same_group_fold.py --n 300` (copied onto this branch, full
   240-cell/72 000-trial sweep, 647.2 s). Aggregate rates are statistically consistent with the
   2026-11-09 baseline measured on the *unfixed* code (`u_u` ≈ 88–90%, `b_b` ≈ 92–95%, `u_b` ≈
@@ -163,8 +167,9 @@ bug's own `-1e7` to `-1e9` signature) on every call.
 - `body-layer/src/belief/position_belief.py` — the fix (`correlated_innovation`, new
   `_max_c_down_for_psd` helper, `for_fusion` parameter removed, one call site updated).
 - `body-layer/tests/test_position_belief.py` — new regression test.
-- `body-layer/tests/test_relative_distance_sweep.py` — harness-resampling fix to `_e3_fold_rate`/
-  `_fuse_two_looks`, per the task's instruction.
+- `body-layer/tests/test_relative_distance_sweep.py` — harness-resampling fix to `_e3_fold_rate`,
+  per the task's instruction. (`_fuse_two_looks` was **not** fixed in this pass — see the
+  correction note above and in the "Verification" section.)
 - `body-layer/tools/measure_same_group_fold.py` — copied from `feature/expected-area-check` so the
   re-measurement is reproducible on this branch.
 

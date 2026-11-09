@@ -6,6 +6,24 @@ six test fences that the S-conditioning fixes moved, to their honestly re-measur
 production code was touched — only `body-layer/tests/test_relative_distance_sweep.py`,
 `body-layer/tests/test_expected_area_trigger.py`, and two `ROADMAP/` entries.
 
+**Correction/addendum, 2026-11-09 (review required fix, `plans/same-optic-gate-indefinite/
+review.md`).** `debug.md` claimed the per-trial `observation_id`/`t_sim` resampling fix had been
+applied to both `_e3_fold_rate` *and* `_fuse_two_looks`; only `_e3_fold_rate` actually was. This
+pass extends the same fix to `_fuse_two_looks` (`t0 = trial * 1e-3`, `observation_id=
+f"first-{trial}"/f"second-{trial}"`, a `trial: int` parameter threaded through from both
+`test_no_omniscience_*` callers). Doing so makes `_fuse_two_looks`'s old unconditional
+`assert len(store.contacts) == 1` hit an honest, non-bug non-fold on some trials of the
+binocular-then-unaided order (the same asymmetry `test_e3_binocular_then_unaided_folds_almost_
+always` already fences) — `_fuse_two_looks` now returns `None` on a non-fold instead of asserting,
+and both callers skip and count `None` results, asserting only on folded trials and fencing the
+skipped fraction at a new `_FUSE_NONFOLD_CEILING` (derived from the sibling E3 floors, `1 - floor`,
+plus the file's own +10-point headroom convention for a smaller sample). Measured on this branch:
+0/30 skipped for unaided-then-binocular (ceiling 15%), 1/30 for binocular-then-unaided (ceiling
+20%) — well inside both fences, consistent with the ~1-3% honest non-fold rate `debug.md`'s own
+`measure_same_group_fold.py` re-measurement found for that order. Production code
+(`body-layer/src/`) was not touched by this addendum either, beyond the two one-line optional
+docstring notes below.
+
 Every fence was re-measured on this branch's own committed code, at the test's own `n`, and
 cross-checked for stability across 3-8 additional salts before being set. Where a test's own
 docstring states a measured range, that range is what several additional salt runs produced, not
@@ -76,10 +94,27 @@ room for it).
 
 No production code (`body-layer/src/`) was touched by this pass.
 
+**Review required-fix addendum (2026-11-09):**
+
+- `body-layer/tests/test_relative_distance_sweep.py` — `_fuse_two_looks` gains a `trial: int`
+  parameter, per-trial `observation_id`/`t_sim` base (the fix this entry's `debug.md` had
+  wrongly claimed was already applied here), and returns `tuple[...] | None` instead of
+  asserting fold; both `test_no_omniscience_*` callers skip/count `None` results and fence the
+  skipped fraction with a new `_FUSE_NONFOLD_CEILING` dict; the `_CROSS_OPTIC_MEMORY_ONLY_FENCE`
+  comment for the `(5.0, 3.5, "b_u", True)` cell now says plainly that `rate <= 1.0` can never
+  fail and the cell is a saturated record, not a guarantee (optional refinement).
+- `body-layer/src/belief/position_belief.py` — one-line comment above the `c_down` clamp noting
+  it is one-sided (`[0, max_c_down]`) and behaviour-neutral, since `effective_down_correlation`
+  can only return a non-negative value (optional refinement; no behaviour change).
+- `debug.md` — corrected the inaccurate "`_fuse_two_looks` was also fixed" claim in its
+  "Verification"/"Files changed" sections, with a dated correction note rather than a silent edit.
+
 ### Tests Added
 
-None — this pass resets existing fences to measured values; it does not add new test coverage.
-The renamed tests are the same six tests, continuing to exercise the same code paths.
+None in the original pass — it resets existing fences to measured values; it does not add new
+test coverage. The renamed tests are the same six tests, continuing to exercise the same code
+paths. The addendum adds no new tests either, only extends `_fuse_two_looks`' own resampling and
+non-fold handling inside the two existing `test_no_omniscience_*` tests.
 
 ### Checks
 
@@ -93,6 +128,11 @@ The renamed tests are the same six tests, continuing to exercise the same code p
 - `pytest -q`: pass — 3045 passed, 4 xfailed (3039 passed + 6 previously-failing tests now passing
   against their re-measured fences, 0 failed). Full suite re-run from this worktree; see the run's
   own tail in the conversation for the exact count.
+
+**Addendum checks** (same commands, re-run after the `_fuse_two_looks` fix):
+- `ruff format --check` / `ruff check` / `mypy src`: pass (see "Checks" in the full report below).
+- `pytest tests/test_relative_distance_sweep.py -q`: 71 passed.
+- Full `pytest -q`: see the full report below for the exact count.
 
 ### Notable Discoveries
 
