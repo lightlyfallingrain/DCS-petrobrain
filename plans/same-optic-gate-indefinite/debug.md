@@ -167,3 +167,15 @@ bug's own `-1e7` to `-1e9` signature) on every call.
   `_fuse_two_looks`, per the task's instruction.
 - `body-layer/tools/measure_same_group_fold.py` — copied from `feature/expected-area-check` so the
   re-measurement is reproducible on this branch.
+
+### User direction 2026-11-09 (after the first pass)
+
+Asked: the S-indefinite fix holds but moves the same-optic fold rate only ~1%; the residual
+~10% is unexplained against a 3-sigma gate's ~1%. Recommended continuing on this branch before any
+fence edit: check whether the gate's assumed correlation between two same-optic looks matches the
+error the simulation actually draws (hypothesis: the gate subtracts a cross-term for an error the
+two looks do not share, so S is too tight). User, verbatim:
+
+> *"continue as recommended"*
+
+The six moved fences stay unedited until the second pass; they come back to the user once.
