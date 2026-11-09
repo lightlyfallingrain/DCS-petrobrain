@@ -92,3 +92,68 @@ docstrings, CLI/argparse shape, and grep-checked for scratchpad paths and the te
 probe's containment). Ran `ruff format --check`, `ruff check`, `mypy --strict`, and the full
 `pytest -q` suite myself in this worktree rather than trusting the reported numbers, and they match
 exactly (3045 passed, 4 xfailed, 0 failed).
+
+---
+
+### Re-review (2026-11-09, fix/same-optic-gate-indefinite @ 259ea5733408f06ba546fd4c738e2d5389219655)
+
+Confirmed via `git merge-base --is-ancestor` that this worktree's `HEAD` (the prior review's tip)
+was a strict ancestor of the stated tip with a clean tree, fast-forwarded to it. Diffed
+`07e2bc0230a92d16cc188d1b3751690c0604f2d9..259ea5733408f06ba546fd4c738e2d5389219655` — exactly four
+files touched: `body-layer/src/belief/position_belief.py` (+3, comment-only), `body-layer/tests/
+test_relative_distance_sweep.py` (+126/-31), `plans/same-optic-gate-indefinite/debug.md` (+17/-6),
+`plans/same-optic-gate-indefinite/implementation.md` (+44).
+
+**Required fix verified closed.** `_fuse_two_looks` now takes a `trial: int` parameter and builds
+`t0 = trial * 1e-3`, uses `observation_id=f"first-{trial}"`/`f"second-{trial}"` and
+`t_sim=t0`/`t0 + 6.0` for both looks — the same per-trial resampling recipe `_e3_fold_rate` already
+had, closing the exact gap this review flagged. It returns `None` on a genuine non-fold instead of
+asserting, and both `test_no_omniscience_*` callers now pass `trial=trial`, skip/count `None`
+results, and assert the skipped fraction against a new `_FUSE_NONFOLD_CEILING` dict.
+
+- **The skip-and-count is sound, not a way to hide a failure.** The sigma/mean assertions
+  (`fused_sigma >= tighter_sigma * 0.95`, the 4-sigma overshoot bound) still run on every trial that
+  *does* fold — `continue` only skips the assertion for a `None` result, it never widens or removes
+  either assertion. Confirmed by reading both call sites: `result is None` is the only branch that
+  skips, and the per-trial loop counter (`n`) and `skipped` counter are both incremented
+  unconditionally, so a regression that stopped folding almost always would still show up as
+  `skipped / n` exceeding the ceiling.
+- **The ceiling values are derived, not picked to pass.** `_FUSE_NONFOLD_CEILING` is built from
+  `1 - _E3_FOLD_RATE_FLOOR["u_b"]` (0.95) and `1 - 0.90` (the sibling
+  `test_e3_binocular_then_unaided_folds_almost_always` floor) plus a flat +10 points for the smaller
+  sample (30 trials vs. the E3 tests' own larger n) — traced both source values to the actual
+  constants/tests cited, not taken on faith. 0.15 and 0.20 match `implementation.md`'s own stated
+  figures and the measured 0/30 and 1/30 skip counts land well inside both.
+- **`debug.md`'s correction is a superseding note, not a silent edit** — the false "`_fuse_two_looks`
+  was also fixed" claim is struck through in meaning (crossed out in content, not deleted) with a
+  dated "Correction, 2026-11-09 (review required fix)" paragraph underneath, pointing at this review
+  and at `implementation.md`'s own addendum. Matches the project's "prune for tense, not delete"
+  convention for dated claims.
+- **`position_belief.py`'s comment-only change** is exactly the three-line note from the prior
+  review's Optional Refinements, re-verified: `c_down = max(0.0, min(max_c_down, c_down))` is
+  unchanged code, only a comment added above it. No behaviour change, confirmed by the diff itself
+  (no other hunks in this file).
+- **Documentation accuracy** — `implementation.md`'s addendum section states the fix, the new
+  `trial: int` parameter, the `_FUSE_NONFOLD_CEILING` derivation, and the measured 0/30 and 1/30
+  skip counts; all match the code and `debug.md`'s cross-reference is consistent in both
+  directions.
+
+**Checks, run in this worktree** (no `.venv` here; used
+`/Users/sg/Code/DCS-petrobrain/body-layer/.venv/bin/<tool>` with `cwd` in this worktree's
+`body-layer/`):
+- `ruff format --check .`: 1 pre-existing unformatted file (`research/2026-10-05-security-audit.md`)
+  — same file the prior review flagged, confirmed still untouched by this diff (not in the four
+  changed files above).
+- `ruff check src tests tools`: "All checks passed!"
+- `mypy src` (strict, `cd body-layer && .venv/bin/mypy src`): "Success: no issues found in 79 source
+  files."
+- `pytest tests -q`: **3045 passed, 4 xfailed, 0 failed** (236.19s) — matches both the prior review's
+  count and `implementation.md`'s claimed addendum-checks figure exactly.
+
+#### Verdict
+APPROVED
+
+#### Review Confidence
+Full read of the fix diff (all four changed files, in full) and both affected test functions'
+complete new bodies. Ran all four checks myself in this worktree rather than trusting the reported
+numbers; they match exactly.
