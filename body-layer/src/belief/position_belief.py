@@ -545,14 +545,75 @@ def _down_variance_along(covariance: Covariance2D, bearing_deg_value: float) -> 
     """The down-range (along-line-of-sight) variance `covariance`
     projects onto the axis at `bearing_deg_value` -- `PositionEstimate.
     range_uncertainty_m`'s own projection, factored out so `correlated_
-    innovation`'s fusion cap (`BL-B108` amendment, "Belief side") can read
-    it for an arbitrary covariance/bearing pair, not only `self`'s own."""
+    innovation`'s per-axis cap (below) can read it for an arbitrary
+    covariance/bearing pair, not only `self`'s own."""
     cos_t, sin_t = _down_axis_unit(bearing_deg_value)
     return (
         covariance.xx * cos_t * cos_t
         + 2.0 * covariance.xz * sin_t * cos_t
         + covariance.zz * sin_t * sin_t
     )
+
+
+def _max_c_down_for_psd(
+    sum_covariance: Covariance2D, k_xx: float, k_zz: float, k_xz: float
+) -> float:
+    """The largest `c >= 0` for which `sum_covariance - c * K` stays
+    positive semi-definite, where `K = (xx=k_xx, zz=k_zz, xz=k_xz)` is the
+    fixed symmetric "direction" matrix `correlated_innovation`'s cross-
+    term `c_sym` is `c_down * K` of -- `plans/same-optic-gate-indefinite/
+    debug.md` (fixing `BL-B108`'s original per-axis `min(var_prior_along,
+    var_look_along)` cap, which is **not** tight enough: it bounds the
+    cross-term's magnitude using each side's own along-axis variance, but
+    `S = sum_covariance - c_sym` can still go indefinite from `sum_
+    covariance`'s off-diagonal (cross-axis) structure alone, which that
+    per-axis bound never sees -- measured on a real same-optic gate
+    evaluation where the per-axis cap (109 036) left `S`'s determinant at
+    -4.3e8; this exact cap (103 381) lands it at ~0).
+
+    `sum_covariance` is always valid (a sum of two already-valid
+    covariances), so `det(sum_covariance) >= 0` and `trace(sum_covariance)
+    >= 0`. `K` is always `anchor_u (x) look_u + look_u (x) anchor_u` for
+    two unit vectors (never computed by a different caller), so `det(K) =
+    -(anchor_u x look_u)**2 <= 0` always (the two unit vectors' 2D cross
+    product, squared) -- `f(c) = det(sum_covariance - c*K)` is therefore a
+    downward-opening (or, at `det(K) == 0`, linear) function of `c` that
+    starts at `f(0) = det(sum_covariance) >= 0`, so it has exactly one
+    root on the positive side (or none, if `b <= 0` in the degenerate
+    linear case) -- the smallest positive `c` where `S` first becomes
+    singular. A second, independent cap comes from the trace: `trace(S) =
+    trace(sum_covariance) - c * trace(K)` must also stay non-negative
+    (a non-negative determinant alone permits two negative eigenvalues,
+    not just two non-negative ones). The smaller of the two caps is
+    returned; `prior.anchor is not None` is this function's only
+    precondition (`correlated_innovation`'s own caller already checked
+    it)."""
+    det_a = max(0.0, sum_covariance.xx * sum_covariance.zz - sum_covariance.xz**2)
+    trace_a = sum_covariance.xx + sum_covariance.zz
+    trace_k = k_xx + k_zz
+    det_k = k_xx * k_zz - k_xz * k_xz
+    b = (
+        sum_covariance.xx * k_zz
+        + sum_covariance.zz * k_xx
+        - 2.0 * sum_covariance.xz * k_xz
+    )
+
+    cap = math.inf
+    if trace_k > 0.0:
+        cap = trace_a / trace_k
+
+    if abs(det_k) < 1e-12:
+        if b > 0.0:
+            cap = min(cap, det_a / b)
+    else:
+        discriminant = max(0.0, b * b - 4.0 * det_k * det_a)
+        sqrt_discriminant = math.sqrt(discriminant)
+        root_a = (b - sqrt_discriminant) / (2.0 * det_k)
+        root_b = (b + sqrt_discriminant) / (2.0 * det_k)
+        positive_root = max(root_a, root_b)
+        cap = min(cap, positive_root)
+
+    return max(0.0, cap)
 
 
 def correlated_innovation(
@@ -564,7 +625,6 @@ def correlated_innovation(
     correlation_range_m: float,
     correlation_optic_class: str,
     correlation_sigma_down_stable_m: float,
-    for_fusion: bool = False,
 ) -> tuple[Covariance2D, _Matrix2D, float]:
     """`(S, C, kappa_view)` for the correlated-fusion update, used by both
     `fold_position` (the fuse) and `belief.association_over_time.
@@ -609,19 +669,69 @@ def correlated_innovation(
     compared against the anchor, regardless of which bearing/range mode
     above is in force.
 
-    **`for_fusion` (`BL-B108` amendment, "Belief side")**: when set
-    (`fold_position`'s own call only -- the gate never caps), `C`'s
-    down-range magnitude `c_down` is additionally capped at `min(
-    var_prior_along, var_look_along)`, each side's own full along-line
-    variance projected onto *its own* line-of-sight axis (`_down_
-    variance_along`). In 1-D this is exactly "neither fusion weight goes
-    negative", so the fused mean can never extrapolate past either input
-    -- the honest boundary a flat cross-optic share could violate (module
-    docstring of `perception.estimation`, "Why not 'mostly the same
-    error, scaled down'"). **The gate does not cap**: it tests the model
-    correlation the noise really has, a calibrated test for accept/
-    reject rather than a position, and any look the gate accepts sits
-    well inside the fold's own (larger) `S` by construction.
+    **The cap, revised (`plans/same-optic-gate-indefinite/debug.md`,
+    fixing the `BL-B108` amendment "Belief side"'s original `for_fusion`-
+    only cap)**: `C`'s down-range magnitude `c_down` is capped at `min(
+    per_axis_cap, psd_cap)` -- **always applied now, for both callers**,
+    where it used to apply only when `for_fusion` was set (`fold_
+    position`'s own call). The original theory for not capping the
+    gate's `S` was that the gate "tests the model correlation the noise
+    really has" and never needs capping because any look it accepts sits
+    inside the fold's own (larger) `S` by construction -- true for `S`
+    being too *narrow*, false for `S` failing to be a valid covariance at
+    all. `S` is built by *subtracting* a cross-term, which has no
+    structural guarantee of staying positive semi-definite, and an
+    uncapped `c_down` can exceed the bound a valid correlation permits
+    when both looks share one optic and the hypothesis bearing matches
+    the anchor closely (`rho_eff` near 1). Measured: on a same-optic
+    (`u_u`), zero-growth, 2 km/4 s-gap cell, the gate's own uncapped `S`
+    had a negative determinant on 7.0% of trials (`n=300`), which
+    `Covariance2D.inverse()`'s determinant floor then clamped to a tiny
+    positive value regardless of sign -- the resulting "inverse" is not a
+    valid precision matrix, and the gate rejected those percepts almost
+    regardless of their actual offset.
+
+    **Two caps, not one, because each catches a failure the other
+    misses:**
+
+    - **`per_axis_cap` (the original `for_fusion` cap, `min(
+      var_prior_along, var_look_along)`, each side's own along-axis
+      variance projected independently)** is *not* tight enough on its
+      own for the gate: it ignores `P_est + P_look`'s own off-diagonal
+      (cross-axis) structure, which the subtracted cross-term also
+      interacts with whenever the gate's hypothesis bearing differs from
+      the look's own real bearing (the gate's `look_covariance` is built
+      at the percept's own bearing but projected at the hypothesis
+      bearing for this cap, unlike the fold, where the two always
+      coincide) -- measured on the cell above, `per_axis_cap` alone
+      (109 036) still left `S`'s determinant at -4.3e8.
+    - **`psd_cap` (`_max_c_down_for_psd`, the exact closed-form PSD
+      boundary)** fixes that -- capped there alone, the same cell's `S`
+      lands at determinant ~0, nowhere lower. But landing *exactly* on
+      the boundary is itself a problem for the **fold**: a repeated
+      same-bearing dwell (`test_stage0a_armour_growth_bounded_by_prior_
+      inflation_and_reaches_naked_grade_by_sixth_fuse`) regressed when
+      `psd_cap` alone replaced the per-axis cap, because the Bar-Shalom-
+      Campo fused-covariance formula (`P_est - gain @ (P_est - C^T)`,
+      `gain` through `S^-1`) is exactly the numerically fragile case
+      `_is_valid_covariance`'s own docstring already names ("a
+      near-singular `S^-1` amplified through `K` can push the result
+      negative") -- pushing `c_down` right up to where `det(S) == 0`
+      pushes `S^-1` toward its own singularity, and the fused covariance
+      can come out *larger*, not smaller, even though `S` itself stays
+      nominally valid. `_is_valid_covariance`'s existing negative-
+      determinant/negative-trace guard does not catch this, because the
+      result it catches badly is still positive.
+
+    **`min(per_axis_cap, psd_cap)`** is never looser than either cap
+    alone: it keeps the fold on the same, already-proven-stable
+    `per_axis_cap` everywhere that cap was already inside the true PSD
+    region (every case this project has run the fold through before this
+    fix), and only tightens further, to the exact boundary, in the cases
+    `per_axis_cap` alone was not tight enough for -- exactly the gate's
+    mismatched-hypothesis-bearing regime above, where `per_axis_cap`
+    itself exceeded `psd_cap`. `for_fusion` is gone: one cap formula, one
+    code path, correct for both callers.
 
     `prior.anchor is None` (the `speech.py` placeholder, module docstring
     "Co-moving Fields") makes `C` the zero matrix and `S` the ordinary
@@ -645,14 +755,20 @@ def correlated_innovation(
     )
     rho_eff = effective_down_correlation(rho_view, rho_near)
     c_down = rho_eff * anchor.sigma_down_stable_m * correlation_sigma_down_stable_m
-    if for_fusion:
-        var_prior_along = _down_variance_along(prior_covariance, anchor.bearing_deg)
-        var_look_along = _down_variance_along(look_covariance, correlation_bearing_deg)
-        max_c_down = max(0.0, min(var_prior_along, var_look_along))
-        c_down = max(-max_c_down, min(max_c_down, c_down))
 
     anchor_x, anchor_z = _down_axis_unit(anchor.bearing_deg)
     look_x, look_z = _down_axis_unit(correlation_bearing_deg)
+    sum_covariance = prior_covariance + look_covariance
+    k_xx = 2.0 * anchor_x * look_x
+    k_zz = 2.0 * anchor_z * look_z
+    k_xz = anchor_x * look_z + anchor_z * look_x
+    var_prior_along = _down_variance_along(prior_covariance, anchor.bearing_deg)
+    var_look_along = _down_variance_along(look_covariance, correlation_bearing_deg)
+    per_axis_cap = max(0.0, min(var_prior_along, var_look_along))
+    psd_cap = _max_c_down_for_psd(sum_covariance, k_xx, k_zz, k_xz)
+    max_c_down = min(per_axis_cap, psd_cap)
+    c_down = max(0.0, min(max_c_down, c_down))
+
     c_matrix = _Matrix2D(
         xx=c_down * anchor_x * look_x,
         xz=c_down * anchor_x * look_z,
@@ -660,7 +776,7 @@ def correlated_innovation(
         zz=c_down * anchor_z * look_z,
     )
     c_sym = c_matrix + c_matrix.transpose()
-    s = prior_covariance + look_covariance - c_sym.as_symmetric_covariance()
+    s = sum_covariance - c_sym.as_symmetric_covariance()
     return s, c_matrix, kappa_view
 
 
@@ -868,7 +984,6 @@ def fold_position(
             correlation_range_m=look_range_m,
             correlation_optic_class=uncertainty.optic_class,
             correlation_sigma_down_stable_m=uncertainty.sigma_down_stable_m,
-            for_fusion=True,
         )
         prior_optic_class = (
             prior.anchor.optic_class if prior.anchor is not None else None

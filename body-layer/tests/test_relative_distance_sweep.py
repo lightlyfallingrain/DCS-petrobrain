@@ -465,33 +465,45 @@ def _e3_fold_rate(
 ) -> float:
     """The fraction of `n` realisations in which one real, stationary
     group, seen first through `first_optic` then again through
-    `second_optic`, folds into one contact -- E3's own ensemble measure."""
+    `second_optic`, folds into one contact -- E3's own ensemble measure.
+
+    **Per-trial `observation_id`/`t_sim` base** (`feedback_harness_
+    resampling_fix_can_falsify_an_existing_guarantee`'s recipe,
+    `plans/same-optic-gate-indefinite/debug.md`): `_fresh_realisation`
+    alone only resamples the field; `z_look` (keyed by `(optic,
+    poll_key=t_sim)`) and the per-look bearing draw (keyed by
+    `observation_id`) are independent of the field salt, so a fixed
+    `observation_id`/`t_sim` pair across every trial freezes those two
+    terms to one draw for the whole ensemble. `t0 = trial * 1e-3` keeps
+    `gap_s` exact (`t_sim_second - t_sim_first == gap_s`) while still
+    giving every trial its own `poll_key`."""
     folds = 0
     for trial in range(n):
         _fresh_realisation(f"{salt_prefix}-{trial}")
+        t0 = trial * 1e-3
         store = ContactStore()
         first = _observation(
-            observation_id="first",
-            t_sim=0.0,
-            ownship=_ownship(0.0),
+            observation_id=f"first-{trial}",
+            t_sim=t0,
+            ownship=_ownship(t0),
             group_x=0.0,
             group_z=-true_range_m,
             bias_object_id=1,
             optic=first_optic,
         )
-        store.ingest([first], 0.0)
-        store.tick(0.0)
+        store.ingest([first], t0)
+        store.tick(t0)
         second = _observation(
-            observation_id="second",
-            t_sim=gap_s,
-            ownship=_ownship(gap_s),
+            observation_id=f"second-{trial}",
+            t_sim=t0 + gap_s,
+            ownship=_ownship(t0 + gap_s),
             group_x=0.0,
             group_z=-true_range_m,
             bias_object_id=2,
             optic=second_optic,
         )
-        store.ingest([second], gap_s)
-        store.tick(gap_s)
+        store.ingest([second], t0 + gap_s)
+        store.tick(t0 + gap_s)
         if len(store.contacts) == 1:
             folds += 1
     return folds / n
