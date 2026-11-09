@@ -347,3 +347,14 @@ rather than its second moment (variance/correlation), which this pass never chec
 is Architect-level scoping, not a Debugger patch, per this role's own escalation rule and
 `.claude/agent-memory/debugger/feedback_escalate_gate_policy_changes.md`'s precedent for this same
 gate.
+
+### User decision 2026-11-09: stop here
+
+Offered (A) an architect pass on the residual S-shape mismatch, or (B) stop: merge the
+conditioning fixes, reset the six moved fences to honestly measured values, file the residual.
+User, verbatim:
+
+> *"stop here. If this becomes a problem in missions, we'll investigate more, but not now."*
+
+Residual filed as `[[BL-B113]]` (deferred). Next on this branch: fences reset to measured values
+(with margin), then Reviewer → Security → Performance → DoD → merge.
