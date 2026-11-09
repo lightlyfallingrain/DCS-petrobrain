@@ -290,3 +290,15 @@ Recommended (a).
 
 Reading (main loop): Stage 1b goes to implementation. Stage 2 still held until Stage 1b's
 acceptance grid (including the ground cells) passes.
+
+## Same-optic fold finding: measure first (user, verbatim, 2026-11-09)
+
+Asked, after Stage 1b stopped on the BL-B108 `u_u` fence (same group, naked eye twice, 3 km,
+4 s: 83-86% fold with the harness fixed, not 100%): (1) measure the same-optic case widely
+first, then decide fix vs. fence correction; (2) lower the guarantee to ~85% and continue.
+Recommended (1).
+
+> *"measure first"*
+
+Reading (main loop): a test-only same-optic ensemble sweep (ranges x gaps x optics x class,
+fixed harness), results to the user before any fence or fold code changes. Stage 2 still held.
