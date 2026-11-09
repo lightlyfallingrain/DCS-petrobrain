@@ -405,6 +405,49 @@ are which errors to accept, and where. That is how the candidates were judged.
   module docstring is rewritten. That is a premise change, approved here as the purpose of this
   stage.
 
+**Stage 1b implementer pass, STOPPED 2026-11-09, per this stage's own gate ("if any BL-B108
+fence or assertion moves, stop and report both outputs; do not edit the fence").** Step 1's
+harness fix (`_e3_fold_rate`/`_fuse_two_looks` in `test_relative_distance_sweep.py`: per-trial
+`observation_id` and a per-trial `t_sim`/`poll_key` base, `t0 = trial * 1e-3`, exactly as this
+section specifies) was applied and run in isolation, before touching anything else. It moved two
+`BL-B108` fences:
+
+| test | before (fixed draw, this committed code) | after (per-trial fix applied) |
+|---|---|---|
+| `test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact` | 71 passed | **fails**: unaided→unaided (`u_u`), 3 km, 4 s gap, honest same-optic reacquisition fold rate is **83–86%** (`n=100` then `n=300` for confidence), not the asserted 100%. unaided→binocular (`u_b`) stays 99–100%, consistent with its own fence. |
+| `test_no_omniscience_fused_sigma_never_beats_the_tighter_optics_own_sigma` | 71 passed | **fails**: `_fuse_two_looks`'s own hard `assert len(store.contacts) == 1` (no tolerance) hits the already-known, already-fenced-elsewhere binocular→unaided non-fold rate (`test_e3_binocular_then_unaided_folds_almost_always` fences this direction at ≥ 90%, not 100%) at one cell (3.0 km, trial 7 of 60) once the draw is actually resampled instead of frozen at one lucky value. Re-measured with the fold-precondition excluded: 0 sigma-ratio violations across the 59 cells that did fold.
+
+Full run: `71 passed in 33.31s` (before) → `2 failed, 69 passed in 31.61s` (after), both runs on
+this committed production code, test-side change only.
+
+**Mechanism, same one this stage's own module docstring already names for the gap-dependence
+finding**: `z_look` is keyed by `(optic, poll_key=t_sim)` and the per-look bearing draw by
+`observation_id` alone, both independent of `_FIELD_REALISATION_SALT` — so a cross-time helper
+that reuses the same `t_sim`/id on every trial (as `_e1_fold_rate` and `test_e1_ground_units_
+same_optic_stays_two_contacts` still do; out of this fix's stated scope, lines ~471–566 only)
+freezes those two terms to one draw for the whole ensemble. Here that draw happened to be one on
+which `u_u`'s same-optic reacquisition always folds. The real finding is not an artifact of this
+fix: `u_u` same-optic, same-geometry reacquisition genuinely fails to fold about one time in six
+or seven, a materially weaker guarantee than the "clear case: almost always" the plan and
+`BL-B108` itself have stood on. **Not fixed, not edited, per this gate.** The code change that
+produced this finding (the harness fix above) was reverted after measurement (`git checkout --
+tests/test_relative_distance_sweep.py`), so the committed tree is unchanged and still green; the
+numbers above are the full record of what was measured. Stage 1b's own harness fix in `test_
+expected_area_trigger.py`, the direction clause, the 6/120/700 s gap grid, and the ground cells
+are **not built by this pass** — they depend on step 1, which is the step that produced this stop.
+
+**What this means for the plan.** `[[BL-B111]]`'s point-LOS/anchors discussion and this stage's
+own "far-unaided → near-binocular residual" finding both assumed the same-optic case was the
+solid ground everything else is measured against. It is not as solid as measured. Two directions,
+neither tried here: (a) the `u_u` 4 s-gap reacquisition fold rate may simply be genuinely ~85%,
+in which case `test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact`'s "always" is
+the thing that needs correcting (with the user's sign-off, since it is a `BL-B108` guarantee, not
+this entry's own); (b) the gap/range combination tested (3 km, 4 s) may be unusually unlucky
+among same-optic cells, in which case a wider same-optic sweep (as `test_relative_distance_sweep.
+py`'s own `_e1_fold_rate`/`_E1_PAIRS` already do for the *different-groups* case) is what Stage 1b
+or a follow-up should build before deciding anything is wrong. **Brought to the user before Stage
+1b's harness fix, direction clause, gap grid, or ground cells are built.**
+
 *What the pilot notices.* The case is a SAM site glassed at 4.5 km and seen again by eye after
 more than ten minutes:
 - Variant 2 as built would announce it as a new group about one time in five.

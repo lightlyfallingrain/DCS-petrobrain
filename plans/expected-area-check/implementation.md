@@ -165,3 +165,53 @@ own test-impact list
   unresolved gap** that Stage 2's implementer needs to address before that stage ships — recorded
   in three places (plan.md, the test module's own docstring, `ROADMAP/BL-B110.md`) so it cannot be
   missed.
+
+---
+
+### Stage 1b — implementer pass 2026-11-09, STOPPED per the stage's own gate
+
+**No production or test code is committed by this pass.** Plan's Stage 1b step 1 ("harness fix,
+both cross-time harnesses... If any BL-B108 fence or assertion moves, stop and report both
+outputs; do not edit the fence") was carried out, in isolation, against `test_relative_distance_
+sweep.py` only (its "cross-time helpers, lines ~471–566": `_e3_fold_rate`, `_fuse_two_looks` and
+their two callers) — unique `observation_id` per trial and a per-trial `t_sim`/`poll_key` base
+(`t0 = trial * 1e-3`), exactly as the plan specifies.
+
+**It moved a `BL-B108` fence.** Before (unchanged code): `pytest tests/test_relative_distance_
+sweep.py -q` → `71 passed in 33.31s`. After (fix applied): `2 failed, 69 passed in 31.61s`.
+`test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact`'s `u_u` (unaided→unaided,
+3 km, 4 s gap) honest same-optic reacquisition fold rate measured **83–86%** (`n=100` then
+`n=300`), not the asserted 100%; `u_b` stayed 99–100%. `test_no_omniscience_fused_sigma_never_
+beats_the_tighter_optics_own_sigma` failed on `_fuse_two_looks`'s own zero-tolerance `assert
+len(store.contacts) == 1`, hit once (binocular→unaided, 3 km, trial 7/60) by the already-known,
+already-elsewhere-fenced (`test_e3_binocular_then_unaided_folds_almost_always`, ≥ 90%) non-fold
+rate for that direction, once the draw was actually resampled instead of frozen at one lucky
+value; 0 sigma-ratio violations across the 59 cells that did fold.
+
+**Mechanism**: the same one the plan's own Stage 1b section already names for the gap-dependence
+finding — `z_look` keyed by `(optic, poll_key=t_sim)`, the per-look bearing draw by
+`observation_id` alone, both independent of `_FIELD_REALISATION_SALT`. The fixed-draw helpers
+froze both to one draw for the whole ensemble; that one draw happened to always fold for `u_u`.
+Per this stage's own instruction, **the fence was not edited**. The harness-fix edit itself was
+reverted (`git checkout -- tests/test_relative_distance_sweep.py`) so the committed tree is
+unchanged and green; the numbers above, and in `plan.md`'s new "Stage 1b implementer pass,
+STOPPED 2026-11-09" subsection, are the full record.
+
+**Not done, because step 1 (which produced this stop) blocks it**: the matching harness fix in
+`test_expected_area_trigger.py`'s `_rates`, the one-sided direction clause in `_as_if_gate`, the
+6/120/700 s gap grid, the ground (`surface=True`) cells at 100/500 m AGL, and the replacement of
+`test_false_trigger_rate_for_long_gap_stationary_same_group_exceeds_the_gate`. None of these were
+touched.
+
+**For whoever picks this up next**: `test_relative_distance_sweep.py`'s own `_e1_fold_rate`/
+`_E1_PAIRS` machinery already sweeps the *different-groups* case across many geometries with the
+same fix's shape — the natural next step is the equivalent sweep for the *same-optic, same-group*
+case (what this pass's two ad hoc probe cells hinted at) before deciding whether `u_u`'s "always"
+guarantee itself needs correcting (a `BL-B108` behaviour-description change, needs the user) or
+whether 3 km/4 s was simply an unlucky single cell among many that are fine.
+
+### Checks (this pass)
+
+- No files changed in the final committed state (edit made, measured, then reverted).
+- `pytest body-layer/tests/test_relative_distance_sweep.py -q`: pass (unchanged, `71 passed`) —
+  confirmed clean after the revert.
