@@ -179,3 +179,51 @@ two looks do not share, so S is too tight). User, verbatim:
 > *"continue as recommended"*
 
 The six moved fences stay unedited until the second pass; they come back to the user once.
+
+### Second pass (WIP -- being filled in; this marker is removed once the pass is complete)
+
+**Method.** Built `body-layer/tools/measure_gate_calibration.py` (a measurement tool, not a
+test, same posture as `measure_same_group_fold.py`): for a fixed same-optic, same-group geometry,
+resample the noise ensemble and record both the gate's own modelled `S`
+(`belief.position_belief.correlated_innovation`) and the empirical covariance of the actual
+simulated innovation, then compare the Mahalanobis^2 calibration against chi-square(2) (a
+correctly-sized 3-sigma gate should reject ~1.1% of same-group same-optic pairs).
+
+**Finding 1 -- the leading hypothesis as literally stated is not what is happening.** Directly
+measured the TRUE correlation between two same-optic looks' own stable (field-based) down-range
+error at identical geometry: ~0.96, matching the model's `effective_down_correlation` exactly
+once the independent `z_look` share is accounted for (which the model already excludes by
+construction via `sigma_down_stable_m`). The field-based correlation model
+(`perception.estimation.stable_range_correlation`/`_tiered_field`) is mathematically exact at
+matched geometry, not an approximation error -- the simulation does *not* draw a different
+correlation than `C` assumes, for the stable/field term.
+
+**Finding 2 -- a real, confirmed defect: the gate has no ill-conditioning guard, and the first
+pass's exact PSD cap lands `S` close enough to that boundary on same-optic short-gap trials that
+`.inverse()`'s determinant floor fires on `~4-6%` of `passes_gate` evaluations.** Measured on
+`u_u` 2km/4s-gap (n=2000): gate rejects 11.2% against chi2(2)'s ~1.1%; of the rejected trials,
+`det(S)/trace(S)^2 < 1e-6` (near-singular) for 38%, producing Mahalanobis values in the
+*billions* via the floor-clamped, essentially-arbitrary inverse. This is exactly the
+`_is_valid_covariance`-class failure the first pass fixed for the **fold**; `passes_gate`/
+`contacts_plausibly_same` have no equivalent check and feed a possibly near-singular `S` straight
+into the Mahalanobis test.
+
+**Fix applied (first half):** `_max_c_down_for_psd` now targets `det(S) == _MIN_S_DETERMINANT_
+RATIO * trace(S)^2` (a new private numerical-stability margin, `1e-4`, framed like the existing
+`_MIN_DETERMINANT_RATIO` -- not a tuning key, not a correlation/physics judgement) instead of
+`det(S) == 0`, via the same quadratic solved against adjusted coefficients. Confirmed: post-fix,
+0% of trials are near-singular (min ratio lands exactly at the margin), and the Mahalanobis
+*magnitude* for those trials drops from billions to the tens of thousands.
+
+**Correction, found re-measuring after the fix: this does NOT move the overall rejection rate.**
+Still 11.2%, the identical 225/2000 trials rejected before and after. The margin fix removes the
+catastrophic *magnitude* of the near-boundary outliers (real numerical-hygiene value, and it
+protects the fold's own gain computation from the same fragile regime per `.claude/agent-memory/
+debugger/feedback_exact_psd_cap_can_regress_a_different_caller.md`) but does not, by itself, fix
+the fold-rate defect -- those trials were already going to clear the 3-sigma threshold at a
+finite, merely-large Mahalanobis value. **Keep this fix for the numerical-hygiene reason; do not
+credit it with a fold-rate improvement without a re-measured `measure_same_group_fold.py` table
+showing one.**
+
+(Section being completed -- true-axis orientation-mismatch probe in progress, full suite/table/
+fence status to follow in this same pass.)

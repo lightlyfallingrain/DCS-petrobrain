@@ -297,6 +297,33 @@ _MIN_DETERMINANT_RATIO: Final[float] = 1e-9
 #: and the division below would still fail.
 _MIN_DETERMINANT_ABSOLUTE: Final[float] = 1e-300
 
+#: `plans/same-optic-gate-indefinite/debug.md`'s second pass -- how far
+#: `_max_c_down_for_psd` keeps `S`'s own `det/trace^2` ratio away from
+#: `0`, not just non-negative. **Not a correlation/physics judgement call
+#: (unlike `rho_eff` and everything it is built from) -- a numerical-
+#: stability margin, the same role `_MIN_DETERMINANT_RATIO` above already
+#: plays for `.inverse()` itself**, five orders of magnitude above that
+#: floor so `S`'s own inversion never has to engage its floor at all for
+#: a cap this function returns. Landing the cap exactly at `det(S) == 0`
+#: (the pre-this-pass behaviour) is mathematically the tightest valid
+#: cap, but measured (`tools/measure_gate_calibration.py`, second pass):
+#: on a same-optic, 2km/4s-gap cell, 4.3% of `passes_gate` evaluations
+#: landed within `_MIN_DETERMINANT_RATIO` of that boundary, where `.
+#: inverse()`'s own floor then clamps the determinant to an
+#: almost-arbitrary tiny value -- the resulting "precision matrix" is
+#: not a meaningful inverse of anything, and the Mahalanobis test it
+#: feeds explodes to values in the billions, rejecting the percept
+#: regardless of its actual offset. Those trials accounted for 38-45% of
+#: that cell's excess rejections (11.2% observed against the ~1.1% a
+#: correctly-sized 3-sigma gate predicts). Kept away from the boundary
+#: by this margin, `S` stays a well-conditioned covariance for every
+#: caller, gate and fold alike -- `correlated_innovation` is their one
+#: shared source, so this fixes both without either needing its own
+#: ill-conditioning check (the fold already has one, `_is_valid_
+#: covariance`'s "hold" branch; the gate has none at all, and never
+#: needed one until the cap could land it in this regime).
+_MIN_S_DETERMINANT_RATIO: Final[float] = 1e-4
+
 #: `plans/position-belief-runaway/debug.md` -- `fold_position`'s
 #: ill-conditioning guard: the fused mean must sit within this many "sigma"
 #: (in the sense of `Covariance2D.mahalanobis_squared`) of *at least one* of
@@ -587,16 +614,39 @@ def _max_c_down_for_psd(
     not just two non-negative ones). The smaller of the two caps is
     returned; `prior.anchor is not None` is this function's only
     precondition (`correlated_innovation`'s own caller already checked
-    it)."""
-    det_a = max(0.0, sum_covariance.xx * sum_covariance.zz - sum_covariance.xz**2)
+    it).
+
+    **Second pass (`_MIN_S_DETERMINANT_RATIO`'s own docstring): the root
+    solved for is `det(S) == _MIN_S_DETERMINANT_RATIO * trace(S)^2`, not
+    `det(S) == 0`.** `trace(S)` is itself `trace_a - c*trace_k` (exact,
+    not approximated at `trace_a`), so substituting the margin's target
+    into `f(c) = det_a - b*c + det_k*c^2` and collecting terms in `c`
+    gives a quadratic of the *same shape*, with adjusted coefficients
+    `det_a' = det_a - margin*trace_a^2`, `b' = b - 2*margin*trace_a*
+    trace_k`, `det_k' = det_k - margin*trace_k^2` -- `det_k' <= 0` still
+    holds (subtracting a non-negative quantity from an already
+    non-positive `det_k`), so the same root-finding below applies
+    unchanged against the primed coefficients. At `margin = 0` this
+    collapses to exactly the original derivation."""
+    margin = _MIN_S_DETERMINANT_RATIO
+    det_a_raw = max(0.0, sum_covariance.xx * sum_covariance.zz - sum_covariance.xz**2)
     trace_a = sum_covariance.xx + sum_covariance.zz
     trace_k = k_xx + k_zz
-    det_k = k_xx * k_zz - k_xz * k_xz
-    b = (
+    det_k_raw = k_xx * k_zz - k_xz * k_xz
+    b_raw = (
         sum_covariance.xx * k_zz
         + sum_covariance.zz * k_xx
         - 2.0 * sum_covariance.xz * k_xz
     )
+    det_a = det_a_raw - margin * trace_a * trace_a
+    b = b_raw - 2.0 * margin * trace_a * trace_k
+    det_k = det_k_raw - margin * trace_k * trace_k
+
+    if det_a <= 0.0:
+        # Even an uncorrelated `c = 0` already sits inside the margin
+        # (a highly eccentric `sum_covariance` on its own) -- no positive
+        # `c` can satisfy the margin at all.
+        return 0.0
 
     cap = math.inf
     if trace_k > 0.0:
