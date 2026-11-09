@@ -16,19 +16,27 @@ import math
 
 import pytest
 
+import perception.estimation as estimation_module
 from belief.position_belief import (
     FUSION_SANITY_SIGMA,
     GATE_GROWTH_RATE_MPS,
     Covariance2D,
+    LookAnchor,
     PositionEstimate,
     clamp_fold_displacement,
     clamp_to_detection_envelope,
+    correlated_innovation,
     covariance_from_uncertainty,
     estimate_from_look,
     fold_position,
     plausible_speed_mps,
 )
-from perception.estimation import look_sigma_m, stable_down_sigma_m, stable_share
+from perception.estimation import (
+    look_sigma_m,
+    perturbed_bearing_range,
+    stable_down_sigma_m,
+    stable_share,
+)
 from perception.geometry import GeoPosition
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 from perception.source import PositionUncertainty
@@ -1087,3 +1095,117 @@ def test_stage0a_founding_look_unaffected_by_cap() -> None:
     assert founded.x == direct.x
     assert founded.z == direct.z
     assert founded.covariance == direct.covariance
+
+
+def _restore_field_salt_for_psd_test() -> None:
+    estimation_module._FIELD_REALISATION_SALT = ""
+    estimation_module._field_frequencies.cache_clear()
+
+
+def test_correlated_innovation_s_stays_psd_over_a_same_optic_ensemble() -> None:
+    """`plans/same-optic-gate-indefinite/debug.md` -- regression for the
+    bug this entry fixes: `correlated_innovation`'s `S = (P_est + P_look)
+    - (C + C^T)` went indefinite (negative determinant) on ~7% of
+    same-optic (`u_u`) gate evaluations, because `c_down` was uncapped
+    for the gate (`for_fusion=False` never capped before this fix).
+    Sweeps an ensemble of same-optic reacquisitions -- the regime the
+    measurement found it in -- over `perception.estimation.
+    perturbed_bearing_range`'s own noise draw (unique `observation_id`
+    per trial, the harness-resampling recipe) and asserts `S` is
+    positive semi-definite (within float tolerance) every time, for both
+    optics in the ladder."""
+    try:
+        for optic in (UNAIDED_OPTIC, BINOCULAR_OPTIC):
+            for range_m in (1000.0, 2000.0, 3000.0, 4500.0):
+                for trial in range(60):
+                    estimation_module._FIELD_REALISATION_SALT = (
+                        f"psd-ensemble-{optic.name}-{range_m}-{trial}"
+                    )
+                    estimation_module._field_frequencies.cache_clear()
+
+                    true_bearing_deg = 0.0
+                    sigma_cross_m, sigma_down_m = look_sigma_m(range_m, optic)
+
+                    first_bearing_deg, first_range_m = perturbed_bearing_range(
+                        observation_id=f"first-{trial}",
+                        object_id=1,
+                        true_bearing_deg=true_bearing_deg,
+                        true_range_m=range_m,
+                        sigma_cross_m=sigma_cross_m,
+                        sigma_down_m=sigma_down_m,
+                        optic_class=optic.name,
+                        poll_key=0.0,
+                    )
+                    anchor = LookAnchor(
+                        observer_x=0.0,
+                        observer_z=0.0,
+                        bearing_deg=first_bearing_deg,
+                        range_m=first_range_m,
+                        optic_class=optic.name,
+                        sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+                    )
+                    prior_uncertainty = PositionUncertainty(
+                        sigma_cross_m=sigma_cross_m,
+                        sigma_down_m=sigma_down_m,
+                        sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+                        optic_class=optic.name,
+                    )
+                    prior_covariance = covariance_from_uncertainty(
+                        prior_uncertainty, first_bearing_deg
+                    )
+                    prior = PositionEstimate(
+                        x=first_range_m,
+                        z=0.0,
+                        covariance=prior_covariance,
+                        as_of_sim=0.0,
+                        fused_at_sim=0.0,
+                        fused_covariance=prior_covariance,
+                        anchor=anchor,
+                    )
+
+                    second_bearing_deg, second_range_m = perturbed_bearing_range(
+                        observation_id=f"second-{trial}",
+                        object_id=2,
+                        true_bearing_deg=true_bearing_deg,
+                        true_range_m=range_m,
+                        sigma_cross_m=sigma_cross_m,
+                        sigma_down_m=sigma_down_m,
+                        optic_class=optic.name,
+                        poll_key=4.0,
+                    )
+                    look_covariance = covariance_from_uncertainty(
+                        prior_uncertainty, second_bearing_deg
+                    )
+
+                    s, _c, _kappa = correlated_innovation(
+                        prior,
+                        prior_covariance,
+                        look_covariance,
+                        correlation_bearing_deg=second_bearing_deg,
+                        correlation_range_m=second_range_m,
+                        correlation_optic_class=optic.name,
+                        correlation_sigma_down_stable_m=stable_down_sigma_m(
+                            sigma_down_m
+                        ),
+                    )
+                    determinant = s.xx * s.zz - s.xz * s.xz
+                    trace = s.xx + s.zz
+                    # Float tolerance, not a widened floor: a genuinely
+                    # PSD S can land at a tiny negative determinant from
+                    # rounding alone when `c_down` is capped exactly at
+                    # the boundary (`_max_c_down_for_psd`'s own
+                    # docstring) -- the bug this guards against produced
+                    # determinants many orders of magnitude more
+                    # negative (-1e7 to -1e9 on the measured cell), never
+                    # this close to zero.
+                    assert determinant >= -1e-3 * trace * trace, (
+                        f"{optic.name} range={range_m} trial={trial}: S "
+                        f"determinant {determinant} is indefinite "
+                        f"(S={s}, trace={trace})"
+                    )
+                    assert trace >= 0.0, (
+                        f"{optic.name} range={range_m} trial={trial}: S "
+                        f"trace {trace} is negative (S={s})"
+                    )
+    finally:
+        _restore_field_salt_for_psd_test()
