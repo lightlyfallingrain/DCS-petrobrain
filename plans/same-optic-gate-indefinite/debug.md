@@ -180,7 +180,7 @@ two looks do not share, so S is too tight). User, verbatim:
 
 The six moved fences stay unedited until the second pass; they come back to the user once.
 
-### Second pass (WIP -- being filled in; this marker is removed once the pass is complete)
+### Second pass
 
 **Method.** Built `body-layer/tools/measure_gate_calibration.py` (a measurement tool, not a
 test, same posture as `measure_same_group_fold.py`): for a fixed same-optic, same-group geometry,
@@ -225,5 +225,125 @@ finite, merely-large Mahalanobis value. **Keep this fix for the numerical-hygien
 credit it with a fold-rate improvement without a re-measured `measure_same_group_fold.py` table
 showing one.**
 
-(Section being completed -- true-axis orientation-mismatch probe in progress, full suite/table/
-fence status to follow in this same pass.)
+**Finding 3 -- the orientation-mismatch theory (the natural next candidate once Finding 2 turned
+out not to move the rate) is refuted.** `C`'s correlation kernel and axis unit vectors are built
+from each look's own *reported* (perturbed) bearing/range, never the true one -- a plausible
+source of shape mismatch, since the field correlation the kernel is modelling actually lives along
+the *true* bearing axis. Tested directly with a ground-truth probe
+(`correlated_innovation_true_axis`, test-only, can never ship -- no-omniscience is structural):
+rebuild `C`'s kernel and axis from each look's true bearing/range instead, keep every declared
+sigma unchanged, and re-measure the rejection rate. Result (n=1000, `u_u` 2km/4s): **15.3% under
+the true-axis variant vs. 10.6% under production's reported-axis `S`** -- *worse*, not better; the
+4.5km cell shows the same direction (17.1% vs 11.4%); `b_b` is roughly unchanged (3.9% vs 5.3%).
+The true-axis variant does not recover anything close to chi2(2)'s 1.1%, so building `C`'s axis
+off the reported bearing is **not** the cause of the residual mismatch. No fix follows from this
+finding -- per the task's own instruction, a refuted hypothesis gets reported, not patched around.
+
+**Net result of this pass: the near-singular mechanism (Finding 2) is fixed (numerical hygiene);
+the well-conditioned residual over-rejection (~5-11% depending on cell, vs. chi2(2)'s 1.1%) has
+two confirmed non-causes (Findings 1 and 3) and no identified cause.** The empirical covariance of
+the real simulated innovation, used directly in place of the model `S`, reproduces chi2(2)'s
+1.1% almost exactly in every cell measured -- so the test/threshold machinery is sound and the
+mismatch is specifically in how `S`'s *shape* (not trace, which tracks the empirical covariance to
+within ~5%) is built. The clearest numeric signature: the empirical down-axis variance is
+consistently 70-76% of the model's `S_down` (model too wide on that axis alone, by the approximate
+down/cross split), while the full 2x2 Mahalanobis test still over-rejects -- i.e. the mismatch is
+not reducible to either axis's own variance in isolation; it is a genuine interaction the
+approximate per-axis split (explicitly not exact when `S`'s off-diagonal term is non-zero, per
+`measure_same_group_fold.py`'s own comment) cannot localise further. **Left open for whoever next
+picks this up**, with the two ruled-out theories recorded above so they are not re-tried.
+
+### Fix applied (second pass)
+
+`body-layer/src/belief/position_belief.py`:
+
+1. `_MIN_S_DETERMINANT_RATIO: Final[float] = 1e-4` (new private module constant, alongside
+   `_MIN_DETERMINANT_RATIO`) -- a numerical-stability margin, not a tuning key (same reasoning the
+   file already applies to `_MIN_DETERMINANT_RATIO`: this governs how far `S` is kept from its own
+   inversion floor, not a correlation/perceptual judgement).
+2. `_max_c_down_for_psd` now solves for `det(S) == _MIN_S_DETERMINANT_RATIO * trace(S)^2` instead
+   of `det(S) == 0`, by substituting the margin's target into the existing quadratic
+   (`det(S) = det_a - b*c + det_k*c^2`) and solving against adjusted coefficients `det_a' = det_a -
+   margin*trace_a^2`, `b' = b - 2*margin*trace_a*trace_k`, `det_k' = det_k - margin*trace_k^2`
+   (`det_k' <= 0` still holds, so the same root-finding code applies unchanged; at `margin = 0`
+   this collapses to the original derivation exactly). Full derivation in the function's own
+   docstring.
+
+No other production code changed. `association_over_time.py`'s two call sites
+(`passes_gate`/`contacts_plausibly_same`) are unchanged -- the fix lives entirely in
+`correlated_innovation`'s own shared cap, so both the gate and the fold inherit it.
+
+### Verification (second pass)
+
+- `ruff format --check`, `ruff check`, `mypy src` (strict): all clean, including the new
+  `tools/measure_gate_calibration.py` (ruff only -- `tools/` is outside `mypy src`'s scope per
+  `CLAUDE.md`'s own Commands list, same as every other `tools/*.py` in this subproject).
+- Full suite (`pytest tests -q`): **3039 passed, 6 failed, 4 xfailed** -- identical failure count,
+  identical failing test names, and fold-rate numbers matching the first pass's own table to
+  within noise (`u_u` always-folds: 87.00% vs. the first pass's 87%; cross-optic memory-only:
+  96.67% vs. 96.7%; same-optic ceiling: unchanged cell). **No new failures, no regression** --
+  confirms the margin fix does not move any fenced rate, consistent with the calibration
+  measurement's own finding that it does not change the overall rejection count.
+- `test_correlated_innovation_s_stays_psd_over_a_same_optic_ensemble` and
+  `test_stage0a_armour_growth_bounded_by_prior_inflation_and_reaches_naked_grade_by_sixth_fuse`
+  (the first pass's own regression tests): both still pass, run in isolation to confirm.
+- Negative/near-singular-determinant repro, re-run against this fix
+  (`tools/measure_gate_calibration.py --n 1000`, `u_u` 2km/4s cell): `det(S)/trace(S)^2` minimum is
+  now exactly `1.000e-04` (the margin, working as designed) across every trial in every cell
+  measured -- 0% near-singular, down from 4-6% before this fix.
+- Re-measured `tools/measure_same_group_fold.py --n 80` (reduced from the task's requested
+  `--n 300` to fit this pass's per-command foreground time budget; aggregate rates below are
+  therefore slightly noisier than the first pass's `n=300` table but land within the same range):
+
+  | optic pair | aggregate fold rate (n=80/cell) | first pass's `n=300` baseline |
+  |---|---|---|
+  | `u_u` | 90.5% | 88-90% |
+  | `b_b` | 93.4% | 92-95% |
+  | `u_b` | 98.9% | 98-100% |
+  | `b_u` | 97.8% | 97-99% |
+  | `u_u` surface | 89.4% | 87-91% / 90-97% |
+
+  **Statistically consistent with the first pass's own baseline, no detectable movement** --
+  confirms Finding 2's own conclusion that the near-singular fix is numerical hygiene, not a
+  fold-rate change.
+
+### Status of the six moved fences (table carried from the first pass)
+
+**None of the six were edited.** Re-run against this fix's code (full `pytest tests -q` above):
+
+| test | first pass (measured) | this pass (measured) | moved further? |
+|---|---|---|---|
+| `test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact` (`u_u`) | 87% | 87.00% | no |
+| `test_e1_same_optic_fold_rate_stays_at_or_below_the_clear_case_ceiling[False-optic0-5.0-3.5]` | 6.0%/12.0% (ceiling 10%) | 12.00% | no |
+| `test_e1_cross_optic_memory_only_fold_rate_is_fenced[True-far_optic1-near_optic1-b_u-5.0-3.5]` | 88.3%/96.7% (fence 95%) | 96.67% | no |
+| `test_residual_fold_rate_for_far_binocular_near_unaided_is_small[4.5-3.0]` | 1-5%/~honest rate (fence 10%) | 72.00% | no |
+| `test_residual_fold_rate_for_far_binocular_near_unaided_is_small[5.0-3.5]` | 1-5%/~honest rate (fence 10%) | 87.33% | no |
+| `test_false_trigger_rate_for_long_gap_stationary_same_group_exceeds_the_gate` | 25-27%/6.0% (floor `>= 0.15`) | 6.00% | no |
+
+**All six are exactly where the first pass left them.** This is expected, not a gap in this pass's
+own fix -- Finding 2 (the only production defect this pass actually fixed) was confirmed not to
+move the overall rejection rate, so no fence-relevant number should have moved either. The fences
+remain the user's to revise; nothing here changes that.
+
+### Files changed (second pass)
+
+- `body-layer/src/belief/position_belief.py` -- `_MIN_S_DETERMINANT_RATIO`, `_max_c_down_for_psd`'s
+  margin-aware cap derivation.
+- `body-layer/tools/measure_gate_calibration.py` -- new measurement tool (not committed test code),
+  documenting and reproducing every finding in this section; its own module docstring restates
+  the three findings for a reader who finds the tool before this file.
+- `plans/same-optic-gate-indefinite/debug.md` -- this section.
+
+### Open item for whoever next touches this gate
+
+The well-conditioned residual over-rejection (Finding 3's "left open") has no identified mechanism.
+Two theories are now ruled out (the field correlation model itself, and the reported-vs-true-axis
+mismatch). Candidates not yet tested: whether the approximate down/cross split is hiding a genuine
+off-diagonal effect that a full-2x2, non-decomposed comparison would localise better; whether
+`hypothesis_scale`'s rescaling of the percept's own sigma (`passes_gate`'s "Belief side" amendment)
+interacts with the cap in a way that is not visible cell-by-cell; or whether the mismatch is a
+property of the Random-Fourier-Feature field approximation's own higher moments (skew/kurtosis)
+rather than its second moment (variance/correlation), which this pass never checked. Any of these
+is Architect-level scoping, not a Debugger patch, per this role's own escalation rule and
+`.claude/agent-memory/debugger/feedback_escalate_gate_policy_changes.md`'s precedent for this same
+gate.
