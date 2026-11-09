@@ -302,3 +302,14 @@ Recommended (1).
 
 Reading (main loop): a test-only same-optic ensemble sweep (ranges x gaps x optics x class,
 fixed harness), results to the user before any fence or fold code changes. Stage 2 still held.
+
+## Same-optic fold defect: fix first (user, verbatim, 2026-11-09)
+
+Asked, after the same-optic sweep (u_u ~90%, b_b ~95% fold, flat over gap; Covariance2D.inverse
+determinant floor fires on 7% of u_u gate evaluations, S indefinite): fix as a bug on its own
+branch before Stage 2, re-measure, then set the BL-B108 fences to the measured rate.
+
+> *"do as recommended"*
+
+Branch: `fix/same-optic-gate-indefinite` (from main). Stage 2 held until it merges and the
+residual rate is back with the user.
