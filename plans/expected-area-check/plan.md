@@ -463,6 +463,107 @@ more than ten minutes:
 *Ships with Stage 2* (one merge). Stage 1b is test-side and measurement only. Stage 2 lifts the
 stand-in into production as the trigger's third condition.
 
+**Same-optic fold measurement 2026-11-09** (user decision, "measure first" — above, before any
+fence or fold code change). Measures the honest same-group fold rate (not the as-if trigger) over
+every noise draw the Stage 1b stop finding named as frozen: the field salt (existing seam), the
+look-to-look draw `z_look` (keyed by `(optic, poll_key=t_sim)`), and the per-look bearing draw
+(keyed by `observation_id`) — unique observation ids and a per-trial time base
+(`t0 = trial * 1e-3`) alongside the field salt, exactly `feedback_harness_resampling_fix_can_
+falsify_an_existing_guarantee`'s recipe. **No fence, test, or production code changed** — a new
+script, `body-layer/tools/measure_same_group_fold.py` (no `slow`/`skip` pytest marker exists in
+this project, checked: no `pytest.ini_options.markers`, no `conftest.py`; this follows the
+`tools/summarize_detection_trace.py`-class precedent for a dev script outside the committed suite).
+Grid: optic pairs `{u_u, b_b, u_b, b_u}` × ranges `{1.0, 2.0, 3.0, 4.5}` km × gaps
+`{2, 4, 6, 30, 120}` s × classes `{armour (`OP_ARMORED`, 8 m/s growth), installation (`s-125`, 0
+growth)}` = 160 air cells, plus `u_u` ground-unit cells (`surface=True`) at 100 m and 500 m AGL
+over the same range/gap/class grid = 80 more, 240 cells total, `n=300`/cell, 72 000 trials,
+652.8 s. Full per-cell table: `body-layer/tools/measure_same_group_fold.py`'s own `--out`
+(regenerate with `PYTHONPATH=src:../world-model/src .venv/bin/python
+tools/measure_same_group_fold.py --n 300`; the raw 240-row table is not reproduced here).
+
+**Fold rate, aggregated over each pair's 20/40 cells (weighted by each cell's own non-fold
+count, `n=300`/cell):**
+
+| optic pair | fold rate | note |
+|---|---|---|
+| `u_u` (naked eye twice) | **89.7%** | 84.7–87.7% flat at every gap for the stationary class; 85.7–100% for the moving class, rising to 100% only once `gap_s` is large enough for growth to loosen the gate |
+| `b_b` (binoculars twice) | **94.7%** | same shape, better floor: 91.0–93.7% stationary (flat), 93.3–100% moving |
+| `u_b` (unaided founded, binocular re-sight) | **99.0%** | matches `test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact`'s existing ≈100% fence |
+| `b_u` (binocular founded, unaided re-sight) | **98.1%** | matches `test_e3_binocular_then_unaided_folds_almost_always`'s existing ≥90% fence |
+| `u_u` surface, 100 m AGL | **87.1%** | ground units, same shape as the air `u_u` case |
+| `u_u` surface, 500 m AGL | **90.6%** | higher than 100 m AGL — shallower depression angle at low AGL makes `surface_range_estimate`'s grazing cue noisier |
+
+**The installation (zero-growth) class's flat rate across every gap from 2 s to 120 s — not just
+the one 3 km/4 s cell Stage 1b's stop found — confirms that cell was not an unlucky single draw.**
+It is a structural ceiling of same-optic reacquisition that elapsed time cannot loosen when
+nothing inflates the contact's own covariance (`plausible_speed_mps(..., installation_
+component=True) == 0.0`): **≈85–88% for `u_u`, ≈91–94% for `b_b`**, at every range and every gap
+measured. The moving class's rate rises toward 100% only because growth eventually loosens the
+gate enough to swamp this same ceiling — it is masking the same structural effect, not a
+different, better-behaved one.
+
+**Direction of non-folds** (`B`'s own reported range vs. the hypothesis range from the observer to
+`A`'s believed position — Stage 1b's own Decision 12 direction signal), aggregated over all
+non-fold trials for that pair:
+
+| optic pair | non-folds where B reads nearer | farther |
+|---|---|---|
+| `u_u` air | 61.9% | 38.1% |
+| `b_b` air | 73.8% | 26.2% |
+| `u_u` surface 100 m AGL | 62.1% | 37.9% |
+| `u_u` surface 500 m AGL | 68.9% | 31.1% |
+| `u_b` air | 45.5% | 54.5% (`n`=121 non-folds total, roughly balanced) |
+| `b_u` air | 28.7% | 71.3% (`n`=230 non-folds total) |
+
+Same-optic non-folds lean nearer (62–74%); `b_u`'s lean farther (71%) instead — opposite signs,
+so a one-sided "fires only when B reads nearer" trigger (Stage 1b's Decision 12, built for the
+*different-groups* case) would, if it were ever applied to a same-optic reacquisition, suppress
+the majority of same-optic non-folds for `u_u`/`b_b` but miss most of `b_u`'s. Not acted on here —
+Stage 2's trigger condition is scoped to the different-groups defect, and this is reported only
+because the task asked for the direction breakdown.
+
+**Mechanism for `u_u`, by inspecting individual non-fold trials (not a formal attribution, an
+inspection, per the task).** The gate's `correlated_innovation` (`position_belief.py`) computes
+`S = P_est + P_look - (C + C^T)`, and `Covariance2D.inverse()` floors `S`'s determinant at
+`max(1e-9 * trace(S)^2, 1e-300)` before inverting — that floor's own comment says it sits "orders
+of magnitude above ... so it never fires on real data." **Measured, same-optic, zero-growth, 2 km,
+4 s gap (installation class, `n=300`): the real determinant is negative on 7.0% of trials (21/300)
+for `u_u`, 1.7% (5/300) for `b_b`, and 0% for `u_b`/`b_u` (0/300 each)** — the comment's premise
+does not hold in the regime this feature's own same-group reacquisition lives in. A negative
+determinant means `S` is not positive semi-definite at all; the floor clamps it to a tiny positive
+number regardless, and the resulting "inverse" is not a valid precision matrix — the diagonal
+terms (`S.zz`/`determinant`, `S.xx`/`determinant`) blow up to the tens of thousands against a
+typical covariance trace of ~30 000 m², so the Mahalanobis test returns values of `1e7`–`1e9`
+against the gate's `9.0` threshold (`GATE_SIGMA_THRESHOLD ** 2`) — rejecting the percept regardless
+of how small its actual positional offset is. **On the same cell, split by the sign of the real
+(pre-floor) determinant: positive-determinant trials fold 90.7% of the time (279/300, close to
+what the aggregate rate would be without this effect); negative-determinant trials fold only 19.0%
+of the time (21 trials)** — this single, previously-undocumented numerical degeneracy accounts for
+roughly a third to half of this cell's own ~14% non-fold rate, on top of ordinary 3σ excursions
+(where the approximate down/cross decomposition the mechanism dump below uses is meaningful).
+**Same-optic only** (the correlation kernel's magnitude is largest when both looks share one optic,
+pushing `C`'s cross term large enough to occasionally overshoot `P_est + P_look`); negligible for
+`b_b` (binoculars' tighter base sigma leaves less room to overshoot) and absent for cross-optic
+pairs in the cells checked. **Not fixed or changed here** — this is a candidate root cause for
+whoever revisits `BL-B108`'s same-optic "always"/"almost always" guarantees (Stage 1b's own open
+question (a)/(b)), not something this measurement-only entry acts on. A handful of individual
+non-fold trials' own gate arithmetic (the ordinary, non-degenerate case: approximate down-range vs.
+cross-range z-scores, elapsed-time growth contribution) is in the script's own `--out` dump; most
+inspected `u_u` non-fold trials hit the determinant-floor pathway above rather than an ordinary
+single-axis 3σ excursion, which is itself notable — the approximate decomposition's "which axis
+dominates" framing understates what is actually happening in most of these cells.
+
+**What this means for the plan.** Stage 1b's open question — (a) the `u_u`/`b_u` "always"/"almost
+always" guarantees may simply be weaker than documented, or (b) 3 km/4 s was an unlucky single
+cell — is answered **(a)**, with a third option Stage 1b did not anticipate: a chunk of the
+weakness is not ordinary measurement noise at all but a numerical degeneracy in the gate's own
+correlated-covariance formula, specific to same-optic reacquisition. **Brought to the user before
+any fence, `correlated_innovation`, or `Covariance2D.inverse` change** — three different follow-
+ups are now distinguishable rather than one: lowering `BL-B108`'s same-optic guarantees to match
+what is actually measured; fixing `correlated_innovation` so `S` cannot go indefinite for a
+same-optic pair (a `position_belief.py` change, not this entry's); or treating the ~85–94%
+same-optic ceiling as acceptable and continuing to Stage 2 regardless. None attempted here.
+
 **Stage 1 — Per-sector scan order (user Q1). It ships on its own and changes behaviour for every
 contact.**
 

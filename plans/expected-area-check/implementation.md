@@ -215,3 +215,82 @@ whether 3 km/4 s was simply an unlucky single cell among many that are fine.
 - No files changed in the final committed state (edit made, measured, then reverted).
 - `pytest body-layer/tests/test_relative_distance_sweep.py -q`: pass (unchanged, `71 passed`) —
   confirmed clean after the revert.
+
+---
+
+### Same-optic fold measurement — implementer pass 2026-11-09
+
+**User decision, "measure first"** (`explore-notes.md`): measure the same-optic/same-group fold
+rate widely before deciding whether to fix `BL-B108`'s "always"/"almost always" guarantees or
+correct their documented rate. Per the orchestrator's scope, **no fence, test, or production code
+was changed** — this pass adds one new file only.
+
+### Files Changed
+
+- `body-layer/tools/measure_same_group_fold.py` (new) — standalone measurement script (no
+  `slow`/`skip` pytest marker exists in this project to keep an `n=300`×240-cell sweep out of
+  `pytest -q`, so this follows `tools/summarize_detection_trace.py`'s existing "dev script, not a
+  test" precedent rather than adding one). Builds `Observation`s with the same shape
+  `test_relative_distance_sweep.py`/`test_expected_area_trigger.py` already use (duplicated, not
+  imported, per this project's own "no test file imports another's private helpers" convention),
+  drives the real `belief.contacts.ContactStore.ingest`/`tick` for the honest fold decision, and
+  resamples every noise draw per trial — the field salt, plus a unique `observation_id` and a
+  per-trial `t_sim` base, per `feedback_harness_resampling_fix_can_falsify_an_existing_guarantee`'s
+  own recipe (Stage 1b's stop finding). Also reports, per non-fold trial, whether `B`'s own
+  reported range read nearer or farther than the hypothesis range (Stage 1b's Decision 12 signal),
+  and, for `u_u` only, a per-trial gate-arithmetic dump (approximate down-range/cross-range
+  Mahalanobis decomposition, elapsed-time growth contribution, and the real determinant/mahalanobis
+  value) for mechanism inspection. `--smoke` (n=20) for a quick correctness check; full run is
+  `--n 300` (default), ~11 minutes for the 240-cell grid.
+- `plans/expected-area-check/plan.md` — new "Same-optic fold measurement 2026-11-09" section
+  (inserted after the Stage 1b stop subsection, before Stage 1): the measured fold-rate table per
+  optic pair/surface band, the non-fold direction breakdown, and the determinant-degeneracy
+  mechanism finding below.
+
+### Measurement
+
+Grid: `{u_u, b_b, u_b, b_u}` × `{1.0, 2.0, 3.0, 4.5}` km × `{2, 4, 6, 30, 120}` s gap ×
+`{armour, installation}` = 160 air cells, plus `u_u` ground-unit cells at 100 m/500 m AGL over the
+same grid = 80 more, 240 cells, `n=300`/cell (72 000 trials, 652.8 s). Full numbers and the
+per-pair/per-band aggregates are in `plan.md`'s new section; not repeated here. Headline: `u_u`
+89.7%, `b_b` 94.7%, `u_b` 99.0%, `b_u` 98.1%, `u_u` surface 87.1%/90.6% (100 m/500 m AGL) — the
+cross-optic pairs hold up at their existing fences; the two same-optic pairs sit well under, and
+**flat across every gap for the zero-growth (installation) class**, confirming Stage 1b's single
+3 km/4 s finding generalises rather than being an unlucky cell.
+
+### Notable Discoveries
+
+- **A previously-undocumented numerical degeneracy in `belief.position_belief.correlated_
+  innovation`/`Covariance2D.inverse` drives a meaningful share of the same-optic non-fold rate.**
+  `Covariance2D.inverse()`'s determinant floor (`_MIN_DETERMINANT_RATIO`, comment: "orders of
+  magnitude above this floor, so it never fires on real data") does fire, routinely, in the
+  same-optic reacquisition regime: measured on one cell (2 km, 4 s gap, installation class,
+  `n=300`), the gate's own `S` matrix has a **negative** real determinant (not merely small — not
+  positive semi-definite at all) on 7.0% of `u_u` trials and 1.7% of `b_b` trials, and 0% for
+  `u_b`/`b_u`. When it fires, the floor clamps an invalid matrix to a tiny positive determinant,
+  producing Mahalanobis values of `1e7`–`1e9` against the gate's `9.0` threshold — a percept is
+  rejected no matter how small its actual offset is. Split by sign on that same cell:
+  positive-determinant trials fold 90.7% of the time; negative-determinant trials fold only 19.0%
+  of the time. This is same-optic-specific (the correlation kernel is strongest when both looks
+  share one optic) and was found by instrumenting individual failing trials with a probe script
+  (not kept — reproducible via the committed tool's own diagnostics dump), not by reasoning about
+  the formula. **Not fixed here** — reported to the user/plan as a third candidate explanation
+  (alongside "the guarantee is just weaker than documented" and "3 km/4 s was unlucky") for
+  whoever next touches `BL-B108`'s same-optic fences or `correlated_innovation` itself.
+- **"Measure first" surfaced a mechanism the task's own framing (bearing/range/time-growth) did
+  not anticipate.** The task asked which gate term rejects a failing trial; most inspected `u_u`
+  non-fold trials were rejected by neither term in the ordinary sense — the determinant floor had
+  already made the test degenerate before the down-range/cross-range split meant anything. Reported
+  as found rather than forced into the three-term framing the task posed.
+
+### Checks (this pass)
+
+- `body-layer/tools/measure_same_group_fold.py` is not covered by this project's defined
+  `ruff`/`mypy`/`pytest` Commands (`tools/` is outside `ruff check body-layer/src body-layer/tests`
+  and `mypy src`'s scope) — checked anyway for hygiene: `ruff format --check` pass (after one
+  `ruff format` pass), `ruff check` pass, `mypy --strict` (ad hoc, same `PYTHONPATH`) pass, 0
+  errors.
+- No committed test or production file touched; `git status --porcelain` before this pass's
+  commit shows only the new tool file and the two plan docs.
+- Full committed suite not re-run for this pass specifically (nothing it touches changed) —
+  last known-clean full-suite run is the Stage 1 entry above (`3044 passed, 4 xfailed`).
