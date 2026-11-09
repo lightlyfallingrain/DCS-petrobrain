@@ -269,18 +269,25 @@ _E1_PAIRS: Final[tuple[tuple[float, float], ...]] = (
 _SAME_OPTIC_N = 100
 _IN_VIEW_N = 50
 
-#: Measured (main-loop probe, N=100 trials per cell, this committed code):
-#: every same-optic cell's fold rate was 0-2%, matching the plan's own
-#: declared ceiling for the "clear case" (amendment, Stage D: "Assert
-#: fold <= 3% per cell (measured <= 1%)"). **10%, not the plan's own
-#: 3%**: with 24 cells (6 geometries x 2 optics x 2 orders) at a true
-#: rate around 1-2% and `n=100` each, binomial sampling noise alone makes
-#: at least one cell exceed 3% by chance often enough to make the suite
-#: flaky (found by running it: one cell measured 6% on an otherwise-clean
-#: run) -- 10% keeps the fence a real guarantee (it would still catch a
-#: fold rate an order of magnitude worse than measured) without chasing
-#: sampling noise across a 24-cell grid.
-_SAME_OPTIC_FOLD_CEILING = 0.10
+#: Re-measured on `fix/same-optic-gate-indefinite`, after the production
+#: fix to `belief.position_belief.correlated_innovation`'s gate cap
+#: (`plans/same-optic-gate-indefinite/debug.md`): the fix removed a
+#: spurious *over*-rejection the old indefinite-`S` floor-clamp caused on
+#: some different-groups same-optic pairs, so several cells' honest fold
+#: rate rose -- worst measured cell (this committed code, the same salts
+#: this test uses, N=100): 12% (`5.0/3.5 km, unaided, far_first=False`);
+#: a wider resample at other salts for that same cell reached 16%. **20%,
+#: not the previous 10%**: across the 24-cell grid, most cells still sit
+#: at 0-8%, so 20% stays well short of "no guarantee at all" while
+#: covering the measured worst cell with headroom against the same
+#: binomial sampling noise the original 10% was set against (one cell
+#: measured 6% on an otherwise-clean run, back when the true rate was
+#: 1-2%; the true rate for the worst cell is now higher, so the ceiling
+#: moved with it, not instead of accounting for noise). Residual over-
+#: rejection in the *same-group* direction (the opposite failure --
+#: `[[BL-B113]]`) is a separate, already-filed, deferred defect; this
+#: constant is about *different* groups folding together too often.
+_SAME_OPTIC_FOLD_CEILING = 0.20
 
 
 @pytest.mark.parametrize("far_km,near_km", _E1_PAIRS)
@@ -359,7 +366,16 @@ _CROSS_OPTIC_MEMORY_ONLY_FENCE: Final[dict[tuple[float, float, str, bool], float
     (4.5, 3.0, "b_u", False): 0.25,
     (5.0, 3.5, "u_b", True): 0.90,
     (5.0, 3.5, "u_b", False): 0.65,
-    (5.0, 3.5, "b_u", True): 0.95,
+    # Re-measured on `fix/same-optic-gate-indefinite`: the gate-cap fix
+    # (`plans/same-optic-gate-indefinite/debug.md`) raised this cell's
+    # honest fold rate to 90-98% (this test's own salt: 96.67%) -- already
+    # essentially saturated against a 100% ceiling, so the file's usual
+    # "+10 points of headroom" convention has nowhere left to go. Fenced
+    # at 1.0: there is no further widening left for this fence to catch;
+    # it stays as a record, not a guarantee, until/unless a future change
+    # narrows the rate back down, at which point this should be tightened
+    # deliberately rather than left at the ceiling.
+    (5.0, 3.5, "b_u", True): 1.0,
     (5.0, 3.5, "b_u", False): 0.40,
     (4.0, 2.0, "u_b", True): 0.35,
     (4.0, 2.0, "u_b", False): 0.20,
@@ -509,12 +525,31 @@ def _e3_fold_rate(
     return folds / n
 
 
-def test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact() -> None:
-    """Measured (main-loop probe, N=100): unaided/unaided 100/100,
-    unaided-then-binocular 100/100 -- the direction the plan's own
-    `test_relative_distance_scenarios.py::test_e3_group_seen_unaided_
-    then_through_binoculars_stays_one_contact` already pins for one
-    realisation; this is the same claim over an ensemble."""
+#: Re-measured on `fix/same-optic-gate-indefinite`
+#: (`plans/same-optic-gate-indefinite/debug.md`): the u_u (same-optic)
+#: direction does **not** always fold -- it never did honestly; the
+#: original `== 1.0` assertion was a frozen-draw harness artifact (one
+#: fixed noise draw per trial, not an ensemble), and the resampled
+#: harness this file now uses measures 87-90% across several salts
+#: (this test's own salt: 87%). This matches `[[BL-B113]]`'s own
+#: same-optic residual over-rejection finding (same group, same optic,
+#: stays one contact only ~87-90% of the time against a 3-sigma gate's
+#: ~99%) -- filed and deferred, not fixed by this entry. u_b
+#: (unaided-then-binocular) stays measured at 98-100% and is kept as a
+#: near-guarantee, consistent with the sibling cross-optic "almost
+#: always" fence below.
+_E3_FOLD_RATE_FLOOR: Final[dict[str, float]] = {
+    "u_u": 0.75,
+    "u_b": 0.95,
+}
+
+
+def test_e3_same_and_unaided_then_binocular_folds_at_least_as_often_as_measured() -> (
+    None
+):
+    """**Not** a universal guarantee for the u_u (same-optic) direction --
+    see `_E3_FOLD_RATE_FLOOR`'s own comment and `[[BL-B113]]`. u_b
+    (unaided-then-binocular) stays near-guaranteed."""
     for first_optic, second_optic, label in (
         (UNAIDED_OPTIC, UNAIDED_OPTIC, "u_u"),
         (UNAIDED_OPTIC, BINOCULAR_OPTIC, "u_b"),
@@ -525,7 +560,8 @@ def test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact() -> Non
             n=100,
             salt_prefix=f"e3-{label}",
         )
-        assert rate == 1.0, f"{label}: fold rate {rate:.2%}, expected 100%"
+        floor = _E3_FOLD_RATE_FLOOR[label]
+        assert rate >= floor, f"{label}: fold rate {rate:.2%}, expected >= {floor:.0%}"
 
 
 def test_e3_binocular_then_unaided_folds_almost_always() -> None:
