@@ -1582,7 +1582,7 @@ sense - keep the current."* `BINOCULAR_RANGE_SIGMA_SCALE` stays 0.7 (`#needs-fli
    moved". Settle it together with `[[BL-B109]]`'s `/explore`.
    → Answered above: ≈ *"A now at …"*.
 
-**Decision 12, OPEN (sixth pass, 2026-11-03), needs the user: the trigger catches only a group
+**Decision 12, ANSWERED 2026-11-09: (a). User: *"go with (a)"*. The trigger catches only a group
 that reads nearer than the remembered one.** Stage 1b measured three ways to bring the same-group
 false split under your ~10%. Only one keeps the catch:
 - **(a) Recommended: one-sided.** Petrovich splits B off from a remembered A only when B reads

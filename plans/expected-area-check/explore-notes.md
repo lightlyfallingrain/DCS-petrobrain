@@ -279,3 +279,14 @@ re-measured, or build it now. Also recommended moving `[[BL-B111]]` up.
 Reading (main loop): Stage 2 is not built until a fix brings the stationary binocular→unaided
 long-gap cells under the ~10% gate in Stage 0's harness. Next is an architect pass on that fix
 only. BL-B111 ordering not answered; it stays where it is.
+
+## Decision 12 (user, verbatim, 2026-11-09)
+
+Asked: (a) one-sided trigger (B must read nearer than A; same-group split 3-6%, a farther group
+still folds as today), (b) stricter two-sided threshold, (c) duplicate gate raised to ~20%.
+Recommended (a).
+
+> *"go with (a)"*
+
+Reading (main loop): Stage 1b goes to implementation. Stage 2 still held until Stage 1b's
+acceptance grid (including the ground cells) passes.
