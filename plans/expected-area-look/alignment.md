@@ -186,7 +186,7 @@ for BL-B111. E9–E12 are new.
   touched because nothing was folded.
 - If A unmasks one sweep later, the in-view path already has both. No issue.
 
-### Questions for the user
+### Questions for the user — ANSWERED 2026-11-10, all as recommended (user: *"as recommended"*)
 
 1. **When should he look at a remembered group's place?** Recommend: **every time** a new
    sighting lands on, or right beside, a remembered group he can't see right now. In flight that
