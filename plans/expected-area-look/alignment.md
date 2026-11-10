@@ -202,3 +202,85 @@ for BL-B111. E9–E12 are new.
    moved**. Settle the wording in the BL-B109 explore.
 5. **Should area looks spend the shared 12 s binocular budget?** Recommend: **yes, and they rank
    first**. If the budget is spent, B is called new right away, per your *"call B as new"*.
+
+## Plan check — 2026-11-10
+
+**Verdict:** CONCERNS. Every expectation traces to a stage. The open item is not a missing or
+contradicted stage but two places (Decisions 1 and 2) where the plan's recommendation departs from
+a *literal* reading of the user's already-answered goal-check questions — exactly the tension named
+in the dispatch — plus one undocumented edge (concurrent-check cap) that could silently narrow E1/E9
+in a busy scene. None of this is hidden: Decisions 1–4 are open in `plan.md` with recommendations,
+and this check agrees with all four recommendations. It records why each is a departure worth the
+user's eyes before Implementer, not a new one.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 | 3a (different verdict) | met, with a named exception — Decision 1 leaves a too-wide A's area folded as today (0% help), the plan states the cost and ties the fix to `[[BL-B112]]` |
+| E2 | 3b (merge, no relocation line) | met |
+| E3 | 3a (hold before `CALLOUT_MAX_AGE_S`, age from release) | met — ≈17 s worst, matches the goal check's bound |
+| E4 | 3a (B's look first, A's area look; `_look_target_position` from terrain) | met |
+| E5 | 2 (fail-closed probe, "cannot_look" ≠ "empty") + 3b (`mark_absent` only on visible+misfit) | met |
+| E6 | 3b ("same" requires composition + displacement before any relocation line) | met |
+| E7 | 3b (`CONTACT_ABSENT` only after a completed look; no verdict without one) | met |
+| E8 | 3a (threat released at once, Q2) + 3b (ATGM/attack-run pause resolves every open check "cannot look") | met |
+| E9 | 3a (trigger: fold, echo, beside-lost-A — all three E9 cases) | met for A whose area fits one look; **contradicted for a too-wide A** — Decision 1 means the question "is this the group I left there?" honestly arises but no look happens, and today's silent fold (the thing E9's "why" was written against) continues |
+| E10 | 3b (relocation line gated on bucket change AND ≥500 m/30°, Decision 3) | met |
+| E11 | Stage 1 (`PROBE_TARGET_HEIGHT_M` on terrain at `a_snapshot`, never ownship, never A's true position) | met — matches the calibration case directly |
+| E12 | 3a (threat called once) + 3b (silent "same" unless relocation fires) + the "A observed" continuity rule (Open assumption 2) | met — the plan's own SAM vignette walks this through and the harness shows the naive alternative fails 91–99% |
+
+### Findings
+
+1. **Decision 1's feasibility gate is a second kind of "narrow trigger" the goal check did not
+   anticipate, and it reopens the exact failure E9 exists to close.** — lens: Purpose / World truth
+   - Assumption: Open assumption 1 rejects "anything that waits for range arithmetic to flag the
+     case" as not serving the why, and E9 says the look happens "whenever the question honestly
+     arises," with no numeric trigger. Decision 1 adds one anyway — half-width ≤ 15° — but as a
+     feasibility gate (can one glance cover A's area at all), not a separability predictor. The
+     distinction is real, but the pilot-facing effect is the one E9 was written against.
+   - In the sim: armour re-seen at 700 s with a 5–6 km-wide belief area never gets a check. B folds
+     into A silently, same as today, 100% of the time (plan's own number).
+   - The pilot would see: no change for a moved group on a remembered bearing, even though a real
+     "is this the same group?" question exists in that moment, until `[[BL-B112]]` narrows armour's
+     belief growth.
+   - Grounded in: `plan.md` Decision 1 and its own stated cost; `alignment.md` E9 and Open
+     assumption 1 (both from the earlier goal check, which governs here).
+   - Suggests: this is already an open Decision with a recommendation this check agrees with — the
+     alternative (open a check anyway and immediately rule "cannot look" → B new) regresses armour
+     700 s from 0% to 100% heard-twice, which is strictly worse. The user should see the Decision 1
+     trade stated in E9's own terms before approving it, not just as a numeric fence.
+
+2. **Decision 2 resolves a real conflict between two of the user's own "as recommended" answers,
+   and the resolution favours Q2 over Q5 in exactly one case.** — lens: Crew sense
+   - Q5 says "budget spent → B called new." Q2/BL-B114 says "he holds B and looks first... BL-B114
+     keeps only the cannot-look cases" (silent). When the echo case's look cannot run because the
+     budget is spent, these two answers point opposite ways. Decision 2 picks silence, narrowing
+     "budget spent → B new" to the fold/beside-lost cases only.
+   - This is the right call under the why (an echo re-announcing a group definitely nearby would be
+     the noisy error the merge-echo rule exists to prevent), but it is a narrowing of a "yes" answer
+     the user gave only a few lines earlier, on the same day, to a different question. Worth their
+     explicit sign-off rather than inheriting it through Decision 2's wording alone.
+
+3. **The probe-points cap allows only two concurrently open checks, and the plan does not say what
+   happens to a third.** — lens: Bounded knowledge / The non-obvious case
+   - `MAX_PROBE_POINTS = 6` is sized as "two open checks × three points" (Stage 1). Nothing in Stage
+     3a caps `ExpectedAreaCheck` opens at two, so a third trigger in a busy scene (the plan's own
+     Risk section: "a busy scene could crowd out classification looks") has nowhere documented for
+     its probe points to go.
+   - Fail-closed (Stage 2's own rule) would make the third check "cannot_look" → B new, which is
+     consistent with E1/Q5 ("missing a group is worse than a duplicate") and is probably what
+     happens by construction — but the plan never states it, and a silent cap that nobody decided
+     on is the shape of drift this project's own "do not reinvent" rule warns about.
+   - This is a question for the user/Architect, not a finding grounded in their words: is a 2-check
+     cap intended, and should Stage 4's `sortie-log-triage` addition (already planned) count checks
+     that opened against a full budget, so this is observable rather than assumed?
+
+### Questions for the user
+
+- Decisions 1–4 as already posed in `plan.md`: this check agrees with all four recommendations —
+  confirm them (or answer differently) before Implementer starts.
+- Decision 1, restated in E9's terms: accept that a group whose belief area has outgrown one
+  binocular sweep gets no look and keeps today's silent fold, until `[[BL-B112]]` narrows it?
+- Decision 2, restated: when the merge-echo case cannot get a look (budget spent included), stay
+  silent — overriding "budget spent → B new" for this one case?
+- Is the two-concurrent-check probe cap intentional, and should a third trigger's fail-closed
+  "cannot look → B new" be stated in the plan rather than left implicit?
