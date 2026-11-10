@@ -267,3 +267,64 @@ recommendation.
 
 Reading (main loop): all three recommendations taken; also read as the go to build (Stages 0a, 0,
 1, then 2).
+
+## Stage 2 decision (user, verbatim, 2026-11-03)
+
+Asked, after Stages 0a/0/1 merged: hold Stage 2 (call a new group out at once) until the
+long-gap stationary false-trigger (7-15% at 120 s, 25-27% at 600 s, gate ~10%) is fixed and
+re-measured, or build it now. Also recommended moving `[[BL-B111]]` up.
+
+> *"Stage 2 -> Hold it until the stationary-group case is fixed."*
+
+Reading (main loop): Stage 2 is not built until a fix brings the stationary binocular→unaided
+long-gap cells under the ~10% gate in Stage 0's harness. Next is an architect pass on that fix
+only. BL-B111 ordering not answered; it stays where it is.
+
+## Decision 12 (user, verbatim, 2026-11-09)
+
+Asked: (a) one-sided trigger (B must read nearer than A; same-group split 3-6%, a farther group
+still folds as today), (b) stricter two-sided threshold, (c) duplicate gate raised to ~20%.
+Recommended (a).
+
+> *"go with (a)"*
+
+Reading (main loop): Stage 1b goes to implementation. Stage 2 still held until Stage 1b's
+acceptance grid (including the ground cells) passes.
+
+## Same-optic fold finding: measure first (user, verbatim, 2026-11-09)
+
+Asked, after Stage 1b stopped on the BL-B108 `u_u` fence (same group, naked eye twice, 3 km,
+4 s: 83-86% fold with the harness fixed, not 100%): (1) measure the same-optic case widely
+first, then decide fix vs. fence correction; (2) lower the guarantee to ~85% and continue.
+Recommended (1).
+
+> *"measure first"*
+
+Reading (main loop): a test-only same-optic ensemble sweep (ranges x gaps x optics x class,
+fixed harness), results to the user before any fence or fold code changes. Stage 2 still held.
+
+## Same-optic fold defect: fix first (user, verbatim, 2026-11-09)
+
+Asked, after the same-optic sweep (u_u ~90%, b_b ~95% fold, flat over gap; Covariance2D.inverse
+determinant floor fires on 7% of u_u gate evaluations, S indefinite): fix as a bug on its own
+branch before Stage 2, re-measure, then set the BL-B108 fences to the measured rate.
+
+> *"do as recommended"*
+
+Branch: `fix/same-optic-gate-indefinite` (from main). Stage 2 held until it merges and the
+residual rate is back with the user.
+
+## Decisions 13 and 14: Stage 2 not built, merge-echo gap filed (user, verbatim, 2026-11-10)
+
+Asked, after the seventh architect pass re-measured Stage 2 on the fixed gate and harness (the
+trigger moves only bino -> eye, B nearer, by 5-15 points; the merge-echo rule silences 50-60 points
+of correctly split second groups): (13) build Stage 2 at all, recommended (a) close BL-B110 on what
+shipped and move the believed-distinct pair and merge-echo skip into BL-B111; (14) the merge-echo
+gap, recommended (a) its own deferred backlog entry, measure first, explore before any fix.
+
+> *"As recommended."*
+
+Reading (main loop): BL-B110 closes on Stages 0a/0/1 plus Stage 5's docs; Stage 2 is not built.
+BL-B111 inherits the believed-distinct pair, the merge-echo skip and Stage 2b's anchor question.
+The merge-echo gap is `[[BL-B114]]`, deferred. Work order set the same day: BL-B110 close, then
+BL-B111, then BL-B112 (user: *"A then B then C"*, *"C=bl-b112"*).
