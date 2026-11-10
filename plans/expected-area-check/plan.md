@@ -564,6 +564,81 @@ what is actually measured; fixing `correlated_innovation` so `S` cannot go indef
 same-optic pair (a `position_belief.py` change, not this entry's); or treating the ~85–94%
 same-optic ceiling as acceptable and continuing to Stage 2 regardless. None attempted here.
 
+**Honest grid, seventh architect pass, 2026-11-10** (on `cd58ab76`: the gate-covariance fix
+`6096b2b2` merged in, harness fixed). **This replaces every trigger number taken before it:
+Stage 1b's candidate table, Decision 12's figures, and the "Read this first" table.** Those were
+measured on the indefinite-`S` gate, and the as-if trigger's "catch" was mostly that bug
+(`test_expected_area_trigger.py`'s own re-measured comments say the same).
+
+*Method.* Scratch probe (`probe_stage2_honest.py` in the architect's scratchpad, not kept), built on
+`tools/measure_same_group_fold.py`'s own `_observation`/`_ownship`/`_fresh_realisation`. Every
+trial redraws the field salt, `z_look` (per-trial `t0 = trial * 1e-3`) and the per-look bearing
+draw (per-trial observation ids). Per trial it records:
+- the honest fold, through the real `ContactStore.ingest`/`tick`;
+- the Variant 2 as-if gate (correlation class set to the tighter optic);
+- the direction (`percept.range_m <` the hypothesis range to A);
+- when the gate splits, whether `callouts._is_merge_echo_of_earlier_contact`'s condition would
+  **silence B's callout**: A not `lost` and `contacts_plausibly_same(B, A)`.
+
+That last column is new, and it is what the pilot actually hears. Air path at 500 m; ground cells
+use `surface=True` at 100 m AGL (SAM site, `s-125`). Same-group `n = 400` per cell (95% CI ±1.7
+points at 3%, ±3 at 10%). Different-groups `n = 300` (±5 points at 70%, ±3 at 10%).
+
+**Same group re-seen through the gate: duplicate callouts the pilot hears.** Each cell reads
+"today / with two-sided trigger / with one-sided trigger".
+
+| pair | gap 6 s (A not lost) | gap 700 s, stationary (A lost) | gap 700 s, armour |
+|---|---|---|---|
+| eye → eye (`u_u`) | 0.3–0.5% / same / same | **10–12%** / same / same (ground 10–11%) | 0% |
+| bino → bino (`b_b`) | 0.2–0.5% / same / same | 6–7% / same / same | 0% |
+| eye → bino (`u_b`) | 0.2–1.2% / same / same | 1.0–1.5% / same / same | 0% |
+| bino → eye (`b_u`) | 0.2–1.0% / **2.0–5.8%** / 0.2–0.7% | 1.5–2.8% / **4.3–6.5%** / 1.5–2.8% | 0% |
+
+- **The gate splits same-optic re-sightings 4–11% of the time** (`[[BL-B113]]`). Inside 120 s the
+  merge-echo rule silences almost all of them, so the pilot hears ≤ 0.5%. **Past 120 s, A is `lost`,
+  nothing silences the split, and BL-B113 is heard in full:** 10–12% by eye, 6–7% through
+  binoculars. **Stage 2 does not change this.** For a same-optic pair the as-if gate *is* the
+  honest gate, so the trigger never fires.
+- **The trigger's own cost is small on honest numbers.** Two-sided adds 2–5 points, cross-optic
+  bino → eye only. One-sided adds ≤ 0.3 points. The sixth pass's "15–20% two-sided" was the bug.
+- Armour past 120 s never splits. Growth at 8 m/s swamps everything, which also means nothing is
+  ever caught there (below).
+- In flight, a same group inside 600 s goes through object continuity, not the gate. So the
+  0.3–1% short-gap column covers only re-formed clusters. **The 700 s column is the real case**:
+  a SAM site re-seen after ten minutes.
+
+**Different groups on one bearing: B is never announced.** Silent = folded into A by the gate, or
+founded and then silenced as A's merge echo. Each cell reads "today → with the trigger"; one- and
+two-sided are identical to within 1 point in every cell. Far/near pairs are 4.5/3.0 and 5.0/3.5,
+then 3.0/1.5 after the semicolon.
+
+| pair | B nearer, gap 6 s | B farther, gap 6 s | B nearer, 700 s stationary | B farther, 700 s |
+|---|---|---|---|---|
+| bino → eye (`b_u`) | 72–86% → **60–79%**; 6–7% → 3–4% | 73–82%, unchanged; 41–45% | 70–82% → **58–76%**; 7% → 4% | 32–39%; 4% |
+| eye → bino (`u_b`) | 78–81%, unchanged; 40–44% | 39–53%; 2% | 58–65%, unchanged; 22% | 21–31%; 1% |
+| eye → eye (`u_u`) | 63–73%, unchanged; 28–30% | 63–72%; 30–37% | 7–11%; 5% | 8–12%; 1% |
+| bino → bino (`b_b`) | 13–22%, unchanged; 0–2% | 13–25%; 2% | 1%; 0% | 1%; 0% |
+
+Ground cells (100 m AGL, `s-125`, `u_u` and `b_u`) match the air cells within the CI.
+
+**Of the three silent paths, the trigger reaches the smallest.**
+1. **The gate folds B into A.** This is cross-optic only: 60–86% where the far contact was ranged
+   through the other optic. The trigger takes **5–15 points** off it, and only in bino → eye with B
+   nearer. It never touches eye → bino. **The information is not there to do better.** Naked-eye
+   down-range σ is 0.17 R (≈ 510 m at 3 km), and the binocular anchor's is ≈ 535 m at 4.5 km, so
+   groups 1.5 km apart on one bearing are about 2σ. The sixth pass already said this. The bug was
+   hiding how true it is.
+2. **The merge-echo rule silences B.** This applies at any optic pairing, while A is not lost
+   (< 120 s). It takes **50–60 points** in same-optic eye → eye cells where the gate itself
+   correctly split (gate fold 4–15%, silent 63–73%). `contacts_plausibly_same` is evidently looser
+   than the gate. Why is unattributed: it is not inspected here and should not be guessed.
+   **This is a finding that changes direction.** No BL-B110 stage touches it, and Stage 2's
+   believed-distinct skip only covers trigger-fired pairs.
+3. **Past 120 s, same-optic, nothing silences B:** 1–12% fold, which is BL-B108's floor.
+
+**Stage 2b's proposal rule fires.** Its own text: "if, after Stage 0 tuning, any clear-case cell's
+residual stays above 10%, open a follow-on entry". Every cross-optic nearer cell is 58–86%.
+
 **Stage 1 — Per-sector scan order (user Q1). It ships on its own and changes behaviour for every
 contact.**
 
