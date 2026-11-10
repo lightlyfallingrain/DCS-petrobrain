@@ -110,9 +110,9 @@ candidate table, and Decision 12's figures. They are kept below, labelled, not d
   (10–12% by eye, 6–7% binocular), and Stage 2 neither adds to it nor removes it. The trigger's
   own added cost is 2–5 points two-sided, and ≤ 0.3 points one-sided.
 - **Effort/value: Stage 2 as designed no longer earns a build in BL-B110** (Stage 2, seventh-pass
-  redesign). **Decision 13 (OPEN)** asks whether to build it, with a recommendation.
+  redesign). **Decision 13 ANSWERED (a), 2026-11-10** (user: *"As recommended."*): not built; BL-B110 closes.
   **Decision 12a**: the one-sided direction still holds if Stage 2 is built, for a different
-  reason. **Decision 14 (OPEN)**: a new entry for the merge-echo gap.
+  reason. **Decision 14 ANSWERED (a), 2026-11-10**: the merge-echo gap is `[[BL-B114]]`, deferred.
 
 ### Goal
 
@@ -1940,7 +1940,7 @@ reason. It applies only if Stage 2 is built (Decision 13).** Honest numbers:
   exists. The farther group was never caught by either variant. Ground cells (100 m AGL) agree.
 No new question for the user. This records that (a) survives the re-measure.
 
-**Decision 13, OPEN, needs the user: build Stage 2 at all?** On honest numbers the trigger moves
+**Decision 13, ANSWERED (a), 2026-11-10 (user: *"As recommended."*): build Stage 2 at all?** On honest numbers the trigger moves
 one cell family by 5–15 points (far group glassed, near group by eye: 70–86% → 58–79% unannounced).
 It moves nothing else. What the pilot would notice: a nearer group on a remembered bearing is still
 missed most of the time, either way.
@@ -1956,7 +1956,7 @@ missed most of the time, either way.
 - (c) Build it two-sided. Same catch as (b), plus 2–5 points of duplicates. Dominated by (b), so
   not recommended.
 
-**Decision 14, OPEN, needs the user: open an entry for merge-echo silencing of real second
+**Decision 14, ANSWERED (a), 2026-11-10 (user: *"As recommended."*), filed as `[[BL-B114]]`: open an entry for merge-echo silencing of real second
 groups?** `callouts._is_merge_echo_of_earlier_contact` silences B's first callout when an earlier,
 not-lost contact is "plausibly same" by `contacts_plausibly_same`. In the honest grid that test
 accepts 50–60 points of different-group pairs the gate itself had correctly split. Eye → eye at a

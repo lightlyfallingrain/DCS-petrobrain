@@ -58,10 +58,8 @@ contact, not a wrong verdict), and no regression is visible in ordinary scan/bin
 relative to before this change.
 
 **Known, disclosed, out of scope for this card:**
-- Stage 2 (never folding an ambiguous memory-only match) is **not built** by this merge — a new
-  sighting on a remembered group's bearing is still always founded as a new contact and called out
-  at once. This is not a regression to probe for; it is the current, intentional state (`[[BL-B111]]`
-  carries the fix).
-- The long-gap (120/600 s), stationary, binocular-then-unaided same-group false-trigger rate
-  (7–27%, measured in Stage 0) has **no live-flight manifestation yet** — it only matters once
-  Stage 2 ships the trigger it measures. Nothing to probe for it on this card.
+- Stage 2 (never folding an ambiguous memory-only match) is **not built and will not be** (BL-B110
+  Decision 13 (a), 2026-11-10). A second group seen on a remembered group's bearing is often **not
+  called out** (13–86% depending on optics and order) — known, measured, and carried by `[[BL-B111]]`
+  and `[[BL-B114]]`. Note it if you notice it, but it is not a regression of this card.
+- The same group re-sighted past ~2 min may be called twice (~10% by eye, `[[BL-B113]]`, deferred).

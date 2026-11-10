@@ -313,3 +313,18 @@ branch before Stage 2, re-measure, then set the BL-B108 fences to the measured r
 
 Branch: `fix/same-optic-gate-indefinite` (from main). Stage 2 held until it merges and the
 residual rate is back with the user.
+
+## Decisions 13 and 14: Stage 2 not built, merge-echo gap filed (user, verbatim, 2026-11-10)
+
+Asked, after the seventh architect pass re-measured Stage 2 on the fixed gate and harness (the
+trigger moves only bino -> eye, B nearer, by 5-15 points; the merge-echo rule silences 50-60 points
+of correctly split second groups): (13) build Stage 2 at all, recommended (a) close BL-B110 on what
+shipped and move the believed-distinct pair and merge-echo skip into BL-B111; (14) the merge-echo
+gap, recommended (a) its own deferred backlog entry, measure first, explore before any fix.
+
+> *"As recommended."*
+
+Reading (main loop): BL-B110 closes on Stages 0a/0/1 plus Stage 5's docs; Stage 2 is not built.
+BL-B111 inherits the believed-distinct pair, the merge-echo skip and Stage 2b's anchor question.
+The merge-echo gap is `[[BL-B114]]`, deferred. Work order set the same day: BL-B110 close, then
+BL-B111, then BL-B112 (user: *"A then B then C"*, *"C=bl-b112"*).
