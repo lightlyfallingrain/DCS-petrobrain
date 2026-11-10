@@ -94,6 +94,26 @@ changed:
   BL-B112 would move observed-stationary armour into the same regime, so the acceptance grid
   includes zero-growth cells. That way BL-B112 cannot reopen this.
 
+**Revised 2026-11-10, seventh architect pass, on `cd58ab76`**, after the gate-covariance fix
+(`6096b2b2`, `plans/same-optic-gate-indefinite/debug.md`) and the harness fix. Every trigger number
+taken before it is **superseded**: the "Read this first" table, Stage 0's residuals, Stage 1b's
+candidate table, and Decision 12's figures. They are kept below, labelled, not deleted. What changed:
+- **Honest grid** (after Stage 1b, "Honest grid, seventh architect pass"). The as-if trigger
+  catches **5–15 points**, only bino → eye with B nearer. The cross-optic gate fold it targets is
+  60–86% and stays 58–79%. The sixth pass's 1–3% residual was the indefinite-`S` bug doing the
+  catching.
+- **Finding that changes direction: a second silent path, larger than the one Stage 2 targets.**
+  The callout merge-echo rule silences 50–60 points of genuinely different, correctly split groups
+  while A is not lost (`contacts_plausibly_same` is looser than the gate). No stage of BL-B110
+  touches it.
+- **Duplicates the pilot hears.** Past 120 s, `[[BL-B113]]`'s same-optic split is heard in full
+  (10–12% by eye, 6–7% binocular), and Stage 2 neither adds to it nor removes it. The trigger's
+  own added cost is 2–5 points two-sided, and ≤ 0.3 points one-sided.
+- **Effort/value: Stage 2 as designed no longer earns a build in BL-B110** (Stage 2, seventh-pass
+  redesign). **Decision 13 (OPEN)** asks whether to build it, with a recommendation.
+  **Decision 12a**: the one-sided direction still holds if Stage 2 is built, for a different
+  reason. **Decision 14 (OPEN)**: a new entry for the merge-echo gap.
+
 ### Goal
 
 When a new sighting B lies on the bearing of a group A that Petrovich holds only in memory, he
@@ -103,6 +123,12 @@ His binocular use moves to a per-sector rhythm: sweep a sector by eye, glass wha
 glassing there, then move on.
 
 ### Read this first: what the measurement says about effort and value
+
+> **Superseded, seventh pass (2026-11-10).** The table and points 1 and 3 below were measured on
+> the indefinite-`S` gate, before `6096b2b2`, with a frozen harness. The real catch is 5–15 points
+> in one cell family, not "most of the 0–86%". Point 2 still holds, and it is now the whole
+> argument: only new information (BL-B111's look) separates two groups ~2σ apart. Current numbers:
+> "Honest grid, seventh architect pass", after Stage 1b.
 
 The **trigger** decides whether a fold is ambiguous. It re-evaluates BL-B108's gate as if A had
 been in this very look. The plan's whole shape follows from probing that trigger on BL-B108's own
@@ -307,7 +333,15 @@ mechanism measured.
 false-split rate is 15–20% at every gap, and the fix is a direction test.
 
 **Stage 1b — Fix the trigger's same-group false split (Stage 2 prerequisite; sixth pass,
-2026-11-03).** Measured with a scratch probe on `a3758a2c`, before any design choice. It used
+2026-11-03).**
+
+> **Superseded, seventh pass (2026-11-10): every rate in this stage was measured on the
+> indefinite-`S` gate.** That covers 15–20% two-sided, 3–6% one-sided, residual 1–3% and 28%
+> farther. The harness diagnosis (frozen `z_look` and bearing draw) stands. The measured outcome
+> does not. On honest numbers the two-sided trigger adds 2–5 points of false split, not 15–20, and
+> the one-sided ≤ 0.3. The catch is 5–15 points, not "residual 1–3%". The text is kept as the record.
+
+Measured with a scratch probe on `a3758a2c`, before any design choice. It used
 the harness's own `_observation`/`_as_if_gate`, `n` = 300–800 per cell, and all three draws
 resampled per trial. Scripts:
 `/private/tmp/claude-501/-Users-sg-Code-DCS-petrobrain/9af034a3-3761-4eb7-a81e-bb7415cff2d5/scratchpad/probe_gap.py`,
@@ -1146,6 +1180,56 @@ Fourth pass, new tests:
   BL-B108's own tests are run before and after, per Stage 0a: **if any fence or assertion moves,
   stop and report.**
 
+**Stage 2, seventh-pass redesign (2026-11-10): not built in BL-B110 unless the user chooses
+otherwise (Decision 13).** The design below it is kept for the record and for option (b).
+
+*Effort/value (`AGENTS.md`).*
+- **The challenge is not the code.** That is small: a keyword on `passes_gate`, one pure predicate,
+  a believed-distinct pair on `ContactStore`, and one skip in the merge-echo check, about one
+  implementer pass.
+- **The challenge is that the trigger has almost nothing to act on.** The honest grid shows the
+  gate cannot tell two groups 1.5 km apart on one bearing from one group seen twice. Each is about
+  2σ under the eye's 0.17 R range error, and no rearrangement of the same numbers adds information.
+  What the pilot would get:
+  - one cell family (far group glassed, near group seen by eye) drops from 70–86% unannounced to
+    58–79%;
+  - nothing in eye → bino;
+  - nothing on the larger merge-echo path, 50–60 points in eye → eye.
+- **What he might assume he gets, and would not:** "two groups on one bearing are called as two".
+  E1 is **not** delivered by Stage 2 on honest numbers. Only a look adds the missing information:
+  `[[BL-B111]]`'s check of A's area, which can see A there.
+
+*The redesign, recommended (Decision 13 (a)):*
+1. **BL-B110 closes on what it shipped** (Stages 0a, 0, 1), plus Stage 5's docs and card, and this
+   honest grid recorded on `BL-B110.md` as the measured residual. That is Stage 2b's own "record the
+   residual and stop", except the rule's other branch also fires (point 3).
+2. **The believed-distinct pair and the merge-echo skip move to `[[BL-B111]]`.** That is the first
+   mechanism that can conclude "different" from new information. Its "A seen in its area, so B is
+   different" verdict needs exactly these two pieces. They are built once, where they carry weight,
+   not twice.
+3. **Stage 2b's anchor follow-on and BL-B111's look are the same question now**: what new
+   information separates two groups on one bearing? BL-B111's own goal check should take both.
+   Opening a third entry would split it.
+4. **The merge-echo gap gets its own entry (Decision 14).** It is the larger silent path, and it is
+   not this feature's mechanism.
+
+*If the user chooses (b), build Stage 2 one-sided as written below, with these acceptance numbers
+replacing every earlier one* (production trigger in place of the stand-in, the same grid and harness
+as the honest grid, fences at `n = 300`):
+- **Same group, trigger-added split ≤ 2% in every cell** of {`u_u`, `b_b`, `u_b`, `b_u`} × {2.0,
+  3.0, 4.5 km} × {6, 700 s} × {`s-125`, armour}, plus the ground cells. Measured ≤ 0.3%.
+- **Same group, total duplicate the pilot hears ≤ today's rate + 2 points per cell.** Today's rate
+  is the honest grid's first column. This fence is the one that answers the user's ~10% question
+  with BL-B113 included. It does not fence BL-B113 itself, which the user deferred.
+- **Characterisations, not gates:** bino → eye, B nearer, 4.5/3.0 and 5.0/3.5: unannounced
+  ≤ 85% (measured 58–79%). Every other different-groups cell unchanged from today within the CI.
+- `test_expected_area_trigger.py`'s re-measured floors (`_FAR_BINOCULAR_NEAR_UNAIDED_RESIDUAL_
+  FLOOR`, the 20% long-gap ceiling) are replaced by these. They are already marked "premise gone".
+- `test_e3_same_and_unaided_then_binocular_always_folds_to_one_contact`: the Decision 3 restatement
+  as a fence still applies. Re-measure it on the fixed harness. Do not carry the 90–96% figure.
+
+*Original Stage 2 (second to sixth pass), kept for the record:*
+
 **Stage 2 — Never fold an ambiguous memory-only match (E1 delivered, Q3 as the default).**
 - **Trigger** (`ContactStore.ingest`, gate branch only, never continuity), all of:
   - the percept resolves through the gate onto A: the single passing candidate, or the
@@ -1155,7 +1239,7 @@ Fourth pass, new tests:
     had A been in this very look, this percept would read as a different thing.
   - **(Stage 1b, sixth pass) B reads nearer than A should be:** `percept.range_m <` the range from
     this observer to A's believed position (the gate's own `hypothesis_range_m`). Same-group false
-    split 3–6% instead of 15–20%.
+    split 3–6% instead of 15–20%. *(Superseded numbers. Honest: ≤ 0.3% instead of 2–5%.)*
 
   Perceived quantities and model parameters only, the same correlation helper as BL-B108, no new
   constant. All four conditions are evaluated in **one** pure predicate in
@@ -1398,7 +1482,19 @@ to be grep-verified at implementation.
   rate, brings identifications sooner, and makes classification-change lines denser. It is the
   user's direction, but it is also the largest behaviour change here and has nothing to do with
   BL-B110's own defect. That is why it ships alone (Decision 3) and gets its own card.
-- **The Stage 0 false-trigger rate is the duplicate rate the pilot hears** after Stage 2. Gate-path
+- **(Seventh pass) The duplicate the pilot hears is mostly `[[BL-B113]]`, not the trigger.** Past
+  120 s a same-optic re-sighting is announced as a new group 10–12% of the time by eye, with or
+  without Stage 2. The user deferred it (*"If this becomes a problem in missions, we'll investigate
+  more, but not now."*). A SAM site called twice after a long gap is the flight signature.
+- **(Seventh pass) Merge-echo silencing hides real second groups** (50–60 points, eye → eye, A not
+  lost). It is unattributed. Decision 14. If flights show a nearer group on a remembered bearing
+  never called, look here before at the gate.
+- **(Seventh pass) The harness's cross-range systematic bias is a fixed draw.** `bias:1` and
+  `bias:2` hash to −1.43 and −1.40, and the hash is not salted. Both looks carry nearly the same
+  −0.56σ cross offset in every trial, so it cancels in the innovation. That is realistic for one
+  object seen twice, and optimistic for two groups that would have independent biases. Not
+  resampled here. It biases the different-groups rows slightly toward folding.
+- *(Superseded numbers, seventh pass)* **The Stage 0 false-trigger rate is the duplicate rate the pilot hears** after Stage 2. Gate-path
   same-group re-sightings occur only past the 600 s continuity window or when clusters re-form.
   How often that happens in flight is unmeasured. `sortie-log-triage` can count gate-path
   foundings near a remembered contact.
@@ -1487,6 +1583,15 @@ to be grep-verified at implementation.
 
 ### Second-order effect
 
+Seventh pass:
+- **`[[BL-B109]]` is not unblocked by BL-B110.** The precondition it named was "two groups on one
+  bearing reliably two contacts across optics", and on honest numbers no gate-side trigger delivers
+  that. Its precondition moves to `[[BL-B111]]` (and to Decision 14's entry for the same-optic,
+  short-gap half).
+- **`[[BL-B111]]`'s value rises and its scope grows by two small pieces**: the believed-distinct
+  pair and the merge-echo skip. It is now the only planned mechanism for E1.
+
+*(Earlier passes; the first sentence below is superseded by the seventh pass.)*
 Stage 2 makes two groups on one bearing reliably two contacts across optics. That is the
 precondition `[[BL-B109]]` ("second group, beyond") named for itself, so this unblocks it.
 `[[BL-B111]]`'s Q4a line is the same wording problem, and the two should be explored together.
@@ -1527,7 +1632,11 @@ Fifth pass:
 
 ### How each alignment item is answered
 
-- **E1**: Stage 2, for the cases the trigger catches; residuals in Stage 0's table.
+- **E1 (seventh pass): not delivered by BL-B110.** On honest numbers the trigger moves one cell
+  family by 5–15 points, and a nearer group on a remembered bearing stays unannounced 58–86%
+  cross-optic and 63–73% eye → eye (merge echo). E1 now rests on `[[BL-B111]]` and Decision 14's
+  entry. Plan-aligner should treat it as moved, not met.
+- *(Superseded, seventh pass)* **E1**: Stage 2, for the cases the trigger catches; residuals in Stage 0's table.
 - **E2**: Stage 2 trades a 4–10% gate-only false split, per Q3. Stage 4's "same" verdict removes
   it. Spread units found to be A's join A through the existing group cohesion.
 - **E3**: Stage 2: no hold, immediate. Stage 4: structural bound and age-from-release.
@@ -1818,6 +1927,51 @@ false split under your ~10%. Only one keeps the catch:
 
 The ground-unit cells are still to be measured (Stage 1b step 4). If they break (a), this comes
 back to you before Stage 2 is built.
+→ **The figures above are superseded** (seventh pass): they were measured on the indefinite-`S`
+gate. The user's answer stands, and Decision 12a restates it on honest numbers.
+
+**Decision 12a, seventh pass (2026-11-10): the one-sided direction still holds, for a different
+reason. It applies only if Stage 2 is built (Decision 13).** Honest numbers:
+- One-sided and two-sided catch the same groups, within 1 point in every cell. Every trigger catch
+  is a "B nearer" case.
+- Two-sided adds 2–5 points of same-group duplicates (bino → eye). One-sided adds ≤ 0.3.
+- So one-sided costs nothing in catch and removes the trigger's own duplicates.
+- The sixth pass's trade, giving up the farther group to cut duplicates from 20% to 6%, no longer
+  exists. The farther group was never caught by either variant. Ground cells (100 m AGL) agree.
+No new question for the user. This records that (a) survives the re-measure.
+
+**Decision 13, OPEN, needs the user: build Stage 2 at all?** On honest numbers the trigger moves
+one cell family by 5–15 points (far group glassed, near group by eye: 70–86% → 58–79% unannounced).
+It moves nothing else. What the pilot would notice: a nearer group on a remembered bearing is still
+missed most of the time, either way.
+- **(a) Recommended: do not build Stage 2 in BL-B110.** Close BL-B110 on Stages 0a/0/1 plus Stage 5,
+  and record the honest residual on `BL-B110.md`. The believed-distinct pair and merge-echo skip
+  move to `[[BL-B111]]`, the one mechanism that can supply the missing information (a look at A's
+  area). BL-B111 absorbs Stage 2b's anchor question too. Consider raising BL-B111's priority, since
+  it is now the only planned route to "two groups called as two".
+- (b) Build Stage 2 one-sided now, as a small partial: one implementer pass, acceptance numbers in
+  Stage 2's seventh-pass redesign. It buys 5–15 points in one cell family at ≤ 0.3 points of
+  duplicates. It is not wasted, because BL-B111 reuses the pair and the skip. But it ships a
+  mechanism whose headline claim (E1) it does not meet, and the card would have to say so.
+- (c) Build it two-sided. Same catch as (b), plus 2–5 points of duplicates. Dominated by (b), so
+  not recommended.
+
+**Decision 14, OPEN, needs the user: open an entry for merge-echo silencing of real second
+groups?** `callouts._is_merge_echo_of_earlier_contact` silences B's first callout when an earlier,
+not-lost contact is "plausibly same" by `contacts_plausibly_same`. In the honest grid that test
+accepts 50–60 points of different-group pairs the gate itself had correctly split. Eye → eye at a
+6 s gap: gate fold 4–15%, but B is unannounced 63–73%. The rule exists to silence echoes (it is also
+what keeps BL-B113's short-gap splits down to ≤ 0.5% heard), so tightening it trades one error for
+the other.
+- **(a) Recommended: open it as a body-layer backlog entry, measure first, `/explore` before any
+  fix, deferred like BL-B113.** The flight signal is "a group on a remembered bearing never called".
+  The 6 s memory-only geometry is the harness worst case. In flight, two groups on one bearing seen
+  within one sweep are separated by the same-poll claim rule. How often the memory-only case arises
+  is unmeasured: `sortie-log-triage` can count CONTACT_DETECTED events suppressed as merge echoes.
+- (b) Fold it into `[[BL-B111]]`. Not recommended. It is a callout rule, not the look, and it would
+  make BL-B111's goal check carry two unrelated questions.
+- (c) Leave it unrecorded. Not recommended. This is the larger silent path, and it was invisible
+  until this pass measured what is heard rather than what folds.
 
 **Plan re-check 3 questions, ANSWERED 2026-11-03.** User: *"go with recommendations"*.
 1. The rough-location fence is **0.2 · R** with no 250 m floor (edited throughout).
