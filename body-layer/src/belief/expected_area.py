@@ -454,6 +454,8 @@ class _StoreLike(Protocol):
     def record_believed_distinct(self, a_id: str, b_id: str) -> None: ...
     def merge_contact(self, *, into: str, source: str) -> None: ...
     def mark_lost_now(self, contact_id: str, now_sim: float) -> None: ...
+    def record_relocation(self, contact_id: str, now_sim: float) -> None: ...
+    def record_absence(self, contact_id: str, now_sim: float) -> None: ...
 
 
 Verdict = Literal["different", "same", "absent", "cannot_look", "still_open"]
@@ -566,6 +568,7 @@ def resolve_checks(
             outcomes.append(CheckOutcome(b_id, a_id, "still_open"))
             continue
 
+        relocation_line = False
         if verdict == "different":
             store.release_check(b_id, now_sim)
             store.record_believed_distinct(a_id, b_id)
@@ -580,24 +583,35 @@ def resolve_checks(
                 store.release_check(b_id, now_sim)
             store.close_check(b_id)
         elif verdict == "same":
+            relocation_line = a_was_announced.get(
+                a_id, False
+            ) and relocation_warranted_by_b.get(b_id, False)
             store.merge_contact(into=a_id, source=b_id)
             store.close_check(b_id)
+            if relocation_line:
+                # `plans/expected-area-look/plan.md` Stage 3b,
+                # `CONTACT_RELOCATED` -- computed *before* `merge_contact`
+                # (whose docstring already says A's own identity/fields
+                # survive the fold unchanged, so `a_id` still names a
+                # live contact afterwards), but minted after, so the
+                # event's own `certainty` reads A's just-refreshed state.
+                store.record_relocation(a_id, now_sim)
         elif verdict == "absent":
             store.release_check(b_id, now_sim)
+            a_was_announced_before = a_was_announced.get(a_id, False)
             store.mark_lost_now(a_id, now_sim)
             store.close_check(b_id)
+            if a_was_announced_before:
+                # `plans/expected-area-look/plan.md` Stage 3b --
+                # "'no longer at its last place' is spoken only if A was
+                # announced before." Read before `mark_lost_now` runs
+                # (both read the same pre-rewind fact; order does not
+                # change the value here, but reading it first keeps this
+                # branch's two statements in the plan's own stated order).
+                store.record_absence(a_id, now_sim)
 
         outcomes.append(
-            CheckOutcome(
-                b_id,
-                a_id,
-                verdict,
-                relocation_line=(
-                    verdict == "same"
-                    and a_was_announced.get(a_id, False)
-                    and relocation_warranted_by_b.get(b_id, False)
-                ),
-            )
+            CheckOutcome(b_id, a_id, verdict, relocation_line=relocation_line)
         )
     return outcomes
 

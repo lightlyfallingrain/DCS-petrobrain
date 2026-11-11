@@ -888,6 +888,70 @@ def test_contact_reacquired_is_never_suppressed_by_a_nearby_contact() -> None:
     assert "Ural truck." in spoken
 
 
+def test_contact_relocated_is_suppressed_when_reacquired_speaks_same_tick() -> None:
+    """Stage 3b: "Suppress RELOCATED when REACQUIRED is spoken in the
+    same tick" -- a merge that reacquires a lost contact already states
+    its place (`CONTACT_REACQUIRED`'s own positional-callout text), so a
+    pending `CONTACT_RELOCATED` for that same contact must not also be
+    spoken, on this tick or any later one.
+
+    A's own `CONTACT_DETECTED` is deliberately never spoken here (no
+    initial `scheduler.tick()` call) -- speaking it would cache its
+    rendered text in `_last_spoken_signature`, and `CONTACT_REACQUIRED`
+    would then render the byte-identical "Ural truck." with no
+    `EnrichmentContext` in play, tripping the unrelated unchanged-
+    signature suppression (`_render_event`'s own `CONTACT_DETECTED`/
+    `CONTACT_REACQUIRED` branch) instead of exercising this one."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    store.ingest([_br_observation(obs_id="OBS_A", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    a_id = store.contacts[0].id
+
+    store.mark_lost_now(a_id, now_sim=60.0)
+    store.tick(now_sim=60.0)  # mints CONTACT_LOST
+    store.record_relocation(a_id, now_sim=60.0)  # the check's own "same" verdict
+
+    reacquire_at = 61.0
+    store.ingest(
+        [
+            _br_observation(
+                obs_id="OBS_A_REACQUIRE",
+                t_sim=reacquire_at,
+                continues_observation_id="OBS_A",
+            )
+        ],
+        now_sim=reacquire_at,
+    )
+    store.tick(now_sim=reacquire_at)  # mints CONTACT_REACQUIRED
+    assert [e.kind for e in store.unacknowledged_events if e.contact_id == a_id] == [
+        "CONTACT_DETECTED",
+        "CONTACT_LOST",
+        "CONTACT_RELOCATED",
+        "CONTACT_REACQUIRED",
+    ]
+
+    spoken = scheduler.tick(store, now_sim=reacquire_at)
+
+    assert spoken == ["Ural truck."]  # CONTACT_REACQUIRED's own text
+    # CONTACT_DETECTED was also spoken by this same tick -- `tick` only
+    # ever speaks one *line*, but `CONTACT_DETECTED` and `CONTACT_
+    # REACQUIRED` are two different candidates; priority favours the
+    # newer one (`callout_priority`'s own `-event.t_sim` key), so
+    # REACQUIRED is the one actually rendered, and DETECTED (never
+    # rendered) is left for a later tick same as always. CONTACT_LOST
+    # has no template and is never consumed by this loop at all (module
+    # docstring) -- only RELOCATED/REACQUIRED clear this poll.
+    assert {e.kind for e in store.unacknowledged_events if e.contact_id == a_id} == {
+        "CONTACT_DETECTED",
+        "CONTACT_LOST",
+    }
+    # A second poll must not surface the relocation line either -- it
+    # was acknowledged, not merely skipped this tick.
+    spoken_again = scheduler.tick(store, now_sim=reacquire_at + 2.0)
+    assert "That group, now" not in "".join(spoken_again)
+
+
 def test_urgent_call_resets_occupancy_even_mid_routine_line() -> None:
     from belief.crew_console import CrewConsole
 

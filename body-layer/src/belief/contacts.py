@@ -84,6 +84,7 @@ from belief.decay import (
     object_id_continuity_valid,
 )
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
@@ -92,6 +93,7 @@ from belief.events import (
     CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
+    CONTACT_RELOCATED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
@@ -1129,6 +1131,51 @@ class ContactStore:
         if contact is None:
             return
         contact.last_seen_sim = now_sim - LOST_THRESHOLD_S - 1.0
+
+    def record_relocation(self, contact_id: str, now_sim: float) -> None:
+        """Mints a `CONTACT_RELOCATED` event for `contact_id` -- the
+        "same" verdict's own action when Decision 3's relocation rule
+        fires (`belief.expected_area.resolve_checks`'s own caller is the
+        only one that knows whether it fired; this method only appends
+        the event). Deliberately separate from `tick`'s own lifecycle
+        derivation: `CONTACT_RELOCATED` is not a before/after comparison
+        over stored state, it is a fact `resolve_checks` has already
+        established. A no-op if `contact_id` is unknown (defensive only --
+        `resolve_checks` only ever calls this for a contact it just
+        fetched)."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        self._events.append(
+            Event(
+                id=self._new_event_id(),
+                contact_id=contact_id,
+                kind=CONTACT_RELOCATED,
+                t_sim=now_sim,
+                certainty=certainty_of(contact, now_sim),
+            )
+        )
+
+    def record_absence(self, contact_id: str, now_sim: float) -> None:
+        """Mints a `CONTACT_ABSENT` event for `contact_id` -- the
+        "absent" verdict's own action, called by `resolve_checks` only
+        when A had previously been announced (plan: *"spoken only if A
+        was announced before"*). Separate from `mark_lost_now`, which
+        does the state rewind that makes the *lifecycle* read lost; this
+        method only appends the event, same posture as `record_relocation`
+        above. A no-op if `contact_id` is unknown."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        self._events.append(
+            Event(
+                id=self._new_event_id(),
+                contact_id=contact_id,
+                kind=CONTACT_ABSENT,
+                t_sim=now_sim,
+                certainty=certainty_of(contact, now_sim),
+            )
+        )
 
     @property
     def contacts(self) -> list[Contact]:

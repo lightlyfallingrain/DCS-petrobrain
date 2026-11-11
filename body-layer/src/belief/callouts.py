@@ -51,15 +51,19 @@ disclosure mints no `Event` at all, so no emission-site gate could ever
 have covered it, and a per-kind list at emission is a list the next new
 kind silently fails to join.
 
-**The breadth is five of `_TEMPLATED_KINDS`' six kinds, plus group
+**The breadth is seven of `_TEMPLATED_KINDS`' eight kinds, plus group
 disclosure, with one deliberate exemption.** Because the gate
 discriminates on the *contact* and not on the kind, it covers every
-member of `_TEMPLATED_KINDS` that reaches it. Three of those five are
+member of `_TEMPLATED_KINDS` that reaches it. Three of those seven are
 newly gated here -- `CONTACT_CLASSIFICATION_CHANGED` (the measured
 defect) and `CONTACT_DETECTED`/`CONTACT_REACQUIRED` (close to a no-op,
-since both perception channels already constrain founding) -- and the
-other two, `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED`, were
-already gated at emission and are now gated here as well. The sixth,
+since both perception channels already constrain founding) -- two,
+`CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED`, were already gated
+at emission and are now gated here as well, and two more,
+`CONTACT_RELOCATED`/`CONTACT_ABSENT` (`plans/expected-area-look/plan.md`,
+`BL-B111`), join ungated at emission (neither is gated anywhere else --
+both are minted directly by `belief.expected_area.resolve_checks`'s own
+caller, not derived at `ContactStore.tick`). The eighth,
 `CONTACT_ENGAGEMENT_CHANGED`, is **exempt in its entering transition
 only** -- `engaged is True`, the *"Danger, ..."* line (decided in the
 review loop, 2026-10-06, on the Reviewer's recommendation, narrowed to
@@ -233,6 +237,7 @@ from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
@@ -241,6 +246,7 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
+    CONTACT_RELOCATED,
     Event,
     EventKind,
 )
@@ -288,6 +294,15 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         #: priority` gives it an elevated band for that reason, not this
         #: set.
         CONTACT_FIRING_SEEN,
+        #: `plans/expected-area-look/plan.md` (`BL-B111`) Stage 3b. Not in
+        #: `_OBSERVABILITY_EXEMPT_KINDS` (an ordinary no-omniscience
+        #: candidate, same as `CONTACT_DETECTED`/`CONTACT_REACQUIRED`) and
+        #: not in `_WATCHED_ONLY_KINDS` -- an expected-area check's
+        #: verdict is spoken regardless of whether A happens to be
+        #: watched. Neither carries a `targets_ownship` variant, so
+        #: neither needs `callout_priority`'s own special-casing.
+        CONTACT_RELOCATED,
+        CONTACT_ABSENT,
     }
 )
 
@@ -1229,16 +1244,18 @@ class CalloutScheduler:
             # check for exactly that reason -- ahead of it, a permanently
             # astern contact's event would never be consumed at all.
             #
-            # **Breadth: this gates five of `_TEMPLATED_KINDS`' six
+            # **Breadth: this gates seven of `_TEMPLATED_KINDS`' eight
             # kinds.** Three are newly gated here -- `CONTACT_
             # CLASSIFICATION_CHANGED` (the measured defect) and `CONTACT_
-            # DETECTED`/`CONTACT_REACQUIRED` -- and two, `CONTACT_MOTION_
+            # DETECTED`/`CONTACT_REACQUIRED` -- two, `CONTACT_MOTION_
             # CHANGED` and `CONTACT_RANGE_CROSSED`, were already gated at
-            # emission and are gated here too. The sixth, `CONTACT_
-            # ENGAGEMENT_CHANGED`, is exempt in its *entering* transition
-            # only (`engaged is True`; decided in the review loop,
-            # 2026-10-06, narrowed by the security deep analysis the same
-            # day) -- see `_OBSERVABILITY_EXEMPT_KINDS` for the full
+            # emission and are gated here too, and two more, `CONTACT_
+            # RELOCATED`/`CONTACT_ABSENT` (`plans/expected-area-look/
+            # plan.md`, `BL-B111`), join ungated at emission. The eighth,
+            # `CONTACT_ENGAGEMENT_CHANGED`, is exempt in its *entering*
+            # transition only (`engaged is True`; decided in the review
+            # loop, 2026-10-06, narrowed by the security deep analysis the
+            # same day) -- see `_OBSERVABILITY_EXEMPT_KINDS` for the full
             # reasoning and the bar a further member would have to clear.
             # The gate discriminates on the *contact*, not on the kind, so
             # every templated kind is in scope unless that set says
@@ -1450,6 +1467,23 @@ class CalloutScheduler:
                     continue
                 if candidate.kind in _WATCHED_ONLY_KINDS:
                     self._last_spoken_sim[candidate.contact_id] = now_sim
+                if candidate.kind == CONTACT_REACQUIRED:
+                    # `plans/expected-area-look/plan.md` Stage 3b --
+                    # "Suppress RELOCATED when REACQUIRED is spoken in
+                    # the same tick": a merge that reacquires a lost A
+                    # already states its place (`CONTACT_REACQUIRED`'s
+                    # own positional-callout text), so a pending
+                    # `CONTACT_RELOCATED` for that same contact would be
+                    # a second, redundant line about the identical move.
+                    # Acknowledged, not left for a later tick -- the
+                    # move it would have reported is the same move
+                    # `CONTACT_REACQUIRED` just reported.
+                    for other_event in store.unacknowledged_events:
+                        if (
+                            other_event.kind == CONTACT_RELOCATED
+                            and other_event.contact_id == candidate.contact_id
+                        ):
+                            acknowledge_event(store, other_event.id)
                 self.last_spoken_mention = Mention(
                     kind="contact", id=candidate.contact_id, t_sim=now_sim
                 )

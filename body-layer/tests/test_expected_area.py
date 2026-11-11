@@ -444,6 +444,8 @@ class _FakeStore:
         self.believed_distinct: list[tuple[str, str]] = []
         self.merged: list[tuple[str, str]] = []
         self.marked_lost: list[str] = []
+        self.relocated: list[str] = []
+        self.marked_absent: list[str] = []
 
     def contact(self, contact_id: str) -> Contact | None:
         return self._contacts.get(contact_id)
@@ -462,6 +464,12 @@ class _FakeStore:
 
     def mark_lost_now(self, contact_id: str, now_sim: float) -> None:
         self.marked_lost.append(contact_id)
+
+    def record_relocation(self, contact_id: str, now_sim: float) -> None:
+        self.relocated.append(contact_id)
+
+    def record_absence(self, contact_id: str, now_sim: float) -> None:
+        self.marked_absent.append(contact_id)
 
 
 def _check(a_id: str = "A", b_id: str = "B", kind: str = "fold") -> ExpectedAreaCheck:
@@ -673,6 +681,96 @@ def test_resolve_checks_same_without_relocation_line_when_a_never_announced() ->
         paused=False,
     )
     assert outcomes == [CheckOutcome("B", "A", "same", relocation_line=False)]
+
+
+def test_resolve_checks_same_with_relocation_line_mints_contact_relocated() -> None:
+    """`CONTACT_RELOCATED` (`belief.contacts.ContactStore.record_
+    relocation`) is minted only when `relocation_line` actually fires --
+    the "same" branch's own new wiring, beyond the pre-existing
+    `relocation_line=True` outcome assertion."""
+    a = _contact("A", classification_raw="s-125")
+    b = _contact("B", classification_raw="s-125")
+    store = _FakeStore({"A": a, "B": b})
+    check = _check()
+    resolve_checks(
+        store,
+        [check],
+        now_sim=5.0,
+        deadline_s=17.0,
+        look_evidence=_no_evidence_map(),
+        a_observed={},
+        relocation_warranted_by_b={"B": True},
+        a_was_announced={"A": True},
+        paused=False,
+    )
+    assert store.relocated == ["A"]
+
+
+def test_resolve_checks_same_without_relocation_line_never_mints_contact_relocated() -> (
+    None
+):
+    a = _contact("A", classification_raw="s-125")
+    b = _contact("B", classification_raw="s-125")
+    store = _FakeStore({"A": a, "B": b})
+    check = _check()
+    resolve_checks(
+        store,
+        [check],
+        now_sim=5.0,
+        deadline_s=17.0,
+        look_evidence=_no_evidence_map(),
+        a_observed={},
+        relocation_warranted_by_b={"B": False},
+        a_was_announced={"A": True},
+        paused=False,
+    )
+    assert store.relocated == []
+
+
+def test_resolve_checks_absent_when_a_was_announced_mints_contact_absent() -> None:
+    """`CONTACT_ABSENT` (`belief.contacts.ContactStore.record_absence`)
+    is minted only when A had previously been announced -- the "absent"
+    branch's own new wiring, beyond the pre-existing `marked_lost`
+    assertion (`test_resolve_checks_absent_when_visible_but_composition_
+    misfits`, which leaves `a_was_announced` empty and so never mints
+    this)."""
+    a = _contact("A", classification_raw="OP_ARMORED", count_bucket="OP_3UNITS")
+    b = _contact("B", classification_raw="OP_ARMORED", count_bucket="OP_8TO10UNITS")
+    store = _FakeStore({"A": a, "B": b})
+    check = _check()
+    resolve_checks(
+        store,
+        [check],
+        now_sim=5.0,
+        deadline_s=17.0,
+        look_evidence=_no_evidence_map(),
+        a_observed={},
+        relocation_warranted_by_b={},
+        a_was_announced={"A": True},
+        paused=False,
+    )
+    assert store.marked_absent == ["A"]
+
+
+def test_resolve_checks_absent_when_a_never_announced_never_mints_contact_absent() -> (
+    None
+):
+    a = _contact("A", classification_raw="OP_ARMORED", count_bucket="OP_3UNITS")
+    b = _contact("B", classification_raw="OP_ARMORED", count_bucket="OP_8TO10UNITS")
+    store = _FakeStore({"A": a, "B": b})
+    check = _check()
+    resolve_checks(
+        store,
+        [check],
+        now_sim=5.0,
+        deadline_s=17.0,
+        look_evidence=_no_evidence_map(),
+        a_observed={},
+        relocation_warranted_by_b={},
+        a_was_announced={"A": False},
+        paused=False,
+    )
+    assert store.marked_absent == []
 
 
 def test_resolve_checks_defensive_close_when_a_contact_is_missing() -> None:
