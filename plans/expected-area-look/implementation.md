@@ -794,3 +794,147 @@ text to say so rather than leave the plan's sentence unmet silently.
 - The Stage 1 Windows test card (push probe points by hand, confirm `dcs.
   log`/`/line_of_sight/latest.probes`, a paused-state check, `bridge_
   call_ms` unmoved) is still owed, unchanged from Pass 1's own report.
+
+### Pass 3 (production acceptance, trace logging, docs)
+
+**1. `tools/measure_expected_area_look.py --production`** drives the real
+`ContactStore(expected_area_checks=True)` -- the real trigger
+(`eligible_trigger_target`/`merge_echo_or_beside_lost_target`, through
+`store.ingest` exactly as `body.py` calls it) and the real
+`resolve_checks`/`area_visibility`/`is_same`/`relocation_warranted` --
+stubbing only what a live DCS Hook/world-model would supply: `LookEvidence`'s
+cockpit-mask/presence-range/occlusion/probe fields are fixed to "clear", and
+`look_completed_naturally` is fixed `True` (Pass 2's own optic-policy
+mechanics are already covered by `test_optic_policy.py::TestAreaCheckLook`
+and are not re-driven here). `area_fits_one_look_now` is computed for real.
+
+**Why "A observed" is not driven through a second `store.ingest` call** (a
+real finding, not a simplification chosen for convenience): `ingest`'s own
+trigger fires on *every* single-candidate gate fold against an out-of-view,
+area-fits A, not only the first -- correct production behaviour (two
+independent sightings of the same remembered group, both still open, is
+exactly `MAX_OPEN_CHECKS`'s own case) -- but it means a second, hand-built
+"the look found A" observation fed back through `ingest` would open a
+*second* check against A rather than advance `a.last_seen_sim`, because this
+harness's own `_observation` helper (`measure_same_group_fold.py`) never sets
+`continues_observation_id`/`derived_world_position`, so object-id continuity
+can never resolve here at all. Instead, whether A is "observed" during the
+hold reuses the architect's own modelled-mode geometric test (`passes_gate`
+against `a_snapshot`, or the gap sitting inside `OBJECT_ID_MEMORY_S`), and
+only when that says yes, calls the real `Contact.record` directly on A --
+bypassing `ingest`'s trigger re-check, which is what a continuity-resolved
+sighting would also do in real flight.
+
+**Acceptance grid, measured at n = 200 (different)/300 (same), the plan's
+own salts and cells** (`tools/measure_expected_area_look.py --production
+200 300`, full output not committed -- re-run to reproduce):
+
+| measure | fence | measured |
+|---|---|---|
+| Different groups, B announced, every cell A's area fits one look | >= 85% | 92.5-100% (worst: s-125 b->u 700 s 5.0/3.5 km, 92.5%; matches the plan's own "91.5-94.5%" prediction) |
+| Same group duplicate, 6 s | <= today + 4 pts | max measured delta +0.7 pts (OP_ARMORED b_u) |
+| Same group duplicate, 700 s | <= today + 1 pt | every cell equal or **decreased** vs. today, 0 cells increased |
+| Armour, 700 s (area > one look) | = today, unchanged | 0.0% -> 0.0% exactly, every cell (`trigger` = 0.0%, Decision 1 confirmed) |
+| Same group, `CONTACT_RELOCATED`, same-optic | <= 5% | 0.0-3.0% measured (u_u/b_b cells) |
+| Same group, `CONTACT_RELOCATED`, cross-optic | characterise only | 4.3-38.7% (u_b/b_u), matching the plan's own "12-35% eye->bino" |
+| SAM vignette, same group 700 s, verdict "different" | <= 2% | **0.0%**, every pair/range cell measured |
+
+**Every fence passed in production. None needed stopping/reporting per the
+plan's own "if a fence fails, stop and report" instruction.** The two
+documented Pass 2 simplifications (`a_was_announced` approximated from
+`Contact.last_event_emitted_sim`; `relocation_warranted_by_b`'s "after" state
+is B's own current position, not the post-merge fused estimate) do not
+affect these numbers: `a_was_announced=True` is forced for every production
+trial (so the relocation line is always testable rather than gated on a
+coin-flip from real flight history, which this harness has none of), and the
+"after" position question is exactly what this harness asks regardless, per
+that simplification's own stated reasoning.
+
+`test_expected_area_look_sweep.py` fences a representative subset (the
+worst/characteristic cell per row, not the full ~190-cell grid, for test
+runtime -- each cell costs ~2 s at n = 300, and the full grid would add
+several minutes to every `pytest` run for no more confidence than the worst
+cell already gives) at **n = 300 for every cell**, per the plan's own
+"Remaining build" instruction for this file (not the Acceptance table's own
+n = 200 for "different groups" -- the plan states 300 explicitly here). 17
+tests, ~35 s total -- `test_relative_distance_sweep.py`'s own ~30 s is the
+precedent this budget follows.
+
+**2. `--expected-area-log PATH`**, the seventh per-run JSONL log
+(`expected_area_log.py`, mirroring `group_trace_log.py`'s shape exactly --
+unbuffered, self-disabling on write failure), wired through the same
+sibling-resolve-function/`_reroll_run_logs`/plain-field-sink pattern
+`--group-trace` already has. Checked against the two candidates the
+dispatch named first: `--belief-truth-log`'s `BeliefTruthRow` requires a
+*matched ground-truth object* on every row (`object_id`, true bearing/
+range), which a belief-only expected-area check never has; `--speech-log`'s
+schema is voice-transcript recognition, unrelated. Neither fits, confirming
+and extending Pass 2's own finding that `--detection-trace` doesn't either
+(ground-truth-only by construction). `body._resolve_expected_area_checks`
+writes one `"open"` row per poll a check stays open and one `"verdict"` row
+per resolution (verdict, relocation flag, and a new `_cannot_look_cause`
+helper naming which `area_visibility` clause failed -- log/report only,
+never feeds back into the verdict). `sortie-log-triage`'s `triage.py` gains
+`expected_area_report`: distinct checks opened, check-kind split, verdict
+histogram, cannot-look-cause histogram (excluding merge-echo rows), the
+merge-echo-suppressed count (`[[BL-B114]]`'s own flight signal -- a
+`"cannot_look"` verdict on an `"echo"`-kind check), and the
+`CONTACT_RELOCATED`-heard count against total "same" verdicts.
+
+**3. Stage 4 docs:**
+- `body-layer/docs/STRUCTURE.md`: a full new entry for `belief/
+  expected_area.py` (the trigger amendment's own account, Decision 1's
+  feasibility-not-separability framing, the fail-closed verdict table, the
+  two real tunables vs. the protocol-bound literals, the declared-
+  independently `_LOOK_SWEEP_SIGMA` import-cycle avoidance); an addendum on
+  `body.py`'s own entry for `_resolve_expected_area_checks`/`_cannot_look_
+  cause`; an addendum on `perception/forest.py`'s entry for the settlement-
+  mask parameterisation. `belief/contacts.py`/`callouts.py`/`optic_policy.py`
+  have **no** dedicated STRUCTURE.md entries at all, before or after this
+  pass -- a pre-existing gap this pass did not create and did not attempt to
+  close (out of this pass's own scope; flagged here rather than silently
+  left for the next reader to discover).
+- `body-layer/CLAUDE.md`: new `--expected-area-log` paragraph, added to the
+  "Per-mission log files (Decision 5)" reroll list. **No Tuning-section
+  change** -- no new `tuning.real`/`tuning.whole` constant was added in Pass
+  3 (confirmed: `test_tuning_defaults_toml.py` passes unchanged, so
+  `config/defaults.toml` needed no regeneration). Note: that section's own
+  "curated ~15" constant list does not mention `EXPECTED_AREA_MAX_HALF_
+  WIDTH_DEG`/`COMPOSITION_MATCH_RATIO` even though both are already real
+  `tuning.real` declarations and already rendered in `defaults.toml` -- a
+  staleness from an earlier stage (BL-B110/this plan's Stage 2), not
+  something Pass 3 introduced; flagged rather than fixed, since fixing it is
+  not "anything tunable changed" in this pass.
+- `aircraft-layer/CLAUDE.md`'s line-of-sight-hook structure line and a new
+  `WORKFLOW.md` "Deploy the line-of-sight Hook script" section, documenting
+  `probe_points` (owed since Stage 1 shipped -- that stage's own "Affected
+  Modules" list named these two files, but implementation.md's Pass 1
+  section never mentioned touching them) plus the Stage 1 Windows card's
+  exact commands.
+- Two test-card sources, **not published** (the main loop publishes):
+  `plans/expected-area-look/test-card-windows.md` (Stage 1,
+  aircraft-layer-only, no body-layer) and `plans/expected-area-look/
+  test-card.md` (the five flight cases named in the plan's own Acceptance/
+  Stage-4 list). Both name branch `main`.
+- **Not touched, per the dispatch's own instruction**: roadmap entry status
+  on `BL-B111.md`/`BL-B113.md`/`BL-B114.md`/`BL-B109.md` -- "I do that at
+  merge."
+
+**Checks, this pass:**
+- `ruff format --check src tests` (body-layer): pass.
+- `ruff check src tests` (body-layer): pass.
+- `cd body-layer && .venv/bin/mypy src`: pass (81 source files).
+- `pytest tests -q` (body-layer, full suite): **3160 passed, 4 xfailed**
+  (confirmed by name in unfiltered `-v` output for every new test; the 4
+  xfailed are pre-existing and unrelated).
+- aircraft-layer: docs-only changes this pass (`CLAUDE.md`/`WORKFLOW.md`), no
+  `src`/`tests` touched, so no code-quality checks are owed for it per root
+  `CLAUDE.md`'s "Verification" (applies to code changes).
+
+**Environment note:** `body-layer/.venv` did not exist in this worktree
+(gitignored, as Pass 2 also found) -- recreated with
+`python3.12 -m venv .venv` plus the project's own pinned versions read off
+other plans' implementation.md files (`numpy==2.4.6`, `pyproj==3.8.0`,
+`ruff==0.16.6`, `mypy==2.3.1`, `pytest==9.1.1`; Python 3.11 itself was not
+available on this machine, 3.12 used instead -- satisfies the subproject's
+own `requires-python = ">=3.11"`).
