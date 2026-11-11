@@ -2845,3 +2845,201 @@ def test_mark_lost_now_makes_certainty_of_read_lost_immediately() -> None:
     store.mark_lost_now(a_id, now_sim=0.0)
 
     assert contacts_module.certainty_of(a, 0.0) == "lost"
+
+
+# --- `plans/expected-area-look/plan.md` (`BL-B111`) -- `ingest`'s own ----
+# --- trigger wiring, gated off by default (`ContactStore.__init__`'s -----
+# --- own docstring on why: the ten gate-characterisation tests above -----
+# --- (and every other pre-existing `ContactStore()` call site in this ----
+# --- file) hand-build `Observation`s with no continuity and would -------
+# --- otherwise see the trigger fire on every one of their gate-path ------
+# --- reacquisitions, which cannot happen in flight -- see `belief. -------
+# --- expected_area.a_out_of_view`'s own docstring and this project's -----
+# --- `.claude/agent-memory/implementer/ -----------------------------------
+# --- feedback_tautological_trigger_precondition.md`). Every test below --
+# --- passes `expected_area_checks=True` explicitly. ----------------------
+
+
+def test_trigger_opens_a_fold_check_at_a_6s_gate_path_gap() -> None:
+    """A gate-path fold against an eligible, out-of-view A (gap 6.0s >
+    `FOCUS_DWELL_S`) founds B fresh and holds a check instead of folding
+    silently -- Stage 3a's "Action", the plan's own named short gap."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=6.0, bearing_deg=0.0, range_m=3010.0)],
+        now_sim=6.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "fold"
+
+
+def test_trigger_opens_a_fold_check_at_a_700s_gate_path_gap() -> None:
+    """The plan's own long-gap named pair. A zero-growth class
+    (`classification_raw="s-125"`, `object_model`'s
+    `installation_component=True`) so A's believed area has not outgrown
+    one binocular sweep by 700s (`area_fits_one_look`) -- the point this
+    test isolates is the gap, not growth; `test_area_does_not_fit_one_
+    look_once_it_has_grown_wide` (`test_expected_area.py`) already covers
+    a growing class outgrowing the feasibility gate."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(
+                obs_id="A1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                range_m=3000.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="B1",
+                t_sim=700.0,
+                bearing_deg=0.0,
+                range_m=3010.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=700.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "fold"
+
+
+def test_trigger_never_fires_on_continuous_tracking_even_when_enabled() -> None:
+    """The two "hard rule" tests above (`test_slow_directional_drift_...`,
+    `test_position_runaway_...`) already prove this with the flag at its
+    default `False`. This is the same 1s-poll, 18-step continuous
+    sequence with the flag explicitly `True` -- `a_out_of_view`'s own
+    `FOCUS_DWELL_S` (2.0s) window is what protects this case, not the
+    flag being off."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    for i in range(1, 19):
+        store.ingest(
+            [
+                _observation(
+                    obs_id=f"B{i}",
+                    t_sim=float(i),
+                    bearing_deg=0.0,
+                    range_m=1000.0 + i,
+                )
+            ],
+            now_sim=float(i),
+        )
+    assert len(store.contacts) == 1
+    assert len(store.checks) == 0
+
+
+def test_trigger_opens_a_beside_lost_check_and_releases_it_at_once_for_a_threat() -> (
+    None
+):
+    """The founded-fresh path's own scan (`merge_echo_or_beside_lost_
+    target`): B does not pass the gate against A at all (range offset
+    850m, outside `passes_gate`'s own tighter test) but is still
+    `contacts_plausibly_same` (the founding-time scan's looser,
+    symmetric test) -- and A is already `lost` (gap 130.0s >
+    `LOST_THRESHOLD_S`, 120.0s default), so the check opens `kind=
+    "beside_lost"`. `classification_raw="s-125"` (air-defence) also
+    exercises Q2's immediate release (`b_is_threat`) through `ingest`
+    itself, not just the pure `b_is_threat` function
+    (`test_expected_area.py` already covers that in isolation)."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(
+                obs_id="A1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                range_m=3000.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="B1",
+                t_sim=130.0,
+                bearing_deg=0.0,
+                range_m=3850.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=130.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    check = store.checks[0]
+    assert check.kind == "beside_lost"
+    assert check.released is True
+    assert check.released_sim == 130.0
+
+
+def test_trigger_opens_a_merge_echo_check_for_a_not_lost_eligible_target() -> None:
+    """The same founded-fresh scan as the beside-lost case above, but A is
+    not yet `lost` (gap 6.0s, well inside `LOST_THRESHOLD_S`) -- `kind=
+    "echo"`, not `"beside_lost"`."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=6.0, bearing_deg=0.0, range_m=3900.0)],
+        now_sim=6.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "echo"
+
+
+def test_trigger_cap_falls_through_to_an_ordinary_fold_at_the_third_candidate() -> None:
+    """`MAX_OPEN_CHECKS` (2): a third eligible gate-path fold, arriving
+    once two checks are already open, is not held -- it folds exactly as
+    it would with the trigger off (Stage 3a's "Third concurrent check",
+    main loop's call 2026-11-11)."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0),
+            _observation(obs_id="A2", t_sim=0.0, bearing_deg=90.0, range_m=3000.0),
+            _observation(obs_id="A3", t_sim=0.0, bearing_deg=180.0, range_m=3000.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 3
+
+    gap = 6.0
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=gap, bearing_deg=0.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    store.ingest(
+        [_observation(obs_id="B2", t_sim=gap, bearing_deg=90.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    assert len(store.checks) == 2
+
+    store.ingest(
+        [_observation(obs_id="B3", t_sim=gap, bearing_deg=180.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    # Still 2 checks (the cap), and B3 folded directly onto A3 -- 3
+    # original contacts + the two held B1/B2 = 5, not 6.
+    assert len(store.checks) == 2
+    assert len(store.contacts) == 5

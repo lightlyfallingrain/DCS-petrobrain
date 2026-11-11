@@ -863,7 +863,34 @@ class ContactStore:
     updated; `tick` is Stage 1's placeholder for Stage 2's decay/lifecycle
     ticker."""
 
-    def __init__(self) -> None:
+    def __init__(self, expected_area_checks: bool = False) -> None:
+        #: `plans/expected-area-look/plan.md` -- the trigger below is OFF by
+        #: default. `eligible_trigger_target`'s "out of view" precondition
+        #: (`a_out_of_view`, `now_sim - last_seen_sim > FOCUS_DWELL_S`) is
+        #: tautologically true for a gate-path match whenever object-
+        #: permanence continuity does not carry across an optic change --
+        #: which is never, in production (`perception.naked_eye_source`'s
+        #: `_object_id_to_last_observation_id` map is keyed by DCS
+        #: `object_id`, persists across an optic swap on the same source
+        #: instance, and is trusted for `OBJECT_ID_MEMORY_S`, 600s default
+        #: -- see that module's docstring and `body._apply_active_gaze`'s
+        #: `source.optic = optic` line), but *is* always true for a test
+        #: fixture that hand-builds an `Observation` via the test suite's
+        #: own `_observation()`-style helpers, which default
+        #: `continues_observation_id=None` and never go through that map.
+        #: Ten pre-existing tests across `test_expected_area_trigger.py`/
+        #: `test_relative_distance_scenarios.py`/
+        #: `test_relative_distance_sweep.py` characterise the spatial gate
+        #: itself using exactly that kind of fixture (same-group, cross-
+        #: optic, 4-6s apart, continuity deliberately absent) -- wiring the
+        #: trigger unconditionally breaks all ten for a reason that cannot
+        #: occur in flight. Gating it behind this constructor flag (default
+        #: `False`, matching every pre-existing `ContactStore()` call site
+        #: including those ten tests) keeps the trigger's own tests, which
+        #: pass it explicitly, isolated from the gate-characterisation
+        #: tests, which do not. `body.py` passes `True` (Pass 2) -- the one
+        #: call site where continuity is real.
+        self._expected_area_checks = expected_area_checks
         self._contacts: dict[str, Contact] = {}
         self._observations: dict[str, Observation] = {}
         self._events: list[Event] = []
@@ -1453,8 +1480,15 @@ class ContactStore:
                 # "B called new" is not possible here (fold_target, if
                 # any, is a real candidate), so the cap is honoured by
                 # simply not opening a third check.
+                # `self._expected_area_checks` (main loop's call,
+                # 2026-11-11, `__init__`'s own docstring): off by default,
+                # so every pre-existing `ContactStore()` call site -- in
+                # particular the gate-characterisation tests that hand-
+                # build an `Observation` with no continuity -- is
+                # unaffected until a caller opts in.
                 if (
-                    fold_target is not None
+                    self._expected_area_checks
+                    and fold_target is not None
                     and len(self._checks) < MAX_OPEN_CHECKS
                     and eligible_trigger_target(fold_target, percept.t_sim, observer)
                 ):
@@ -1517,7 +1551,10 @@ class ContactStore:
                     # exactly what not opening a check already does
                     # here -- so the cap is honoured by skipping the
                     # scan entirely.
-                    if len(self._checks) < MAX_OPEN_CHECKS:
+                    if (
+                        self._expected_area_checks
+                        and len(self._checks) < MAX_OPEN_CHECKS
+                    ):
                         certainty_of_a_is_lost = {
                             candidate.id: certainty_of(candidate, now_sim) == "lost"
                             for candidate in self._contacts.values()
