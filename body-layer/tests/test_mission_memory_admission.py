@@ -17,6 +17,7 @@ from belief.cardinality import (
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact, ContactStore, SightingSpan
 from belief.events import CONTACT_FIRING_SEEN, Event
+from belief.expected_area import ExpectedAreaCheck
 from belief.groups import Group
 from belief.motion import MotionBelief
 from belief.position_belief import Covariance2D, PositionEstimate
@@ -188,6 +189,30 @@ def test_class_level_contact_gets_an_entry_on_founding() -> None:
 
     assert len(memory.entries) == 1
     assert memory.entries[0].kind == "group"
+
+
+def test_held_contact_gets_no_entry_even_above_the_confidence_floor() -> None:
+    """`plans/expected-area-look/plan.md` Stage 3a's own "while held"
+    bullet -- a held contact (an open `ExpectedAreaCheck`'s `b_id`) is
+    excluded from admission entirely, regardless of confidence, because
+    its own identity is not yet settled: it may still turn out to be the
+    very group A it is held against."""
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1)
+    store = _store_with(contact)
+    store.open_check(
+        ExpectedAreaCheck(
+            b_id=contact.id,
+            a_id="A_NOT_PRESENT",
+            kind="fold",
+            opened_sim=0.0,
+            a_snapshot=contact,
+        )
+    )
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0)
+
+    assert memory.entries == []
 
 
 def test_single_glimpse_presence_only_contact_gets_no_entry() -> None:

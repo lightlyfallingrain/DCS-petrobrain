@@ -2227,11 +2227,21 @@ class ContactStore:
         # `BL-B23`: filtered to not-`lost` contacts -- see this method's
         # own docstring above for why this is the right exclusion
         # (clustering input only) rather than pruning `_contacts` itself.
+        # `plans/expected-area-look/plan.md` Stage 3a's own "while held"
+        # bullet ("excluded from `GroupStore.reconcile` ... still glassed
+        # for classification") -- a held B's own identity is not yet
+        # settled, so it must not be clustered as a group member (or
+        # counted toward one) until the check resolves. `has_open_check`,
+        # not `callout_held`: this exclusion applies for the whole hold,
+        # regardless of whether the check has already released B's own
+        # callout (release only ever changes whether B's *callout* is
+        # held, per that method's own docstring).
         self._groups.reconcile(
             [
                 contact
                 for contact in self._contacts.values()
                 if certainty_of(contact, now_sim) != "lost"
+                and not self.has_open_check(contact.id)
             ],
             now_sim,
             trace_sink=group_trace_sink,

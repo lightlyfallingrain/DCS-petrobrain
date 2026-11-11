@@ -2448,6 +2448,31 @@ def test_tick_reconciles_group_membership_for_a_cohering_trio() -> None:
         assert store.group_for_contact(contact_id) is store.groups[0]
 
 
+def test_tick_excludes_a_held_contact_from_group_membership() -> None:
+    """`plans/expected-area-look/plan.md` Stage 3a's own "while held"
+    bullet -- a held contact (an open `ExpectedAreaCheck`'s `b_id`) is
+    excluded from `GroupStore.reconcile`'s clustering input, even while
+    it would otherwise cohere with its neighbours, because its own
+    identity is not yet settled."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    held_id = store.contacts[1].id
+    store.open_check(_check_fixture(store, a_id=store.contacts[0].id, b_id=held_id))
+
+    store.tick(now_sim=0.0)
+
+    assert len(store.groups) == 1
+    assert held_id not in store.groups[0].member_contact_ids
+    assert store.group_for_contact(held_id) is None
+
+
 def test_tick_is_idempotent_for_group_membership() -> None:
     """Calling `tick()` again with the same `now_sim` and no belief change
     must not refound the group -- same idempotence `tick`'s own docstring

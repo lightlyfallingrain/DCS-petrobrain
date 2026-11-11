@@ -531,6 +531,18 @@ def step(
     passes it."""
     phase_info = to_phase_info(phase)
     for contact in contacts.contacts:
+        if contacts.has_open_check(contact.id):
+            # `plans/expected-area-look/plan.md` Stage 3a's own "while
+            # held" bullet -- a held contact's identity is not yet
+            # settled (it may still turn out to be the very group `A` it
+            # was held against), so it is excluded from mission-memory
+            # admission the same way `belief.groups.GroupStore.reconcile`
+            # is excluded (`belief.contacts.ContactStore.tick`'s own
+            # comment on the same cross-cutting exclusion). Skipped, not
+            # merely delayed by a cooldown -- once the check resolves,
+            # this contact is either gone (merged into A) or an ordinary
+            # live contact the very next poll's loop will reach anyway.
+            continue
         _maybe_write_entry_for_contact(
             memory, contacts, contact, now_sim, theatre, phase_info, enrichment
         )
