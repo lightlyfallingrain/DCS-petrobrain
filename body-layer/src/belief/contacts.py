@@ -954,8 +954,17 @@ class ContactStore:
         "reset mechanism" section). Object identity is unchanged, so
         `logger.ConsolePerceptionRunner.store`/`belief.crew_console.
         CrewConsole.store` (the same instance, by design) see the reset
-        with no further wiring."""
-        self.__init__()  # type: ignore[misc]
+        with no further wiring.
+
+        **`expected_area_checks` is the one constructor argument, not a
+        mission-scoped field** -- it is `body.py`'s own standing choice of
+        mechanism (Pass 2: always `True` in production), not belief state
+        to clear, so it must be threaded back through here rather than
+        silently reverting to the constructor's `False` default on every
+        mission restart (found while wiring `body.py`'s own `ContactStore`
+        construction -- a bare `self.__init__()` would have turned the
+        trigger off again at the second mission of every sortie)."""
+        self.__init__(expected_area_checks=self._expected_area_checks)  # type: ignore[misc]
 
     def callout_observable(self, contact: Contact, now_sim: float) -> bool:
         """Whether a spontaneous callout about `contact` may be *spoken*

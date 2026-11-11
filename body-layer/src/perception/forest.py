@@ -92,22 +92,51 @@ class ForestOcclusion:
     memo of this poll's (and prior polls') `occluded` verdicts. Constructed
     once by `NakedEyePerceptionSource` and reused across polls, exactly as
     `WorldEnrichmentCache` is reused across `tick()` calls -- see that
-    class's own docstring for the staleness this kind of cache accepts."""
+    class's own docstring for the staleness this kind of cache accepts.
+
+    **`layers`/`class_tag`/`class_values` are `plans/expected-area-look/
+    plan.md` Pass 2's parameterisation** ("the occlusion class takes its
+    layer/class set as a parameter, so a settlement mask reuses it -- one
+    class, two instances. No second copy."): `body.py` builds a *second*
+    instance, `layers=("settlement",)`/`class_tag=None`, for `belief.
+    expected_area.area_visibility`'s `occluded` clause ("forest or
+    settlement landcover at A's believed point"), rather than forking a
+    sibling class that duplicates this one's cache/finiteness-guard logic.
+    Every pre-Pass-2 caller/test constructs this with neither argument,
+    which defaults to exactly the old forest-only behaviour -- a true
+    no-op."""
 
     conn: sqlite3.Connection
     theatre: str
+    #: Which `store.models.StoredFeature.kind` rows `occluded` even looks
+    #: at (`store.reader.containing_polygons`'s own `kinds` parameter).
+    layers: tuple[str, ...] = ("landcover",)
+    #: The tag key to test `class_values` against, or `None` to treat
+    #: *any* polygon `containing_polygons` returns from `layers` as a hit,
+    #: with no further tag filter -- the settlement instance's own shape:
+    #: `kind == "settlement"` already identifies a settlement polygon by
+    #: construction, and `landcover_class` is present only on `landcover`
+    #: rows and *built-up* `settlement` rows, not on every settlement
+    #: (`store.models.StoredFeature`'s own docstring) -- filtering on it
+    #: here would silently drop a named place-area settlement that is not
+    #: also built-up landuse.
+    class_tag: str | None = "landcover_class"
+    class_values: frozenset[str] = FOREST_LANDCOVER_CLASSES
     _cache: dict[tuple[int, int], bool] = field(default_factory=dict, repr=False)
 
     def occluded(self, x: float, z: float) -> bool:
-        """`True` iff `(x, z)` falls inside a mapped `landcover` polygon
-        whose `landcover_class` is one of `FOREST_LANDCOVER_CLASSES` --
-        `inner_rings` honoured by `containing_polygons` itself, so a
-        clearing inside a wood correctly answers `False`. `theatre` is
-        held but not yet consulted -- `containing_polygons` takes no
-        theatre argument; kept on this dataclass for the same reason
-        `check_visibility`'s own `conn`/`theatre` parameters exist, so a
-        future multi-theatre store selection has somewhere to read it
-        from without a signature change.
+        """`True` iff `(x, z)` falls inside a mapped polygon of one of
+        `layers`, matching `class_values` on `class_tag` (or any such
+        polygon at all, when `class_tag` is `None`) -- for the default
+        forest instance, a `landcover` polygon whose `landcover_class` is
+        one of `FOREST_LANDCOVER_CLASSES`. `inner_rings` honoured by
+        `containing_polygons` itself, so a clearing inside a wood
+        correctly answers `False`. `theatre` is held but not yet
+        consulted -- `containing_polygons` takes no theatre argument;
+        kept on this dataclass for the same reason `check_visibility`'s
+        own `conn`/`theatre` parameters exist, so a future multi-theatre
+        store selection has somewhere to read it from without a signature
+        change.
 
         **Non-finite `x` or `z`, by design, not by accident.** `candidate.
         x`/`candidate.z` is raw `LoGetWorldObjects` ground truth
@@ -141,10 +170,13 @@ class ForestOcclusion:
         if cached is not None:
             return cached
 
-        candidates = containing_polygons(self.conn, ["landcover"], x, z)
-        result = any(
-            feature.tags.get("landcover_class") in FOREST_LANDCOVER_CLASSES
-            for feature in candidates
-        )
+        candidates = containing_polygons(self.conn, list(self.layers), x, z)
+        if self.class_tag is None:
+            result = len(candidates) > 0
+        else:
+            result = any(
+                feature.tags.get(self.class_tag) in self.class_values
+                for feature in candidates
+            )
         self._cache[key] = result
         return result
