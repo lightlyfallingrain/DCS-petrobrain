@@ -509,6 +509,33 @@ def test_resolve_checks_different_when_a_observed() -> None:
     assert store.closed == ["B"]
 
 
+def test_sam_vignette_700s_gap_b_is_a_resolves_same() -> None:
+    """Stage 3a's own named vignette (plan, "The look"'s "A observed"
+    section): a SAM (A) is held from memory across a 700 s gap; B,
+    re-observed at A's own place with A's own composition and class,
+    resolves "same" once the look says "visible" -- the group is not
+    reported as a second contact just because the hold ran long."""
+    a = _contact("A", classification_raw="s-125")
+    b = _contact("B", classification_raw="s-125")
+    store = _FakeStore({"A": a, "B": b})
+    check = _check()
+    outcomes = resolve_checks(
+        store,
+        [check],
+        now_sim=700.0,
+        deadline_s=17.0,
+        look_evidence=_no_evidence_map(),
+        a_observed={},
+        relocation_warranted_by_b={},
+        a_was_announced={},
+        paused=False,
+    )
+    assert outcomes == [CheckOutcome("B", "A", "same", relocation_line=False)]
+    assert store.merged == [("A", "B")]
+    assert store.closed == ["B"]
+    assert store.relocated == []  # no relocation line -- A was never announced
+
+
 def test_resolve_checks_same_when_visible_and_composition_displacement_hold() -> None:
     a = _contact("A", classification_raw="s-125")
     b = _contact("B", classification_raw="s-125")
