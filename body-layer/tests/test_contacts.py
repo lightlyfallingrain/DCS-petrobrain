@@ -2696,10 +2696,9 @@ def test_clustering_cost_scales_with_live_not_total_ever_seen() -> None:
 
 
 # --- `plans/expected-area-look/plan.md` (`BL-B111`): ContactStore's own --
-# --- expected-area-check primitives. The trigger that *opens* a check --
-# --- is not wired into `ingest` yet (see that method's own comment); --
-# --- these tests exercise the primitives `resolve_checks` is built to --
-# --- call, directly. ---
+# --- expected-area-check primitives, exercised directly -- the same --
+# --- primitives `resolve_checks` and `ingest`'s own trigger wiring (see --
+# --- the dedicated section below) call. ---
 
 
 def _check_fixture(

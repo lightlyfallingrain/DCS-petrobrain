@@ -288,3 +288,157 @@ No subproject check failed at any point after the trigger-wiring revert.
   reusable pattern this codebase does not otherwise have (a "declared known
   state" overriding a derived decay reading) — worth the Architect's attention
   if a future feature needs the same thing without the stated cost.
+
+### Pass 1 (belief side: the check opens, holds and is spoken — no `body.py`)
+
+**STOPPED mid-pass and reporting, per the escalation rule ("existing tests
+must be rewritten rather than extended" needs sign-off) — the trigger is
+wired exactly as the plan's amended Stage 3a specifies, the two named
+"hard rule" tests pass unchanged, but ten other pre-existing tests across
+three files now fail for the same single, deliberate-by-design reason, and
+that blast radius was not covered by the plan's own "Measured" section.**
+`callouts.py`, `events.py`/`speech.py`, `groups.py`/`admission.py`, and the
+new `test_contacts.py` trigger tests (item 6 of Pass 1's own list) are
+**not yet built** — I stopped before them rather than build more on top of
+a mechanism whose eligibility window this finding puts in question.
+
+**What was built, exactly as specified:**
+- `belief/expected_area.py`: `a_out_of_view(a, now_sim)` — `(now_sim -
+  a.last_seen_sim) > FOCUS_DWELL_S` — extracted as its own named function
+  (the plan's own code block), with `eligible_trigger_target` calling it in
+  place of the literal `a.last_seen_sim < b_percept_t_sim`. Import added:
+  `from perception.gaze import FOCUS_DWELL_S` (no cycle — `perception.gaze`
+  imports nothing from `belief`; confirmed both by `import belief.contacts;
+  import belief.expected_area` succeeding and by the full test run below).
+- `belief/contacts.py` `ingest`'s gate branch: the dated "deliberately NOT
+  enabled" comment is gone. A gate-path fold (single passing candidate, or
+  the ambiguous-fold target) against an `eligible_trigger_target` A, with
+  fewer than `MAX_OPEN_CHECKS` (2) already open, founds B fresh and opens a
+  `kind="fold"` check instead of folding — "never fold while a check could
+  run" (plan, Stage 3a's own "Action"). A founded-fresh B (no gate match at
+  all) is then scanned via `merge_echo_or_beside_lost_target` for an
+  eligible, earlier A it could be an echo of or sit beside, under the same
+  cap; at the cap, both paths fall through to today's unchanged behaviour
+  exactly as the plan's "Third concurrent check" section specifies (a fold
+  simply folds; a fresh-founded B with no scan room stays founded, which is
+  already "silent"/"B called new" for the echo/beside-lost cases
+  respectively — no extra code needed to honour that half of the cap).
+  `b_is_threat` is evaluated once at open time (Q2's immediate release).
+  Restructured the surrounding `if`/`elif`/`else` from the reverted code's
+  two independent `if` statements into one exhaustive chain so `mypy
+  --strict` can prove `contact` is always assigned a concrete `Contact` —
+  the two-independent-`if` shape (one setting a flag, a second checking its
+  negation) type-checked fine by eye but `mypy` could not follow it
+  (`Item "None" of "Contact | None" has no attribute "id"` three times);
+  worth remembering as its own small pattern, not worth a memory file on
+  its own.
+
+**The central finding.** `eligible_trigger_target`'s amended precondition
+(`a_out_of_view`, `now_sim - last_seen_sim > FOCUS_DWELL_S` = 2.0 s) fixes
+the tautology the previous pass found (confirmed: `test_contacts.py` and
+`test_expected_area.py` — 138 tests — all pass, including both named "hard
+rule" tests, run individually and as part of the full suite below) — but
+it is **not narrow enough to avoid catching this codebase's own existing
+same-group, cross-optic, few-seconds-apart reacquisition test pattern**,
+which is a different, much larger population than the two named tests'
+own 1 s/poll continuous-tracking sequences. Ten tests now fail, all for
+the identical reason — a gate-path fold at `gap_s` in {4.0, 6.0} between an
+eligible A and a plausible same-group B, previously resolved as an
+immediate, synchronous fold (`len(store.contacts) == 1` right after
+`ingest`), now opens a held check instead (two contacts; the "same"
+verdict that would eventually re-merge them is never reached inside these
+tests, because `resolve_checks` is not wired into any production or test
+loop until Pass 2/`body.py`):
+
+- `tests/test_expected_area_trigger.py` (4): both parametrised cases of
+  `test_residual_fold_rate_for_far_binocular_near_unaided_matches_honest_rate`
+  and `test_residual_fold_rate_for_far_unaided_near_binocular_stays_high` —
+  a **pre-existing `BL-B110`-era characterisation test** for a different,
+  never-shipped mechanism (`[[BL-B110]]` Stage 2's `as_if_optic_class`,
+  the module's own docstring: "Stage 2 ... re-evaluates `passes_gate` *as
+  if* ..."; this plan's own intro says "Stage 2's trigger was never
+  built"). Its `_rates` helper calls `store.ingest` directly and reads
+  `honest_fold = len(store.contacts) == 1` as its baseline — exactly the
+  line this pass's wiring changes, at `gap_s=6.0`. Measured: residual fold
+  rate dropped to 0.00% (floor asserts ≥ 55%/70%) — meaning *every* trial
+  that used to fold now opens a check instead, which is the plan's own
+  stated design ("fires on ~99% of same-group gate re-sightings"), just
+  not previously checked against this file's own baseline measurement.
+- `tests/test_relative_distance_scenarios.py` (2):
+  `test_e3_group_seen_unaided_then_through_binoculars_stays_one_contact`
+  (`gap_s=4.0`, range 3000 m — the exact shape `a_out_of_view`'s own 2.0 s
+  threshold is sized to *not* protect: this is a genuine, intentional
+  reacquisition through a different optic 4 s later, asserting `len(store
+  .contacts) == 1` immediately) and
+  `test_cross_optic_fuse_along_sigma_never_beats_the_tighter_optics_own_sigma`.
+- `tests/test_relative_distance_sweep.py` (4):
+  `test_e3_same_and_unaided_then_binocular_folds_at_least_as_often_as_measured`,
+  `test_e3_binocular_then_unaided_folds_almost_always`,
+  `test_no_omniscience_fused_sigma_never_beats_the_tighter_optics_own_sigma`,
+  `test_no_omniscience_fused_mean_never_extrapolates_past_either_look` — all
+  via `_fuse_two_looks`'s own `gap_s: float = 4.0` default. One directly
+  measured: `unaided→binocular`, 30/30 trials "did not fold" (ceiling 15%).
+
+**Why the plan's own "Measured" section did not catch this.** Stage 3a's
+amendment (`1a6c1e55`) measured the two named `test_contacts.py` tests
+(1 s/poll, 18 matches each) and the architect's own 144-cell harness
+(6 s/700 s gaps, the plan's own scenario geometry: a believed group A and a
+*second*, possibly-different group B). Neither touches the population these
+ten tests exercise: **one real group, reacquired seconds later through a
+different optic — the ordinary, core cross-optic fusion path this
+codebase's own test suite characterises extensively**, which sits squarely
+inside `a_out_of_view`'s 2 s window at `gap_s` 4–6 s. The amendment's own
+"Not chosen" list considered `OBSERVED_WINDOW_S` (16 s, rejected for
+missing the 6 s *ridge* case) and a store-held previous-poll set, but not a
+window wide enough to exclude "two looks of the same thing, four seconds
+apart, through two different optics" — which is a different, and in this
+codebase evidently much more heavily tested, scenario than either.
+
+**What I did not do.** I did not narrow `a_out_of_view`'s window, rewrite
+any of these ten tests' expectations, or revert the `ingest` call site —
+each is exactly the kind of unilateral call the escalation rule reserves
+for the Architect/user, and this is a different, larger-blast-radius
+version of the same question the previous pass already escalated once.
+Two concrete directions, for whoever picks this up:
+
+1. **Widen the trigger's own exemption window** past `FOCUS_DWELL_S`
+   (2.0 s) to something that also covers an ordinary few-seconds-apart
+   cross-optic reacquisition of the *same* group — at the cost of giving
+   up more of the "ridge" case (A masked and B appearing on its bearing
+   within that same window) the amendment itself already accepted as an
+   unmeasured risk. `OBSERVED_WINDOW_S` (16 s) was already considered and
+   rejected for a different reason (the 6 s ridge case); a value between
+   2 s and 16 s, newly measured against *this* suite specifically, is the
+   open middle ground.
+2. **Accept that these ten tests' premise has changed** (a same-group,
+   cross-optic reacquisition now defers through a hold, resolving only
+   once Pass 2 wires `resolve_checks` into a poll loop) and have Pass 2
+   either (a) rewrite them to call `resolve_checks` and assert the
+   eventual merged state, or (b) give each its own fake `_StoreLike`-driven
+   resolution step matching the plan's own `test_resolve_checks_same_...`
+   pattern already in `test_expected_area.py`.
+
+Not raised as a third option, because the plan's own Stage 3a text is
+explicit about it ("never fold while a check could run"): narrowing which
+*candidates* open a check (e.g. only an A whose certainty has decayed past
+`"observed"`) rather than widening the *time* window was already
+considered and rejected in the amendment's own "Not chosen" list
+(`certainty_of(A) != "observed"`, 16 s) for missing the 6 s ridge case —
+the same tension applies here, just discovered against a different test
+population.
+
+**Checks, this pass:**
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass (80 source files).
+- `pytest tests/test_contacts.py tests/test_expected_area.py -q`: pass (138
+  passed) — both named "hard rule" tests confirmed unchanged among them.
+- `pytest tests -q` (full suite): **3096 passed, 4 xfailed, 10 failed** —
+  the ten tests named above. No other file affected.
+
+**Files changed, this pass:** `src/belief/expected_area.py` (`a_out_of_view`
+extracted, `eligible_trigger_target` amended), `src/belief/contacts.py`
+(`ingest`'s gate/founding branches wired to the trigger, per above),
+`tests/test_contacts.py` (the Expected-area-look section header comment
+updated to no longer say the trigger "is not wired into `ingest` yet" —
+no new tests added this pass; see "What I did not do").

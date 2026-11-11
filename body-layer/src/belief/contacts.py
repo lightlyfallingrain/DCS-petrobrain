@@ -36,6 +36,7 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -103,7 +104,11 @@ from belief.events import (
     motion_event_kind,
 )
 from belief.expected_area import (
+    MAX_OPEN_CHECKS,
     ExpectedAreaCheck,
+    b_is_threat,
+    eligible_trigger_target,
+    merge_echo_or_beside_lost_target,
 )
 from belief.groups import Group, GroupStore
 from belief.motion import MotionBelief, MotionState, fold_motion
@@ -1415,64 +1420,71 @@ class ContactStore:
                     and passes_gate(percept, candidate, now_sim)
                 ]
 
-                # **`BL-B111` trigger wiring deliberately NOT enabled
-                # here.** `plans/expected-area-look/plan.md` Stage 3a
-                # calls for opening a check on every gate-path fold/
-                # ambiguous-fold against an eligible A -- but `eligible_
-                # trigger_target`'s own precondition (`a.last_seen_sim <
-                # now_sim`, "A was not seen this poll") is true of nearly
-                # *every* ordinary gate match by construction (a passing
-                # candidate's `last_seen_sim` is always from a strictly
-                # earlier poll than the percept now being matched against
-                # it), so wiring this in as specified fires on every
-                # continuity-free repeated reacquisition, not only a
-                # genuine "not currently in view" case. Measured directly
-                # against this file's own existing suite: it breaks
-                # `test_slow_directional_drift_never_reports_a_range_
-                # beyond_the_detection_cap` and `test_position_runaway_
-                # does_not_corrupt_a_second_contacts_cardinality`, both of
-                # which exercise a same-object sequence of gate-path (not
-                # continuity) reacquisitions specifically to isolate the
-                # spatial gate's own robustness -- a scenario the plan's
-                # own Finding 1 says real flight rarely produces (ordinary
-                # continuous tracking resolves via continuity, leaving the
-                # gate for genuine gaps), but which these two tests
-                # deliberately construct anyway. Per this project's own
-                # escalation rule ("existing tests must be rewritten
-                # rather than extended" needs explicit sign-off, root
-                # `CLAUDE.md`'s "Escalation Rules"), this needs the
-                # Architect/user to either narrow the trigger's own
-                # eligibility condition or accept rewriting those two
-                # tests' expectations -- not a unilateral call here. The
-                # mechanism itself (`belief.expected_area`, `ContactStore.
-                # open_check`/`release_check`/`merge_contact`/
-                # `mark_lost_now`/`has_open_check`/`callout_held`) is
-                # built and unit-tested; only this one call site -- the
-                # trigger's own insertion into `ingest` -- is withheld
-                # pending that decision. See `plans/expected-area-look/
-                # implementation.md` for the full writeup.
                 if len(passing) == 1:
-                    # A single passing candidate is also unambiguous --
-                    # same reset as the continuity branch above.
-                    contact = passing[0]
-                    contact.record(percept)
-                    contact.fold_displacement_m = 0.0
+                    fold_target: Contact | None = passing[0]
+                    ambiguous_fold = False
                 else:
                     fold_target = (
                         self._fold_target_for_ambiguous_candidates(passing, percept)
                         if len(passing) >= 2
                         else None
                     )
-                    if fold_target is not None:
-                        # The one call site that folds: `ambiguous_fold=True`
-                        # is what tells `Contact.record` to bound this
-                        # fuse's own displacement (`plans/
+                    ambiguous_fold = True
+
+                observer = GeoPosition(
+                    x=percept.ownship_at_observation.x,
+                    z=percept.ownship_at_observation.z,
+                    alt_m=percept.ownship_at_observation.alt_m,
+                )
+
+                # `plans/expected-area-look/plan.md` Stage 3a's trigger,
+                # "amended 2026-11-11" (`belief.expected_area.
+                # eligible_trigger_target`/`a_out_of_view` -- see that
+                # module for why the literal "A was not seen this poll"
+                # reading was wrong and what replaces it,
+                # `.claude/agent-memory/implementer/
+                # feedback_tautological_trigger_precondition.md`): a
+                # gate-path fold against an eligible, out-of-view A never
+                # folds -- B is founded fresh and held instead, so a
+                # check can decide whether B really is a second group.
+                # The "Third concurrent check" cap (plan, main loop's
+                # call 2026-11-11): at `MAX_OPEN_CHECKS` already open,
+                # this path falls through to today's fold unchanged --
+                # "B called new" is not possible here (fold_target, if
+                # any, is a real candidate), so the cap is honoured by
+                # simply not opening a third check.
+                if (
+                    fold_target is not None
+                    and len(self._checks) < MAX_OPEN_CHECKS
+                    and eligible_trigger_target(fold_target, percept.t_sim, observer)
+                ):
+                    contact = Contact.from_percept(self._new_contact_id(), percept)
+                    self._contacts[contact.id] = contact
+                    threat = b_is_threat(contact)
+                    self.open_check(
+                        ExpectedAreaCheck(
+                            b_id=contact.id,
+                            a_id=fold_target.id,
+                            kind="fold",
+                            opened_sim=now_sim,
+                            a_snapshot=copy.deepcopy(fold_target),
+                            released=threat,
+                            released_sim=now_sim if threat else None,
+                        )
+                    )
+                elif fold_target is not None:
+                    if ambiguous_fold:
+                        # The one call site that folds ambiguously:
+                        # `ambiguous_fold=True` is what tells
+                        # `Contact.record` to bound this fuse's own
+                        # displacement (`plans/
                         # bounded-fold-displacement/plan.md`, `BL-B58`/
-                        # `BL-B59`) -- the budget tracks the *worst single
-                        # unretired fold* (`max()`, never accumulated),
-                        # never reset here (`Contact.fold_displacement_m`'s
-                        # own docstring; `plans/group-cohesion-admission-
-                        # gate/plan.md` §4).
+                        # `BL-B59`) -- the budget tracks the *worst
+                        # single unretired fold* (`max()`, never
+                        # accumulated), never reset here
+                        # (`Contact.fold_displacement_m`'s own
+                        # docstring; `plans/
+                        # group-cohesion-admission-gate/plan.md` §4).
                         contact = fold_target
                         position_before = contact.position
                         contact.record(percept, ambiguous_fold=True)
@@ -1484,8 +1496,54 @@ class ContactStore:
                             ),
                         )
                     else:
-                        contact = Contact.from_percept(self._new_contact_id(), percept)
-                        self._contacts[contact.id] = contact
+                        # A single passing candidate is also
+                        # unambiguous -- same reset as the continuity
+                        # branch above.
+                        contact = fold_target
+                        contact.record(percept)
+                        contact.fold_displacement_m = 0.0
+                else:
+                    contact = Contact.from_percept(self._new_contact_id(), percept)
+                    self._contacts[contact.id] = contact
+
+                    # Stage 3a's trigger, third case: B founded fresh
+                    # (no gate match at all) -- is there an earlier,
+                    # eligible A it could plausibly be an echo of, or
+                    # sit beside? At the cap, both outcomes
+                    # (`merge_echo_or_beside_lost_target` returning
+                    # "echo" or "beside_lost") already equal "leave B
+                    # as founded" -- Decision 2's "silent" for echo
+                    # and "B called new" for beside-lost are both
+                    # exactly what not opening a check already does
+                    # here -- so the cap is honoured by skipping the
+                    # scan entirely.
+                    if len(self._checks) < MAX_OPEN_CHECKS:
+                        certainty_of_a_is_lost = {
+                            candidate.id: certainty_of(candidate, now_sim) == "lost"
+                            for candidate in self._contacts.values()
+                            if candidate.id != contact.id
+                        }
+                        match = merge_echo_or_beside_lost_target(
+                            contact,
+                            list(self._contacts.values()),
+                            now_sim,
+                            observer,
+                            certainty_of_a_is_lost=certainty_of_a_is_lost,
+                        )
+                        if match is not None:
+                            nearest, kind = match
+                            threat = b_is_threat(contact)
+                            self.open_check(
+                                ExpectedAreaCheck(
+                                    b_id=contact.id,
+                                    a_id=nearest.id,
+                                    kind=kind,
+                                    opened_sim=now_sim,
+                                    a_snapshot=copy.deepcopy(nearest),
+                                    released=threat,
+                                    released_sim=now_sim if threat else None,
+                                )
+                            )
 
             claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id

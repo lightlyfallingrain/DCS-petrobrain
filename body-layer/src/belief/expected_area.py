@@ -63,6 +63,7 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.position_belief import _down_axis_unit
+from perception.gaze import FOCUS_DWELL_S
 from perception.geometry import GeoPosition, angular_delta_deg, bearing_deg, range_m
 
 #: Mirrors `belief.optic_policy.LOOK_SWEEP_SIGMA` (3.0) -- **declared
@@ -242,18 +243,34 @@ def probe_points_for(
 # --- The trigger (Stage 3a) -------------------------------------------
 
 
+def a_out_of_view(a: Contact, now_sim: float) -> bool:
+    """A is held only in memory: not seen within the current look (one
+    gaze dwell). **Amended 2026-11-11** (plan, "Trigger precondition,
+    amended 2026-11-11"): the literal reading, `a.last_seen_sim < now_sim`,
+    is true of nearly every ordinary gate match by construction -- a
+    passing candidate's own `last_seen_sim` is always from a strictly
+    earlier poll than the percept now being matched against it -- which
+    fired on all 18 gate matches of a contact tracked continuously
+    through the gate at 1 s polls and broke two existing `test_contacts.py`
+    tests (`feedback_tautological_trigger_precondition.md`). `FOCUS_DWELL_S`
+    is how long one look stays on one o'clock; a contact seen within it is
+    in the current look, one older than it is held from memory. Uses
+    perceived state only (`last_seen_sim`), never DCS truth."""
+    return (now_sim - a.last_seen_sim) > FOCUS_DWELL_S
+
+
 def eligible_trigger_target(
     a: Contact, b_percept_t_sim: float, observer: GeoPosition
 ) -> bool:
     """Whether `a` qualifies to have a check opened against it for a
     sighting at `b_percept_t_sim` -- the two conditions common to every
     trigger path (gate fold, ambiguous fold, merge-echo, beside-lost-A):
-    A was not seen this poll, and A's area fits one look (Decision 1).
-    Callers combine this with their own path-specific condition (the gate
-    actually matching A, or `contacts_plausibly_same`); this function
-    does not decide *which* A, only whether a given candidate A is a
-    legal target at all."""
-    return a.last_seen_sim < b_percept_t_sim and area_fits_one_look(
+    A is out of view (`a_out_of_view`), and A's area fits one look
+    (Decision 1). Callers combine this with their own path-specific
+    condition (the gate actually matching A, or `contacts_plausibly_same`);
+    this function does not decide *which* A, only whether a given
+    candidate A is a legal target at all."""
+    return a_out_of_view(a, b_percept_t_sim) and area_fits_one_look(
         a, b_percept_t_sim, observer
     )
 
