@@ -828,11 +828,18 @@ def _is_merge_echo_of_earlier_contact(
     member_ids` asks it of a member reached by iterating a group's
     membership with no event in hand -- both questions are "does an
     earlier, live, plausibly-same contact already account for this one,"
-    answered the same way regardless of which caller is asking."""
+    answered the same way regardless of which caller is asking.
+
+    **`plans/expected-area-look/plan.md` Stage 3a**: a pair the store has
+    already told apart (`ContactStore.record_believed_distinct`, an
+    expected-area check's own "different" verdict) is excluded here --
+    `is_believed_distinct` is checked first, so that verdict is never
+    silently reversed by this suppression on some later poll."""
     return any(
         other.id != contact.id
         and other.first_seen_sim < contact.first_seen_sim
         and certainty_of(other, now_sim) != "lost"
+        and not store.is_believed_distinct(contact.id, other.id)
         and contacts_plausibly_same(contact, other, now_sim)
         for other in store.contacts
     )
@@ -1083,6 +1090,20 @@ class CalloutScheduler:
         for event in store.unacknowledged_events:
             if event.kind not in _TEMPLATED_KINDS or event.id in self._consumed:
                 continue
+            if store.callout_held(event.contact_id):
+                # `plans/expected-area-look/plan.md` Stage 3a -- "the hold
+                # check sits before `CALLOUT_MAX_AGE_S` and defers without
+                # consuming" (`ContactStore.callout_held`'s own docstring).
+                # Placed first, ahead of every other gate below: while B
+                # is held, nothing about it should speak yet, including
+                # the merge-echo suppression further down in `_render_
+                # event` -- this is what keeps an echo-kind-held B from
+                # being silently, permanently consumed as an echo before
+                # the check has had a chance to say "different" (plan's
+                # "while held" bullet, "a held echo-kind B is not
+                # consumed as an echo"). Deferred, not lost: re-evaluated
+                # every tick until the check releases it.
+                continue
             if (
                 event.kind
                 in (
@@ -1169,7 +1190,25 @@ class CalloutScheduler:
                 ):
                     self._consumed.add(event.id)
                     continue
-            if now_sim - event.t_sim > CALLOUT_MAX_AGE_S:
+            # `plans/expected-area-look/plan.md` Stage 3a -- "a released
+            # contact's events age from `max(t_sim, released_sim)`": a
+            # contact held, then released, must not have its own
+            # original `event.t_sim` (from before the hold started)
+            # counted as elapsed age against it the instant it is let go
+            # -- the hold itself must never be what expires the
+            # candidate. `check_for` reads the check that may have just
+            # released this contact (or `None`, the ordinary case);
+            # `released_sim` is `None` while a check is still open, which
+            # `store.callout_held` above already excluded from reaching
+            # this line, so the `is not None` guard here only ever sees
+            # an already-released check.
+            check = store.check_for(event.contact_id)
+            age_anchor_sim = (
+                max(event.t_sim, check.released_sim)
+                if check is not None and check.released_sim is not None
+                else event.t_sim
+            )
+            if now_sim - age_anchor_sim > CALLOUT_MAX_AGE_S:
                 self._consumed.add(event.id)
                 continue
             # `plans/callout-observability-gate/debug.md` -- the

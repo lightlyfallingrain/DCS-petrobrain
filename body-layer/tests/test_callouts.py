@@ -58,6 +58,7 @@ from belief.events import (
     CONTACT_RANGE_CROSSED,
     Event,
 )
+from belief.expected_area import ExpectedAreaCheck
 from belief.groups import Group
 from belief.motion import MotionBelief
 from belief.speech import group_callout_member_id, render_group_report
@@ -3140,3 +3141,85 @@ def test_hold_routine_defers_group_disclosure_too() -> None:
     scheduler.tick(store, now_sim=0.0)
 
     assert scheduler.tick(store, now_sim=1.0, hold_routine=True) == []
+
+
+# --- `plans/expected-area-look/plan.md` (`BL-B111`) Stage 3a -- the hold --
+# --- check, ahead of `CALLOUT_MAX_AGE_S`; age measured from release; -----
+# --- the merge-echo skip for a believed-distinct pair. -------------------
+
+
+def test_held_callout_is_deferred_past_callout_max_age_s_and_still_speaks_on_release() -> (
+    None
+):
+    """E3: "a held callout never silently becomes no callout." B's own
+    `CONTACT_DETECTED` is held by an open check well past `CALLOUT_
+    MAX_AGE_S` -- unlike `test_expired_candidate_is_never_spoken_and_
+    never_acknowledged` above, this must not be dropped, because the
+    hold check (`ContactStore.callout_held`) sits *before* the age check
+    in `tick`'s own filter loop. Once released, the event speaks
+    immediately even though its own `t_sim` is long past `CALLOUT_
+    MAX_AGE_S` -- "a released contact's events age from `max(t_sim,
+    released_sim)`", so release, not the original founding, restarts the
+    age budget."""
+    store = ContactStore()
+    store.ingest(
+        [_br_observation(obs_id="OBS_B", t_sim=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    b_id = store.contacts[0].id
+    a_snapshot = store.contact(b_id)
+    assert a_snapshot is not None
+    store.open_check(
+        ExpectedAreaCheck(
+            b_id=b_id,
+            a_id="A_NOT_PRESENT",
+            kind="fold",
+            opened_sim=0.0,
+            a_snapshot=a_snapshot,
+        )
+    )
+    scheduler = CalloutScheduler()
+
+    past_deadline = CALLOUT_MAX_AGE_S + 5.0
+    assert scheduler.tick(store, now_sim=past_deadline) == []
+    # Deferred, not consumed -- still unacknowledged, unlike the plain
+    # expiry case.
+    assert len(store.unacknowledged_events) == 1
+
+    store.release_check(b_id, now_sim=past_deadline)
+    assert scheduler.tick(store, now_sim=past_deadline) == ["Ural truck."]
+
+
+def test_believed_distinct_pair_is_exempt_from_merge_echo_suppression() -> None:
+    """Stage 3a: a pair the store has already told apart
+    (`ContactStore.record_believed_distinct`, an expected-area check's
+    own "different" verdict) must never be silenced as an echo of each
+    other again -- without this, `test_merge_echo_refounding_near_a_
+    live_contact_is_not_spoken`'s own geometry would suppress C a second
+    time even after a check had already ruled it genuinely different."""
+    store = ContactStore()
+    store.ingest(
+        [_br_observation(obs_id="OBS_A", t_sim=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    a_id = store.contacts[0].id
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == ["Ural truck."]
+
+    # C founds fresh at t=6 (too far from A, range 3900 vs 3000, to pass
+    # the spatial gate at all -- `passes_gate` is `False` here) but is
+    # still `contacts_plausibly_same` (the founding-time scan's own
+    # looser, symmetric test), so `_is_merge_echo_of_earlier_contact`
+    # would otherwise suppress C's `CONTACT_DETECTED` as an echo of A.
+    store.ingest(
+        [_br_observation(obs_id="OBS_C", t_sim=6.0, range_m=3900.0)],
+        now_sim=6.0,
+    )
+    store.tick(now_sim=6.0)
+    c_id = next(c.id for c in store.contacts if c.id != a_id)
+
+    store.record_believed_distinct(a_id, c_id)
+
+    assert scheduler.tick(store, now_sim=9.0) == ["Ural truck."]
