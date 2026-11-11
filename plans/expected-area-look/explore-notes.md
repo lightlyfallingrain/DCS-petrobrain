@@ -25,3 +25,13 @@ Reading (main loop):
    called new at once.
 Also accepted with the recommendation: `land.isVisible` is terrain-only, so a place in a town is
 "cannot look".
+
+## Plan Decisions 1–4 (user, verbatim, 2026-11-11)
+
+Asked Decisions 1–4 of `plan.md` with recommendations, told plainly that 1 and 2 narrow two of the
+goal-check answers (1: no check when A's area outgrew one look, so a second group there stays
+unannounced as today — the exception to E9; 2: echo case silent when he cannot look, overriding
+"budget spent → B new" there), and that the third-concurrent-check case would follow Decision 2's
+rule.
+
+> *"as recommended"*

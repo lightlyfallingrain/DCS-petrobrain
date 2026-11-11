@@ -392,7 +392,7 @@ regime, where the look **does** apply, which makes Decision 1's exclusion narrow
 
 ### Decisions
 
-**Decision 1 — A group with no place left to look at: no check (recommend), or "cannot look → B
+**Decision 1 — ANSWERED 2026-11-11, as recommended (user: *"as recommended"*). A group with no place left to look at: no check (recommend), or "cannot look → B
 new"?**
 - Armour, 700 s: A's area is 5–6 km wide, so no look can cover it. Read literally, the settled
   answers make every such re-sighting a duplicate: **0% → 100%**, which breaks the "duplicates
@@ -403,7 +403,7 @@ new"?**
 - Cost: different groups in that case stay folded, as today, 100% unannounced. Only a narrower
   belief fixes that (`[[BL-B112]]`).
 
-**Decision 2 — Merge-echo case when he cannot look (including budget spent): stay silent as
+**Decision 2 — ANSWERED 2026-11-11, as recommended (user: *"as recommended"*). Merge-echo case when he cannot look (including budget spent): stay silent as
 today (recommend), or call B new?**
 - The user's answers say both *"BL-B114 keeps only the cannot-look cases"* and *"budget spent → B
   called new"*. In the echo case these conflict.
@@ -411,7 +411,7 @@ today (recommend), or call B new?**
   voice BL-B113's 4–11% short-gap same-optic splits.
 - "Budget spent → B new" then applies to the fold and beside-lost cases.
 
-**Decision 3 — Relocation line: "spoken bucket changed" alone, or also "moved ≥ one bucket"
+**Decision 3 — ANSWERED 2026-11-11, as recommended (user: *"as recommended"*). Relocation line: "spoken bucket changed" alone, or also "moved ≥ one bucket"
 (recommend)?**
 - Measured on a stationary same group: bucket change alone fires **6–65%**, which is jitter at
   the 0.5 km edge. With the ≥ 500 m / ≥ 30° condition it is **0% same-optic, 12–35% eye→bino**.
@@ -419,8 +419,14 @@ today (recommend), or call B new?**
   *"now at"* wording was chosen for.
 - **Recommend:** both conditions.
 
-**Decision 4 — Probe points: centre + ±2σ along-line, all clear (recommend), or centre only?**
+**Decision 4 — ANSWERED 2026-11-11, as recommended (user: *"as recommended"*). Probe points: centre + ±2σ along-line, all clear (recommend), or centre only?**
 - Centre only gives fewer "cannot look" results in hilly terrain (fewer duplicates), but it calls
   a place "seen empty" while a group could sit masked behind the crest a few hundred metres on.
   That breaks E5 (absence counts only where he could have seen).
 - **Recommend:** all three, and read the cannot-look reasons in the first sortie.
+
+**Third concurrent check (plan check's question; main loop's call, local and reversible,
+2026-11-11):** at most two checks are open at once (matching `MAX_PROBE_POINTS` = 6). A trigger
+that would open a third is handled exactly like "budget spent": Decision 2's rule for the echo
+case (silent), "B called new" for the fold and beside-lost cases. Stage 3a enforces the cap and
+tests it.
