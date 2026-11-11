@@ -442,3 +442,137 @@ extracted, `eligible_trigger_target` amended), `src/belief/contacts.py`
 `tests/test_contacts.py` (the Expected-area-look section header comment
 updated to no longer say the trigger "is not wired into `ingest` yet" —
 no new tests added this pass; see "What I did not do").
+
+### Pass 1, continued — resolved the blast-radius stop, finished the pass
+
+**Main-loop resolution (local, reversible — no further user decision
+needed), stated before any code changed:** in flight, a same-group
+re-sighting seconds later through a different optic carries object
+continuity (`perception.naked_eye_source`'s majority-vote
+`continues_observation_id`), so it resolves at `ContactStore.
+_resolve_continuity` and never reaches the gate at all — the ten failing
+tests drive the gate path directly, bypassing continuity by construction
+(their own `_observation`-style helpers default `continues_observation_id
+=None`), which is a legitimate way to characterise the gate's own
+fold/fusion math but not a scenario that recurs in flight under this
+trigger. The fix: make the expected-area trigger a `ContactStore`
+capability, **off unless enabled** (`expected_area_checks: bool = False`
+constructor parameter), so the ten gate-characterisation tests (and every
+other pre-existing `ContactStore()` call site) are unaffected, and a
+caller that wants the trigger passes the flag explicitly. `body.py`
+(Pass 2) is the one production call site; Pass 1's own new trigger tests
+pass it explicitly.
+
+**Verified the premise before relying on it, per the dispatch's own
+instruction, rather than assuming it:**
+- `perception/naked_eye_source.py`'s `_object_id_to_last_observation_id`
+  map (keyed by DCS `object_id`, module docstring point 6) is a field on
+  the `NakedEyePerceptionSource` instance itself, cleared only on a
+  genuine mission restart (`reset_for_new_mission`) — never per-poll, and
+  never on an optic change.
+- `body._apply_active_gaze` (the one place `body.py` drives perception
+  each poll) sets `source.optic = optic` directly on that same instance
+  (`for source in sources: if isinstance(source, NakedEyePerceptionSource):
+  ... source.optic = optic`) — unaided and binocular/sight observations
+  both flow through the *same* instance and the *same* persistent map, so
+  a cluster's majority-vote correlation survives the optic switch by
+  construction, not by any expected-area-specific wiring.
+- The trust window for that correlation is `belief.decay.
+  object_id_continuity_valid`'s `OBJECT_ID_MEMORY_S` (= `IDENTITY_
+  HALF_LIFE_S`, 600 s default) — two orders of magnitude wider than the
+  4–6 s gaps the ten failing tests use, confirmed by reading the constant
+  directly rather than assuming its scale.
+- Confirmed the inverse directly: `belief.optic_policy.py` (the binocular
+  "GLASSING" look machinery) contains no `Observation(` construction at
+  all — the binocular look's own `Observation`s are produced by this same
+  `NakedEyePerceptionSource._build_observation`, with `self.optic` simply
+  swapped beforehand, not a second, independent construction path that
+  might have its own (missing) continuity wiring.
+- The premise holds. Had it not — had binocular glassing produced
+  `Observation`s through an independent path with no continuity map —
+  this resolution would have been wrong (the trigger would fire on
+  ordinary glassing in production too), and this would have stopped here
+  to report it instead of proceeding.
+
+**Finished the rest of Pass 1 on that resolution**, all in
+`feature/expected-area-look`'s own continuation of this work:
+
+1. `belief/contacts.py`: `ContactStore.__init__(self,
+   expected_area_checks: bool = False)`; both trigger call sites in
+   `ingest` gated on `self._expected_area_checks`.
+2. `belief/callouts.py`: `store.callout_held(event.contact_id)` checked
+   first in `tick`'s own per-event filter loop, ahead of `CALLOUT_
+   MAX_AGE_S` and the merge-echo suppression inside `_render_event` — a
+   held contact's events are deferred, never consumed. A released
+   contact's events now age from `max(event.t_sim, check.released_sim)`.
+   `_is_merge_echo_of_earlier_contact` now excludes a believed-distinct
+   pair (`store.is_believed_distinct`).
+3. `belief/events.py`: `CONTACT_RELOCATED`/`CONTACT_ABSENT` constants —
+   minted directly by their caller (`resolve_checks`), not derived from a
+   before/after comparison like every other kind in this module.
+   `belief/contacts.py`: `ContactStore.record_relocation`/`record_
+   absence`, each a one-line event mint, deliberately separate from
+   `mark_lost_now` (the state rewind and the "say something" decision
+   stay two actions). `belief/expected_area.py`: `_StoreLike` extended;
+   `resolve_checks`'s "same" branch mints `CONTACT_RELOCATED` when
+   `relocation_line` fires, "absent" mints `CONTACT_ABSENT` only when
+   `a_was_announced` was already true. `belief/speech.py`: the two
+   templates — *"That group, now &lt;clock&gt; o'clock, &lt;range&gt;."*
+   (neutral lead, not `_contact_report_text`'s unit-type lead) and the
+   fixed *"That group is no longer at its last place."* `belief/
+   callouts.py`: both kinds added to `_TEMPLATED_KINDS` (the module's own
+   "breadth" comments updated 5/6 → 7/8 to match); the same-tick
+   suppression rule — when a `CONTACT_REACQUIRED` candidate is actually
+   rendered, any unacknowledged `CONTACT_RELOCATED` for the same contact
+   is acknowledged without being spoken.
+4. `belief/contacts.py`'s `tick` extends its existing not-`lost` filter
+   on `self._groups.reconcile`'s input with `not self.has_open_check(...)`.
+   `mission_memory/admission.py`'s `step` skips a held contact's admission
+   entirely, same primitive.
+5. Tests: six new trigger-wiring tests in `test_contacts.py` (fold at 6 s/
+   700 s, never on continuous ≤2 s even with the flag on, beside-lost with
+   immediate threat release, merge-echo for a not-yet-lost target, the
+   two-open-checks cap falling through to an ordinary fold); two in
+   `test_callouts.py` (E3's "a held callout never silently becomes no
+   callout", the believed-distinct exemption, the `CONTACT_RELOCATED`/
+   `CONTACT_REACQUIRED` same-tick suppression); four in
+   `test_expected_area.py` (`record_relocation`/`record_absence` minted
+   only under their stated conditions, plus the SAM vignette — a SAM held
+   across a 700 s gap, B is A, resolves "same" — driving `resolve_checks`
+   directly with a hand-built, all-clear `LookEvidence`); three in
+   `test_speech.py` (the two new templates' wording, the missing-bearing
+   fallback); two in `test_contacts.py`/`test_mission_memory_admission.py`
+   (a held contact excluded from group membership and from mission-memory
+   admission). Every new negative-space assertion (the suppression rule,
+   the believed-distinct exemption) was confirmed red for the stated
+   reason by temporarily breaking the fix and re-running, then restored.
+
+**No existing test needed rewriting** — the ten previously-failing tests,
+and every other pre-existing test, pass unchanged now that the trigger is
+off by default.
+
+**Checks, this continuation:**
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass (80 source files).
+- `pytest tests -q` (full suite, run twice across this continuation as
+  code landed): 3124 passed, 4 xfailed (first run, through the groups/
+  admission step); a final run including the SAM vignette test was
+  in flight at hand-off — see the implementer's own final report for its
+  result.
+
+**What Pass 2 needs to know:**
+- `body.py` must construct its `ContactStore` with `expected_area_checks
+  =True` — the trigger stays silent in production until that one argument
+  is added.
+- `resolve_checks`'s "same"/"absent" branches already mint `CONTACT_
+  RELOCATED`/`CONTACT_ABSENT` — Pass 2 does not need to add that minting
+  itself, only to call `resolve_checks` once per poll and supply its
+  `LookEvidence`/`a_observed`/`relocation_warranted_by_b`/`a_was_announced`
+  state params from real optic/enrichment state.
+- The callout-suppression rule depends on `CalloutScheduler.tick` actually
+  rendering a `CONTACT_REACQUIRED` candidate in the same poll the merge
+  happened — true whenever `resolve_checks` and `CalloutScheduler.tick`
+  run in the same poll loop iteration (the ordinary case), but if Pass 2's
+  own poll ordering ever separates them across polls, re-check this rule's
+  premise.
