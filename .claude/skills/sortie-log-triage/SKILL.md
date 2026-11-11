@@ -1,6 +1,6 @@
 ---
 name: sortie-log-triage
-description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth, dcs-detection-trace, dcs-speech (.jsonl) -- plus the 9K113 slew logs (aircraft_layer_slew_trace.log per-frame, --slew-trace per-poll, BL-B66 Stage 4b). Resolve the filenames first: pre-BL-11-Stage-5 they are single files every sortie appended to, so the flight is a region; once stamped, glob for the newest and take all three from the same stamp. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range, slew rate/granularity during a hand-slew. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
+description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth, dcs-detection-trace, dcs-speech (.jsonl) -- plus the 9K113 slew logs (aircraft_layer_slew_trace.log per-frame, --slew-trace per-poll, BL-B66 Stage 4b) and the expected-area-check log (--expected-area-log, plans/expected-area-look/plan.md Pass 3). Resolve the filenames first: pre-BL-11-Stage-5 they are single files every sortie appended to, so the flight is a region; once stamped, glob for the newest and take all three from the same stamp. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range, slew rate/granularity during a hand-slew, expected-area checks opened/verdicts/cannot-look causes/merge-echo suppressions. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
 type: user-invocable
 ---
 
@@ -11,6 +11,7 @@ python3 .claude/skills/sortie-log-triage/scripts/triage.py           # all defau
 python3 .../triage.py --skip-trace                                   # fast pass, skips the GBs
 python3 .../triage.py --belief PATH --trace PATH --speech PATH
 python3 .../triage.py --slew PATH --body-slew PATH                   # the 9K113 slew logs, see below
+python3 .../triage.py --expected-area PATH                           # the expected-area-check log, see below
 python3 .../triage.py --no-snapshot                                  # only after the flight ended
 ```
 
@@ -140,6 +141,28 @@ because an utterance matching no command is otherwise unobservable.
   `ownship_bank_deg`) and `sight_fov` (objects inside the simulated sight's FOV that poll) --
   `body-layer/CLAUDE.md`'s `--slew-trace` paragraph has the full column list. A coarse cross-check against the per-frame
   file above, not a replacement for it -- body-layer's 1 Hz poll cannot see a slew in progress.
+
+**Expected-area checks** (`--expected-area-log`, `plans/expected-area-look/plan.md` Pass 3, no
+default path -- the flag itself has none, same posture as `--group-trace`/`--mission-memory`):
+one row per check *opened* (`event: "open"`, one per poll while held) and one per *verdict*
+(`event: "verdict"`, `"different"`/`"same"`/`"absent"`/`"cannot_look"`). Built because neither of
+the other three logs fits a belief-only state transition with no ground-truth pairing of its own
+(see `body/expected_area_log.py`'s own module docstring) -- this is the closest existing pattern,
+the seventh per-run JSONL log, not a new mechanism.
+
+- *distinct checks opened* (the b_id/a_id pair count, not the open-row count -- a check open for
+  8 s at ~1 Hz produces ~8 open-rows for one trigger) and the *check kind* split (`fold`/`echo`/
+  `beside_lost`) -- answers the plan's own top-listed open risk, "how often does the trigger fire
+  in flight".
+- *verdict histogram* and *cannot-look cause* (`area_too_wide`/`look_not_completed`/
+  `outside_cockpit_mask`/`out_of_presence_range`/`occluded`/`probe_seq_mismatch`/`probe_stale`/
+  `probe_no_answer`/`probe_blocked`) -- which clause of `area_visibility` decided a hold could not
+  be resolved, excluding the merge-echo rows counted separately below.
+- *merge-echo suppressed* -- a `"cannot_look"` verdict on an `"echo"`-kind check is `[[BL-B114]]`'s
+  own flight signal: the deliberate silence Decision 2 keeps "as today", not a missing fact. Count
+  it directly rather than folding it into the cannot-look-cause histogram above.
+- *"that group, now ..." (CONTACT_RELOCATED)* -- how many `"same"` verdicts actually spoke the
+  relocation line, against how many `"same"` verdicts there were in total.
 
 ## What it deliberately does not do
 

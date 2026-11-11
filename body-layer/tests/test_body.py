@@ -8275,3 +8275,47 @@ class TestResolveExpectedAreaChecks:
 
         assert runner.store.check_for(b_id) is None
         assert not runner.store.callout_held(b_id)
+
+    def test_expected_area_log_sink_receives_an_open_row(self) -> None:
+        """`plans/expected-area-look/plan.md` Pass 3 --
+        `runner.expected_area_log_sink`, read fresh each poll (same
+        plain-field shape as `group_trace_sink`), gets one `"open"` row
+        per poll a check stays open."""
+        runner, ownship, a_id, b_id = self._runner_with_open_check()
+        rows: list[dict[str, object]] = []
+        runner.expected_area_log_sink = rows.append
+
+        body_module._resolve_expected_area_checks(runner, ownship)
+
+        opens = [r for r in rows if r.get("event") == "open"]
+        assert len(opens) == 1
+        assert opens[0]["b_id"] == b_id
+        assert opens[0]["a_id"] == a_id
+        assert opens[0]["kind"] == "fold"
+
+    def test_expected_area_log_sink_receives_a_verdict_row_with_cause(self) -> None:
+        """The paused-resolution path (previous test) also reaches a
+        verdict this same poll -- the sink's `"verdict"` row carries
+        `cannot_look_cause`, not just the bare verdict string."""
+        runner, ownship, _a_id, b_id = self._runner_with_open_check()
+        runner.attack_run_state = AttackRunState()
+        rows: list[dict[str, object]] = []
+        runner.expected_area_log_sink = rows.append
+
+        body_module._resolve_expected_area_checks(runner, ownship)
+
+        verdicts = [r for r in rows if r.get("event") == "verdict"]
+        assert len(verdicts) == 1
+        assert verdicts[0]["b_id"] == b_id
+        assert verdicts[0]["verdict"] == "cannot_look"
+        assert verdicts[0]["paused"] is True
+        assert verdicts[0]["cannot_look_cause"] is not None
+
+    def test_no_sink_is_a_true_no_op(self) -> None:
+        """`expected_area_log_sink`'s own default (`None`) must not be
+        exercised -- the existing Pass 2 tests above already run with it
+        unset; this just states that explicitly as its own case."""
+        runner, ownship, _a_id, _b_id = self._runner_with_open_check()
+        assert runner.expected_area_log_sink is None
+
+        body_module._resolve_expected_area_checks(runner, ownship)  # does not raise

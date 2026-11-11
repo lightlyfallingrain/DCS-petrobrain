@@ -198,6 +198,22 @@ evaluated through a sight optic and found inside its FOV (truth geometry and gat
 first) — what the simulated 9K113 sees. Turning it on also turns on the detection-trace collector
 in memory (no detection-trace file unless `--detection-trace` is given).
 
+Add `--expected-area-log PATH` (`plans/expected-area-look/plan.md` Pass 3) to write one JSON line
+per `belief.expected_area` check *opened* (one row per poll it stays open) and one per *verdict*
+`resolve_checks` reaches (`"different"`/`"same"`/`"absent"`/`"cannot_look"`, plus the relocation
+flag and, for a `"cannot_look"` verdict, which clause of `area_visibility` decided it). Answers the
+plan's own top-listed open risk — how often the trigger fires in flight, and whether a busy scene
+crowds the hold out of the shared glass budget — which was otherwise genuinely unobservable from a
+flown sortie's artifacts: `logger.debug`/`logger.info` calls at the same two points are real but go
+to stderr/stdout, not a file `sortie-log-triage` can resolve and reduce, and neither
+`--detection-trace`'s `DetectionTrace` (ground-truth-only by construction, no `belief/` import at
+all) nor `--belief-truth-log`'s `BeliefTruthRow` (every row requires a matched ground-truth object,
+which a belief-only expected-area check never has) fits this data. `src/expected_area_log.py` is
+the writer, the seventh per-run JSONL log, same "additive, off by default, true no-op when absent"
+posture and same unbuffered shape as `--group-trace`'s own `GroupTraceLogWriter`; reduce with
+`.claude/skills/sortie-log-triage`, which also counts the merge-echo suppressions (`[[BL-B114]]`'s
+own flight signal — a `"cannot_look"` verdict on an `"echo"`-kind check).
+
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
 mission memory, and every perception source a clean slate (`body._check_for_new_mission`/
@@ -222,7 +238,7 @@ as not terrain model" / "on error loud refusal is better") until the next missio
 resolves successfully.
 
 **Per-mission log files (Decision 5).** `--detection-trace`/`--belief-truth-log`/`--mission-memory`/
-`--speech-log`/`--group-trace`/`--slew-trace` each roll to a *fresh* stamped filename (same
+`--speech-log`/`--group-trace`/`--slew-trace`/`--expected-area-log` each roll to a *fresh* stamped filename (same
 `run_log_paths` mechanism as the initial per-run stamp, `BL-11` Stage 5) on every detected mission
 (re)start, not
 just once at process start — a sortie that restarts the mission mid-process gets its own set of

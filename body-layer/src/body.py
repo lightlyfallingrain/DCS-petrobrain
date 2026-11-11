@@ -208,6 +208,7 @@ from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
 from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
+from expected_area_log import ExpectedAreaLogWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
 from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
 from eyesight_view import (
@@ -372,6 +373,13 @@ class ConsolePerceptionRunner:
     #: already defaults to `None`, so nothing changes for a run that never
     #: sets this field.
     group_trace_sink: Callable[[Mapping[str, object]], None] | None = None
+    #: `--expected-area-log` (`plans/expected-area-look/plan.md` Pass 3).
+    #: `None` (the default) is a true no-op -- `_resolve_expected_area_
+    #: checks` reads this field fresh each call, the same "plain field,
+    #: no closure capturing it by value" shape `group_trace_sink` above
+    #: already has, so a mission-restart reroll (`_reroll_run_logs`) is
+    #: simply reassigning it.
+    expected_area_log_sink: Callable[[Mapping[str, object]], None] | None = None
     #: BL-3's world-model connection/theatre (`plans/bl3-world-enrichment/
     #: plan.md` step 6), set once by `_run_crew_text_poll_loop` at the same
     #: point it already builds `sources` -- both need the same thread-local
@@ -1464,6 +1472,39 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
     ]
 
 
+def _cannot_look_cause(evidence: LookEvidence | None) -> str:
+    """`plans/expected-area-look/plan.md` Pass 3 -- a human/log-readable
+    name for *which* of `belief.expected_area.area_visibility`'s clauses
+    is why a check resolved `"cannot_look"`, for `--expected-area-log`/
+    `logger.info` only -- it never feeds back into the verdict itself,
+    which `area_visibility` already decided. Checked in the same order
+    that function checks them; the first failing clause is reported,
+    since `area_visibility` itself treats them as one conjunction and
+    does not rank which one "mattered most" when several fail at once.
+    `"none"` (every clause passed) only occurs for a `probe_clear` entry
+    of exactly `False` -- `area_visibility`'s own second `if`, checked
+    last here too."""
+    if evidence is None:
+        return "no_evidence"
+    if not evidence.area_fits_one_look_now:
+        return "area_too_wide"
+    if not evidence.look_completed_naturally:
+        return "look_not_completed"
+    if not evidence.inside_cockpit_mask:
+        return "outside_cockpit_mask"
+    if not evidence.within_binocular_presence_range:
+        return "out_of_presence_range"
+    if evidence.occluded:
+        return "occluded"
+    if not evidence.probe_seq_matches:
+        return "probe_seq_mismatch"
+    if not evidence.probe_time_in_window:
+        return "probe_stale"
+    if any(answer is None for answer in evidence.probe_clear):
+        return "probe_no_answer"
+    return "probe_blocked"
+
+
 def _resolve_expected_area_checks(
     runner: ConsolePerceptionRunner, ownship: OwnshipState
 ) -> None:
@@ -1522,13 +1563,19 @@ def _resolve_expected_area_checks(
     if not checks:
         return
 
-    # `plans/expected-area-look/plan.md` Pass 2 -- "the detection trace
-    # logs check open, verdict and reason" (the standard `logging`
-    # module, not `--detection-trace`'s own `DetectionTrace`/`GateOutcome`
-    # schema: that type is perception-layer ground truth by construction
-    # and has no belief import, per that module's own docstring, so an
-    # expected-area check -- belief-layer, no ground truth involved --
-    # does not fit it; see the implementer's report for this gap).
+    # `plans/expected-area-look/plan.md` Pass 2/3 -- check open/verdict is
+    # belief-layer, has no ground truth of its own, and so does not fit
+    # `--detection-trace`'s own `DetectionTrace`/`GateOutcome` schema (no
+    # `belief/` import there, per that module's own docstring) or
+    # `--belief-truth-log`'s `BeliefTruthRow` (every row requires a
+    # matched ground-truth object). `logger.debug`/`logger.info` below
+    # are unchanged from Pass 2 (stderr, for a developer watching live);
+    # `runner.expected_area_log_sink` (Pass 3, `--expected-area-log`) is
+    # the structured, file-captured record `sortie-log-triage` reduces --
+    # see `expected_area_log.py`'s own module docstring for why neither
+    # existing sortie log fits and this is the closest existing pattern
+    # instead (the seventh per-run JSONL log, same shape as `--group-
+    # trace`'s).
     for check in checks:
         logger.debug(
             "expected-area check open: b=%s a=%s kind=%s age_s=%.1f released=%s",
@@ -1538,6 +1585,18 @@ def _resolve_expected_area_checks(
             ownship.t_sim - check.opened_sim,
             check.released,
         )
+        if runner.expected_area_log_sink is not None:
+            runner.expected_area_log_sink(
+                {
+                    "t_sim": ownship.t_sim,
+                    "event": "open",
+                    "b_id": check.b_id,
+                    "a_id": check.a_id,
+                    "kind": check.kind,
+                    "age_s": ownship.t_sim - check.opened_sim,
+                    "released": check.released,
+                }
+            )
 
     try:
         los = runner.aircraft_client.get_line_of_sight_latest()
@@ -1676,17 +1735,43 @@ def _resolve_expected_area_checks(
         a_was_announced=a_was_announced,
         paused=paused,
     )
+    # `check.kind` for the verdict row too (`sortie-log-triage`'s own
+    # merge-echo-suppression count needs it without a cross-row join):
+    # built from `checks` (this poll's own snapshot, captured above
+    # before any of them closed), not re-read from `store` -- a closed
+    # check is gone from `store.checks` by the time this loop runs.
+    kind_by_b_id = {c.b_id: c.kind for c in checks}
     for outcome in outcomes:
         if outcome.verdict != "still_open":
+            cause = (
+                _cannot_look_cause(look_evidence.get(outcome.b_id))
+                if outcome.verdict == "cannot_look"
+                else None
+            )
             logger.info(
                 "expected-area check resolved: b=%s a=%s verdict=%s relocation=%s "
-                "paused=%s",
+                "paused=%s cause=%s",
                 outcome.b_id,
                 outcome.a_id,
                 outcome.verdict,
                 outcome.relocation_line,
                 paused,
+                cause,
             )
+            if runner.expected_area_log_sink is not None:
+                runner.expected_area_log_sink(
+                    {
+                        "t_sim": ownship.t_sim,
+                        "event": "verdict",
+                        "b_id": outcome.b_id,
+                        "a_id": outcome.a_id,
+                        "kind": kind_by_b_id.get(outcome.b_id),
+                        "verdict": outcome.verdict,
+                        "relocation": outcome.relocation_line,
+                        "paused": paused,
+                        "cannot_look_cause": cause,
+                    }
+                )
 
 
 def _sight_lock_seen(
@@ -3233,6 +3318,7 @@ def _reroll_run_logs(
     mission_memory_base: Path | None,
     slew_trace_writer: SightTraceWriter | None = None,
     slew_trace_base: Path | None = None,
+    expected_area_log_base: Path | None = None,
     when: float | None = None,
 ) -> tuple[
     DetectionTraceWriter | None, BeliefTruthLogWriter | None, SightTraceWriter | None
@@ -3278,10 +3364,11 @@ def _reroll_run_logs(
       with no exception (the `OSError` guard inside `write_speech`'s own
       try/except would simply disable belief-truth logging for the rest
       of the sortie the first time anything tried to speak).
-    - `runner.group_trace_sink` and `crew_console.transcript_log` are
-      **plain fields read fresh every call** (no closure capturing the
-      writer by value anywhere else), so reassigning them here is the
-      whole of the fix.
+    - `runner.group_trace_sink`, `runner.expected_area_log_sink`
+      (`plans/expected-area-look/plan.md` Pass 3) and `crew_console.
+      transcript_log` are **plain fields read fresh every call** (no
+      closure capturing the writer by value anywhere else), so
+      reassigning them here is the whole of the fix.
     - `mission_memory._sink` is the one case `_reset_mission_state` itself
       already touches -- `MissionMemory.reset_for_new_mission` preserves
       the *old* sink across the belief reset (its own docstring: "the one
@@ -3342,6 +3429,12 @@ def _reroll_run_logs(
     new_group_trace = _reroll_one(group_trace_base, "group-trace")
     if new_group_trace is not None:
         runner.group_trace_sink = GroupTraceLogWriter(new_group_trace).write
+
+    new_expected_area_log = _reroll_one(expected_area_log_base, "expected-area-log")
+    if new_expected_area_log is not None:
+        runner.expected_area_log_sink = ExpectedAreaLogWriter(
+            new_expected_area_log
+        ).write
 
     new_mission_memory = _reroll_one(mission_memory_base, "mission-memory")
     if new_mission_memory is not None:
@@ -3721,6 +3814,7 @@ def _run_crew_text_poll_loop(
     effector_sequences: Mapping[tuple[str, str, str], SequenceFile] | None = None,
     effector_registry: Mapping[str, EffectorDef] | None = None,
     polled_args: Sequence[int] | None = None,
+    expected_area_log_base: Path | None = None,
 ) -> None:
     """The crew session's background poll thread: opens `world_model_conn`
     and builds `runner.sources` here, on this thread (`sqlite3.Connection`s
@@ -3753,7 +3847,12 @@ def _run_crew_text_poll_loop(
     re-rolls `crew_console.transcript_log` to a fresh per-mission speech
     log. `slew_trace_path`/`slew_trace_base` (`--slew-trace`, `BL-B66`
     Stage 4b) are the same shape, for the takeoff/power-up/OBSERV wiring
-    this writer reads, which only runs on this loop.
+    this writer reads, which only runs on this loop. `expected_area_log_
+    base` (`--expected-area-log`, `plans/expected-area-look/plan.md`
+    Pass 3) is the same "pre-stamp path, threaded through for a mission-
+    restart reroll" shape as `group_trace_base` -- its *initial* sink is
+    set once at `main()`'s `ConsolePerceptionRunner` construction, not
+    inside this function, the same split `group_trace_sink` already has.
 
     `effector_sequences`/`effector_registry` (`plans/effector-sequences/
     plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
@@ -3911,6 +4010,7 @@ def _run_crew_text_poll_loop(
                             mission_memory_base=mission_memory_base,
                             slew_trace_writer=slew_trace_writer,
                             slew_trace_base=slew_trace_base,
+                            expected_area_log_base=expected_area_log_base,
                         )
                     )
                 # `plans/atgm-run-sight-tracking/plan.md` -- captured
@@ -5073,6 +5173,34 @@ def _resolve_slew_trace_log_path(
     return stamped
 
 
+def _resolve_expected_area_log_path(
+    expected_area_log_path: Path | None, when: float | None = None
+) -> Path | None:
+    """`_resolve_group_trace_log_path`'s own sibling for `--expected-
+    area-log` (`plans/expected-area-look/plan.md` Pass 3) -- the seventh
+    per-run JSONL log, same reasoning, same reproduced-rather-than-shared
+    policy body, same "its own `time.time()` call" divergence. See that
+    function's docstring for why this is a sibling rather than a
+    parameter on `_per_run_log_paths`."""
+    if expected_area_log_path is None:
+        return None
+    stamp_at = time.time() if when is None else when
+    reported_parent = expected_area_log_path.parent
+    try:
+        expanded = expected_area_log_path.expanduser()
+        reported_parent = expanded.parent
+        stamped = per_run_log_path(expanded, stamp_at)
+        stamped.parent.mkdir(parents=True, exist_ok=True)
+    except _RESOLVE_FAILURES as exc:
+        print(
+            f"expected-area-log: could not create log directory "
+            f"{reported_parent} ({exc}); continuing without this log",
+            file=sys.stderr,
+        )
+        return None
+    return stamped
+
+
 def _configure_logger_for_main() -> None:
     """Give this module's own `logger` (`logging.getLogger(__name__)`,
     above) a level and a handler, so `_log_live_los_coverage_summary`'s
@@ -5319,6 +5447,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--expected-area-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per belief.expected_area check opened "
+            "and one per verdict resolve_checks reaches (verdict, "
+            "relocation line, cannot-look cause) to this path -- "
+            "plans/expected-area-look/plan.md Pass 3. Answers how often "
+            "the trigger fires in flight (the plan's own top-listed open "
+            "risk) and whether a busy scene crowds the hold out of the "
+            "shared glass budget; reduce with .claude/skills/"
+            "sortie-log-triage. Defaults off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--eyesight-view",
         action="store_true",
         help=(
@@ -5551,6 +5694,7 @@ def main() -> None:
     group_trace_base = _expand_log_base(args.group_trace)
     mission_memory_base = _expand_log_base(args.mission_memory)
     slew_trace_base = _expand_log_base(args.slew_trace)
+    expected_area_log_base = _expand_log_base(args.expected_area_log)
 
     # BL-11 Stage 5: each run writes its own files rather than appending to
     # one that grows across sorties. Applied after the default resolution
@@ -5570,6 +5714,9 @@ def main() -> None:
     args.mission_memory = _resolve_mission_memory_log_path(args.mission_memory)
     # BL-B66 Stage 4b: a sixth per-run log, same sibling-function shape.
     args.slew_trace = _resolve_slew_trace_log_path(args.slew_trace)
+    # `plans/expected-area-look/plan.md` Pass 3: a seventh per-run log,
+    # same sibling-function shape.
+    args.expected_area_log = _resolve_expected_area_log_path(args.expected_area_log)
     for label, rolled in (
         ("detection-trace", args.detection_trace),
         ("belief-truth-log", args.belief_truth_log),
@@ -5577,6 +5724,7 @@ def main() -> None:
         ("group-trace", args.group_trace),
         ("mission-memory", args.mission_memory),
         ("slew-trace", args.slew_trace),
+        ("expected-area-log", args.expected_area_log),
     ):
         if rolled is not None:
             print(f"{label}: writing {rolled}", file=sys.stderr)
@@ -5607,6 +5755,11 @@ def main() -> None:
         group_trace_sink=(
             GroupTraceLogWriter(args.group_trace).write
             if args.group_trace is not None
+            else None
+        ),
+        expected_area_log_sink=(
+            ExpectedAreaLogWriter(args.expected_area_log).write
+            if args.expected_area_log is not None
             else None
         ),
         # `plans/expected-area-look/plan.md` -- the one production call
@@ -5686,6 +5839,7 @@ def main() -> None:
             effector_sequences_by_key,
             effector_registry_entries,
             polled_args_set.args,
+            expected_area_log_base,
         ),
         daemon=True,
     )
