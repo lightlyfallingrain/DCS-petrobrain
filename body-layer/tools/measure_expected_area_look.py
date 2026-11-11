@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import math
 import sys
+from typing import cast
 
 import measure_same_group_fold as h
 
@@ -38,8 +39,16 @@ from belief.association_over_time import (
 from belief.callouts import _is_merge_echo_of_earlier_contact
 from belief.contacts import Contact, ContactStore
 from belief.decay import OBJECT_ID_MEMORY_S, certainty_of
+from belief.enrichment import relative_geometry
+from belief.expected_area import (
+    LookEvidence,
+    area_fits_one_look,
+    relocation_warranted,
+    resolve_checks,
+)
 from belief.optic_policy import LOOK_SWEEP_SIGMA
 from belief.percept import percept_of
+from perception.geometry import GeoPosition
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 
 MAX_HW_DEG = 15.0
@@ -208,9 +217,352 @@ def cell(pair, za, zb, gap, cls, n, same, alt=500.0, surface=False):
     }
 
 
+# --- Production mode (Stage 3c) ----------------------------------------
+#
+# Drives the real `ContactStore(expected_area_checks=True)` -- the real
+# trigger (`eligible_trigger_target`/`merge_echo_or_beside_lost_target`,
+# called from `ContactStore.ingest` exactly as `body.py` calls it) and the
+# real `resolve_checks`/`area_visibility`/`is_same` -- in place of
+# `trial()`'s own hand-written decision table above. Only what a live DCS
+# Hook would supply is stubbed:
+#
+# - `LookEvidence`'s cockpit-mask/presence-range/occlusion/probe fields are
+#   all fixed to "clear" (no world-model store, no aircraft-layer, no Hook
+#   in this test environment -- same honest limit the modelled mode's own
+#   docstring states for terrain/towns/the glass budget);
+# - `look_completed_naturally` is fixed `True` -- Pass 2's own optic-policy
+#   mechanics (`OpticState.area_look_reports`, natural-end/steady/envelope)
+#   are already covered by `test_optic_policy.py::TestAreaCheckLook` and
+#   are not re-driven here; this harness answers "given the look
+#   completed, what does the verdict table say", not "does the look
+#   complete".
+#
+# **Why "A observed" is not driven through a second `store.ingest` call.**
+# `ingest`'s own trigger fires on *every* single-candidate gate fold
+# against an out-of-view, area-fits A (not only the first) -- correct
+# production behaviour (two independent sightings of the same remembered
+# group, both still open, is exactly `MAX_OPEN_CHECKS`'s own case), but it
+# means a second, hand-built "the look found A" observation fed back
+# through `ingest` here would open a *second* check against A rather than
+# advancing `a.last_seen_sim` the way genuine object-id continuity would in
+# real flight -- and this harness's own `_observation` helper never sets
+# `continues_observation_id`/`derived_world_position` (see
+# `measure_same_group_fold.py`), so continuity can never resolve here at
+# all. Instead, whether A is "observed" during the hold reuses the
+# modelled mode's own geometric test (`passes_gate` against `a_snapshot`,
+# or the gap sitting inside `OBJECT_ID_MEMORY_S`) -- the same stand-in for
+# "the look saw A" the architect's own model already used -- and, only
+# when that test says yes, calls the real `Contact.record` directly on A
+# (bypassing `ingest`'s trigger re-check entirely, which is what a
+# continuity-resolved sighting would also do in real flight).
+
+
+def production_trial(
+    pair: str,
+    za: float,
+    zb: float,
+    gap: float,
+    cls: str,
+    i: int,
+    salt: str,
+    alt: float,
+    surface: bool,
+    same: bool,
+) -> dict[str, object]:
+    o1, o2 = PAIRS[pair]
+    h._fresh_realisation(f"{salt}-{i}")
+    t1 = i * 1e-3
+    t2 = t1 + gap
+    store = ContactStore(expected_area_checks=True)
+    ownship1 = h._ownship(t1, alt)
+    store.ingest(
+        [
+            h._observation(
+                observation_id=f"first-{i}",
+                t_sim=t1,
+                ownship=ownship1,
+                group_z=za,
+                bias_object_id=1,
+                optic=o1,
+                classification_raw=cls,
+                surface=surface,
+            )
+        ],
+        t1,
+    )
+    store.tick(t1)
+    a0 = copy.deepcopy(store.contacts[0])
+
+    ownship2 = h._ownship(t2, alt)
+    ob = h._observation(
+        observation_id=f"second-{i}",
+        t_sim=t2,
+        ownship=ownship2,
+        group_z=zb,
+        bias_object_id=2,
+        optic=o2,
+        classification_raw=cls,
+        surface=surface,
+    )
+    touched = store.ingest([ob], t2)
+    store.tick(t2)
+    b_contact_id = touched[0].id
+    check = store.check_for(b_contact_id)
+
+    t3 = t2 + 3.0
+    ownship3 = h._ownship(t3, alt)
+    observer3 = GeoPosition(x=ownship3.x, z=ownship3.z, alt_m=ownship3.alt_m)
+    ol = h._observation(
+        observation_id=f"look-{i}",
+        t_sim=t3,
+        ownship=ownship3,
+        group_z=za,
+        bias_object_id=1,
+        optic=BINOCULAR_OPTIC,
+        classification_raw=cls,
+        surface=surface,
+    )
+    ol_percept = percept_of(ol)
+
+    if check is None:
+        # Trigger did not fire for real (area too wide for one look, the
+        # cap already reached, or an ambiguous fold) -- today's behaviour
+        # stands exactly as the store already applied it.
+        folded = b_contact_id == a0.id
+        if folded:
+            echo = False
+            a_now = store.contact(a0.id)
+            lost = a_now is not None and certainty_of(a_now, t2) == "lost"
+        else:
+            b_now = store.contact(b_contact_id)
+            a_now = store.contact(a0.id)
+            echo = b_now is not None and _is_merge_echo_of_earlier_contact(
+                b_now, store, t2
+            )
+            lost = a_now is not None and certainty_of(a_now, t2) == "lost"
+        today_heard = (not folded) and (not echo)
+        return {
+            "folded": folded,
+            "echo": echo,
+            "lost": lost,
+            "trigger": False,
+            "today": today_heard,
+            "new": today_heard,
+            "merged": False,
+            "relocation": False,
+            "naive": False,
+            "verdict_different": False,
+        }
+
+    a_id, b_id = check.a_id, check.b_id
+    folded_equiv = check.kind == "fold"
+    echo_equiv = check.kind == "echo"
+    today_heard = (not folded_equiv) and (not echo_equiv)
+
+    in_a_area = passes_gate(ol_percept, check.a_snapshot, t3)
+    naive_a_observed = in_a_area  # "naive rule": anything seen in A's area
+
+    if same:
+        a_observed_bool = False
+    else:
+        a_observed_bool = gap <= OBJECT_ID_MEMORY_S or in_a_area
+        if a_observed_bool:
+            a_contact = store.contact(a_id)
+            if a_contact is not None:
+                a_contact.record(ol_percept)
+
+    a_for_evidence = store.contact(a_id)
+    area_fits_now = (
+        area_fits_one_look(a_for_evidence, t3, observer3)
+        if a_for_evidence is not None
+        else False
+    )
+    evidence = LookEvidence(
+        area_fits_one_look_now=area_fits_now,
+        look_completed_naturally=True,
+        inside_cockpit_mask=True,
+        within_binocular_presence_range=True,
+        occluded=False,
+        probe_seq_matches=True,
+        probe_time_in_window=True,
+        probe_clear=(True, True, True),
+    )
+
+    b_for_evidence = store.contact(b_id)
+    before = relative_geometry(ownship3, check.a_snapshot.last_position)
+    after = (
+        relative_geometry(ownship3, b_for_evidence.last_position)
+        if b_for_evidence is not None
+        else before
+    )
+    reloc = relocation_warranted(
+        before_clock=cast(int, before["clock_position"]),
+        before_range_m=cast(float, before["range_m"]),
+        before_bearing_deg=cast(float, before["bearing_deg"]),
+        after_clock=cast(int, after["clock_position"]),
+        after_range_m=cast(float, after["range_m"]),
+        after_bearing_deg=cast(float, after["bearing_deg"]),
+    )
+
+    outcomes = resolve_checks(
+        store,
+        [check],
+        now_sim=t3,
+        deadline_s=1_000_000.0,
+        look_evidence={b_id: evidence},
+        a_observed={a_id: a_observed_bool},
+        relocation_warranted_by_b={b_id: reloc},
+        a_was_announced={a_id: True},
+        paused=False,
+    )
+    outcome = outcomes[0]
+    verdict = outcome.verdict
+
+    if verdict == "different":
+        new_heard, merged = True, False
+    elif verdict == "same":
+        new_heard, merged = False, True
+    elif verdict == "absent":
+        new_heard, merged = True, False
+    elif verdict == "cannot_look":
+        new_heard, merged = (check.kind != "echo"), False
+    else:  # "still_open" -- should not occur: evidence is always "visible"
+        new_heard, merged = today_heard, False
+
+    return {
+        "folded": folded_equiv,
+        "echo": echo_equiv,
+        "lost": check.kind == "beside_lost",
+        "trigger": True,
+        "today": today_heard,
+        "new": new_heard,
+        "merged": merged,
+        "relocation": outcome.relocation_line,
+        "naive": naive_a_observed,
+        "verdict_different": verdict == "different",
+    }
+
+
+def production_cell(
+    pair: str,
+    za: float,
+    zb: float,
+    gap: float,
+    cls: str,
+    n: int,
+    same: bool,
+    alt: float = 500.0,
+    surface: bool = False,
+) -> dict[str, float]:
+    rs = [
+        production_trial(
+            pair,
+            za,
+            zb,
+            gap,
+            cls,
+            i,
+            f"prod{pair}{za}{zb}{gap}{cls}{same}",
+            alt,
+            surface,
+            same,
+        )
+        for i in range(n)
+    ]
+    f = lambda k: 100.0 * sum(1 for r in rs if r[k]) / n
+    return {
+        k: f(k)
+        for k in (
+            "folded",
+            "echo",
+            "trigger",
+            "today",
+            "new",
+            "merged",
+            "relocation",
+            "naive",
+            "verdict_different",
+        )
+    }
+
+
 def main():
-    n_diff = int(sys.argv[1]) if len(sys.argv) > 1 else 200
-    n_same = int(sys.argv[2]) if len(sys.argv) > 2 else 300
+    argv = sys.argv[1:]
+    production = "--production" in argv
+    if production:
+        argv = [a for a in argv if a != "--production"]
+    n_diff = int(argv[0]) if len(argv) > 0 else 200
+    n_same = int(argv[1]) if len(argv) > 1 else 300
+
+    if production:
+        print(
+            "== PRODUCTION -- real ContactStore/resolve_checks, stubbed probe answers =="
+        )
+        print("== DIFFERENT groups: % B announced (today -> with look); trig")
+        for cls in ("s-125", "OP_ARMORED"):
+            for gap in (6.0, 700.0):
+                for pair in PAIRS:
+                    for far, near in ((4.5, 3.0), (5.0, 3.5), (3.0, 1.5)):
+                        for label, za, zb in (
+                            ("Bnear", -far * 1000, -near * 1000),
+                            ("Bfar", -near * 1000, -far * 1000),
+                        ):
+                            r = production_cell(pair, za, zb, gap, cls, n_diff, False)
+                            print(
+                                f"{cls:10s} gap{gap:5.0f} {pair} {far}/{near} {label:5s} "
+                                f"heard {r['today']:5.1f} -> {r['new']:5.1f}  "
+                                f"trig {r['trigger']:5.1f}"
+                            )
+        print(
+            "== SAME group: % duplicate heard (today -> with look); relocation; naive-rule false 'different'"
+        )
+        for cls in ("s-125", "OP_ARMORED"):
+            for gap in (6.0, 700.0):
+                for pair in PAIRS:
+                    for rk in (2.0, 3.0, 4.5):
+                        r = production_cell(
+                            pair, -rk * 1000, -rk * 1000, gap, cls, n_same, True
+                        )
+                        print(
+                            f"{cls:10s} gap{gap:5.0f} {pair} {rk} "
+                            f"dup {r['today']:5.1f} -> {r['new']:5.1f}  reloc {r['relocation']:5.1f} "
+                            f"naive {r['naive']:5.1f} trig {r['trigger']:5.1f}"
+                        )
+        print("== ground cells (100 m AGL, s-125)")
+        for gap in (6.0, 700.0):
+            for pair in ("u_u", "b_u"):
+                r = production_cell(
+                    pair,
+                    -4500,
+                    -3000,
+                    gap,
+                    "s-125",
+                    n_diff,
+                    False,
+                    alt=100.0,
+                    surface=True,
+                )
+                print(
+                    f"ground diff gap{gap:5.0f} {pair} 4.5/3.0 heard {r['today']:5.1f} -> {r['new']:5.1f}"
+                )
+                r = production_cell(
+                    pair,
+                    -3000,
+                    -3000,
+                    gap,
+                    "s-125",
+                    n_same,
+                    True,
+                    alt=100.0,
+                    surface=True,
+                )
+                print(
+                    f"ground same gap{gap:5.0f} {pair} 3.0 dup {r['today']:5.1f} -> {r['new']:5.1f} "
+                    f"reloc {r['relocation']:5.1f} naive {r['naive']:5.1f}"
+                )
+        h._restore_field_salt()
+        return
+
     print("== DIFFERENT groups: % B announced (today -> with look); trig, canlook")
     for cls in ("s-125", "OP_ARMORED"):
         for gap in (6.0, 700.0):
