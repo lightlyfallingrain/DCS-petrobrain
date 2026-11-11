@@ -35,12 +35,15 @@ from belief.optic_policy import (
     SIGHT_STALL_COOLDOWN_S,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
     STEADY_RATE_LIMIT_DEG_S,
+    AreaLookReport,
     BoundedSightLook,
     LookTarget,
     OpticDecision,
     OpticPhase,
     OpticState,
     advance_sight_aim,
+    area_look_covers,
+    choose_glass_look,
     choose_look,
     choose_sighting_look,
     decide,
@@ -4487,3 +4490,149 @@ class TestLookFollow:
         assert state.phase is OpticPhase.GLASSING
         assert state.look_envelope_azimuth_deg == pytest.approx(envelope_before)
         assert state.search_pattern_steps == steps_before
+
+
+class TestAreaCheckLook:
+    """`plans/expected-area-look/plan.md` Pass 2 -- `LookTarget.
+    area_check`, `choose_glass_look`'s own ranking of it, and
+    `OpticState.area_look_reports`'s natural-end/interrupted bookkeeping."""
+
+    def test_choose_glass_look_ranks_an_area_check_target_first(self) -> None:
+        """An area-check target wins the step even against a target
+        `choose_sighting_look`'s own bucket 0 would otherwise prefer
+        (an unresolved presence-level contact)."""
+        ordinary = _target("ORDINARY", current_level="presence")
+        area = replace(_target("AREA"), area_check=True, current_level="type")
+        chosen = choose_glass_look([ordinary, area])
+        assert chosen is not None
+        assert chosen.contact_id == "AREA"
+
+    def test_an_area_check_look_keeps_running_though_fully_identified(self) -> None:
+        """A `type`-level target would normally fail `can_still_improve`
+        and end the look on its very first poll (`look_is_finished`'s own
+        docstring, "the 9K113 narrow-search trap") -- an area-check look
+        is about confirming a place, not raising a tier, so it must not."""
+        area = replace(_target("AREA"), area_check=True, current_level="type")
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING, (
+            "an area-check look ended early on classification grounds"
+        )
+
+    def test_area_look_report_opens_runs_and_freezes_naturally(self) -> None:
+        area = replace(_target("AREA"), area_check=True, current_level="type")
+        state, _decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        report = state.area_look_reports["AREA"]
+        assert report.natural_end is False
+        assert report.steady is True
+        assert report.look_ended_sim is None
+        assert area_look_covers(report, area.azimuth_deg, area.elevation_deg)
+
+        # `MAX_LOOK_S` later, with nothing else to glass: the look ends
+        # naturally (the deadline, `look_is_finished`'s own first branch),
+        # and the report freezes `natural_end=True` before the sector
+        # advances and `SCANNING` resumes.
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        frozen = state.area_look_reports["AREA"]
+        assert frozen.natural_end is True
+        assert frozen.steady is True
+        assert frozen.look_ended_sim == pytest.approx(_CYCLE_S + MAX_LOOK_S)
+
+    def test_area_look_report_marks_interrupted_on_an_unsteady_poll(self) -> None:
+        area = replace(_target("AREA"), area_check=True, current_level="type")
+        state, _decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=False,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        report = state.area_look_reports["AREA"]
+        assert report.natural_end is False
+        assert report.steady is False
+        assert report.look_ended_sim == pytest.approx(_CYCLE_S + 1.0)
+
+    def test_area_look_report_marks_interrupted_by_lower_binoculars(self) -> None:
+        area = replace(_target("AREA"), area_check=True, current_level="type")
+        state, _decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[area],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+        state = lower_binoculars(state, _CYCLE_S + 1.0)
+        assert state.phase is OpticPhase.SCANNING
+        report = state.area_look_reports["AREA"]
+        assert report.natural_end is False
+        assert report.steady is False
+
+    def test_searching_entry_carries_the_area_look_report_forward(self) -> None:
+        """The `SEARCHING` fresh `OpticState(...)` construction site
+        (`decide`'s `SCANNING`-at-home body, reached when nothing is
+        worth glassing but a narrow sector was commanded) must not drop a
+        report an earlier, now-closed check left behind -- Co-moving
+        Fields: "carries it forward"."""
+        prior_report = AreaLookReport(
+            contact_id="AREA",
+            natural_end=True,
+            envelope_azimuth_deg=0.0,
+            envelope_elevation_deg=0.0,
+            envelope_half_width_deg=5.0,
+            steady=True,
+            look_started_sim=0.0,
+            look_ended_sim=1.0,
+        )
+        state = OpticState(
+            phase_started_sim=0.0, area_look_reports={"AREA": prior_report}
+        )
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=[(10.0, 0.0)],
+        )
+        assert state.phase is OpticPhase.SEARCHING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.area_look_reports["AREA"] == prior_report

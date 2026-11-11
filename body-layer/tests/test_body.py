@@ -124,15 +124,25 @@ class FakeAircraftClient:
         #: fov_half_deg` pair `ConsolePerceptionRunner.run_once` has
         #: pushed, in order, for tests that want to assert on it.
         self.look_direction_pushes: list[tuple[int, int]] = []
+        #: `plans/expected-area-look/plan.md` Pass 2 -- every `(seq,
+        #: points)` pair `_resolve_expected_area_checks` has pushed, in
+        #: order; `None` means "no probe points command pushed yet".
+        self.probe_points_pushes: list[tuple[int, list[list[int]]]] = []
+        #: What `get_line_of_sight_latest` answers -- `None` (the
+        #: default) until a test sets it directly.
+        self.line_of_sight_latest: dict[str, Any] | None = None
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        return self.line_of_sight_latest
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         self.look_direction_pushes.append((hour, fov_half_deg))
+
+    def post_probe_points(self, seq: int, points: list[tuple[int, int]]) -> None:
+        self.probe_points_pushes.append((seq, [list(point) for point in points]))
 
 
 class FakeSource:
@@ -624,6 +634,9 @@ class FakeConsoleAircraftClient:
         }
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
+        pass
+
+    def post_probe_points(self, seq: int, points: list[tuple[int, int]]) -> None:
         pass
 
     def get_mission_start_latest(self) -> dict[str, Any] | None:
@@ -8187,3 +8200,78 @@ class TestSightLockSeen:
         head = SightHead(aim_source="seen", seen_contact_id="CONTACT_1")
         state = AtgmRunState(contact_id="CONTACT_1")
         assert body_module._sight_lock_seen(head, state) is True
+
+
+class TestResolveExpectedAreaChecks:
+    """`plans/expected-area-look/plan.md` Pass 2 --
+    `body._resolve_expected_area_checks`'s own probe push/clear and
+    pilot-command pause, driven against a hand-opened `ExpectedAreaCheck`
+    rather than the full trigger/`ingest` path (`test_contacts.py`'s own
+    scope)."""
+
+    def _runner_with_open_check(
+        self,
+    ) -> tuple[ConsolePerceptionRunner, OwnshipState, str, str]:
+        from belief.expected_area import ExpectedAreaCheck
+
+        store = ContactStore()
+        a_id = _contact_at_bearing_range(store, bearing_deg=0.0, range_m=3000.0)
+        a_snapshot = store.contact(a_id)
+        assert a_snapshot is not None
+        b_id = _contact_at_bearing_range(store, bearing_deg=0.0, range_m=3100.0)
+        store.open_check(
+            ExpectedAreaCheck(
+                b_id=b_id,
+                a_id=a_id,
+                kind="fold",
+                opened_sim=0.0,
+                a_snapshot=a_snapshot,
+            )
+        )
+        aircraft_client = FakeAircraftClient(_telemetry_dict())
+        runner = ConsolePerceptionRunner(aircraft_client=aircraft_client, store=store)
+        ownship = OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+        )
+        return runner, ownship, a_id, b_id
+
+    def test_pushes_probe_points_while_a_check_is_open(self) -> None:
+        runner, ownship, _a_id, _b_id = self._runner_with_open_check()
+        body_module._resolve_expected_area_checks(runner, ownship)
+
+        client = runner.aircraft_client
+        assert isinstance(client, FakeAircraftClient)
+        assert len(client.probe_points_pushes) == 1
+        seq, points = client.probe_points_pushes[0]
+        assert seq == 1
+        assert len(points) == 3  # centre + the two along-line +-2 sigma points
+
+    def test_clears_probe_points_once_the_check_closes(self) -> None:
+        runner, ownship, _a_id, b_id = self._runner_with_open_check()
+        body_module._resolve_expected_area_checks(runner, ownship)
+        runner.store.close_check(b_id)
+
+        body_module._resolve_expected_area_checks(runner, ownship)
+
+        client = runner.aircraft_client
+        assert isinstance(client, FakeAircraftClient)
+        assert len(client.probe_points_pushes) == 2
+        seq, points = client.probe_points_pushes[1]
+        assert seq == 2
+        assert points == []
+
+    def test_an_engaged_attack_run_resolves_every_open_check_as_cannot_look(
+        self,
+    ) -> None:
+        """The plan's own Q5 row: "every open check resolves 'cannot
+        look' at once" while an ATGM run or attack-run grant stands --
+        the diverged-state case: evidence never assembled (no world
+        model, no probe answer), yet the pilot command alone is enough
+        to close the hold rather than leave it `still_open` forever."""
+        runner, ownship, _a_id, b_id = self._runner_with_open_check()
+        runner.attack_run_state = AttackRunState()
+
+        body_module._resolve_expected_area_checks(runner, ownship)
+
+        assert runner.store.check_for(b_id) is None
+        assert not runner.store.callout_held(b_id)

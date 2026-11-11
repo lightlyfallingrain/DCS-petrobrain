@@ -576,3 +576,221 @@ off by default.
   run in the same poll loop iteration (the ordinary case), but if Pass 2's
   own poll ordering ever separates them across polls, re-check this rule's
   premise.
+
+### Pass 2 (the look: optics, probes and the poll loop)
+
+**A real defect found and fixed while wiring `expected_area_checks`
+through, not part of the plan's own list:** `ContactStore.
+reset_for_new_mission` re-invoked `self.__init__()` with no arguments,
+which silently turned `_expected_area_checks` back to its constructor
+default (`False`) on every second-and-later mission of a sortie —
+exactly the trap the mission-reset mechanism's own docstring warns about
+for a plain-`default` `init=False` field, except this one *is* an
+ordinary `init=True` field, and the bug is that it is **not** mission-
+scoped state at all (it is `body.py`'s own standing choice of
+mechanism). Fixed by threading `expected_area_checks=self.
+_expected_area_checks` through the re-invoked `__init__`.
+`test_mission_start_reset.py::test_contact_store_reset_clears_every_field`
+caught this immediately (poisoned the field, asserted it reset to the
+*fresh-constructor* default, which is `False` even when the store under
+test was built `True`) — extended with a `_CONTACT_STORE_PRESERVE` set
+and a by-value assertion, the exact pattern `test_crew_console_reset_
+preserves_declared_fields_and_resets_rest`'s own `silenced` field
+already uses, not a rewrite of the test's logic.
+
+**`optic_policy.py`** — `LookTarget.area_check: bool`; `choose_glass_look`
+ranks it in a new bucket `-1`, ahead of every classification bucket;
+`_area_or_glass_can_improve` (used in place of `_glass_can_improve` at
+all three `GLASSING` call sites that gate admission/continuation/next-
+look-selection) treats an `area_check` target as never "done improving"
+on classification grounds, so a fully-identified A still gets its look —
+the area look is about confirming a *place*, not raising a tier.
+`AreaLookReport` (frozen: `contact_id`, `natural_end`, `envelope_*`,
+`steady`, `look_started_sim`/`look_ended_sim`) and `OpticState.
+area_look_reports: dict[str, AreaLookReport]`, keyed by **A's** contact
+id (the look targets A's place, never B's) — a dict, not a single field,
+because at most `MAX_OPEN_CHECKS` (2) checks can be open at once and a
+single slot would lose one report's own natural-end outcome if both
+looks happen to finish/restart inside the same `decide()` call ("several
+looks per step"). Set at `_start_glass_look` (fresh report, `natural_end
+=False`) when the chosen target is an area check; frozen `natural_end=
+True`/`steady=True` at the look's own natural end (inside the `look_is_
+finished` branch, read off `glassing_state` so a look-follow azimuth
+shift is reflected); marked `natural_end=False`/`steady=False` by a new
+`_mark_area_look_interrupted` helper, called both from the `GLASSING`
+"not steady" branch and from `lower_binoculars`'s own interrupt branch
+(the latter covers "OBSERV on"/"a scan command" too, since `body.py`
+routes every dispatched player command through `lower_binoculars`
+first). Both fresh `OpticState(...)` construction sites (`_start_glass_
+look`'s `GLASSING` entry, and the `SEARCHING` entry) carry `area_look_
+reports` forward explicitly, per the Co-moving Fields table. `area_look_
+covers(report, azimuth_deg, elevation_deg) -> bool` is the one new public
+read `body.py` needs (true angular separation against the frozen
+envelope); exposed instead of the already-private `_angular_separation_
+deg` (which takes two `LookTarget`s).
+
+**`look_target_for`** gained an explicit `area_check: bool = False`
+keyword, passed straight through to the `LookTarget(...)` it builds.
+**Not** threaded through the function's existing `**kwargs: dict[str,
+float]` splat (used only for `bearing_uncertainty_deg`) — `mypy --strict`
+caught, correctly, that unpacking a `dict[str, float]` into a call that
+could also supply a `bool`-typed keyword is unsound; fixed by making it
+an explicit parameter rather than suppressing the error.
+
+**`perception/forest.py`** — `ForestOcclusion` gained `layers: tuple[str,
+...] = ("landcover",)`, `class_tag: str | None = "landcover_class"`,
+`class_values: frozenset[str] = FOREST_LANDCOVER_CLASSES`, all defaulting
+to the exact pre-Pass-2 forest-only behaviour. `occluded` now checks
+`class_tag is None` (treat any polygon `containing_polygons` returns from
+`layers` as a hit, no tag filter) before falling back to the tag-matching
+test. **`class_tag=None` for the settlement instance specifically**
+because `store.models.StoredFeature`'s own docstring says `landcover_
+class` is present only on `landcover` rows and *built-up* `settlement`
+rows — filtering on it would silently drop a named place-area settlement
+that is not also built-up landuse, which is exactly the common case
+(a village with no industrial landuse tag).
+
+**`body.py`**:
+- `ConsolePerceptionRunner.store`'s one production construction site
+  (`main()`) now passes `ContactStore(expected_area_checks=True)`
+  explicitly — the dataclass field's own `default_factory=ContactStore`
+  is left alone (every test/fixture construction site stays off by
+  default, matching `ContactStore`'s own constructor default).
+- Two new fields, `area_forest_occlusion`/`area_settlement_occlusion:
+  ForestOcclusion | None`, built lazily alongside `self.enrichment` (same
+  `world_model_conn`/`theatre` lifecycle, same invalidate-on-theatre-
+  switch site in `_enter_refusal_mode`) — one parameterised class, two
+  instances, per that module's own docstring.
+- `_look_targets` now flags `area_check=True` for whichever contact is
+  the `a_id` of a currently-open check (`{check.a_id for check in store.
+  checks}`) — A stays an ordinary live contact throughout the hold, so
+  this is a flag on the existing per-contact loop, not a different
+  contact set. **One poll of lag**: `_look_targets`/`decide_optic` run
+  *before* this poll's own `ingest` (where a check can newly open), so a
+  freshly-opened check's own area-check look starts the poll after —
+  the same one-poll lag this codebase already accepts for `sight_lock_
+  contact_id` and several other `decide_optic` keywords.
+- New `_resolve_expected_area_checks(runner, ownship)`, called once per
+  poll from `run_once`, immediately after `self.tasks.tick(...)` (so this
+  poll's own `ingest`/`tick` and this poll's own `decide_optic` pass — run
+  earlier in the same `run_once` call — are both reflected): pushes/
+  clears probe points (unconditionally, "on change" — an all-checks-
+  closed poll sends the empty list exactly once, the same posture `post_
+  look_direction` already has), reads `get_line_of_sight_latest()`'s
+  `"probes"` key, assembles every `LookEvidence`/`a_observed`/
+  `relocation_warranted_by_b`/`a_was_announced` state param, and calls
+  `resolve_checks`. `paused = attack_run_state is not None or atgm_
+  run_state is not None` — the plan's own Q5 row.
+- **Two documented simplifications, not full fidelity**, both in the
+  *safe* direction (an occasional extra/missing speech line or a slightly
+  mistimed hold-open, never a wrong fact or a wrong merge):
+  1. `a_was_announced` is approximated as "A has ever had a `CONTACT_
+     DETECTED`/`CONTACT_REACQUIRED` event appended to its own log"
+     (`Contact.last_event_emitted_sim`), because the belief layer has no
+     narrower "was this ever actually *spoken*" bookkeeping — that is
+     `CalloutScheduler`'s own gated/cooldown/mask decision, made
+     per-event rather than per-contact, and threading a new per-contact
+     field through for this one caller alone was judged out of Pass 2's
+     scope. Revisit against a flown sortie's `--speech-log` if it
+     misfires often enough to matter.
+  2. `relocation_warranted_by_b`'s "after" state is B's own *current*
+     believed position (via `belief.enrichment.relative_geometry`), not
+     the post-merge fused estimate `merge_contact` would actually
+     produce — computing that ahead of the very merge call it is the
+     precondition for would be circular. B's own percepts are what a
+     relocation line is reporting, so this is the natural question to
+     ask, not a stand-in for a different one.
+- `_EXPECTED_AREA_HOLD_DEADLINE_S` (`resolve_checks`'s `deadline_s`) is a
+  **derived expression**, `GLASS_BUDGET_PER_CYCLE_S + SCAN_CYCLE_PERIOD_S
+  + 1.0`, over two constants that are each already `tuning.real` in
+  `perception.gaze` — not a new tunable, matching this codebase's own
+  posture toward `WORST_REVISIT_S` (`body-layer/CLAUDE.md`'s "I2"
+  coupling: a bound built from several already-tunable constants, not a
+  dial of its own). The plan's own worst-case arithmetic ("<= 4 + 12 + 1
+  ~ 17 s") assumes the *default* scan table's own sector period for the
+  "4"; a commanded narrow sector's period can differ, so this is a stated
+  approximation of that bound, not an exact reproduction — acceptable
+  because `resolve_checks` is fail-closed either way (a missed deadline
+  only ever makes a hold give up sooner or later, never wrong).
+
+**Not built as specified — a scoped-down substitute, flagged rather than
+silently claimed equivalent:** the plan's Pass 2 item 4, "the detection
+trace logs check open, verdict and reason; `sortie-log-triage` gains the
+count." `perception.detection_trace.DetectionTrace`/`GateOutcome` is
+explicitly perception-layer ground truth by construction (that module's
+own docstring: "no `belief/` import here") — an expected-area check is
+belief-layer and has no ground truth of its own, so forcing it into that
+schema would be a wrong fit, not a reuse. Built instead: `logger.debug`
+for every open check each poll (b/a id, kind, age, released), `logger.
+info` for every verdict `resolve_checks` actually reaches (b/a id,
+verdict, relocation flag, paused) — the standard `logging` module already
+used elsewhere in `body.py`, **not** wired into any of the three sortie
+logs `sortie-log-triage` reduces, and that skill's own count was **not**
+added. Flagging this plainly rather than claiming the plan's own
+observability goal is met: a flown sortie's check-open/verdict rate is
+visible in the process's own log output (if captured), not in `--
+detection-trace`/`--speech-log`/`--belief-truth-log`, and `sortie-log-
+triage` gains nothing from this pass. Pass 3 (or a follow-up) should
+either add a fourth dedicated per-run log for this, or decide the
+standard logger is enough and update `sortie-log-triage`'s own skill
+text to say so rather than leave the plan's sentence unmet silently.
+
+**Tests added:**
+- `test_optic_policy.py`, `TestAreaCheckLook` (6 tests): `choose_glass_
+  look` ranks an area-check target first even against a bucket-0
+  candidate; an area-check look at `current_level="type"` keeps running
+  past the poll where an ordinary look would end (the 9K113 narrow-
+  search trap, inverted); `area_look_reports["AREA"]` opens `natural_end
+  =False`/`steady=True`, is covered by `area_look_covers`, and freezes
+  `natural_end=True`/`look_ended_sim` set at the look's own `MAX_LOOK_S`
+  deadline; the same report is marked `natural_end=False`/`steady=False`
+  by an unsteady poll, and separately by `lower_binoculars`; the
+  `SEARCHING` fresh-construction site carries a prior, already-closed
+  report forward unchanged (Co-moving Fields: "carries it forward").
+- `test_body.py`, `TestResolveExpectedAreaChecks` (3 tests): probe points
+  are pushed (3 points, `seq=1`) while a hand-opened check is open; they
+  clear (`seq=2`, empty list) the poll after the check closes; an engaged
+  `AttackRunState` resolves the open check as `cannot_look` at once with
+  no world model and no probe answer assembled at all (the diverged-
+  state case the plan's own Q5 row names) — `store.check_for(b_id)` is
+  `None` and the contact is no longer held afterward.
+- `test_mission_start_reset.py`: extended (not rewritten) with `_CONTACT_
+  STORE_PRESERVE`, covering the `_expected_area_checks` reset defect
+  above.
+- `FakeAircraftClient` (`test_body.py`) gained `post_probe_points`
+  (recording, for the new tests above) and a settable `line_of_sight_
+  latest` (unused by the three tests above, kept for whichever Pass 3
+  test needs a real probe answer); `FakeConsoleAircraftClient` gained a
+  no-op `post_probe_points` so every pre-existing test using it keeps
+  compiling.
+
+**Checks, this pass:**
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass (80 source files). (`mypy
+  src tests` reports ~270 pre-existing errors across 29 test files —
+  this project's own documented command is `mypy src` only; `tests/` is
+  not held to `--strict` the same way, and none of those errors are in
+  code this pass touched.)
+- `pytest tests -q` (full suite): see the implementer's final report for
+  the exact count from the run started after this pass's own tests
+  landed.
+
+**What Pass 3 needs to know:**
+- `tools/measure_expected_area_look.py --production` (Stage 3c) can now
+  drive a real `ContactStore(expected_area_checks=True)` end to end
+  through `_resolve_expected_area_checks`-shaped logic, but note the two
+  documented simplifications above (`a_was_announced`, `relocation_
+  warranted_by_b`'s "after" state) if the production acceptance numbers
+  need to match the plan's own modelled column exactly.
+- The detection-trace/`sortie-log-triage` gap above needs a decision: a
+  fourth dedicated log, or accept the standard logger and update that
+  skill's text.
+- `STRUCTURE.md`/`CLAUDE.md`'s "Tuning" section/`defaults.toml`
+  regeneration were explicitly Stage 4/Pass 3 scope and are untouched by
+  this pass (no new `tuning.real`/`tuning.whole` constant was added —
+  `_EXPECTED_AREA_HOLD_DEADLINE_S` is a derived expression, not a new
+  tunable, so `defaults.toml` needed no regeneration).
+- The Stage 1 Windows test card (push probe points by hand, confirm `dcs.
+  log`/`/line_of_sight/latest.probes`, a paused-state check, `bridge_
+  call_ms` unmoved) is still owed, unchanged from Pass 1's own report.
