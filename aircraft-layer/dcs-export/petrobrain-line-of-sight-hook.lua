@@ -230,6 +230,47 @@ fields of an entry is unaffected (the field is appended, never inserted).
 
 Reuses DCS's own shipped JSON encoder (`Scripts\JSON.lua`) and LuaSocket's
 `package.path`/`cpath` extension, mirroring every other Hook script here.
+
+**Point probes (`plans/expected-area-look/plan.md`, `BL-B111`, Stage 1).**
+A second inbound op, `probe_points`, on this file's *existing* 7797
+listener (no new socket): `{"op":"probe_points","seq":n,"points":
+[ [x,z], ... ]}`, at most `MAX_PROBE_POINTS` points. Clamped a second time here
+(`_safeClampInt`, same total NaN/Inf-guarded clamp `_applyLookDirection`
+already uses) and applied via `SET_PROBES_TEMPLATE` -- a module-level
+constant with **exactly `2 + 2*MAX_PROBE_POINTS` `%d` conversions and no
+other `%` specifier**, the same safety argument as `SET_LOOK_TEMPLATE`
+above (every finite integer `%d`-formats to only digits and an optional
+leading `-`), checked by `aircraft-layer/tests/test_line_of_sight_hook_
+lua.py`. Coalesced to at most one setter call per frame, same drain
+discipline as the look-direction op (`pollInbound` below drains both ops
+off one socket, applying only the latest of each per frame).
+
+The LOS chunk evaluates up to `PB_PROBE_N` points per poll, **after** the
+ordinary candidate loop, and **fails closed, unlike `terrainClear`
+above**: a failed `land.getHeight` or `land.isVisible` pcall on a probe
+point emits an empty token ("unknown"), never a guessed `1`/`0` --
+`terrainClear`'s own `true`-on-error is correct for a unit gate (missing
+a real detection is the worse failure there) and wrong here (E11/E5: an
+unanswered probe must never read as "place seen empty"). The probe
+target point is `land.getHeight` at the queried (x, z) plus
+`PROBE_TARGET_HEIGHT_M` (2.0, the same +2 m the unit sightlines use) --
+**terrain at the queried point, never ownship's own altitude** (this
+script has no notion of "whose point" it is; that no-omniscience
+boundary is enforced body-layer side, by what it is willing to ask for).
+
+The probes answer rides the *same* single-string `dostring_in` return as
+the LOS payload (one bridged chunk, one round trip, the plan's own "after
+the unit loop" placement), separated by `"\1"` (ASCII SOH) -- a control
+byte, not a printable character, so it cannot collide with a mission-
+editor unit name the way a `;`/`:` edge case already could (and already
+is a documented, accepted risk for those two). `pollAndSend` below splits
+on this byte *before* building the JSON envelope, so `"payload"` on the
+wire is byte-identical to the pre-Stage-1 LOS string and `"probes"` rides
+as its own, independent, optional key (`schema.line_of_sight` module
+docstring's "never as an eighth pipe-delimited field") -- an old collector
+talking to a new Hook simply never reads the new key, and the reverse
+(new collector, old Hook) sees no `"probes"` key at all and reads that as
+"no check open," both correct.
 --]]
 
 log.write("PetrobrainLineOfSight", log.INFO, "Loading - Petrobrain line of sight")
@@ -320,6 +361,43 @@ local MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME = 20
 --: other `%` specifier, ever.
 local SET_LOOK_TEMPLATE = "PB_LOOK_HOUR=%d\nPB_LOOK_FOV_DEG=%d\nreturn \"ok\""
 
+--: `plans/expected-area-look/plan.md` Stage 1 -- "two open checks x three
+--: points". Matches `schema.line_of_sight.MAX_PROBE_POINTS` exactly
+--: (collector-side validation caps `points` at this length too) -- a
+--: mismatch here would let the collector accept a shape this template
+--: then cannot carry.
+local MAX_PROBE_POINTS = 6
+
+--: `land.getHeight`/`land.isVisible`'s own target-point convention
+--: everywhere else in this file (`unitAGL`/the sightline loop below):
+--: terrain plus a vehicle's height, never ownship's own altitude.
+local PROBE_TARGET_HEIGHT_M = 2.0
+
+--: A second runtime-value splice into the mission-scripting state, same
+--: safety argument as `SET_LOOK_TEMPLATE` above (file header): every
+--: finite integer `%d`-formats to only an optional leading `-` and
+--: decimal digits, so there is no way for any of these conversions to
+--: close the template early or open a new statement. Exactly
+--: `2 + 2*MAX_PROBE_POINTS` `%d` conversions (seq, N, then MAX_PROBE_
+--: POINTS (x, z) pairs, flat) and no other `%` specifier --
+--: `test_line_of_sight_hook_lua.py` asserts this mechanically, the same
+--: guard `SET_LOOK_TEMPLATE` already has.
+local SET_PROBES_TEMPLATE = "PB_PROBE_SEQ=%d\nPB_PROBE_N=%d\n"
+    .. "PB_PROBE_X_1=%d\nPB_PROBE_Z_1=%d\n"
+    .. "PB_PROBE_X_2=%d\nPB_PROBE_Z_2=%d\n"
+    .. "PB_PROBE_X_3=%d\nPB_PROBE_Z_3=%d\n"
+    .. "PB_PROBE_X_4=%d\nPB_PROBE_Z_4=%d\n"
+    .. "PB_PROBE_X_5=%d\nPB_PROBE_Z_5=%d\n"
+    .. "PB_PROBE_X_6=%d\nPB_PROBE_Z_6=%d\n"
+    .. "return \"ok\""
+
+--: The coordinate clamp for an inbound probe point -- `schema.
+--: line_of_sight`'s own `MAX_PROBE_POINTS`/coordinate-bound docstring has
+--: the matching collector-side figure (+-2,000,000 m, comfortably wider
+--: than any DCS theatre's own map extent).
+local PROBE_COORD_ABS_MAX = 2000000
+local PROBE_SEQ_MAX = 2147483647
+
 --: Enumerates every live unit **and every static object** across all
 --: three coalition sides within
 --: `PLAYER_BUBBLE_RADIUS_M` of ownship's own true position, filters those
@@ -367,6 +445,8 @@ local LOS_CODE = "local MAX_SIGHTLINES = "
     .. string.format("%d", MAX_SIGHTLINES_PER_CALL)
     .. "\nlocal BUBBLE_RADIUS_M = "
     .. string.format("%.17g", PLAYER_BUBBLE_RADIUS_M)
+    .. "\nlocal MAX_PROBES = "
+    .. string.format("%d", MAX_PROBE_POINTS)
     .. "\n"
     .. [[
 local hour = PB_LOOK_HOUR or 0
@@ -625,6 +705,52 @@ for i = 1, #candidates do
         .. ":" .. (agl ~= nil and tostring(agl) or "")
 end
 
+-- `plans/expected-area-look/plan.md` Stage 1: up to `PB_PROBE_N`
+-- terrain-point probes, evaluated after the unit loop (this file's own
+-- "after" placement), never pre-ANDed with the unit sightlines above.
+-- Reads the mission-scripting globals `_applyProbePoints` (below) writes.
+-- `PB_PROBE_N`/`PB_PROBE_SEQ` default to 0 when no probe command has ever
+-- arrived this mission-scripting-state lifetime (mirrors `PB_LOOK_HOUR`'s
+-- own `or 0` read pattern).
+-- `MAX_PROBES` (not `MAX_PROBE_POINTS`) -- this chunk runs in a different
+-- Lua state via `net.dostring_in` and cannot see the outer file's own
+-- `local`s, so the clamp bound is spliced in at module load exactly like
+-- `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` above (file header's "load-time
+-- splice" note). The target-point height below is the literal `2.0`, not
+-- a spliced `PROBE_TARGET_HEIGHT_M`, for the same reason -- matching the
+-- existing `+ 2.0` convention this file's own unit-sightline loop above
+-- already uses rather than adding a third splice for one fixed number.
+local probeSeq = PB_PROBE_SEQ or 0
+local probeN = PB_PROBE_N or 0
+if probeN > MAX_PROBES then probeN = MAX_PROBES end
+local probeParts = {}
+for i = 1, probeN do
+    local px = _G["PB_PROBE_X_" .. tostring(i)]
+    local pz = _G["PB_PROBE_Z_" .. tostring(i)]
+    local clearToken = ""
+    if type(px) == "number" and type(pz) == "number" then
+        local okH, groundH = pcall(land.getHeight, { x = px, y = pz })
+        if okH and groundH ~= nil then
+            local probeTarget = { x = px, y = groundH + 2.0, z = pz }
+            -- Fail closed, unlike `terrainClear` above: an empty token
+            -- ("unknown") on any failure, never a guessed "1"/"0" --
+            -- E11/E5, see file header's "Point probes" section.
+            local okV, visible = pcall(land.isVisible, observerPoint, probeTarget)
+            if okV then
+                clearToken = visible and "1" or "0"
+            end
+        end
+    end
+    probeParts[#probeParts + 1] = tostring(i - 1) .. ":" .. clearToken
+end
+-- `N == 0` (plan: "N = 0 clears") means no check is open -- an empty
+-- string here, never `"<seq>|"` with zero entries, so the Hook side
+-- (`pollAndSend`) and the schema side (`ProbeAnswers.from_wire`'s
+-- `if probes_raw:` guard) agree on exactly one "nothing to report" shape.
+local probesPayload = probeN > 0
+    and (tostring(probeSeq) .. "|" .. table.concat(probeParts, ";"))
+    or ""
+
 -- The units-vs-statics breakdown cannot cross the `dostring_in` boundary
 -- (one scalar return, and the wire format is fixed by
 -- `aircraft-layer/src/schema/line_of_sight.py`), so it goes to `dcs.log`
@@ -660,6 +786,7 @@ return tostring(objectsInBubble) .. "|" .. tostring(objectsInWedge) .. "|"
     .. tostring(sightlinesComputed) .. "|" .. tostring(hour) .. "|"
     .. tostring(fovHalfDeg) .. "|" .. tostring(timer.getTime()) .. "|"
     .. table.concat(parts, ";")
+    .. "\1" .. probesPayload
 ]]
 
 local petrobrainLineOfSight = {}
@@ -746,36 +873,98 @@ local function _applyLookDirection(decoded)
     end
 end
 
+--: `plans/expected-area-look/plan.md` Stage 1 -- clamps and applies one
+--: `probe_points` datagram (`{"op":"probe_points","seq":n,"points":
+--: [[x,z],...]}`), same end-to-end-`pcall`'d, "no error path leaves a
+--: stale value silently in place" posture as `_applyLookDirection`. `N`
+--: is clamped to `MAX_PROBE_POINTS`; unused point slots are zeroed (the
+--: LOS chunk only ever reads indices `1..N`, so a zeroed-but-unread slot
+--: is never a wrong answer, only an unread one).
+local function _applyProbePoints(decoded)
+    local pointsRaw = decoded.points
+    local n = 0
+    if type(pointsRaw) == "table" then
+        n = #pointsRaw
+    end
+    if n > MAX_PROBE_POINTS then n = MAX_PROBE_POINTS end
+
+    local args = {}
+    args[1] = _safeClampInt(decoded.seq, 0, PROBE_SEQ_MAX, 0)
+    args[2] = n
+    for i = 1, MAX_PROBE_POINTS do
+        local px, pz = 0, 0
+        if i <= n then
+            local point = pointsRaw[i]
+            if type(point) == "table" then
+                px = _safeClampInt(point[1], -PROBE_COORD_ABS_MAX, PROBE_COORD_ABS_MAX, 0)
+                pz = _safeClampInt(point[2], -PROBE_COORD_ABS_MAX, PROBE_COORD_ABS_MAX, 0)
+            end
+        end
+        args[#args + 1] = px
+        args[#args + 1] = pz
+    end
+
+    local snippet = string.format(SET_PROBES_TEMPLATE, unpack(args))
+    local ok, result = dostring("scripting", snippet)
+    if ok then
+        logi("probe points set: seq=" .. tostring(args[1]) .. " n=" .. tostring(n))
+    else
+        logi("probe points set failed: " .. tostring(result))
+    end
+end
+
 --: Drains up to `MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME` pending
---: datagrams, applying only the last successfully-decoded one this frame
---: -- Security review Finding 5/required fix 2: coalesce to at most one
---: `dostring_in` setter call per frame, never one per queued datagram.
-local function pollLookDirection()
+--: datagrams off the one shared inbound socket, applying only the last
+--: successfully-decoded datagram **of each op** this frame -- Security
+--: review Finding 5/required fix 2's coalescing rule, now extended to a
+--: second op sharing the same listener (`plans/expected-area-look/
+--: plan.md` Stage 1: "the existing 7797 listener"). Renamed from
+--: `pollLookDirection` -- it now polls for either op, not only
+--: `look_direction`.
+local function pollInbound()
     if listenSocket == nil then
         return
     end
-    local latest = nil
+    local latestLook = nil
+    local latestProbes = nil
     for _ = 1, MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME do
         local data, _err = listenSocket:receivefrom()
         if data == nil then
             break
         end
         local decodeOk, decoded = pcall(function() return JSON:decode(data) end)
-        if decodeOk and type(decoded) == "table" and decoded.op == "look_direction" then
-            latest = decoded
+        if decodeOk and type(decoded) == "table" then
+            if decoded.op == "look_direction" then
+                latestLook = decoded
+            elseif decoded.op == "probe_points" then
+                latestProbes = decoded
+            end
         end
     end
-    if latest ~= nil then
-        _applyLookDirection(latest)
+    if latestLook ~= nil then
+        _applyLookDirection(latestLook)
+    end
+    if latestProbes ~= nil then
+        _applyProbePoints(latestProbes)
     end
 end
 
-local function sendPayload(payload, bridgeCallMs)
+--: `probes`, when non-empty, rides as its own JSON key -- never folded
+--: into `payload` (file header's "Point probes" section; `schema.
+--: line_of_sight`'s matching docstring). Omitted from the envelope
+--: entirely when empty, so an old collector's parser (which never looks
+--: for this key) and a new one (which treats a missing key as "no probe
+--: answers") both read the same thing.
+local function sendPayload(payload, bridgeCallMs, probes)
     if sendSocket == nil then
         sendSocket = socket.udp()
     end
-    local envelope = JSON:encode({ payload = payload, bridge_call_ms = bridgeCallMs })
-    local ok, err = sendSocket:sendto(envelope, LOS_SEND_HOST, LOS_SEND_PORT)
+    local envelope = { payload = payload, bridge_call_ms = bridgeCallMs }
+    if probes ~= nil and probes ~= "" then
+        envelope.probes = probes
+    end
+    local encoded = JSON:encode(envelope)
+    local ok, err = sendSocket:sendto(encoded, LOS_SEND_HOST, LOS_SEND_PORT)
     if not ok then
         logi("send failed: " .. tostring(err))
     end
@@ -793,6 +982,17 @@ local function pollAndSend()
         logi("LOS poll error: " .. result)
         return
     end
+    -- `plans/expected-area-look/plan.md` Stage 1: split off the probes
+    -- sub-wire (file header's "\1" separator) before anything below
+    -- touches `result` -- every observability match/log line downstream
+    -- must see exactly the pre-Stage-1 LOS payload, not a string with the
+    -- probes answer still appended to it.
+    local losPayload, probesPayload = result:match("^(.*)\1(.*)$")
+    if losPayload == nil then
+        losPayload = result
+        probesPayload = ""
+    end
+    result = losPayload
     -- Pull the observability triad out of the result's own leading fields
     -- rather than leaving it inside a truncated `result_head=`. A
     -- `string.match` pattern, not a format splice -- nothing is spliced
@@ -827,7 +1027,7 @@ local function pollAndSend()
                 .. " farthest candidates)"
         )
     end
-    sendPayload(result, bridgeCallMs)
+    sendPayload(result, bridgeCallMs, probesPayload)
 end
 
 function petrobrainLineOfSight.onSimulationStart()
@@ -863,7 +1063,7 @@ function petrobrainLineOfSight.onSimulationFrame()
     if not simulationRunning then
         return
     end
-    local pollOk, pollErr = pcall(pollLookDirection)
+    local pollOk, pollErr = pcall(pollInbound)
     if not pollOk then
         logi("look-direction poll failed: " .. tostring(pollErr))
     end

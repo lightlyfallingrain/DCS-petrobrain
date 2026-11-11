@@ -165,6 +165,7 @@ import math
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -455,6 +456,21 @@ class AircraftLayerClient:
         self._post_json(
             "/command/look_direction",
             {"hour": hour, "fov_half_deg": fov_half_deg},
+        )
+
+    def post_probe_points(self, seq: int, points: Sequence[tuple[int, int]]) -> None:
+        """`POST /command/probe_points` -> pushes the currently-open
+        expected-area check(s)' own probe points (`aircraft-layer/src/
+        collector/command_sender.LookDirectionSender.send_probe_points`,
+        `plans/expected-area-look/plan.md` Stage 1). `belief.expected_area`
+        is the one caller; `points=[]` clears (the Hook's own "N = 0
+        clears" contract). Same raise-on-failure posture as `post_look_
+        direction` above -- a dropped probe push leaves an open check
+        silently stuck, which `belief.expected_area`'s fail-closed contract
+        must be able to see rather than guess past."""
+        self._post_json(
+            "/command/probe_points",
+            {"seq": seq, "points": [list(point) for point in points]},
         )
 
     def get_petrovich_wheel_latest(self) -> dict[str, Any] | None:

@@ -122,6 +122,17 @@ EFFECTOR_SEQUENCE_STEP_DELAY_S = 1.0
 # source: belief/enrichment.py:BUILT_UP_VILLAGE_MAX_AREA_M2
 BUILT_UP_VILLAGE_MAX_AREA_M2 = 1000000.0
 
+[belief.expected_area]
+# `plans/expected-area-look/plan.md` Stage 3b -- "same" requires the count-interval midpoints of A (before the hold) and B not to differ by more than this ratio, the larger over the smaller.
+# status: judgement | range: 1.2 .. 5.0
+# source: belief/expected_area.py:COMPOSITION_MATCH_RATIO
+COMPOSITION_MATCH_RATIO = 2.0
+
+# `plans/expected-area-look/plan.md` Stage 2 -- how wide A's believed area (its growth-inflated covariance, the same formula the gate's own `_contact_covariance` already uses) may be, in half-degrees from the observer, and still fit inside one binocular sweep.
+# status: judgement | range: 4.25 .. 30.0
+# source: belief/expected_area.py:EXPECTED_AREA_MAX_HALF_WIDTH_DEG
+EXPECTED_AREA_MAX_HALF_WIDTH_DEG = 15.0
+
 [belief.optic_policy]
 # `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a binocular look must be expected to tighten the range of a contact the pilot asked to watch, in metres, before Petrovich raises binoculars just for its position.
 # status: judgement | range: 5.0 .. 500.0

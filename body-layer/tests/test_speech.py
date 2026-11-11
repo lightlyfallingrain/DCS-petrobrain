@@ -26,11 +26,13 @@ from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext, semantic_facts_for
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RELOCATED,
     Event,
 )
 from belief.position_belief import Covariance2D, PositionEstimate
@@ -2470,6 +2472,57 @@ def test_route_event_contact_firing_seen_auto_acknowledges(
     )
 
     assert firing_event not in store.unacknowledged_events
+
+
+# --- CONTACT_RELOCATED / CONTACT_ABSENT speech (plans/expected-area-look/
+# plan.md, BL-B111 Stage 3b) -------------------------------------------
+
+
+def test_route_event_contact_relocated_says_now_clock_and_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 4's provisional wording -- neutral "that group", not the
+    unit-type lead `_contact_report_text` would give (A's own
+    classification was already spoken when first announced)."""
+    store, contact_id = _store_with_one_contact()
+    store.record_relocation(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_RELOCATED)
+
+    speech = route_event(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text.startswith("That group, now ")
+    assert "o'clock" in speech.text
+
+
+def test_route_event_contact_relocated_omits_without_a_current_bearing() -> None:
+    store, contact_id = _store_with_one_contact()
+    store.record_relocation(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_RELOCATED)
+
+    # No `EnrichmentContext` -> no `relative_now` -> nothing to report,
+    # same "do not invent a look that was not taken" posture as
+    # `CONTACT_BURNING_SEEN`.
+    speech = route_event(store, event, now_sim=0.0)
+
+    assert speech is None
+
+
+def test_route_event_contact_absent_says_the_fixed_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, contact_id = _store_with_one_contact()
+    store.record_absence(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_ABSENT)
+
+    speech = route_event(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text == "That group is no longer at its last place."
 
 
 # --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --

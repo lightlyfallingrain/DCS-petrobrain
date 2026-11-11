@@ -587,6 +587,17 @@ class LookTarget:
     #: the *order* looks happen in, never whether they happen at all.
     watched: bool = False
 
+    #: `plans/expected-area-look/plan.md` Stage 3a -- this target is A's
+    #: own expected place for an open `ExpectedAreaCheck`, not an ordinary
+    #: classification candidate. `choose_glass_look` ranks it ahead of
+    #: every other bucket (user Q5); `_area_or_glass_can_improve` (below)
+    #: never lets it read as "nothing left to learn" on classification
+    #: grounds alone, since an area-check look is about confirming a
+    #: *place*, not raising a tier -- it runs to its own `MAX_LOOK_S`
+    #: budget regardless of A's believed classification. `False` (the
+    #: default) is a true no-op for every pre-`BL-B111` caller/test.
+    area_check: bool = False
+
     #: How much a binocular look is expected to tighten this contact's own
     #: down-range uncertainty, metres (`plans/expected-area-check/plan.md`
     #: Stage 1, "Priority 4") -- `location_gain_for`'s own output, `0.0`
@@ -641,6 +652,78 @@ class BoundedSightLook:
     #: `body.py` can render "<where> clear." without recomputing it.
     label: str
     sweeps_completed: int = 0
+
+
+@dataclass(frozen=True)
+class AreaLookReport:
+    """One open `[[BL-B111]]` expected-area check's own look outcome, read
+    by `body.py` as `belief.expected_area.area_visibility`'s
+    `look_completed_naturally` state param -- so that field is read off a
+    real recorded look rather than approximated from a deadline
+    (`plans/expected-area-look/plan.md` Pass 2: "the deadline
+    approximation ... is not acceptable").
+
+    `contact_id` is **A's** id (`LookTarget.contact_id` for the
+    `area_check=True` target `body.py` built from A's believed place) --
+    the look targets A's place, never B's, so `body.py` matches this
+    against each open check's own `a_id`, not `b_id`.
+
+    Frozen once the look ends, by whichever of the two ways it can end
+    (`_decide_without_guidance`'s own Co-moving Fields rows):
+
+    - **naturally** -- `look_is_finished` says so, while still `steady`:
+      `natural_end=True`, `steady=True`, `look_ended_sim=now_sim`.
+    - **interrupted** -- an unsteady poll, or an external `lower_
+      binoculars` (any pilot command, OBSERV on, a scan command, all of
+      which route through that one function): `natural_end=False`,
+      `steady=False`, `look_ended_sim=now_sim`.
+
+    `envelope_*` are the sweep's own fixed envelope (`_start_glass_look`'s
+    `chosen.azimuth_deg`/`elevation_deg`/`envelope_half_width`) -- the
+    same quantities `OpticState.look_envelope_azimuth_deg`/`_half_width_
+    deg` hold for whichever look is *currently* running, but copied here
+    so a finished look's own envelope survives into the next look
+    overwriting those fields."""
+
+    contact_id: str
+    natural_end: bool
+    envelope_azimuth_deg: float
+    envelope_elevation_deg: float
+    envelope_half_width_deg: float
+    steady: bool
+    look_started_sim: float
+    look_ended_sim: float | None = None
+
+
+def area_look_covers(
+    report: AreaLookReport, azimuth_deg: float, elevation_deg: float
+) -> bool:
+    """Whether `(azimuth_deg, elevation_deg)` -- A's *current* believed
+    place, as `body.py` reads it this poll -- still falls inside
+    `report`'s own frozen sweep envelope. The one public read `body.py`
+    needs to finish deriving `area_visibility`'s `look_completed_
+    naturally` (natural end + steady + this); exposed instead of
+    `_angular_separation_deg` itself, which takes two `LookTarget`s and is
+    private to this module."""
+    separation_deg = _angular_separation_deg(
+        LookTarget(
+            contact_id="",
+            azimuth_deg=report.envelope_azimuth_deg,
+            elevation_deg=report.envelope_elevation_deg,
+            range_m=0.0,
+            object_type="",
+            current_level="unknown",
+        ),
+        LookTarget(
+            contact_id="",
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+            range_m=0.0,
+            object_type="",
+            current_level="unknown",
+        ),
+    )
+    return separation_deg <= report.envelope_half_width_deg
 
 
 @dataclass(frozen=True)
@@ -913,6 +996,21 @@ class OpticState:
     #: `guidance_optic` is `None` -- the two are set and cleared together,
     #: never independently (`_apply_guidance`'s own contract).
     guidance_optic_since_sim: float | None = None
+
+    #: `plans/expected-area-look/plan.md` Pass 2 -- every open
+    #: `[[BL-B111]]` check's own `AreaLookReport`, keyed by **A's**
+    #: `contact_id` (not `b_id`; see that dataclass's own docstring). A
+    #: dict rather than one bare field because at most `belief.
+    #: expected_area.MAX_OPEN_CHECKS` (2) checks may be open at once, and
+    #: a single-slot field would lose one report's own natural-end
+    #: outcome whenever both looks happen to finish and restart within
+    #: the same `decide()` call ("several looks per step"). Entries are
+    #: never pruned here -- `body.py` is what knows a check has closed
+    #: (`resolve_checks`'s own return), and this dict surviving a closed
+    #: check's own id a poll longer than needed is harmless (nothing
+    #: reads an id `resolve_checks` is not still looking for). Empty by
+    #: default, a true no-op for every pre-`BL-B111` caller/test.
+    area_look_reports: dict[str, AreaLookReport] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1523,6 +1621,28 @@ def _glass_can_improve(target: LookTarget) -> bool:
     )
 
 
+def _area_or_glass_can_improve(target: LookTarget) -> bool:
+    """`_glass_can_improve`, extended for an area-check look
+    (`plans/expected-area-look/plan.md` Stage 3a's own ending list: "A is
+    observed" is resolved upstream, by `belief.expected_area.resolve_
+    checks`, *before* it ever asks whether the look finished -- never
+    here; "its sweep has held each step for >= 1 poll" is already what
+    the sweep step mechanics give for free; so this only has to stop this
+    function ending the look early on *classification* grounds, "`MAX_
+    LOOK_S`" governs the rest via `look_is_finished`'s own dwell clock
+    exactly as it does for an ordinary classification look).
+
+    An `area_check` target is never "done improving": the look is about
+    confirming a *place* (Stage 2's `area_visibility`), not raising A's
+    classification tier, and A may well already be fully identified. Used
+    in place of `_glass_can_improve` at every `GLASSING` call site that
+    decides whether the *current* look should keep running or whether a
+    *fresh* one is worth starting, so an area-check target is admitted
+    and kept running on its own terms rather than one built for a
+    different question."""
+    return target.area_check or _glass_can_improve(target)
+
+
 def is_worth_a_look(
     target: LookTarget,
     state: OpticState,
@@ -1668,7 +1788,12 @@ def choose_glass_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     """The binocular glass step's own candidate ordering -- `plans/
     expected-area-check/plan.md` Stage 1, "Optics priority", the user's
     refined order (type identification, then classification, then exact
-    location). Three buckets: `0`/`1` are `choose_sighting_look`'s own
+    location), with `plans/expected-area-look/plan.md` Stage 3a's
+    `area_check` bucket added ahead of all three (user Q5: *"an area
+    check wins the step"*). Four buckets: `-1` is any `area_check`
+    target, ranked first and unconditionally -- it is not a
+    classification candidate at all, so it is never compared against
+    `can_still_improve`. `0`/`1` are `choose_sighting_look`'s own
     `_classification_bucket` (a `class` contact in its type window beats
     any other target `can_still_improve` still admits); `2` is a target
     `can_still_improve` no longer admits but whose `watched`/`location_
@@ -1679,15 +1804,21 @@ def choose_glass_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     is unchanged, so a watched contact still wins inside each priority.
 
     `targets` here is everything `is_worth_a_look(..., can_improve=
-    _glass_can_improve)` admitted -- it may contain exact-location-only
-    candidates `choose_sighting_look` never sees (that caller's own
-    `sight_can_still_improve` filter excludes them upstream), which is
-    why this is a separate function rather than a parameter on that one."""
+    _area_or_glass_can_improve)` admitted -- it may contain exact-
+    location-only and `area_check` candidates `choose_sighting_look`
+    never sees (that caller's own `sight_can_still_improve` filter
+    excludes them upstream), which is why this is a separate function
+    rather than a parameter on that one."""
     if not targets:
         return None
     by_bucket: dict[int, list[LookTarget]] = {}
     for target in targets:
-        bucket = _classification_bucket(target) if can_still_improve(target) else 2
+        if target.area_check:
+            bucket = -1
+        elif can_still_improve(target):
+            bucket = _classification_bucket(target)
+        else:
+            bucket = 2
         by_bucket.setdefault(bucket, []).append(target)
     return choose_look(by_bucket[min(by_bucket)])
 
@@ -1811,6 +1942,35 @@ _HOME_OPTIC: Final[dict[OpticPhase, Optic]] = {
     OpticPhase.SCANNING: UNAIDED_OPTIC,
     OpticPhase.SIGHTING: SIGHT_WIDE_OPTIC,
 }
+
+
+def _mark_area_look_interrupted(state: OpticState, now_sim: float) -> OpticState:
+    """Freeze the current look's own `AreaLookReport` as interrupted
+    before handing off to `_back_to_home` -- `plans/expected-area-look/
+    plan.md` Pass 2's Co-moving Fields table, "external: `lower_
+    binoculars`, OBSERV on, scan command | interrupt | report marked
+    `natural_end=False`". Every external interruption of a `GLASSING`
+    look that is not itself the look's own natural end must mark this, or
+    a stale `natural_end=True` left over from an earlier, already-
+    consumed look at the same contact id could otherwise be misread by
+    `body.py` as *this* interruption's own outcome. ("OBSERV on"/"a scan
+    command" both reach this the same way `lower_binoculars` itself does
+    -- `body.py`'s poll loop routes every dispatched player command
+    through that one function first, per its own docstring.)
+
+    A true no-op when no area-check look is active (`look_contact_id` is
+    `None`, or not a key of `area_look_reports` at all -- an ordinary
+    classification look never populated one)."""
+    if state.look_contact_id is None:
+        return state
+    report = state.area_look_reports.get(state.look_contact_id)
+    if report is None:
+        return state
+    updated = dict(state.area_look_reports)
+    updated[state.look_contact_id] = replace(
+        report, natural_end=False, steady=False, look_ended_sim=now_sim
+    )
+    return replace(state, area_look_reports=updated)
 
 
 def _back_to_home(
@@ -2060,7 +2220,7 @@ def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
             look_contact_id=None,
             look_started_sim=None,
         )
-    return _back_to_home(state, now_sim)[0]
+    return _back_to_home(_mark_area_look_interrupted(state, now_sim), now_sim)[0]
 
 
 #: The search cycle's fixed order -- `plans/9k113-scan-procedure/plan.md`
@@ -2977,6 +3137,22 @@ def _start_glass_look(
     glass_step_started_sim = (
         now_sim if reset_step_clock else state.glass_step_started_sim
     )
+    # `plans/expected-area-look/plan.md` Pass 2 -- an `area_check` look
+    # opens a fresh `AreaLookReport` for `chosen`'s own id; any other
+    # look leaves the dict exactly as carried forward (a prior check's
+    # own finished/interrupted report is not this look's business to
+    # touch, per `OpticState.area_look_reports`'s own docstring).
+    area_look_reports = dict(state.area_look_reports)
+    if chosen.area_check:
+        area_look_reports[chosen.contact_id] = AreaLookReport(
+            contact_id=chosen.contact_id,
+            natural_end=False,
+            envelope_azimuth_deg=chosen.azimuth_deg,
+            envelope_elevation_deg=chosen.elevation_deg,
+            envelope_half_width_deg=envelope_half_width,
+            steady=True,
+            look_started_sim=now_sim,
+        )
     new_state = OpticState(
         phase=OpticPhase.GLASSING,
         phase_started_sim=now_sim,
@@ -3007,6 +3183,7 @@ def _start_glass_look(
         # standing guidance grant's bookkeeping.
         guidance_optic=state.guidance_optic,
         guidance_optic_since_sim=state.guidance_optic_since_sim,
+        area_look_reports=area_look_reports,
     )
     return (
         new_state,
@@ -3164,7 +3341,7 @@ def _decide_without_guidance(
             # advances the next time it completes naturally); `n_sectors
             # <= 1` (every commanded scan, where `SEARCHING`'s own sibling
             # row has the identical gap) makes this a true no-op there.
-            return _back_to_home(state, now_sim)
+            return _back_to_home(_mark_area_look_interrupted(state, now_sim), now_sim)
         # Look-follow (Stage 1, "Body rotation"): shift the sweep to
         # track the chosen contact's own azimuth drift since last poll.
         # **Azimuth only** (a stated, reversible simplification: the plan
@@ -3219,7 +3396,7 @@ def _decide_without_guidance(
                         ),
                     )
         if look_is_finished(
-            glassing_state, now_sim, targets, can_improve=_glass_can_improve
+            glassing_state, now_sim, targets, can_improve=_area_or_glass_can_improve
         ):
             # Natural end (recognition succeeded, nothing left to learn, or
             # MAX_LOOK_S expired): the look ran and delivered its benefit,
@@ -3236,6 +3413,27 @@ def _decide_without_guidance(
                 committed_level[contact_id] = glassing_state.pending_attempted_at_level[
                     contact_id
                 ]
+            # `plans/expected-area-look/plan.md` Pass 2 -- if the look
+            # that just finished naturally was an area-check look, freeze
+            # its own `AreaLookReport` as `natural_end=True`/`steady=True`
+            # *before* any further look starts and possibly reuses the
+            # same `OpticState.look_contact_id` for something else. Reads
+            # `glassing_state` (not `state`) because the look-follow shift
+            # above may have moved the envelope since the poll started.
+            committed_area_look_reports = dict(glassing_state.area_look_reports)
+            if glassing_state.look_contact_id is not None:
+                area_report = committed_area_look_reports.get(
+                    glassing_state.look_contact_id
+                )
+                if area_report is not None:
+                    committed_area_look_reports[glassing_state.look_contact_id] = (
+                        replace(
+                            area_report,
+                            natural_end=True,
+                            steady=True,
+                            look_ended_sim=now_sim,
+                        )
+                    )
             committed_state = replace(
                 glassing_state,
                 attempted_at_range_m=committed_range,
@@ -3243,6 +3441,7 @@ def _decide_without_guidance(
                 attempted_at_level=committed_level,
                 pending_attempted_at_range_m={},
                 pending_attempted_at_level={},
+                area_look_reports=committed_area_look_reports,
             )
             # Stage 1, "several looks per step": another look may start
             # within the same glass step, back to back, if something else
@@ -3256,7 +3455,7 @@ def _decide_without_guidance(
                     target,
                     committed_state,
                     now_sim,
-                    can_improve=_glass_can_improve,
+                    can_improve=_area_or_glass_can_improve,
                     stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
                 )
             ]
@@ -3385,7 +3584,7 @@ def _decide_without_guidance(
             target,
             state,
             now_sim,
-            can_improve=_glass_can_improve,
+            can_improve=_area_or_glass_can_improve,
             stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
         )
     ]
@@ -3433,6 +3632,12 @@ def _decide_without_guidance(
                     # standing).
                     guidance_optic=state.guidance_optic,
                     guidance_optic_since_sim=state.guidance_optic_since_sim,
+                    # `plans/expected-area-look/plan.md` Pass 2 -- `SEARCHING`
+                    # is unrelated to any open check, so this carries the
+                    # dict forward unread (same posture as every other
+                    # field above), rather than losing a just-finished
+                    # look's report to a fresh `OpticState(...)` default.
+                    area_look_reports=dict(state.area_look_reports),
                 ),
                 OpticDecision(
                     optic=BINOCULAR_OPTIC,
@@ -3677,6 +3882,7 @@ def look_target_for(
     watched: bool = False,
     pitch_deg: float = 0.0,
     bank_deg: float = 0.0,
+    area_check: bool = False,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
@@ -3715,6 +3921,11 @@ def look_target_for(
     default (see that field's own docstring). `None` (the default) leaves
     `LookTarget`'s own default untouched, for any caller with no
     `PositionEstimate` to hand.
+
+    `area_check` (`plans/expected-area-look/plan.md` Stage 3a) defaults
+    to `False`, a true no-op for every pre-`BL-B111` caller -- `body.
+    _look_targets` is the one caller that passes `True`, for A's own
+    target while an `ExpectedAreaCheck` naming it as `a_id` is open.
     """
     slant_m = range_m(observer, target_position)
     body_direction = body_relative_direction(
@@ -3740,5 +3951,6 @@ def look_target_for(
         current_level=current_level,
         watched=watched,
         location_gain_m=location_gain_for(position, observer, object_type),
+        area_check=area_check,
         **kwargs,
     )

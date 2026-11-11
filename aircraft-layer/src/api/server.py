@@ -290,6 +290,7 @@ from collector.command_sender import (
 )
 from collector.firing_receiver import EmitterTracker
 from schema import MAX_WATCHED_ARG_NUMBER, MAX_WATCHED_ARGS
+from schema.line_of_sight import MAX_PROBE_POINTS
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,7 @@ _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
+_COMMAND_PROBE_POINTS_PATH = "/command/probe_points"
 _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
 _COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
 _QUERY_READ_ARGS_PATH = "/query/read_args"
@@ -334,6 +336,18 @@ _LOOK_DIRECTION_HOUR_MIN = 0
 _LOOK_DIRECTION_HOUR_MAX = 11
 _LOOK_DIRECTION_FOV_MIN_DEG = 5
 _LOOK_DIRECTION_FOV_MAX_DEG = 180
+
+#: `POST /command/probe_points`'s own validation (`plans/
+#: expected-area-look/plan.md` Stage 1) -- the collector-side layer of
+#: the same three-deep defense `_LOOK_DIRECTION_*` above documents
+#: (body-layer -> collector -> Hook). `MAX_PROBE_POINTS` ("two open
+#: checks x three points") and the coordinate bound both match
+#: `schema.line_of_sight`'s own declarations and the Hook's
+#: `SET_PROBES_TEMPLATE`/`_safeClampInt` pair exactly -- a mismatch here
+#: would validate a shape the Hook then silently reclamps differently.
+_PROBE_POINTS_MAX_POINTS = MAX_PROBE_POINTS
+_PROBE_POINTS_COORD_ABS_MAX = 2_000_000
+_PROBE_POINTS_SEQ_MAX = 2**31 - 1
 
 #: `/audio/play`'s optional `correlation_id` field (`plans/
 #: voice-latency-instrumentation/plan.md` Stage 4) -- the capture side
@@ -587,6 +601,9 @@ def _make_handler(
             if path == _COMMAND_LOOK_DIRECTION_PATH:
                 self._handle_command_look_direction()
                 return
+            if path == _COMMAND_PROBE_POINTS_PATH:
+                self._handle_command_probe_points()
+                return
             if path == _AUDIO_PLAY_PATH:
                 self._handle_audio_play()
                 return
@@ -700,6 +717,96 @@ def _make_handler(
 
             try:
                 look_direction_sender.send_look_direction(hour, fov_half_deg)
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_probe_points(self) -> None:
+            """`POST /command/probe_points` -- forwards to the same
+            `LookDirectionSender` instance `/command/look_direction`
+            already uses (`plans/expected-area-look/plan.md` Stage 1: one
+            Hook listener, two ops). `{"seq": int, "points": [[x, z],
+            ...]}`; at most `MAX_PROBE_POINTS` points, each an integer
+            pair with `|x|, |z| <= _PROBE_POINTS_COORD_ABS_MAX`. An empty
+            `points` list is valid -- it is how a caller clears an open
+            check's probes (plan: "N = 0 clears")."""
+            if look_direction_sender is None:
+                self._respond_json(503, {"error": "look direction not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            seq = data.get("seq")
+            if (
+                isinstance(seq, bool)
+                or not isinstance(seq, int)
+                or not (0 <= seq <= _PROBE_POINTS_SEQ_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            f"'seq' must be an integer in [0, {_PROBE_POINTS_SEQ_MAX}], "
+                            f"got {seq!r}"
+                        )
+                    },
+                )
+                return
+
+            points_raw = data.get("points")
+            if not isinstance(points_raw, list) or len(points_raw) > (
+                _PROBE_POINTS_MAX_POINTS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'points' must be a list of at most "
+                            f"{_PROBE_POINTS_MAX_POINTS} [x, z] pairs, got {points_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            points: list[tuple[int, int]] = []
+            for point in points_raw:
+                if (
+                    not isinstance(point, list)
+                    or len(point) != 2
+                    or any(isinstance(coord, bool) for coord in point)
+                    or not all(isinstance(coord, int) for coord in point)
+                    or not all(
+                        -_PROBE_POINTS_COORD_ABS_MAX
+                        <= coord
+                        <= _PROBE_POINTS_COORD_ABS_MAX
+                        for coord in point
+                    )
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "each point must be an [x, z] integer pair with "
+                                f"|x|, |z| <= {_PROBE_POINTS_COORD_ABS_MAX}, got "
+                                f"{point!r}"
+                            )
+                        },
+                    )
+                    return
+                points.append((point[0], point[1]))
+
+            try:
+                look_direction_sender.send_probe_points(seq, points)
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return

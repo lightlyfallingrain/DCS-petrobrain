@@ -87,15 +87,33 @@ def _assert_value_matches_fresh_default(
 # --- ContactStore / TaskStore -- plain classes, enumerated via vars() -------
 
 
+#: `ContactStore.reset_for_new_mission`'s own documented preserve-set --
+#: `plans/expected-area-look/plan.md` -- `_expected_area_checks` is
+#: `body.py`'s own standing choice of mechanism (Pass 2: always `True` in
+#: production), not per-mission belief state, so a mission restart must
+#: not silently turn the trigger back off. Compared by value below (same
+#: posture `test_crew_console_reset_preserves_declared_fields_and_resets_
+#: rest`'s own `silenced` field takes), not identity -- a plain `bool`.
+_CONTACT_STORE_PRESERVE = {"_expected_area_checks"}
+
+
 def test_contact_store_reset_clears_every_field() -> None:
-    store = ContactStore()
+    store = ContactStore(expected_area_checks=True)
     field_names = set(vars(store))
-    _poison(store, field_names, preserve=set())
+    assert _CONTACT_STORE_PRESERVE <= field_names, (
+        "the preserve-set names a field ContactStore no longer has"
+    )
+    preserved_value = store._expected_area_checks
+    _poison(store, field_names, preserve=_CONTACT_STORE_PRESERVE)
 
     store.reset_for_new_mission()
 
+    assert store._expected_area_checks == preserved_value, (
+        "preserved field '_expected_area_checks' was replaced, not passed through"
+    )
+
     fresh = ContactStore()
-    for name in field_names:
+    for name in field_names - _CONTACT_STORE_PRESERVE:
         _assert_value_matches_fresh_default(
             name, getattr(store, name), getattr(fresh, name)
         )

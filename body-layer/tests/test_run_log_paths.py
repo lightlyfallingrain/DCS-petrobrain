@@ -352,3 +352,41 @@ def test_mission_memory_degrades_rather_than_raising(
 
     assert rolled is None
     assert "mission-memory: could not create log directory" in capsys.readouterr().err
+
+
+# --- `_resolve_expected_area_log_path` (`plans/expected-area-look/plan.md`
+# Pass 3's own sibling of `_resolve_group_trace_log_path`, same reasoning) -
+
+
+def test_expected_area_log_none_stays_none() -> None:
+    assert body_module._resolve_expected_area_log_path(None, when=_WHEN) is None
+
+
+def test_expected_area_log_rolls_and_creates_its_parent(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    assert not logs.exists()
+
+    rolled = body_module._resolve_expected_area_log_path(
+        logs / "expected-area.jsonl", when=_WHEN
+    )
+
+    assert rolled == logs / f"expected-area-{_STAMP}.jsonl"
+    assert logs.is_dir()
+
+
+def test_expected_area_log_degrades_rather_than_raising(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same policy as `_per_run_log_paths`'s own logs: an unwritable parent
+    costs this one log, not the sortie."""
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+
+    rolled = body_module._resolve_expected_area_log_path(
+        blocker / "expected-area.jsonl", when=_WHEN
+    )
+
+    assert rolled is None
+    assert (
+        "expected-area-log: could not create log directory" in capsys.readouterr().err
+    )

@@ -75,7 +75,29 @@ older deployed Hook script, pre-Stage-5) or present but empty (the
 Hook's own `land.getHeight` pcall failed that poll) -- never a guessed
 height, same tri-state discipline as `WorldObjectSample.is_ownship`.
 Helicopter-landed/hovering detection is the only consumer; every other
-LOS reader is unaffected by this field's presence or absence."""
+LOS reader is unaffected by this field's presence or absence.
+
+**Point probes (`plans/expected-area-look/plan.md`, `BL-B111`, Stage 1).**
+A second, independent query rides the same poll: up to `MAX_PROBE_POINTS`
+*terrain points* (not units), pushed by the collector's `probe_points`
+command, each answered `land.isVisible` terrain-clear-or-not, **fail
+closed** (unlike `terrain_clear` above, which fails `True` on error -- see
+the Hook's own module docstring for why a probe answer must never guess
+"clear"). The answer **rides in the JSON envelope as its own optional
+key, never as an eighth pipe-delimited field** (plan: "so an old collector
+with a new Hook, and the reverse, both keep working"):
+
+    {"payload": "<...the seven pipe fields above...>",
+     "bridge_call_ms": <float>,
+     "probes": "<seq>|<i>:<0|1|>;..."}
+
+`probes` is omitted, or an empty string, whenever no check is open (`N ==
+0`) or the datagram came from a pre-Stage-1 Hook -- both read as "no probe
+answers this poll", via `ProbeAnswers.from_wire`'s own optional-field
+contract on `LineOfSightSnapshot.probes`. The timestamp is **not**
+repeated on this sub-wire -- a probe answer is computed inside the same
+mission-scripting poll as the rest of this snapshot, so it shares that
+snapshot's own `dcs_model_time_s` (`LineOfSightReceiver` passes it in)."""
 
 from __future__ import annotations
 
@@ -86,6 +108,99 @@ from typing import Any
 class LineOfSightParseError(ValueError):
     """Raised when a line-of-sight wire payload does not match the
     expected shape."""
+
+
+#: `plans/expected-area-look/plan.md` Stage 1 -- "two open checks x three
+#: points". The collector-side cap on an inbound `probe_points` command's
+#: own `points` list, matched by the Hook's own `_safeClampInt`-bounded
+#: `PB_PROBE_N` and by `SET_PROBES_TEMPLATE`'s fixed `2 + 2*6` `%d`
+#: conversions -- a protocol constant shared by both ends of the wire, not
+#: a behaviour-affecting tunable (root `CLAUDE.md`'s tuning policy: this
+#: bounds a fixed-shape template, it does not change what Petrovich does).
+MAX_PROBE_POINTS = 6
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeAnswer:
+    """One queried point's own terrain-clear verdict -- `index` is its
+    position in the `probe_points` command's own `points` list (0-based),
+    `clear` is `True`/`False`/`None`. **`None` means "cannot look", never
+    "empty"** (plan E11/E5): the Hook's own `land.getHeight`/`land.
+    isVisible` pcall failed, or this index was never answered at all --
+    both collapse to the same fail-closed `None` on this side, since
+    nothing downstream may ever treat an unanswered probe as a clear
+    terrain point."""
+
+    index: int
+    clear: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeAnswers:
+    """All probe answers from one poll, `seq`-matched against whichever
+    `probe_points` command they answer -- `belief.expected_area`'s own
+    caller is the one place that compares `seq` and `dcs_model_time_s`
+    against the open check's own look window (plan Stage 2's "matched by
+    seq" clause); this class only parses and carries the wire shape.
+
+    `clear` is a tuple indexed exactly like the wire's own `<i>` token,
+    length `MAX_PROBE_POINTS`, `None` at every index the wire did not
+    mention -- so a caller can always index it `0..MAX_PROBE_POINTS - 1`
+    without checking length first."""
+
+    seq: int
+    #: This poll's own `dcs_model_time_s` (`LineOfSightSnapshot`'s, not a
+    #: second wire field) -- module docstring's "not repeated on this
+    #: sub-wire" note.
+    dcs_model_time_s: float
+    clear: tuple[bool | None, ...]
+
+    @staticmethod
+    def from_wire(raw: str, *, dcs_model_time_s: float) -> ProbeAnswers:
+        """Parse one `"<seq>|<i>:<0|1|>;..."` sub-wire string. Raises
+        `LineOfSightParseError` on a malformed string -- the caller
+        (`LineOfSightReceiver`) drops the *whole* envelope's `probes` field
+        on that, same "malformed -> dropped, never guessed" posture as
+        every other parse in this module, but does not drop the rest of
+        the snapshot (a bad probe sub-wire says nothing about whether the
+        LOS payload itself parsed)."""
+        seq_str, _, entries_str = raw.partition("|")
+        seq = _parse_int(seq_str, "probes.seq")
+        clear: list[bool | None] = [None] * MAX_PROBE_POINTS
+        for entry in entries_str.split(";"):
+            if not entry:
+                continue
+            index_str, _, flag_str = entry.partition(":")
+            try:
+                index = int(index_str)
+            except ValueError as exc:
+                raise LineOfSightParseError(
+                    f"probes entry index must be an integer, got {entry!r}"
+                ) from exc
+            if not (0 <= index < MAX_PROBE_POINTS):
+                raise LineOfSightParseError(
+                    f"probes entry index {index} out of range in {entry!r}"
+                )
+            if flag_str == "":
+                clear[index] = None
+            elif flag_str == "1":
+                clear[index] = True
+            elif flag_str == "0":
+                clear[index] = False
+            else:
+                raise LineOfSightParseError(
+                    f"probes entry flag must be '0', '1', or empty, got {entry!r}"
+                )
+        return ProbeAnswers(
+            seq=seq, dcs_model_time_s=dcs_model_time_s, clear=tuple(clear)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seq": self.seq,
+            "dcs_model_time_s": self.dcs_model_time_s,
+            "clear": list(self.clear),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,14 +242,31 @@ class LineOfSightSnapshot:
     sightlines_computed: int
     bridge_call_ms: float
     verdicts: dict[str, LineOfSightVerdict]
+    #: `plans/expected-area-look/plan.md` Stage 1 -- `None` when the
+    #: envelope carried no `probes` key, or an empty one (no check open
+    #: this poll, or a pre-Stage-1 Hook). See module docstring's "Point
+    #: probes" section.
+    probes: ProbeAnswers | None = None
 
     @staticmethod
     def from_wire(
-        payload: str, *, bridge_call_ms: float, received_wall_clock_s: float
+        payload: str,
+        *,
+        bridge_call_ms: float,
+        received_wall_clock_s: float,
+        probes_raw: str | None = None,
     ) -> LineOfSightSnapshot:
         """Parse one compact wire string (module docstring) into a typed
         snapshot. `entries` may be empty (nothing in the queried wedge this
-        poll)."""
+        poll).
+
+        `probes_raw` is the envelope's own separate `"probes"` key
+        (**not** part of `payload` -- module docstring's "never as an
+        eighth pipe-delimited field"), passed through by
+        `LineOfSightReceiver`. `None` or `""` both mean "no probe answers
+        this poll" and leave `probes` at `None`; anything else is parsed
+        via `ProbeAnswers.from_wire`, sharing this snapshot's own
+        `dcs_model_time_s`."""
         parts = payload.split("|", 6)
         if len(parts) != 7:
             raise LineOfSightParseError(
@@ -171,6 +303,20 @@ class LineOfSightSnapshot:
             verdict = _parse_entry(entry)
             verdicts[verdict.unit_name] = verdict
 
+        # A malformed `probes_raw` is dropped on its own -- never promoted
+        # to a `LineOfSightParseError` that would also reject the (valid)
+        # LOS payload this method already finished parsing above. Module
+        # docstring: "a bad probe sub-wire says nothing about whether the
+        # LOS payload itself parsed."
+        probes: ProbeAnswers | None = None
+        if probes_raw:
+            try:
+                probes = ProbeAnswers.from_wire(
+                    probes_raw, dcs_model_time_s=dcs_model_time_s
+                )
+            except LineOfSightParseError:
+                probes = None
+
         return LineOfSightSnapshot(
             dcs_model_time_s=dcs_model_time_s,
             received_wall_clock_s=received_wall_clock_s,
@@ -181,6 +327,7 @@ class LineOfSightSnapshot:
             sightlines_computed=sightlines_computed,
             bridge_call_ms=bridge_call_ms,
             verdicts=verdicts,
+            probes=probes,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -196,6 +343,7 @@ class LineOfSightSnapshot:
             "verdicts": {
                 name: verdict.to_dict() for name, verdict in self.verdicts.items()
             },
+            "probes": self.probes.to_dict() if self.probes is not None else None,
         }
 
 

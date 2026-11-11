@@ -219,6 +219,7 @@ from belief.classification import (
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -229,6 +230,7 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
+    CONTACT_RELOCATED,
     Event,
 )
 from belief.group_view import CollapseDepth, CollapseNode, collapse_members
@@ -3473,6 +3475,30 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             return None
         lead = "Danger, " if event.engaged else "Safe from "
         return _contact_report_text(result["facts"], lead=lead)
+    if event.kind == CONTACT_RELOCATED:
+        # `plans/expected-area-look/plan.md` Stage 3b, Decision 4's
+        # provisional wording -- deliberately *not* `_contact_report_
+        # text`, which always leads with the unit-type word: this line's
+        # subject is the group Petrovich already knows about, so it leads
+        # with "that group" instead, the neutral wording the plan asks
+        # for. No unit-type claim, no identification lead -- A's own
+        # classification was already spoken when it was first announced.
+        relative_now = result["facts"].get("relative_now")
+        if relative_now is None:
+            # No current bearing to report -- say nothing rather than a
+            # directionless "now ..." (same "do not invent a look that
+            # was not taken" reasoning `CONTACT_BURNING_SEEN` follows).
+            return None
+        assert isinstance(relative_now, dict)
+        clock = relative_now["clock_position"]
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        return f"That group, now {clock} o'clock, {_format_range_km(range_m)}."
+    if event.kind == CONTACT_ABSENT:
+        # Stage 3b -- a fixed line, no position: the whole point is that
+        # A is no longer believed to be where it was, so there is no
+        # current place to report.
+        return "That group is no longer at its last place."
     return None
 
 
