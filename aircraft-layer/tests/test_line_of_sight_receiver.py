@@ -119,3 +119,70 @@ def test_non_numeric_bridge_call_ms_is_dropped() -> None:
     _run_receiver_briefly(receiver)
 
     assert cache.latest() is None
+
+
+# --- Point probes (`plans/expected-area-look/plan.md`, BL-B111, Stage 1) ---
+
+
+def test_probes_key_is_parsed_and_pushed() -> None:
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|1|1|0|45|1234.5|Truck-1:1:0",
+            "bridge_call_ms": 1.0,
+            "probes": "5|0:1;1:0",
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.probes is not None
+    assert snapshot.probes.seq == 5
+    assert snapshot.probes.clear[0] is True
+    assert snapshot.probes.clear[1] is False
+
+
+def test_absent_probes_key_is_an_old_hook_and_leaves_probes_none() -> None:
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {"payload": "1|1|1|0|45|1234.5|Truck-1:1:0", "bridge_call_ms": 1.0},
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.probes is None
+
+
+def test_non_string_probes_key_is_treated_as_absent_not_dropped() -> None:
+    """A malformed `probes` value (wrong type) must not drop the whole
+    envelope -- only the LOS payload's own well-formedness decides that."""
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|1|1|0|45|1234.5|Truck-1:1:0",
+            "bridge_call_ms": 1.0,
+            "probes": 12345,
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.probes is None
