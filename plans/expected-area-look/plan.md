@@ -32,7 +32,7 @@ see right now, he holds B. He puts the binoculars on A's expected place, and onl
 
 ```mermaid
 flowchart LR
-  S[gate-path sighting B] --> T{on/beside remembered A,<br/>A not seen this poll,<br/>A's area fits one look?}
+  S[gate-path sighting B] --> T{on/beside remembered A,<br/>A out of view: not seen within one gaze dwell<br/>(amended 2026-11-11),<br/>A's area fits one look?}
   T -- no --> TODAY[today's behaviour]
   T -- yes --> TH{B a threat?}
   TH -- yes --> NOW[B called at once] --> L
@@ -206,6 +206,11 @@ visible".
 change.**
 
 *3a — trigger, hold, the look, "different" and "cannot look".*
+
+> **Trigger precondition, amended 2026-11-11** (architect, on `1a6c1e55`). The first condition
+> below, "A was not seen this poll (`A.last_seen_sim < now`)", is replaced by **"A is out of view"**,
+> defined in the note that follows the trigger list. The rest of the trigger is unchanged.
+
 - **Trigger** (one pure predicate, `expected_area.check_target_for(percept, store, now)`): a
   percept that did **not** resolve by continuity, and a remembered contact A that meets all of:
   - A was not seen this poll (`A.last_seen_sim < now`, and A not in this batch's `claimed`);
@@ -218,6 +223,70 @@ change.**
 
   No new constant: existing gate, existing predicate. If several A qualify, the nearest by
   Mahalanobis is taken. One check per B.
+
+- **Trigger precondition, amended 2026-11-11 — "A out of view".**
+  - **What was wrong.** `A.last_seen_sim < now` is true of every gate match by construction: a
+    candidate's last sighting is always from an earlier poll than the percept now being matched.
+    Wired as written, it fired on all 18 gate matches of a contact tracked continuously through
+    the gate at 1 s polls. That broke
+    `test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap` and
+    `test_position_runaway_does_not_corrupt_a_second_contacts_cardinality`, which is why the
+    Implementer withheld the call site (`implementation.md`). The user's meaning was "a remembered
+    group he can't see right now" (`explore-notes.md`, reading 1; E9), not "any earlier sighting".
+  - **The predicate.** A is out of view when it has not been seen within one gaze dwell:
+
+    ```python
+    # belief/expected_area.py
+    from perception.gaze import FOCUS_DWELL_S
+
+    def a_out_of_view(a: Contact, now_sim: float) -> bool:
+        """A is held only in memory: not seen within the current look (one gaze dwell)."""
+        return (now_sim - a.last_seen_sim) > FOCUS_DWELL_S
+
+    def eligible_trigger_target(a, b_percept_t_sim, observer) -> bool:
+        return a_out_of_view(a, b_percept_t_sim) and area_fits_one_look(a, b_percept_t_sim, observer)
+    ```
+
+    `ingest` keeps the other half of the old condition: A must not be in this batch's `claimed`.
+  - **Why this is the honest line.** `FOCUS_DWELL_S` (2 s) is how long a look stays on one
+    o'clock. A contact seen within it is in the current look. A contact older than it is held
+    from memory. This uses perceived state only (`last_seen_sim`, his own last sighting) and
+    no DCS truth. It is the window he looks for, not a cadence of the poll loop, so it does not
+    depend on `ingest` being called on every poll.
+  - **No new knob.** `FOCUS_DWELL_S` is already tunable (`perception.gaze`, lo 0.5, hi 5.0).
+    - Coupling, stated rather than asserted: if it is tuned below the poll interval (1 s),
+      consecutive-poll gate matches read as out of view.
+    - The cost is then a binocular look and a delayed callout, never a wrong verdict. The look
+      sees only B, so the verdict is "same" and B folds silently, which is today's outcome.
+    - No coupling check is added for that reason.
+  - **Measured** (`probe_b111_trigger.py`, output in `probe_b111_trigger_output.txt`, n = 200
+    different / 300 same, the plan's own grid and salts):
+    - **Continuous tracking, the two tests' own sequences:** 18 gate matches each. The literal
+      precondition made 18 eligible; the amended one makes **0**. Their expectations stand
+      unchanged.
+    - **Harness, all 144 cells:** {s-125, armour} × gap {6, 700 s} × 4 optic pairs × (6 different
+      + 3 same).
+      - The trigger rate with the amended precondition equals the plan's model in every cell,
+        with a **max difference of 0.0 points**.
+      - It also equals the literal precondition in every cell.
+      - Inside those, the merge-echo trials (2561) and lost-A trials (14107) are all still
+        eligible.
+      - The plan's 6 s memory-only pair, the 700 s stationary case, the lost-A case and the
+        merge-echo case all still fire, so every number under "Acceptance" stands as modelled.
+  - **The boundary this draws.** A gate-path B within ≤ 2 s of A's last sighting does not open
+    a check, and today's fold or echo stands.
+    - That is A "in view" by this definition: he saw it in the current look.
+    - The case it gives up is A masked by a crest in the same second as B appears on its
+      bearing. The harness has no cell under 6 s, so its rate is unmeasured. It is listed under
+      Risks.
+  - **Not chosen:**
+    - `certainty_of(A) != "observed"` (16 s, `OBSERVED_WINDOW_S`). It would miss the 6 s
+      memory-only pair, the user's ridge case.
+    - "A absent from the previous poll's batch", via a store-held previous-poll set. It depends
+      on `ingest` running every poll, which `body.py` does today but which is not a contract.
+      It also reads a single missed detection as out of view.
+    - "A's bearing swept since". It needs gaze state inside `ingest`, a new seam for no
+      measured gain.
 - **Action:** found B as a new contact (never fold while a check could run), then open
   `ExpectedAreaCheck(b_id, a_id, kind ∈ {fold, echo, beside_lost}, opened_sim, sector_index,
   a_snapshot, released=False)`.
@@ -314,6 +383,74 @@ change.**
   4. **A group in a town:** expect "new contact" (the honest cost).
   5. **Busy scene:** count area looks against the budget in `sortie-log-triage`.
 
+### Remaining build — three implementer passes (added 2026-11-11)
+
+Already on the branch at `1a6c1e55`: Stages 0 and 1, and the dormant mechanism. That is
+`belief.expected_area` (predicates, `area_visibility`, `resolve_checks`) and the `ContactStore`
+primitives (`open_check` … `mark_lost_now`). Each pass ends with body-layer's ruff format, ruff
+check, `mypy --strict` and pytest green. The two drift tests above stay unchanged in every pass.
+
+**Pass 1 — belief side: the check opens, holds and is spoken (no `body.py`).**
+1. `expected_area.a_out_of_view` and the amended `eligible_trigger_target`.
+2. Wire the trigger into `ingest`, replacing the dated "deliberately NOT enabled" comment:
+   - the gate fold and the ambiguous fold found B instead of folding;
+   - the merge-echo and beside-lost path runs after founding;
+   - the two-open-checks cap is enforced;
+   - the threat release happens at once.
+3. `callouts.py`:
+   - the hold check goes before `CALLOUT_MAX_AGE_S`;
+   - age is measured from release;
+   - the merge-echo skip covers a believed-distinct pair;
+   - a held echo-kind B is not consumed.
+4. `events.py` and `speech.py`: `CONTACT_RELOCATED` and `CONTACT_ABSENT`, templated, with
+   Decision 3's two-condition rule. Suppress RELOCATED when REACQUIRED is spoken in the same tick.
+5. `groups.reconcile` and `mission_memory/admission.py` skip a held contact
+   (`has_open_check`).
+6. Tests:
+   - `test_contacts.py`: the trigger fires on the 6 s and 700 s pair and does not fire on
+     continuous tracking (≤ 2 s);
+   - `test_callouts.py`, the E3 case: a hold never drops a callout;
+   - the SAM vignette, driving `resolve_checks` directly with hand-built `LookEvidence`.
+
+**Pass 2 — the look: optics, probes and the poll loop.**
+1. `optic_policy.py`:
+   - `LookTarget.area_check` is added, and `choose_glass_look` ranks it first;
+   - `OpticState.area_look_report` is added, with natural-end, envelope, steady and poll window,
+     and it is used for `area_visibility`'s `look_completed_naturally`. The deadline
+     approximation `implementation.md` mentions is **not** acceptable;
+   - interrupts mark `natural_end=False`;
+   - **build the Co-moving Fields rows by grepping `OpticState(` (two fresh constructions,
+     `optic_policy.py` ~2980 and ~3402) and every `replace(` site**, not from the phase
+     narrative.
+2. `perception/forest.py`: the occlusion class is parameterised so one class serves two
+   instances (forest, settlement). The settlement mask feeds `area_visibility`'s `occluded`.
+3. `body.py`:
+   - `_look_targets` flags A;
+   - `post_probe_points` is pushed while a check is open (N = 0 when none, `seq` on change);
+   - probe answers are read from `LineOfSightSnapshot.probes`;
+   - `resolve_checks` is called once per poll;
+   - ATGM run and attack-run grant resolve every open check as "cannot look" in the same tick;
+   - mission restart clears the checks.
+4. The detection trace logs check open, verdict and reason. `sortie-log-triage` gains the count.
+5. Tests:
+   - `test_optic_policy.py`: both fresh construction sites carry the report;
+   - `test_body.py`: probe push and clear, pause;
+   - a diverged-state test, with an interrupt arriving mid-look, giving "cannot look".
+
+**Pass 3 — production acceptance and docs (Stages 3c and 4).**
+1. Add `tools/measure_expected_area_look.py --production`: the real `ContactStore` and
+   `resolve_checks`, with a stub probe answer.
+2. Run the Acceptance grid. Add the fences to `test_expected_area_look_sweep.py` at n = 300.
+   **If a fence fails, stop and report rather than retune.**
+3. Stage 4:
+   - `STRUCTURE.md`;
+   - the `CLAUDE.md` Tuning section;
+   - the regenerated `defaults.toml`, with its rendered sentences read;
+   - entries (BL-B111 marked `#needs-flight`, BL-B113, BL-B114, BL-B109);
+   - test cards naming `main`, plus the Stage 1 Windows card still owed.
+
+Performance and security run once, after pass 3, when all three passes are built back to back.
+
 ### Acceptance (Stage 3c, production mode; method as `probe_b111.py`)
 
 Cells: optic pair {u_u, b_b, u_b, b_u} × far/near {4.5/3.0, 5.0/3.5, 3.0/1.5} × {B nearer, B
@@ -363,6 +500,12 @@ every `replace`), `Contact(`/`Contact.from_percept`, and every writer of
   - Bounded: when the budget is spent, B is called new.
   - Observable: Stage 3 logs check open/verdict/reason to the detection trace, and
     `sortie-log-triage` gains the count.
+- **The ≤ 2 s boundary of "A out of view" (amended 2026-11-11):** a B that lands on A within one
+  gaze dwell of A's last sighting is treated as A still in view, so no check opens and today's
+  fold stands. The case this gives up is A masked by a crest in the same second as B appears on
+  its bearing. It is unmeasured because the harness has no gap under 6 s. Read it from the
+  check-open counts in the first sortie, and if it shows up, adding a 1–3 s gap cell to the
+  harness is the next step.
 - **Hilly terrain makes "cannot look" commoner** for a same group, because the ±2σ points can sit
   behind a crest even when B is visible. That raises the duplicate rate (fold case → B new). The
   flat harness cannot measure it. Decision 4 trades honesty (E5) for this.
