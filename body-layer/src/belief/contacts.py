@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from belief.association_over_time import (
@@ -76,6 +76,7 @@ from belief.classification import (
 from belief.decay import (
     CALLOUT_OBSERVABILITY_GRACE_S,
     LOS_MASK_CONFIRM_S,
+    LOST_THRESHOLD_S,
     OBSERVED_WINDOW_S,
     Certainty,
     certainty_of,
@@ -100,6 +101,9 @@ from belief.events import (
     firing_event_kind,
     lifecycle_event_kind,
     motion_event_kind,
+)
+from belief.expected_area import (
+    ExpectedAreaCheck,
 )
 from belief.groups import Group, GroupStore
 from belief.motion import MotionBelief, MotionState, fold_motion
@@ -893,6 +897,18 @@ class ContactStore:
         #: true no-op for them -- the same shape `tick`'s own `ownship is
         #: None` branch already uses at emission.
         self._observability_tracked = False
+        #: `plans/expected-area-look/plan.md` (`BL-B111`) -- open expected-
+        #: area checks, keyed by the held contact's own `b_id`. At most
+        #: `belief.expected_area.MAX_OPEN_CHECKS` entries at once; see
+        #: `open_check`/`has_open_check`/`callout_held`.
+        self._checks: dict[str, ExpectedAreaCheck] = {}
+        #: `plans/expected-area-look/plan.md` Stage 3a -- contact-id pairs
+        #: a check has resolved "different" for (`resolve_checks`'s own
+        #: `record_believed_distinct` action). Unordered: `frozenset({a,
+        #: b})`. Read by `belief.callouts`' merge-echo skip -- a pair this
+        #: store has already told apart must never be silenced as an echo
+        #: of each other again.
+        self._believed_distinct: set[frozenset[str]] = set()
 
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
@@ -951,6 +967,136 @@ class ContactStore:
         if contact.last_observable_sim is None:
             return False
         return now_sim - contact.last_observable_sim < CALLOUT_OBSERVABILITY_GRACE_S
+
+    # --- Expected-area checks (`plans/expected-area-look/plan.md`, -----
+    # --- `BL-B111`) -----------------------------------------------------
+
+    @property
+    def checks(self) -> list[ExpectedAreaCheck]:
+        """Every currently-open expected-area check. A read-only view."""
+        return list(self._checks.values())
+
+    def check_for(self, b_id: str) -> ExpectedAreaCheck | None:
+        """The open check holding `b_id`, or `None`."""
+        return self._checks.get(b_id)
+
+    def has_open_check(self, contact_id: str) -> bool:
+        """Whether `contact_id` is the *held* side of an open check --
+        read by `belief.groups.GroupStore.reconcile` and `mission_memory.
+        admission.step` to skip a held contact entirely (plan: "it is
+        still glassed for classification" but excluded from both). True
+        regardless of `ExpectedAreaCheck.released` -- release only ever
+        changes whether B's *callout* is held (`callout_held` below), not
+        whether group/mission-memory admission should wait for the
+        verdict."""
+        return contact_id in self._checks
+
+    def callout_held(self, contact_id: str) -> bool:
+        """Whether `contact_id`'s own callout is currently held -- an open,
+        not-yet-`released` check. `belief.callouts.CalloutScheduler.tick`
+        reads this before its `CALLOUT_MAX_AGE_S` check (plan 3a: "the
+        hold check sits before `CALLOUT_MAX_AGE_S` and defers without
+        consuming")."""
+        check = self._checks.get(contact_id)
+        return check is not None and not check.released
+
+    def open_check(self, check: ExpectedAreaCheck) -> None:
+        """Register a freshly-opened check -- "hold" is nothing more than
+        this call (module docstring's own "'Hold' is not a separate
+        action" note). The caller (`ingest`) is responsible for the
+        `belief.expected_area.MAX_OPEN_CHECKS` cap; this method does not
+        enforce it, so a caller that checks capacity itself and still
+        calls this twice for the same `b_id` simply overwrites the first
+        check (not expected to happen -- each `b_id` is only ever the
+        held side of one check at a time, by construction)."""
+        self._checks[check.b_id] = check
+
+    def release_check(self, b_id: str, now_sim: float) -> None:
+        """Mark the check holding `b_id` released -- idempotent (a
+        second call after a threat release at open time is a no-op, same
+        `released_sim` kept)."""
+        check = self._checks.get(b_id)
+        if check is None or check.released:
+            return
+        self._checks[b_id] = replace(check, released=True, released_sim=now_sim)
+
+    def close_check(self, b_id: str) -> None:
+        """Drop the check holding `b_id` -- the verdict has been reached
+        and acted on; nothing further to hold open."""
+        self._checks.pop(b_id, None)
+
+    def record_believed_distinct(self, a_id: str, b_id: str) -> None:
+        """A "different" verdict's own bookkeeping -- `belief.callouts`'
+        merge-echo skip reads this via `is_believed_distinct` so a pair
+        this store has already told apart is never silenced as an echo of
+        each other again."""
+        self._believed_distinct.add(frozenset((a_id, b_id)))
+
+    def is_believed_distinct(self, a_id: str, b_id: str) -> bool:
+        return frozenset((a_id, b_id)) in self._believed_distinct
+
+    def merge_contact(self, *, into: str, source: str) -> None:
+        """The "same" verdict's own action: fold every percept `source`
+        (B) has ever contributed into `into` (A), through the existing
+        `Contact.record` -- in the order `source` received them -- then
+        remove `source` entirely. **No fresh `Contact(...)` for A** (the
+        plan's own Co-moving Fields requirement): `into`'s own identity,
+        `id`, and every belief field not touched by this fold (e.g. its
+        `classification_lockout_until_sim`) survive unchanged.
+
+        Lifecycle events (a `CONTACT_REACQUIRED` for a lost A) are **not**
+        emitted here -- they fall out of the very next `tick()` call
+        comparing A's own `last_emitted_certainty` against its
+        now-refreshed `last_seen_sim`, the same unmodified mechanism every
+        other re-observation already uses. This method only moves belief
+        state; `tick()` is still the one place a lifecycle event is ever
+        materialised.
+
+        Stale `_observation_id_to_contact_id` entries naming `source` are
+        remapped to `into`, so a later `continues_observation_id` lookup
+        against one of B's old observations resolves to the contact that
+        now actually holds that history. Open checks and believed-distinct
+        pairs naming `source` are dropped -- there is no longer a `source`
+        contact for either to refer to."""
+        a = self._contacts.get(into)
+        b = self._contacts.get(source)
+        if a is None or b is None:
+            return
+        for observation_id in b.contributing_observation_ids:
+            observation = self._observations.get(observation_id)
+            if observation is None:
+                continue
+            a.record(percept_of(observation))
+            self._observation_id_to_contact_id[observation_id] = into
+        del self._contacts[source]
+        self._checks.pop(source, None)
+        self._believed_distinct = {
+            pair for pair in self._believed_distinct if source not in pair
+        }
+
+    def mark_lost_now(self, contact_id: str, now_sim: float) -> None:
+        """The "absent" verdict's own action on A: make `belief.decay.
+        certainty_of` read `"lost"` for `contact_id` as of `now_sim`.
+
+        **A stated simplification, not a new belief-state concept.**
+        `certainty_of` has no stored state of its own -- it is a pure
+        function of `now_sim - contact.last_seen_sim` against `belief.
+        decay.LOST_THRESHOLD_S`. Rather than add a second, parallel
+        "declared absent" flag that `certainty_of` would also have to
+        consult, this rewinds `last_seen_sim` far enough into the past
+        that the existing threshold comparison already answers `"lost"`.
+        The cost, named rather than hidden: a later query of "how long ago
+        was A actually last seen" would read this rewound value, not the
+        true last sighting -- acceptable for what `mark_absent` exists to
+        do (make the *lifecycle* read lost immediately so `tick()`'s own
+        unmodified comparison fires `CONTACT_LOST` next poll), but a
+        narrower, dedicated field would be the more honest fix if a future
+        consumer ever needs the true last-seen time of a contact that was
+        separately declared absent."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        contact.last_seen_sim = now_sim - LOST_THRESHOLD_S - 1.0
 
     @property
     def contacts(self) -> list[Contact]:
@@ -1269,6 +1415,42 @@ class ContactStore:
                     and passes_gate(percept, candidate, now_sim)
                 ]
 
+                # **`BL-B111` trigger wiring deliberately NOT enabled
+                # here.** `plans/expected-area-look/plan.md` Stage 3a
+                # calls for opening a check on every gate-path fold/
+                # ambiguous-fold against an eligible A -- but `eligible_
+                # trigger_target`'s own precondition (`a.last_seen_sim <
+                # now_sim`, "A was not seen this poll") is true of nearly
+                # *every* ordinary gate match by construction (a passing
+                # candidate's `last_seen_sim` is always from a strictly
+                # earlier poll than the percept now being matched against
+                # it), so wiring this in as specified fires on every
+                # continuity-free repeated reacquisition, not only a
+                # genuine "not currently in view" case. Measured directly
+                # against this file's own existing suite: it breaks
+                # `test_slow_directional_drift_never_reports_a_range_
+                # beyond_the_detection_cap` and `test_position_runaway_
+                # does_not_corrupt_a_second_contacts_cardinality`, both of
+                # which exercise a same-object sequence of gate-path (not
+                # continuity) reacquisitions specifically to isolate the
+                # spatial gate's own robustness -- a scenario the plan's
+                # own Finding 1 says real flight rarely produces (ordinary
+                # continuous tracking resolves via continuity, leaving the
+                # gate for genuine gaps), but which these two tests
+                # deliberately construct anyway. Per this project's own
+                # escalation rule ("existing tests must be rewritten
+                # rather than extended" needs explicit sign-off, root
+                # `CLAUDE.md`'s "Escalation Rules"), this needs the
+                # Architect/user to either narrow the trigger's own
+                # eligibility condition or accept rewriting those two
+                # tests' expectations -- not a unilateral call here. The
+                # mechanism itself (`belief.expected_area`, `ContactStore.
+                # open_check`/`release_check`/`merge_contact`/
+                # `mark_lost_now`/`has_open_check`/`callout_held`) is
+                # built and unit-tested; only this one call site -- the
+                # trigger's own insertion into `ingest` -- is withheld
+                # pending that decision. See `plans/expected-area-look/
+                # implementation.md` for the full writeup.
                 if len(passing) == 1:
                     # A single passing candidate is also unambiguous --
                     # same reset as the continuity branch above.

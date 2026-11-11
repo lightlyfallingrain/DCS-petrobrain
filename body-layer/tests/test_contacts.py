@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import inspect
 import itertools
@@ -36,6 +37,7 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
+from belief.expected_area import ExpectedAreaCheck
 from belief.percept import percept_of
 from belief.position_belief import fold_position
 from belief.tools import describe_contact, set_attention
@@ -2691,3 +2693,156 @@ def test_clustering_cost_scales_with_live_not_total_ever_seen() -> None:
         store.contacts[-2].id,
         store.contacts[-1].id,
     }
+
+
+# --- `plans/expected-area-look/plan.md` (`BL-B111`): ContactStore's own --
+# --- expected-area-check primitives. The trigger that *opens* a check --
+# --- is not wired into `ingest` yet (see that method's own comment); --
+# --- these tests exercise the primitives `resolve_checks` is built to --
+# --- call, directly. ---
+
+
+def _check_fixture(
+    store: ContactStore, *, a_id: str = "A", b_id: str = "B", kind: str = "fold"
+) -> ExpectedAreaCheck:
+    a = store.contact(a_id)
+    assert a is not None
+    return ExpectedAreaCheck(
+        b_id=b_id,
+        a_id=a_id,
+        kind=kind,  # type: ignore[arg-type]
+        opened_sim=0.0,
+        a_snapshot=copy.deepcopy(a),
+    )
+
+
+def test_open_check_registers_and_check_for_reads_it_back() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    check = _check_fixture(store, a_id=a_id)
+    store.open_check(check)
+    assert store.check_for("B") is check
+    assert store.checks == [check]
+
+
+def test_has_open_check_and_callout_held_before_and_after_release() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    check = _check_fixture(store, a_id=a_id)
+    store.open_check(check)
+
+    assert store.has_open_check("B") is True
+    assert store.callout_held("B") is True
+
+    store.release_check("B", now_sim=1.0)
+    # Still an open check (group/mission-memory admission still skips it)...
+    assert store.has_open_check("B") is True
+    # ...but no longer held for callout purposes.
+    assert store.callout_held("B") is False
+
+
+def test_release_check_is_idempotent() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.open_check(_check_fixture(store, a_id=a_id))
+    store.release_check("B", now_sim=1.0)
+    first = store.check_for("B")
+    store.release_check("B", now_sim=99.0)  # a second release -- no-op
+    assert store.check_for("B") is first
+    assert store.check_for("B").released_sim == 1.0  # type: ignore[union-attr]
+
+
+def test_close_check_removes_it() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.open_check(_check_fixture(store, a_id=a_id))
+    store.close_check("B")
+    assert store.check_for("B") is None
+    assert store.has_open_check("B") is False
+    assert store.checks == []
+
+
+def test_record_believed_distinct_is_order_independent() -> None:
+    store = ContactStore()
+    store.record_believed_distinct("A", "B")
+    assert store.is_believed_distinct("A", "B") is True
+    assert store.is_believed_distinct("B", "A") is True
+    assert store.is_believed_distinct("A", "C") is False
+
+
+def test_merge_contact_folds_bs_percepts_into_a_in_order_and_removes_b() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    a_id = store.contacts[0].id
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=10.0, bearing_deg=45.0, range_m=5000.0)],
+        now_sim=10.0,
+    )
+    # Two independent contacts before the merge.
+    assert len(store.contacts) == 2
+    b_id = next(c.id for c in store.contacts if c.id != a_id)
+    # A second percept lands on B before the merge -- both must replay
+    # onto A, in order.
+    store.ingest(
+        [_observation(obs_id="B2", t_sim=11.0, bearing_deg=46.0, range_m=5010.0)],
+        now_sim=11.0,
+    )
+    b_contact = store.contact(b_id)
+    assert b_contact is not None
+    assert b_contact.contributing_observation_ids == ["B1", "B2"]
+
+    store.merge_contact(into=a_id, source=b_id)
+
+    assert store.contact(b_id) is None
+    assert len(store.contacts) == 1
+    a_contact = store.contact(a_id)
+    assert a_contact is not None
+    assert a_id == a_contact.id  # no fresh Contact(...) for A
+    # A's own history now also carries B's two percepts.
+    assert a_contact.contributing_observation_ids == ["A1", "B1", "B2"]
+    assert a_contact.last_seen_sim == 11.0
+    # Stale observation-id -> contact-id entries were remapped to A.
+    assert store._observation_id_to_contact_id["B1"] == a_id
+    assert store._observation_id_to_contact_id["B2"] == a_id
+
+
+def test_merge_contact_drops_open_checks_and_believed_distinct_pairs_naming_source() -> (
+    None
+):
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A1", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=10.0, bearing_deg=20.0, range_m=4000.0)],
+        now_sim=10.0,
+    )
+    b_id = next(c.id for c in store.contacts if c.id != a_id)
+    store.open_check(_check_fixture(store, a_id=a_id, b_id=b_id))
+    store.record_believed_distinct(a_id, b_id)
+    store.record_believed_distinct(a_id, "C")  # must survive the merge
+
+    store.merge_contact(into=a_id, source=b_id)
+
+    assert store.check_for(b_id) is None
+    assert store.is_believed_distinct(a_id, b_id) is False
+    assert store.is_believed_distinct(a_id, "C") is True
+
+
+def test_mark_lost_now_makes_certainty_of_read_lost_immediately() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A1", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    a = store.contact(a_id)
+    assert a is not None
+    assert contacts_module.certainty_of(a, 0.0) != "lost"
+
+    store.mark_lost_now(a_id, now_sim=0.0)
+
+    assert contacts_module.certainty_of(a, 0.0) == "lost"
