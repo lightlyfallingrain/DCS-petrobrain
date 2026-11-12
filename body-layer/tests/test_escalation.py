@@ -33,6 +33,12 @@ class _CapturingBrainClient:
     def awaiting_reply_id(self) -> str | None:
         return None
 
+    def poll_replies(self) -> list[object]:
+        return []
+
+    def available(self) -> bool:
+        return True
+
 
 def _utterance(transcript: str = "should we go north?") -> PlayerUtterance:
     parse = PartialParse(
@@ -106,12 +112,26 @@ def test_null_brain_client_produces_no_output_and_no_reply() -> None:
     assert client.poll_replies() == []
 
 
+def test_null_brain_client_is_never_available() -> None:
+    """`plans/brain-tool-calls/plan.md` D4 -- with no brain behind it at
+    all, an addressed utterance must hear "Unable, no brain."
+    immediately, never wait out a turn budget for a reply this client
+    can never produce."""
+    assert NullBrainClient().available() is False
+
+
 def test_debug_print_brain_client_poll_replies_is_also_empty() -> None:
     """`plans/brain-layer/plan.md` -- `poll_replies()` is a new protocol
     method, but neither stand-in's documented "does nothing" behaviour
     changes because of it."""
     client = DebugPrintBrainClient()
     assert client.poll_replies() == []
+
+
+def test_debug_print_brain_client_is_never_available() -> None:
+    """Same posture as `NullBrainClient` -- see that test's own
+    docstring."""
+    assert DebugPrintBrainClient().available() is False
 
 
 def test_debug_print_brain_client_prints_to_its_stream() -> None:

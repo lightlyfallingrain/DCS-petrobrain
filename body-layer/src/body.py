@@ -3550,6 +3550,11 @@ def _poll_transcripts(
     through the same way, `None` allowed (an older capture process, or a
     direct `curl`, never supplied one).
 
+    `addressed` (`plans/brain-tool-calls/plan.md` D4's wire note) is the
+    tenth field, additive -- a missing key (an older `audio-adapter`)
+    reads as `False` via `item.get("addressed", False)`, same posture as
+    `correlation_id`'s own `None` default, not a schema-mismatch skip.
+
     **BL-B96 Stage 4**: a failed/successful poll reports through
     `crew_console.audio_adapter_reporter` (the same instance `CrewConsole.
     _print`'s push path reports through) instead of logging a full
@@ -3577,6 +3582,7 @@ def _poll_transcripts(
         ambiguous = item.get("ambiguous")
         slots_raw = item.get("slots")
         correlation_id_raw = item.get("correlation_id")
+        addressed_raw = item.get("addressed", False)
         if not isinstance(transcript, str):
             continue
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -3590,6 +3596,8 @@ def _poll_transcripts(
         if not isinstance(ambiguous, bool):
             continue
         if correlation_id_raw is not None and not isinstance(correlation_id_raw, str):
+            continue
+        if not isinstance(addressed_raw, bool):
             continue
         slots: dict[str, int | str] | None = None
         if slots_raw is not None:
@@ -3609,6 +3617,7 @@ def _poll_transcripts(
             now_sim,
             slots=slots,
             correlation_id=correlation_id_raw,
+            addressed=addressed_raw,
         )
 
 

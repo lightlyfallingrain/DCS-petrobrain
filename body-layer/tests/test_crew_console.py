@@ -169,6 +169,14 @@ class _CapturingBrainClient:
         replies, self.replies_to_return = self.replies_to_return, []
         return replies
 
+    def available(self) -> bool:
+        """`plans/brain-tool-calls/plan.md` D4 -- this fake is always
+        available, so every test using it exercises an addressed turn's
+        real escalation/reply path rather than the "Unable, no brain."
+        short-circuit. `test_handle_transcript_*_no_brain` below covers
+        that path with its own fake."""
+        return True
+
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
     return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
@@ -365,11 +373,16 @@ def test_unresolvable_reference_escalates_and_speaks_nothing() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    lines = console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    lines = console.handle_line(
+        "Petrovich, should we go north of the ridge?", now_sim=0.0
+    )
 
     assert lines == []
     assert len(brain_client.payloads) == 1
-    assert brain_client.payloads[0].transcript == "should we go north of the ridge?"
+    assert (
+        brain_client.payloads[0].transcript
+        == "Petrovich, should we go north of the ridge?"
+    )
 
 
 def _two_ambiguous_bmp_contacts() -> ContactStore:
@@ -435,13 +448,8 @@ def _make_because_valid_for_d10(
     Stands in for what a live pilot utterance naming the specific vehicle
     would have looked like, without re-running `parse_utterance` (which
     would collapse the ambiguity), by directly extending this console's
-    own tracked transcript for the already-pending escalation."""
-    started_sim, parse, _transcript = console._pending_escalations[utterance_id]
-    console._pending_escalations[utterance_id] = (
-        started_sim,
-        parse,
-        f"watch that bmp, the {because}",
-    )
+    own tracked transcript for the already-pending brain turn."""
+    console._brain_turns[utterance_id].transcript = f"watch that bmp, the {because}"
 
 
 def test_drain_brain_speaks_stand_by_once_at_the_threshold() -> None:
@@ -464,7 +472,7 @@ def test_drain_brain_speaks_stand_by_once_at_the_threshold() -> None:
         speech_client=speech_client,  # type: ignore[arg-type]
     )
 
-    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
 
     console.drain_brain(now_sim=STAND_BY_AFTER_S - 0.1)
     assert "Stand by." not in [text for text, _urgent in speech_client.pushed]
@@ -488,7 +496,7 @@ def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
     assert len(brain_client.payloads) == 1
     utterance_id = brain_client.payloads[0].utterance_id
 
@@ -522,7 +530,7 @@ def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
     _make_because_valid_for_d10(console, utterance_id, "BMP-1")
 
@@ -548,7 +556,7 @@ def test_drain_brain_ask_two_survivors_speaks_disambiguation() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
 
     brain_client.replies_to_return = [
@@ -567,7 +575,7 @@ def test_drain_brain_ask_zero_survivors_yields_lost_him() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
 
     for contact_id in ids:
@@ -591,7 +599,7 @@ def test_drain_brain_ask_one_survivor_confirms_rather_than_acts() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
 
     del store._contacts[doomed_id]
@@ -626,7 +634,7 @@ def test_drain_brain_confirm_sets_pending_confirmation() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("scan somethinggarbled", now_sim=0.0)
+    console.handle_line("Petrovich, scan somethinggarbled", now_sim=0.0)
     assert len(brain_client.payloads) == 1
     utterance_id = brain_client.payloads[0].utterance_id
 
@@ -647,7 +655,7 @@ def test_drain_brain_unable_speaks_the_reason() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
 
     brain_client.replies_to_return = [
@@ -672,7 +680,7 @@ def test_drain_brain_discards_stale_reply() -> None:
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
 
     brain_client.replies_to_return = [
@@ -683,6 +691,69 @@ def test_drain_brain_discards_stale_reply() -> None:
     lines = console.drain_brain(now_sim=BRAIN_REPLY_MAX_AGE_S + 1.0)
 
     assert lines == []
+
+
+def test_drain_brain_expires_an_overdue_turn_and_speaks_no_answer_once() -> None:
+    """D9 (`plans/brain-tool-calls/plan.md`): an addressed turn that has
+    waited `BRAIN_REPLY_MAX_AGE_S` with no reply at all is popped and
+    answered "Unable, no answer." exactly once -- D4's old silent
+    discard is gone. A reply that lands afterwards for the same
+    utterance is untracked and dropped, not spoken a second time."""
+    from belief.crew_console import BRAIN_REPLY_MAX_AGE_S
+
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(
+        store=store,
+        brain_client=brain_client,
+        speech_client=speech_client,  # type: ignore[arg-type]
+    )
+
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+    assert utterance_id in console._brain_turns
+
+    console.drain_brain(now_sim=BRAIN_REPLY_MAX_AGE_S)
+
+    assert utterance_id not in console._brain_turns
+    pushed_texts = [text for text, _urgent in speech_client.pushed]
+    assert pushed_texts.count("Unable, no answer.") == 1
+
+    # A reply that finally arrives after expiry is untracked, not spoken.
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id, kind="unable", t_sim=0.0, reason="NO_MATCH"
+        )
+    ]
+    lines = console.drain_brain(now_sim=BRAIN_REPLY_MAX_AGE_S + 1.0)
+    assert lines == []
+    assert pushed_texts == [text for text, _urgent in speech_client.pushed]  # unchanged
+
+
+def test_start_brain_turn_supersedes_the_outstanding_one_silently() -> None:
+    """D3: brain-layer itself only ever holds one job in flight, so a
+    second addressed utterance before the first one's reply lands
+    silently drops the first turn -- no "Unable, no answer." for it,
+    unlike a genuine budget expiry."""
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(
+        store=store,
+        brain_client=brain_client,
+        speech_client=speech_client,  # type: ignore[arg-type]
+    )
+
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
+    first_id = brain_client.payloads[0].utterance_id
+    assert first_id in console._brain_turns
+
+    console.handle_line("Petrovich, where are we?", now_sim=1.0)
+
+    assert first_id not in console._brain_turns
+    assert len(console._brain_turns) == 1
+    assert "Unable, no answer." not in [text for text, _urgent in speech_client.pushed]
 
 
 def test_drain_brain_reply_for_untracked_utterance_is_discarded_silently() -> None:
@@ -712,6 +783,9 @@ def test_drain_brain_poll_failure_is_logged_and_continues() -> None:
 
         def poll_replies(self) -> list[BrainReply]:
             raise RuntimeError("simulated transport failure")
+
+        def available(self) -> bool:
+            return True
 
     console = CrewConsole(store=ContactStore(), brain_client=_RaisingBrainClient())
     assert console.drain_brain(now_sim=1.0) == []
@@ -796,20 +870,20 @@ def test_drain_events_not_gated_by_an_in_flight_escalation() -> None:
     """User direction, 2026-09-25: "while the model is thinking, everything
     else must keep running and keep being spoken -- contact reports, watch
     reporting, callouts. The brain being mid-decision must never gate
-    speech." Proves it directly: with a real escalation outstanding
-    (`_pending_escalations` non-empty, no reply has landed yet), a queued
+    speech." Proves it directly: with a real brain turn outstanding
+    (`_brain_turns` non-empty, no reply has landed yet), a queued
     lifecycle event still speaks normally through `drain_events` -- nothing
-    in `_print`/`CalloutScheduler` reads escalation state at all (confirmed
+    in `_print`/`CalloutScheduler` reads brain-turn state at all (confirmed
     by inspection), pinned here as a regression guard rather than left
     implicit."""
     store = ContactStore()
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    # An outstanding escalation the brain has not yet answered.
-    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    # An outstanding brain turn the brain has not yet answered.
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
     assert len(brain_client.payloads) == 1
-    assert console._pending_escalations  # genuinely still outstanding
+    assert console._brain_turns  # genuinely still outstanding
 
     # A contact is detected while that escalation is still pending.
     store.ingest(
@@ -1287,6 +1361,20 @@ def test_reset_for_new_mission_preserves_audio_adapter_reporter() -> None:
     assert console.audio_adapter_reporter is reporter
 
 
+def test_reset_for_new_mission_clears_outstanding_brain_turns() -> None:
+    """`plans/brain-tool-calls/plan.md` Co-moving Fields: a mission
+    (re)start gives `_brain_turns` a clean slate -- a turn outstanding
+    against the mission that just ended has nothing left to answer."""
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=ContactStore(), brain_client=brain_client)
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
+    assert console._brain_turns
+
+    console.reset_for_new_mission()
+
+    assert console._brain_turns == {}
+
+
 # -- silence (`plans/silence-command/plan.md`, user direction 2026-10-04: -----
 # "make Petrovich not talk until my next command", absolute silence incl. -----
 # urgent callouts, one spoken acknowledgement, any subsequent command ends ----
@@ -1703,7 +1791,7 @@ def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> No
     brain_client = _CapturingBrainClient()
     tasks = TaskStore()
     console = CrewConsole(store=store, brain_client=brain_client, tasks=tasks)
-    console.handle_line("scan somethinggarbled", now_sim=0.0)
+    console.handle_line("Petrovich, scan somethinggarbled", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
     brain_client.replies_to_return = [
         BrainReply(
@@ -1722,12 +1810,12 @@ def test_refused_drain_brain_consumes_rather_than_leaves_the_reply_queued() -> N
     """Drain and discard, not leave queued: the reply drained while
     refused must not resurface once refusal clears -- `brain_client.
     poll_replies()` has already handed it over (a real queue-draining
-    client would not return it twice), and `_pending_escalations` must no
+    client would not return it twice), and `_brain_turns` must no
     longer be tracking its `utterance_id` either."""
     store = ContactStore()
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
-    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    console.handle_line("Petrovich, should we go north of the ridge?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
     brain_client.replies_to_return = [
         BrainReply(
@@ -1740,7 +1828,7 @@ def test_refused_drain_brain_consumes_rather_than_leaves_the_reply_queued() -> N
     console.refused = True
 
     assert console.drain_brain(now_sim=1.0) == []
-    assert utterance_id not in console._pending_escalations
+    assert utterance_id not in console._brain_turns
 
     console.refused = False
 
@@ -2745,13 +2833,15 @@ def test_handle_transcript_fallthrough_uses_handle_line_unchanged(
 ) -> None:
     """Behaviour #4: `verb_anchored=False` falls through to the exact same
     path a typed line takes -- proven here by checking the stand-in brain
-    client actually received the escalation, not just that the returned
-    lines happen to match. This is also Decision 4 REVISED AGAIN's 'second
-    route in' (`plans/inbound-speech/plan.md`, user 2026-09-20): a high
-    `confidence` (0.95, well above `ACT_FLOOR`) that matches no command at
-    all reaches the brain layer, not 'say again' -- the user's own words,
-    well-transcribed audio that does not match command patterns is
-    exactly what needs to be passed to the brain layer."""
+    client never received anything, not just that the returned lines
+    happen to match. `plans/inbound-speech/plan.md`'s original Decision 4
+    REVISED AGAIN "second route in" (unaddressed speech that matches no
+    command reaches the brain) is now **superseded by `plans/
+    brain-tool-calls/plan.md` U1**: a high `confidence` (0.95, well above
+    `ACT_FLOOR`) transcript with no wake word and no command match is
+    answered deterministically ("say again"), never escalated -- see
+    `test_handle_transcript_addressed_fallthrough_reaches_the_brain`
+    below for the one case that still does."""
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=ContactStore(), brain_client=brain_client)  # type: ignore[arg-type]
 
@@ -2765,9 +2855,127 @@ def test_handle_transcript_fallthrough_uses_handle_line_unchanged(
         now_sim=0.0,
     )
 
+    assert lines == ["Say again?"]
+    assert brain_client.payloads == []
+
+
+def test_handle_transcript_addressed_fallthrough_reaches_the_brain() -> None:
+    """D4: the wire's own `addressed` flag (set from `audio-adapter`'s
+    `opens_with_wake_word`) is what still routes a `verb_anchored=False`
+    transcript to the brain -- U1 only closes the *unaddressed* half of
+    the old second route in."""
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=ContactStore(), brain_client=brain_client)  # type: ignore[arg-type]
+
+    lines = console.handle_transcript(
+        "Petrovich, where's the Shilka?",
+        confidence=0.95,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=0.0,
+        addressed=True,
+    )
+
     assert lines == []
     assert len(brain_client.payloads) == 1
-    assert brain_client.payloads[0].transcript == "completely unrelated free speech"
+    assert brain_client.payloads[0].transcript == "Petrovich, where's the Shilka?"
+
+
+def test_unaddressed_ambiguous_reference_asks_which_one_without_the_brain() -> None:
+    """U1's other branch (`plans/brain-tool-calls/plan.md`): unaddressed
+    speech `parse_utterance` cannot resolve to a single contact, but
+    *can* narrow to several candidates, is answered "which one?"
+    deterministically -- never a model call, same as the zero-candidate
+    "say again" case."""
+    store = _two_ambiguous_bmp_contacts()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    lines = console.handle_line("watch that bmp", now_sim=0.0)
+
+    assert len(lines) == 1
+    assert lines[0].startswith("Which one -- ")
+    assert brain_client.payloads == []
+
+
+def test_addressed_utterance_never_acts_on_a_resolvable_parse_directly() -> None:
+    """D4: even when `parse_utterance` would have resolved an addressed
+    utterance to a `"handled"` disposition (a single, unambiguous
+    contact), it is never acted on directly -- it still becomes a brain
+    turn, with the parse carried along only as a hint. This is the exact
+    case the plan's own "what exists today" section names: "Petrovich,
+    where's the Shilka?" must reach the brain, not answer itself."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    lines = console.handle_line(f"Petrovich, watch {contact_id}", now_sim=0.0)
+
+    assert lines == []
+    assert len(brain_client.payloads) == 1
+    assert store.contacts[0].attention != "watch"
+
+
+class _UnavailableBrainClient:
+    """`plans/brain-tool-calls/plan.md` D4 -- a brain client that is
+    reachable (so `handle`/`poll_replies` would work) but reports
+    `available() == False`, the "wedged" half of the "brain unavailable/
+    wedged" test pair this plan's Stage 1 names -- `NullBrainClient`/
+    `DebugPrintBrainClient` cover the "no brain at all" half."""
+
+    def __init__(self) -> None:
+        self.payloads: list[EscalationPayload] = []
+
+    def handle(self, payload: EscalationPayload) -> None:
+        self.payloads.append(payload)
+
+    def awaiting_reply_id(self) -> str | None:
+        return None
+
+    def poll_replies(self) -> list[BrainReply]:
+        return []
+
+    def available(self) -> bool:
+        return False
+
+
+def test_addressed_utterance_with_unavailable_brain_speaks_no_brain_immediately() -> (
+    None
+):
+    """D4/A6: `brain_client.available()` false answers "Unable, no
+    brain." the instant an addressed utterance is heard -- no
+    escalation is ever posted, and no turn is left outstanding to time
+    out later."""
+    store = ContactStore()
+    brain_client = _UnavailableBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line("Petrovich, where's the Shilka?", now_sim=0.0)
+
+    assert lines == ["Unable, no brain."]
+    assert brain_client.payloads == []
+    assert console._brain_turns == {}
+
+
+def test_null_brain_client_default_speaks_no_brain_for_an_addressed_utterance() -> None:
+    """The default `brain_client` (`DebugPrintBrainClient`) is always
+    unavailable (`plans/brain-tool-calls/plan.md` D4) -- an addressed
+    utterance against a freshly-constructed `CrewConsole` with no brain
+    wired in at all hears "Unable, no brain." rather than the old
+    escalate-into-silence behaviour."""
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_line("Petrovich, where's the Shilka?", now_sim=0.0)
+
+    assert lines == ["Unable, no brain."]
 
 
 def test_handle_transcript_acts_above_act_floor(
@@ -3031,7 +3239,11 @@ def test_handle_transcript_late_answer_beyond_the_grace_falls_through(
 ) -> None:
     """Past the grace window a yes/no word is ordinary speech again -- the
     late-answer branch is a short courtesy after a question, not a
-    permanent reinterpretation of the word."""
+    permanent reinterpretation of the word. "roger" carries no wake word
+    and resolves to no command, so U1 (`plans/brain-tool-calls/plan.md`)
+    answers "say again" deterministically rather than falling silently
+    into an escalation -- the regression this test actually guards is
+    that it is *not* read as a late confirm-band answer."""
     tasks = TaskStore()
     console = CrewConsole(
         store=ContactStore(),
@@ -3059,7 +3271,7 @@ def test_handle_transcript_late_answer_beyond_the_grace_falls_through(
         now_sim=CONFIRM_WINDOW_S + CONFIRM_LATE_ANSWER_GRACE_S + 1.0,
     )
 
-    assert lines == []
+    assert lines == ["Say again?"]
     assert tasks.tasks == []
 
 

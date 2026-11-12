@@ -172,6 +172,17 @@ _LITERAL_CONTACT_ID = re.compile(r"^CONTACT_\d+$", re.IGNORECASE)
 #: "Petrowich", which this does not strip.
 _VOCATIVE_PREFIX = re.compile(r"^(?:hey\W+)?petrovi?t?ch\W*", re.IGNORECASE)
 
+
+def opens_with_vocative(text: str) -> bool:
+    """Whether `text` opens with the "[hey] Petrovich" vocative
+    `_VOCATIVE_PREFIX` above strips -- the typed-console counterpart to
+    `audio-adapter`'s `command_matcher.opens_with_wake_word`
+    (`plans/brain-tool-calls/plan.md` D4's wire note: "Typed console lines
+    set `addressed` from `_VOCATIVE_PREFIX`"). Exact spellings only, same
+    as the prefix itself -- no fuzzy match on this side of the seam."""
+    return _VOCATIVE_PREFIX.match(text.strip()) is not None
+
+
 _FILLER_PREFIXES: tuple[str, ...] = ("that ", "the ", "a ", "an ")
 
 #: Placeholder confidences -- see `PartialParse`'s docstring.

@@ -492,6 +492,17 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # resolvable -- the "unable" half of the project's "say again" vs
     # "unable" distinction, same shape as `ON_GROUND`/`GUIDANCE_NOT_READY`.
     "NO_REFERENT": "Unable, no contact.",
+    # `plans/brain-tool-calls/plan.md` D4/U3 -- the brain seam's own five
+    # new reasons. `NO_BRAIN` fires the instant an addressed utterance is
+    # heard with no brain behind it (`BrainClient.available()` false);
+    # the other four are Stage 2+'s (tool-loop final-answer/command
+    # degradation), declared now alongside it since they share this one
+    # closed vocabulary. Wording is U3's first try, pending flight.
+    "NO_BRAIN": "Unable, no brain.",
+    "NO_ANSWER": "Unable, no answer.",
+    "NO_PLACE": "Unable, don't know that place.",
+    "CANNOT_ANSWER": "Unable, don't know.",
+    "FIXED_COMMAND_ONLY": "Unable, fixed command only.",
 }
 
 
