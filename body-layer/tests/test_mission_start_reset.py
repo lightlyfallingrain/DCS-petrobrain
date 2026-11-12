@@ -40,7 +40,7 @@ from body import (
     _maybe_switch_theatre,
     _reset_mission_state,
 )
-from mission_memory.admission import FiredOnTracker
+from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
 from store.models import Region
@@ -538,6 +538,24 @@ def test_reset_mission_state_is_a_noop_for_fired_on_tracker_when_omitted() -> No
     )
 
     _reset_mission_state(runner, None, MissionMemory())
+
+
+def test_reset_mission_state_resets_lost_contact_tracker_when_given() -> None:
+    """`[[BL-B112]]`: `LostContactTracker`'s own twin of
+    `test_reset_mission_state_resets_fired_on_tracker_when_given` --
+    brought under this mechanism from the day it is added, unlike
+    `FiredOnTracker`, which needed the Batch 2 review follow-up to
+    discover the gap."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    mission_memory = MissionMemory()
+    tracker = LostContactTracker()
+    tracker._scanned_event_count = 500
+
+    _reset_mission_state(runner, None, mission_memory, None, tracker)
+
+    assert tracker._scanned_event_count == 0
 
 
 # --- BL-15 Stage 3: theatre switching (`_maybe_switch_theatre`) and loud- --

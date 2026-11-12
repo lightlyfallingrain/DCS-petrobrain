@@ -162,6 +162,79 @@ def test_all_nullable_fields_round_trip() -> None:
     assert result == entry
 
 
+def test_composition_item_immobile_round_trips() -> None:
+    """`[[BL-B112]]`, schema 2: `CompositionItem.immobile` is an ordinary
+    bool, round-tripping like any other field -- the interesting case
+    (a pre-schema-2 file missing the key entirely) is
+    `test_schema_1_composition_without_immobile_decodes_as_false`
+    below, not this one."""
+    kwargs = _base_kwargs()
+    entry = Entry(
+        **kwargs,  # type: ignore[arg-type]
+        kind="air_defence",
+        payload=AirDefencePayload(
+            composition=(
+                CompositionItem(
+                    op_class="OP_SRSAM",
+                    lo=1,
+                    hi=1,
+                    confidence=0.7,
+                    count_word=None,
+                    immobile=True,
+                ),
+            ),
+            group_link=None,
+            threat=None,
+        ),
+    )
+    result = _roundtrip(entry)
+    assert result == entry
+    payload = result.payload
+    assert isinstance(payload, AirDefencePayload)
+    assert payload.composition[0].immobile is True
+
+
+def test_schema_1_composition_without_immobile_decodes_as_false() -> None:
+    """A hand-written schema-1 JSON line (no `immobile` key at all, since
+    every entry written before `[[BL-B112]]` predates the field) must
+    still decode without error, defaulting `immobile` to `False`
+    (`_decode_composition`'s own comment -- a missing key here is
+    corrupt-free by construction, not a case to raise on)."""
+    data = {
+        "schema": 1,
+        "seq": 1,
+        "kind": "group",
+        "provenance": "observed",
+        "t_sim": 10.0,
+        "t_wall": 1000.0,
+        "phase": None,
+        "pos": None,
+        "seen": None,
+        "belief_ref": "CONTACT_17",
+        "strikes": None,
+        "iff": None,
+        "payload": {
+            "composition": [
+                {
+                    "op_class": "OP_BTR",
+                    "lo": 4,
+                    "hi": 5,
+                    "confidence": 0.6,
+                    "count_word": "handful",
+                    # No "immobile" key -- the schema-1 shape.
+                }
+            ],
+            "motion": {"state": "moving", "dir": None},
+            "ad_link": None,
+        },
+    }
+    text = json.dumps(data)
+    result = decode_entry(json.loads(text))
+    payload = result.payload
+    assert isinstance(payload, GroupPayload)
+    assert payload.composition[0].immobile is False
+
+
 def test_open_ended_cardinality_bucket_hi_is_infinite() -> None:
     """`CompositionItem.hi` can be `math.inf` (`OP_MORETHAN15UNITS`) --
     `json`'s non-standard `Infinity` token round-trips with no special

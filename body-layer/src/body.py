@@ -219,7 +219,7 @@ from eyesight_view import (
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
 from mission_memory import admission, marks
-from mission_memory.admission import FiredOnTracker
+from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.entries import MarkPayload
 from mission_memory.log import MissionMemoryLogWriter
 from mission_memory.store import MissionMemory
@@ -2873,6 +2873,7 @@ def _mission_memory_step(
     theatre: str,
     phase: MissionPhaseInfo | None,
     fired_on_tracker: FiredOnTracker,
+    lost_contact_tracker: LostContactTracker,
 ) -> None:
     """BL-8's writer, called once per poll from the crew-session poll
     loop, **after** `runner.run_once()` (belief is settled;
@@ -2881,9 +2882,10 @@ def _mission_memory_step(
     admission`'s module docstring states the same ordering, and this is
     the one call site responsible for keeping it (plan Decision 3).
 
-    `fired_on_tracker` is owned by the calling poll loop and lives for its
-    whole run (Stage 3) -- `FiredOnTracker`'s own docstring on why this is
-    not state on `MissionMemory` itself.
+    `fired_on_tracker`/`lost_contact_tracker` are owned by the calling
+    poll loop and live for its whole run (Stage 3; `[[BL-B112]]`) --
+    `FiredOnTracker`/`LostContactTracker`'s own docstrings on why neither
+    is state on `MissionMemory` itself.
 
     **Never propagates.** Decision 8: a memory write must never kill the
     poll loop. `admission.step` itself only ever raises from a genuine
@@ -2901,6 +2903,7 @@ def _mission_memory_step(
             phase=phase,
             enrichment=runner.enrichment,
             fired_on_tracker=fired_on_tracker,
+            lost_contact_tracker=lost_contact_tracker,
         )
     except Exception:
         logger.exception("mission-memory step failed; continuing")
@@ -2911,6 +2914,7 @@ def _reset_mission_state(
     crew_console: CrewConsole | None,
     mission_memory: MissionMemory,
     fired_on_tracker: FiredOnTracker | None = None,
+    lost_contact_tracker: LostContactTracker | None = None,
 ) -> None:
     """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
     piece of belief/mission-memory state a clean slate on a genuine DCS
@@ -2938,17 +2942,20 @@ def _reset_mission_state(
     this codebase. `main()`'s own poll loop always has a real
     `CrewConsole` and never takes this branch.
 
-    `fired_on_tracker` defaults to `None` so every existing test calling
-    this with the original three-argument shape is unaffected (same
-    reasoning `_check_for_new_mission`'s own `world_model_dir`/`trace_sink`/
-    `forest_occlusion` defaults give, see that function's docstring) --
-    `None` only arises if a future caller genuinely has no tracker to
-    reset, since both of `body.py`'s own poll loops always build one.
-    Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
-    `FiredOnTracker` predates `BL-15` and was not brought under this
-    mechanism when it was built -- see its own `reset_for_new_mission`
-    docstring for why leaving it out silently stalls `fired_on` mission-
-    memory writes after a restart."""
+    `fired_on_tracker`/`lost_contact_tracker` default to `None` so every
+    existing test calling this with the original three-argument shape is
+    unaffected (same reasoning `_check_for_new_mission`'s own
+    `world_model_dir`/`trace_sink`/`forest_occlusion` defaults give, see
+    that function's docstring) -- `None` only arises if a future caller
+    genuinely has no tracker to reset, since `body.py`'s own poll loop
+    always builds one of each. Batch 2 review follow-up (`plans/
+    bl15-mission-start/review.md`): `FiredOnTracker` predates `BL-15` and
+    was not brought under this mechanism when it was built -- see its own
+    `reset_for_new_mission` docstring for why leaving it out silently
+    stalls `fired_on` mission-memory writes after a restart.
+    `LostContactTracker` (`[[BL-B112]]`) is brought under this mechanism
+    from the day it is added, to avoid discovering the same gap a second
+    time."""
     runner.store.reset_for_new_mission()  # shared with crew_console.store
     runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
     for source in runner.sources:
@@ -2959,6 +2966,8 @@ def _reset_mission_state(
     mission_memory.reset_for_new_mission()
     if fired_on_tracker is not None:
         fired_on_tracker.reset_for_new_mission()
+    if lost_contact_tracker is not None:
+        lost_contact_tracker.reset_for_new_mission()
 
 
 def _enter_refusal_mode(
@@ -3155,6 +3164,7 @@ def _check_for_new_mission(
     trace_sink: DetectionTraceCollector | None = None,
     forest_occlusion: bool = False,
     fired_on_tracker: FiredOnTracker | None = None,
+    lost_contact_tracker: LostContactTracker | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -3164,9 +3174,10 @@ def _check_for_new_mission(
     too (`_reroll_run_logs`, decision 5), not just for a future spoken
     acknowledgement.
 
-    `fired_on_tracker` is passed straight through to `_reset_mission_state`
-    -- see that function's own docstring for why it defaults to `None` and
-    what leaving it out would silently break.
+    `fired_on_tracker`/`lost_contact_tracker` are passed straight through
+    to `_reset_mission_state` -- see that function's own docstring for why
+    they default to `None` and what leaving either out would silently
+    break.
 
     **A genuine reset also arms `runner.pending_mission_start_fire`/
     `pending_mission_start_in_air_check`**, with `mission_start_fresh_
@@ -3278,7 +3289,9 @@ def _check_for_new_mission(
     # fresh, not the previous mission's last cached one (explore-notes,
     # "Two new triggers: mission start").
     pre_reset_t_sim = runner.last_t_sim
-    _reset_mission_state(runner, crew_console, mission_memory, fired_on_tracker)
+    _reset_mission_state(
+        runner, crew_console, mission_memory, fired_on_tracker, lost_contact_tracker
+    )
     _maybe_switch_theatre(
         runner,
         crew_console,
@@ -3924,6 +3937,7 @@ def _run_crew_text_poll_loop(
     crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner)
     crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner)
     fired_on_tracker = FiredOnTracker()
+    lost_contact_tracker = LostContactTracker()
     try:
         if theatre is not None and world_model_db is not None:
             world_model_conn = open_world_model(world_model_db)
@@ -3995,6 +4009,7 @@ def _run_crew_text_poll_loop(
                     trace_sink=trace_collector,
                     forest_occlusion=forest_occlusion,
                     fired_on_tracker=fired_on_tracker,
+                    lost_contact_tracker=lost_contact_tracker,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -4708,6 +4723,7 @@ def _run_crew_text_poll_loop(
                             runner.theatre,
                             phase,
                             fired_on_tracker,
+                            lost_contact_tracker,
                         )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/voice-latency-instrumentation/plan.md` Stage 6

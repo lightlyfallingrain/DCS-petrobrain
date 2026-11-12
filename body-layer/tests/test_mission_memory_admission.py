@@ -16,7 +16,7 @@ from belief.cardinality import (
 )
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact, ContactStore, SightingSpan
-from belief.events import CONTACT_FIRING_SEEN, Event
+from belief.events import CONTACT_FIRING_SEEN, CONTACT_LOST, Event
 from belief.expected_area import ExpectedAreaCheck
 from belief.groups import Group
 from belief.motion import MotionBelief
@@ -27,6 +27,7 @@ from mission_memory.admission import (
     RESIGHT_MIN_INTERVAL_S,
     RESIGHT_MOVE_M,
     FiredOnTracker,
+    LostContactTracker,
     step,
 )
 from mission_memory.entries import AirDefencePayload, FiredOnPayload, GroupPayload
@@ -567,3 +568,110 @@ def test_fired_on_tracker_never_rescans_already_seen_events() -> None:
     # entry a second time.
     step(memory, store, now_sim=1.0, fired_on_tracker=tracker)
     assert len([e for e in memory.entries if e.kind == "fired_on"]) == 2
+
+
+# --- lost-contact write (`[[BL-B112]]`, the working-memory -> kneeboard
+# hand-off's write half) -----------------------------------------------
+
+
+def _lost_event(contact_id: str, event_id: str, t_sim: float) -> Event:
+    return Event(
+        id=event_id,
+        contact_id=contact_id,
+        kind=CONTACT_LOST,
+        t_sim=t_sim,
+        certainty="lost",
+    )
+
+
+def test_lost_group_contact_writes_a_terminal_entry_and_strikes_the_prior_one() -> None:
+    """A contact that already cleared `GROUP_ENTRY_CONFIDENCE_FLOOR` (one
+    standing entry exists) gets a forced terminal snapshot on
+    `CONTACT_LOST`, striking the one it replaces -- same continuation
+    bookkeeping an ordinary resight uses."""
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1)
+    store = _store_with(contact)
+    memory = MissionMemory()
+    tracker = LostContactTracker()
+
+    # Founding entry, via the ordinary group rule -- no CONTACT_LOST event
+    # yet, so the lost-write path has nothing to act on this poll.
+    step(memory, store, now_sim=0.0, lost_contact_tracker=tracker)
+    first_entries = [e for e in memory.entries if e.kind == "group"]
+    assert len(first_entries) == 1
+
+    # The lost write, a fresh poll's event log, bypassing RESIGHT_MIN_
+    # INTERVAL_S entirely (0.0 s since the first entry).
+    store._events.append(_lost_event(contact.id, "EVENT_1", 0.0))
+    step(memory, store, now_sim=0.0, lost_contact_tracker=tracker)
+    group_entries = [e for e in memory.entries if e.kind == "group"]
+    assert len(group_entries) == 2
+    assert group_entries[1].strikes == group_entries[0].seq
+
+
+def test_lost_air_defence_contact_always_writes_even_below_the_floor() -> None:
+    """The air-defence rule's own "always, no floor" posture, applied
+    once more on the way out -- mirrors `test_air_defence_class_always_
+    writes_its_own_entry`."""
+    contact = _contact(
+        contact_id="CONTACT_AD",
+        class_value="OP_SRSAM",
+        confidence=GROUP_ENTRY_CONFIDENCE_FLOOR - 0.3,
+    )
+    store = _store_with(contact)
+    store._events.append(_lost_event(contact.id, "EVENT_1", 0.0))
+    memory = MissionMemory()
+    tracker = LostContactTracker()
+
+    step(memory, store, now_sim=0.0, lost_contact_tracker=tracker)
+    ad_entries = [e for e in memory.entries if e.kind == "air_defence"]
+    # One from the ordinary air-defence rule (always writes), one from
+    # the lost write (also always writes) -- both fire in this single
+    # `step` call, since the lost write is unconditional for air defence.
+    assert len(ad_entries) == 2
+
+
+def test_lost_group_contact_never_entered_writes_nothing() -> None:
+    """Explore-notes.md Q5's own floor logic, applied once more: a
+    contact that never cleared `GROUP_ENTRY_CONFIDENCE_FLOOR` on the way
+    in (a single glimpse, `memory.latest_entry` is `None`) gets no lost
+    note either."""
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR - 0.1)
+    store = _store_with(contact)
+    store._events.append(_lost_event(contact.id, "EVENT_1", 0.0))
+    memory = MissionMemory()
+    tracker = LostContactTracker()
+
+    step(memory, store, now_sim=0.0, lost_contact_tracker=tracker)
+    assert len(memory.entries) == 0
+
+
+def test_lost_contact_tracker_never_rescans_already_seen_events() -> None:
+    """`FiredOnTracker`'s own dedup guarantee, mirrored."""
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1)
+    store = _store_with(contact)
+    memory = MissionMemory()
+    tracker = LostContactTracker()
+
+    step(memory, store, now_sim=0.0, lost_contact_tracker=tracker)
+    first_count = len(memory.entries)
+
+    store._events.append(_lost_event(contact.id, "EVENT_1", 1.0))
+    step(memory, store, now_sim=1.0, lost_contact_tracker=tracker)
+    after_first_lost = len(memory.entries)
+    assert after_first_lost == first_count + 1
+
+    # No new events -- a later poll must not re-process the same
+    # CONTACT_LOST event a second time.
+    step(memory, store, now_sim=2.0, lost_contact_tracker=tracker)
+    assert len(memory.entries) == after_first_lost
+
+
+def test_lost_contact_tracker_reset_for_new_mission_rescans_from_zero() -> None:
+    """`FiredOnTracker.reset_for_new_mission`'s own direct twin -- without
+    this, `_scanned_event_count` would keep indexing into a fresh
+    mission's `ContactStore.events` by the old mission's length."""
+    tracker = LostContactTracker()
+    tracker._scanned_event_count = 5
+    tracker.reset_for_new_mission()
+    assert tracker._scanned_event_count == 0
