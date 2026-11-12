@@ -326,10 +326,11 @@ the fastest class rate in the table (`OP_TRUCK`, 15 m/s) needs ~33 s to cross 50
   because it is small, correct, and consistent with the user's own framing of SA-10 as a fixed
   multi-component site. Flagging so it can be vetoed rather than landing silently.
 - **SA-11/Buk** — not added. The user's answers name SA-2/SA-3/SA-10/SA-6 explicitly but never
-  Buk, and today `object_model.py` has zero keyword coverage for it at all. DCS models Buk's
-  search radar/launcher/command post as separate units, same structural shape as Kub — so by the
-  *general* rule (not an explicit override) it would land `immobile=True` if added. *Recommended:*
-  leave it out of this plan; apply that same default the next time Buk coverage is added, unless
-  told otherwise then.
+  Buk, and today `object_model.py` has zero keyword coverage for it at all. *Corrected by the plan
+  check (main loop, 2026-11-12):* Buk's TELARs each carry their own engagement radar
+  (`body-layer/research/2026-10-01-sam-site-geometry.md`) — self-contained mobile platforms, the
+  branch of the user's rule that makes SA-6 mobile, not the SA-2/3/10 branch. So when Buk coverage
+  is added it defaults to `immobile=False`, unless the user says otherwise then. Left out of this
+  plan.
 - **`plausible_speed_mps`'s now-dead `installation_component` kwarg** — leave or delete; no
   behaviour difference either way, Implementer's call.
