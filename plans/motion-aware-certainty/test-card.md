@@ -1,5 +1,8 @@
 # Test card — motion-aware contact certainty (`BL-B112`), flight acceptance
 
+**Card (published artifact):** https://claude.ai/artifact/6nzbkGbm7DgubzaRz6z5gr — this file is the
+source the card was generated from; read/update there if the test changes.
+
 **Branch to check out: `main`, after this feature merges.** **Air start**, straight and level,
 **50–800 m AGL** (the aircraft's normal operating envelope — `docs/concept/PETROBRAIN_RUNTIME.md`/
 project convention; do not test above a couple of km). `#needs-flight` — this feature has not yet
@@ -74,10 +77,17 @@ Pick any ordinary ground contact, glass it enough times to get at least one miss
 written for it (any group/air-defence contact that clears the usual confidence floor), then leave
 it alone long enough to go fully "lost" (no re-look for ~2 minutes).
 
-**After landing**, check the mission-memory log:
+**After landing**, check the mission-memory log. **Note:** `sortie-log-triage`'s `triage.py` does
+not read mission-memory files (its own options list has no such flag — verified by running
+`--help` before writing this card down, see `dod-check.md`); inspect the JSONL directly instead:
 
 ```sh
-python3 .claude/skills/sortie-log-triage/scripts/triage.py --mission-memory <path-to-the-stamped-mission-memory-log>
+python3 -c "
+import json, sys
+for line in open(sys.argv[1]):
+    e = json.loads(line)
+    print(e['kind'], e['t_sim'], e.get('payload'))
+" <path-to-the-stamped-mission-memory-log>
 ```
 
 **Expect:** a final entry for that contact, written around the time it went lost, carrying its
