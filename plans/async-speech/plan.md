@@ -232,7 +232,8 @@ state that reset would silently leave untouched.
    from `plans/voice-latency-instrumentation/performance-review.md`'s "`push_speech`'s pre-existing
    (not new) blocking call" MONITOR note to this plan, since this plan is what resolves it — that
    file is a merged/closed plan's own artifact, so this is a documentation pointer, not a reopened
-   decision (per this role's step 10, "Superseding a decision").
+   decision (per this role's step 10, "Superseding a decision"). **Done at DoD (2026-11-12):** that
+   file's MONITOR note now carries a "Resolved 2026-11-12 by `[[BL-B106]]`" line pointing back here.
 
 ### Inventory — every other candidate blocking cross-layer call on body-layer's poll loop / brain path
 
