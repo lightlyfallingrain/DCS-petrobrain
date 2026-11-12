@@ -250,7 +250,9 @@ several unrelated missions.
 **`plans/configurable-constants/plan.md`, Stages 1-2.** A curated ~15 behaviour-affecting
 constants (the four `attack_run` gates, the three visibility tier radii, `SPEECH_RATE_WPS`,
 `INTER_UTTERANCE_GAP_S`, `FOCUS_DWELL_S`, `SCAN_PLAN`, `IDENTITY_HALF_LIFE_S`,
-`POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`, `BEARING_SIGMA_DEG`) resolve through `src/tuning.py`
+`POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`, `BEARING_SIGMA_DEG`, `LAST_I_SAW_GROWTH_THRESHOLD_M`
+(`[[BL-B112]]` — the "last I saw" hedge's plausible-displacement threshold, 0.5 km by the user's
+own figure)) resolve through `src/tuning.py`
 at **import time**, not at runtime — see that module's own docstring for why (constants bind by
 value at import; a later `setattr` on the defining module never reaches an importer that already
 ran).
