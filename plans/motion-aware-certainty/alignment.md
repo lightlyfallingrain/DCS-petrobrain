@@ -239,3 +239,67 @@ should say so plainly.
   *Recommended:* yes. Reading back is a design change to mission memory, which today is
   write-only in flight. Until the second step lands, a fixed site still drops out of answers after
   about 2 minutes, the same as today.
+
+## Plan check — 2026-11-12
+
+Tip `a4d0cf9f` (fast-forwarded cleanly from `c4b4454d`, ancestor; tree clean).
+
+**Verdict:** CONCERNS
+
+Checked against this file's own goal check (E1/E4–E7 in BL-B112's scope; E2/E3/Q1/Q4 moved to
+`[[BL-B115]]`, acknowledged in the plan's Goal section and not re-checked here) and
+`explore-notes.md`'s "User answers to the goal check" (Q2, Q3, Q5). Read `plan.md`,
+`BL-B112.md`, `BL-B115.md`, the SA-2 `op_class` research note, `body-layer/CLAUDE.md`'s
+mission-memory import-direction invariant, and `body-layer/research/2026-10-01-sam-site-
+geometry.md` (graph-surfaced, for the Buk finding below). `memory-search.py` had nothing
+indexed for this feature yet.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (fixed site, stated as fact; kneeboard holds it once lost) | 1–3 (write half), 5c | met for the write half — see Finding 1 below for the read half, which is `[[BL-B115]]` by the accepted split |
+| E4 (seen-stopped mobile unit stays fact ~28 min) | 3, 4 | met in working memory to 120 s only; the ~28 min figure needs `[[BL-B115]]`'s read-back, exactly as Stage 3's own prose says — not a gap in this plan |
+| E5 (hedge once growth ≥ 0.5 km: truck ~30 s, tank ~1 min, infantry ~4 min) | 3, 7 | met — `LAST_I_SAW_GROWTH_THRESHOLD_M=500`, class rates give the stated figures (checked: `OP_TRUCK` 15 m/s → ~33 s) |
+| E6 (contact under observation never hedged) | 3, 7 | met — `certainty_of` returns `"observed"` inside `OBSERVED_WINDOW_S` regardless of growth; `_needs_hedge` only fires on `"estimated"` |
+| E7 (never more precise than when the note was written; no fold-back) | 5a–5c | met — this plan only writes `mission_memory`; nothing in it reads a note back into belief. `[[BL-B115]]` inherits the obligation, correctly named there, not settled here |
+| growth-from-zero-to-mobile for Kub/SA-6, BL-B111 Decision 1 interaction | 2, 6 | met — Stage 6 explicitly names the reversal and corrects the goal check's own Finding 5 |
+| "observed not moving" needs the 5 s watch, test rewrite | 4 | met — matches Q2's answer, test-rewrite flagged under Escalation Rules per `AGENTS.md` |
+| lost stays time-based; every lost contact gets a kneeboard note; floor interaction | 5c | met — air-defence always, otherwise gated on `latest_entry is not None`, explicitly resolving the goal check's own open question the same way |
+
+### Findings
+
+1. **The plan's own forward note on Buk/SA-11 reasons from the wrong half of the user's rule, and
+   this project's own prior research already says so.** Lens: World truth, Bounded knowledge.
+   - The user's structural rule has two branches: *"SAM sites where radar and launchers are
+     different units -> treat as not moving"* vs. *"Units that themselves are a mobile SAM
+     platform that can… up and go at a moment's notice"* without deploying a separate radar.
+   - The plan's Decisions section says Buk, if added later, "would land `immobile=True`" under
+     the first branch, because "DCS models Buk's search radar/launcher/command post as separate
+     units, same structural shape as Kub."
+   - `body-layer/research/2026-10-01-sam-site-geometry.md` (already on file, not re-derived here)
+     says the opposite of what that comparison needs: a Buk battalion's TAR is separate, but
+     **each TELAR is itself "a self-contained radar+launcher vehicle (like Osa/Tor)"** — the
+     launcher carries its own engagement radar and does not depend on the TAR to fire, unlike
+     Kub's 2P25 TEL, which has no radar of its own at all and cannot engage without the separate
+     1S91. That is exactly the second branch of the user's rule, the one that made SA-6 the
+     explicit exception in the first place — not the first.
+   - *The pilot would see, if this default ships unexamined later:* a Buk TELAR that drove off
+     the moment Petrovich looked away gets called "SAM, 2 o'clock" at its old position as settled
+     fact, the failure mode E1/E4 exist to prevent — for a system this project's own notes already
+     say is self-propelled.
+   - *Grounded in:* `body-layer/research/2026-10-01-sam-site-geometry.md` lines 72–77,
+     cross-checked against the user's own Q3 wording in `explore-notes.md`.
+   - *Suggests:* nothing here changes BL-B112's code — Buk is correctly left out of this plan.
+     But the one-line default the plan leaves for "the next time Buk coverage is added" currently
+     points the wrong way and should be corrected now, while it is cheap, rather than left to be
+     re-discovered against a live SA-11 in a mission.
+
+### Questions for the user
+
+- **Q1** — The plan's forward note defaults a future Buk/SA-11 addition to `immobile=True` ("same
+  structural shape as Kub"). This project's own 2026-10-01 SAM-site-geometry research says Buk's
+  TELARs, unlike Kub's TEL, carry their own engagement radar and are themselves self-contained
+  mobile platforms — the branch of your rule that made SA-6 mobile, not the branch that keeps
+  SA-2/3/10 fixed. Should the plan's note be corrected now to default Buk to `immobile=False`
+  (mobile, Kub's treatment) when it is eventually added? *Recommended:* yes — one sentence, and it
+  stops a future implementer from wiring Buk the wrong way from a note that currently points at
+  the wrong precedent.
