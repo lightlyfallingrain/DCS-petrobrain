@@ -115,6 +115,29 @@ Derived:
   So "hands free while flying" is a function of flight state (stable vs manoeuvring), not a
   timer.
 
+## 2026-11-12 — a sketch from the user (verbatim, left to Architect)
+
+> We could have a solution like:
+> ```
+> {
+> "eyes" : "none"/"9K113"/"scan"/"binoculars"/"effector"/...
+> "hand1" : "cyclic"/"binocular"/"effector"/...
+> "hand2" : "collective"/"binocular"/"effector"/...
+> "mouth" : "speech"/none
+> "brain" : "...."
+> }
+> ```
+> Then any actions would need to check if it can proceed or get's queued. Urgent things bypass
+> queue.
+> Just a though, I leave it to architecht to define a good logic.
+
+Two things in it that the derived rules above had not said: the body state is **one readable
+record** naming what each resource is doing now (a state param in the `[[BL-B94]]` sense, so a
+"what are you doing?" answer and the debug views can read it), and **urgent bypasses the queue**
+(the mouth already has this: `bypass_gate`/`interrupt()`). Hands written as two named slots here;
+the earlier direction was "we don't need to model which hand is free" — Architect reconciles
+(a count is enough for arbitration; a named slot may still read better in the record).
+
 ## Open questions (to be answered in this conversation)
 
 - Preemption/priority: what happens when a new action needs a resource that is busy — refuse
