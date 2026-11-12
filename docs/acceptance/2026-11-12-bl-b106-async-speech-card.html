@@ -1,0 +1,182 @@
+<title>Async Speech Sortie</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, prize block marked in amber. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+.surprise{color:var(--record); font-weight:600; margin-top:10px;}
+</style>
+
+<div class="wrap">
+<div class="eyebrow">BL-B106 · async speech · live acceptance</div>
+<h1>Async Speech Sortie</h1>
+<div class="subhead">The mouth never blocks the eyes and arms. Petrovich keeps scanning, slewing and answering while a line is being spoken. Five things to watch, one of them the prize.</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH</div>
+  <pre>git fetch origin
+git checkout main
+git pull</pre>
+  <div class="subhead" style="font-size:0.9rem">On both machines. BL-B106 merged to <code class="i">main</code> as <code class="i">820f8b34</code> on 2026-11-12. Restart body-layer (Mac) after pulling. audio-adapter and the collector are unchanged; no restart needed there.</div>
+</div>
+
+<div class="note"><strong>Nothing new to type.</strong> The usual run command, no new flags. The change is which thread speaks. If you want timings afterwards, keep <code class="i">--belief-truth-log</code> on: its <code class="i">speech</code> rows now carry the real push timings from the worker thread.</div>
+
+<div class="note warn"><span class="tag">Not testable this flight</span><br>
+The F8 "readback several seconds late" delay itself. This feature only removes the poll-loop stall; Piper synthesis time and audio-adapter queue dwell are unchanged and still need the <code class="i">join_voice_latency.py</code> timeline from a flown sortie.</div>
+
+<h2>Blocks</h2>
+
+<section class="block prize">
+  <div class="block-num">1 · the prize</div>
+  <h3>Does he keep looking while he talks? <span class="prize-tag">Prize</span></h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">With <code class="i">--eyesight-view</code> or <code class="i">--pov-view</code> up, ask for something long: <em>"report contacts"</em> with several groups in belief, or let a multi-line callout run. Watch the view while he speaks. Then try a slew: on OBSERV with a target, <em>"set target …"</em> while a long line is still playing.</div>
+    <div class="k expect">Expect</div><div class="v">The view keeps redrawing once a second through the whole utterance. Gaze keeps stepping through the scan plan. A 9K113 slew starts without waiting for the line to finish. Before this change the view froze for the length of the line.</div>
+    <div class="k record">Record</div><div class="v record">Did the view ever freeze while he spoke, and for roughly how long? Did a slew start while a line was still playing?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b1" id="b1"><span>Covered</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">2</div>
+  <h3>"Stop talking" cuts him off fast</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Mid-sentence on a long line, say <em>"stop talking"</em>. Do it twice, once while a queued second line is waiting behind the first.</div>
+    <div class="k expect">Expect</div><div class="v">Speech stops within about a second. No readback. The queued line is dropped, not spoken afterwards. The view never stalls on the command.</div>
+    <div class="k record">Record</div><div class="v record">How long from the word "stop" to silence? Did anything queued still get spoken after?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b2" id="b2"><span>Covered</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>One mouth: order kept, nothing spoken over</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Give two commands back to back, faster than he can answer: <em>"scan left"</em> then <em>"report contacts"</em>. Also let a routine callout land while a readback is playing.</div>
+    <div class="k expect">Expect</div><div class="v">Readbacks come out in the order given, one after the other, never overlapping. A routine callout waits its turn. An urgent callout (SAM launch) still interrupts.</div>
+    <div class="k record">Record</div><div class="v record">Did any two lines overlap? Did any readback arrive out of order or go missing?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b3" id="b3"><span>Covered</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">4</div>
+  <h3>Mission restart drops stale lines</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">With contacts in belief and him mid-callout or with a line queued, restart the mission from the DCS menu.</div>
+    <div class="k expect">Expect</div><div class="v">The line in progress stops. Nothing from the old mission is spoken into the new one. The first thing you hear is the new mission's own.</div>
+    <div class="k record">Record</div><div class="v record">Was any pre-restart line spoken after the restart? What was the first line heard in the new mission?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b4" id="b4"><span>Covered</span></label>
+</section>
+
+<section class="block">
+  <div class="block-num">5 · optional, on the ground</div>
+  <h3>audio-adapter down: he keeps working, logs one line</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Kill audio-adapter while body-layer runs. Give a command. Wait 30 s. Start audio-adapter again, give another command.</div>
+    <div class="k expect">Expect</div><div class="v">body-layer keeps ticking (view redraws, commands still show in the console). Log shows exactly one <code class="i">audio adapter disconnected</code> warning, not one per line. On restart, one <code class="i">audio adapter connected</code> and speech resumes with the new command, not a backlog of the old ones beyond what was queued.</div>
+    <div class="k record">Record</div><div class="v record">How many disconnected lines in the log? Did speech resume on its own?</div>
+  </div>
+  <label class="chk"><input type="checkbox" data-k="b5" id="b5"><span>Covered</span></label>
+</section>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>Did the view ever freeze while he spoke, and did a slew start mid-line? <strong>(the prize)</strong></li>
+    <li>"Stop talking": seconds to silence, and whether anything queued leaked through.</li>
+    <li>Any overlap, reordering or missing readback.</li>
+    <li>Any old-mission line heard after a restart.</li>
+    <li>Disconnected-line count with audio-adapter down, and whether speech came back by itself.</li>
+  </ol>
+  <p style="margin:10px 0 0;color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+const KEY='bl-b106-async-speech';
+function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return {};}}
+const saved=load();
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{const s=load(); s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));}catch(e){}
+  });
+});
+</script>
