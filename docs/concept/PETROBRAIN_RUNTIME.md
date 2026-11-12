@@ -86,6 +86,47 @@ recent events
 
 The LLM sees relevant subsets.
 
+## Petrovich's body: eyes, hands, mouth, brain
+
+Every action Petrovich takes uses one or more of four resources, and the resources are
+independent of each other. (User direction, 2026-10-20 and 2026-11-12;
+`plans/body-model-concept/explore-notes.md` has the verbatim words.)
+
+| resource | capacity | rule |
+|---|---|---|
+| **eyes** | one focus | one optic at a time (naked eye, binoculars, 9K113 sight); reading a switch, lamp, gauge or instrument is a look like any other; **blind outside the current optic** |
+| **hands** | two, counted not named | cyclic = 1 while in control; collective = 1 but free in stable flight, needed in manoeuvres; any non-naked-eye optic = 2; 9K113 = 2 except pylon switch and radiator reset; switch flip = 1 |
+| **mouth** | one utterance | never two things at once; never waits for eyes or hands (`BL-B106`) |
+| **brain** | parallel in principle | limited by the machine, not the man |
+
+Which actions need what:
+
+| action | eyes | hands |
+|---|---|---|
+| naked-eye scan, track, attack run | yes | 0 |
+| binoculars, 9K113 sight | yes | 2 |
+| 9K113 pylon switch, radiator reset, cyclic/collective buttons | no, muscle memory | 1 |
+| any other switch, lamp or gauge | yes | 1 |
+| fly: cyclic | no (attitude and instruments do) | 1, always |
+| fly: collective | no | 1, free in stable flight |
+| speak | | |
+| kneeboard, later | yes | 1 |
+
+Arbitration, when a new demand meets a busy resource:
+
+- **A look is atomic.** Finish the current look, take eyes and a hand off for the action, then
+  return to what was running. A 9K113 track survives an eyes-off look: slewing pauses, the track
+  is kept.
+- **Attack run is the one hard refusal**: *"unable, attack run"* to anything needing eyes or
+  hands, except a pylon change (muscle memory) and `OBSERV OFF`, which ends 9K113 use at once.
+- **Queue or "stand by"** is decided by expected delay: up to about 5 s (tunable) the action is
+  queued silently and read back when done; longer, he says *"stand by"* first, then reads back.
+- **The pilot's command outranks Petrovich's own initiative**, always. Threat-level ordering is
+  a later refinement, not now.
+- **Optic dwell is limited**: he comes off any optic for a naked-eye glance around at intervals,
+  because he is blind outside it (already built: sight dwell ceiling and glance-away, per-cycle
+  binocular budget).
+
 ## Knowledge layers
 
 ### 1. World knowledge
