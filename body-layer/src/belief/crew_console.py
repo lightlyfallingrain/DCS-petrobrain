@@ -164,6 +164,7 @@ from belief.speech import (
     render_watch_nearest_readback,
     route_event,
 )
+from belief.speech_worker import SpeechWorker
 from belief.tasks import PendingIntent, TaskKind, TaskStore
 from belief.tools import (
     _find_contact,
@@ -1344,6 +1345,18 @@ class CrewConsole:
     #: other's still-true "disconnected" state. See that class's own
     #: docstring for why state is tri-valued and transition-only.
     audio_adapter_reporter: ConnectionReporter | None = None
+    #: `[[BL-B106]]` (`plans/async-speech/plan.md`) -- the optional
+    #: collaborator that moves `push_speech` off whichever thread calls
+    #: `_print` and onto its own background worker thread. `None` (the
+    #: default, every test that doesn't care about this) is a true no-op:
+    #: `_print`'s speech branch falls back to the pre-existing synchronous
+    #: `speech_client.push_speech` call, byte-for-byte unchanged -- same
+    #: optional-collaborator shape as every other additive field on this
+    #: class. `body.py`'s `main()` always constructs and wires one now
+    #: that speech is unconditional (`BL-B96`); see that plan's Decision 1
+    #: for why the risk of `main()` ever forgetting to pass this alongside
+    #: `speech_client=` is flagged, not guarded against structurally.
+    speech_worker: SpeechWorker | None = None
 
     #: Optional callback invoked for every line this console speaks, with
     #: `(line, urgent)` -- `body` wires it to `belief_truth_log.
@@ -1374,8 +1387,12 @@ class CrewConsole:
     #: with no voice origin) and the `push_speech` call's own
     #: `time.monotonic()` bracket (`push_sent_wall`/`push_acked_wall`/
     #: `push_duration_s`, all `None` when nothing was pushed to
-    #: `speech_client` at all) -- `_print` is what measures these, this
-    #: callback only carries them to `write_speech`.
+    #: `speech_client` at all) -- `_print` measures these for the
+    #: fallback (no-`speech_worker`) path; `[[BL-B106]]`'s `SpeechWorker`
+    #: measures them for the worker path instead, and
+    #: `CrewConsole.drain_speech_results` is what calls this callback for
+    #: that path. Either way, this callback only carries them to
+    #: `write_speech`.
     speech_log_sink: (
         Callable[
             [
@@ -1608,7 +1625,8 @@ class CrewConsole:
         reasoning as `body.ConsolePerceptionRunner.reset_for_new_
         mission`), the injected collaborators (`brain_client`, `output`,
         `aircraft_client`, `mark_here_fn`, `mark_target_fn`, `transcript_
-        log`, `speech_client`, `speech_log_sink`), and
+        log`, `speech_client`, `speech_log_sink`, `speech_worker`,
+        `audio_adapter_reporter`), and
         `silenced` -- whether a pilot's deliberate mute should survive a
         mission restart is an open product question (see the plan's
         "Decisions Requiring User Input"); until decided, this preserves it
@@ -1631,7 +1649,25 @@ class CrewConsole:
         `on_ground` resetting
         to `True` is harmless either way: `body._check_for_new_mission`
         re-evaluates it from live telemetry the very next poll, same as
-        `enrichment`."""
+        `enrichment`.
+
+        **`[[BL-B106]]` adds two things, both to this same pass-through
+        list.** `speech_worker` survives like `speech_client`/
+        `brain_client` already do -- the worker thread itself persists
+        across a mission restart -- but its *queued content* must not:
+        `self.speech_worker.interrupt()` (called below, before `__init__`
+        re-runs, since it needs no state this call is about to reset)
+        clears the queue first, so a stale pre-restart line (e.g.
+        "contact lost" from the mission that just ended) is never spoken
+        into the new one. **`audio_adapter_reporter` is added to the
+        pass-through list for an unrelated reason: it was a pre-existing
+        `BL-B96` omission**, found by checking this list field-by-field
+        against the class's own fields rather than assumed -- without it,
+        a mission restart silently dropped back to the full-traceback
+        push-failure path (`self.audio_adapter_reporter` would reset to
+        `None`, the field's own default, on every restart)."""
+        if self.speech_worker is not None:
+            self.speech_worker.interrupt()
         self.__init__(  # type: ignore[misc]
             store=self.store,
             tasks=self.tasks,
@@ -1643,6 +1679,8 @@ class CrewConsole:
             transcript_log=self.transcript_log,
             speech_client=self.speech_client,
             speech_log_sink=self.speech_log_sink,
+            speech_worker=self.speech_worker,
+            audio_adapter_reporter=self.audio_adapter_reporter,
             silenced=self.silenced,
             config_error_pending=self.config_error_pending,
         )
@@ -1987,6 +2025,55 @@ class CrewConsole:
         for reply in replies:
             lines.extend(self._handle_brain_reply(reply, now_sim))
         return lines
+
+    def drain_speech_results(self, now_sim: float) -> None:
+        """`[[BL-B106]]` (`plans/async-speech/plan.md` Decision 2) --
+        pops every result `self.speech_worker` has deposited since the
+        last drain and calls `self.speech_log_sink` for each, **on this
+        (the poll) thread**. Called once per poll from `body.py`, same
+        per-poll hook point as `drain_events`/`drain_brain`.
+
+        This is the one place that closes the cross-thread read hazard
+        named in `_print`'s own docstring: `body._speech_log_sink`'s
+        closure reads `runner.last_t_sim`/`runner.scan_plan`/`runner.
+        last_ownship_state` live, by that function's own design, and is
+        only safe to call from the thread that mutates those fields --
+        the poll thread this method runs on. A result the worker thread
+        deposited is never handed to `speech_log_sink` from the worker
+        thread itself.
+
+        `now_sim` is accepted for the same per-poll-method signature
+        every other `drain_*` method already has, but is not needed
+        here: each result already carries its own real `push_sent_wall`/
+        `push_acked_wall`/`push_duration_s`, measured by the worker at
+        the moment the push actually happened, not derived from this
+        call's own timing. A true no-op when `speech_worker` is unset
+        (the fallback path's lines are logged synchronously by `_print`
+        itself, and never reach a worker's results list at all)."""
+        del now_sim  # unused -- see docstring
+        if self.speech_worker is None:
+            return
+        for result in self.speech_worker.drain_results():
+            if self.speech_log_sink is None:
+                continue
+            try:
+                self.speech_log_sink(
+                    result.line,
+                    result.bypass_gate,
+                    result.attack_run_fields,
+                    result.correlation_id,
+                    result.push_sent_wall,
+                    result.push_acked_wall,
+                    result.push_duration_s,
+                )
+            except Exception:
+                # Same deliberately-broad posture as `_print`'s own sink
+                # call: a debug log must never be the reason Petrovich
+                # stops talking.
+                logger.warning(
+                    "speech log sink failed for a deferred speech result (continuing)",
+                    exc_info=True,
+                )
 
     def _speak_stand_by_if_due(self, now_sim: float) -> None:
         """D8: speak "stand by" **once** for any escalation that has been
@@ -4758,7 +4845,19 @@ class CrewConsole:
         wiring one -- `main()` always does now, BL-B96), there is nothing
         to interrupt and this is a true no-op -- the same
         None-means-no-op posture every other `speech_client` use already
-        has."""
+        has.
+
+        **`[[BL-B106]]` (Decision 3): routes through `self.speech_worker.
+        interrupt()` when a worker is configured**, consolidating every
+        `speech_client` access behind its one owner, and falling back to
+        this method's own pre-existing direct `speech_client.stop()` call
+        when no worker is wired (a test built `CrewConsole` without one).
+        `SpeechWorker.interrupt()` never raises -- it logs its own
+        failure internally -- so there is no `try`/`except` on that
+        branch."""
+        if self.speech_worker is not None:
+            self.speech_worker.interrupt()
+            return
         if self.speech_client is None:
             return
         try:
@@ -5323,7 +5422,28 @@ class CrewConsole:
         subject(s). Recorded only when `lines` is non-empty: a call that
         ends up speaking nothing (an empty deferred-readback tail call,
         the common case once `_speak_or_defer` has already queued the
-        real one) must not plant a referent for a line nobody heard."""
+        real one) must not plant a referent for a line nobody heard.
+
+        **`[[BL-B106]]` (Decisions 1/2): when `speech_worker` is
+        configured, the push moves off whichever thread calls this
+        method.** `self.speech_worker.enqueue(...)` returns immediately;
+        the worker thread does the timed `push_speech` call and the
+        connection-reporter bookkeeping that used to happen right here,
+        and deposits a result `CrewConsole.drain_speech_results` later
+        drains **on the poll thread** to call `speech_log_sink` with the
+        real timings -- not here, because that sink's own closure
+        (`body._speech_log_sink`) reads poll-thread-owned state live and
+        is only safe to call from that thread (see that function's own
+        docstring). `self.silenced` still gates whether anything is
+        enqueued at all, exactly as it gates `speech_client` in the
+        fallback branch below -- a silenced line is never queued, so it
+        falls through to this method's own synchronous `speech_log_sink`
+        call with `push_sent_wall`/`push_acked_wall`/`push_duration_s`
+        all `None`, the same row shape the fallback path already produces
+        for a silenced line. Without `speech_worker` configured, this
+        method's speech branch is the pre-existing synchronous
+        `speech_client.push_speech` call below, byte-for-byte
+        unchanged."""
         if lines and mentions:
             self._referent_memory.record(mentions, now_sim)
         for line in lines:
@@ -5332,7 +5452,14 @@ class CrewConsole:
             push_sent_wall: float | None = None
             push_acked_wall: float | None = None
             push_duration_s: float | None = None
-            if self.speech_client is not None and not self.silenced:
+            deferred_to_worker = False
+            if self.speech_worker is not None:
+                if not self.silenced:
+                    self.speech_worker.enqueue(
+                        line, bypass_gate, correlation_id, attack_run_fields
+                    )
+                    deferred_to_worker = True
+            elif self.speech_client is not None and not self.silenced:
                 push_sent_wall = time.time()
                 t0 = time.monotonic()
                 try:
@@ -5358,7 +5485,7 @@ class CrewConsole:
                         self.audio_adapter_reporter.report_success()
                 push_duration_s = time.monotonic() - t0
                 push_acked_wall = time.time()
-            if self.speech_log_sink is not None:
+            if self.speech_log_sink is not None and not deferred_to_worker:
                 try:
                     self.speech_log_sink(
                         line,

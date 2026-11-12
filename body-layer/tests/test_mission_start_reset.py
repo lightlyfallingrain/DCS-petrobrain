@@ -216,6 +216,16 @@ _CREW_CONSOLE_PRESERVE = {
     "transcript_log",
     "speech_client",
     "speech_log_sink",
+    # `[[BL-B106]]` (`plans/async-speech/plan.md` Decision 4 / "Refresh"
+    # section) -- the worker thread and the shared audio-adapter
+    # reporter both persist across a mission restart, same as
+    # `speech_client`/`brain_client` above. `speech_worker`'s own
+    # *queued content* does not survive (`reset_for_new_mission` calls
+    # `speech_worker.interrupt()` before passing it through) -- that is
+    # a side effect on the object this preserve-set's identity check
+    # cannot see, not a reason to leave it out of this set.
+    "speech_worker",
+    "audio_adapter_reporter",
     "silenced",
     # `plans/effector-sequences/plan.md` D6 -- describes this *process's*
     # startup state, not per-mission state, same as `silenced` above.
