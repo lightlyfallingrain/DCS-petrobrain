@@ -42,6 +42,7 @@ on the index without opening anything.
 - [[X-T28]] — **Does the always-loaded brake hold? Re-measure on 2026-10-27** — the first
   compaction was erased in nine days and nobody noticed until the words were counted, so the test of
   the 2026-10-18 brake is a number taken on a date. Carries lever D, held pending that measurement
+- [[X-T29]] — **Next after BL-B106 merges: BR-2 brain tool calls** — user direction 2026-11-12
 - [[X-T1]] — Fly the contact/terrain sortie — **USER**
 - [[X-T2]] — `/explore` the location-fragment rewrite — **USER**
 
