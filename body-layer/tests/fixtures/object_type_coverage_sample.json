@@ -1330,7 +1330,7 @@
     },
     {
       "object_type": "RD_75",
-      "expected_op_class": null,
+      "expected_op_class": "OP_LRSAM",
       "bucket": "ground"
     },
     {
@@ -1415,12 +1415,12 @@
     },
     {
       "object_type": "S_75_Zil_Trailer",
-      "expected_op_class": "OP_TRUCK",
+      "expected_op_class": "OP_LRSAM",
       "bucket": "ground"
     },
     {
       "object_type": "S_75M_Volhov",
-      "expected_op_class": null,
+      "expected_op_class": "OP_LRSAM",
       "bucket": "ground"
     },
     {
@@ -1530,7 +1530,7 @@
     },
     {
       "object_type": "SNR_75V",
-      "expected_op_class": null,
+      "expected_op_class": "OP_LRSAM",
       "bucket": "ground"
     },
     {
