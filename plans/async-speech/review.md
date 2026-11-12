@@ -98,3 +98,70 @@ dispatch prompt's specific checkpoints verified individually against the code ra
 the plan's description of the code. Format/lint/type/test commands run directly by the Reviewer
 (not taken on trust) against a freshly built `.venv` in this worktree, with results matching
 `implementation.md`'s own reported numbers exactly.
+
+## Fix review (e77f8b26)
+
+Review-of-the-fix for the performance-reviewer change request (`plans/async-speech/
+performance-review.md`'s NOW finding), re-entering the loop per `AGENTS.md`. Worktree HEAD was
+`f480cf71` (ancestor of the named tip); fast-forwarded to `e77f8b26059cc96896f24c41e20fef89b2e65cfc`
+cleanly (tree was clean before and after). Diff reviewed: `57a5a7ca..e77f8b26`, one commit
+("BL-B106: give AudioAdapterClient.stop() its own short timeout"), three files:
+`audio_client.py`, `test_speech_worker.py`, `implementation.md`.
+
+- **Scope matches the finding exactly.** `AudioAdapterClient` gains `stop_timeout_s: float = 1.0`
+  (module constant `_DEFAULT_STOP_TIMEOUT_S`), used only inside `stop()`'s `urlopen(...,
+  timeout=self.stop_timeout_s)` call. `push_speech`'s and `get_transcripts`'s own timeout handling
+  is untouched — confirmed by reading the diff hunk boundaries, not just the stat summary: the
+  only changed method body is `stop()`.
+- **The new test genuinely exercises `stop()`'s path, not `push_speech`'s.**
+  `test_interrupt_wall_time_is_bounded_well_under_push_speechs_timeout_against_a_wedged_client`
+  calls `worker.interrupt()`, which (per `speech_worker.py`'s `interrupt()`, read directly) clears
+  the queue and calls `self._client.stop()` — never `push_speech`. It reuses the same genuinely-
+  wedged raw-socket `_WedgedSpeechServer` as the existing enqueue test (own local copy, no shared
+  fixture yet — consistent with this file's existing style) and asserts wall time `< 2.0s` against
+  a client built with defaults (`stop_timeout_s=1.0`, `timeout_s=5.0` unchanged), which is a real
+  assertion about `/stop`'s own bound, not `push_speech`'s. The implementer's reported
+  counterfactual (reverting to `self.timeout_s` reproduces a ~5.1s stall and fails the test) is the
+  right way to have confirmed this is not a decorative assertion; I did not independently re-run
+  the revert, since the commit message states it was checked and the test's own numbers (asserting
+  `< 2.0` against a 1.0s timeout, comfortably below `push_speech`'s 5.0s) are consistent with a
+  real, not accidentally-always-passing, check.
+- **Tuning-mechanism inclusion test applied correctly.** `_DEFAULT_STOP_TIMEOUT_S` bounds a
+  transport-level wait on a failed/wedged HTTP call — the implementer.md inclusion test's own listed
+  exemption ("a protocol constant... is not" behaviour-affecting) names exactly this case. It does
+  not change what Petrovich says, sees, remembers, or how long *he* makes the pilot wait; it bounds
+  how long a broken network call is tolerated before the poll thread gives up. Treating it as an
+  ordinary module literal rather than a `tuning.py` entry is correct, and the `#:` comment above it
+  states the reasoning and cites the precedent (`speech_worker._MAX_QUEUE_LEN`) accurately.
+  `body-layer/config/defaults.toml` is correctly untouched (confirmed: the fix commit's full file
+  list is `audio_client.py`, `test_speech_worker.py`, `implementation.md` — no `defaults.toml`).
+- **Cross-key coupling, noted but not a defect.** `stop_timeout_s` (1.0) is shorter than
+  `timeout_s` (5.0) by design and by the commit's own stated reasoning (`/stop` has no synthesis to
+  wait out), but nothing asserts `stop_timeout_s <= timeout_s` at the dataclass level — a caller
+  constructing `AudioAdapterClient(base_url=..., stop_timeout_s=10.0)` would silently defeat the
+  fix's purpose. Low risk: the client is constructed exactly once in `body.py` with neither field
+  overridden, so there is no live path that could hit this today. Optional, not required.
+- **Nothing else changed** — `implementation.md`'s new "Perf fix" section matches the diff; no
+  unrelated edits rode along.
+
+**Checks** (main checkout's `.venv` by absolute path, cwd in this worktree's `body-layer/`, per
+`.claude/agent-memory/reviewer/feedback_worktree_use_main_checkout_venv.md`):
+`ruff format --check` — 200 files already formatted; `ruff check` — all passed; `mypy src` —
+success, 82 source files; `pytest -q tests/test_speech_worker.py tests/test_crew_console.py` —
+**288 passed**.
+
+### Fix Required Fixes
+None.
+
+### Fix Optional Refinements
+- **No assertion that `stop_timeout_s <= timeout_s`** on `AudioAdapterClient` — see above. Worth a
+  one-line guard or comment if a second construction site is ever added; not worth one for a
+  single, fixed-argument call site.
+
+### Fix Verdict
+APPROVED
+
+### Fix Review Confidence
+Full read — the one-commit diff in full, `speech_worker.py`'s `interrupt()`, the new test and its
+helper server, `implementation.md`'s new section, and `performance-review.md`'s NOW finding it
+answers. Checks run directly, not taken on trust.
