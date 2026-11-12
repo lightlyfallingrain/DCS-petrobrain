@@ -19,18 +19,25 @@ Petrovich should be able to recall it later even though he no longer tracks it l
 entries are inspectable afterward, and `--speech-log` (on by default) to check the exact wording
 heard.
 
-## Case 1 — a fixed SAM site, unseen for several minutes, stated as fact
+## Case 1 — a fixed SAM site, unseen, stated as fact until it goes lost
 
 Find or place a fixed SAM site (S-125/SA-3, S-300/SA-10, or SA-2 if the theatre has one — **not**
 Kub/SA-6, which is deliberately treated as mobile by this feature, see Case 2). Glass it once so
-Petrovich has it in belief, then fly away so it drops out of gate range and stays unseen for
-**several minutes** (well past the old ~2-minute "estimated" window).
+Petrovich has it in belief, then fly away so it drops out of gate range. Two checks, by elapsed
+time since the last look:
 
-**Expect:** if asked (`report`, or a threat question), the site is still named as fact — **no**
-"last I saw" hedge, and it should **not** have gone silently to "lost" either (it should still be
-in working memory, reportable). If it does eventually go lost (past ~2 minutes with no re-look),
-check the mission-memory log afterward — there should be an entry for it recording its last-seen
-place and time.
+**(a) Within ~2 minutes unseen** (say 60–100 s): ask (`report`, or a threat question). **Expect:**
+the site is still named as fact — **no** "last I saw" hedge, ever, however close to the 2-minute
+mark. Before this feature the hedge arrived on the clock alone; now a unit that cannot move never
+gets it. This is the new behaviour this case is for.
+
+**(b) Past ~2 minutes unseen:** the site goes "lost" and leaves working memory, **same as every
+contact** — "lost" is still purely time-based (~120 s, unchanged by this feature). It simply skips
+"estimated" on the way out: tracked → lost, no hedge in between. A live question now may not name
+it (see "A known gap" below). **After landing**, check the mission-memory log — there should be an
+entry for it written around the time it went lost, recording its last-seen place and time.
+
+Report as a defect: any "last I saw" on the fixed site in (a); no lost-write entry in (b).
 
 ## Case 2 — Kub/SA-6 is mobile: a long-unwatched Kub should eventually hedge
 
@@ -85,6 +92,11 @@ about what's out there. So even though Case 1's fixed SAM site will have a corre
 in the log, a live in-cockpit question asked *after* it has gone lost may still come back as "no
 threats" rather than recalling the noted position. That is expected for this feature; `[[BL-B115]]`
 (the kneeboard read-back, a separate pass) is what closes it.
+
+**Also expected:** a ground contact seen *only* through the scope/hybrid channel (never with the
+naked eye, so no motion evidence ever arrives) behaves like Case 1's fixed site — tracked → lost at
+~2 minutes with no "last I saw" in between — because its unobserved-motion growth rate is too small
+to cross the half-kilometre threshold before the lost clock runs out. Not a defect.
 
 ## General things to listen for across every case
 
