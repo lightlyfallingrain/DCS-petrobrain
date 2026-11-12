@@ -81,3 +81,36 @@ for the goal check to propose.
   observation" reads as: a stopped mobile unit stays believed-stopped until seen moving — at
   0.3 m/s it would take ~28 min to reach 0.5 km. Whether the drift still applies to the label is
   for the goal check.
+
+## User answers to the goal check, verbatim (2026-11-12)
+
+> *"Q1 - all of them. d can be later as you recommend*
+> *Q2 - as recommended*
+> *Q3 - SA-6 is mobile platform, so potentially can move. Treat it like this: SAM sites where radar
+> and launchers are different units -> treat as not moving. While technically they can be stowed and
+> towed away, that is extremely rare in DCS missions. Units that themselves are a mobile SAM platform
+> that can just move to a different position without need to deploy separate radar dish and/or
+> launchers, can just up and go at momemts notice.*
+> *Q4 - yes*
+> *Q5 - yes. When to check kneeboard, i.e. read data: entering another sector. Flight stage change
+> like en route to ingress. Consider: Petrovich flips a page of local map and quickly checks what
+> remarks he has made on that page. There's no need to check theatre wide, just the "page of map we
+> are on, that we're flying into". Use this as the operating principle for the other questions above
+> as well."*
+
+Settled:
+- **Q1:** read the kneeboard (a) on pilot questions, (b) on a sighting near a noted unit, (c) when
+  closing on a noted SAM. (d) scan steering toward noted positions — later.
+- **Q2:** "observed not moving" needs a short watch (existing 5 s stop confirmation), never one glance.
+- **Q3:** the rule is structural. A SAM **site whose radar and launchers are separate units** is
+  fixed (SA-2, SA-3, SA-10 named in the question). A **self-contained mobile SAM platform** that can
+  drive off without deploying anything separate is mobile — **SA-6 named mobile by the user**, also
+  Osa/SA-8, Strela, Tor. Class-only "SAM" stays mobile until identified. *Note for the architect:*
+  in DCS an SA-6 battery has a separate 1S91 radar vehicle; the user's explicit naming (mobile) wins
+  over the structural rule for SA-6, and the plan should say so rather than derive SA-6 from the rule.
+- **Q4:** yes — warn from the kneeboard when closing on a fixed site's envelope.
+- **Q5:** two steps. BL-B112 = wording, fixed/stopped units, every lost contact noted on the
+  kneeboard. `[[BL-B115]]` = kneeboard read-back in flight.
+- **Operating principle for every read (Q5, applies to Q1 too): the local map page.** Petrovich reads
+  the kneeboard when **entering another sector** or on a **flight-phase change** (e.g. en route →
+  ingress), and only the page "we are on, that we're flying into" — never theatre-wide.
