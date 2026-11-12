@@ -149,7 +149,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B109]] — callout wording for a second group on the same bearing, e.g. "second group, beyond" (split from `[[BL-B108]]`)
 - [[BL-B110]] — expected-area check: per-sector scan and never-less-certain fold shipped; Stage 2 trigger not built (honest numbers), rest moved to `[[BL-B111]]` (done 2026-11-10)
 - [[BL-B111]] — expected-area look: point line-of-sight query through the LOS Hook, then look at a remembered group's area and say "now at …"/"gone" (done 2026-11-11, needs flight)
-- [[BL-B112]] — motion-aware contact certainty: a stationary unit stays tracked; lost by plausible movement, not fixed time (next)
+- [[BL-B112]] — motion-aware contact certainty: a stationary unit stays tracked; lost stays time-based, now written to mission memory (done 2026-11-12, needs flight)
 - [[BL-B113]] — same-optic re-sighting splits one group ~10% of the time; gate S shape off, cause open (deferred until seen in missions)
 - [[BL-B114]] — merge-echo callout rule silences real second groups the gate split (63–73% unannounced eye→eye); narrowed by `[[BL-B111]]` to the cannot-look remainder; deferred until seen in missions
 - [[BL-B115]] — kneeboard read-back: consult mission memory for the local map page (sector entry, phase change); split from `[[BL-B112]]`
