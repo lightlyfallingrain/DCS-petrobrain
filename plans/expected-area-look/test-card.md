@@ -12,8 +12,9 @@ always called out as a brand-new contact, even when it is really the same group 
 feature makes him hold that sighting, put the binoculars on the remembered group's expected place,
 and only then decide: is this a second group, or the one he already knows about?
 
-**Run with `--expected-area-log logs/expected-area.jsonl`** (or let it default-stamp — see
-`body-layer/CLAUDE.md`'s `--expected-area-log` paragraph) so the check-open/verdict log is
+**Run with `--expected-area-log logs/expected-area.jsonl`** — there is no default path; without
+the flag nothing is written. The name gets a per-mission stamp, so point triage at the stamped
+file afterwards. This is what makes the check-open/verdict log
 captured for `sortie-log-triage` afterward; also useful: `--eyesight-view` to watch the binoculars
 swing onto the remembered place rather than the new sighting.
 
