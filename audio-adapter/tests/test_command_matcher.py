@@ -196,6 +196,13 @@ def test_never_mind_anchors_despite_not_being_in_the_plans_prose_list() -> None:
 
 
 _NOT_A_COMMAND = MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
+#: `plans/brain-tool-calls/plan.md` D4's wire note -- the wake-word branch
+#: of `_NOT_A_COMMAND`'s own outcome (same token/match_ratio/verb_anchored
+#: shape), but `addressed=True`: this is what tells body-layer to route
+#: the utterance to the brain rather than treat it as unheard free speech.
+_ADDRESSED_NOT_A_COMMAND = MatchResult(
+    token=None, match_ratio=0.0, verb_anchored=False, addressed=True
+)
 
 
 @pytest.mark.parametrize(
@@ -225,7 +232,7 @@ def test_opening_wake_word_is_free_speech_for_the_brain(text: str) -> None:
     answering "say again". This replaces a test that pinned
     `"hey petrovich"` anchoring as the `wake_petrovich` command -- the
     defect itself."""
-    assert match_transcript(text) == _NOT_A_COMMAND
+    assert match_transcript(text) == _ADDRESSED_NOT_A_COMMAND
 
 
 @pytest.mark.parametrize(
