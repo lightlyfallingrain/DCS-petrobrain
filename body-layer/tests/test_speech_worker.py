@@ -376,3 +376,35 @@ def test_enqueue_never_blocks_caller_even_with_a_wedged_client() -> None:
             assert elapsed < 1.0
         finally:
             worker.close()
+
+
+def test_interrupt_wall_time_is_bounded_well_under_push_speechs_timeout_against_a_wedged_client() -> (
+    None
+):
+    """`[[BL-B106]]` performance-review NOW finding
+    (`plans/async-speech/performance-review.md`): `interrupt()` calls
+    `client.stop()` synchronously, on whichever thread calls it
+    (`SpeechWorker.interrupt`'s own docstring) -- reached from the poll
+    thread itself via `stop_talking`/mission-restart detection, not just
+    from a background worker. Before the fix, `stop()` shared `push_
+    speech`'s 5.0s `_DEFAULT_TIMEOUT_S`, so a wedged (not merely down)
+    audio-adapter stalled the poll thread for the full 5s on `interrupt()`.
+    `AudioAdapterClient.stop_timeout_s` now bounds `/stop` separately and
+    short -- this measures `interrupt()`'s real wall time against the
+    same genuinely-wedged-socket technique as the enqueue test above, and
+    asserts it stays well under `push_speech`'s own 5.0s default, not
+    merely under some arbitrary larger number."""
+    with _WedgedSpeechServer() as server:
+        client = AudioAdapterClient(base_url=server.base_url)
+        worker = SpeechWorker(client)
+        worker.open()
+        try:
+            start = time.monotonic()
+            worker.interrupt()
+            elapsed = time.monotonic() - start
+
+            # Well under push_speech's 5.0s default timeout -- the whole
+            # point of giving `/stop` its own short, dedicated bound.
+            assert elapsed < 2.0
+        finally:
+            worker.close()

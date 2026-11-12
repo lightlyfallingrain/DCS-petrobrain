@@ -87,7 +87,8 @@ name; summarized by what each category proves:
 - ruff format --check: pass (200 files already formatted)
 - ruff check: pass (all checks passed)
 - mypy --strict (`cd body-layer && .venv/bin/mypy src`): pass, no issues in 82 source files
-- pytest -q (full suite, `body-layer/tests`): 3192 passed, 4 xfailed (pre-existing, unrelated)
+- pytest -q (full suite, `body-layer/tests`): 3193 passed, 4 xfailed (pre-existing, unrelated) —
+  after the perf fix above (one test added vs. the pre-fix 3192)
 
 ### Notable Discoveries
 - **Step 1b's test-impact check caught a real gap the plan did not name.**
@@ -120,3 +121,28 @@ name; summarized by what each category proves:
   behaviour) rather than deferred to a drain that will never happen for that line. Implemented via
   a `deferred_to_worker` flag rather than three parallel `if` chains, to keep the single
   `speech_log_sink` call site at the bottom of the loop.
+
+### Perf fix (performance-review change request, `plans/async-speech/performance-review.md`)
+
+The performance review's NOW finding: `SpeechWorker.interrupt()` calls `client.stop()`
+synchronously on whichever thread calls it (Decision 3, by design — reached from the poll thread
+itself via `stop_talking` and mission-restart detection), but `AudioAdapterClient.stop()` shared
+`push_speech`'s 5.0s `_DEFAULT_TIMEOUT_S`. Measured against a genuinely wedged raw-socket server:
+5.012s poll-thread stall, not "at most one small round trip" as Decision 3 assumed.
+
+Fix: `AudioAdapterClient` gets a second field, `stop_timeout_s: float = _DEFAULT_STOP_TIMEOUT_S`
+(1.0, `audio_client.py`), used only by `stop()`; `push_speech`/`get_transcripts` are unaffected.
+Treated as an ordinary module literal, not a `tuning.py` entry — per the implementer role's
+inclusion test, this bounds a failed HTTP call (a protocol/network timeout), not a choice
+Petrovich makes about what he does, same reasoning already applied to `speech_worker.
+_MAX_QUEUE_LEN`. Decision 3's synchronous-interrupt design is otherwise untouched.
+
+Added `test_interrupt_wall_time_is_bounded_well_under_push_speechs_timeout_against_a_wedged_client`
+(`test_speech_worker.py`), same wedged-raw-socket technique as the existing non-blocking-enqueue
+test, measuring `interrupt()`'s real wall time and asserting it stays under 2.0s rather than
+`push_speech`'s 5.0s default. Confirmed as a genuine counterfactual, not just a passing assertion:
+reverting `stop()` to `self.timeout_s` reproduces the original 5.012s-class stall and this test
+fails at ~5.1s; restored the file to its prior checksum before re-confirming green.
+
+No other file needed a change — `AudioAdapterClient` is constructed exactly once
+(`body.py:5801`), so the new field's default applies everywhere without further wiring.
