@@ -12,9 +12,12 @@ table"; Stage 1's `SCOPE_UNCERTAINTY_M`/`GATE_GROWTH_RATE_MPS` in
 `association_over_time.py` are the precedent for this kind of documented,
 revisitable constant).
 
-Four of the five half-lives are now consumed. `POSITION_HALF_LIFE_S` (and
-`LOST_THRESHOLD_S` derived from it) drives `certainty_of` below.
-`IDENTITY_HALF_LIFE_S` drives `classification_confidence_at`
+Four of the five half-lives are now consumed. `POSITION_HALF_LIFE_S` drives
+`position_confidence`'s numeric decay below; `certainty_of`'s own
+tracked/estimated boundary no longer reads it (`[[BL-B112]]`) -- see that
+function's docstring. `LOST_THRESHOLD_S` still drives `certainty_of`'s
+lost boundary unaffected. `IDENTITY_HALF_LIFE_S` drives
+`classification_confidence_at`
 (`plans/classification-refinement/plan.md` Stage 10's follow-up fix, once
 `Contact.classification` existed for it to decay) -- the folded
 `belief.classification.ClassificationBelief.confidence` this module's own
@@ -61,7 +64,8 @@ import math
 from typing import TYPE_CHECKING, Final, Literal
 
 import tuning
-from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
+from belief.association_over_time import contact_growth_rate_mps
+from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S, WORST_REVISIT_S
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
@@ -98,8 +102,10 @@ IDENTITY_HALF_LIFE_S: Final[float] = tuning.real(
 #: what it is; recalibrating it against the new per-class rates is future
 #: work, not this commit's.
 #:
-#: This is the one half-life `certainty_of` below actually uses to
-#: separate "tracked" from "estimated".
+#: Consumed by `position_confidence`'s exponential decay curve below.
+#: **No longer read by `certainty_of`'s tracked/estimated split**
+#: (`[[BL-B112]]`) -- that boundary is now growth-distance-based, see
+#: `distance_since_last_seen_m` below.
 POSITION_HALF_LIFE_S: Final[float] = tuning.real(
     "belief.decay.POSITION_HALF_LIFE_S", 30.0, lo=20.0, hi=120.0, status="judgement"
 )
@@ -205,14 +211,15 @@ assert SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S, (
     "contact reads as unobserved for most of every scan cycle"
 )
 
-# Upper bound: at or above `POSITION_HALF_LIFE_S`, the "tracked" band
-# between "observed" and "estimated" (`certainty_of` below) vanishes
-# silently -- `elapsed_s <= OBSERVED_WINDOW_S` would already be false
-# exactly when `elapsed_s <= POSITION_HALF_LIFE_S` also turns false, so no
-# elapsed time could ever land in "tracked" at all. This assertion is what
-# stops a later widening of `OBSERVED_WINDOW_S` (e.g. hard part 8's plan-C
-# fallback, 16 -> 20) from silently collapsing that middle certainty band
-# instead of raising `POSITION_HALF_LIFE_S` alongside it.
+# Upper bound: `POSITION_HALF_LIFE_S` is `position_confidence`'s own decay
+# half-life, not (since `[[BL-B112]]`) anything `certainty_of`'s tracked/
+# estimated split reads -- that split is now growth-distance-based (see
+# `distance_since_last_seen_m`/`LAST_I_SAW_GROWTH_THRESHOLD_M` below) and
+# does not compare against `POSITION_HALF_LIFE_S` at all. This assertion
+# protects a narrower, still-real concern: at or above `POSITION_HALF_
+# LIFE_S`, `position_confidence` would already read a *currently observed*
+# contact (`elapsed_s <= OBSERVED_WINDOW_S`) as more than half-decayed
+# numerically -- Petrovich doubting a contact he currently sees.
 #
 # **A pilot override cannot trip this any more** (`plans/
 # configurable-constants/review.md`'s Required Fix 1): `tuning.
@@ -225,8 +232,9 @@ assert SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S, (
 # what this assert still exists to catch loudly. See `tuning.py`'s module
 # docstring for the full mechanism.
 assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S, (
-    "OBSERVED_WINDOW_S must stay below POSITION_HALF_LIFE_S or the "
-    "'tracked' certainty band collapses to nothing"
+    "OBSERVED_WINDOW_S must stay below POSITION_HALF_LIFE_S or "
+    "position_confidence already reads a currently-observed contact as "
+    "numerically doubted"
 )
 
 #: Past this much elapsed time since last observed, a contact is considered
@@ -281,14 +289,36 @@ OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S
 #: table, test 1).
 GROUP_REIDENTIFY_WINDOW_S: Final[float] = 2.0 * POSITION_HALF_LIFE_S
 
+# I2 (`plans/expected-area-check/plan.md` Stage 1, "Cross-key coupling") --
+# the real cliffs a *busy* revisit (not just a quiet sweep, which I1 above
+# already covers) can actually fall off: past `LOST_THRESHOLD_S` a flank
+# contact not glassed inside one busy window would go lost -> reacquired
+# every busy cycle (audible `CONTACT_REACQUIRED` churn), and past
+# `GROUP_REIDENTIFY_WINDOW_S` its group would expire and re-form. Both are
+# real failure modes a per-key `lo`/`hi` bound cannot see on its own --
+# `LOST_THRESHOLD_S`'s own `lo` of 30 makes it reachable by a single
+# in-bounds override today. `tuning._check_scan_decay_coupling` enforces
+# this across the five coupled keys before any of them is finally bound,
+# the same mechanism I1 above already relies on -- by the time this line
+# runs, only a change to the code defaults themselves could trip it.
+assert WORST_REVISIT_S < min(LOST_THRESHOLD_S, GROUP_REIDENTIFY_WINDOW_S), (
+    "WORST_REVISIT_S must stay below both LOST_THRESHOLD_S and "
+    "GROUP_REIDENTIFY_WINDOW_S or a busy scan cycle would lose/re-form a "
+    "flank contact or group every cycle"
+)
+
 #: The certainty lifecycle ladder. Four levels, evaluated top-down in
 #: `certainty_of` (first match wins) rather than as independent predicates:
 #:
 #:   observed  -- currently being perceived (within `OBSERVED_WINDOW_S`).
-#:   tracked   -- recently seen; position still trustworthy (within
-#:                `POSITION_HALF_LIFE_S`).
-#:   estimated -- position has decayed past its half-life but the contact is
-#:                not yet given up on (within `LOST_THRESHOLD_S`).
+#:   tracked   -- recently seen; plausible displacement since then is still
+#:                small (within `LAST_I_SAW_GROWTH_THRESHOLD_M`, see
+#:                `distance_since_last_seen_m` below -- `[[BL-B112]]`: no
+#:                longer a bare elapsed-time band against `POSITION_HALF_
+#:                LIFE_S`).
+#:   estimated -- plausible displacement has grown past that distance, but
+#:                the contact is not yet given up on (within
+#:                `LOST_THRESHOLD_S`).
 #:   lost      -- past `LOST_THRESHOLD_S` since last observed.
 #:
 #: `docs/concept/PETROBRAIN_RUNTIME.md`'s "Uncertainty and memory decay"
@@ -297,18 +327,49 @@ GROUP_REIDENTIFY_WINDOW_S: Final[float] = 2.0 * POSITION_HALF_LIFE_S
 #: the enum itself -- this is that enum, derived to match.
 Certainty = Literal["observed", "tracked", "estimated", "lost"]
 
+#: `[[BL-B112]]` (explore-notes.md, user, 2026-11-12): *"use 'last I saw'
+#: if it is a mobile unit. Use when location inaccuracy grows to >= 0.5
+#: km."* How far a contact could plausibly have moved since it was last
+#: seen (`distance_since_last_seen_m` below) before `certainty_of` hedges
+#: it as "estimated" rather than stating it as "tracked" fact -- the
+#: user gave this figure directly, 0.5 km, so it is not independently
+#: derived. An immobile contact (`distance_since_last_seen_m` always
+#: `0.0`, `association_over_time.contact_growth_rate_mps`'s `profile.
+#: immobile` branch) never crosses this threshold and so never reaches
+#: "estimated" by this route -- it stays "tracked" fact until elapsed time
+#: alone hands it to mission memory (the plan's own decision: "lost"
+#: stays purely elapsed-time, unaffected by this threshold).
+LAST_I_SAW_GROWTH_THRESHOLD_M: Final[float] = tuning.real(
+    "belief.decay.LAST_I_SAW_GROWTH_THRESHOLD_M",
+    500.0,
+    lo=100.0,
+    hi=2000.0,
+    status="agreed-guess",
+)
+
+
+def distance_since_last_seen_m(contact: Contact, now_sim: float) -> float:
+    """How far `contact` could plausibly have moved since it was last seen
+    -- `association_over_time.contact_growth_rate_mps(contact) * elapsed_s`.
+    The one quantity `certainty_of`'s tracked/estimated hedge keys on
+    (growth, not total position uncertainty, `[[BL-B112]]`)."""
+    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
+    return contact_growth_rate_mps(contact) * elapsed_s
+
 
 def certainty_of(contact: Contact, now_sim: float) -> Certainty:
     """The contact's current `Certainty`, evaluated top-down against elapsed
-    time since `contact.last_seen_sim`. Pure -- does not read or write
+    time since `contact.last_seen_sim`, with the tracked/estimated boundary
+    additionally keyed on plausible displacement (`[[BL-B112]]`, see the
+    ladder's own docstring above). Pure -- does not read or write
     `contact.last_emitted_certainty`; that comparison is `events.
     lifecycle_event_kind`'s job, not this function's."""
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
     if elapsed_s <= OBSERVED_WINDOW_S:
         return "observed"
-    if elapsed_s <= POSITION_HALF_LIFE_S:
-        return "tracked"
     if elapsed_s <= LOST_THRESHOLD_S:
+        if distance_since_last_seen_m(contact, now_sim) < LAST_I_SAW_GROWTH_THRESHOLD_M:
+            return "tracked"
         return "estimated"
     return "lost"
 

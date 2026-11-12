@@ -85,6 +85,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+# `perception.geometry` has no dependency on `tuning` or `perception.gaze`
+# (its own module docstring) -- the one place both this module and `gaze`
+# can reach for `n_sectors_for_legs`, I2's own sector count, without
+# `tuning` importing `gaze` (which imports `tuning`) to get it.
+from perception.geometry import n_sectors_for_legs
+
 #: The one environment variable this module reads. Not a CLI flag -- see
 #: the module docstring and plan Decision 2.
 _ENV_VAR = "PETROBRAIN_TUNING"
@@ -296,13 +302,25 @@ def _coerce_number(raw_value: Any) -> float | None:
 
 #: The one cross-key coupling this loader knows about -- see the module
 #: docstring and `_check_scan_decay_coupling` below. Not a general
-#: mechanism: these three dotted keys are named literally, nowhere else in
+#: mechanism: these five dotted keys are named literally, nowhere else in
 #: this module, and nothing generalises this to a second coupling without
-#: writing a second named check.
+#: writing a second named check. **Extended from three to five keys**
+#: (`plans/expected-area-check/plan.md` Stage 1, "Cross-key coupling"):
+#: `GLASS_BUDGET_PER_CYCLE_S`/`LOST_THRESHOLD_S` join the original three,
+#: for the second invariant (I2) `_check_scan_decay_coupling` now also
+#: enforces.
 _FOCUS_DWELL_S_KEY = "perception.gaze.FOCUS_DWELL_S"
 _SCAN_PLAN_KEY = "perception.gaze.SCAN_PLAN"
+_GLASS_BUDGET_PER_CYCLE_S_KEY = "perception.gaze.GLASS_BUDGET_PER_CYCLE_S"
 _POSITION_HALF_LIFE_S_KEY = "belief.decay.POSITION_HALF_LIFE_S"
-_COUPLED_KEYS = (_FOCUS_DWELL_S_KEY, _SCAN_PLAN_KEY, _POSITION_HALF_LIFE_S_KEY)
+_LOST_THRESHOLD_S_KEY = "belief.decay.LOST_THRESHOLD_S"
+_COUPLED_KEYS = (
+    _FOCUS_DWELL_S_KEY,
+    _SCAN_PLAN_KEY,
+    _GLASS_BUDGET_PER_CYCLE_S_KEY,
+    _POSITION_HALF_LIFE_S_KEY,
+    _LOST_THRESHOLD_S_KEY,
+)
 
 
 def _defaults_registry() -> dict[str, Any]:
@@ -336,26 +354,44 @@ def _coupling_effective_value(state: _State, key: str) -> Any:
 
 
 def _check_scan_decay_coupling(state: _State) -> None:
-    """The targeted fix for review's Required Fix 1: before either of
-    `perception.gaze.FOCUS_DWELL_S`'s or `perception.gaze.SCAN_PLAN`'s own
-    accessor call returns, check whether the combination they and
-    `belief.decay.POSITION_HALF_LIFE_S` would resolve to violates
-    `belief.decay`'s `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` invariant
-    -- `OBSERVED_WINDOW_S` being `len(SCAN_PLAN) * FOCUS_DWELL_S`. Runs at
-    most once per process (`state.cross_key_checked` guards it), triggered
-    by whichever of the three keys' accessor call happens to run first.
+    """The targeted fix for review's Required Fix 1, **extended to two
+    invariants over five keys** (`plans/expected-area-check/plan.md`
+    Stage 1, "Cross-key coupling"): before any of the five coupled keys'
+    own accessor call returns, check whether the combination they would
+    resolve to violates either of `belief.decay`'s two invariants --
 
-    If the invariant would be violated, every one of the three keys that
-    the override file actually sets is marked `cross_key_rejected` --
-    never a subset chosen to be "the cause," and never a clamped or
+    - **I1 (original; code unchanged, re-purposed by `[[BL-B112]]`)**:
+      `OBSERVED_WINDOW_S` (`len(SCAN_PLAN) * FOCUS_DWELL_S`) must stay
+      below `POSITION_HALF_LIFE_S`. No longer protects `certainty_of`'s
+      tracked/estimated split, which is now growth-distance-based and
+      does not read `POSITION_HALF_LIFE_S` at all (`belief.decay.
+      certainty_of`'s own docstring) -- it protects `position_confidence`'s
+      decay curve instead: at or above `POSITION_HALF_LIFE_S`, a contact
+      still being actively watched would already read numerically
+      doubted.
+    - **I2 (new)**: `WORST_REVISIT_S` (`OBSERVED_WINDOW_S +
+      GLASS_BUDGET_PER_CYCLE_S + n_sectors(SCAN_PLAN) * 1.0`, the real
+      cliff a *busy* revisit can fall off, not just a quiet sweep) must
+      stay below both `LOST_THRESHOLD_S` and `GROUP_REIDENTIFY_WINDOW_S`
+      (`2 * POSITION_HALF_LIFE_S`) -- past either, a flank contact or its
+      group would go lost/re-form every busy cycle. `LOST_THRESHOLD_S`'s
+      own `lo` of 30 makes this reachable by a single in-bounds override
+      without I2.
+
+    Runs at most once per process (`state.cross_key_checked` guards it),
+    triggered by whichever of the five keys' accessor call happens to
+    run first.
+
+    If either invariant would be violated, every one of the five keys
+    that the override file actually sets is marked `cross_key_rejected`
+    -- never a subset chosen to be "the cause," and never a clamped or
     invented middle value -- so that the keys actually at fault
-    (whichever they are) all fall back to their code defaults and the
-    invariant is restored, per the reasoning in the module docstring.
+    (whichever they are) all fall back to their code defaults and both
+    invariants are restored, per the reasoning in the module docstring.
     A key the file never mentions was already going to resolve to its own
     code default through the ordinary path, so marking only the
-    file-mentioned keys here still produces "every one of the three keys
-    is at its code default" as the end state -- exactly what the review's
-    reproduction requires."""
+    file-mentioned keys here still produces "every one of the five keys
+    is at its code default" as the end state."""
     if state.cross_key_checked:
         return
     state.cross_key_checked = True
@@ -364,18 +400,32 @@ def _check_scan_decay_coupling(state: _State) -> None:
 
     focus = _coupling_effective_value(state, _FOCUS_DWELL_S_KEY)
     scan_plan = _coupling_effective_value(state, _SCAN_PLAN_KEY)
+    glass_budget = _coupling_effective_value(state, _GLASS_BUDGET_PER_CYCLE_S_KEY)
     half_life = _coupling_effective_value(state, _POSITION_HALF_LIFE_S_KEY)
+    lost_threshold = _coupling_effective_value(state, _LOST_THRESHOLD_S_KEY)
     if isinstance(focus, bool) or not isinstance(focus, (int, float)):
         return
     if not isinstance(scan_plan, list) or not all(
         isinstance(v, int) and not isinstance(v, bool) for v in scan_plan
     ):
         return
+    if isinstance(glass_budget, bool) or not isinstance(glass_budget, (int, float)):
+        return
     if isinstance(half_life, bool) or not isinstance(half_life, (int, float)):
+        return
+    if isinstance(lost_threshold, bool) or not isinstance(lost_threshold, (int, float)):
         return
 
     observed_window_s = len(scan_plan) * float(focus)
-    if observed_window_s < float(half_life):
+    n_sectors = n_sectors_for_legs(tuple(scan_plan))
+    worst_revisit_s = observed_window_s + float(glass_budget) + n_sectors * 1.0
+    group_reidentify_window_s = 2.0 * float(half_life)
+
+    i1_violated = observed_window_s >= float(half_life)
+    i2_violated = worst_revisit_s >= min(
+        float(lost_threshold), group_reidentify_window_s
+    )
+    if not i1_violated and not i2_violated:
         return
 
     involved = sorted(
@@ -386,16 +436,25 @@ def _check_scan_decay_coupling(state: _State) -> None:
     if not involved:
         # The violation comes entirely from code defaults, not from any
         # override -- a genuine programming error, not a bad tuning file.
-        # Leave it alone; belief.decay's own hard assert (kept exactly for
-        # this case) will fail loudly once it resolves.
+        # Leave it alone; belief.decay's own hard asserts (kept exactly
+        # for this case) will fail loudly once they resolve.
         return
     state.cross_key_rejected.update(involved)
+    violated = (
+        ("I1",)
+        if i1_violated and not i2_violated
+        else ("I2",)
+        if i2_violated and not i1_violated
+        else ("I1", "I2")
+    )
     state.cross_key_detail = (
-        "belief.decay's OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S invariant "
-        f"would be violated (OBSERVED_WINDOW_S = len(SCAN_PLAN) * "
-        f"FOCUS_DWELL_S = {observed_window_s!r} >= POSITION_HALF_LIFE_S = "
-        f"{half_life!r}); rejected together with: {involved} -- code "
-        "defaults in force for all of them"
+        f"belief.decay's invariant(s) {violated} would be violated "
+        f"(OBSERVED_WINDOW_S={observed_window_s!r}, WORST_REVISIT_S="
+        f"{worst_revisit_s!r}, POSITION_HALF_LIFE_S={half_life!r}, "
+        f"LOST_THRESHOLD_S={lost_threshold!r}, "
+        f"GROUP_REIDENTIFY_WINDOW_S={group_reidentify_window_s!r}); "
+        f"rejected together with: {involved} -- code defaults in force "
+        "for all of them"
     )
 
 

@@ -21,14 +21,22 @@ from perception.gaze import (
     FOCUS_DWELL_S,
     FREE_SCAN_PLAN,
     FULL_GAZE,
+    GLASS_BUDGET_PER_CYCLE_S,
     SCAN_CYCLE_PERIOD_S,
     SCAN_PLAN,
+    WORST_REVISIT_S,
     Gaze,
     ScanPlan,
     gaze_at,
     gaze_for,
     legs_within_wedge,
+    sector_azimuth_span_deg,
+    sector_legs_for,
     within_gaze,
+)
+from perception.geometry import (
+    n_sectors_for_legs,
+    sector_runs_for_legs,
 )
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 
@@ -341,3 +349,136 @@ def test_legs_within_wedge_never_empty_for_a_real_compass_sector_half_width() ->
     # conversion into an invalid zero-leg `ScanPlan`.
     for degrees in range(0, 360, 5):
         assert len(legs_within_wedge(float(degrees), 45.0)) > 0, degrees
+
+
+# --- BL-B110 Stage 1: sector partition (`perception.geometry.sector_
+# runs_for_legs`/`n_sectors_for_legs`) ---------------------------------
+
+
+def test_sector_runs_for_legs_default_table_gives_four_sectors() -> None:
+    # `plans/expected-area-check/plan.md` Stage 1's own worked table:
+    # ahead-outbound-left / left / ahead-outbound-right / right.
+    assert sector_runs_for_legs(SCAN_PLAN) == (
+        (12, 11),
+        (10, 9),
+        (12, 1),
+        (2, 3),
+    )
+    assert n_sectors_for_legs(SCAN_PLAN) == 4
+
+
+def test_sector_runs_for_legs_pendulum_table_also_gives_four_sectors() -> None:
+    # "Alternative considered and not chosen" -- the partition rule
+    # handles it unchanged, per the plan's own claim.
+    pendulum = (1, 12, 11, 10, 9, 11, 12, 1, 2, 3)
+    assert sector_runs_for_legs(pendulum) == (
+        (1, 12, 11),
+        (10, 9),
+        (11, 12, 1),
+        (2, 3),
+    )
+    assert n_sectors_for_legs(pendulum) == 4
+
+
+def test_sector_runs_for_legs_three_leg_table_gives_three_sectors() -> None:
+    # A plain left/ahead/right table (the first pass's "third of full
+    # scan" reading, superseded but still a valid table to partition).
+    three_third = (9, 10, 11, 12, 1, 2, 3)
+    assert sector_runs_for_legs(three_third) == ((9, 10), (11, 12, 1), (2, 3))
+    assert n_sectors_for_legs(three_third) == 3
+
+
+def test_sector_runs_for_legs_boundary_legs_11_and_1_join_ahead() -> None:
+    # 11 and 1 are the ahead/left and ahead/right boundary legs -- both
+    # belong to "ahead", per `SECTOR_WEDGE_DEG`'s own convention.
+    assert sector_runs_for_legs((9, 11, 1, 3)) == ((9,), (11, 1), (3,))
+
+
+def test_sector_runs_for_legs_cyclic_first_last_merge() -> None:
+    # The table's own first and last runs, both "left", merge into one --
+    # the cyclic wrap this function's own docstring describes.
+    assert sector_runs_for_legs((10, 9, 11, 12, 1, 2, 3, 10)) == (
+        (10, 10, 9),
+        (11, 12, 1),
+        (2, 3),
+    )
+
+
+def test_sector_runs_for_legs_single_leg_is_one_sector() -> None:
+    assert sector_runs_for_legs((12,)) == ((12,),)
+    assert n_sectors_for_legs((12,)) == 1
+
+
+def test_sector_runs_for_legs_empty_is_empty() -> None:
+    assert sector_runs_for_legs(()) == ()
+    assert n_sectors_for_legs(()) == 0
+
+
+# --- BL-B110 Stage 1: `sector_azimuth_span_deg`/`sector_legs_for` -------
+
+
+def test_sector_azimuth_span_deg_matches_the_worked_table() -> None:
+    # `plan.md` Stage 1's own "eye covers" column, one sector per row.
+    assert sector_azimuth_span_deg((12, 11)) == (-45.0, 15.0)
+    assert sector_azimuth_span_deg((10, 9)) == (-105.0, -45.0)
+    assert sector_azimuth_span_deg((12, 1)) == (-15.0, 45.0)
+    assert sector_azimuth_span_deg((2, 3)) == (45.0, 105.0)
+
+
+def test_sector_legs_for_matches_the_commanded_sector_table() -> None:
+    assert sector_legs_for("ahead") == (11, 12, 1)
+    assert sector_legs_for("left") == (11, 10, 9)
+    assert sector_legs_for("right") == (1, 2, 3)
+    assert sector_legs_for("full") == SCAN_PLAN
+
+
+# --- BL-B110 Stage 1: `ScanPlan.sweep_legs`/`sweep_started_sim` --------
+
+
+def test_gaze_at_free_scan_without_sweep_anchor_keeps_absolute_indexing() -> None:
+    # `FREE_SCAN_PLAN` (no `sweep_legs`) must keep the pre-Stage-1
+    # behaviour exactly -- the module docstring's own stated reason
+    # `test_gaze.py`'s free-scan cycling tests keep their old premise.
+    assert gaze_at(0.0, FREE_SCAN_PLAN) == gaze_at(SCAN_CYCLE_PERIOD_S, FREE_SCAN_PLAN)
+
+
+def test_gaze_at_with_sweep_anchor_cycles_only_the_given_legs() -> None:
+    plan = ScanPlan(
+        commanded_sector=None,
+        command_t_sim=None,
+        sweep_legs=(10, 9),
+        sweep_started_sim=100.0,
+    )
+    assert gaze_at(100.0, plan).label == "10_oclock"
+    assert gaze_at(102.0, plan).label == "9_oclock"
+
+
+def test_gaze_at_with_sweep_anchor_holds_at_the_last_leg_once_reached() -> None:
+    # No modulo -- a sector's own sweep never repeats within one pass,
+    # and holds at its last leg once reached (the step waiting for the
+    # glass decision).
+    plan = ScanPlan(
+        commanded_sector=None,
+        command_t_sim=None,
+        sweep_legs=(10, 9),
+        sweep_started_sim=100.0,
+    )
+    assert gaze_at(200.0, plan).label == "9_oclock"
+
+
+def test_gaze_at_with_sweep_anchor_before_the_anchor_clamps_to_the_first_leg() -> None:
+    plan = ScanPlan(
+        commanded_sector=None,
+        command_t_sim=None,
+        sweep_legs=(10, 9),
+        sweep_started_sim=100.0,
+    )
+    assert gaze_at(50.0, plan).label == "10_oclock"
+
+
+# --- BL-B110 Stage 1: `WORST_REVISIT_S`/`GLASS_BUDGET_PER_CYCLE_S` -----
+
+
+def test_worst_revisit_s_matches_its_own_formula_at_defaults() -> None:
+    assert WORST_REVISIT_S == SCAN_CYCLE_PERIOD_S + GLASS_BUDGET_PER_CYCLE_S + 4.0 * 1.0
+    assert WORST_REVISIT_S == 32.0

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, cast
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 EntryKind = Literal["group", "air_defence", "attack_run", "mark", "fired_on"]
 Provenance = Literal["observed", "commanded", "briefed"]
@@ -97,13 +97,23 @@ class CompositionItem:
     (Decision 2, point 4). `count_word` is `belief.speech.
     cardinality_phrase`'s output, frozen at write time -- `None` precisely
     when that function returns `None` (an exactly-one interval has nothing
-    to hedge)."""
+    to hedge).
+
+    `immobile` (schema 2, `[[BL-B112]]`): `perception.object_model.
+    ObjectTypeProfile.immobile`'s value for this bucket's type, frozen at
+    write time -- what `[[BL-B115]]` will need to recompute the right
+    growth rate from a kneeboard note alone, since `op_class`/classification
+    here can be a coarse class bucket shared by both a fixed and a mobile
+    system (e.g. `OP_SRSAM`) and does not by itself say which. Defaults
+    `False` on decode for every entry written before this field existed
+    (`_decode_composition`'s own comment)."""
 
     op_class: str
     lo: int
     hi: float
     confidence: float
     count_word: str | None
+    immobile: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +243,7 @@ def _encode_composition(
             "hi": item.hi,
             "confidence": item.confidence,
             "count_word": item.count_word,
+            "immobile": item.immobile,
         }
         for item in composition
     ]
@@ -347,6 +358,13 @@ def _decode_composition(data: list[dict[str, object]]) -> tuple[CompositionItem,
             hi=cast(float, item["hi"]),
             confidence=cast(float, item["confidence"]),
             count_word=cast("str | None", item["count_word"]),
+            # Schema 1 entries predate this field (`[[BL-B112]]`) --
+            # `.get(..., False)` rather than `item["immobile"]`, the one
+            # deliberate exception to this module's own "a missing key is
+            # corrupt, not a case to degrade silently" rule
+            # (`decode_entry`'s docstring): every real schema-1 file on
+            # disk is missing this key by construction, not by corruption.
+            immobile=cast(bool, item.get("immobile", False)),
         )
         for item in data
     )

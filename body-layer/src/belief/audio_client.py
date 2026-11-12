@@ -22,7 +22,19 @@ seam's first *inbound* read -- `GET /transcripts/poll` drains
 raises `AudioAdapterError` on transport/parse failure, the same posture
 as `push_speech` -- **not** a swallow-and-return-`[]` posture, since
 `body.py`'s poll loop is the place that decides to log-and-continue, not
-this client."""
+this client.
+
+`stop()` has its own, separately bounded `stop_timeout_s` rather than
+sharing `timeout_s` with `push_speech`/`get_transcripts`
+(`plans/async-speech/performance-review.md`'s NOW finding): `/stop` is
+reached synchronously from `SpeechWorker.interrupt()`
+(`plans/async-speech/plan.md` Decision 3), on the poll thread itself via
+`stop_talking` and mission-restart detection, so its timeout bounds a
+poll-thread stall directly. `push_speech`'s own `timeout_s` has to cover
+Piper synthesis (seconds, by design); `/stop`'s round trip has no
+synthesis to wait out, so bounding it separately, and short, keeps a
+wedged (not merely down) audio-adapter from stalling the interrupt path
+for the full synthesis-sized budget."""
 
 from __future__ import annotations
 
@@ -34,6 +46,15 @@ from dataclasses import dataclass
 from typing import Any
 
 _DEFAULT_TIMEOUT_S = 5.0
+
+#: `/stop` is payload-less and does no synthesis, so it never needs
+#: anywhere near `push_speech`'s synthesis-sized budget; this bounds a
+#: wedged audio-adapter's worst-case stall on `SpeechWorker.interrupt()`'s
+#: synchronous call, reached from the poll thread via `stop_talking` and
+#: mission-restart detection. A protocol/network timeout, not a choice
+#: Petrovich makes, so an ordinary literal rather than a `tuning.py` entry
+#: (same reasoning as `speech_worker._MAX_QUEUE_LEN`).
+_DEFAULT_STOP_TIMEOUT_S = 1.0
 
 #: A tilde before a figure is spoken as "about" -- Piper reads "~800" as
 #: "tilde 800" (2026-10-20 sortie, user: *"replace "~" with "about" in all
@@ -57,6 +78,7 @@ class AudioAdapterClient:
 
     base_url: str
     timeout_s: float = _DEFAULT_TIMEOUT_S
+    stop_timeout_s: float = _DEFAULT_STOP_TIMEOUT_S
 
     def push_speech(
         self, text: str, urgent: bool, correlation_id: str | None = None
@@ -95,7 +117,9 @@ class AudioAdapterClient:
         readback/confirm rule (`crew_console.CrewConsole.
         _handle_stop_talking`'s own docstring), which must interrupt
         playback and say nothing. Raises `AudioAdapterError` on any
-        failure, same posture as `push_speech`."""
+        failure, same posture as `push_speech`. Uses `stop_timeout_s`,
+        not `timeout_s` -- see the module docstring for why `/stop`'s
+        timeout is bounded separately from `push_speech`'s."""
         url = f"{self.base_url}/stop"
         request = urllib.request.Request(
             url,
@@ -104,7 +128,9 @@ class AudioAdapterClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.stop_timeout_s
+            ) as response:
                 response.read()
         except (urllib.error.URLError, OSError) as exc:
             raise AudioAdapterError(f"request to {url} failed: {exc}") from exc

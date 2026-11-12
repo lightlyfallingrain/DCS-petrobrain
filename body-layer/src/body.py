@@ -129,7 +129,7 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Final, Literal, TextIO
+from typing import Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
@@ -158,8 +158,17 @@ from belief.effector_registry import (
     load_registries_by_aircraft,
 )
 from belief.effector_sequences import SequenceFile, load_sequences
-from belief.enrichment import EnrichmentContext
+from belief.enrichment import EnrichmentContext, relative_geometry
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
+from belief.events import CONTACT_DETECTED, CONTACT_REACQUIRED
+from belief.expected_area import (
+    PROBE_POINTS_PER_CHECK,
+    LookEvidence,
+    area_fits_one_look,
+    probe_points_for,
+    relocation_warranted,
+    resolve_checks,
+)
 from belief.mission_phase import (
     MissionPhaseInfo,
     MissionPhaseTracker,
@@ -179,6 +188,7 @@ from belief.optic_policy import (
     OpticPhase,
     OpticState,
     advance_sight_aim,
+    area_look_covers,
     is_steady,
     look_target_for,
     lower_binoculars,
@@ -193,11 +203,13 @@ from belief.sight_effector import (
 from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
 from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
+from belief.speech_worker import SpeechWorker
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
 from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
+from expected_area_log import ExpectedAreaLogWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
 from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
 from eyesight_view import (
@@ -208,17 +220,20 @@ from eyesight_view import (
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
 from mission_memory import admission, marks
-from mission_memory.admission import FiredOnTracker
+from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.entries import MarkPayload
 from mission_memory.log import MissionMemoryLogWriter
 from mission_memory.store import MissionMemory
 from perception.association import PLAYER_BUBBLE_RADIUS_M, SightCone
-from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.forest import ForestOcclusion
 from perception.gaze import (
+    FOCUS_DWELL_S,
     FREE_SCAN_PLAN,
+    GLASS_BUDGET_PER_CYCLE_S,
     SCAN_CYCLE_PERIOD_S,
+    SCAN_PLAN,
     SECTOR_WEDGE_DEG,
     SIGHT_AHEAD_LEGS,
     SIGHT_AHEAD_WINDOW_DWELL_S,
@@ -228,15 +243,19 @@ from perception.gaze import (
     _gaze_for_clock_hour,
     gaze_at,
     legs_within_wedge,
+    sector_azimuth_span_deg,
+    sector_legs_for,
 )
 from perception.geometry import (
     GeoPosition,
     alignment_direction,
     heading_relative_to_body_relative,
     open_world_model,
+    sector_runs_for_legs,
 )
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
+from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import (
     BINOCULAR_OPTIC,
     SIGHT_NARROW_OPTIC,
@@ -246,6 +265,7 @@ from perception.optics import (
     within_field_of_regard,
 )
 from perception.source import Observation, OwnshipState, PerceptionSource
+from perception.visibility import tier_ranges
 from pov_view import DEFAULT_MAX_LINES as POV_DEFAULT_MAX_LINES
 from pov_view import (
     pov_believed_markers_from_contacts,
@@ -299,6 +319,26 @@ MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: `plans/expected-area-look/plan.md` Stage 3a's own "Hold bound" --
+#: "the end of the glass step of B's sector plus one poll: <= 4 + 12 + 1
+#: ~ 17 s worst, ~ 5-8 s typical" -- `resolve_checks`'s own `deadline_s`:
+#: once this many real seconds have passed with the look never completing
+#: *naturally*, the hold gives up (`cannot_look`) rather than waiting
+#: forever. **A derived expression over already-tunable constants, not a
+#: second tunable** (`SCAN_CYCLE_PERIOD_S`/`GLASS_BUDGET_PER_CYCLE_S` are
+#: each already `tuning.real` in `perception.gaze`, the same posture
+#: `perception.gaze.WORST_REVISIT_S`/`body-layer/CLAUDE.md`'s own "I2"
+#: coupling already take for a bound built from several tunables rather
+#: than inventing a new one). The plan's own "4" is one sector's worth of
+#: the free-scan cycle under the *default* scan table; a commanded narrow
+#: sector's own period can differ, so this is a stated approximation, not
+#: an exact bound -- `resolve_checks`'s own fail-closed posture (a missed
+#: deadline only ever makes a hold give up sooner/later, never wrong)
+#: is what makes that an acceptable one.
+_EXPECTED_AREA_HOLD_DEADLINE_S: Final[float] = (
+    GLASS_BUDGET_PER_CYCLE_S + SCAN_CYCLE_PERIOD_S + 1.0
+)
+
 
 @dataclass
 class ConsolePerceptionRunner:
@@ -334,6 +374,13 @@ class ConsolePerceptionRunner:
     #: already defaults to `None`, so nothing changes for a run that never
     #: sets this field.
     group_trace_sink: Callable[[Mapping[str, object]], None] | None = None
+    #: `--expected-area-log` (`plans/expected-area-look/plan.md` Pass 3).
+    #: `None` (the default) is a true no-op -- `_resolve_expected_area_
+    #: checks` reads this field fresh each call, the same "plain field,
+    #: no closure capturing it by value" shape `group_trace_sink` above
+    #: already has, so a mission-restart reroll (`_reroll_run_logs`) is
+    #: simply reassigning it.
+    expected_area_log_sink: Callable[[Mapping[str, object]], None] | None = None
     #: BL-3's world-model connection/theatre (`plans/bl3-world-enrichment/
     #: plan.md` step 6), set once by `_run_crew_text_poll_loop` at the same
     #: point it already builds `sources` -- both need the same thread-local
@@ -363,6 +410,17 @@ class ConsolePerceptionRunner:
     #: reads this field (BL-B96 fix: it builds its own REPL-thread-local
     #: connection/cache instead, see that function's own docstring for why).
     enrichment: EnrichmentContext | None = None
+    #: `plans/expected-area-look/plan.md` Pass 2 -- `belief.expected_area.
+    #: area_visibility`'s `occluded` clause (forest *or* settlement at A's
+    #: believed point), built lazily alongside `enrichment` above from the
+    #: same `world_model_conn`/`theatre` (same lazy-build/invalidate-on-
+    #: theatre-switch lifecycle; see `run_once`'s own build site and
+    #: `_enter_refusal_mode`). Two instances of the one parameterised
+    #: `ForestOcclusion` class (`perception.forest`'s own docstring: "one
+    #: class, two instances") -- `layers=("landcover",)` default for
+    #: forest, `layers=("settlement",)`/`class_tag=None` for settlement.
+    area_forest_occlusion: ForestOcclusion | None = None
+    area_settlement_occlusion: ForestOcclusion | None = None
     #: BL-7's mission-phase tracker (`plans/bl7-mission-phase-relevance/
     #: plan.md`), built once by `main()` (a plain JSON file load, not a
     #: sqlite connection -- no thread-affinity concern, unlike `sources`/
@@ -508,6 +566,28 @@ class ConsolePerceptionRunner:
         default=None, init=False, repr=False
     )
 
+    #: `plans/expected-area-look/plan.md` Pass 2 -- the probe-points list
+    #: last actually pushed via `POST /command/probe_points` ("on change",
+    #: same posture as `_last_look_direction` above), and the `seq` it was
+    #: pushed under (`ProbeAnswers.seq`-matched back against it). Empty
+    #: list / `0` before the first push.
+    _last_probe_points: tuple[tuple[int, int], ...] = field(
+        default=(), init=False, repr=False
+    )
+    _last_probe_seq: int = field(default=0, init=False, repr=False)
+
+    #: `plans/expected-area-check/plan.md` Stage 1 (Co-moving Fields,
+    #: "external: scan command issued or cancelled") -- the previous
+    #: poll's `ScanPlan.command_t_sim`, compared by identity change
+    #: (`!=`) against this poll's own, never by heading-driven leg
+    #: recomputation (which can change `commanded_legs`' own tuple value
+    #: poll to poll for the *same* standing compass command without this
+    #: changing). A genuinely new or cancelled scan command resets
+    #: `optic_state.scan_sector_index`/`glass_recent_steps_s` -- a stale
+    #: sector index from a different scan mode's own partition is
+    #: meaningless under the new one. `None` before the first poll.
+    _last_scan_command_t_sim: float | None = field(default=None, init=False, repr=False)
+
     #: `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the last
     #: `MissionStartEvent.sequence` this runner has seen, or `None` before
     #: the first poll of this process. `_check_for_new_mission` compares
@@ -649,6 +729,11 @@ class ConsolePerceptionRunner:
             world_model_store=self.world_model_store,
         )
         self._last_look_direction = None
+        self._last_scan_command_t_sim = None
+        # `plans/expected-area-look/plan.md` Pass 2 -- same `init=False`
+        # trap `_last_look_direction` above already documents.
+        self._last_probe_points = ()
+        self._last_probe_seq = 0
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -690,6 +775,19 @@ class ConsolePerceptionRunner:
                 self.enrichment = EnrichmentContext(
                     conn=self.world_model_conn, theatre=self.theatre, ownship=ownship
                 )
+                # `plans/expected-area-look/plan.md` Pass 2 -- built
+                # alongside `enrichment` above, same lazy-build/
+                # invalidate-on-theatre-switch lifecycle (both hold a
+                # `conn` to this same connection).
+                self.area_forest_occlusion = ForestOcclusion(
+                    conn=self.world_model_conn, theatre=self.theatre
+                )
+                self.area_settlement_occlusion = ForestOcclusion(
+                    conn=self.world_model_conn,
+                    theatre=self.theatre,
+                    layers=("settlement",),
+                    class_tag=None,
+                )
             else:
                 self.enrichment.ownship = ownship
         # 2B: resolve whatever scan sector is currently commanded and hand
@@ -704,12 +802,34 @@ class ConsolePerceptionRunner:
                 ownship.heading_true_deg,
             )
         )
-        self.scan_plan = _active_gaze(
+        commanded_scan_plan = _active_gaze(
             self.tasks,
             ownship.heading_true_deg,
             store=self.store,
             ownship=ownship,
             attack_run_engaged=self.attack_run_state is not None,
+        )
+        # `plans/expected-area-check/plan.md` Stage 1, Co-moving Fields,
+        # "external: scan command issued or cancelled" -- a genuinely new
+        # or cancelled scan command (identified by `command_t_sim`
+        # changing, never by heading-driven leg recomputation) resets the
+        # sector bookkeeping: a stale index from a different scan mode's
+        # own partition means nothing under the new one.
+        if commanded_scan_plan.command_t_sim != self._last_scan_command_t_sim:
+            self._last_scan_command_t_sim = commanded_scan_plan.command_t_sim
+            self.optic_state = replace(
+                self.optic_state,
+                scan_sector_index=0,
+                glass_recent_steps_s=(),
+                glass_step_started_sim=None,
+            )
+        # `plans/expected-area-check/plan.md` Stage 1: one resolved plan,
+        # built once per poll from the *previous* poll's `optic_state`,
+        # and handed to every `gaze_at` consumer below *and* to `decide_
+        # optic` -- see `_resolve_sector_scan`'s own docstring (E4: where
+        # he actually looks).
+        self.scan_plan, sector_period_s, sector_wedge_deg, n_sectors = (
+            _resolve_sector_scan(commanded_scan_plan, self.optic_state, ownship.t_sim)
         )
         # `plans/dcs-driven-los/plan.md` (X-B29): push the look-direction
         # command only on change (SS9b), from the same `scan_plan` that is
@@ -766,19 +886,37 @@ class ConsolePerceptionRunner:
             # revisits a `SCANNING` phase that is already `SCANNING` here
             # to null it -- and a later OBSERV-on would resume there
             # instead of boresight.
+            #
+            # `plans/expected-area-check/plan.md` Stage 1, Co-moving
+            # Fields, "external: OBSERV off": the free-scan sector
+            # resets to 0 with a cleared budget window, the same reset a
+            # genuinely new scan command gets above -- OBSERV was off
+            # (or this is the first time it ever was), so whatever
+            # sector index/window had accumulated belongs to a different
+            # home phase's own bookkeeping.
             self.optic_state = replace(
                 self.optic_state,
                 home_phase=OpticPhase.SCANNING,
                 look_azimuth_deg=None,
                 look_elevation_deg=None,
+                scan_sector_index=0,
+                glass_recent_steps_s=(),
+                glass_step_started_sim=None,
             )
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
-            scan_cycle_period_s=SCAN_CYCLE_PERIOD_S,
+            scan_cycle_period_s=sector_period_s,
             targets=_look_targets(self.store, ownship),
             steady=is_steady(list(self.attitude_history)),
             search=_search_sweep(self.scan_plan, ownship),
+            # `plans/expected-area-check/plan.md` Stage 1: this poll's
+            # swept sector (`_resolve_sector_scan`, above) -- the glass
+            # step's own target filter, sector count (the rolling
+            # budget's own window length) and binocular-time budget.
+            sector_wedge_deg=sector_wedge_deg,
+            n_sectors=n_sectors,
+            glass_budget_per_cycle_s=GLASS_BUDGET_PER_CYCLE_S,
             # `BL-B64` Stage 2, direction §8 -- the sight's own, higher
             # manoeuvre-tolerance threshold, read from the same attitude
             # history the binocular gate above already samples. A second
@@ -997,6 +1135,12 @@ class ConsolePerceptionRunner:
             ownship.t_sim, ownship=ownship, group_trace_sink=self.group_trace_sink
         )
         self.tasks.tick(self.store, ownship.t_sim)
+        # `plans/expected-area-look/plan.md` Pass 2 -- once per poll,
+        # after this poll's own `ingest`/`tick` (so a just-opened check
+        # and this poll's own area-check `LookTarget`/`decide_optic` pass
+        # are both reflected) and before `last_t_sim` below, matching
+        # every other end-of-poll hook point in this method.
+        _resolve_expected_area_checks(self, ownship)
         self.last_t_sim = ownship.t_sim
         if self.output is not None:
             print(
@@ -1158,6 +1302,102 @@ def _active_gaze(
     return FREE_SCAN_PLAN
 
 
+#: Half the binocular field of view -- the margin the swept sector's own
+#: wedge is widened by before `optic_policy`'s glass step tests a
+#: candidate's believed azimuth against it (`plans/expected-area-check/
+#: plan.md` Stage 1, "Glass step": "widened by half a binocular field...
+#: The margin is there for body rotation"). No new constant: `Optic.
+#: fov_half_angle_deg` already exists for this exact optic.
+_SECTOR_MARGIN_DEG: Final[float] = BINOCULAR_OPTIC.fov_half_angle_deg or 0.0
+
+
+def _resolve_sector_scan(
+    scan_plan: ScanPlan, optic_state: OpticState, now_sim: float
+) -> tuple[ScanPlan, float, tuple[float, float] | None, int]:
+    """This poll's `(resolved_scan_plan, sector_period_s, sector_wedge_
+    deg, n_sectors)` -- `plans/expected-area-check/plan.md` Stage 1's
+    one resolved plan, built once per poll and handed to every `gaze_at`
+    consumer (the naked-eye source, the LOS look-direction push, the
+    eyesight/POV debug views) *and* to `decide_optic`, so none of them
+    can disagree about which sector is swept this poll (E4).
+
+    - **Free scan** (`scan_plan` is `FREE_SCAN_PLAN`): partitioned into
+      the active table's own sectors (`perception.geometry.sector_runs_
+      for_legs`), indexed by `optic_state.scan_sector_index` (the
+      *previous* poll's own index -- `decide_optic` only advances it at
+      a glass step's own end, so every poll within one step reads the
+      same sector). `resolved_scan_plan` carries `sweep_legs`/`sweep_
+      started_sim` -- the sweep anchor is `optic_state.phase_started_sim`
+      while `SCANNING` (the sector's own real sweep-start clock), or,
+      while `GLASSING`/`SEARCHING`/`SIGHTING`, an anchor far enough in
+      the past that the sweep has already reached and holds at its last
+      leg: physically, the eye is not free-sweeping while binoculars (or
+      the sight) are up, so this freezes it at wherever it left off
+      rather than letting it silently keep advancing by absolute time
+      the way the pre-Stage-1 stateless `FREE_SCAN_PLAN` did.
+    - **Commanded** (a sector, a single o'clock hour, or compass-derived
+      legs): treated as *one* sector spanning the whole commanded leg
+      set -- `n_sectors=1`, `sector_period_s` is that set's own length
+      (fixing the pre-Stage-1 wiring defect: a faster commanded scan now
+      genuinely brings binoculars round sooner, `plan.md` Stage 1's own
+      "what the code does today"). `resolved_scan_plan` is `scan_plan`
+      unchanged -- `gaze_at` already cycles `commanded_legs`/
+      `commanded_sector` continuously from `command_t_sim`, which needs
+      no sector anchor of its own.
+    - **Fixed look** (an attack run's own `fixed_look_at`): passed
+      through unchanged, with no sector mechanism at all -- unaffected
+      by this stage, same as every pre-Stage-1 caller."""
+    if scan_plan.fixed_look is not None:
+        return scan_plan, SCAN_CYCLE_PERIOD_S, None, 1
+
+    if scan_plan.commanded_sector is not None:
+        legs = sector_legs_for(scan_plan.commanded_sector)
+    elif scan_plan.commanded_legs is not None:
+        legs = scan_plan.commanded_legs
+    else:
+        legs = None  # free scan, resolved below
+
+    if legs is not None:
+        sector_period_s = len(legs) * FOCUS_DWELL_S
+        lo, hi = sector_azimuth_span_deg(legs)
+        sector_wedge_deg = (lo - _SECTOR_MARGIN_DEG, hi + _SECTOR_MARGIN_DEG)
+        return scan_plan, sector_period_s, sector_wedge_deg, 1
+
+    sectors = sector_runs_for_legs(SCAN_PLAN)
+    n_sectors = len(sectors)
+    sector_index = optic_state.scan_sector_index % n_sectors
+    current_legs = sectors[sector_index]
+    sector_period_s = len(current_legs) * FOCUS_DWELL_S
+    lo, hi = sector_azimuth_span_deg(current_legs)
+    sector_wedge_deg = (lo - _SECTOR_MARGIN_DEG, hi + _SECTOR_MARGIN_DEG)
+
+    if optic_state.phase is OpticPhase.SCANNING:
+        # Anchor at the sector's own real sweep-start clock -- or, on the
+        # very first poll (`phase_started_sim is None`), at `now_sim`
+        # itself, the identical convention `decide_optic`'s own first-
+        # poll branch uses (`replace(state, phase_started_sim=now_sim)`).
+        # Using the real anchor, never `now_sim` unconditionally, is what
+        # keeps a second poll at the *same* `t_sim` (nothing elapsed)
+        # resolve to the identical gaze as the first -- a bare `now_sim`
+        # fallback here would otherwise disagree with the anchor `decide_
+        # optic` commits a moment later this same poll.
+        sweep_started_sim = (
+            optic_state.phase_started_sim
+            if optic_state.phase_started_sim is not None
+            else now_sim
+        )
+    else:
+        # GLASSING/SEARCHING/SIGHTING: freeze the sweep at its last leg
+        # rather than let it advance by absolute time while the eye is
+        # not actually free-sweeping.
+        sweep_started_sim = now_sim - sector_period_s
+
+    resolved_scan_plan = replace(
+        scan_plan, sweep_legs=current_legs, sweep_started_sim=sweep_started_sim
+    )
+    return resolved_scan_plan, sector_period_s, sector_wedge_deg, n_sectors
+
+
 def _look_target_position(contact: Contact) -> GeoPosition:
     """`contact.last_position`, with its altitude corrected when a better
     one is known -- `plans/atgm-run-sight-tracking/debug.md`, narrowed by
@@ -1202,8 +1442,16 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
     last_position` directly** (`plans/atgm-run-sight-tracking/debug.md`) --
     see that function's own docstring for why the altitude needs
     correcting before it reaches `body_relative_direction`'s elevation.
+
+    **`area_check` is set for A's own target** (`plans/expected-area-look/
+    plan.md` Stage 3a) whenever this contact's own id is the `a_id` of a
+    currently-open `ExpectedAreaCheck` -- A stays an ordinary live contact
+    in `store.contacts` throughout the hold (only B is held/founded
+    separately), so this is the one place A's target needs a different
+    flag from every other contact's, not a different contact set.
     """
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    open_check_a_ids = {check.a_id for check in store.checks}
     return [
         look_target_for(
             contact.id,
@@ -1219,9 +1467,312 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
                 contact.attention, contact.last_position, store.areas
             )[0]
             in ("watch", "priority"),
+            area_check=contact.id in open_check_a_ids,
         )
         for contact in store.contacts
     ]
+
+
+def _cannot_look_cause(evidence: LookEvidence | None) -> str:
+    """`plans/expected-area-look/plan.md` Pass 3 -- a human/log-readable
+    name for *which* of `belief.expected_area.area_visibility`'s clauses
+    is why a check resolved `"cannot_look"`, for `--expected-area-log`/
+    `logger.info` only -- it never feeds back into the verdict itself,
+    which `area_visibility` already decided. Checked in the same order
+    that function checks them; the first failing clause is reported,
+    since `area_visibility` itself treats them as one conjunction and
+    does not rank which one "mattered most" when several fail at once.
+    `"none"` (every clause passed) only occurs for a `probe_clear` entry
+    of exactly `False` -- `area_visibility`'s own second `if`, checked
+    last here too."""
+    if evidence is None:
+        return "no_evidence"
+    if not evidence.area_fits_one_look_now:
+        return "area_too_wide"
+    if not evidence.look_completed_naturally:
+        return "look_not_completed"
+    if not evidence.inside_cockpit_mask:
+        return "outside_cockpit_mask"
+    if not evidence.within_binocular_presence_range:
+        return "out_of_presence_range"
+    if evidence.occluded:
+        return "occluded"
+    if not evidence.probe_seq_matches:
+        return "probe_seq_mismatch"
+    if not evidence.probe_time_in_window:
+        return "probe_stale"
+    if any(answer is None for answer in evidence.probe_clear):
+        return "probe_no_answer"
+    return "probe_blocked"
+
+
+def _resolve_expected_area_checks(
+    runner: ConsolePerceptionRunner, ownship: OwnshipState
+) -> None:
+    """`plans/expected-area-look/plan.md` Pass 2 -- `belief.expected_area.
+    resolve_checks`'s one production caller, run once per poll from
+    `run_once` immediately after `self.store.tick()`: pushes/clears this
+    poll's probe points, reads back whatever `LineOfSightSnapshot.probes`
+    answer the aircraft layer last received, assembles every state param
+    `resolve_checks` needs from real optic/world-model state, and calls
+    it. A true no-op whenever no check is open (the trigger is off by
+    default and `MAX_OPEN_CHECKS` caps it at 2 even when it is on).
+
+    **Probe push/clear runs even with no checks open**, so a check that
+    closed *this* poll has its own points cleared (`N = 0`) the very next
+    poll rather than leaving a stale request standing -- `aircraft_
+    client.post_probe_points` is only actually called "on change"
+    (mirroring `post_look_direction`), so an all-checks-closed poll sends
+    the empty list exactly once.
+
+    **`a_was_announced`** (Stage 3b) is approximated as "A has ever had a
+    `CONTACT_DETECTED`/`CONTACT_REACQUIRED` event appended to its own
+    log" (`Contact.last_event_emitted_sim`) -- the belief layer has no
+    narrower "was this ever actually *spoken*" bookkeeping; that is
+    `CalloutScheduler`'s own gated/cooldown/mask decision, made per-event
+    rather than per-contact. `record_relocation`/`record_absence` are
+    both additive, speech-adjacent lines, so an occasional over- or
+    under-fire here costs one extra or missing line, never a wrong fact
+    -- this is why the approximation is taken rather than threading a new
+    per-contact field through for this alone. Revisit if a flown sortie's
+    `--speech-log` shows it misfiring often enough to matter.
+
+    **`relocation_warranted_by_b`'s "after" state is B's own *current*
+    believed position**, not the post-merge fused estimate `merge_
+    contact` would produce -- computing that ahead of the very merge it
+    is the precondition for would be circular. B's own percepts are what
+    a relocation line is reporting, so this is the natural question to
+    ask, not an approximation of a different one."""
+    checks = runner.store.checks
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+
+    points: list[tuple[int, int]] = []
+    for check in checks:
+        a_for_probe = runner.store.contact(check.a_id)
+        if a_for_probe is not None:
+            points.extend(probe_points_for(a_for_probe, ownship.t_sim, observer))
+    points_t = tuple(points)
+    if points_t != runner._last_probe_points:
+        next_seq = runner._last_probe_seq + 1
+        try:
+            runner.aircraft_client.post_probe_points(next_seq, points_t)
+            runner._last_probe_points = points_t
+            runner._last_probe_seq = next_seq
+        except AircraftLayerError:
+            logger.warning("probe-points push failed (continuing)", exc_info=True)
+
+    if not checks:
+        return
+
+    # `plans/expected-area-look/plan.md` Pass 2/3 -- check open/verdict is
+    # belief-layer, has no ground truth of its own, and so does not fit
+    # `--detection-trace`'s own `DetectionTrace`/`GateOutcome` schema (no
+    # `belief/` import there, per that module's own docstring) or
+    # `--belief-truth-log`'s `BeliefTruthRow` (every row requires a
+    # matched ground-truth object). `logger.debug`/`logger.info` below
+    # are unchanged from Pass 2 (stderr, for a developer watching live);
+    # `runner.expected_area_log_sink` (Pass 3, `--expected-area-log`) is
+    # the structured, file-captured record `sortie-log-triage` reduces --
+    # see `expected_area_log.py`'s own module docstring for why neither
+    # existing sortie log fits and this is the closest existing pattern
+    # instead (the seventh per-run JSONL log, same shape as `--group-
+    # trace`'s).
+    for check in checks:
+        logger.debug(
+            "expected-area check open: b=%s a=%s kind=%s age_s=%.1f released=%s",
+            check.b_id,
+            check.a_id,
+            check.kind,
+            ownship.t_sim - check.opened_sim,
+            check.released,
+        )
+        if runner.expected_area_log_sink is not None:
+            runner.expected_area_log_sink(
+                {
+                    "t_sim": ownship.t_sim,
+                    "event": "open",
+                    "b_id": check.b_id,
+                    "a_id": check.a_id,
+                    "kind": check.kind,
+                    "age_s": ownship.t_sim - check.opened_sim,
+                    "released": check.released,
+                }
+            )
+
+    try:
+        los = runner.aircraft_client.get_line_of_sight_latest()
+    except AircraftLayerError:
+        los = None
+    probes = los.get("probes") if los is not None else None
+
+    look_evidence: dict[str, LookEvidence] = {}
+    a_observed: dict[str, bool] = {}
+    relocation_warranted_by_b: dict[str, bool] = {}
+    a_was_announced: dict[str, bool] = {}
+
+    for index, check in enumerate(checks):
+        a = runner.store.contact(check.a_id)
+        b = runner.store.contact(check.b_id)
+        if a is None or b is None:
+            continue
+
+        # The vignette rule (`plans/expected-area-look/plan.md` Stage
+        # 3a): A's own `last_seen_sim` only ever advances via a percept
+        # that genuinely resolved onto A (continuity or the gate) -- B is
+        # founded fresh at trigger time and never folds into A until
+        # `resolve_checks` itself does it, so this is exactly "A recorded
+        # a percept not attributed to B since the check opened", with no
+        # extra bookkeeping needed.
+        a_observed[check.a_id] = a.last_seen_sim > check.opened_sim
+
+        a_look = look_target_for(
+            a.id,
+            observer=observer,
+            target_position=_look_target_position(a),
+            heading_true_deg=ownship.heading_true_deg,
+            pitch_deg=ownship.pitch_deg,
+            bank_deg=ownship.bank_deg,
+            object_type=a.last_class_raw,
+            current_level=a.classification.level.name.lower(),
+            position=a.position,
+        )
+
+        area_fits_now = area_fits_one_look(a, ownship.t_sim, observer)
+
+        report = runner.optic_state.area_look_reports.get(check.a_id)
+        look_completed_naturally = (
+            report is not None
+            and report.natural_end
+            and report.steady
+            and area_look_covers(report, a_look.azimuth_deg, a_look.elevation_deg)
+        )
+
+        inside_mask = is_visible(
+            COCKPIT_MASKS[STATION_CO_PILOT], a_look.azimuth_deg, a_look.elevation_deg
+        )
+
+        profile = profile_for(a.last_class_raw)
+        extent = apparent_extent_m(profile, None)
+        distinctiveness = distinctiveness_of(profile)
+        presence_m, _unused_class_m, _unused_type_m = tier_ranges(
+            presence_size_m=profile.size_m,
+            recognition_extent_m=extent,
+            optic=BINOCULAR_OPTIC,
+            distinctiveness=distinctiveness,
+        )
+        within_presence = a_look.range_m <= presence_m
+
+        occluded = False
+        if runner.area_forest_occlusion is not None:
+            occluded = runner.area_forest_occlusion.occluded(a.position.x, a.position.z)
+        if not occluded and runner.area_settlement_occlusion is not None:
+            occluded = runner.area_settlement_occlusion.occluded(
+                a.position.x, a.position.z
+            )
+
+        base = index * PROBE_POINTS_PER_CHECK
+        if probes is not None and isinstance(probes, dict) and report is not None:
+            probe_seq_matches = probes.get("seq") == runner._last_probe_seq
+            probe_time = probes.get("dcs_model_time_s")
+            window_end_sim = (
+                report.look_ended_sim
+                if report.look_ended_sim is not None
+                else ownship.t_sim
+            )
+            probe_time_in_window = isinstance(probe_time, (int, float)) and (
+                report.look_started_sim - 2.0 <= probe_time <= window_end_sim + 2.0
+            )
+            clear_raw = probes.get("clear")
+            clear_list = clear_raw if isinstance(clear_raw, list) else []
+            probe_clear = cast(
+                "tuple[bool | None, bool | None, bool | None]",
+                tuple(
+                    clear_list[base + i] if base + i < len(clear_list) else None
+                    for i in range(PROBE_POINTS_PER_CHECK)
+                ),
+            )
+        else:
+            probe_seq_matches = False
+            probe_time_in_window = False
+            probe_clear = (None, None, None)
+
+        look_evidence[check.b_id] = LookEvidence(
+            area_fits_one_look_now=area_fits_now,
+            look_completed_naturally=look_completed_naturally,
+            inside_cockpit_mask=inside_mask,
+            within_binocular_presence_range=within_presence,
+            occluded=occluded,
+            probe_seq_matches=probe_seq_matches,
+            probe_time_in_window=probe_time_in_window,
+            probe_clear=probe_clear,
+        )
+
+        before = relative_geometry(ownship, _look_target_position(check.a_snapshot))
+        after = relative_geometry(ownship, _look_target_position(b))
+        relocation_warranted_by_b[check.b_id] = relocation_warranted(
+            before_clock=cast(int, before["clock_position"]),
+            before_range_m=cast(float, before["range_m"]),
+            before_bearing_deg=cast(float, before["bearing_deg"]),
+            after_clock=cast(int, after["clock_position"]),
+            after_range_m=cast(float, after["range_m"]),
+            after_bearing_deg=cast(float, after["bearing_deg"]),
+        )
+
+        a_was_announced[check.a_id] = (
+            CONTACT_DETECTED in a.last_event_emitted_sim
+            or CONTACT_REACQUIRED in a.last_event_emitted_sim
+        )
+
+    paused = runner.attack_run_state is not None or runner.atgm_run_state is not None
+
+    outcomes = resolve_checks(
+        runner.store,
+        checks,
+        now_sim=ownship.t_sim,
+        deadline_s=_EXPECTED_AREA_HOLD_DEADLINE_S,
+        look_evidence=look_evidence,
+        a_observed=a_observed,
+        relocation_warranted_by_b=relocation_warranted_by_b,
+        a_was_announced=a_was_announced,
+        paused=paused,
+    )
+    # `check.kind` for the verdict row too (`sortie-log-triage`'s own
+    # merge-echo-suppression count needs it without a cross-row join):
+    # built from `checks` (this poll's own snapshot, captured above
+    # before any of them closed), not re-read from `store` -- a closed
+    # check is gone from `store.checks` by the time this loop runs.
+    kind_by_b_id = {c.b_id: c.kind for c in checks}
+    for outcome in outcomes:
+        if outcome.verdict != "still_open":
+            cause = (
+                _cannot_look_cause(look_evidence.get(outcome.b_id))
+                if outcome.verdict == "cannot_look"
+                else None
+            )
+            logger.info(
+                "expected-area check resolved: b=%s a=%s verdict=%s relocation=%s "
+                "paused=%s cause=%s",
+                outcome.b_id,
+                outcome.a_id,
+                outcome.verdict,
+                outcome.relocation_line,
+                paused,
+                cause,
+            )
+            if runner.expected_area_log_sink is not None:
+                runner.expected_area_log_sink(
+                    {
+                        "t_sim": ownship.t_sim,
+                        "event": "verdict",
+                        "b_id": outcome.b_id,
+                        "a_id": outcome.a_id,
+                        "kind": kind_by_b_id.get(outcome.b_id),
+                        "verdict": outcome.verdict,
+                        "relocation": outcome.relocation_line,
+                        "paused": paused,
+                        "cannot_look_cause": cause,
+                    }
+                )
 
 
 def _sight_lock_seen(
@@ -2323,6 +2874,7 @@ def _mission_memory_step(
     theatre: str,
     phase: MissionPhaseInfo | None,
     fired_on_tracker: FiredOnTracker,
+    lost_contact_tracker: LostContactTracker,
 ) -> None:
     """BL-8's writer, called once per poll from the crew-session poll
     loop, **after** `runner.run_once()` (belief is settled;
@@ -2331,9 +2883,10 @@ def _mission_memory_step(
     admission`'s module docstring states the same ordering, and this is
     the one call site responsible for keeping it (plan Decision 3).
 
-    `fired_on_tracker` is owned by the calling poll loop and lives for its
-    whole run (Stage 3) -- `FiredOnTracker`'s own docstring on why this is
-    not state on `MissionMemory` itself.
+    `fired_on_tracker`/`lost_contact_tracker` are owned by the calling
+    poll loop and live for its whole run (Stage 3; `[[BL-B112]]`) --
+    `FiredOnTracker`/`LostContactTracker`'s own docstrings on why neither
+    is state on `MissionMemory` itself.
 
     **Never propagates.** Decision 8: a memory write must never kill the
     poll loop. `admission.step` itself only ever raises from a genuine
@@ -2351,6 +2904,7 @@ def _mission_memory_step(
             phase=phase,
             enrichment=runner.enrichment,
             fired_on_tracker=fired_on_tracker,
+            lost_contact_tracker=lost_contact_tracker,
         )
     except Exception:
         logger.exception("mission-memory step failed; continuing")
@@ -2361,6 +2915,7 @@ def _reset_mission_state(
     crew_console: CrewConsole | None,
     mission_memory: MissionMemory,
     fired_on_tracker: FiredOnTracker | None = None,
+    lost_contact_tracker: LostContactTracker | None = None,
 ) -> None:
     """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
     piece of belief/mission-memory state a clean slate on a genuine DCS
@@ -2388,17 +2943,20 @@ def _reset_mission_state(
     this codebase. `main()`'s own poll loop always has a real
     `CrewConsole` and never takes this branch.
 
-    `fired_on_tracker` defaults to `None` so every existing test calling
-    this with the original three-argument shape is unaffected (same
-    reasoning `_check_for_new_mission`'s own `world_model_dir`/`trace_sink`/
-    `forest_occlusion` defaults give, see that function's docstring) --
-    `None` only arises if a future caller genuinely has no tracker to
-    reset, since both of `body.py`'s own poll loops always build one.
-    Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
-    `FiredOnTracker` predates `BL-15` and was not brought under this
-    mechanism when it was built -- see its own `reset_for_new_mission`
-    docstring for why leaving it out silently stalls `fired_on` mission-
-    memory writes after a restart."""
+    `fired_on_tracker`/`lost_contact_tracker` default to `None` so every
+    existing test calling this with the original three-argument shape is
+    unaffected (same reasoning `_check_for_new_mission`'s own
+    `world_model_dir`/`trace_sink`/`forest_occlusion` defaults give, see
+    that function's docstring) -- `None` only arises if a future caller
+    genuinely has no tracker to reset, since `body.py`'s own poll loop
+    always builds one of each. Batch 2 review follow-up (`plans/
+    bl15-mission-start/review.md`): `FiredOnTracker` predates `BL-15` and
+    was not brought under this mechanism when it was built -- see its own
+    `reset_for_new_mission` docstring for why leaving it out silently
+    stalls `fired_on` mission-memory writes after a restart.
+    `LostContactTracker` (`[[BL-B112]]`) is brought under this mechanism
+    from the day it is added, to avoid discovering the same gap a second
+    time."""
     runner.store.reset_for_new_mission()  # shared with crew_console.store
     runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
     for source in runner.sources:
@@ -2409,6 +2967,8 @@ def _reset_mission_state(
     mission_memory.reset_for_new_mission()
     if fired_on_tracker is not None:
         fired_on_tracker.reset_for_new_mission()
+    if lost_contact_tracker is not None:
+        lost_contact_tracker.reset_for_new_mission()
 
 
 def _enter_refusal_mode(
@@ -2440,6 +3000,11 @@ def _enter_refusal_mode(
     runner.world_model_conn = None
     runner.world_model_store = None
     runner.enrichment = None
+    # `plans/expected-area-look/plan.md` Pass 2 -- same staleness `runner.
+    # enrichment` above is cleared for: both hold a `conn` to the
+    # connection just closed.
+    runner.area_forest_occlusion = None
+    runner.area_settlement_occlusion = None
     runner.sources = []
     if crew_console is not None:
         crew_console.refused = True
@@ -2600,6 +3165,7 @@ def _check_for_new_mission(
     trace_sink: DetectionTraceCollector | None = None,
     forest_occlusion: bool = False,
     fired_on_tracker: FiredOnTracker | None = None,
+    lost_contact_tracker: LostContactTracker | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -2609,9 +3175,10 @@ def _check_for_new_mission(
     too (`_reroll_run_logs`, decision 5), not just for a future spoken
     acknowledgement.
 
-    `fired_on_tracker` is passed straight through to `_reset_mission_state`
-    -- see that function's own docstring for why it defaults to `None` and
-    what leaving it out would silently break.
+    `fired_on_tracker`/`lost_contact_tracker` are passed straight through
+    to `_reset_mission_state` -- see that function's own docstring for why
+    they default to `None` and what leaving either out would silently
+    break.
 
     **A genuine reset also arms `runner.pending_mission_start_fire`/
     `pending_mission_start_in_air_check`**, with `mission_start_fresh_
@@ -2723,7 +3290,9 @@ def _check_for_new_mission(
     # fresh, not the previous mission's last cached one (explore-notes,
     # "Two new triggers: mission start").
     pre_reset_t_sim = runner.last_t_sim
-    _reset_mission_state(runner, crew_console, mission_memory, fired_on_tracker)
+    _reset_mission_state(
+        runner, crew_console, mission_memory, fired_on_tracker, lost_contact_tracker
+    )
     _maybe_switch_theatre(
         runner,
         crew_console,
@@ -2763,6 +3332,7 @@ def _reroll_run_logs(
     mission_memory_base: Path | None,
     slew_trace_writer: SightTraceWriter | None = None,
     slew_trace_base: Path | None = None,
+    expected_area_log_base: Path | None = None,
     when: float | None = None,
 ) -> tuple[
     DetectionTraceWriter | None, BeliefTruthLogWriter | None, SightTraceWriter | None
@@ -2808,10 +3378,11 @@ def _reroll_run_logs(
       with no exception (the `OSError` guard inside `write_speech`'s own
       try/except would simply disable belief-truth logging for the rest
       of the sortie the first time anything tried to speak).
-    - `runner.group_trace_sink` and `crew_console.transcript_log` are
-      **plain fields read fresh every call** (no closure capturing the
-      writer by value anywhere else), so reassigning them here is the
-      whole of the fix.
+    - `runner.group_trace_sink`, `runner.expected_area_log_sink`
+      (`plans/expected-area-look/plan.md` Pass 3) and `crew_console.
+      transcript_log` are **plain fields read fresh every call** (no
+      closure capturing the writer by value anywhere else), so
+      reassigning them here is the whole of the fix.
     - `mission_memory._sink` is the one case `_reset_mission_state` itself
       already touches -- `MissionMemory.reset_for_new_mission` preserves
       the *old* sink across the belief reset (its own docstring: "the one
@@ -2872,6 +3443,12 @@ def _reroll_run_logs(
     new_group_trace = _reroll_one(group_trace_base, "group-trace")
     if new_group_trace is not None:
         runner.group_trace_sink = GroupTraceLogWriter(new_group_trace).write
+
+    new_expected_area_log = _reroll_one(expected_area_log_base, "expected-area-log")
+    if new_expected_area_log is not None:
+        runner.expected_area_log_sink = ExpectedAreaLogWriter(
+            new_expected_area_log
+        ).write
 
     new_mission_memory = _reroll_one(mission_memory_base, "mission-memory")
     if new_mission_memory is not None:
@@ -3251,6 +3828,7 @@ def _run_crew_text_poll_loop(
     effector_sequences: Mapping[tuple[str, str, str], SequenceFile] | None = None,
     effector_registry: Mapping[str, EffectorDef] | None = None,
     polled_args: Sequence[int] | None = None,
+    expected_area_log_base: Path | None = None,
 ) -> None:
     """The crew session's background poll thread: opens `world_model_conn`
     and builds `runner.sources` here, on this thread (`sqlite3.Connection`s
@@ -3283,7 +3861,12 @@ def _run_crew_text_poll_loop(
     re-rolls `crew_console.transcript_log` to a fresh per-mission speech
     log. `slew_trace_path`/`slew_trace_base` (`--slew-trace`, `BL-B66`
     Stage 4b) are the same shape, for the takeoff/power-up/OBSERV wiring
-    this writer reads, which only runs on this loop.
+    this writer reads, which only runs on this loop. `expected_area_log_
+    base` (`--expected-area-log`, `plans/expected-area-look/plan.md`
+    Pass 3) is the same "pre-stamp path, threaded through for a mission-
+    restart reroll" shape as `group_trace_base` -- its *initial* sink is
+    set once at `main()`'s `ConsolePerceptionRunner` construction, not
+    inside this function, the same split `group_trace_sink` already has.
 
     `effector_sequences`/`effector_registry` (`plans/effector-sequences/
     plan.md` Stage 2) are `main()`'s own `_load_effector_config()` result
@@ -3355,6 +3938,7 @@ def _run_crew_text_poll_loop(
     crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner)
     crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner)
     fired_on_tracker = FiredOnTracker()
+    lost_contact_tracker = LostContactTracker()
     try:
         if theatre is not None and world_model_db is not None:
             world_model_conn = open_world_model(world_model_db)
@@ -3426,6 +4010,7 @@ def _run_crew_text_poll_loop(
                     trace_sink=trace_collector,
                     forest_occlusion=forest_occlusion,
                     fired_on_tracker=fired_on_tracker,
+                    lost_contact_tracker=lost_contact_tracker,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -3441,6 +4026,7 @@ def _run_crew_text_poll_loop(
                             mission_memory_base=mission_memory_base,
                             slew_trace_writer=slew_trace_writer,
                             slew_trace_base=slew_trace_base,
+                            expected_area_log_base=expected_area_log_base,
                         )
                     )
                 # `plans/atgm-run-sight-tracking/plan.md` -- captured
@@ -4138,6 +4724,7 @@ def _run_crew_text_poll_loop(
                             runner.theatre,
                             phase,
                             fired_on_tracker,
+                            lost_contact_tracker,
                         )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/voice-latency-instrumentation/plan.md` Stage 6
@@ -4161,6 +4748,13 @@ def _run_crew_text_poll_loop(
                     # last poll. A true no-op for NullBrainClient and
                     # DebugPrintBrainClient, both of which return [].
                     crew_console.drain_brain(runner.last_t_sim)
+                    # `[[BL-B106]]` (`plans/async-speech/plan.md` Decision
+                    # 2) -- drains whatever `speech_worker` has finished
+                    # pushing since the last poll and calls
+                    # `speech_log_sink` for each, on this thread. Same
+                    # per-poll hook point as `drain_events`/`drain_brain`;
+                    # a true no-op when `speech_worker` is unset.
+                    crew_console.drain_speech_results(runner.last_t_sim)
                     commands_before = crew_console.commands_handled
                     if speech_input_enabled and speech_client is not None:
                         _poll_transcripts(
@@ -4603,6 +5197,34 @@ def _resolve_slew_trace_log_path(
     return stamped
 
 
+def _resolve_expected_area_log_path(
+    expected_area_log_path: Path | None, when: float | None = None
+) -> Path | None:
+    """`_resolve_group_trace_log_path`'s own sibling for `--expected-
+    area-log` (`plans/expected-area-look/plan.md` Pass 3) -- the seventh
+    per-run JSONL log, same reasoning, same reproduced-rather-than-shared
+    policy body, same "its own `time.time()` call" divergence. See that
+    function's docstring for why this is a sibling rather than a
+    parameter on `_per_run_log_paths`."""
+    if expected_area_log_path is None:
+        return None
+    stamp_at = time.time() if when is None else when
+    reported_parent = expected_area_log_path.parent
+    try:
+        expanded = expected_area_log_path.expanduser()
+        reported_parent = expanded.parent
+        stamped = per_run_log_path(expanded, stamp_at)
+        stamped.parent.mkdir(parents=True, exist_ok=True)
+    except _RESOLVE_FAILURES as exc:
+        print(
+            f"expected-area-log: could not create log directory "
+            f"{reported_parent} ({exc}); continuing without this log",
+            file=sys.stderr,
+        )
+        return None
+    return stamped
+
+
 def _configure_logger_for_main() -> None:
     """Give this module's own `logger` (`logging.getLogger(__name__)`,
     above) a level and a handler, so `_log_live_los_coverage_summary`'s
@@ -4849,6 +5471,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--expected-area-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per belief.expected_area check opened "
+            "and one per verdict resolve_checks reaches (verdict, "
+            "relocation line, cannot-look cause) to this path -- "
+            "plans/expected-area-look/plan.md Pass 3. Answers how often "
+            "the trigger fires in flight (the plan's own top-listed open "
+            "risk) and whether a busy scene crowds the hold out of the "
+            "shared glass budget; reduce with .claude/skills/"
+            "sortie-log-triage. Defaults off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--eyesight-view",
         action="store_true",
         help=(
@@ -5081,6 +5718,7 @@ def main() -> None:
     group_trace_base = _expand_log_base(args.group_trace)
     mission_memory_base = _expand_log_base(args.mission_memory)
     slew_trace_base = _expand_log_base(args.slew_trace)
+    expected_area_log_base = _expand_log_base(args.expected_area_log)
 
     # BL-11 Stage 5: each run writes its own files rather than appending to
     # one that grows across sorties. Applied after the default resolution
@@ -5100,6 +5738,9 @@ def main() -> None:
     args.mission_memory = _resolve_mission_memory_log_path(args.mission_memory)
     # BL-B66 Stage 4b: a sixth per-run log, same sibling-function shape.
     args.slew_trace = _resolve_slew_trace_log_path(args.slew_trace)
+    # `plans/expected-area-look/plan.md` Pass 3: a seventh per-run log,
+    # same sibling-function shape.
+    args.expected_area_log = _resolve_expected_area_log_path(args.expected_area_log)
     for label, rolled in (
         ("detection-trace", args.detection_trace),
         ("belief-truth-log", args.belief_truth_log),
@@ -5107,6 +5748,7 @@ def main() -> None:
         ("group-trace", args.group_trace),
         ("mission-memory", args.mission_memory),
         ("slew-trace", args.slew_trace),
+        ("expected-area-log", args.expected_area_log),
     ):
         if rolled is not None:
             print(f"{label}: writing {rolled}", file=sys.stderr)
@@ -5139,6 +5781,19 @@ def main() -> None:
             if args.group_trace is not None
             else None
         ),
+        expected_area_log_sink=(
+            ExpectedAreaLogWriter(args.expected_area_log).write
+            if args.expected_area_log is not None
+            else None
+        ),
+        # `plans/expected-area-look/plan.md` -- the one production call
+        # site. `ContactStore`'s own default (`expected_area_checks=
+        # False`) stays off for every other construction site (tests,
+        # and `ConsolePerceptionRunner`'s own dataclass default), per
+        # that constructor argument's own docstring on why: object-
+        # permanence continuity across an optic change is real here and
+        # never in a hand-built test fixture.
+        store=ContactStore(expected_area_checks=True),
     )
     # BL-B96: speech in (`get_transcripts`) and out (`push_speech`) are
     # both always on now, so exactly one `AudioAdapterClient` is always
@@ -5151,6 +5806,16 @@ def main() -> None:
     # reporter's own docstring for why this must be the *same* instance,
     # not one per path.
     audio_adapter_reporter = ConnectionReporter(logger, label="audio adapter")
+    # `[[BL-B106]]` (`plans/async-speech/plan.md`) -- always built and
+    # opened now that speech is unconditional (`BL-B96`), no
+    # `--speech-audio`-style flag branch. Shares `audio_adapter_reporter`
+    # with `_poll_transcripts`' own poll-path reporting, same reasoning
+    # as the comment above: the push-failure/push-success calls that used
+    # to happen inside `CrewConsole._print` now happen on this worker's
+    # own background thread instead (Decision 2), but through the same
+    # reporter instance.
+    speech_worker = SpeechWorker(audio_adapter_client, reporter=audio_adapter_reporter)
+    speech_worker.open()
     # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
     # loaded once here, before `CrewConsole` exists, so a bad
     # registry/sequence file can set `config_error_pending` at
@@ -5169,6 +5834,7 @@ def main() -> None:
         aircraft_client=aircraft_client,
         tasks=crew_runner.tasks,
         speech_client=audio_adapter_client,
+        speech_worker=speech_worker,
         audio_adapter_reporter=audio_adapter_reporter,
         transcript_log=(
             SpeechLogWriter(args.speech_log).write
@@ -5208,6 +5874,7 @@ def main() -> None:
             effector_sequences_by_key,
             effector_registry_entries,
             polled_args_set.args,
+            expected_area_log_base,
         ),
         daemon=True,
     )
@@ -5218,6 +5885,7 @@ def main() -> None:
     finally:
         stop_event.set()
         poll_thread.join()
+        speech_worker.close()
 
 
 if __name__ == "__main__":

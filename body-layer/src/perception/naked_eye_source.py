@@ -127,10 +127,12 @@ Each `poll()`:
     moment the cone sweeps back -- defeating `_acquire_on_change`'s
     debounce every single scan cycle. "Still known" instead means "seen
     within `_ACQUISITION_RETENTION_WINDOW_S`" (== `perception.gaze.
-    SCAN_CYCLE_PERIOD_S`, not an invented constant -- the eviction window
-    has to span at least one full scan cycle or a flank object ages out
-    before the cone sweeps back to it), evaluated fresh each poll via
-    `_live_ids`/`_prune_stale`, never by dict membership alone.
+    WORST_REVISIT_S`, not an invented constant -- the eviction window has
+    to span the true worst-case revisit under the per-sector scan and its
+    rolling glass budget, `plans/expected-area-check/plan.md` Stage 1, or
+    a flank object ages out before the eye returns to it in a busy
+    window), evaluated fresh each poll via `_live_ids`/`_prune_stale`,
+    never by dict membership alone.
 5. **Simultaneous-detection cap counts groups, not objects**
    (`NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`, `plans/detection-cones-slice2/
    plan.md`'s 2A.5 -- renamed from `NAKED_EYE_MAX_NEW_PER_POLL`; **value
@@ -259,12 +261,13 @@ from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
+    stable_down_sigma_m,
     surface_range_estimate,
 )
 from perception.forest import ForestOcclusion
 from perception.gaze import (
     FREE_SCAN_PLAN,
-    SCAN_CYCLE_PERIOD_S,
+    WORST_REVISIT_S,
     ScanPlan,
     gaze_at,
     gaze_for,
@@ -343,11 +346,17 @@ NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 5
 #: How long an object_id stays "known" (previously visible/acquired) after
 #: it was last actually seen, before the acquisition dicts evict it (2C,
 #: module docstring point 4a; `plans/detection-cones-slice2/plan.md` hard
-#: part 6) -- reused directly from `perception.gaze.SCAN_CYCLE_PERIOD_S`,
-#: not an invented constant: "still known" has to span at least one full
-#: scan cycle, or a flank object the cone has swept off of ages out before
-#: the cone sweeps back to it.
-_ACQUISITION_RETENTION_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
+#: part 6) -- reused directly from `perception.gaze.WORST_REVISIT_S`, not
+#: an invented constant. **Moved from `SCAN_CYCLE_PERIOD_S` to `WORST_
+#: REVISIT_S`** (`plans/expected-area-check/plan.md` Stage 1, "Derived
+#: windows"): "still known" has to span the *true* worst-case revisit
+#: under the per-sector scan and its rolling glass budget, not only the
+#: bare quiet sweep -- otherwise a flank object ages out of this debounce
+#: before the eye genuinely returns to it in a busy window, and is
+#: re-acquired as "newly visible" every busy cycle, defeating `_acquire_
+#: on_change`'s own debounce (point 4a above) exactly the way it was
+#: built to prevent.
+_ACQUISITION_RETENTION_WINDOW_S: Final[float] = WORST_REVISIT_S
 
 #: `plans/dcs-driven-los/plan.md` (X-B29) -- the maximum age, in sim
 #: seconds, a `GET /line_of_sight/latest` snapshot may be before its join
@@ -1336,6 +1345,8 @@ class NakedEyePerceptionSource:
             true_range_m=true_range_m,
             sigma_cross_m=sigma_cross_m,
             sigma_down_m=sigma_down_m,
+            optic_class=self.optic.name,
+            poll_key=now_sim,
         )
         # `plans/bl-b104-ground-contacts-on-ground/plan.md` Stage 3: a
         # surface cluster's *range* comes from the two-cue fused estimator
@@ -1348,11 +1359,11 @@ class NakedEyePerceptionSource:
         if cluster.is_surface is True:
             height_above_unit_m = ownship_state.alt_m - cluster.centroid_alt_m
             estimated_range_m, sigma_down_m = surface_range_estimate(
-                observation_id=observation_id,
-                object_id=bias_object_id,
                 true_distance_m=true_range_m,
+                true_bearing_deg=true_bearing_deg,
                 height_above_unit_m=height_above_unit_m,
                 optic=self.optic,
+                poll_key=now_sim,
             )
         for member in cluster.members:
             self._object_id_to_last_observation_id[member.object_id] = observation_id
@@ -1545,7 +1556,10 @@ class NakedEyePerceptionSource:
             continues_observation_id=continues_observation_id,
             count_bucket=cluster.count_bucket,
             position_uncertainty=PositionUncertainty(
-                sigma_cross_m=sigma_cross_m, sigma_down_m=sigma_down_m
+                sigma_cross_m=sigma_cross_m,
+                sigma_down_m=sigma_down_m,
+                sigma_down_stable_m=stable_down_sigma_m(sigma_down_m),
+                optic_class=self.optic.name,
             ),
             apparent_motion=apparent_motion,
             live_los_clear=live_los_clear,

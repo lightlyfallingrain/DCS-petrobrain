@@ -8,6 +8,7 @@ import pytest
 from schema.line_of_sight import (
     LineOfSightParseError,
     LineOfSightSnapshot,
+    ProbeAnswers,
 )
 
 
@@ -174,3 +175,96 @@ def test_to_dict_round_trips_agl_m() -> None:
         received_wall_clock_s=1000.0,
     )
     assert snapshot.to_dict()["verdicts"]["Heli-1"]["agl_m"] == 8.5
+
+
+# --- Point probes (`plans/expected-area-look/plan.md`, BL-B111, Stage 1) ---
+
+
+def test_probes_absent_when_no_probes_raw_given() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.probes is None
+
+
+def test_probes_absent_when_probes_raw_is_empty_string() -> None:
+    # `N == 0` on the Hook side -- "no check open", not a malformed wire.
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        probes_raw="",
+    )
+    assert snapshot.probes is None
+
+
+def test_probes_parses_well_formed_sub_wire() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        probes_raw="7|0:1;1:0;2:",
+    )
+    assert snapshot.probes is not None
+    assert snapshot.probes.seq == 7
+    # Shares this snapshot's own dcs_model_time_s -- not a second wire
+    # field (module docstring: "not repeated on this sub-wire").
+    assert snapshot.probes.dcs_model_time_s == 1234.5
+    assert snapshot.probes.clear[0] is True
+    assert snapshot.probes.clear[1] is False
+    assert snapshot.probes.clear[2] is None
+    # Every index this sub-wire did not mention stays None (fail closed).
+    assert snapshot.probes.clear[3] is None
+    assert snapshot.probes.clear[4] is None
+    assert snapshot.probes.clear[5] is None
+    assert len(snapshot.probes.clear) == 6
+
+
+def test_probes_malformed_sub_wire_drops_probes_only_not_the_snapshot() -> None:
+    """A bad `probes_raw` must not reject the (valid) LOS payload this
+    method already parsed -- module docstring's own "a bad probe
+    sub-wire says nothing about whether the LOS payload itself parsed"
+    promise."""
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        probes_raw="not_an_int|0:1",
+    )
+    assert snapshot.probes is None
+    assert snapshot.verdicts["Heli-1"].building_clear is True
+
+
+def test_probes_out_of_range_index_raises_in_from_wire_directly() -> None:
+    with pytest.raises(LineOfSightParseError):
+        ProbeAnswers.from_wire("1|6:1", dcs_model_time_s=1.0)
+
+
+def test_probes_bad_flag_raises_in_from_wire_directly() -> None:
+    with pytest.raises(LineOfSightParseError):
+        ProbeAnswers.from_wire("1|0:maybe", dcs_model_time_s=1.0)
+
+
+def test_probes_to_dict_round_trips() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        probes_raw="3|0:1",
+    )
+    as_dict = snapshot.to_dict()["probes"]
+    assert as_dict["seq"] == 3
+    assert as_dict["dcs_model_time_s"] == 1234.5
+    assert as_dict["clear"][0] is True
+    assert as_dict["clear"][1] is None
+
+
+def test_to_dict_probes_is_none_when_absent() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.to_dict()["probes"] is None

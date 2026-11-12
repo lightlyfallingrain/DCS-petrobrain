@@ -61,6 +61,7 @@ import pytest
 from perception import object_model
 from perception.association import WorldObjectCandidate
 from perception.clustering import angular_separation_rad, angular_size_rad
+from perception.estimation import RANGE_RELATIVE_SHARE, look_sigma_m
 from perception.geometry import GeoPosition, range_m
 from perception.group_salience import (
     GROUP_COHESION_GAP_UNIT_WIDTHS,
@@ -69,6 +70,11 @@ from perception.group_salience import (
 )
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.visibility import RESOLUTION_ANGULAR_RADIUS_RAD
+
+#: `belief.association_over_time.GATE_SIGMA_THRESHOLD`'s own value,
+#: restated here the same way `group_salience.py` itself restates it --
+#: see `_reference_cohesive`'s own docstring.
+_GATE_SIGMA_THRESHOLD = 3.0
 
 _OBSERVER = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
 
@@ -107,7 +113,10 @@ def _reference_resolvable(
 
 
 def _reference_cohesive(
-    a: WorldObjectCandidate, b: WorldObjectCandidate, observer: GeoPosition
+    a: WorldObjectCandidate,
+    b: WorldObjectCandidate,
+    observer: GeoPosition,
+    optic: Optic,
 ) -> bool:
     """`group_salience`'s pre-Stage-2 cohesion predicate (then a
     two-candidate function named `_cohesive`), copied here rather than
@@ -116,18 +125,38 @@ def _reference_cohesive(
     production's own pair loop also calls, so importing it could not pin
     the formula. It too was deleted once this copy replaced its only use.
 
-    `GROUP_COHESION_GAP_UNIT_WIDTHS` and the geometry helpers this body
-    calls are imported rather than copied -- see the module docstring on
-    where the shared/not-shared line falls and why."""
+    **`BL-B108` Stage 3** added a second, along-line test to the same
+    predicate (`group_salience._cohesive_from_terms`'s own docstring) --
+    mirrored here, per-pair and unhoisted, rather than imported, for the
+    same reason the angular test's own copy exists: this file pins the
+    *formula*, independent of production's hoisted-terms optimisation.
+
+    `GROUP_COHESION_GAP_UNIT_WIDTHS`, `RANGE_RELATIVE_SHARE`, `look_sigma_m`
+    and the geometry helpers this body calls are imported rather than
+    copied -- see the module docstring on where the shared/not-shared line
+    falls and why; `_GATE_SIGMA_THRESHOLD`'s value (3.0) is restated here
+    the same way `group_salience.py` itself restates it (duplicated from
+    `belief.association_over_time.GATE_SIGMA_THRESHOLD` -- `perception`
+    must not import `belief`)."""
     target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
     target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
     theta_sep = angular_separation_rad(observer, target_a, target_b)
     profile_a = object_model.profile_for(a.object_type)
     profile_b = object_model.profile_for(b.object_type)
-    theta_size_a = angular_size_rad(profile_a.size_m, range_m(observer, target_a))
-    theta_size_b = angular_size_rad(profile_b.size_m, range_m(observer, target_b))
+    range_a_m = range_m(observer, target_a)
+    range_b_m = range_m(observer, target_b)
+    theta_size_a = angular_size_rad(profile_a.size_m, range_a_m)
+    theta_size_b = angular_size_rad(profile_b.size_m, range_b_m)
     mean_unit_rad = 0.5 * (theta_size_a + theta_size_b)
-    return theta_sep <= GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad
+    if theta_sep > GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad:
+        return False
+    mean_size_m = 0.5 * (profile_a.size_m + profile_b.size_m)
+    mean_range_m = 0.5 * (range_a_m + range_b_m)
+    _sigma_cross_m, sigma_down_m = look_sigma_m(mean_range_m, optic)
+    along_line_budget_m = GROUP_COHESION_GAP_UNIT_WIDTHS * mean_size_m + (
+        _GATE_SIGMA_THRESHOLD * math.sqrt(2.0) * RANGE_RELATIVE_SHARE * sigma_down_m
+    )
+    return abs(range_a_m - range_b_m) <= along_line_budget_m
 
 
 def _reference_group_salient_ids(
@@ -156,7 +185,7 @@ def _reference_group_salient_ids(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if _reference_cohesive(resolvable[i], resolvable[j], observer):
+            if _reference_cohesive(resolvable[i], resolvable[j], observer, optic):
                 union(i, j)
 
     groups: dict[int, list[int]] = {}

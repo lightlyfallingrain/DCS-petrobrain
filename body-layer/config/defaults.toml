@@ -95,12 +95,17 @@ ON_GROUND_AGL_THRESHOLD_M = 10.0
 # source: belief/decay.py:IDENTITY_HALF_LIFE_S
 IDENTITY_HALF_LIFE_S = 600.0
 
+# `[[BL-B112]]` (explore-notes.md, user, 2026-11-12): *"use 'last I saw' if it is a mobile unit. Use when location inaccuracy grows to >= 0.5 km."* How far a contact could plausibly have moved since it was last seen (`distance_since_last_seen_m` below) before `certainty_of` hedges it as "estimated" rather than stating it as "tracked" fact -- the user gave this figure directly, 0.5 km, so it is not independently derived.
+# status: agreed-guess | range: 100.0 .. 2000.0
+# source: belief/decay.py:LAST_I_SAW_GROWTH_THRESHOLD_M
+LAST_I_SAW_GROWTH_THRESHOLD_M = 500.0
+
 # Past this much elapsed time since last observed, a contact is considered lost outright rather than merely stale -- set to 4x `POSITION_HALF_LIFE_S`, so the two must be retuned together.
 # status: judgement | range: 30.0 .. 600.0
 # source: belief/decay.py:LOST_THRESHOLD_S
 LOST_THRESHOLD_S = 120.0
 
-# This is the one half-life `certainty_of` below actually uses to separate "tracked" from "estimated".
+# Consumed by `position_confidence`'s exponential decay curve below.
 # status: judgement | range: 20.0 .. 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0
@@ -122,7 +127,28 @@ EFFECTOR_SEQUENCE_STEP_DELAY_S = 1.0
 # source: belief/enrichment.py:BUILT_UP_VILLAGE_MAX_AREA_M2
 BUILT_UP_VILLAGE_MAX_AREA_M2 = 1000000.0
 
+[belief.expected_area]
+# `plans/expected-area-look/plan.md` Stage 3b -- "same" requires the count-interval midpoints of A (before the hold) and B not to differ by more than this ratio, the larger over the smaller.
+# status: judgement | range: 1.2 .. 5.0
+# source: belief/expected_area.py:COMPOSITION_MATCH_RATIO
+COMPOSITION_MATCH_RATIO = 2.0
+
+# `plans/expected-area-look/plan.md` Stage 2 -- how wide A's believed area (its growth-inflated covariance, the same formula the gate's own `_contact_covariance` already uses) may be, in half-degrees from the observer, and still fit inside one binocular sweep.
+# status: judgement | range: 4.25 .. 30.0
+# source: belief/expected_area.py:EXPECTED_AREA_MAX_HALF_WIDTH_DEG
+EXPECTED_AREA_MAX_HALF_WIDTH_DEG = 15.0
+
 [belief.optic_policy]
+# `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a binocular look must be expected to tighten the range of a contact the pilot asked to watch, in metres, before Petrovich raises binoculars just for its position.
+# status: judgement | range: 5.0 .. 500.0
+# source: belief/optic_policy.py:EXACT_LOCATION_MIN_GAIN_M
+EXACT_LOCATION_MIN_GAIN_M = 25.0
+
+# `plans/expected-area-check/plan.md` (`BL-B110`) Stage 1, "Selectivity" -- `GLASSING`'s own analogue of `SIGHT_STALL_COOLDOWN_S` above, same mechanism (`is_worth_a_look`'s `stall_cooldown_s` branch), not the same number: how long binoculars leave a contact alone after a look at it taught nothing (its classification level unchanged since the last committed attempt), unless the aircraft has closed on it since (`RETRY_RANGE_FRACTION`, untouched either way).
+# status: judgement | range: 60.0 .. 600.0
+# source: belief/optic_policy.py:GLASS_STALL_COOLDOWN_S
+GLASS_STALL_COOLDOWN_S = 180.0
+
 # BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's, and `GUIDANCE_OPTIC_MIN_INTERVAL_S` must exceed the time this band buys (~10 s of closing at 0.25) or a fly-past re-crosses it early, so the two are retuned together.
 # status: agreed-guess | range: 0.05 .. 0.9
 # source: belief/optic_policy.py:GUIDANCE_OPTIC_HYSTERESIS_FRACTION
@@ -258,7 +284,7 @@ MISSION_START_RESOLVE_FALLBACK_S = 30.0
 # source: mission_memory/admission.py:FIRED_ON_FOLD_WINDOW_S
 FIRED_ON_FOLD_WINDOW_S = 120.0
 
-# Decision 3's admission floor for the `group` rule: a contact's classification must have reached `CLASS` specificity *and* be held at or above this confidence before its first memory entry is written.
+# Decision 3's admission floor for the `group` rule: a contact's classification confidence must be held at or above this value before its first memory entry is written, at *whatever* identification level it has (`BL-B108` Stage 4 dropped the separate `CLASS`-specificity gate this comment used to also require -- user, 2026-10-31: "keep the confidence floor" while every group is kept regardless of level).
 # status: agreed-guess
 # source: mission_memory/admission.py:GROUP_ENTRY_CONFIDENCE_FLOOR
 GROUP_ENTRY_CONFIDENCE_FLOOR = 0.5
@@ -291,10 +317,40 @@ FIRE_LIFE_FRACTION_MAX = 0.765
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
 
+# Down-range scale for a binocular look, relative to naked eye -- `BL-B108` Q3 (user, 2026-10-31: *"With binoculars you see better and so can judge unit apparent size better. That'd give a better range estimate."*).
+# status: judgement | range: 0.1 .. 1.0
+# source: perception/estimation.py:BINOCULAR_RANGE_SIGMA_SCALE
+BINOCULAR_RANGE_SIGMA_SCALE = 0.7
+
 # How noisy Petrovich's sense of looking angle (up/down) is, which feeds a surface unit's estimated range once fused against the size/terrain judgement cue -- raising it widens the depression cue's own spread, which the fusion below weighs against cue A automatically, so Petrovich firms up on a ground unit's range more slowly while closing; lower it for the opposite effect.
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:DEPRESSION_SIGMA_DEG
 DEPRESSION_SIGMA_DEG = 3.0
+
+# `BL-B108` Stage 1 -- how many degrees of line-of-sight rotation it takes for the `Z_view` field's down-range correlation to fall to about `1/e` (holding range fixed): a smaller value means ownship turning past a group updates its range estimate (via `belief.position_belief`'s correlated fusion/gate) sooner; a larger value means the estimate stays "the same look" longer, through a shallow orbit for instance.
+# status: judgement | range: 5.0 .. 120.0
+# source: perception/estimation.py:RANGE_DECORRELATION_BEARING_DEG
+RANGE_DECORRELATION_BEARING_DEG = 30.0
+
+# How far apart in distance two things can be and still have their ranges misjudged together, as a range ratio (closing or opening) at which the `Z_view` field's down-range correlation falls to about `1/e` (holding bearing fixed).
+# status: judgement | range: 1.1 .. 8.0
+# source: perception/estimation.py:RANGE_DECORRELATION_RANGE_RATIO
+RANGE_DECORRELATION_RANGE_RATIO = 4.0
+
+# The look-to-look share `a` of the three-part down-range draw, coupled to `RANGE_RELATIVE_SHARE` below (both bounded `lo=0.0, hi=0.6` keeps `f*f + a*a <= 0.72 < 1`, so `s = sqrt(1 - f*f - a*a)` can never go imaginary from any combination of independently-valid overrides of the two -- the X-T26 cross-key trap, closed by the shared bound rather than a runtime assertion): how much a *repeat* look from the same geometry still varies, even though the scene and terrain cues are the same.
+# status: judgement | range: 0.0 .. 0.6
+# source: perception/estimation.py:RANGE_LOOK_SHARE
+RANGE_LOOK_SHARE = 0.2
+
+# The range ratio at which the `Z_near` field's correlation between two *different* things falls to about `1/e` -- deliberately much smaller than the `Z_view` field's own decorrelation range ratio (declared above this one), so two things ~200 m apart along a line at a few km (ratio close to 1.0) share nearly all of their `Z_near` term (one real group, E3) while two groups at a 1.2-1.5 ratio or more do not (E1/E2).
+# status: judgement | range: 1.02 .. 1.5
+# source: perception/estimation.py:RANGE_NEAR_DECORRELATION_RANGE_RATIO
+RANGE_NEAR_DECORRELATION_RANGE_RATIO = 1.15
+
+# The relative share `f` of the three-part down-range draw, coupled to `RANGE_LOOK_SHARE` above (see that constant's own docstring for the shared bound that keeps `f*f + a*a < 1`): how much two *different* things seen in the same look, at about the same distance, still differ in their down-range error.
+# status: judgement | range: 0.0 .. 0.6
+# source: perception/estimation.py:RANGE_RELATIVE_SHARE
+RANGE_RELATIVE_SHARE = 0.2
 
 # Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
 # status: judgement | range: 0.05 .. 1.0
@@ -311,6 +367,11 @@ SIGHT_WIDE_RANGE_SIGMA_SCALE = 0.5
 # status: judgement | range: 0.5 .. 5.0
 # source: perception/gaze.py:FOCUS_DWELL_S
 FOCUS_DWELL_S = 2.0
+
+# The most binocular time Petrovich spends across one full scan cycle, counted over the last cycle's glass steps, so no part of the windscreen waits longer than one sweep plus this -- `plans/expected-area-check/plan.md` (`BL-B110`) Stage 1, Decision 5 (user: *"four is too short... The 12 s sounds ok"*).
+# status: judgement | range: 6.0 .. 30.0
+# source: perception/gaze.py:GLASS_BUDGET_PER_CYCLE_S
+GLASS_BUDGET_PER_CYCLE_S = 12.0
 
 # Free scan's ordered o'clock-cone table (hard part 8, "Adopt A") -- 12 is deliberately visited twice per cycle (the forward arc gets double the dwell of a flank o'clock), never inlined elsewhere: `gaze_at` and every derived constant below read this tuple directly, so revisiting hard part 8's plan-C alternative (`11, 12, 1` / `10, 9` / `2, 3`, 20 s) is a one-table edit plus `belief.decay.OBSERVED_WINDOW_S`, nothing else.
 # status: judgement

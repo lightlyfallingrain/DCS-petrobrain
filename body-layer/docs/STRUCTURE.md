@@ -128,6 +128,19 @@ The entries are in the order they were written, which is roughly perception → 
   `NakedEyePerceptionSource` only (`forest: ForestOcclusion | None = None`, Stage 2) via
   `body.py`'s `--forest-occlusion`/`--no-forest-occlusion` (`argparse.BooleanOptionalAction`,
   default off) — `None` is a true no-op, same posture as `trace_sink`/`live_los_coverage`.
+  **Pass 2 of `plans/expected-area-look/plan.md`** generalised the class past its original
+  forest-only shape: `layers: tuple[str, ...] = ("landcover",)`, `class_tag: str | None =
+  "landcover_class"`, `class_values: frozenset[str] = FOREST_LANDCOVER_CLASSES`, all defaulting
+  to the exact pre-Pass-2 behaviour. `occluded` checks `class_tag is None` (any polygon
+  `containing_polygons` returns from `layers` is a hit, no tag filter) before the tag-matching
+  test. `body.ConsolePerceptionRunner` now builds **two instances** of this one class —
+  `area_forest_occlusion` (the default above) and `area_settlement_occlusion`
+  (`layers=("settlement",)`, `class_tag=None`) — feeding `belief.expected_area.area_visibility`'s
+  `occluded` clause (a town is "cannot look", same as a wood). `class_tag=None` specifically for
+  the settlement instance: `store.models.StoredFeature`'s own docstring says `landcover_class` is
+  present only on `landcover` rows and built-up `settlement` rows, so filtering on it would
+  silently drop a named place-area settlement with no industrial landuse tag — the common case for
+  a village. One class, two instances, no second copy.
 - `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md` slice 1, per-tier multipliers
   by slice 2A `plans/detection-cones-slice2/plan.md` / `body-layer/research/2026-09-21-slice2-model-
   decisions.md` decision 1, the two sight optics by `BL-B64` `plans/9k113-sight/plan.md` §11) —
@@ -222,6 +235,31 @@ The entries are in the order they were written, which is roughly perception → 
   (`plans/attack-run/plan.md` Decision 4 REVISED/16) is the mean of the members' own `alt_m` — the
   cluster's real altitude, distinct from the flat-projection convention `naked_eye_source.
   _build_observation` substitutes for `derived_world_position`/`last_alt_m` elsewhere.
+- `src/perception/estimation.py` (`plans/precise-position-belief/plan.md` Stages 1-2,
+  restructured by `plans/relative-distance-grouping/plan.md`/`BL-B108` Stage 1, amended
+  2026-11-01 "cross-optic error model") — the perception-side error model: a look's down-range
+  error is three parts (`s * Z_view + f * Z_near + a * z_look`), where `Z_view`/`Z_near` are
+  deterministic random-Fourier-feature fields over *perceived look geometry* (true bearing, log
+  true range), not object id — this is what makes judging *relative* distance between two things
+  seen together far more precise than the absolute number, and what makes a repeat look from the
+  same geometry read as consistent rather than independently noisy. **The amendment's own
+  addition**: `optic_range_correlation`/`_tiered_field` build each optic's field as a nested
+  ladder on the tightest optic's own shared core (`sight_narrow < sight_wide < binocular <
+  unaided`), so two different optics' field *realisations* correlate at exactly `min(k)/max(k)`
+  of their own range-scale ratio — the honest boundary where fusing any two optics can never
+  extrapolate past either input, replacing a flat `CROSS_OPTIC_RANGE_SHARE` share (retired) that
+  let belief declare more correlation than the noise actually had. `stable_range_correlation`
+  is the **only** place `belief/` learns how two looks' errors correlate (reads model parameters,
+  never a realisation); `view_range_correlation` exposes the plain geometric kernel, un-scaled by
+  the optic factor, for `position_belief`'s floor to apply separately. `_FIELD_REALISATION_SALT`
+  is a test-only seam (folded into the field's cache key) letting tests sweep an *ensemble* of
+  field realisations rather than being pinned to the one fixed draw any geometry would otherwise
+  always see — load-bearing for `tests/test_relative_distance_sweep.py`'s own fold-rate
+  measurements, since a single realisation cannot tell a calibration regression from a lucky
+  hash (review round 2's own root-cause finding). `surface_range_estimate` takes the observer's
+  real `true_bearing_deg` as of the amendment — a pre-amendment defect evaluated both of a ground
+  unit's cues at bearing `0.0` unconditionally, so a surface contact's stable error never
+  decorrelated with ownship's own line-of-sight rotation even though belief assumed it did.
 - `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
   `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
   channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
@@ -322,6 +360,29 @@ The entries are in the order they were written, which is roughly perception → 
   module's own docstring before touching any of the three — it carries two live-flight-found
   defects' worked reasoning (runaway fusion, the no-envelope-gate) plus the fold-displacement
   plan's own.
+
+  **`plans/relative-distance-grouping/plan.md`/`BL-B108` Stage 2, amended 2026-11-01.** The fuse
+  is no longer a plain independent-covariance sum: `correlated_innovation` (one shared helper for
+  both `fold_position` and `belief.association_over_time.passes_gate`/`contacts_plausibly_same`)
+  computes a cross-covariance `C` from the two sides' *stable* (geometry-correlated) down-range
+  error, read from `perception.estimation.stable_range_correlation`/`effective_down_correlation`
+  — never a field realisation, only the model's own declared correlation parameters. The gate and
+  the fold differ only in what bearing/range they feed the correlation: the gate uses a
+  *hypothesis* (current observer to the contact's *believed* position — this, not the incoming
+  look's own real geometry, is what makes the gate reject a look whose implied position disagrees
+  by kilometres even when the hypothesis geometry alone predicts high correlation); the fold uses
+  the look's own real bearing/range, since by fold time the gate has already decided. **The
+  amendment's own addition**: `correlated_innovation`'s `for_fusion: bool` caps `C`'s magnitude at
+  `min(var_prior_along, var_look_along)` (each side's own full along-line variance projected onto
+  its own line of sight) for the fold only, never the gate — the 1-D form of "no fusion weight
+  goes negative," so two optics can never fuse to claim better precision than the tighter one
+  alone. `_apply_floor`'s down-range floor is `kappa_view * stable_share() * sigma_down_m *
+  min(1, k_anchor / k_look)` — the geometric kernel (not optic-scaled) times an explicit optic
+  factor, so staring through a worse optic after a better one can never push the floor below the
+  better optic's own stable floor. `LookAnchor` (one look's geometry/optic/stable-sigma) rides
+  every `PositionEstimate` through every construction site — see the plan's own "Co-moving
+  Fields" table; `dataclasses.replace` everywhere a site derives from an existing estimate, never
+  a fresh constructor.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
   *production*): `percept.py` (`Percept`/`percept_of`, the structural no-omniscience boundary —
   belief code never sees `Observation.derived_world_position` or a DCS object id),
@@ -681,6 +742,27 @@ The entries are in the order they were written, which is roughly perception → 
   `--audio-adapter-url`. `body-layer/CLAUDE.md`'s "## Commands" section is the current reference;
   this entry is not rewritten in place because the sequence of *why* each piece was added is
   still the right account of how the module got here.
+
+  **`plans/expected-area-look/plan.md` (`BL-B111`) additions.** `_look_targets` flags
+  `area_check=True` for whichever contact is the `a_id` of a currently-open `ExpectedAreaCheck` —
+  A stays an ordinary live contact in `store.contacts` throughout the hold, so this is a flag on
+  the existing per-contact loop, not a different contact set. `_resolve_expected_area_checks`
+  (called once per poll from `run_once`, right after `self.tasks.tick(...)`) is `belief.
+  expected_area.resolve_checks`'s one production caller: pushes/clears this poll's probe points
+  (`aircraft_client.post_probe_points`, "on change" only, mirroring `post_look_direction`), reads
+  `LineOfSightSnapshot.probes` back, assembles every `LookEvidence`/`a_observed`/`relocation_
+  warranted_by_b`/`a_was_announced` state param from real optic/world-model state, and calls
+  `resolve_checks`. **Two documented simplifications**, both in the *safe* direction (an
+  occasional extra/missing speech line, never a wrong fact): `a_was_announced` is approximated as
+  "A has ever had a `CONTACT_DETECTED`/`CONTACT_REACQUIRED` event" (`Contact.last_event_emitted_
+  sim`) rather than threading a new per-contact "was this ever actually spoken" field through for
+  this one caller; `relocation_warranted_by_b`'s "after" state is B's own *current* believed
+  position, not the post-merge fused estimate `merge_contact` would produce (computing that ahead
+  of the merge it is the precondition for would be circular). `_cannot_look_cause` (Pass 3,
+  `--expected-area-log`) names which `area_visibility` clause failed, for logging only — it never
+  feeds back into the verdict `area_visibility` already decided. See `expected_area_log.py`'s own
+  module docstring for why that log exists and `belief/expected_area.py`'s entry below for the
+  mechanism this function drives.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`GAZE`/`COCKPIT_MASK`/`OPTIC_FOV`/
   `RANGE_OR_SIZE`/`TERRAIN_LOS`/`FOREST`/`ADMITTED`/`PLAYER_BUBBLE` — `FOREST` added `plans/
   forest-occlusion/plan.md` Stage 1, the answer to "lost in forest" vs. "lost to terrain LOS" a
@@ -1034,7 +1116,11 @@ The entries are in the order they were written, which is roughly perception → 
   `None`) so a Stage-4-less entry, if one is ever written before that trigger exists, still has a
   real value to serialise. `MotionInfo.dir` and `.outcome` both ship nullable-forever-until-later
   — no direction belief and no destruction-determination signal exist yet (plan's own Risks &
-  Unknowns), not an oversight.
+  Unknowns), not an oversight. `SCHEMA_VERSION` is `2` as of `[[BL-B112]]`:
+  `CompositionItem.immobile` (`perception.object_model.ObjectTypeProfile.immobile`'s value for
+  that bucket's type, frozen at write time) is a new field, decoded with `.get("immobile", False)`
+  rather than a bare key lookup — every schema-1 entry on disk predates it, so a missing key is
+  the expected shape for an old file, not corruption.
 - `src/mission_memory/store.py` — `MissionMemory`, the in-memory JSONL-backed log.
   `MissionMemory.append` is the **single construction site** for `Entry` across this whole
   package: `admission.py`/`marks.py`/`query.py`/`tools.py` contain no `Entry(` call at all,
@@ -1060,6 +1146,16 @@ The entries are in the order they were written, which is roughly perception → 
   `RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`, `FIRED_ON_FOLD_WINDOW_S` (the user's own "~2 min").
   `FiredOnTracker` is the one admission rule's own per-shooter suppression bookkeeping, owned by
   the poll loop's caller, deliberately not state on `MissionMemory` itself.
+  **`LostContactTracker`/`_write_lost_entry`/`_write_lost_entries`** (`[[BL-B112]]`) are
+  `FiredOnTracker`'s own sibling: a `CONTACT_LOST` event writes one forced terminal snapshot of the
+  contact's last real look (the working-memory → kneeboard hand-off, explore-notes.md) —
+  air-defence always, a group contact only if it already cleared `GROUP_ENTRY_CONFIDENCE_FLOOR` on
+  the way in (same floor, applied once more on the way out). Bypasses `RESIGHT_MIN_INTERVAL_S`/
+  `_material_change` entirely (a forced snapshot, not an ordinary resight), and reuses every other
+  helper (`_build_entry_position`/`_seen_how`/`_motion_info`/`_composition_for`/`_group_link_for`)
+  unmodified — `_build_entry_position`'s position is already frozen at the last genuine look
+  (`Contact.position.as_of_sim`, only ever updated inside `record`/`from_percept`), so this write
+  records the last-seen place and time, not the moment the note was written.
 - `src/mission_memory/marks.py` — the commanded-mark path (Decision 6), `mark_here`/`mark_target`,
   reachable by voice and the brain tool only — no new F10 radio-menu entry, per BL-10's explicit
   instruction not to re-expand that tree. **Deliberately does not share `admission.py`'s
@@ -1360,6 +1456,50 @@ The entries are in the order they were written, which is roughly perception → 
   — `_SECTOR_LEGS`'s per-sector tables generalised to an arbitrary wedge. `gaze_at` picks
   `commanded_sector` over `commanded_legs` over free scan, in that order (mutual exclusivity means
   at most one of the first two is ever set).
+
+  **`BL-B110` Stage 1** (`plans/expected-area-check/plan.md`) adds the per-sector free-scan
+  mechanism, split across three modules so `perception` never has to import `belief`:
+  `perception.geometry.sector_runs_for_legs`/`n_sectors_for_legs` partition an ordered o'clock-hour
+  table into consecutive same-third runs (ahead/left/right, cyclic first/last merge) — placed there,
+  not here, because `tuning.py`'s cross-key coupling check needs it and `gaze.py` itself imports
+  `tuning`. `gaze.py` adds `GLASS_BUDGET_PER_CYCLE_S` (tunable) and derived `WORST_REVISIT_S`
+  (`SCAN_CYCLE_PERIOD_S + GLASS_BUDGET_PER_CYCLE_S + n_sectors(SCAN_PLAN)` seconds of poll slack —
+  `perception.naked_eye_source._ACQUISITION_RETENTION_WINDOW_S` now reads this instead of the bare
+  sweep period), `sector_azimuth_span_deg` (a sector's own union wedge) and the public `sector_legs_
+  for` accessor. `ScanPlan` gains `sweep_legs`/`sweep_started_sim` (the one-pass sector sweep
+  anchor); `gaze_at` honours it with no modulo, holding at the sector's last leg once reached —
+  `FREE_SCAN_PLAN` (no anchor) keeps the pre-Stage-1 absolute-indexing behaviour unchanged, which is
+  why that plan's own test-impact analysis found `test_gaze.py`'s free-scan cycling tests needed no
+  change. `belief.optic_policy.decide`/`_decide_without_guidance` keep `scan_cycle_period_s`'s
+  pre-Stage-1 name and shape (now meaning "this sector's own period") and gain three new, default-
+  backward-compatible parameters (`sector_wedge_deg`/`n_sectors`/`glass_budget_per_cycle_s`) — a
+  deliberate scope decision to avoid a ~130-site mechanical rename across `test_optic_policy.py`;
+  see that plan's own Stage 1 section and `plans/expected-area-check/implementation.md` for the
+  reasoning. `OpticState` gains `scan_sector_index`/`glass_step_started_sim`/`glass_recent_steps_s`
+  (the rolling budget window, length `n_sectors - 1`). New `choose_glass_look` (three buckets: a
+  `class` contact in its type window, then anything else `can_still_improve` admits, then an
+  exact-location-only target for a *watched* contact whose `LookTarget.location_gain_m` -- computed
+  by the new `location_gain_for` -- clears `EXACT_LOCATION_MIN_GAIN_M`), sharing `_classification_
+  bucket`/`choose_look` with the pre-existing `choose_sighting_look` rather than re-deriving the
+  coverage math. `GLASS_STALL_COOLDOWN_S` (and its `_EFFECTIVE_` floor at `OPTIC_RETRY_INTERVAL_S`,
+  mirroring `SIGHT_STALL_COOLDOWN_S`'s own pattern) closes the one selectivity gap `BL-B85` deferred
+  for `GLASSING`: a look that already failed at this range no longer retries at the bare
+  `OPTIC_RETRY_INTERVAL_S` alone. Look-follow (azimuth only, a stated simplification — no new
+  `OpticState` field, per the plan's own Co-moving Fields table) shifts an in-progress look's sweep
+  steps and envelope centre by the chosen contact's own azimuth drift each poll. `body.py`'s new
+  `_resolve_sector_scan` builds one resolved `ScanPlan` plus the sector period/wedge/count once per
+  poll from the *previous* poll's `OpticState`, handed to every `gaze_at` consumer and to
+  `decide_optic` alike (E4) — freezing the free-scan sweep at its last leg while `GLASSING`/
+  `SEARCHING`/`SIGHTING` (the eye is not physically free-sweeping then), anchoring at `now_sim` on
+  the very first poll (matching `decide_optic`'s own first-poll convention, found the hard way when
+  an initial "freeze" reading gave a second poll at the same `t_sim` a different gaze than the
+  first). A commanded scan (a sector, a single o'clock hour, or compass-derived legs) is treated as
+  one sector spanning its own legs, fixing the pre-Stage-1 wiring defect where a faster commanded
+  scan never actually brought binoculars round sooner (`body.py` always passed the bare 16 s
+  `SCAN_CYCLE_PERIOD_S` regardless). Sector bookkeeping resets to its defaults on two external
+  triggers: a genuinely new or cancelled scan command (`ScanPlan.command_t_sim` changing, never
+  heading-driven leg recomputation — a new `_last_scan_command_t_sim` field on the runner tracks
+  this) and OBSERV going off (folded into the existing `home_phase`-reset branch).
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into
@@ -1396,3 +1536,69 @@ The entries are in the order they were written, which is roughly perception → 
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a
   live ambiguous scene is harder to stage than a single-target one — noted in that test module's
   own docstring.
+- `src/belief/expected_area.py` (`BL-B111`, `plans/expected-area-look/plan.md`) — the expected-
+  area-look mechanism end to end: state (`ExpectedAreaCheck`), the trigger (`eligible_trigger_
+  target`/`merge_echo_or_beside_lost_target`, called from `belief.contacts.ContactStore.ingest`'s
+  existing gate/founding branches, never a separate pass over the store), the verdict
+  (`area_visibility`, Stage 2), and the one "when" function (`resolve_checks`), which is the only
+  caller of the four actions (`release_check`/`record_believed_distinct`/`merge_contact`/`mark_
+  lost_now`, all on `ContactStore`) — "hold" is not a separate action, it is simply `open_check`.
+
+  **The trigger's precondition was amended after shipping, and the amendment is the load-bearing
+  part of this module.** The plan's literal reading, "A was not seen this poll"
+  (`a.last_seen_sim < now_sim`), is true of nearly every ordinary gate match by construction — a
+  passing candidate's own `last_seen_sim` is always from a strictly earlier poll than the percept
+  now being matched against it — and fired on all 18 gate matches of a contact tracked
+  continuously through the gate at 1 s polls, breaking two existing `test_contacts.py` tests
+  (`.claude/agent-memory/implementer/feedback_tautological_trigger_precondition.md`). `a_out_of_
+  view` replaces it: A is out of view only once it has not been seen within `perception.gaze.
+  FOCUS_DWELL_S` (one gaze dwell) — the window he looks for, not a poll-loop cadence, and measured
+  (`probe_b111_trigger.py`) to equal the plan's own model in every one of 144 harness cells, max
+  difference 0.0 points.
+
+  **`EXPECTED_AREA_MAX_HALF_WIDTH_DEG` is a feasibility gate, not a separability predictor**
+  (Decision 1): it answers "does A have an expected *place* narrow enough that one glance could
+  cover it", never "are A and B probably different groups". A group whose believed area has
+  already grown past one binocular sweep (armour, ~700 s and beyond) gets no check at all —
+  today's silent fold stands for that case, the plan's own accepted cost, tied to `[[BL-B112]]`.
+
+  **The verdict table is fail-closed throughout** (`area_visibility`): every clause — area still
+  fits, the look completed naturally and steady with A's place inside its envelope, inside the
+  cockpit mask, within binocular presence range, not forest/settlement, probe answer matched by
+  `seq` and inside its time window — must hold, and a probe answer of `None` (no answer, a stale
+  one, or the Hook's own pcall failing) is read as `"cannot_look"`, **never** as "empty" (E5/E11).
+  "A observed" (the vignette rule, Stage 3a) counts only a percept genuinely attributed to A
+  itself (continuity or the gate) — never "anything seen in A's area", which the harness measured
+  would call a genuine same group "different" 91-99% of the time by naively reading the look.
+
+  **No new constant for the trigger itself** — reuses the existing gate and `contacts_plausibly_
+  same`. The two real new tunables, `EXPECTED_AREA_MAX_HALF_WIDTH_DEG` (Decision 1, 15°) and
+  `COMPOSITION_MATCH_RATIO` (Stage 3b's "same" clause, 2.0), are declared here with `tuning.real`
+  and are in the rendered `config/defaults.toml`; `MAX_OPEN_CHECKS`/`PROBE_POINTS_PER_CHECK` are
+  plain `Final` literals, not tunables, because they are protocol bounds shared with the aircraft-
+  layer Hook's fixed-shape `SET_PROBES_TEMPLATE`, not a dial that changes what Petrovich does.
+
+  **`_LOOK_SWEEP_SIGMA` is declared independently here, not imported from `belief.optic_policy.
+  LOOK_SWEEP_SIGMA`**, despite sharing the value 3.0 — the same "declare independently, with a
+  comment citing the sibling and why" move `LOOK_SWEEP_SIGMA`'s own docstring already takes
+  toward `belief.association_over_time.GATE_SIGMA_THRESHOLD`. Importing it here would also reopen
+  a real import cycle: `optic_policy` imports `belief.enrichment`, which imports `belief.
+  contacts`, which imports this module to call the trigger/verdict functions above. `Contact` is
+  imported only under `TYPE_CHECKING` for the same reason — `mypy --strict` passed clean on the
+  literal version of this cycle while the test suite's actual import graph deadlocked at runtime,
+  because `from __future__ import annotations` makes every annotation a lazy string mypy resolves
+  structurally rather than by executing the import order
+  (`.claude/agent-memory/implementer/feedback_circular_import_from_lazy_annotations.md`).
+
+  `probe_points_for` computes A's believed point plus the two along-line ±2σ points (Decision 4)
+  along the observer→A bearing, reusing `belief.position_belief._down_axis_unit` rather than
+  re-deriving the axis. `relocation_warranted` (Decision 3) is the full two-condition predicate
+  for *"that group, now …"*: the spoken clock hour or 0.5 km range bucket must have changed
+  **and** the merged position must have moved ≥ 500 m in range or ≥ 30° in bearing — bucket
+  change alone was measured to fire 6-65% on a stationary same group (bucket-edge jitter); with
+  both conditions it is 0% same-optic, 12-35% eye→bino (a real range correction, not jitter).
+
+  See `plans/expected-area-look/plan.md` for the full verdict table, the Co-moving Fields
+  construction-site inventory, and the Acceptance grid; `tools/measure_expected_area_look.py`
+  (modelled mode, and `--production` for the real `ContactStore`/`resolve_checks` fenced in
+  `tests/test_expected_area_look_sweep.py`) is where every number above was actually measured.

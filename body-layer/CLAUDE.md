@@ -144,8 +144,22 @@ The other per-run debug logs below (`--detection-trace`, `--group-trace`, `--sle
 **Voice-latency instrumentation (`plans/voice-latency-instrumentation/plan.md`).** A per-utterance
 `correlation_id`, minted by `audio-adapter`'s capture process at PTT release, now rides the whole
 chain: `--speech-log` rows and `--belief-truth-log`'s `kind: "speech"` rows both gain it, plus
-`push_sent_wall`/`push_acked_wall`/`push_duration_s` on the latter (`CrewConsole._print`'s own
-`time.monotonic()` bracket around `push_speech`). **Every positional readback is deferred, not
+`push_sent_wall`/`push_acked_wall`/`push_duration_s` on the latter. **`[[BL-B106]]`
+(`plans/async-speech/plan.md`) moved the `push_speech` call itself, and that `time.monotonic()`
+bracket, off `CrewConsole._print` and onto `belief.speech_worker.SpeechWorker`'s own background
+thread** — `_print`'s speech branch now enqueues and returns immediately when `speech_worker` is
+configured (`body.py`'s `main()` always builds and opens one now that speech is unconditional,
+`BL-B96`); the worker times the push and deposits a result, and `CrewConsole.
+drain_speech_results` (polled once per poll, same spot as `drain_events`/`drain_brain`) is what
+actually calls `speech_log_sink` with those real timings, **on the poll thread** — not the worker
+thread, because `speech_log_sink`'s own closure (`body._speech_log_sink`) reads poll-thread-owned
+state live and is only safe to call from there. `stop_talking` and a mission restart both now
+route through `speech_worker.interrupt()` rather than `speech_client.stop()` directly, falling
+back to the pre-existing direct call when no worker is configured (every test that builds a
+`CrewConsole` without one). The queue is bounded (`_MAX_QUEUE_LEN = 64`, FIFO, drop-oldest plus
+one rate-limited `WARNING` on overflow, same shape as `aircraft-layer`'s `AudioPlaybackSender`)
+so a producer bug cannot grow it without limit, but ordinary callout traffic never comes close.
+**Every positional readback is deferred, not
 just spoken immediately, when `CalloutScheduler.busy_until_sim` is modeled busy** — `select_target`,
 `mark_target`, `step`, `follow`, `watch_nearest`/`watch_nearest_air_defence`, and the whole `report`
 family: the command's own immediate, unconditional side effects (resolving a target, registering a
@@ -198,6 +212,22 @@ evaluated through a sight optic and found inside its FOV (truth geometry and gat
 first) — what the simulated 9K113 sees. Turning it on also turns on the detection-trace collector
 in memory (no detection-trace file unless `--detection-trace` is given).
 
+Add `--expected-area-log PATH` (`plans/expected-area-look/plan.md` Pass 3) to write one JSON line
+per `belief.expected_area` check *opened* (one row per poll it stays open) and one per *verdict*
+`resolve_checks` reaches (`"different"`/`"same"`/`"absent"`/`"cannot_look"`, plus the relocation
+flag and, for a `"cannot_look"` verdict, which clause of `area_visibility` decided it). Answers the
+plan's own top-listed open risk — how often the trigger fires in flight, and whether a busy scene
+crowds the hold out of the shared glass budget — which was otherwise genuinely unobservable from a
+flown sortie's artifacts: `logger.debug`/`logger.info` calls at the same two points are real but go
+to stderr/stdout, not a file `sortie-log-triage` can resolve and reduce, and neither
+`--detection-trace`'s `DetectionTrace` (ground-truth-only by construction, no `belief/` import at
+all) nor `--belief-truth-log`'s `BeliefTruthRow` (every row requires a matched ground-truth object,
+which a belief-only expected-area check never has) fits this data. `src/expected_area_log.py` is
+the writer, the seventh per-run JSONL log, same "additive, off by default, true no-op when absent"
+posture and same unbuffered shape as `--group-trace`'s own `GroupTraceLogWriter`; reduce with
+`.claude/skills/sortie-log-triage`, which also counts the merge-echo suppressions (`[[BL-B114]]`'s
+own flight signal — a `"cannot_look"` verdict on an `"echo"`-kind check).
+
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
 mission memory, and every perception source a clean slate (`body._check_for_new_mission`/
@@ -222,7 +252,7 @@ as not terrain model" / "on error loud refusal is better") until the next missio
 resolves successfully.
 
 **Per-mission log files (Decision 5).** `--detection-trace`/`--belief-truth-log`/`--mission-memory`/
-`--speech-log`/`--group-trace`/`--slew-trace` each roll to a *fresh* stamped filename (same
+`--speech-log`/`--group-trace`/`--slew-trace`/`--expected-area-log` each roll to a *fresh* stamped filename (same
 `run_log_paths` mechanism as the initial per-run stamp, `BL-11` Stage 5) on every detected mission
 (re)start, not
 just once at process start — a sortie that restarts the mission mid-process gets its own set of
@@ -234,7 +264,9 @@ several unrelated missions.
 **`plans/configurable-constants/plan.md`, Stages 1-2.** A curated ~15 behaviour-affecting
 constants (the four `attack_run` gates, the three visibility tier radii, `SPEECH_RATE_WPS`,
 `INTER_UTTERANCE_GAP_S`, `FOCUS_DWELL_S`, `SCAN_PLAN`, `IDENTITY_HALF_LIFE_S`,
-`POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`, `BEARING_SIGMA_DEG`) resolve through `src/tuning.py`
+`POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`, `BEARING_SIGMA_DEG`, `LAST_I_SAW_GROWTH_THRESHOLD_M`
+(`[[BL-B112]]` — the "last I saw" hedge's plausible-displacement threshold, 0.5 km by the user's
+own figure)) resolve through `src/tuning.py`
 at **import time**, not at runtime — see that module's own docstring for why (constants bind by
 value at import; a later `setattr` on the defining module never reaches an importer that already
 ran).
@@ -267,15 +299,29 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m body --print-tuning
 regenerates it from the `tuning.*` declarations in `src/`, and
 `tests/test_tuning_defaults_toml.py` fails CI if a calibration commit forgot to regenerate it.
 
-**A known residual coupling, not fully closed by the loader's own per-key bounds:**
-`belief.decay.py` asserts `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` at import time
-(`OBSERVED_WINDOW_S` being `perception.gaze.SCAN_CYCLE_PERIOD_S`, itself
-`len(SCAN_PLAN) * FOCUS_DWELL_S`). `POSITION_HALF_LIFE_S`'s own declared bounds (`lo=20.0`) sit
-safely above the *default* `SCAN_CYCLE_PERIOD_S` (16.0), but tuning `POSITION_HALF_LIFE_S` down
-*and* `FOCUS_DWELL_S`/`SCAN_PLAN` up at the same time can still violate that assertion and crash
-at import — the loader validates each key against its own declared bounds, not against the other
-keys it is coupled to. Single-key tuning (the motivating case) is safe by a wide margin; tuning
-more than one of these three together is not protected.
+**A cross-key coupling, not closeable by per-key bounds alone, so `tuning._check_scan_decay_
+coupling` enforces it directly.** `belief.decay.py` asserts two invariants over five keys
+(`perception.gaze.FOCUS_DWELL_S`/`SCAN_PLAN`/`GLASS_BUDGET_PER_CYCLE_S`,
+`belief.decay.POSITION_HALF_LIFE_S`/`LOST_THRESHOLD_S`) at import time —
+`BL-B110`'s `plans/expected-area-check/plan.md` Stage 1 extended this from the original three
+keys/one invariant (`plans/configurable-constants/review.md`'s Required Fix 1):
+
+- **I1 (original)**: `OBSERVED_WINDOW_S` (`len(SCAN_PLAN) * FOCUS_DWELL_S`) must stay below
+  `POSITION_HALF_LIFE_S`, or the "tracked" certainty band collapses to nothing for a *quiet* scan.
+- **I2 (new)**: `WORST_REVISIT_S` (`OBSERVED_WINDOW_S + GLASS_BUDGET_PER_CYCLE_S +
+  n_sectors(SCAN_PLAN)` seconds of poll slack) must stay below both `LOST_THRESHOLD_S` and
+  `2 * POSITION_HALF_LIFE_S`, or a flank contact (or its group) would go lost/re-form every *busy*
+  glass-budget cycle, not just on a quiet sweep.
+
+A per-key `lo`/`hi` bound cannot see either coupling on its own — `POSITION_HALF_LIFE_S`'s own
+`lo=20.0` sits safely above the default `OBSERVED_WINDOW_S` (16.0), and `LOST_THRESHOLD_S`'s own
+`lo=30.0` sits below the default `WORST_REVISIT_S` (32.0), each reachable by a single in-bounds
+override. `tuning._check_scan_decay_coupling` is what closes this: before any of the five keys'
+own accessor returns, it checks the combination the override file (plus code defaults for keys it
+does not mention) would resolve to, and if either invariant would be violated, rejects every one
+of the five keys the file actually sets back to its own code default — never crashes, per this
+project's own tuning policy above (a bad combination warns and falls back, exactly like any other
+rejected value).
 
 ## Testing
 
@@ -508,7 +554,8 @@ Surfaces and transports:
 - `src/belief/voice_commands.py` — speech-transcript recognition to command tokens.
 - `src/belief/brain_client.py`, `src/belief/brain_reply.py` — the brain-layer HTTP seam and structured-reply handling.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API. `push_text_line` and the other writes **raise** rather than swallow; the caller's try/except is the designed catch point.
-- `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`).
+- `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`). `push_speech`/`stop` still raise `AudioAdapterError` synchronously on the calling thread exactly as before; `[[BL-B106]]` changed *which* thread calls them (`SpeechWorker`'s, not `CrewConsole._print`'s), not this client's own contract.
+- `src/belief/speech_worker.py` — `SpeechWorker` (`[[BL-B106]]`, `plans/async-speech/plan.md`): the bounded-FIFO background-thread worker that makes `_print`'s `push_speech` call asynchronous, mirroring `aircraft-layer`'s `AudioPlaybackSender` shape rather than `brain_client.BrainLayerClient`'s single-slot one (speech must preserve order, never silently skip a line). `enqueue`/`interrupt`/`drain_results`, `open`/`close` lifecycle. See the "Voice-latency instrumentation" paragraph above for how it plugs into `CrewConsole`.
 - `src/body.py` — the poll-loop entrypoint and every `--flag` branch. `main()`'s CLI wiring is untested by design; the runners are tested against fakes.
 - `src/detection_trace_writer.py` — the sanctioned ground-truth-plus-belief join. Read-only, one-directional, buffered off the poll loop's critical path.
 - `src/ascii_canvas.py` — shared ASCII-canvas primitives (`Canvas`, `wrap`, the ANSI colour constants) extracted from `eyesight_view.py` (`plans/pov-view/plan.md`, `BL-B99`) so `pov_view.py` reuses the same grid instead of forking it.

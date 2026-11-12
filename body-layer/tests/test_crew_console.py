@@ -40,12 +40,18 @@ from belief.crew_console import (
     _describe_token_for_confirm,
     _nearest_sector,
 )
-from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S, certainty_of
+from belief.decay import (
+    LAST_I_SAW_GROWTH_THRESHOLD_M,
+    LOST_THRESHOLD_S,
+    OBSERVED_WINDOW_S,
+    certainty_of,
+)
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
 from belief.optic_policy import BoundedSightLook
 from belief.percept import Percept
+from belief.position_belief import plausible_speed_mps
 from belief.referent import Mention
 from belief.speech import (
     group_membership_state,
@@ -53,6 +59,7 @@ from belief.speech import (
     render_group_full_disclosure,
     render_no_contact,
 )
+from belief.speech_worker import _SpeechResult
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import attack_target_task, describe_contact
 from belief.voice_commands import (
@@ -107,6 +114,38 @@ class FakeSpeechClient:
         if "Copy." in self._fail_on:
             raise AudioAdapterError("simulated stop failure")
         self.stop_calls += 1
+
+
+class FakeSpeechWorker:
+    """`[[BL-B106]]` -- a `belief.speech_worker.SpeechWorker`-shaped
+    double for testing `CrewConsole`'s own *wiring* to a worker
+    (`_print`'s worker-vs-fallback split, `drain_speech_results`,
+    `_handle_stop_talking`/`reset_for_new_mission`'s interrupt routing)
+    without a real background thread -- `test_speech_worker.py` covers
+    the real class's own threading/ordering/overflow/interrupt
+    behaviour. `enqueue`/`interrupt` just record; `drain_results`
+    returns and clears whatever the test has put on `self.results`."""
+
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, bool, str | None, dict[str, object] | None]] = []
+        self.interrupt_calls = 0
+        self.results: list[_SpeechResult] = []
+
+    def enqueue(
+        self,
+        line: str,
+        bypass_gate: bool,
+        correlation_id: str | None,
+        attack_run_fields: dict[str, object] | None,
+    ) -> None:
+        self.enqueued.append((line, bypass_gate, correlation_id, attack_run_fields))
+
+    def interrupt(self) -> None:
+        self.interrupt_calls += 1
+
+    def drain_results(self) -> list[_SpeechResult]:
+        drained, self.results = self.results, []
+        return drained
 
 
 class _CapturingBrainClient:
@@ -1070,6 +1109,182 @@ def test_stop_talking_interrupt_failure_does_not_raise() -> None:
     lines = console.handle_command("stop_talking", now_sim=0.0)
 
     assert lines == []
+
+
+def test_stop_talking_routes_through_speech_worker_interrupt_when_configured() -> None:
+    """`[[BL-B106]]` Decision 3 -- when `speech_worker` is configured,
+    `stop_talking` must reach `speech_worker.interrupt()`, never
+    `speech_client.stop()` directly, consolidating every `speech_client`
+    access behind its one owner."""
+    speech_client = FakeSpeechClient()
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_client=speech_client,  # type: ignore[arg-type]
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_command("stop_talking", now_sim=0.0)
+
+    assert lines == []
+    assert speech_worker.interrupt_calls == 1
+    assert speech_client.stop_calls == 0
+    assert speech_client.pushed == []
+
+
+# -- `[[BL-B106]]` async speech: _print's worker-vs-fallback split and ------
+# `drain_speech_results` (`plans/async-speech/plan.md`) --------------------
+
+
+def test_print_enqueues_to_speech_worker_instead_of_pushing_directly() -> None:
+    """When `speech_worker` is configured, `_print`'s speech branch must
+    enqueue there and must **not** call `speech_client.push_speech`
+    directly -- the whole point of Decision 1's worker-vs-fallback
+    split."""
+    speech_client = FakeSpeechClient()
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_client=speech_client,  # type: ignore[arg-type]
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    console.handle_line("radio check", now_sim=0.0)
+
+    assert speech_client.pushed == []
+    assert len(speech_worker.enqueued) == 1
+    _line, bypass_gate, _correlation_id, attack_run_fields = speech_worker.enqueued[0]
+    assert bypass_gate is False
+    assert attack_run_fields is None
+
+
+def test_print_with_worker_does_not_call_speech_log_sink_synchronously() -> None:
+    """The timings aren't known yet at enqueue time -- `speech_log_sink`
+    for an enqueued line is deferred to `drain_speech_results`, not
+    called from `_print` itself (Decision 2)."""
+    logged: list[object] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+    )
+
+    console.handle_line("radio check", now_sim=0.0)
+
+    assert len(speech_worker.enqueued) == 1
+    assert logged == []
+
+
+def test_print_silenced_with_worker_configured_enqueues_nothing_but_still_logs() -> (
+    None
+):
+    """`self.silenced` must still gate the worker branch exactly as it
+    gates the fallback `speech_client` branch -- nothing is enqueued,
+    and (matching the fallback path's own existing behaviour for a
+    silenced line) `speech_log_sink` is still called synchronously, with
+    `push_sent_wall`/`push_acked_wall`/`push_duration_s` all `None`,
+    since `speech_log_sink`/scheduler bookkeeping are not gated by
+    `silenced` (see `CrewConsole.silenced`'s own field docstring)."""
+    logged: list[tuple[object, ...]] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+        silenced=True,
+    )
+
+    # Calling `_print` directly, not through `handle_command` -- any
+    # *other* command token would end `silence` before `_print` ever
+    # ran (`plans/silence-command/plan.md`: "any subsequent command will
+    # end silence"), which would defeat this test's own point.
+    console._print(["Loud and clear."], now_sim=0.0)
+
+    assert speech_worker.enqueued == []
+    assert len(logged) == 1
+    _line, _urgent, _attack_run_fields, _corr, push_sent, push_acked, push_dur = logged[
+        0
+    ]
+    assert push_sent is None
+    assert push_acked is None
+    assert push_dur is None
+
+
+def test_drain_speech_results_calls_speech_log_sink_with_result_timings() -> None:
+    """`drain_speech_results` is what finally calls `speech_log_sink` for
+    an enqueued line, carrying the real timings the worker measured --
+    not the `(None, None, None)` triple a synchronous call would have
+    produced."""
+    logged: list[tuple[object, ...]] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+    )
+    speech_worker.results.append(
+        _SpeechResult(
+            line="BMP-2.",
+            bypass_gate=False,
+            correlation_id="corr-1",
+            attack_run_fields=None,
+            push_sent_wall=10.0,
+            push_acked_wall=10.5,
+            push_duration_s=0.5,
+        )
+    )
+
+    console.drain_speech_results(now_sim=0.0)
+
+    assert len(logged) == 1
+    line, urgent, _attack_run_fields, corr, push_sent, push_acked, push_dur = logged[0]
+    assert line == "BMP-2."
+    assert urgent is False
+    assert corr == "corr-1"
+    assert push_sent == 10.0
+    assert push_acked == 10.5
+    assert push_dur == 0.5
+    # A second drain with nothing new produced is a no-op.
+    logged.clear()
+    console.drain_speech_results(now_sim=1.0)
+    assert logged == []
+
+
+def test_drain_speech_results_is_a_true_no_op_without_a_worker() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.drain_speech_results(now_sim=0.0)  # must not raise
+
+
+def test_reset_for_new_mission_interrupts_speech_worker_and_preserves_reference() -> (
+    None
+):
+    """`[[BL-B106]]` Decision 4 -- the worker thread itself persists
+    across a mission restart (same object, by identity), but its queued
+    content must not: `reset_for_new_mission` must call
+    `speech_worker.interrupt()`."""
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    console.reset_for_new_mission()
+
+    assert console.speech_worker is speech_worker
+    assert speech_worker.interrupt_calls == 1
+
+
+def test_reset_for_new_mission_preserves_audio_adapter_reporter() -> None:
+    """A pre-existing `BL-B96` omission (`plans/async-speech/plan.md`'s
+    "Refresh" section) -- `audio_adapter_reporter` must survive a
+    mission restart, by identity, same as `speech_client`."""
+    reporter = ConnectionReporter(logging.getLogger("test"), label="audio adapter")
+    console = CrewConsole(store=ContactStore(), audio_adapter_reporter=reporter)
+
+    console.reset_for_new_mission()
+
+    assert console.audio_adapter_reporter is reporter
 
 
 # -- silence (`plans/silence-command/plan.md`, user direction 2026-10-04: -----
@@ -3964,7 +4179,13 @@ def _observation_for_follow(
     """Places a contact at a controlled clock/range from `_enrichment_
     context`'s fixed origin ownship, with a caller-controlled
     classification -- `_observation_at`'s shape, extended with
-    `classification_level` for `follow`'s descriptor-matching tests."""
+    `classification_level` for `follow`'s descriptor-matching tests.
+    `surface_alt_m` is left `None` (an air contact, `Contact.on_surface
+    is False`) -- `[[BL-B112]]`'s `contact_growth_rate_mps` therefore
+    takes the unconditional class-rate branch for every contact this
+    fixture builds, regardless of observed motion (that function's own
+    docstring: "air contacts are gated on `on_surface`, not on `contact.
+    motion`")."""
     x, z = _xz_for_clock(clock, range_m)
     return Observation(
         id=obs_id,
@@ -6824,10 +7045,11 @@ def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
 
     Driven by making the contact stale enough that the push path's own
     observability/eligibility reasoning would have something to say about
-    it -- `certainty` has fallen to `estimated`, past `OBSERVED_WINDOW_S`
-    and past `POSITION_HALF_LIFE_S` -- and asserting the report still
-    names it."""
-    from belief.decay import OBSERVED_WINDOW_S, POSITION_HALF_LIFE_S
+    it -- `certainty` has fallen to `estimated` (`[[BL-B112]]`: past
+    `LAST_I_SAW_GROWTH_THRESHOLD_M`'s plausible-displacement bound, not a
+    bare elapsed-time window) -- and asserting the report still names it."""
+    from belief.decay import LAST_I_SAW_GROWTH_THRESHOLD_M, LOST_THRESHOLD_S
+    from belief.position_belief import plausible_speed_mps
 
     store = ContactStore()
     store.ingest(
@@ -6844,8 +7066,11 @@ def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    later = POSITION_HALF_LIFE_S + 1.0
-    assert later > OBSERVED_WINDOW_S
+    # `OP_ARMORED` here is an air contact (`on_surface=False`,
+    # `_observation_for_follow`'s own docstring), so its growth rate is
+    # the unconditional class rate -- time to cross the growth threshold.
+    later = LAST_I_SAW_GROWTH_THRESHOLD_M / plausible_speed_mps("OP_ARMORED") + 1.0
+    assert later < LOST_THRESHOLD_S, "fixture must land in 'estimated', not 'lost'"
     store.tick(now_sim=later)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     console.on_ground = False
@@ -6951,24 +7176,27 @@ def test_slotted_report_band_labels_are_derived_from_the_filter_bounds() -> None
     assert _REPORT_BAND_LABELS["far"] == "beyond 5 kilometres"
 
 
-def test_slotted_report_freshness_window_is_the_decay_modules_own(
+def test_slotted_report_freshness_window_is_growth_distance_based(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The live call site passes `decay.OBSERVED_WINDOW_S` -- the
-    project's existing "how long since a look is still fresh" bound -- so
-    no second staleness constant was introduced (`plans/crew-query-path/
-    plan.md` Decision D; `decay.py` is read-only in this plan).
+    """`[[BL-B112]]`: the live call site's wording trigger is no longer a
+    bare elapsed-time window -- `speech._needs_hedge` reads `certainty ==
+    "estimated"`, and `certainty_of`'s tracked/estimated boundary is now
+    growth-distance-based (`belief.decay.LAST_I_SAW_GROWTH_THRESHOLD_M`),
+    not `decay.OBSERVED_WINDOW_S` (the test this one replaces pinned that
+    constant; `decay.py`'s own docstring on `POSITION_HALF_LIFE_S` records
+    why `OBSERVED_WINDOW_S` no longer decides this wording either).
 
-    Driven across the boundary rather than by reading the constant back:
-    the same scene answers unqualified just inside the window and
-    qualified just outside it. The window is read from `decay` to place
-    the two probes, never to assert the wording.
+    Driven across the real boundary rather than by reading the constant
+    back: the same scene answers unqualified just inside the distance the
+    contact's own class (`OP_ARMORED`, an air contact under this
+    fixture's own `on_surface=False` -- see `_observation_for_follow`'s
+    docstring) could plausibly have travelled, and qualified just past
+    it.
 
     `scheduler.busy_until_sim` is reset between the two calls -- see
     `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
-    note (`plans/voice-latency-instrumentation/plan.md` Stage 6); the two
-    `now_sim` values are only 2s apart, well inside the first call's own
-    estimated speech duration."""
+    note (`plans/voice-latency-instrumentation/plan.md` Stage 6)."""
     store = ContactStore()
     store.ingest(
         [
@@ -6987,12 +7215,19 @@ def test_slotted_report_freshness_window_is_the_decay_modules_own(
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     console.on_ground = False
 
+    growth_rate_mps = plausible_speed_mps("OP_ARMORED")
+    threshold_s = LAST_I_SAW_GROWTH_THRESHOLD_M / growth_rate_mps
+    assert OBSERVED_WINDOW_S < threshold_s < LOST_THRESHOLD_S, (
+        "fixture assumption: the growth boundary must sit strictly between "
+        "OBSERVED_WINDOW_S and LOST_THRESHOLD_S for this test to probe it"
+    )
+
     fresh = console.handle_command(
-        "report", now_sim=OBSERVED_WINDOW_S - 1.0, slots={"clock": 2}
+        "report", now_sim=threshold_s - 1.0, slots={"clock": 2}
     )
     console.scheduler.busy_until_sim = 0.0
     stale = console.handle_command(
-        "report", now_sim=OBSERVED_WINDOW_S + 1.0, slots={"clock": 2}
+        "report", now_sim=threshold_s + 1.0, slots={"clock": 2}
     )
 
     assert "Last I saw" not in fresh[0]
