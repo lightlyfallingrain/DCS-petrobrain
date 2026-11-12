@@ -125,6 +125,8 @@ class BrainClient(Protocol):
 
     def poll_replies(self) -> list[BrainReply]: ...
 
+    def available(self) -> bool: ...
+
 
 class NullBrainClient:
     """See module docstring. Does nothing -- the honest "no brain yet"
@@ -138,6 +140,13 @@ class NullBrainClient:
 
     def poll_replies(self) -> list[BrainReply]:
         return []
+
+    def available(self) -> bool:
+        """`plans/brain-tool-calls/plan.md` D4 -- always unavailable:
+        there is no brain behind this client at all, so an addressed
+        utterance should hear "Unable, no brain." immediately rather than
+        wait out a turn budget for a reply that will never come."""
+        return False
 
 
 @dataclass
@@ -155,6 +164,12 @@ class DebugPrintBrainClient:
 
     def poll_replies(self) -> list[BrainReply]:
         return []
+
+    def available(self) -> bool:
+        """See `NullBrainClient.available`'s own docstring -- same
+        always-unavailable posture, this stand-in never has a real brain
+        behind it either."""
+        return False
 
 
 def _situational_header(

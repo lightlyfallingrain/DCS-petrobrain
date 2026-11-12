@@ -94,6 +94,15 @@ _POLL_LOOP_INTERVAL_S = 0.2
 #: its own before this backoff ever applies.
 _POLL_RETRY_BACKOFF_S = 1.0
 
+#: `plans/brain-tool-calls/plan.md` D4 -- `available()` reports `False`
+#: once the background poll thread's last *successful* round is older
+#: than this many seconds, so a down or newly-wedged brain-layer process
+#: is noticed within a couple of retry cycles rather than only once a
+#: caller happens to try something and get silence. A protocol/timing
+#: constant, not a Petrovich behaviour choice, so an ordinary literal
+#: like `_POLL_RETRY_BACKOFF_S` above rather than a `tuning.py` entry.
+_AVAILABILITY_MAX_AGE_S = 3 * _POLL_RETRY_BACKOFF_S
+
 
 class BrainLayerError(RuntimeError):
     """Raised internally, inside the background poll thread's own loop,
@@ -212,6 +221,27 @@ class BrainLayerClient:
     #: successful background-thread round trip), never explicitly bounded
     #: since it is drained at least once per `_POLL_LOOP_INTERVAL_S`.
     _poll_buffer: list[BrainReply] = field(default_factory=list, repr=False)
+    #: Wall-clock time of the background poll thread's last *successful*
+    #: round (`_poll_once` returning rather than raising), whether or not
+    #: that round carried any replies -- `available()`'s own evidence that
+    #: brain-layer is actually answering. `None` until the first round
+    #: completes, which `available()` reads as "not yet confirmed
+    #: reachable," not an error.
+    _last_poll_success_wall: float | None = field(default=None, repr=False)
+
+    def available(self) -> bool:
+        """`plans/brain-tool-calls/plan.md` D4 -- whether an addressed
+        utterance may be escalated at all. `False` before this client's
+        background poll thread has ever completed a round (nothing has
+        confirmed brain-layer is there yet) or once its last successful
+        round is older than `_AVAILABILITY_MAX_AGE_S` -- a wedged or
+        crashed brain-layer process stops answering `GET /replies/poll`,
+        which is exactly what this reads."""
+        with self._poll_lock:
+            last = self._last_poll_success_wall
+        if last is None:
+            return False
+        return time.time() - last <= _AVAILABILITY_MAX_AGE_S
 
     def handle(self, payload: EscalationPayload) -> None:
         """Hands `payload` to the single-slot background worker and
@@ -312,8 +342,9 @@ class BrainLayerClient:
                 )
                 time.sleep(_POLL_RETRY_BACKOFF_S)
                 continue
-            if replies:
-                with self._poll_lock:
+            with self._poll_lock:
+                self._last_poll_success_wall = time.time()
+                if replies:
                     self._poll_buffer.extend(replies)
             time.sleep(_POLL_LOOP_INTERVAL_S)
 

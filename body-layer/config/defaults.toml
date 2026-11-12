@@ -84,10 +84,25 @@ INTER_UTTERANCE_GAP_S = 0.75
 SPEECH_RATE_WPS = 2.5
 
 [belief.crew_console]
+# `plans/brain-tool-calls/plan.md` D9/D5 -- the tool loop's own round cap, declared now alongside the turn-budget constants it is bounded by though nothing calls it until Stage 2 builds that loop.
+# status: agreed-guess | range: 1.0 .. 8.0
+# source: belief/crew_console.py:BRAIN_MAX_TOOL_ROUNDS
+BRAIN_MAX_TOOL_ROUNDS = 4
+
+# How long an addressed utterance waits for a brain reply before Petrovich gives up and speaks the turn's unable reason.
+# status: agreed-guess | range: 1.0 .. 60.0
+# source: belief/crew_console.py:BRAIN_REPLY_MAX_AGE_S
+BRAIN_REPLY_MAX_AGE_S = 20.0
+
 # Below this altitude AGL in metres, Petrovich is treated as on the ground: perception stops and a look command is refused rather than dispatched -- too high false-grounds him during genuine low-level/NOE flight, too low lets him scan while the aircraft is still sitting on the ramp.
 # status: uncalibrated | range: 0.5 .. 50.0
 # source: belief/crew_console.py:ON_GROUND_AGL_THRESHOLD_M
 ON_GROUND_AGL_THRESHOLD_M = 10.0
+
+# `plans/brain-layer/plan.md` D8 -- how long an outstanding brain turn waits for a reply before Petrovich speaks "stand by" once, purely deterministically (no model involvement).
+# status: agreed-guess | range: 0.5 .. 10.0
+# source: belief/crew_console.py:STAND_BY_AFTER_S
+STAND_BY_AFTER_S = 2.0
 
 [belief.decay]
 # Slowest-decaying attribute: what a contact *is*.
