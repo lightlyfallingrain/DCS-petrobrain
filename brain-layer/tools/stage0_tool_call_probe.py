@@ -248,15 +248,26 @@ def tool_to_json_schema(tool: ToolSpec) -> dict[str, Any]:
 #: forms, since D5/D10 require the same closed final-reply vocabulary
 #: however the tool call itself was expressed (plan D1: "Either way the
 #: wire to body is the same structured JSON").
-_FINAL_GRAMMAR_BLOCK = """To finish, reply on one line, exactly one of:
-FINAL command <token> <json object of slots>
-FINAL answer <form> <json list of refs>
-FINAL ask <json list of refs>
-FINAL unable <reason>
+_FINAL_GRAMMAR_BLOCK = """When you have what you need, finish with ONE line, exactly one of:
+FINAL command <token> {"target": "<ref>"}   -- do something, or point out one contact (use where_is_it for "where is X"); omit the slots object for commands without a target
+FINAL answer <form> <json list of refs>      -- form is one of: our_position (no refs), memory (mark refs), contacts (contact refs, at most 3), nothing_seen (no refs)
+FINAL ask <json list of refs>                -- two or more contacts fit and nothing the pilot said tells them apart
+FINAL unable <reason>                        -- reason is one of: NO_PLACE (pilot named a place no tool knows), CANNOT_ANSWER (no tool covers the question, e.g. ammunition or fuel), FIXED_COMMAND_ONLY (weapons, sight or flying: the pilot must use the fixed phrase)
 
-Every ref you name (a contact, a place, a memory entry) must be one offered to you this turn, in the header below or in a tool's observation. Never invent a ref, a position, a bearing or a range -- only the facts a tool gave you this turn."""
+Rules:
+- The header below lists only what has already been offered this turn. It is EMPTY at the start of most turns. An empty header never means "nothing out there": if the pilot asks about something the header does not contain, CALL a tool first. That is how you find out.
+- Every ref you name must be one offered to you this turn, in the header or in a tool's observation. Never invent a ref, a position, a bearing or a range.
+- Do not reply FINAL unable just because the header is empty. Reply FINAL unable only for the three reasons above.
 
-_SYSTEM_PROMPT_HEAD = """You are Petrovich, the weapons officer in a Mi-24P attack helicopter, replying to your pilot who just spoke to you directly. You know only what the tools tell you this turn -- never invent a contact, a place, a position, a bearing, a range or a quantity that no tool gave you.
+Examples (header empty each time):
+Pilot said: "Petrovich, where's the BMP?"          -> CALL find_contact {"text": "bmp"}
+  ... observation says one match, CONTACT_3        -> FINAL command where_is_it {"target": "CONTACT_3"}
+Pilot said: "Petrovich, anything near Soganli?"    -> CALL find_place {"text": "soganli"}
+  ... observation offers PLACE_1                   -> CALL list_contacts {"filter": "near PLACE_1"}
+  ... observation lists CONTACT_8                  -> FINAL answer contacts ["CONTACT_8"]
+Pilot said: "Petrovich, arm the weapons."          -> FINAL unable FIXED_COMMAND_ONLY"""
+
+_SYSTEM_PROMPT_HEAD = """You are Petrovich, the weapons officer in a Mi-24P attack helicopter, replying to your pilot who just spoke to you directly. You know only what the tools tell you this turn -- never invent a contact, a place, a position, a bearing, a range or a quantity that no tool gave you. Tools are how you look things up; use them before answering.
 
 Reply with EXACTLY ONE line, nothing else, no explanation, no markdown, no thinking out loud."""
 
@@ -270,14 +281,21 @@ def build_system_prompt(
     command_block = f"\n\nCommands you may issue as a FINAL command, and no others:\n{render_command_block(commands)}"
     if form == "grammar":
         call_block = (
-            "\n\nTools you may call -- to use one, reply on one line:\n"
+            "\n\nTools you may call -- to use one, reply with ONE line of the form:\n"
             "CALL <tool_name> <json object of arguments>\n\n"
             f"{render_tool_block(tools)}"
         )
         return f"{_SYSTEM_PROMPT_HEAD}{call_block}{command_block}\n\n{_FINAL_GRAMMAR_BLOCK}"
     # native: tools are offered through the API's own `tools` field, not
-    # restated in prose.
-    return f"{_SYSTEM_PROMPT_HEAD}{command_block}\n\n{_FINAL_GRAMMAR_BLOCK}"
+    # restated in prose -- but the model still has to be told that a
+    # tool call (not a FINAL line) is the way to look things up. The
+    # examples' "CALL ..." lines then read as "call that tool".
+    call_block = (
+        "\n\nYou have tools (see the tools you were given). To look something up, call the tool"
+        " -- do not write a CALL line in text. In the examples below, 'CALL x {...}' means"
+        " 'call tool x with those arguments'."
+    )
+    return f"{_SYSTEM_PROMPT_HEAD}{call_block}{command_block}\n\n{_FINAL_GRAMMAR_BLOCK}"
 
 
 def build_case_suffix(case: Case) -> str:
