@@ -59,6 +59,7 @@ from belief.speech import (
     render_group_full_disclosure,
     render_no_contact,
 )
+from belief.speech_worker import _SpeechResult
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import attack_target_task, describe_contact
 from belief.voice_commands import (
@@ -113,6 +114,38 @@ class FakeSpeechClient:
         if "Copy." in self._fail_on:
             raise AudioAdapterError("simulated stop failure")
         self.stop_calls += 1
+
+
+class FakeSpeechWorker:
+    """`[[BL-B106]]` -- a `belief.speech_worker.SpeechWorker`-shaped
+    double for testing `CrewConsole`'s own *wiring* to a worker
+    (`_print`'s worker-vs-fallback split, `drain_speech_results`,
+    `_handle_stop_talking`/`reset_for_new_mission`'s interrupt routing)
+    without a real background thread -- `test_speech_worker.py` covers
+    the real class's own threading/ordering/overflow/interrupt
+    behaviour. `enqueue`/`interrupt` just record; `drain_results`
+    returns and clears whatever the test has put on `self.results`."""
+
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, bool, str | None, dict[str, object] | None]] = []
+        self.interrupt_calls = 0
+        self.results: list[_SpeechResult] = []
+
+    def enqueue(
+        self,
+        line: str,
+        bypass_gate: bool,
+        correlation_id: str | None,
+        attack_run_fields: dict[str, object] | None,
+    ) -> None:
+        self.enqueued.append((line, bypass_gate, correlation_id, attack_run_fields))
+
+    def interrupt(self) -> None:
+        self.interrupt_calls += 1
+
+    def drain_results(self) -> list[_SpeechResult]:
+        drained, self.results = self.results, []
+        return drained
 
 
 class _CapturingBrainClient:
@@ -1076,6 +1109,182 @@ def test_stop_talking_interrupt_failure_does_not_raise() -> None:
     lines = console.handle_command("stop_talking", now_sim=0.0)
 
     assert lines == []
+
+
+def test_stop_talking_routes_through_speech_worker_interrupt_when_configured() -> None:
+    """`[[BL-B106]]` Decision 3 -- when `speech_worker` is configured,
+    `stop_talking` must reach `speech_worker.interrupt()`, never
+    `speech_client.stop()` directly, consolidating every `speech_client`
+    access behind its one owner."""
+    speech_client = FakeSpeechClient()
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_client=speech_client,  # type: ignore[arg-type]
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_command("stop_talking", now_sim=0.0)
+
+    assert lines == []
+    assert speech_worker.interrupt_calls == 1
+    assert speech_client.stop_calls == 0
+    assert speech_client.pushed == []
+
+
+# -- `[[BL-B106]]` async speech: _print's worker-vs-fallback split and ------
+# `drain_speech_results` (`plans/async-speech/plan.md`) --------------------
+
+
+def test_print_enqueues_to_speech_worker_instead_of_pushing_directly() -> None:
+    """When `speech_worker` is configured, `_print`'s speech branch must
+    enqueue there and must **not** call `speech_client.push_speech`
+    directly -- the whole point of Decision 1's worker-vs-fallback
+    split."""
+    speech_client = FakeSpeechClient()
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_client=speech_client,  # type: ignore[arg-type]
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    console.handle_line("radio check", now_sim=0.0)
+
+    assert speech_client.pushed == []
+    assert len(speech_worker.enqueued) == 1
+    _line, bypass_gate, _correlation_id, attack_run_fields = speech_worker.enqueued[0]
+    assert bypass_gate is False
+    assert attack_run_fields is None
+
+
+def test_print_with_worker_does_not_call_speech_log_sink_synchronously() -> None:
+    """The timings aren't known yet at enqueue time -- `speech_log_sink`
+    for an enqueued line is deferred to `drain_speech_results`, not
+    called from `_print` itself (Decision 2)."""
+    logged: list[object] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+    )
+
+    console.handle_line("radio check", now_sim=0.0)
+
+    assert len(speech_worker.enqueued) == 1
+    assert logged == []
+
+
+def test_print_silenced_with_worker_configured_enqueues_nothing_but_still_logs() -> (
+    None
+):
+    """`self.silenced` must still gate the worker branch exactly as it
+    gates the fallback `speech_client` branch -- nothing is enqueued,
+    and (matching the fallback path's own existing behaviour for a
+    silenced line) `speech_log_sink` is still called synchronously, with
+    `push_sent_wall`/`push_acked_wall`/`push_duration_s` all `None`,
+    since `speech_log_sink`/scheduler bookkeeping are not gated by
+    `silenced` (see `CrewConsole.silenced`'s own field docstring)."""
+    logged: list[tuple[object, ...]] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+        silenced=True,
+    )
+
+    # Calling `_print` directly, not through `handle_command` -- any
+    # *other* command token would end `silence` before `_print` ever
+    # ran (`plans/silence-command/plan.md`: "any subsequent command will
+    # end silence"), which would defeat this test's own point.
+    console._print(["Loud and clear."], now_sim=0.0)
+
+    assert speech_worker.enqueued == []
+    assert len(logged) == 1
+    _line, _urgent, _attack_run_fields, _corr, push_sent, push_acked, push_dur = logged[
+        0
+    ]
+    assert push_sent is None
+    assert push_acked is None
+    assert push_dur is None
+
+
+def test_drain_speech_results_calls_speech_log_sink_with_result_timings() -> None:
+    """`drain_speech_results` is what finally calls `speech_log_sink` for
+    an enqueued line, carrying the real timings the worker measured --
+    not the `(None, None, None)` triple a synchronous call would have
+    produced."""
+    logged: list[tuple[object, ...]] = []
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+        speech_log_sink=lambda *args: logged.append(args),
+    )
+    speech_worker.results.append(
+        _SpeechResult(
+            line="BMP-2.",
+            bypass_gate=False,
+            correlation_id="corr-1",
+            attack_run_fields=None,
+            push_sent_wall=10.0,
+            push_acked_wall=10.5,
+            push_duration_s=0.5,
+        )
+    )
+
+    console.drain_speech_results(now_sim=0.0)
+
+    assert len(logged) == 1
+    line, urgent, _attack_run_fields, corr, push_sent, push_acked, push_dur = logged[0]
+    assert line == "BMP-2."
+    assert urgent is False
+    assert corr == "corr-1"
+    assert push_sent == 10.0
+    assert push_acked == 10.5
+    assert push_dur == 0.5
+    # A second drain with nothing new produced is a no-op.
+    logged.clear()
+    console.drain_speech_results(now_sim=1.0)
+    assert logged == []
+
+
+def test_drain_speech_results_is_a_true_no_op_without_a_worker() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.drain_speech_results(now_sim=0.0)  # must not raise
+
+
+def test_reset_for_new_mission_interrupts_speech_worker_and_preserves_reference() -> (
+    None
+):
+    """`[[BL-B106]]` Decision 4 -- the worker thread itself persists
+    across a mission restart (same object, by identity), but its queued
+    content must not: `reset_for_new_mission` must call
+    `speech_worker.interrupt()`."""
+    speech_worker = FakeSpeechWorker()
+    console = CrewConsole(
+        store=ContactStore(),
+        speech_worker=speech_worker,  # type: ignore[arg-type]
+    )
+
+    console.reset_for_new_mission()
+
+    assert console.speech_worker is speech_worker
+    assert speech_worker.interrupt_calls == 1
+
+
+def test_reset_for_new_mission_preserves_audio_adapter_reporter() -> None:
+    """A pre-existing `BL-B96` omission (`plans/async-speech/plan.md`'s
+    "Refresh" section) -- `audio_adapter_reporter` must survive a
+    mission restart, by identity, same as `speech_client`."""
+    reporter = ConnectionReporter(logging.getLogger("test"), label="audio adapter")
+    console = CrewConsole(store=ContactStore(), audio_adapter_reporter=reporter)
+
+    console.reset_for_new_mission()
+
+    assert console.audio_adapter_reporter is reporter
 
 
 # -- silence (`plans/silence-command/plan.md`, user direction 2026-10-04: -----

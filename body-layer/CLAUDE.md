@@ -144,8 +144,22 @@ The other per-run debug logs below (`--detection-trace`, `--group-trace`, `--sle
 **Voice-latency instrumentation (`plans/voice-latency-instrumentation/plan.md`).** A per-utterance
 `correlation_id`, minted by `audio-adapter`'s capture process at PTT release, now rides the whole
 chain: `--speech-log` rows and `--belief-truth-log`'s `kind: "speech"` rows both gain it, plus
-`push_sent_wall`/`push_acked_wall`/`push_duration_s` on the latter (`CrewConsole._print`'s own
-`time.monotonic()` bracket around `push_speech`). **Every positional readback is deferred, not
+`push_sent_wall`/`push_acked_wall`/`push_duration_s` on the latter. **`[[BL-B106]]`
+(`plans/async-speech/plan.md`) moved the `push_speech` call itself, and that `time.monotonic()`
+bracket, off `CrewConsole._print` and onto `belief.speech_worker.SpeechWorker`'s own background
+thread** — `_print`'s speech branch now enqueues and returns immediately when `speech_worker` is
+configured (`body.py`'s `main()` always builds and opens one now that speech is unconditional,
+`BL-B96`); the worker times the push and deposits a result, and `CrewConsole.
+drain_speech_results` (polled once per poll, same spot as `drain_events`/`drain_brain`) is what
+actually calls `speech_log_sink` with those real timings, **on the poll thread** — not the worker
+thread, because `speech_log_sink`'s own closure (`body._speech_log_sink`) reads poll-thread-owned
+state live and is only safe to call from there. `stop_talking` and a mission restart both now
+route through `speech_worker.interrupt()` rather than `speech_client.stop()` directly, falling
+back to the pre-existing direct call when no worker is configured (every test that builds a
+`CrewConsole` without one). The queue is bounded (`_MAX_QUEUE_LEN = 64`, FIFO, drop-oldest plus
+one rate-limited `WARNING` on overflow, same shape as `aircraft-layer`'s `AudioPlaybackSender`)
+so a producer bug cannot grow it without limit, but ordinary callout traffic never comes close.
+**Every positional readback is deferred, not
 just spoken immediately, when `CalloutScheduler.busy_until_sim` is modeled busy** — `select_target`,
 `mark_target`, `step`, `follow`, `watch_nearest`/`watch_nearest_air_defence`, and the whole `report`
 family: the command's own immediate, unconditional side effects (resolving a target, registering a
@@ -540,7 +554,8 @@ Surfaces and transports:
 - `src/belief/voice_commands.py` — speech-transcript recognition to command tokens.
 - `src/belief/brain_client.py`, `src/belief/brain_reply.py` — the brain-layer HTTP seam and structured-reply handling.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API. `push_text_line` and the other writes **raise** rather than swallow; the caller's try/except is the designed catch point.
-- `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`).
+- `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`). `push_speech`/`stop` still raise `AudioAdapterError` synchronously on the calling thread exactly as before; `[[BL-B106]]` changed *which* thread calls them (`SpeechWorker`'s, not `CrewConsole._print`'s), not this client's own contract.
+- `src/belief/speech_worker.py` — `SpeechWorker` (`[[BL-B106]]`, `plans/async-speech/plan.md`): the bounded-FIFO background-thread worker that makes `_print`'s `push_speech` call asynchronous, mirroring `aircraft-layer`'s `AudioPlaybackSender` shape rather than `brain_client.BrainLayerClient`'s single-slot one (speech must preserve order, never silently skip a line). `enqueue`/`interrupt`/`drain_results`, `open`/`close` lifecycle. See the "Voice-latency instrumentation" paragraph above for how it plugs into `CrewConsole`.
 - `src/body.py` — the poll-loop entrypoint and every `--flag` branch. `main()`'s CLI wiring is untested by design; the runners are tested against fakes.
 - `src/detection_trace_writer.py` — the sanctioned ground-truth-plus-belief join. Read-only, one-directional, buffered off the poll loop's critical path.
 - `src/ascii_canvas.py` — shared ASCII-canvas primitives (`Canvas`, `wrap`, the ANSI colour constants) extracted from `eyesight_view.py` (`plans/pov-view/plan.md`, `BL-B99`) so `pov_view.py` reuses the same grid instead of forking it.

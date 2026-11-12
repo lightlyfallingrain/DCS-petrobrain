@@ -203,6 +203,7 @@ from belief.sight_effector import (
 from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
 from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
+from belief.speech_worker import SpeechWorker
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
@@ -4747,6 +4748,13 @@ def _run_crew_text_poll_loop(
                     # last poll. A true no-op for NullBrainClient and
                     # DebugPrintBrainClient, both of which return [].
                     crew_console.drain_brain(runner.last_t_sim)
+                    # `[[BL-B106]]` (`plans/async-speech/plan.md` Decision
+                    # 2) -- drains whatever `speech_worker` has finished
+                    # pushing since the last poll and calls
+                    # `speech_log_sink` for each, on this thread. Same
+                    # per-poll hook point as `drain_events`/`drain_brain`;
+                    # a true no-op when `speech_worker` is unset.
+                    crew_console.drain_speech_results(runner.last_t_sim)
                     commands_before = crew_console.commands_handled
                     if speech_input_enabled and speech_client is not None:
                         _poll_transcripts(
@@ -5798,6 +5806,16 @@ def main() -> None:
     # reporter's own docstring for why this must be the *same* instance,
     # not one per path.
     audio_adapter_reporter = ConnectionReporter(logger, label="audio adapter")
+    # `[[BL-B106]]` (`plans/async-speech/plan.md`) -- always built and
+    # opened now that speech is unconditional (`BL-B96`), no
+    # `--speech-audio`-style flag branch. Shares `audio_adapter_reporter`
+    # with `_poll_transcripts`' own poll-path reporting, same reasoning
+    # as the comment above: the push-failure/push-success calls that used
+    # to happen inside `CrewConsole._print` now happen on this worker's
+    # own background thread instead (Decision 2), but through the same
+    # reporter instance.
+    speech_worker = SpeechWorker(audio_adapter_client, reporter=audio_adapter_reporter)
+    speech_worker.open()
     # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
     # loaded once here, before `CrewConsole` exists, so a bad
     # registry/sequence file can set `config_error_pending` at
@@ -5816,6 +5834,7 @@ def main() -> None:
         aircraft_client=aircraft_client,
         tasks=crew_runner.tasks,
         speech_client=audio_adapter_client,
+        speech_worker=speech_worker,
         audio_adapter_reporter=audio_adapter_reporter,
         transcript_log=(
             SpeechLogWriter(args.speech_log).write
@@ -5866,6 +5885,7 @@ def main() -> None:
     finally:
         stop_event.set()
         poll_thread.join()
+        speech_worker.close()
 
 
 if __name__ == "__main__":
