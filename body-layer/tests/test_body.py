@@ -2747,10 +2747,14 @@ def test_poll_transcripts_dispatches_a_matched_command_through_handle_transcript
     assert client.poll_count == 1
 
 
-def test_poll_transcripts_no_match_falls_through_to_handle_line() -> None:
+def test_poll_transcripts_addressed_no_match_falls_through_to_the_brain() -> None:
     """A `token=None, verb_anchored=False` transcript (not a command
     attempt at all) must reach the ordinary typed-text path, exactly like
-    Stage 2's `handle_transcript` fallthrough test."""
+    Stage 2's `handle_transcript` fallthrough test -- and the wire's own
+    `"addressed": True` field (`plans/brain-tool-calls/plan.md` D4) is
+    what still routes it on to the brain from there, through `_poll_
+    transcripts`' real field-by-field parse, not just at `CrewConsole`'s
+    own level."""
     escalated: list[str] = []
 
     class _RecordingBrainClient:
@@ -2759,6 +2763,53 @@ def test_poll_transcripts_no_match_falls_through_to_handle_line() -> None:
 
         def awaiting_reply_id(self) -> str | None:
             return None
+
+        def poll_replies(self) -> list[object]:
+            return []
+
+        def available(self) -> bool:
+            return True
+
+    console = CrewConsole(store=ContactStore(), brain_client=_RecordingBrainClient())  # type: ignore[arg-type]
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "Petrovich, the tanks are on the ridge",
+                "confidence": 0.5,
+                "token": None,
+                "match_ratio": 0.0,
+                "verb_anchored": False,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "addressed": True,
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert escalated == ["sent"]
+
+
+def test_poll_transcripts_unaddressed_no_match_never_reaches_the_brain() -> None:
+    """U1 (`plans/brain-tool-calls/plan.md`): the same transcript with no
+    wake word -- and an item carrying no `"addressed"` key at all, the
+    shape an older `audio-adapter` sends -- is answered deterministically
+    and never escalated. The absent-key case is this test's own point:
+    additive means an old adapter's silence on the field must read as
+    `False`, not get skipped as a malformed row."""
+    escalated: list[str] = []
+
+    class _RecordingBrainClient:
+        def handle(self, payload: object) -> None:
+            escalated.append("sent")
+
+        def awaiting_reply_id(self) -> str | None:
+            return None
+
+        def poll_replies(self) -> list[object]:
+            return []
+
+        def available(self) -> bool:
+            return True
 
     console = CrewConsole(store=ContactStore(), brain_client=_RecordingBrainClient())  # type: ignore[arg-type]
     client = FakeSpeechInputClient(
@@ -2775,7 +2826,7 @@ def test_poll_transcripts_no_match_falls_through_to_handle_line() -> None:
         ]
     )
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
-    assert escalated == ["sent"]
+    assert escalated == []
 
 
 def test_poll_transcripts_empty_queue_dispatches_nothing() -> None:
@@ -2869,6 +2920,7 @@ class _RecordingCrewConsole:
         now_sim: float,
         slots: dict[str, int | str] | None = None,
         correlation_id: str | None = None,
+        addressed: bool = False,
     ) -> list[str]:
         self.calls.append((transcript, token, slots))
         self.correlation_ids.append(correlation_id)
