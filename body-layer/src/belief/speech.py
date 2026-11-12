@@ -1213,11 +1213,9 @@ def _summary_air_defence_clause(
     return "and " + ", ".join(phrases)
 
 
-def _summary_deferral_clause(
-    facts_list: Sequence[dict[str, object]], stale_window_s: float
-) -> str | None:
+def _summary_deferral_clause(facts_list: Sequence[dict[str, object]]) -> str | None:
     """*"Still checking the truck group."* -- **at most one**, for a
-    contact Petrovich has not looked at inside `stale_window_s`.
+    contact `_needs_hedge` judges stale.
 
     This is the honest half of a summary: a summary can be vague where an
     enumeration would have to either lie or hedge four times (decision
@@ -1225,13 +1223,8 @@ def _summary_deferral_clause(
     declared rather than hidden. It is deliberately not emitted when
     *everything* in scope is stale -- the freshness qualifier already
     covers the whole answer then, and deferring to it as well would say
-    the same thing twice.
-
-    `stale_window_s` is `decay.OBSERVED_WINDOW_S` at the only call site.
-    Passed in rather than imported so this module keeps its one-way
-    dependency on `decay` through the caller, and so a test can state the
-    window it means instead of inheriting a tuned default."""
-    stale = [facts for facts in facts_list if _is_stale(facts, stale_window_s)]
+    the same thing twice."""
+    stale = [facts for facts in facts_list if _needs_hedge(facts)]
     if not stale or len(stale) == len(facts_list):
         return None
     op_class = _summary_op_class(stale[0])
@@ -1246,14 +1239,15 @@ def _summary_deferral_clause(
     return f"Still checking the {_respell_for_tts(word)} group."
 
 
-def _is_stale(facts: dict[str, object], stale_window_s: float) -> bool:
-    """Whether this contact was last seen longer ago than
-    `stale_window_s`. Reads `facts["last_seen_ago_s"]`, which
-    `tools._contact_facts` always populates."""
-    ago_s = facts.get("last_seen_ago_s")
-    if not isinstance(ago_s, (int, float)):
-        return False
-    return float(ago_s) > stale_window_s
+def _needs_hedge(facts: dict[str, object]) -> bool:
+    """Whether this contact's report-summary wording should hedge --
+    `[[BL-B112]]`: `facts["certainty"] == "estimated"` (never "lost",
+    already dropped from report scope by `crew_console.CrewConsole.
+    _report_scope`; never "observed"/"tracked", stated as fact). Replaces
+    the old age-based `_is_stale`: the certainty label is now itself
+    growth-distance-based (`belief.decay.certainty_of`), not a bare
+    elapsed-time comparison this module would have to duplicate."""
+    return facts.get("certainty") == "estimated"
 
 
 def _spoken_age_phrase(ago_s: float) -> str:
@@ -1306,7 +1300,7 @@ def _attack_run_last_seen_phrase(ago_s: float) -> str:
 
 
 def _summary_air_defence_freshness_clause(
-    facts_list: Sequence[dict[str, object]], stale_window_s: float
+    facts_list: Sequence[dict[str, object]],
 ) -> str | None:
     """*"The long range SAM is a couple minutes old."* -- the **selective**
     freshness marker, for a stale *air-defence* contact in a scene that is
@@ -1352,7 +1346,7 @@ def _summary_air_defence_freshness_clause(
     op_classes: list[str] = []
     oldest_ago_s = 0.0
     for facts in facts_list:
-        if not _is_stale(facts, stale_window_s):
+        if not _needs_hedge(facts):
             continue
         op_class = _summary_op_class(facts)
         if op_class is None or op_class not in AIR_DEFENSE_OP_CLASSES:
@@ -1391,7 +1385,6 @@ def render_report_summary(
     facts_list: list[dict[str, object]],
     *,
     band_label: str,
-    stale_window_s: float,
 ) -> OutgoingSpeech:
     """The slotted query's answer: **one summary utterance whose job is to
     aim the pilot's eyes** (`plans/crew-query-path/plan.md` Decision C,
@@ -1416,13 +1409,11 @@ def render_report_summary(
     `band_label` is the caller's, the same division of labour
     `render_clear`/`render_no_view` already follow -- the metre boundaries
     are a command-vocabulary fact (`crew_console._REPORT_BAND_BOUNDS_M`)
-    and this function only formats what it is handed. `stale_window_s` is
-    `decay.OBSERVED_WINDOW_S` at the live call site: the project's
-    existing "how long since a look is still fresh" bound, reused rather
-    than joined by a second staleness constant.
+    and this function only formats what it is handed.
 
     **Freshness is spoken, not implied.** When *every* in-scope contact
-    is older than `stale_window_s` the whole answer is prefixed *"Last I
+    `_needs_hedge`s (`[[BL-B112]]`: `certainty == "estimated"`, no longer
+    a bare elapsed-time comparison) the whole answer is prefixed *"Last I
     saw, "* -- a remembered contact must be spoken as remembered, which is
     the no-omniscience invariant's grip on a *pull* (Decision D). Note
     what this is not: it is not a filter. A contact Petrovich believes in
@@ -1430,11 +1421,12 @@ def render_report_summary(
 
     **In the *mixed* case it is spoken selectively, which is a user
     decision and not an omission.** In-scope runs to `decay.
-    LOST_THRESHOLD_S` (120 s) while `stale_window_s` is one scan cycle
-    (16 s), so one contact refreshed in the current cycle leaves the rest
-    unqualified by that prefix -- and the first implementation had no
-    other freshness signal (`plans/crew-query-path/security.md`, required
-    fix 1). His call, 2026-10-10: *"Freshness is spoken only when a stale
+    LOST_THRESHOLD_S` (120 s) while the hedge boundary can trigger much
+    earlier for a fast-moving class, so one contact refreshed in the
+    current cycle leaves the rest unqualified by that prefix -- and the
+    first implementation had no other freshness signal (`plans/
+    crew-query-path/security.md`, required fix 1). His call, 2026-10-10:
+    *"Freshness is spoken only when a stale
     contact is air defence or otherwise decision-relevant; a stale truck
     passes unqualified. Shortest answers, but it means accepting that some
     stale belief is spoken as present tense."* So a stale air-defence
@@ -1502,15 +1494,13 @@ def render_report_summary(
             class_clause = f"mostly {_respell_for_tts(plural)}"
 
     clock_clause = _summary_clock_clause(facts_list)
-    deferral_clause = _summary_deferral_clause(facts_list, stale_window_s)
-    all_stale = all(_is_stale(facts, stale_window_s) for facts in facts_list)
+    deferral_clause = _summary_deferral_clause(facts_list)
+    all_stale = all(_needs_hedge(facts) for facts in facts_list)
     # Computed once, outside `_assemble`: it does not depend on which
     # candidate the budget settles on, because it is in no candidate's
     # droppable part.
     freshness_clause = (
-        None
-        if all_stale
-        else _summary_air_defence_freshness_clause(facts_list, stale_window_s)
+        None if all_stale else _summary_air_defence_freshness_clause(facts_list)
     )
 
     def _assemble(with_deferral: bool, with_class: bool) -> str:
