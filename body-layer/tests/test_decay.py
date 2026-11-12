@@ -11,6 +11,7 @@ from belief.contacts import Contact
 from belief.decay import (
     GROUP_REIDENTIFY_WINDOW_S,
     IDENTITY_HALF_LIFE_S,
+    LAST_I_SAW_GROWTH_THRESHOLD_M,
     LOST_THRESHOLD_S,
     MOTION_HALF_LIFE_S,
     OBJECT_ID_MEMORY_S,
@@ -18,6 +19,7 @@ from belief.decay import (
     POSITION_HALF_LIFE_S,
     certainty_of,
     classification_confidence_at,
+    distance_since_last_seen_m,
     motion_confidence_at,
     object_id_continuity_valid,
     position_confidence,
@@ -28,8 +30,19 @@ from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
 
 
 def _contact(
-    last_seen_sim: float, classification_established_sim: float | None = None
+    last_seen_sim: float,
+    classification_established_sim: float | None = None,
+    last_class_raw: str = "OP_TRUCK",
 ) -> Contact:
+    """`last_class_raw` defaults to the plain `"OP_TRUCK"` class string
+    every pre-`[[BL-B112]]` test here already used -- `profile_for` matches
+    it via the generic `"truck"` keyword (`OP_TRUCK`, 15.0 m/s,
+    `immobile=False`). A handful of `certainty_of` tests below instead pass
+    a real DCS `object_type` keyword (`"5p73 s-125 ln"`, SA-3) to get an
+    `immobile=True` profile -- see `association_over_time.contact_growth_
+    rate_mps`'s own docstring for why the growth rate, not the class
+    string, is what `certainty_of`'s tracked/estimated boundary now
+    reads."""
     return Contact(
         id="CONTACT_1",
         position=PositionEstimate(
@@ -41,7 +54,7 @@ def _contact(
             fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
         ),
         last_alt_m=0.0,
-        last_class_raw="OP_TRUCK",
+        last_class_raw=last_class_raw,
         classification=new_classification_belief(
             value="OP_TRUCK",
             level=SpecificityLevel.CLASS,
@@ -77,12 +90,10 @@ def test_observed_window_clears_the_worst_case_flank_gap() -> None:
     assert worst_case_flank_gap_s < OBSERVED_WINDOW_S
 
 
-def test_observed_window_does_not_collapse_the_tracked_band() -> None:
-    # Upper bound: at or above POSITION_HALF_LIFE_S, `certainty_of`'s
-    # "tracked" band (between "observed" and "estimated") vanishes --
-    # `elapsed_s <= OBSERVED_WINDOW_S` and `elapsed_s <= POSITION_HALF_
-    # LIFE_S` would become the same test, so no elapsed time could ever
-    # land in "tracked".
+def test_observed_window_stays_below_the_position_half_life() -> None:
+    # `position_confidence`'s own concern now (`[[BL-B112]]`, decay.py's
+    # own comment above the assertion this mirrors) -- not `certainty_of`'s
+    # tracked band, which no longer reads `POSITION_HALF_LIFE_S` at all.
     assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S
 
 
@@ -101,14 +112,62 @@ def test_certainty_is_tracked_just_past_the_observed_window() -> None:
     assert certainty_of(contact, now_sim=OBSERVED_WINDOW_S + 0.1) == "tracked"
 
 
-def test_certainty_is_tracked_at_the_position_half_life_boundary() -> None:
-    contact = _contact(last_seen_sim=0.0)
-    assert certainty_of(contact, now_sim=POSITION_HALF_LIFE_S) == "tracked"
+# -- `[[BL-B112]]`: tracked/estimated is growth-distance-based, not a bare
+# POSITION_HALF_LIFE_S elapsed-time boundary (explore-notes.md, user,
+# 2026-11-12: "use 'last I saw' if it is a mobile unit. Use when location
+# inaccuracy grows to >= 0.5 km."). -----------------------------------------
 
 
-def test_certainty_is_estimated_just_past_the_position_half_life() -> None:
+def test_distance_since_last_seen_grows_with_the_class_rate() -> None:
+    # OP_TRUCK (via the plain "OP_TRUCK" class string) resolves to 15.0
+    # m/s (test_association_over_time.py's own calibration anchor for this
+    # class) -- an air contact by `_contact`'s own default (`on_surface=
+    # False`), so `contact_growth_rate_mps` takes the unconditional
+    # class-rate branch regardless of `Contact.motion`.
     contact = _contact(last_seen_sim=0.0)
-    assert certainty_of(contact, now_sim=POSITION_HALF_LIFE_S + 0.1) == "estimated"
+    assert distance_since_last_seen_m(contact, now_sim=10.0) == pytest.approx(150.0)
+
+
+def test_certainty_is_tracked_below_the_growth_threshold() -> None:
+    # ~32.3 s elapsed * 15.0 m/s = ~499 m, just below
+    # LAST_I_SAW_GROWTH_THRESHOLD_M (500 m) -- "tracked" fact, even though
+    # this elapsed time is already past the old POSITION_HALF_LIFE_S
+    # boundary (30 s default). That is the point of this test: the
+    # boundary is distance now, not elapsed time.
+    contact = _contact(last_seen_sim=0.0)
+    now_sim = LAST_I_SAW_GROWTH_THRESHOLD_M / 15.0 - 1.0
+    assert distance_since_last_seen_m(contact, now_sim) < LAST_I_SAW_GROWTH_THRESHOLD_M
+    assert certainty_of(contact, now_sim) == "tracked"
+
+
+def test_certainty_is_estimated_once_growth_crosses_the_threshold() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    now_sim = LAST_I_SAW_GROWTH_THRESHOLD_M / 15.0 + 1.0
+    assert now_sim <= LOST_THRESHOLD_S, "fixture must stay inside the estimated band"
+    assert distance_since_last_seen_m(contact, now_sim) >= LAST_I_SAW_GROWTH_THRESHOLD_M
+    assert certainty_of(contact, now_sim) == "estimated"
+
+
+def test_immobile_contact_never_reaches_estimated_via_growth() -> None:
+    """Explore-notes.md Q3: *"a SAM site that is not a mobile SAM unit
+    itself, will not move... SA-2 is and remains stationary."* An immobile
+    profile (`"5p73 s-125 ln"`, SA-3) always has `distance_since_last_seen_m
+    == 0.0` (`association_over_time.contact_growth_rate_mps`'s `profile.
+    immobile` branch), so it stays "tracked" fact for as long as
+    `certainty_of`'s elapsed-time ladder allows at all -- right up to
+    `LOST_THRESHOLD_S`, never hedged as "estimated" along the way."""
+    contact = _contact(last_seen_sim=0.0, last_class_raw="5p73 s-125 ln")
+    now_sim = LOST_THRESHOLD_S
+    assert distance_since_last_seen_m(contact, now_sim) == 0.0
+    assert certainty_of(contact, now_sim) == "tracked"
+
+
+def test_immobile_contact_still_goes_lost_at_the_lost_threshold() -> None:
+    """Q2's "use current implementation": `LOST_THRESHOLD_S` stays purely
+    elapsed-time for every contact, immobile ones included -- this is the
+    hand-off to mission memory, not a claim the unit could have moved."""
+    contact = _contact(last_seen_sim=0.0, last_class_raw="5p73 s-125 ln")
+    assert certainty_of(contact, now_sim=LOST_THRESHOLD_S + 0.1) == "lost"
 
 
 def test_certainty_is_estimated_at_the_lost_threshold_boundary() -> None:

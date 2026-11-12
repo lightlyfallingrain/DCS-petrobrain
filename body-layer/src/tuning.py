@@ -360,9 +360,15 @@ def _check_scan_decay_coupling(state: _State) -> None:
     own accessor call returns, check whether the combination they would
     resolve to violates either of `belief.decay`'s two invariants --
 
-    - **I1 (original, unchanged)**: `OBSERVED_WINDOW_S` (`len(SCAN_PLAN)
-      * FOCUS_DWELL_S`) must stay below `POSITION_HALF_LIFE_S`, or the
-      "tracked" certainty band collapses to nothing for a *quiet* scan.
+    - **I1 (original; code unchanged, re-purposed by `[[BL-B112]]`)**:
+      `OBSERVED_WINDOW_S` (`len(SCAN_PLAN) * FOCUS_DWELL_S`) must stay
+      below `POSITION_HALF_LIFE_S`. No longer protects `certainty_of`'s
+      tracked/estimated split, which is now growth-distance-based and
+      does not read `POSITION_HALF_LIFE_S` at all (`belief.decay.
+      certainty_of`'s own docstring) -- it protects `position_confidence`'s
+      decay curve instead: at or above `POSITION_HALF_LIFE_S`, a contact
+      still being actively watched would already read numerically
+      doubted.
     - **I2 (new)**: `WORST_REVISIT_S` (`OBSERVED_WINDOW_S +
       GLASS_BUDGET_PER_CYCLE_S + n_sectors(SCAN_PLAN) * 1.0`, the real
       cliff a *busy* revisit can fall off, not just a quiet sweep) must
