@@ -46,9 +46,10 @@ curl -s -X POST http://<collector-host>:7791/command/probe_points \
 
 **Check:**
 - `dcs.log` shows new `PetrobrainLineOfSight` lines (no errors/exceptions from the Hook).
-- `curl -s http://<collector-host>:7791/line_of_sight/latest` carries a `"probes"` field with
-  three entries matching `seq: 1`. Expected pattern: `1` (clear), `0` (blocked), `1` (clear) for
-  near-slope/behind-crest/open-ground respectively.
+- `curl -s http://<collector-host>:7791/line_of_sight/latest` carries a `"probes"` field — a
+  string, not a list: `"<seq>|<i>:<0|1|>;..."`. Expected: `"1|0:1;1:0;2:1"` — clear, blocked,
+  clear for near-slope/behind-crest/open-ground. An empty value after `:` means "could not
+  evaluate" (fail closed), never clear.
 
 ## Step 2 — fly closer and confirm the near-slope point flips
 
