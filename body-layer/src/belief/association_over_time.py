@@ -389,11 +389,22 @@ def contact_growth_rate_mps(contact: Contact) -> float:
     now gated on whether motion has actually been *observed*, not only on
     class -- `UNOBSERVED_MOTION_GROWTH_RATE_MPS` when `contact.motion` is
     `"stopped"` or `None` ("never observed moving"), the class rate only
-    once `contact.motion.state == "moving"`. Installation components stay
-    `0.0` unconditionally, checked first: an entrenched SA-3 does not start
-    growing at the tiny rate just because `Contact.motion` happens to be
-    `None`; it is still immobile either way, and `0.0` already says so more
-    strongly than `UNOBSERVED_MOTION_GROWTH_RATE_MPS` would.
+    once `contact.motion.state == "moving"`. Immobile systems (`profile.
+    immobile`) stay `0.0` unconditionally, checked first: an entrenched
+    SA-3 does not start growing at the tiny rate just because `Contact.
+    motion` happens to be `None`; it is still immobile either way, and
+    `0.0` already says so more strongly than `UNOBSERVED_MOTION_GROWTH_
+    RATE_MPS` would.
+
+    **`[[BL-B112]]`: reads `profile.immobile`, not `profile.
+    installation_component`.** The two are independent bits
+    (`ObjectTypeProfile.immobile`'s own docstring) -- `installation_
+    component` keeps its existing meaning for `belief.groups`' cohesion/
+    reconciliation, untouched by this change. The one row where they
+    diverge, Kub/SA-6 (`installation_component=True`, `immobile=False`,
+    user's explicit override), is exactly why a second field exists: this
+    function must stop returning `0.0` for Kub while `belief.groups` must
+    keep treating its radar and launcher as one site.
 
     **Air contacts (`not contact.on_surface`) are gated on `on_surface`,
     not on `contact.motion`, and so stay bit-identical to pre-Stage-8
@@ -410,7 +421,7 @@ def contact_growth_rate_mps(contact: Contact) -> float:
     exactly as before this stage. Only `on_surface is True` contacts -- the
     ones this rule is about -- see the new gate."""
     profile = object_model.profile_for(contact.last_class_raw)
-    if profile.installation_component:
+    if profile.immobile:
         return 0.0
     if not contact.on_surface:
         return plausible_speed_mps(profile.op_class)
