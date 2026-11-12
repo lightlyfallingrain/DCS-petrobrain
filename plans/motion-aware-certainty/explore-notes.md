@@ -44,6 +44,23 @@ Questions asked:
 > purposes, in DCS, a SAM site that is not a mobile SAM unit itself, will not move. -> SA-2 is and
 > remains stationary. OSA (SA-8?) can move, but does not necessarily."*
 
+## User, verbatim (2026-11-12, follow-up on "lost")
+
+Said after being told that, taken literally, an SA-2 would still go "lost" at 120 s unseen:
+
+> *""lost" contacts need to go to mission memory.*
+> *Consider current belief as Petrovich "working memory". It's expected that things are dropped from
+> there after a few minutes.*
+> *Mission memory should keep then, using the kneeboard analogue.*
+> *This also means that mission memory must be read from every now and then for known unit
+> positions that are no more in belief."*
+
+So "lost" is not "forgotten": it is the hand-off from working memory (belief) to the kneeboard
+(mission memory, `BL-8`, `body-layer/src/mission_memory/`). Working memory is expected to shed
+contacts after a few minutes; the kneeboard keeps them; and Petrovich must consult the kneeboard
+from time to time for known unit positions no longer in belief. Scope (one feature or a split) is
+for the goal check to propose.
+
 ## Reading (to be confirmed by the goal check, not yet decided)
 
 - **"Last I saw" trigger:** position uncertainty ≥ 0.5 km, not elapsed time — and only for a unit
