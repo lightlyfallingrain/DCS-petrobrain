@@ -301,3 +301,42 @@ reality, with no change needed to the reducer tool itself.
    Risks section named: "the audio-adapter queue dwell time is unmeasured"; this would be the
    body-layer-side analogue). Left out to keep this plan proportionate to what was asked. Flag if
    wanted now instead of as a small later follow-on.
+
+### Refresh against the code of 2026-11-12 (main loop, before Implementer dispatch)
+
+The plan above was written 2026-10-20 and merged unbuilt. Everything in it still holds; these are
+the deltas found by reading the current tree, and they bind over the older text where they differ:
+
+- **`logger.py` is now `body.py`.** Every `logger.py` reference above means `body-layer/src/body.py`:
+  `_run_crew_text_poll_loop` (`body.py:3802`), the drain cluster (`drain_events` /
+  `drain_pending_positional_replies` / `drain_pending_point_clear` / `drain_pending_point_request` /
+  `drain_brain`, `body.py:4728-4749`) where `drain_speech_results` joins, `main()`'s
+  `AudioAdapterClient` construction and `CrewConsole(...)` call (`body.py:5793-5825`), and the
+  `finally: stop_event.set(); poll_thread.join()` block (`body.py:5866-5868`) where
+  `speech_worker.close()` goes. `_speech_log_sink` is `body.py:2593` and still reads `runner` live —
+  Decision 2 (results drained on the poll thread) is unchanged and still necessary.
+- **`--speech-audio` no longer exists.** `BL-B96` made speech unconditional: `main()` always builds
+  one `AudioAdapterClient`. So `SpeechWorker` is always built and opened in `main()`, no flag
+  branch. Decision 1's named risk (wiring omitting `speech_worker=`) stands; Reviewer checks the one
+  `CrewConsole(...)` call in `main()`.
+- **`_print` now has a `BL-B96` reporter branch** (`crew_console.py:5335-5360`): on
+  `AudioAdapterError` it calls `audio_adapter_reporter.report_failure(exc)` (or logs a warning when
+  the reporter is `None`), and on success `report_success()`. That whole try/except/else moves to
+  the worker thread with the `push_speech` call — the worker therefore takes the reporter as a
+  constructor argument, same optional-`None` shape. `ConnectionReporter` (`src/connection_reporter.py`)
+  is shared with `_poll_transcripts` on the poll thread and has no lock; the race is benign (at
+  worst one duplicated transition line) but a `threading.Lock` around its two methods is three lines
+  and removes the question. Add it.
+- **`reset_for_new_mission` drops `audio_adapter_reporter`** (`crew_console.py:1640-1650` passes
+  `speech_client`/`speech_log_sink` through but not the reporter) — a pre-existing `BL-B96` omission:
+  after a mission restart, push failures fall back to the full-traceback path. Decision 4 edits that
+  exact pass-through list to add `speech_worker`; add `audio_adapter_reporter` in the same edit, with
+  a test, and say so in the commit. Not a scope creep: the same list, the same class of miss Decision
+  4 exists to catch.
+- **Decisions Requiring User Input 1–3**: taken as recommended, by the main loop, since the user
+  handed the item over without qualification — overlay push stays synchronous, queue bound reuses
+  `_MAX_QUEUE_LEN = 64` drop-oldest, no `queued_at_wall` stage. Each is reversible later.
+- **Behaviour alignment (goal-aligner / plan-aligner) skipped**, and said so here: the why is the
+  user's own verbatim direction quoted at the top, and the plan makes no player-facing behavioural
+  choice beyond "the mouth no longer stalls the eyes" — what is spoken, in what order, and when, is
+  unchanged by design (Decision 1's ordering/no-skip requirement, scheduler untouched).
