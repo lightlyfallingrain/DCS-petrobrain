@@ -46,12 +46,12 @@ from belief.decay import (
     OBSERVED_WINDOW_S,
     certainty_of,
 )
-from belief.position_belief import plausible_speed_mps
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
 from belief.optic_policy import BoundedSightLook
 from belief.percept import Percept
+from belief.position_belief import plausible_speed_mps
 from belief.referent import Mention
 from belief.speech import (
     group_membership_state,
