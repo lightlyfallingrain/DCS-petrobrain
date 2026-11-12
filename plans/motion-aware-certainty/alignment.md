@@ -4,183 +4,238 @@
 
 **Verdict:** CONCERNS
 
-Checked at `bfced060`. The inputs read were `explore-notes.md`, `BL-B112.md`, the 2026-10-13 direction,
-BL-B111's plan Decision 1 and its DoD milestone answer, and `belief/decay.py`,
+Checked at `bfced060`, then **revised in place the same day** for the user's follow-up on "lost"
+(`9cf8af1c`, `explore-notes.md`, "User, verbatim (2026-11-12, follow-up on 'lost')"):
+
+> *""lost" contacts need to go to mission memory. Consider current belief as Petrovich "working
+> memory". It's expected that things are dropped from there after a few minutes. Mission memory
+> should keep then, using the kneeboard analogue. This also means that mission memory must be read
+> from every now and then for known unit positions that are no more in belief."*
+
+The inputs read were `explore-notes.md`, `BL-B112.md`, the 2026-10-13 direction, BL-B111's plan
+Decision 1 and its DoD milestone answer, and `belief/decay.py`,
 `association_over_time.contact_growth_rate_mps`, `position_belief`, `belief/motion.py`,
-`perception/motion.py`, `perception/estimation.py`, `perception/object_model.py`, and every
-`certainty_of` consumer.
+`perception/motion.py`, `perception/estimation.py` and `perception/object_model.py`. I read every
+`certainty_of` consumer. I also read `mission_memory/` (`admission.py`, `query.py`, `tools.py`),
+`belief/tool_api.py`, `BL-8.md`, `BR-2.md`, `plans/bl8-mission-memory/explore-notes.md` and the
+architect memory `project_bl8_kneeboard_design.md`.
 
 ### Why
 
-The pilot builds his picture of the threats from what Petrovich has told him. That picture should
-stay as solid as the world actually is. A SAM site or a parked column does not become doubtful, or
-disappear from Petrovich's answers, just because nobody has looked at it for half a minute while
-the crew circles at a distance. And Petrovich should hedge ("last I saw") when, and only when, the
-unit could really have moved far enough that the pilot would look in the wrong place.
+The pilot's threat picture should stay as solid as the world is. Petrovich holds what he is
+working with right now in his head. That working memory is allowed to let a unit go after a few
+minutes unseen. **What he has noted on the kneeboard he does not forget.** He goes back to it when
+it matters, the way a crewman glances at his notes. A SAM site or a parked column does not turn
+doubtful just because nobody looked at it for half a minute. It does not vanish from the crew's
+picture just because it left working memory.
 
-Ask why once more and the purpose turns out to be **where to look and what to avoid**. A label
-counts only through what the pilot then hears: whether the report is stated as fact or hedged, and
-whether the unit is still in the answer at all. The label is the mechanism. Truthful wording and a
-persistent threat picture are the purpose.
+Petrovich should hedge ("last I saw") when, and only when, the unit could really have moved far
+enough that the pilot would look in the wrong place. That holds whichever store the position came
+from.
+
+Ask why once more and the purpose is **where to look and what to avoid**. The labels, the "lost"
+transition and the kneeboard are mechanisms. What the pilot gets from them is truthful wording and
+a threat picture that persists.
 
 ### Player expectations
 
 The hedge is driven by one quantity: **how far the unit could have moved since it was last seen.**
-That is growth, not total position uncertainty (finding 2).
+That is growth, not total position uncertainty (finding 2). "Lost" is a hand-off to the kneeboard,
+not forgetting.
+
+```mermaid
+flowchart LR
+  S[seen] --> WM["working memory (belief)<br/>as fact, or 'last I saw' once it could have gone >= 0.5 km"]
+  WM -- "a few minutes unseen: 'lost'" --> KB["kneeboard (mission memory)<br/>keeps where and when it was seen"]
+  KB -- "read back when it matters:<br/>report, re-sighting, closing on a SAM" --> P[pilot hears it]
+  WM --> P
+```
 
 ```
-unseen for →                      30 s        2 min        10 min       30 min
-fixed site (SA-2, dug-in)         as fact     as fact      as fact      as fact      never hedged, never lost by time
-mobile, seen stopped (0.3 m/s)    as fact     as fact      as fact      last I saw   0.5 km at ~28 min
-mobile, seen moving: truck 15     as fact     last I saw   last I saw   (lost?)      0.5 km at ~33 s
-                     armour 8                 last I saw   ...                       0.5 km at ~1 min
-                     infantry 2   as fact     as fact      last I saw                0.5 km at ~4 min
+unseen for →                      30 s        2 min          10 min         30 min
+fixed site (SA-2, dug-in)         as fact     → kneeboard;   still reported as fact, from the kneeboard
+mobile, seen stopped (0.3 m/s)    as fact     → kneeboard;   as fact        last I saw   (0.5 km at ~28 min)
+mobile, seen moving: truck 15     as fact     last I saw → kneeboard; last I saw, N min ago
 ```
 
-- **E1** — When the pilot asks about a fixed SAM site (SA-2, an installation, a dug-in unit) seen
-  any time this sortie and not seen since, Petrovich states it as present fact. He does not say
-  "last I saw", and it stays in the answer however long ago it was seen.
-- **E2** — A fixed site never drops out of report answers, group pictures or threat summaries
-  through time alone. It goes away only when someone looks at its place and finds it empty
-  (BL-B111's absence route), or when it is destroyed.
-- **E3** — While circling a known fixed site, the pilot does **not** hear it re-announced as a new
-  or reacquired contact each time Petrovich's eye comes back round to it.
-- **E4** — A mobile unit Petrovich saw standing still is reported as fact for a long time (about
-  28 min at today's 0.3 m/s drift) unless he sees it move. Once it is seen moving it is treated as
-  a mover.
-- **E5** — A unit Petrovich saw moving is reported "last I saw …" once it could have gone 0.5 km
-  or more since he last saw it: a truck after about half a minute unseen, a tank after about a
-  minute, infantry after about four. Before that it is reported as fact.
-- **E6** — A contact Petrovich is watching right now, or that he saw moments ago, is never hedged
-  at any range. A 4 km naked-eye fix is "as fact" while he is looking at it.
-- **E7** — How confident a report sounds depends on what Petrovich perceived, never on DCS truth.
-  "Fixed site" comes from what he identified it as, and "stopped" comes from what he watched.
+- **E1** — Whenever the pilot asks about threats or ground units, a fixed SAM site (SA-2, an
+  installation, a dug-in unit) seen any time this sortie is in the answer and stated as fact. It is
+  never "last I saw", whether it is still in working memory or only on the kneeboard.
+- **E2** — When a contact goes "lost", it is not forgotten. The kneeboard holds where and when it
+  was last seen. Until someone looks at that place and finds it empty (BL-B111's absence route), or
+  it is destroyed, the unit stays part of what Petrovich can tell the pilot. **What the pilot must
+  still get from a fixed site that has left working memory:**
+  - it is still in "report", "any SAMs" and threat answers;
+  - it is warned about as he closes on its envelope;
+  - when it is seen again, it is recognised as the unit already known.
+- **E3** — While circling a known fixed site, the pilot does **not** hear it announced as a new or
+  reacquired contact each time it drops out of working memory and is seen again. Seeing it again
+  confirms the kneeboard note. It is not news.
+- **E4** — A mobile unit Petrovich saw standing still is stated as fact (about 28 min at today's
+  0.3 m/s drift) unless he sees it move. Once seen moving, it is treated as a mover. This holds
+  from either store.
+- **E5** — A unit Petrovich saw moving is reported "last I saw …" once it could have gone 0.5 km or
+  more: a truck after about 30 s, a tank after about 1 min, infantry after about 4 min. Before that
+  it is stated as fact. Coming from the kneeboard, it carries its age ("… a few minutes ago").
+- **E6** — A contact being watched right now, or seen moments ago, is never hedged at any range.
+- **E7** — What Petrovich says depends on what he perceived, never on DCS truth. That covers "fixed
+  site", "stopped" and the kneeboard's positions. A kneeboard note **informs** what he says and
+  where he looks. It never makes his belief about the unit more precise than when the note was
+  written.
 
 ### Open assumptions
 
-- **What the 0.5 km is measured on** — serves the why: growth since last seen ("how far could it
-  have gone"). Would not: the total position radius. That includes the measurement error of the
-  look itself, so most naked-eye contacts beyond ~3 km would be hedged the moment they are seen
-  (finding 2).
-- **What "lost" is** — serves the why: a unit leaves the picture when it could be anywhere, or when
-  someone looked and it was gone. For a fixed site that is never by time. Would not: a flat 120 s
-  for every contact, which drops a known SA-2 from every answer after two minutes (finding 1).
-- **Which mobile/fixed fact is used** — serves the why: the type or class Petrovich has actually
-  identified, with an honest fallback when he only knows "short range SAM". Would not: the DCS
-  `object_type` read through regardless of how deep his identification has gone (finding 4).
+- **What the 0.5 km is measured on** — serves the why: growth since last seen. Would not: the total
+  position radius, which already exceeds 0.5 km for one naked-eye fix beyond ~3 km (finding 2).
+- **What "lost" is** — serves the why (now the user's own words): leaving working memory after a
+  few minutes, handed to the kneeboard. Today's 120 s fits "a few minutes" well enough. Would not:
+  lost meaning gone from everything the pilot hears, which is what it means today (finding 1).
+- **Which lost contacts reach the kneeboard** — serves the why: every lost contact that was ever
+  worth noting, with its **last-seen** position and time. Air defence is always noted today; other
+  contacts are noted once they clear `GROUP_ENTRY_CONFIDENCE_FLOOR`, a floor the user kept on
+  2026-10-31 so that "a single glimpse gets no entry". Would not: a note written only at first
+  sighting or at the last 250 m change. For a mover, that note can be older than the last sighting,
+  so the kneeboard would place it where it was before it last moved.
+- **What the read-back is for, and what triggers it** — serves the why: the moments in E2 (the
+  pilot asks, the unit is seen again, he closes on a known SAM). Would not: a periodic re-fold of
+  noted positions into belief, which is the "precision laundering" the BL-8 design shut the door on
+  (`fold_position` of an old snapshot shrinks covariance). Q1.
+- **Which mobile/fixed fact is used** — serves the why: the type or class Petrovich identified,
+  with an honest fallback at class level. Would not: the DCS `object_type` read through whatever
+  his identification depth (finding 4).
 - **What "seen stopped" means** — serves the why: watched long enough, at a range where motion
-  would have been noticed. Would not: one glance below the angular-rate threshold, which at 4 km
-  also returns "stopped" for a tank driving at 8 m/s (finding 3).
-- **Never observed for motion (`motion is None`, a scope-only contact)** — serves the why: keep the
-  2026-10-30 decision that `None` drifts like `stopped`. Would not: giving it the class speed. That
-  makes a scope-seen truck "last I saw" in 33 s and widens the association gates the user narrowed
-  on purpose (BL-B58/B24).
-- **Other time-keyed things** — `position_confidence` (exponential, half-life 30 s, feeds
-  enrichment), the range-crossing `fresh` gate and `GROUP_REIDENTIFY_WINDOW_S` all assume the time
-  ladder. The planner has to choose, for each one, whether it follows the new quantity. The why says
-  that anything the pilot hears about a fixed site should not decay on a timer.
+  would show. Would not: one glance below the angular-rate threshold (finding 3).
+- **Never observed for motion (`motion is None`)** — serves the why: it keeps the 2026-10-30 drift
+  of 0.3 m/s. Would not: the class speed, which widens gates the user narrowed on purpose.
+- **Other time-keyed things** — `position_confidence` (exponential decay, half-life 30 s), the
+  range-crossing `fresh` gate and `GROUP_REIDENTIFY_WINDOW_S` all assume the time ladder. For a
+  fixed site, whatever the pilot hears should not decay on a timer.
 
 ### Findings
 
-1. **Taken literally, "Use current implementation" for lost removes a known SA-2 from the picture
-   after 120 s, and re-announces it every orbit** — lens: Purpose, Crew sense
-   - *Assumption:* lost stays at a flat 120 s for every contact.
-   - *In the code today:* a `"lost"` contact is dropped from `report` answers (`crew_console`
-     `_handle_report`, "drop `certainty == 'lost'`"), from follow targeting, from group clustering
-     (BL-B23) and from callout proximity (`callouts.py:856`). The lost moment itself is silent
-     (`speech.py`: no `CONTACT_LOST` template). Coming back from lost emits `CONTACT_REACQUIRED`,
-     which renders a full positional callout.
-   - *The pilot would see:* he circles an SA-2 at 5 km and asks "any SAMs?" after three minutes:
-     no SA-2 in the answer. Petrovich's eye comes round, and "SAM, 2 o'clock, 5 km" is called again
-     as though it were new. The BL-B110/I2 coupling exists to stop exactly this churn.
-   - *Grounded in:* `BL-B112.md`'s own "For the pilot" ("does not go 'lost' while it is certainly
-     still there"), the user's origin quote, and the code paths above.
-   - *Suggests:* the user most likely meant "keep the lost lifecycle as it is", that is the events,
-     the filters and BL-B111's absence route, not "keep 120 s for a fixed site". Question Q1.
-     Nothing in his three answers asks for a fixed site to drop out.
+1. **Today "lost" is forgetting, as far as the pilot can tell, and nothing reads the kneeboard
+   back in flight. So the hand-off the user describes is only half built.** Lens: Purpose, Crew
+   sense.
+   - *Working-memory side, in the code:* a `"lost"` contact is dropped from `report` answers
+     (`crew_console._handle_report`), from follow targeting, from group clustering (BL-B23) and
+     from callout proximity (`callouts.py:856`). The lost moment is silent. Coming back emits
+     `CONTACT_REACQUIRED`, which renders a full positional callout.
+   - *Kneeboard side, in the code:* `mission_memory.admission.step` already writes an entry for
+     every air-defence contact and for every other contact past the confidence floor. It writes on
+     first confident sighting and on material change (≥ 250 m, ≥ 60 s apart), not at the moment a
+     contact goes lost. **The only reader is `recall_memory` in the brain's `TOOL_SET`. BR-2 is
+     open: nothing dispatches `TOOL_SET`, and `BL-8.md` says "write-only in flight by design".**
+     The BL-8 import rule (no `belief/` module imports `mission_memory` except `tool_api.py`) means
+     the deterministic report and callout paths cannot read it today either.
+   - *The pilot would see:* he circles an SA-2 at 5 km and asks "any SAMs?" three minutes later.
+     It is not in the answer, even though it is on the kneeboard. Petrovich's eye comes round and
+     "SAM, 2 o'clock, 5 km" is called as though it were new.
+   - *Grounded in:* the user's follow-up quoted above, `BL-B112.md`'s "for the pilot", `BL-8.md`
+     and `BR-2.md`.
+   - *Suggests:* "lost" stays time-based, as the user said. What is missing is the read-back: the
+     consumers in E2, and E3's "seen again, not news". That read-back is a new in-flight consumer
+     of mission memory. It reverses BL-8's settled "write-only file, read-in-flight in memory, via
+     the brain" path for deterministic code, and it must keep the fold door shut (E7). Q1 and Q5.
 
-2. **"Location inaccuracy ≥ 0.5 km" has to mean growth since last seen, not total uncertainty** —
-   lens: World truth, Crew sense
-   - *Assumption:* the hedge keys on `position.radius_m()`.
-   - *In the code:* one naked-eye look has σ_down = 0.17 × range (`estimation.RANGE_FRACTIONAL_SIGMA`),
-     which is ~680 m at 4 km before any time has passed.
-   - *The pilot would see:* "last I saw" on a contact Petrovich is looking at right now, for most
-     naked-eye contacts beyond ~3 km. That is the opposite of the user's intent (E6).
-   - *Grounded in:* code. The user's phrasing ("as inaccuracy grows") also points to growth.
-   - *Suggests:* the planner keys on how far the unit could have moved since last seen. No user
-     question needed unless the main loop reads his words differently.
+2. **"Location inaccuracy ≥ 0.5 km" has to mean growth since last seen, not total
+   uncertainty.** Lens: World truth, Crew sense.
+   - One naked-eye look has σ_down = 0.17 × range (`estimation.RANGE_FRACTIONAL_SIGMA`), about
+     680 m at 4 km before any time passes.
+   - Keyed on the total, most naked-eye contacts beyond about 3 km would be hedged while Petrovich
+     is looking at them. That breaks E6.
+   - *Grounded in:* code. No user question is needed.
 
 3. **"Observed not moving" is one sub-threshold glance today, and at Mi-24 ranges that misses real
-   movement** — lens: World truth, Bounded knowledge, Non-obvious case
-   - *In the code:* the founding `apparent_motion=False` is adopted as `"stopped"` at once
-     (`belief/motion.py`). The threshold is 8 arcmin/s (`perception/motion.py`), which needs about
-     9 m/s across the line of sight at 4 km. A tank at 8 m/s broadside at 4 km, or any vehicle
-     driving toward or away from the aircraft, reads "stopped".
-   - *Vignette:* a column on a road, heading toward the helicopter at 4 km, is seen once and then
-     goes behind a ridge. Under this goal it is stated as fact at its first place for about 28 min,
+   movement.** Lens: World truth, Bounded knowledge, Non-obvious case.
+   - The founding `apparent_motion=False` is adopted as `"stopped"` at once (`belief/motion.py`).
+   - The threshold is 8 arcmin/s (`perception/motion.py`), which needs about 9 m/s across the line
+     of sight at 4 km. A tank driving broadside, or anything driving toward or away from the
+     helicopter, reads "stopped".
+   - *Vignette:* a column heading for the helicopter is seen once at 4 km. It is then stated as
+     fact at its first place for about 28 min, in working memory and then from the kneeboard,
      while it closes 10 km.
-   - *Today the cost is small,* because growth is already 0.3 m/s for stopped units. BL-B112 adds
-     **confident wording** on top of that belief, and that wording is what the pilot acts on.
-   - *Grounded in:* code, and the user's "seen **and observed** not moving", which suggests
-     watching rather than glancing.
-   - *Suggests:* Q2.
+   - Today the cost is small, because growth is already 0.3 m/s. BL-B112 adds **confident
+     wording** on top of that belief, and the read-back carries the same confidence into later
+     answers. Q2.
 
-4. **Fixed versus mobile can be known only at type depth, and SA-2 is not in the table** — lens:
-   Bounded knowledge, World truth
-   - *In the code:* `installation_component=True` exists only for S-125 (SA-3) and Kub (SA-6). No
-     `object_model` row matches an S-75/SA-2 type string, so an SA-2 falls to the default profile
-     and is treated as mobile. A naked-eye contact carries ED's coarse class (`OP_SRSAM` and so on).
-     `OP_SRSAM` covers both the fixed S-125 and the mobile Osa/Strela/Tor, so "short range SAM"
-     cannot tell the two apart.
-   - *What softens it:* a SAM Petrovich glanced at below threshold is "stopped" anyway, so it is
-     stated as fact for ~28 min. Fixed versus mobile matters mainly after that, and for lost.
-   - *Kub/SA-6* is marked fixed today. Under the user's rule ("a SAM site that is not a mobile SAM
-     unit itself") it may belong with the OSA. Only the user can say how DCS missions use it.
-   - *Suggests:* Q3.
+4. **Fixed versus mobile can be known only at type depth, and SA-2 is not in the type table.**
+   Lens: Bounded knowledge, World truth.
+   - `installation_component=True` exists only for S-125 (SA-3) and Kub (SA-6). No row matches an
+     S-75/SA-2 type string.
+   - A naked-eye contact carries ED's coarse class. `OP_SRSAM` covers the fixed S-125 and the
+     mobile Osa, Strela and Tor alike.
+   - A glanced-at SAM is "stopped" anyway, so fixed versus mobile matters mostly past about 28 min,
+     and for how the kneeboard note is worded. Q3.
 
 5. **BL-B111's DoD expects BL-B112 to narrow its Decision 1 exclusion, and under this goal it will
-   barely move** — lens: Purpose
-   - The excluded case BL-B111 measured is armour **seen moving**, 5–6 km wide at 700 s
-     (8 m/s × 700 s). Moving units keep their class rate under every reading of the user's answers.
-     Stopped and `None` units already grow at 0.3 m/s, and installations at 0.
-   - The only growth BL-B112 plausibly narrows is an SA-2 (or another fixed type the table
-     lacks) going from 0.3 to 0. That is about 200 m at 700 s, already well inside one look.
-   - *Grounded in:* `contact_growth_rate_mps` and BL-B111's own measurement.
-   - *Suggests:* the acceptance check against `EXPECTED_AREA_MAX_HALF_WIDTH_DEG` should be written
-     as "expected: unchanged, except fixed types now at zero", not as a narrowing to look for. A
-     plan that promises narrowing will either fail that check or change moving-unit growth, which
-     the user has not asked for.
+   barely move.** Lens: Purpose.
+   - The excluded case BL-B111 measured is armour **seen moving**: 8 m/s × 700 s, about 5.6 km
+     wide. Moving units keep their class rate under every reading of the user's answers.
+   - Stopped and `None` units already grow at 0.3 m/s, and installations at 0.
+   - The acceptance check against `EXPECTED_AREA_MAX_HALF_WIDTH_DEG` should expect "unchanged,
+     except fixed types now at zero".
+   - Separately, the kneeboard read-back is a natural feed for BL-B111's "A". A unit seen again
+     near a noted position should be checked against that note, not called new. This belongs to
+     the read-back item, not to BL-B112.
 
-6. **"Tracked" versus "estimated" stays a real player-facing difference if it maps to the hedge** —
-   lens: Purpose
-   - Today the pilot does not hear the two labels as such. "Last I saw" keys on age greater than
-     one scan cycle (`speech._is_stale`), not on the label. The labels reach him through the
-     brain's phrasing hint ("recent" or "remembered") and the range-crossing `fresh` gate (tracked
-     only).
-   - *Serves the why:* tracked means "good enough to point the pilot at, said as fact", and
-     estimated means "said with 'last I saw'". Two states, one meaning each, and the pilot can tell
-     them apart.
-   - *Consequence to accept:* a fixed SA-2 that stays tracked keeps range-crossing callouts alive
-     ("SAM inside 3 km") as ownship closes on its remembered place. For a site that cannot move
-     this is the most useful call Petrovich can make, but it is a call made without a fresh look.
-     That makes it Q4.
+6. **"Tracked" versus "estimated" stays a real player-facing difference only if it maps onto the
+   hedge.** Lens: Purpose.
+   - Today "Last I saw" is triggered by age past one scan cycle (`speech._is_stale`), not by the
+     label.
+   - *Serves the why:* tracked means stated as fact, estimated means "last I saw", and lost means
+     handed to the kneeboard. One meaning per state.
+   - A fixed site that stays tracked keeps range-crossing callouts alive while it is in working
+     memory. After hand-off, the same warning has to come from the kneeboard, or it stops at
+     "lost". Q4.
+
+### Scope proposal
+
+**Split it.** BL-B112 delivers E4–E6 and the working-memory half of E1:
+
+- the hedge keyed on growth, with "tracked" and "estimated" mapped onto it;
+- the fixed-site and observed-stopped distinction;
+- the guarantee that **every contact going lost leaves a kneeboard note with its last-seen place
+  and time** (the write half of the hand-off).
+
+That stays inside today's architecture.
+
+**A new body-layer item, the kneeboard read-back,** delivers E2, E3 and E1's kneeboard half:
+
+- report and threat answers include noted units;
+- a re-sighting near a noted unit is recognised rather than announced, which feeds BL-B111's "A";
+- the pilot is warned when closing on a noted SAM.
+
+It needs its own architect pass, because it opens a deterministic in-flight read path into
+`mission_memory`. That reverses BL-8's settled "write-only in flight, read through the brain", and
+it has to keep the fold door shut. It is also the thing BR-2 would otherwise be waited on for.
+
+**Ship order matters.** Until the read-back lands, BL-B112 changes nothing about a fixed site
+dropping out of answers at 120 s. That is today's behaviour, not a regression, and the test card
+should say so plainly.
 
 ### Questions for the user
 
-- **Q1** — "Use current implementation" for lost: did you mean keep 120 s for everything (an SA-2
-  last seen three minutes ago then drops out of "report" answers, and is called again as a new
-  contact when Petrovich looks back), or keep how "lost" works while a fixed site never goes lost on
-  time alone, only when he looks and finds the place empty? *Recommended:* the second. Your other
-  two answers and the origin quote are all about the site still being there.
-- **Q2** — "Observed not moving": is one glance enough, or must Petrovich have watched it for a few
-  seconds? At 4 km a single look cannot tell a tank driving straight toward you from a parked one,
-  and this change would then state its old position as fact for about half an hour.
-  *Recommended:* a short watch, for example the existing 5 s stop confirmation, and nothing from
-  one glance.
+- **Q1** — When should Petrovich go back to the kneeboard for a unit no longer in his head: when
+  you ask (report, "any SAMs"), when he sees something near a noted unit (so the SA-2 is
+  recognised, not announced again), and when you close on a noted SAM's envelope? Or also on his
+  own, turning his scan to look at noted positions again? *Recommended:* the first three now. Scan
+  steering toward noted positions is worth having, but it is a larger change to how he looks, and
+  can come later.
+- **Q2** — "Observed not moving": is one glance enough, or must Petrovich have watched it for a
+  few seconds? At 4 km a single look cannot tell a tank driving straight toward you from a parked
+  one, and this change would then state its old position as fact for about half an hour, first in
+  his head and then from the kneeboard. *Recommended:* a short watch, for example the existing 5 s
+  stop confirmation, and nothing from one glance.
 - **Q3** — Which SAM systems should count as "fixed site, never moves" in DCS: SA-2 and SA-3 for
   certain, and SA-6 (Kub), SA-10/S-300, SA-11 (Buk)? And when Petrovich only knows "short range
-  SAM", not which one, treat it as mobile? *Recommended:* fixed = SA-2, SA-3, SA-10 site components;
-  treat SA-6 as you rule; class-only "SAM" is mobile until identified.
+  SAM", not which one, treat it as mobile? *Recommended:* fixed = SA-2, SA-3, SA-10 site
+  components; treat SA-6 as you rule; class-only "SAM" is mobile until identified.
 - **Q4** — For a fixed SAM site that he has not seen for a while, should Petrovich still call
-  "SAM inside 3 km" as you close on its remembered position? *Recommended:* yes. A site cannot
-  move, so the call is true, and it is the warning you would want most.
+  "SAM inside 3 km" as you close on its noted position, from the kneeboard once it has left his
+  head? *Recommended:* yes. A site cannot move, so the call is true, and it is the warning you
+  would want most.
+- **Q5** — Build this in two steps: BL-B112 first (wording, fixed and stopped units, every lost
+  contact noted on the kneeboard), then a separate item for reading the kneeboard back in flight?
+  *Recommended:* yes. Reading back is a design change to mission memory, which today is
+  write-only in flight. Until the second step lands, a fixed site still drops out of answers after
+  about 2 minutes, the same as today.
