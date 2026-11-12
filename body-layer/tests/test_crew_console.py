@@ -40,12 +40,18 @@ from belief.crew_console import (
     _describe_token_for_confirm,
     _nearest_sector,
 )
-from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S, certainty_of
+from belief.decay import (
+    LAST_I_SAW_GROWTH_THRESHOLD_M,
+    LOST_THRESHOLD_S,
+    OBSERVED_WINDOW_S,
+    certainty_of,
+)
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
 from belief.optic_policy import BoundedSightLook
 from belief.percept import Percept
+from belief.position_belief import plausible_speed_mps
 from belief.referent import Mention
 from belief.speech import (
     group_membership_state,
@@ -3964,7 +3970,13 @@ def _observation_for_follow(
     """Places a contact at a controlled clock/range from `_enrichment_
     context`'s fixed origin ownship, with a caller-controlled
     classification -- `_observation_at`'s shape, extended with
-    `classification_level` for `follow`'s descriptor-matching tests."""
+    `classification_level` for `follow`'s descriptor-matching tests.
+    `surface_alt_m` is left `None` (an air contact, `Contact.on_surface
+    is False`) -- `[[BL-B112]]`'s `contact_growth_rate_mps` therefore
+    takes the unconditional class-rate branch for every contact this
+    fixture builds, regardless of observed motion (that function's own
+    docstring: "air contacts are gated on `on_surface`, not on `contact.
+    motion`")."""
     x, z = _xz_for_clock(clock, range_m)
     return Observation(
         id=obs_id,
@@ -6824,10 +6836,11 @@ def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
 
     Driven by making the contact stale enough that the push path's own
     observability/eligibility reasoning would have something to say about
-    it -- `certainty` has fallen to `estimated`, past `OBSERVED_WINDOW_S`
-    and past `POSITION_HALF_LIFE_S` -- and asserting the report still
-    names it."""
-    from belief.decay import OBSERVED_WINDOW_S, POSITION_HALF_LIFE_S
+    it -- `certainty` has fallen to `estimated` (`[[BL-B112]]`: past
+    `LAST_I_SAW_GROWTH_THRESHOLD_M`'s plausible-displacement bound, not a
+    bare elapsed-time window) -- and asserting the report still names it."""
+    from belief.decay import LAST_I_SAW_GROWTH_THRESHOLD_M, LOST_THRESHOLD_S
+    from belief.position_belief import plausible_speed_mps
 
     store = ContactStore()
     store.ingest(
@@ -6844,8 +6857,11 @@ def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    later = POSITION_HALF_LIFE_S + 1.0
-    assert later > OBSERVED_WINDOW_S
+    # `OP_ARMORED` here is an air contact (`on_surface=False`,
+    # `_observation_for_follow`'s own docstring), so its growth rate is
+    # the unconditional class rate -- time to cross the growth threshold.
+    later = LAST_I_SAW_GROWTH_THRESHOLD_M / plausible_speed_mps("OP_ARMORED") + 1.0
+    assert later < LOST_THRESHOLD_S, "fixture must land in 'estimated', not 'lost'"
     store.tick(now_sim=later)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     console.on_ground = False
@@ -6951,24 +6967,27 @@ def test_slotted_report_band_labels_are_derived_from_the_filter_bounds() -> None
     assert _REPORT_BAND_LABELS["far"] == "beyond 5 kilometres"
 
 
-def test_slotted_report_freshness_window_is_the_decay_modules_own(
+def test_slotted_report_freshness_window_is_growth_distance_based(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The live call site passes `decay.OBSERVED_WINDOW_S` -- the
-    project's existing "how long since a look is still fresh" bound -- so
-    no second staleness constant was introduced (`plans/crew-query-path/
-    plan.md` Decision D; `decay.py` is read-only in this plan).
+    """`[[BL-B112]]`: the live call site's wording trigger is no longer a
+    bare elapsed-time window -- `speech._needs_hedge` reads `certainty ==
+    "estimated"`, and `certainty_of`'s tracked/estimated boundary is now
+    growth-distance-based (`belief.decay.LAST_I_SAW_GROWTH_THRESHOLD_M`),
+    not `decay.OBSERVED_WINDOW_S` (the test this one replaces pinned that
+    constant; `decay.py`'s own docstring on `POSITION_HALF_LIFE_S` records
+    why `OBSERVED_WINDOW_S` no longer decides this wording either).
 
-    Driven across the boundary rather than by reading the constant back:
-    the same scene answers unqualified just inside the window and
-    qualified just outside it. The window is read from `decay` to place
-    the two probes, never to assert the wording.
+    Driven across the real boundary rather than by reading the constant
+    back: the same scene answers unqualified just inside the distance the
+    contact's own class (`OP_ARMORED`, an air contact under this
+    fixture's own `on_surface=False` -- see `_observation_for_follow`'s
+    docstring) could plausibly have travelled, and qualified just past
+    it.
 
     `scheduler.busy_until_sim` is reset between the two calls -- see
     `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
-    note (`plans/voice-latency-instrumentation/plan.md` Stage 6); the two
-    `now_sim` values are only 2s apart, well inside the first call's own
-    estimated speech duration."""
+    note (`plans/voice-latency-instrumentation/plan.md` Stage 6)."""
     store = ContactStore()
     store.ingest(
         [
@@ -6987,12 +7006,19 @@ def test_slotted_report_freshness_window_is_the_decay_modules_own(
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     console.on_ground = False
 
+    growth_rate_mps = plausible_speed_mps("OP_ARMORED")
+    threshold_s = LAST_I_SAW_GROWTH_THRESHOLD_M / growth_rate_mps
+    assert OBSERVED_WINDOW_S < threshold_s < LOST_THRESHOLD_S, (
+        "fixture assumption: the growth boundary must sit strictly between "
+        "OBSERVED_WINDOW_S and LOST_THRESHOLD_S for this test to probe it"
+    )
+
     fresh = console.handle_command(
-        "report", now_sim=OBSERVED_WINDOW_S - 1.0, slots={"clock": 2}
+        "report", now_sim=threshold_s - 1.0, slots={"clock": 2}
     )
     console.scheduler.busy_until_sim = 0.0
     stale = console.handle_command(
-        "report", now_sim=OBSERVED_WINDOW_S + 1.0, slots={"clock": 2}
+        "report", now_sim=threshold_s + 1.0, slots={"clock": 2}
     )
 
     assert "Last I saw" not in fresh[0]

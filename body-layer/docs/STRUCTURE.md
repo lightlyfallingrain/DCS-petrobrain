@@ -1116,7 +1116,11 @@ The entries are in the order they were written, which is roughly perception → 
   `None`) so a Stage-4-less entry, if one is ever written before that trigger exists, still has a
   real value to serialise. `MotionInfo.dir` and `.outcome` both ship nullable-forever-until-later
   — no direction belief and no destruction-determination signal exist yet (plan's own Risks &
-  Unknowns), not an oversight.
+  Unknowns), not an oversight. `SCHEMA_VERSION` is `2` as of `[[BL-B112]]`:
+  `CompositionItem.immobile` (`perception.object_model.ObjectTypeProfile.immobile`'s value for
+  that bucket's type, frozen at write time) is a new field, decoded with `.get("immobile", False)`
+  rather than a bare key lookup — every schema-1 entry on disk predates it, so a missing key is
+  the expected shape for an old file, not corruption.
 - `src/mission_memory/store.py` — `MissionMemory`, the in-memory JSONL-backed log.
   `MissionMemory.append` is the **single construction site** for `Entry` across this whole
   package: `admission.py`/`marks.py`/`query.py`/`tools.py` contain no `Entry(` call at all,
@@ -1142,6 +1146,16 @@ The entries are in the order they were written, which is roughly perception → 
   `RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`, `FIRED_ON_FOLD_WINDOW_S` (the user's own "~2 min").
   `FiredOnTracker` is the one admission rule's own per-shooter suppression bookkeeping, owned by
   the poll loop's caller, deliberately not state on `MissionMemory` itself.
+  **`LostContactTracker`/`_write_lost_entry`/`_write_lost_entries`** (`[[BL-B112]]`) are
+  `FiredOnTracker`'s own sibling: a `CONTACT_LOST` event writes one forced terminal snapshot of the
+  contact's last real look (the working-memory → kneeboard hand-off, explore-notes.md) —
+  air-defence always, a group contact only if it already cleared `GROUP_ENTRY_CONFIDENCE_FLOOR` on
+  the way in (same floor, applied once more on the way out). Bypasses `RESIGHT_MIN_INTERVAL_S`/
+  `_material_change` entirely (a forced snapshot, not an ordinary resight), and reuses every other
+  helper (`_build_entry_position`/`_seen_how`/`_motion_info`/`_composition_for`/`_group_link_for`)
+  unmodified — `_build_entry_position`'s position is already frozen at the last genuine look
+  (`Contact.position.as_of_sim`, only ever updated inside `record`/`from_percept`), so this write
+  records the last-seen place and time, not the moment the note was written.
 - `src/mission_memory/marks.py` — the commanded-mark path (Decision 6), `mark_here`/`mark_target`,
   reachable by voice and the brain tool only — no new F10 radio-menu entry, per BL-10's explicit
   instruction not to re-expand that tree. **Deliberately does not share `admission.py`'s

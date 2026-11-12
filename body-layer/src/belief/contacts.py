@@ -780,6 +780,17 @@ class Contact:
             z=percept.ownship_at_observation.z,
             alt_m=percept.ownship_at_observation.alt_m,
         )
+        # `[[BL-B112]]`: called once here (not inline at the `motion=`
+        # field below) so its `pending_stop_since_sim` can also be
+        # persisted -- a founding `False` reading no longer adopts
+        # "stopped" outright, it starts (or continues) the same
+        # `MOTION_STOP_CONFIRM_S` watch `record` already threads through
+        # `self.motion_pending_stop_since_sim`. Discarding this outcome's
+        # countdown, as the old single-field read below used to, would
+        # silently drop that watch for every founding contact.
+        founding_motion_outcome = fold_motion(
+            None, percept.apparent_motion, percept.t_sim, None
+        )
         founding_position = fold_position(
             None,
             x=look_position.x,
@@ -814,14 +825,12 @@ class Contact:
                 if percept.count_bucket is not None
                 else new_cardinality_belief(OP_1UNIT, percept.t_sim)
             ),
-            # `held=None` -- `fold_motion` adopts the founding percept's own
-            # motion evidence outright (its own "no prior claim to demote
-            # away from" rule), or stays `None` when the founding percept
-            # carries no motion evidence at all (`belief.motion`'s module
-            # docstring).
-            motion=fold_motion(
-                None, percept.apparent_motion, percept.t_sim, None
-            ).motion,
+            # `held=None` -- stays `None` when the founding percept carries
+            # no motion evidence at all, or (`[[BL-B112]]`) while a
+            # founding `False` reading's own watch has not yet completed
+            # (`belief.motion`'s module docstring).
+            motion=founding_motion_outcome.motion,
+            motion_pending_stop_since_sim=founding_motion_outcome.pending_stop_since_sim,
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
             live_los_clear=percept.live_los_clear,

@@ -95,12 +95,17 @@ ON_GROUND_AGL_THRESHOLD_M = 10.0
 # source: belief/decay.py:IDENTITY_HALF_LIFE_S
 IDENTITY_HALF_LIFE_S = 600.0
 
+# `[[BL-B112]]` (explore-notes.md, user, 2026-11-12): *"use 'last I saw' if it is a mobile unit. Use when location inaccuracy grows to >= 0.5 km."* How far a contact could plausibly have moved since it was last seen (`distance_since_last_seen_m` below) before `certainty_of` hedges it as "estimated" rather than stating it as "tracked" fact -- the user gave this figure directly, 0.5 km, so it is not independently derived.
+# status: agreed-guess | range: 100.0 .. 2000.0
+# source: belief/decay.py:LAST_I_SAW_GROWTH_THRESHOLD_M
+LAST_I_SAW_GROWTH_THRESHOLD_M = 500.0
+
 # Past this much elapsed time since last observed, a contact is considered lost outright rather than merely stale -- set to 4x `POSITION_HALF_LIFE_S`, so the two must be retuned together.
 # status: judgement | range: 30.0 .. 600.0
 # source: belief/decay.py:LOST_THRESHOLD_S
 LOST_THRESHOLD_S = 120.0
 
-# This is the one half-life `certainty_of` below actually uses to separate "tracked" from "estimated".
+# Consumed by `position_confidence`'s exponential decay curve below.
 # status: judgement | range: 20.0 .. 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0

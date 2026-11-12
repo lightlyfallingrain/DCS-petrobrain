@@ -40,7 +40,7 @@ from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
-from belief.events import CONTACT_FIRING_SEEN
+from belief.events import CONTACT_FIRING_SEEN, CONTACT_LOST
 from belief.mission_phase import MissionPhaseInfo
 from belief.speech import cardinality_phrase
 from belief.threat import envelope_for
@@ -58,6 +58,7 @@ from mission_memory.entries import (
     ThreatInfo,
 )
 from mission_memory.store import MissionMemory
+from perception import object_model
 
 #: Decision 3's admission floor for the `group` rule: a contact's
 #: classification confidence must be held at or above this value before
@@ -139,11 +140,19 @@ def _composition_for(contact: Contact) -> tuple[CompositionItem, ...]:
     composition list a per-contact entry carries. Empty when the contact
     has no classification value at all (`UNKNOWN` level) -- callers only
     reach this once a class-level-or-above check has already passed, but
-    it stays total rather than assuming that."""
+    it stays total rather than assuming that.
+
+    `immobile` (`[[BL-B112]]`) is resolved via `object_model.profile_for`
+    on `contact.last_class_raw` -- the same resolution `belief.
+    association_over_time.contact_growth_rate_mps` already applies for the
+    growth rate itself, so a contact's immobility is read through one
+    path here, not re-derived from the (possibly coarser) `value` this
+    composition item carries."""
     value = contact.classification.value
     if value is None:
         return ()
     word = cardinality_phrase(contact.cardinality.lo, contact.cardinality.hi)
+    profile = object_model.profile_for(contact.last_class_raw)
     return (
         CompositionItem(
             op_class=value,
@@ -151,6 +160,7 @@ def _composition_for(contact: Contact) -> tuple[CompositionItem, ...]:
             hi=contact.cardinality.hi,
             confidence=contact.classification.confidence,
             count_word=word,
+            immobile=profile.immobile,
         ),
     )
 
@@ -512,6 +522,148 @@ def _write_fired_on_entries(
         tracker._last_write_sim[shooter_id] = now_sim
 
 
+@dataclass
+class LostContactTracker:
+    """Per-run scan-cursor state for the `[[BL-B112]]` lost-contact
+    write (explore-notes.md, user: *"'lost' contacts need to go to
+    mission memory"*) -- `FiredOnTracker`'s direct sibling, same shape and
+    same reasoning for existing: owned by the poll loop, lives for its
+    whole run, and is not state on `MissionMemory` itself."""
+
+    #: `FiredOnTracker._scanned_event_count`'s own twin -- see that
+    #: field's docstring.
+    _scanned_event_count: int = 0
+
+    def reset_for_new_mission(self) -> None:
+        """`FiredOnTracker.reset_for_new_mission`'s own twin, same
+        reasoning: without this, `_scanned_event_count` keeps indexing
+        into `ContactStore.events` by the *old* mission's length after a
+        genuine DCS mission (re)start resets that list back to empty."""
+        self.__init__()  # type: ignore[misc]
+
+
+def _write_lost_entry(
+    memory: MissionMemory,
+    contacts: ContactStore,
+    contact: Contact,
+    now_sim: float,
+    theatre: str | None,
+    phase: PhaseInfo | None,
+    enrichment: EnrichmentContext | None,
+) -> None:
+    """One terminal snapshot of `contact`'s last real look, written when it
+    goes `CONTACT_LOST` -- the write half of the working-memory ->
+    kneeboard hand-off (explore-notes.md). **Bypasses
+    `RESIGHT_MIN_INTERVAL_S`/`_material_change` entirely**: this is a
+    forced terminal snapshot, not an ordinary resight, so the usual
+    "has it actually changed enough, and not too recently" gates do not
+    apply.
+
+    **Air defence: always, mirroring `_maybe_write_air_defence`'s own
+    "always, no floor" rule. Otherwise: only if `memory.latest_entry
+    (contact.id) is not None`** -- it already cleared `GROUP_ENTRY_
+    CONFIDENCE_FLOOR` at some point (Decision 3's own floor, applied once
+    more on the way out: a contact that never got a first entry on the
+    way in -- "a single glimpse" -- gets no lost note either).
+
+    Reuses `_build_entry_position`/`_seen_how`/`_motion_info`/
+    `_composition_for`/`_group_link_for` unmodified. **Position/time
+    integrity**: `_build_entry_position` reads `contact.position`, whose
+    `as_of_sim`/`fused_at_sim` are only ever updated inside `Contact.
+    record`/`from_percept` (which only run when a new percept actually
+    exists for that contact this poll) -- so for a contact that has gone
+    `CONTACT_LOST`, `position.as_of_sim` is already frozen at the last
+    genuine look, not bumped by this write's own `now_sim`. This write
+    therefore records the **last seen** place and time, exactly as the
+    scope requires, not the moment the note was written."""
+    classification = contact.classification
+    is_air_defence = (
+        classification.value is not None
+        and parent_class_of(classification.value) in AIR_DEFENSE_OP_CLASSES
+    )
+    last_entry = memory.latest_entry(contact.id)
+    if not is_air_defence and last_entry is None:
+        return
+
+    composition = _composition_for(contact)
+    motion = _motion_info(contact)
+    pos = _build_entry_position(contact, contacts, now_sim, theatre, enrichment)
+    seen = _seen_how(contact, now_sim)
+    strikes = last_entry.seq if last_entry is not None else None
+
+    if is_air_defence:
+        threat_envelope = envelope_for(classification)
+        threat = (
+            ThreatInfo(
+                envelope_m=threat_envelope.range_max_m,
+                source=classification.value,
+            )
+            if threat_envelope is not None and classification.value is not None
+            else None
+        )
+        memory.append(
+            kind="air_defence",
+            provenance="observed",
+            t_sim=now_sim,
+            phase=phase,
+            pos=pos,
+            seen=seen,
+            belief_ref=contact.id,
+            strikes=strikes,
+            payload=AirDefencePayload(
+                composition=composition,
+                group_link=_group_link_for(contacts, memory, contact),
+                threat=threat,
+            ),
+        )
+        return
+
+    memory.append(
+        kind="group",
+        provenance="observed",
+        t_sim=now_sim,
+        phase=phase,
+        pos=pos,
+        seen=seen,
+        belief_ref=contact.id,
+        strikes=strikes,
+        payload=GroupPayload(
+            composition=composition,
+            motion=motion,
+            ad_link=_group_link_for(contacts, memory, contact),
+        ),
+    )
+
+
+def _write_lost_entries(
+    memory: MissionMemory,
+    contacts: ContactStore,
+    tracker: LostContactTracker,
+    now_sim: float,
+    theatre: str | None,
+    phase: PhaseInfo | None,
+    enrichment: EnrichmentContext | None,
+) -> None:
+    """`_write_fired_on_entries`'s own sibling: one `_write_lost_entry`
+    call per `CONTACT_LOST` event appended since the last `step` call. A
+    lost contact is **not** evicted from `ContactStore` on going lost (it
+    stays, decaying, until a real eviction/destroyed path elsewhere), so
+    `contacts.contact(event.contact_id)` still resolves it here."""
+    events = contacts.events
+    new_events = events[tracker._scanned_event_count :]
+    tracker._scanned_event_count = len(events)
+
+    for event in new_events:
+        if event.kind != CONTACT_LOST:
+            continue
+        contact = contacts.contact(event.contact_id)
+        if contact is None:
+            continue
+        _write_lost_entry(
+            memory, contacts, contact, now_sim, theatre, phase, enrichment
+        )
+
+
 def step(
     memory: MissionMemory,
     contacts: ContactStore,
@@ -520,15 +672,16 @@ def step(
     phase: MissionPhaseInfo | None = None,
     enrichment: EnrichmentContext | None = None,
     fired_on_tracker: FiredOnTracker | None = None,
+    lost_contact_tracker: LostContactTracker | None = None,
 ) -> None:
     """Run every admission rule, once, over every current contact. Called
     once per poll by `body._mission_memory_step`, after
     `ContactStore.tick()` -- see module docstring.
 
-    `fired_on_tracker` is `None` only in a test that does not care about
-    the `fired_on` rule -- every real caller (`body.py`'s two poll
-    loops) owns one `FiredOnTracker` for the run's lifetime and always
-    passes it."""
+    `fired_on_tracker`/`lost_contact_tracker` are `None` only in a test
+    that does not care about the `fired_on`/lost-write rule respectively
+    -- every real caller (`body.py`'s poll loop) owns one of each for the
+    run's lifetime and always passes them."""
     phase_info = to_phase_info(phase)
     for contact in contacts.contacts:
         if contacts.has_open_check(contact.id):
@@ -548,3 +701,13 @@ def step(
         )
     if fired_on_tracker is not None:
         _write_fired_on_entries(memory, contacts, fired_on_tracker, now_sim, phase_info)
+    if lost_contact_tracker is not None:
+        _write_lost_entries(
+            memory,
+            contacts,
+            lost_contact_tracker,
+            now_sim,
+            theatre,
+            phase_info,
+            enrichment,
+        )

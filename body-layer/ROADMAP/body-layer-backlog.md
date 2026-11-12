@@ -152,6 +152,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B112]] — motion-aware contact certainty: a stationary unit stays tracked; lost by plausible movement, not fixed time (next)
 - [[BL-B113]] — same-optic re-sighting splits one group ~10% of the time; gate S shape off, cause open (deferred until seen in missions)
 - [[BL-B114]] — merge-echo callout rule silences real second groups the gate split (63–73% unannounced eye→eye); narrowed by `[[BL-B111]]` to the cannot-look remainder; deferred until seen in missions
+- [[BL-B115]] — kneeboard read-back: consult mission memory for the local map page (sector entry, phase change); split from `[[BL-B112]]`
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

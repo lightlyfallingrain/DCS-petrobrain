@@ -32,11 +32,18 @@ demotion countdown either (a gap in observation is not evidence the unit
 started moving again, so `pending_stop_since_sim` survives a `None` poll
 unchanged; only a `True` reading resets it).
 
-A contact's *founding* motion percept (no `held` claim yet) is adopted
-outright regardless of direction -- there is no prior "moving" claim to
-demote away from, so a first `False` reading becomes `"stopped"`
-immediately, the same "adopt the founding claim as-is" rule
-`classification.py`/`cardinality.py` both already follow."""
+**A contact's *founding* motion percept is NOT adopted outright**
+(`[[BL-B112]]`, reversing the earlier "adopt the founding claim as-is"
+rule `classification.py`/`cardinality.py` still follow for their own
+claims). At Mi-24 ranges a single glance cannot tell a unit driving
+straight at the helicopter from one parked -- the user's own answer
+(explore-notes.md Q2, 2026-11-12): *"a short watch, for example the
+existing 5 s stop confirmation, and nothing from one glance."* So a
+founding `False` reading runs through the same `MOTION_STOP_CONFIRM_S`
+countdown the demotion branch already uses, rather than becoming
+`"stopped"` from one reading -- `motion` stays honestly `None` ("never
+observed for movement," already a real state for this field) until the
+watch completes."""
 
 from __future__ import annotations
 
@@ -73,12 +80,16 @@ class MotionBelief:
 
 @dataclass(frozen=True, slots=True)
 class FoldMotionOutcome:
-    """`fold_motion`'s result. `motion` is `None` only when `held` was
-    already `None` and `incoming` was `None` too (nothing to hold, nothing
-    to adopt). `pending_stop_since_sim` is the demotion-countdown state --
-    the sim time the *first* contradicting `False` reading arrived since
-    `motion` was last confirmed `"moving"`, or `None` when no demotion is in
-    progress (module docstring)."""
+    """`fold_motion`'s result. `motion` is `None` when `held` was already
+    `None` and either `incoming` was `None` too (nothing to hold, nothing
+    to adopt) or a founding `False` reading's own watch
+    (`MOTION_STOP_CONFIRM_S`) has not yet completed (`[[BL-B112]]`:
+    "never observed for movement" is honest until that watch confirms
+    `"stopped"`). `pending_stop_since_sim` is the watch/demotion-countdown
+    state -- the sim time the *first* `False` reading arrived since
+    `motion` was last confirmed `"moving"` (or, for a founding contact,
+    since founding), or `None` when no watch is in progress (module
+    docstring)."""
 
     motion: MotionBelief | None
     pending_stop_since_sim: float | None
@@ -117,12 +128,19 @@ def fold_motion(
 
     # incoming is False.
     if held is None:
-        # Founding claim -- no prior "moving" belief to demote away from
-        # (module docstring's "adopt the founding claim as-is" rule).
-        motion = MotionBelief(
-            state="stopped", confidence=_DEFAULT_CONFIDENCE, established_sim=now_sim
+        # Founding claim, no prior "moving" belief -- but `[[BL-B112]]`
+        # still requires a watch before adopting "stopped" (module
+        # docstring): the same countdown the demotion branch below uses,
+        # started (or continued) from `pending_stop_since_sim`.
+        since = (
+            pending_stop_since_sim if pending_stop_since_sim is not None else now_sim
         )
-        return FoldMotionOutcome(motion=motion, pending_stop_since_sim=None)
+        if now_sim - since >= MOTION_STOP_CONFIRM_S:
+            motion = MotionBelief(
+                state="stopped", confidence=_DEFAULT_CONFIDENCE, established_sim=now_sim
+            )
+            return FoldMotionOutcome(motion=motion, pending_stop_since_sim=None)
+        return FoldMotionOutcome(motion=None, pending_stop_since_sim=since)
 
     if held.state == "stopped":
         # Already stopped -- reinforce, no countdown needed (only a

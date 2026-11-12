@@ -115,7 +115,6 @@ from belief.callouts import (
 )
 from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import ContactStore
-from belief.decay import OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
     BrainClient,
@@ -4347,7 +4346,6 @@ class CrewConsole:
                 render_report_summary(
                     facts_list,
                     band_label=self._band_label_for(facts_list, band),
-                    stale_window_s=OBSERVED_WINDOW_S,
                 ).text
             ]
 

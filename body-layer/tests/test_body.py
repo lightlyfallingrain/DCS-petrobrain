@@ -78,7 +78,7 @@ from body import (
     _warn_live_los_coverage_gap_once,
     main,
 )
-from mission_memory.admission import FiredOnTracker
+from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.store import MissionMemory
 from perception import association
 from perception.forest import ForestOcclusion
@@ -3555,6 +3555,7 @@ def _f4_poll(
     crew_console: CrewConsole,
     memory: MissionMemory,
     fired_on_tracker: FiredOnTracker,
+    lost_contact_tracker: LostContactTracker,
 ) -> None:
     """One poll of `_run_crew_text_poll_loop`'s belief-to-speech sinks, in
     that loop's own order, minus its cockpit writes (switches and the
@@ -3577,7 +3578,13 @@ def _f4_poll(
         resolving_optic=runner.optic,
     )
     body_module._mission_memory_step(
-        memory, runner, runner.last_t_sim, runner.theatre, None, fired_on_tracker
+        memory,
+        runner,
+        runner.last_t_sim,
+        runner.theatre,
+        None,
+        fired_on_tracker,
+        lost_contact_tracker,
     )
     crew_console.drain_events(runner.last_t_sim)
     crew_console.drain_pending_positional_replies(runner.last_t_sim)
@@ -3705,6 +3712,7 @@ def _f4_scenario(
 
     memory = MissionMemory()
     fired_on_tracker = FiredOnTracker()
+    lost_contact_tracker = LostContactTracker()
     crew_console = CrewConsole(
         store=runner.store,
         tasks=runner.tasks,
@@ -3740,7 +3748,7 @@ def _f4_scenario(
         2: [("mark_target", None), ("engage", None)],
     }
     for poll in range(1, 5):
-        _f4_poll(runner, crew_console, memory, fired_on_tracker)
+        _f4_poll(runner, crew_console, memory, fired_on_tracker, lost_contact_tracker)
         aim_sources.append(runner.sight_head.aim_source)
         goals.append(
             (runner.sight_head.goal_world_az_deg, runner.sight_head.goal_world_el_deg)

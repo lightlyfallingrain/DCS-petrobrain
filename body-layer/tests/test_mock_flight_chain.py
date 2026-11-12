@@ -328,8 +328,11 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # any channel" was a fact about that timing, not an invariant of
         # the fixture's geometry). Confirmed by actually running the
         # pipeline, not assumed: the second contact never reappears
-        # after its one look, so it decays to "estimated" by the end of
-        # the run (`last_seen_ago_s: 60.0` at `final_t_sim=95`).
+        # after its one look (`last_seen_ago_s: 60.0` at `final_t_sim=95`),
+        # but (`[[BL-B112]]`) it stays "tracked" fact rather than hedged as
+        # "estimated" -- a single unobserved infantry contact's plausible
+        # growth over 60 s (`UNOBSERVED_MOTION_GROWTH_RATE_MPS`, never
+        # observed moving) is far below `LAST_I_SAW_GROWTH_THRESHOLD_M`.
         assert len(contacts) == 2
 
         # Two founding CONTACT_DETECTED events -- no spurious CONTACT_
@@ -366,7 +369,9 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         infantry = next(c for c in contacts if c["facts"]["id"] == "CONTACT_2")
         assert infantry["facts"]["classification"]["value"] == "OP_INFANTRY"
         assert infantry["facts"]["classification"]["level"] == "class"
-        assert infantry["facts"]["certainty"] == "estimated"
+        # `[[BL-B112]]`: "tracked", not "estimated" -- see the comment
+        # above `assert len(contacts) == 2`.
+        assert infantry["facts"]["certainty"] == "tracked"
         assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
         infantry_cardinality = infantry["facts"]["cardinality"]
         assert (infantry_cardinality["lo"], infantry_cardinality["hi"]) == (1, 1)
