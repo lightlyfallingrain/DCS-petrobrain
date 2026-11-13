@@ -99,7 +99,15 @@ def test_final_answer_line_becomes_answer_dict(
         model="m", ollama_client=OllamaClient(base_url=fake_ollama.base_url)
     )
     result = decider.decide(_payload(round_=1))
-    assert result == {"kind": "answer", "form": "contacts", "refs": ["CONTACT_1"]}
+    # BR-2 Stage 3 (`final_reply.final_to_dict`) adds an optional
+    # `because` alongside `form`/`refs` for D3's ambiguity-evidence rule
+    # -- `None` here since this line carries no trailing `BECAUSE "..."`.
+    assert result == {
+        "kind": "answer",
+        "form": "contacts",
+        "refs": ["CONTACT_1"],
+        "because": None,
+    }
 
 
 def test_final_unable_line_becomes_unable_dict(

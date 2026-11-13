@@ -357,11 +357,16 @@ def test_run_case_once_grammar_form_call_then_final(
     assert result.rounds[0].kind == "tool_call"
     assert result.rounds[0].step_matched_expected is True
     assert result.rounds[1].kind == "final"
+    # BR-2 Stage 3 (`final_reply.final_to_dict`): `target`/`because` are
+    # popped out of the raw JSON object into their own dedicated fields
+    # rather than left duplicated inside `slots` -- `slots` holds only
+    # whatever else the model tried to fill (nothing, here).
     assert result.final == {
         "kind": "command",
         "token": "where_is_it",
-        "slots": {"target": "CONTACT_1"},
+        "slots": {},
         "target": "CONTACT_1",
+        "because": None,
     }
     assert result.final_correct is True
     assert result.exceeded_rounds is False

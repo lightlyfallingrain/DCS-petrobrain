@@ -214,7 +214,7 @@ class DebugPrintBrainClient:
 def _situational_header(
     store: ContactStore,
     enrichment: EnrichmentContext | None,
-    recent_contacts: tuple[dict[str, object], ...] = (),
+    recent_contacts: tuple[tuple[str, str], ...] = (),
 ) -> dict[str, object]:
     """`plans/brain-tool-calls/plan.md` D4's "header refs" -- `belief.
     crew_console.CrewConsole._header_contact_refs`'s already-resolved
@@ -232,7 +232,9 @@ def _situational_header(
             "z": enrichment.ownship.z,
         }
     if recent_contacts:
-        header["recent_contacts"] = list(recent_contacts)
+        header["recent_contacts"] = [
+            {"id": handle, "summary": text} for handle, text in recent_contacts
+        ]
     return header
 
 
@@ -247,7 +249,7 @@ def handle_player_utterance(
     commands: tuple[dict[str, object], ...] = (),
     round: int = 0,
     steps: tuple[dict[str, object], ...] = (),
-    recent_contacts: tuple[dict[str, object], ...] = (),
+    recent_contacts: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """The one body->brain entry point (§3.5). Builds the escalation payload
     from `utterance` (its `parse: belief.utterance.PartialParse` is what the
@@ -260,8 +262,10 @@ def handle_player_utterance(
     everything else empty); `CrewConsole`'s tool-loop turn is the one
     caller that passes `mode="addressed"` plus a non-empty `tools`, and
     passes a growing `round`/`steps` on each continuation POST for the
-    same `utterance.id`. `recent_contacts` (Stage 3, D4) is each `{"id",
-    "summary"}` dict `_situational_header` folds into the wire header,
+    same `utterance.id`. `recent_contacts` (Stage 3, D4) is `CrewConsole.
+    _header_contact_refs`'s own `(handle, text)` pairs -- `belief.
+    crew_console.BrainTurn.header_refs`'s shape -- which `_situational_
+    header` serialises into `{"id", "summary"}` dicts on the wire,
     unchanged across a turn's own rounds (`CrewConsole._post_tool_
     continuation`'s own docstring)."""
     payload = EscalationPayload(

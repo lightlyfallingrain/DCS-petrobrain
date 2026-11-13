@@ -1,9 +1,9 @@
-"""Tests for BR-2 Stage 2's tool loop (`plans/brain-tool-calls/plan.md`)
+"""Tests for BR-2 Stage 2/3's tool loop (`plans/brain-tool-calls/plan.md`)
 -- the part of `belief.crew_console.CrewConsole.drain_brain` that
 executes a validated `tool_call`, drives continuation rounds, and
-renders the eventual `answer`/`ask`/`unable` final. A scripted fake
-`BrainClient` plus a scripted fake `run_brain_tool` closure drive exact
-step sequences through the real `CrewConsole`/`belief.brain_reply`
+renders the eventual `answer`/`ask`/`unable`/`command` final. A scripted
+fake `BrainClient` plus a scripted fake `run_brain_tool` closure drive
+exact step sequences through the real `CrewConsole`/`belief.brain_reply`
 code -- nothing here talks to brain-layer or Ollama."""
 
 from __future__ import annotations
@@ -19,7 +19,10 @@ from belief.contacts import ContactStore
 from belief.crew_console import BRAIN_MAX_TOOL_ROUNDS, CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
+from belief.referent import Mention
+from belief.tasks import TaskStore
 from belief.tool_api import BRAIN_TOOLS_BY_NAME, ToolContext, ToolObservation
+from belief.tools import watch_contact_task
 from mission_memory.store import MissionMemory
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -582,3 +585,347 @@ def test_describe_our_position_observation_has_no_x_or_z(
     observation = tool.invoke(ctx, {})
     assert "12345" not in observation.summary
     assert "67890" not in observation.summary
+
+
+# ---------------------------------------------------------------------------
+# BR-2 Stage 3 (`plans/brain-tool-calls/plan.md` D5) -- commands through
+# `handle_command`.
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_command_final(
+    console: CrewConsole,
+    brain_client: _ScriptedBrainClient,
+    utterance_id: str,
+    token: str,
+    target: str | None,
+    *,
+    because: str | None = None,
+    # Kept under `STAND_BY_AFTER_S` (2.0) from the turn's own
+    # `started_sim` (every `_start_turn` helper call here starts at
+    # `now_sim=0.0`) -- otherwise `drain_brain`'s own `_speak_stand_by_
+    # if_due` speaks "stand by" first and bumps `self.scheduler.
+    # busy_until_sim` past this call's `now_sim`, which would make any
+    # `_speak_or_defer`-routed readback (`follow`/`mark_target`/etc.)
+    # defer instead of speaking immediately -- a test-timing artefact,
+    # not something this stage's dispatch logic should be judged by.
+    now_sim: float = 1.0,
+) -> list[str]:
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="command",
+            t_sim=now_sim,
+            token=token,
+            target=target,
+            because=because,
+            slots={},
+        )
+    )
+    return console.drain_brain(now_sim=now_sim)
+
+
+def test_brain_command_mark_target_matches_phrasebook_dispatch() -> None:
+    """E3 differential test: `mark_target` with a tool-resolved `target`
+    (the brain path) and a bare "mark target" referent dispatch (the
+    phrasebook path, `[[BL-B102]]`'s "mark it" shape) produce identical
+    readback text from identical belief state -- `_handle_brain_
+    command`'s own docstring: both ultimately call the same
+    `handle_command`."""
+    marks: list[tuple[str, float]] = []
+
+    def _mark_target_fn(contact_id: str, now_sim: float) -> str:
+        marks.append((contact_id, now_sim))
+        return f"mark N set on {contact_id}"
+
+    # Phrasebook path: seed the referent directly (the voice "mark it"
+    # shape) and dispatch through `handle_command`.
+    phrasebook_store = _store_with_one_contact()
+    contact_id = phrasebook_store.contacts[0].id
+    phrasebook_console = CrewConsole(
+        store=phrasebook_store,
+        brain_client=_ScriptedBrainClient(),
+        mark_target_fn=_mark_target_fn,
+    )
+    phrasebook_console._referent_memory.record(
+        [Mention(kind="contact", id=contact_id, t_sim=0.0)], 0.0
+    )
+    phrasebook_lines = phrasebook_console.handle_command(
+        "mark_target", now_sim=1.0, slots={"referent": True}
+    )
+
+    # Brain path: resolve the same contact via a tool call, then a
+    # validated `command` final naming it as `target`.
+    brain_store = _store_with_one_contact()
+    assert brain_store.contacts[0].id == contact_id
+    brain_client = _ScriptedBrainClient()
+    tool_runner = _ScriptedToolRunner(
+        observations={
+            "find_contact": ToolObservation(summary="x", handles=(contact_id,))
+        }
+    )
+    brain_console = CrewConsole(
+        store=brain_store, brain_client=brain_client, mark_target_fn=_mark_target_fn
+    )
+    brain_console.run_brain_tool = tool_runner
+    utterance_id = _start_turn(brain_console, brain_client)
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="tool_call",
+            t_sim=0.0,
+            tool="find_contact",
+            args={"text": "t-72"},
+        )
+    )
+    brain_console.drain_brain(now_sim=1.0)
+    brain_lines = _dispatch_command_final(
+        brain_console, brain_client, utterance_id, "mark_target", contact_id
+    )
+
+    assert brain_lines == phrasebook_lines == [f"mark N set on {contact_id}"]
+    assert marks == [(contact_id, 1.0), (contact_id, 1.0)]
+
+
+def test_brain_command_cancel_task_matches_phrasebook_dispatch() -> None:
+    """E3, a no-target command: `cancel_task` from the brain path (a
+    `command` final with no `target`) cancels the same task and speaks
+    the same readback a direct `handle_command("cancel_task", ...)` call
+    would, from identical task state."""
+
+    def _build() -> tuple[CrewConsole, TaskStore]:
+        store = _store_with_one_contact()
+        contact_id = store.contacts[0].id
+        tasks = TaskStore()
+        assert watch_contact_task(store, tasks, contact_id, now_sim=0.0) is not None
+        console = CrewConsole(store=store, brain_client=_ScriptedBrainClient(), tasks=tasks)
+        return console, tasks
+
+    phrasebook_console, phrasebook_tasks = _build()
+    phrasebook_lines = phrasebook_console.handle_command("cancel_task", now_sim=1.0)
+
+    brain_console, brain_tasks = _build()
+    brain_client = brain_console.brain_client
+    assert isinstance(brain_client, _ScriptedBrainClient)
+    utterance_id = _start_turn(brain_console, brain_client)
+    brain_lines = _dispatch_command_final(
+        brain_console, brain_client, utterance_id, "cancel_task", None, now_sim=1.0
+    )
+
+    assert brain_lines == phrasebook_lines
+    assert [t.status for t in brain_tasks.tasks] == [t.status for t in phrasebook_tasks.tasks]
+
+
+def test_excluded_token_gets_fixed_command_only() -> None:
+    """U2: a token the brain is not allowed to dispatch (`engage`, one
+    of the weapons/sight tokens excluded by policy) degrades to `unable
+    FIXED_COMMAND_ONLY`, never dispatched."""
+    store = _store_with_one_contact()
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    utterance_id = _start_turn(console, brain_client)
+    lines = _dispatch_command_final(console, brain_client, utterance_id, "engage", None)
+    assert lines == ["Unable, fixed command only."]
+
+
+def test_unknown_token_also_gets_fixed_command_only() -> None:
+    """D5's own instruction: a token that is not a real command at all
+    (not merely excluded by policy) degrades identically -- there is no
+    second reason to distinguish "excluded" from "not a command"."""
+    store = _store_with_one_contact()
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    utterance_id = _start_turn(console, brain_client)
+    lines = _dispatch_command_final(
+        console, brain_client, utterance_id, "not_a_real_command", None
+    )
+    assert lines == ["Unable, fixed command only."]
+
+
+def test_command_target_not_offered_is_rejected() -> None:
+    """D3: a `command` final naming a `target` never offered this turn
+    (no tool call ever returned it, no header mention) degrades -- here,
+    with no candidate set recorded, to `unable CANNOT_ANSWER`."""
+    store = _store_with_one_contact()
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    utterance_id = _start_turn(console, brain_client)
+    lines = _dispatch_command_final(
+        console, brain_client, utterance_id, "follow", "CONTACT_NEVER_OFFERED"
+    )
+    assert lines == ["Unable, don't know."]
+
+
+def test_ambiguous_command_target_without_because_becomes_which_one() -> None:
+    """D3's ambiguity-evidence rule, extended to a command's own
+    `target` (plan D3): a `find_contact` call that returned two
+    candidates, followed by `command where_is_it target=<one of them>`
+    with no `because`, degrades to "which one?" over the two -- the
+    target is never silently dispatched on a guess."""
+    store2 = _store_with_two_far_apart_contacts()
+    ids = [contact.id for contact in store2.contacts]
+    brain_client = _ScriptedBrainClient()
+    tool_runner = _ScriptedToolRunner(
+        observations={
+            "find_contact": ToolObservation(
+                summary="two",
+                handles=tuple(ids),
+                candidate_texts={
+                    ids[0]: "T-72, near the village.",
+                    ids[1]: "T-72, near the road.",
+                },
+            )
+        }
+    )
+    console = CrewConsole(store=store2, brain_client=brain_client)
+    console.run_brain_tool = tool_runner
+    utterance_id = _start_turn(console, brain_client)
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="tool_call",
+            t_sim=0.0,
+            tool="find_contact",
+            args={"text": "t-72"},
+        )
+    )
+    console.drain_brain(now_sim=1.0)
+    lines = _dispatch_command_final(console, brain_client, utterance_id, "where_is_it", ids[0])
+    assert len(lines) == 1
+    assert lines[0].startswith("Which one -- ")
+    # Never dispatched -- `where_is_it_requested` stays false, the
+    # degrade never reached `handle_command` at all.
+    assert console.where_is_it_requested is False
+
+
+def test_ambiguous_command_target_with_because_dispatches() -> None:
+    """The same ambiguous pair, but `because` is a word from the
+    transcript that appears in the picked candidate's own text and no
+    other's -- the command dispatches (`handle_command` runs, the
+    one-shot `where_is_it_requested` signal is set), not degraded."""
+    store2 = _store_with_two_far_apart_contacts()
+    ids = [contact.id for contact in store2.contacts]
+    brain_client = _ScriptedBrainClient()
+    tool_runner = _ScriptedToolRunner(
+        observations={
+            "find_contact": ToolObservation(
+                summary="two",
+                handles=tuple(ids),
+                candidate_texts={
+                    ids[0]: "T-72, near the village.",
+                    ids[1]: "T-72, near the road.",
+                },
+            )
+        }
+    )
+    console = CrewConsole(store=store2, brain_client=brain_client)
+    console.run_brain_tool = tool_runner
+    console.handle_line("Petrovich, the one near the village", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="tool_call",
+            t_sim=0.0,
+            tool="find_contact",
+            args={"text": "t-72"},
+        )
+    )
+    console.drain_brain(now_sim=1.0)
+    lines = _dispatch_command_final(
+        console,
+        brain_client,
+        utterance_id,
+        "where_is_it",
+        ids[0],
+        because="near the village",
+    )
+    # `where_is_it` has no return-value readback of its own (`body.py`'s
+    # `drain_where_is_it` speaks it later) -- `[]` here is the dispatch
+    # succeeding, not a degrade (contrast the previous test's single
+    # "Which one" line).
+    assert lines == []
+    assert console.where_is_it_requested is True
+    assert console.where_is_it_slots == {"referent": True}
+
+
+def test_r1_brain_command_signal_survives_an_unrelated_command_same_poll() -> None:
+    """R1 regression: `where_is_it`'s one-shot signal, set by a brain
+    command dispatch in `drain_brain`, must not be wiped by an unrelated
+    command dispatched later in the *same* poll (`_poll_transcripts`,
+    which in the real loop runs after `drain_brain`) -- its consumer,
+    `body.py`'s `drain_where_is_it`, does not run until the *next*
+    poll's own earlier step."""
+    store = _store_with_one_contact()
+    contact_id = store.contacts[0].id
+    brain_client = _ScriptedBrainClient()
+    tool_runner = _ScriptedToolRunner(
+        observations={
+            "find_contact": ToolObservation(summary="x", handles=(contact_id,))
+        }
+    )
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console.run_brain_tool = tool_runner
+
+    utterance_id = _start_turn(console, brain_client)
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="tool_call",
+            t_sim=0.0,
+            tool="find_contact",
+            args={"text": "t-72"},
+        )
+    )
+    console.drain_brain(now_sim=1.0)
+    _dispatch_command_final(console, brain_client, utterance_id, "where_is_it", contact_id)
+
+    assert console.where_is_it_requested is True
+    assert console.where_is_it_slots == {"referent": True}
+
+    # An unrelated command dispatched later in the same poll (standing in
+    # for a transcript's own `_poll_transcripts` dispatch) must not wipe
+    # the signal before `body.py`'s `drain_where_is_it` ever sees it.
+    console.handle_command("report_all", now_sim=1.0)
+
+    assert console.where_is_it_requested is True
+    assert console.where_is_it_slots == {"referent": True}
+
+
+def test_header_refs_offered_without_a_tool_call() -> None:
+    """D4's header refs: a contact already in `_referent_memory`'s short
+    window (`[[BL-B102]]`'s "recently mentioned") is offered from the
+    *first* round, with no tool call needed -- "which one's the BMP?"
+    style, D3's ambiguity-evidence rule included (a header-seeded
+    candidate set is not pushed, so no `because` is demanded of it,
+    `CrewConsole._start_brain_turn`'s own docstring)."""
+    store = _store_with_two_far_apart_contacts()
+    ids = [contact.id for contact in store.contacts]
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console._referent_memory.record(
+        [Mention(kind="contact", id=ids[0], t_sim=0.0)], 0.0
+    )
+
+    console.handle_line("Petrovich, where is it?", now_sim=0.5)
+    assert len(brain_client.payloads) == 1
+    payload = brain_client.payloads[0]
+    utterance_id = payload.utterance_id
+
+    header = payload.situational_header
+    recent = header.get("recent_contacts")
+    assert isinstance(recent, list)
+    assert [entry["id"] for entry in recent] == [ids[0]]
+    # D2's "no raw x/z" -- the header's own recent-contact summaries
+    # never carry a raw coordinate, even though the contact has a real
+    # position in the store.
+    serialised = json.dumps(header)
+    assert '"x"' not in serialised
+    assert '"z"' not in serialised
+
+    # No tool call needed -- the header already offered it.
+    lines = _dispatch_command_final(
+        console, brain_client, utterance_id, "where_is_it", ids[0]
+    )
+    assert lines == []
+    assert console.where_is_it_requested is True
