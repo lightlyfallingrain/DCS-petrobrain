@@ -831,7 +831,9 @@ BRAIN_COMMANDS: tuple[BrainCommand, ...] = (
         takes_target=True,
         meaning="select a resolved target for an attack run",
     ),
-    BrainCommand(name="drop_target", takes_target=False, meaning="drop the current target"),
+    BrainCommand(
+        name="drop_target", takes_target=False, meaning="drop the current target"
+    ),
     BrainCommand(
         name="mark_here", takes_target=False, meaning="mark our own current position"
     ),

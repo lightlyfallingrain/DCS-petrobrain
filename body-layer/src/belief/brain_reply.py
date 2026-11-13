@@ -67,7 +67,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from belief.escalation import BrainReply
-from belief.tool_api import BRAIN_COMMANDS_BY_NAME, BRAIN_TOOLS_BY_NAME, BrainTool, ParamSpec
+from belief.tool_api import (
+    BRAIN_COMMANDS_BY_NAME,
+    BRAIN_TOOLS_BY_NAME,
+    BrainTool,
+    ParamSpec,
+)
 from belief.utterance import PartialParse
 
 if TYPE_CHECKING:

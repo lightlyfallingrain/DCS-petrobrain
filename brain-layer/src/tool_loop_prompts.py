@@ -98,7 +98,7 @@ def _command_block(commands: tuple[dict[str, Any], ...]) -> str:
     for command in commands:
         token = command["token"]
         meaning = command.get("meaning") or ""
-        shape = f"{token} {{\"target\": <ref>}}" if command.get("takes_target") else token
+        shape = f'{token} {{"target": <ref>}}' if command.get("takes_target") else token
         lines.append(f"- {shape} -- {meaning}" if meaning else f"- {shape}")
     return (
         "\n\nCommands you may issue as a FINAL command, and no others -- a request for "

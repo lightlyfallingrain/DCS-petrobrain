@@ -698,7 +698,9 @@ def test_brain_command_cancel_task_matches_phrasebook_dispatch() -> None:
         contact_id = store.contacts[0].id
         tasks = TaskStore()
         assert watch_contact_task(store, tasks, contact_id, now_sim=0.0) is not None
-        console = CrewConsole(store=store, brain_client=_ScriptedBrainClient(), tasks=tasks)
+        console = CrewConsole(
+            store=store, brain_client=_ScriptedBrainClient(), tasks=tasks
+        )
         return console, tasks
 
     phrasebook_console, phrasebook_tasks = _build()
@@ -713,7 +715,9 @@ def test_brain_command_cancel_task_matches_phrasebook_dispatch() -> None:
     )
 
     assert brain_lines == phrasebook_lines
-    assert [t.status for t in brain_tasks.tasks] == [t.status for t in phrasebook_tasks.tasks]
+    assert [t.status for t in brain_tasks.tasks] == [
+        t.status for t in phrasebook_tasks.tasks
+    ]
 
 
 def test_excluded_token_gets_fixed_command_only() -> None:
@@ -790,7 +794,9 @@ def test_ambiguous_command_target_without_because_becomes_which_one() -> None:
         )
     )
     console.drain_brain(now_sim=1.0)
-    lines = _dispatch_command_final(console, brain_client, utterance_id, "where_is_it", ids[0])
+    lines = _dispatch_command_final(
+        console, brain_client, utterance_id, "where_is_it", ids[0]
+    )
     assert len(lines) == 1
     assert lines[0].startswith("Which one -- ")
     # Never dispatched -- `where_is_it_requested` stays false, the
@@ -878,7 +884,9 @@ def test_r1_brain_command_signal_survives_an_unrelated_command_same_poll() -> No
         )
     )
     console.drain_brain(now_sim=1.0)
-    _dispatch_command_final(console, brain_client, utterance_id, "where_is_it", contact_id)
+    _dispatch_command_final(
+        console, brain_client, utterance_id, "where_is_it", contact_id
+    )
 
     assert console.where_is_it_requested is True
     assert console.where_is_it_slots == {"referent": True}
