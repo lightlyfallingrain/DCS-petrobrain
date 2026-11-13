@@ -131,3 +131,87 @@ Stage 0 probe/fixture (`brain-layer/tools/stage0_tool_call_probe.py`,
 `brain-layer/tools/stage0_cases.json`) was read lightly, per the dispatch instruction — enough to
 confirm the acceptance-set fixtures the Stage 2/3 bench reuses, not a full line-by-line read of the
 probe CLI itself.
+
+### Re-review of `3a54b55b`
+
+Fast-forwarded cleanly from `415fa135` (strict ancestor, tree clean) to `3a54b55b`. Both
+`plans/brain-tool-calls/review.md` (this file, pre-fix) and `implementation.md`'s new "Review fix"
+section were present and read in full before this re-review.
+
+**The fix lands exactly where the review asked.** `crew_console.py::_start_brain_turn` now does
+
+```python
+turn.offered.update(cid for cid, _ in header_refs)
+if len(header_refs) >= 2:
+    turn.candidate_sets.append(header_refs)
+```
+
+— the review's suggested shape verbatim ("push it into `candidate_sets` at turn start when
+`len(header_refs) >= 2`"). `_candidate_set_for_ref`/`_validate_turn_answer`/
+`_validate_turn_command` are unchanged and did not need to be: they already walk
+`turn.candidate_sets` generically, so a header-seeded entry now gets the identical verbatim-
+`because` evidence check a tool-returned multi-candidate set already got. A single header contact
+(`len == 1`) is not pushed and keeps the no-evidence pronoun trust — correctly unaffected, and the
+pre-existing `test_header_refs_offered_without_a_tool_call` (single-contact shape) still passes
+unchanged, confirming that.
+
+**Verified the new tests are genuinely red without the fix, not taken on the implementer's word.**
+Reverted the two added lines above by hand in this worktree, ran
+`pytest tests/test_brain_tool_loop.py -k "test_header_ref_ambiguity"`:
+`test_header_ref_ambiguity_without_because_becomes_which_one` failed (`'BMP.'` was spoken directly
+instead of degrading to `"Which one -- "`); `test_header_ref_ambiguity_with_because_dispatches`
+passed either way, as expected (it's the positive-evidence case, not the one the fix changes).
+Restored the fix (`git checkout -- src/belief/crew_console.py`) and confirmed both pass green.
+This is exactly the shape the implementer's own log claims ("verified red without the fix...
+confirmed green") — reproduced independently rather than trusted.
+
+**`A4_which_ones_the_bmp` outcome matches the review's own prediction.** The review said the fix
+"should not break `A4_which_ones_the_bmp`'s intended pass... a model naming `CONTACT_9 BECAUSE
+"BMP"` would still validate." The fixture was given exactly that (`"because": "BMP"` added to
+`expected.final`) rather than the fix being shaped to dodge touching it — the right choice: the
+fixture was asserting an ungrounded pick as correct, which is precisely the gap being closed, so
+updating the fixture's evidence rather than carving an exemption for header-seeded picks is
+faithful to D10's intent, not a workaround. `test_stage2_acceptance_bench.py`'s
+`_EXPECTED_COMMAND_NEEDS_EVIDENCE_GAP`/`_EXPECTED_NO_HEADER_REFS_GAP` bookkeeping sets were
+re-checked: both stay empty, correctly — `A4` now validates through the evidence path rather than
+around it, and `A1_where_two_shilkas_discriminated` (the one genuine, already-documented gap) is a
+tool-returned candidate set, unaffected by this fix, and was already gated by the evidence check
+before it.
+
+**The bench's `_turn_from_case` mirroring is faithful to the real fix, but the mirror itself is a
+standing, pre-existing risk this fix makes slightly more concrete, not a new one.** `_turn_from_case`
+reconstructs `_start_brain_turn`'s seeding logic by hand (`if len(header_contacts) >= 2:
+turn.candidate_sets.append(...)`) rather than calling the real function — this pattern predates the
+fix (the original Stage 3 addition already hand-seeded `offered` the same way, and the original
+review did not flag it) and the fix correctly extended the existing mirror rather than introducing
+a second one. It is a real, if modest, drift risk: the mirror had to be touched by hand in lockstep
+with the real change, and nothing would fail loudly if a future edit to `_start_brain_turn`'s
+seeding logic were not mirrored here — the bench would keep passing against its own
+(now-stale) reimplementation. This is not a reason to hold up this fix (the mirror is correct today,
+the bench's job is to validate `validate_turn_final` against canned turns, and calling the real
+`_start_brain_turn` would require a full `CrewConsole`/store/transcript setup the bench deliberately
+avoids), but it is worth a non-blocking note for whoever next touches header-ref seeding: check
+`_turn_from_case` when you do, since nothing currently enforces that this stays in sync.
+(Optional, not required — matches the shape of the review's own prior "Optional Refinements.")
+
+**Nothing else regressed.** No other file in the diff touches D1–D9 or D10's other mechanisms; the
+E3 comment addition is documentation-only (confirmed by re-reading both differential tests —
+`mark_target`/`cancel_task` — unchanged in behaviour, only a docstring addition answering the
+original review's own non-blocking note).
+
+**Checks (independently re-run in this worktree, not taken from the implementer's log):**
+
+- `body-layer`: `ruff format --check src tests` — pass. `ruff check src tests` — pass. `mypy src`
+  (strict, 82 files) — pass. `pytest -q` — **3265 passed, 4 xfailed** (matches the implementer's
+  claimed count exactly).
+- `brain-layer`: `ruff check src tests tools` — pass. `mypy src` (strict, 9 files) — pass.
+  `pytest -q` — **89 passed** (matches).
+
+### Verdict (re-review)
+
+**APPROVED.** The one required fix from the original review is correctly and narrowly implemented,
+verified red-then-green independently (not taken on the implementer's claim), the acceptance
+fixture update matches the review's own prediction rather than working around it, and all three
+subprojects' checks pass with counts matching the implementer's log. One non-blocking note left for
+a future touch of header-ref seeding (the bench's hand-mirrored `_turn_from_case`), consistent with
+"Optional Refinements" above and not a reason to withhold approval.
