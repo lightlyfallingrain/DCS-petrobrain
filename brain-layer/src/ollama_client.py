@@ -14,12 +14,9 @@ alongside the text, which `generate()` has always discarded. `generate()`
 itself is unchanged -- both additions share its request/response
 handling via `_post_json` rather than duplicating it.
 
-**`chat()` reproduces `generate()`'s own unbounded `response.read()`**
-(`[[BR-B3]]`, filed against this module's existing `/api/generate` call
-and still open) rather than fixing it here: Stage 0 is a one-off,
-user-run measurement against a local model the pilot started, not the
-Stage 2 traffic BR-2's own U4 asks to fold the fix into. Flagged in the
-Stage 0 implementation report rather than silently carried.
+**`chat()` shares `generate()`'s `_post_json`, including its byte cap on
+`response.read()` (`[[BR-B3]]`, BR-2's U4)** -- both endpoints go through
+one guarded read rather than each needing their own fix.
 
 **`stream=false`, a small `num_predict`, and an explicit `num_ctx`** --
 D5/D6: the model's entire output is one short line drawn from a closed
@@ -51,6 +48,15 @@ from typing import Any
 #: at most two sequential calls (D5's classify/discriminate split), so
 #: two of these plus overhead must still fit inside that outer bound.
 DEFAULT_TIMEOUT_S = 5.0
+
+#: Caps `_post_json`'s `response.read()` (`[[BR-B3]]`) -- a runaway or
+#: malfunctioning Ollama daemon must not be read into memory unbounded.
+#: A normal reply is a short classify/discriminate line or a handful of
+#: tool-call rounds, well under 1MiB; this is headroom, not a measured
+#: ceiling. Behaviour-affecting (root `CLAUDE.md`'s tuning rule) and
+#: would want the tuning mechanism; `brain-layer` has no loader yet, so
+#: it stays a plain module constant until one exists here.
+MAX_OLLAMA_RESPONSE_BYTES = 1_048_576
 
 
 class OllamaRequestError(RuntimeError):
@@ -118,9 +124,17 @@ class OllamaClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                raw = response.read()
+                # Read one byte past the cap so an over-cap response is
+                # detectable (`read(n)` truncates silently at exactly
+                # `n` otherwise, which would masquerade as a bare
+                # 1MiB-sized reply rather than raising).
+                raw = response.read(MAX_OLLAMA_RESPONSE_BYTES + 1)
         except (urllib.error.URLError, OSError) as exc:
             raise OllamaRequestError(f"request to {url} failed: {exc}") from exc
+        if len(raw) > MAX_OLLAMA_RESPONSE_BYTES:
+            raise OllamaRequestError(
+                f"response from {url} exceeded {MAX_OLLAMA_RESPONSE_BYTES} byte cap"
+            )
         try:
             result = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -262,6 +276,7 @@ def _parse_tool_call(entry: Any) -> ToolCall:
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
+    "MAX_OLLAMA_RESPONSE_BYTES",
     "ChatResult",
     "OllamaClient",
     "OllamaRequestError",

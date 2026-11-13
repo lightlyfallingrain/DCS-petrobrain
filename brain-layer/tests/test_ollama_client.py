@@ -14,6 +14,7 @@ from typing import Self
 import pytest
 
 from ollama_client import (
+    MAX_OLLAMA_RESPONSE_BYTES,
     ChatResult,
     OllamaClient,
     OllamaRequestError,
@@ -253,3 +254,45 @@ def test_chat_raises_on_unreachable_server() -> None:
         client.chat(
             model="test-model", messages=[], tools=[], num_ctx=2048, num_predict=200
         )
+
+
+# --- response byte cap (`[[BR-B3]]`) ------------------------------------
+
+
+def test_generate_raises_when_response_exceeds_byte_cap(
+    fake_ollama: _FakeOllamaServer,
+) -> None:
+    """A runaway/malfunctioning Ollama daemon must not be read into memory
+    unbounded -- `_post_json` raises `OllamaRequestError` instead, shared by
+    `generate()` and `chat()` alike since both go through it."""
+    fake_ollama.response_text = "A" * (MAX_OLLAMA_RESPONSE_BYTES + 100)
+    client = OllamaClient(base_url=fake_ollama.base_url)
+
+    with pytest.raises(OllamaRequestError, match="exceeded"):
+        client.generate(model="test-model", prompt="x", num_ctx=2048, num_predict=40)
+
+
+def test_chat_raises_when_response_exceeds_byte_cap(
+    fake_ollama: _FakeOllamaServer,
+) -> None:
+    fake_ollama.chat_message = {
+        "content": "A" * (MAX_OLLAMA_RESPONSE_BYTES + 100),
+        "tool_calls": [],
+    }
+    client = OllamaClient(base_url=fake_ollama.base_url)
+
+    with pytest.raises(OllamaRequestError, match="exceeded"):
+        client.chat(
+            model="test-model", messages=[], tools=[], num_ctx=2048, num_predict=200
+        )
+
+
+def test_generate_under_cap_still_succeeds(fake_ollama: _FakeOllamaServer) -> None:
+    fake_ollama.response_text = "A" * (MAX_OLLAMA_RESPONSE_BYTES - 1000)
+    client = OllamaClient(base_url=fake_ollama.base_url)
+
+    result = client.generate(
+        model="test-model", prompt="x", num_ctx=2048, num_predict=40
+    )
+
+    assert result == "A" * (MAX_OLLAMA_RESPONSE_BYTES - 1000)
