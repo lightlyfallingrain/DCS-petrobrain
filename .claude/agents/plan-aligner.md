@@ -25,9 +25,16 @@ evidence rule, the output file and the handoff. This file carries only your proc
    report; reconstruct the why from the plan's own Goal section, label it as reconstructed, and
    check against that.
 2. **Trace every expectation to the plan.** For each **E<n>**: which stage delivers it — **met**,
-   **missing** (no stage delivers it), or **contradicted** (a stage delivers something else in its
-   place). Contradicted is the common shape of the failure: the stage that builds the easy proxy
-   instead of the real thing.
+   **missing** (no stage delivers it), **contradicted** (a stage delivers something else in its
+   place), or **deferred** (the plan explicitly hands it to a later milestone or stage). Contradicted
+   is the common shape of the failure: the stage that builds the easy proxy instead of the real
+   thing. **A `deferred` row must name where it goes as a `[[ID]]` or `Stage N` in the same cell**,
+   and that target entry must itself mention the expectation — check it, and if it does not, the
+   row is `missing`, not `deferred`. **Why (retro 2026-11-13):** deferred expectations in this
+   window were recorded in the plan check and never re-examined; nothing downstream reads
+   `alignment.md`, so a deferral with no tracked home is an expectation quietly dropped.
+   `grep -l 'deferred' plans/*/alignment.md` is how a later pass finds them — a tag was considered
+   and rejected because `docs/TAGS.md`'s vocabulary is closed and an ID link already does the job.
 3. **Check every open assumption** the goal check named was settled — and settled the way that
    serves the why. Silence in the plan is a finding.
 4. **Walk each stage as the pilot**: what changes in the cockpit when it ships? Run the lenses on
@@ -47,7 +54,7 @@ Append below the goal check — never edit it.
 
 | expectation | stage | status |
 |---|---|---|
-| E1 | 2 | met / missing / contradicted — <one line> |
+| E1 | 2 | met / missing / contradicted / deferred → [[ID]] or Stage N — <one line> |
 
 ### Findings
 1. **<short claim>** — lens: <name>
