@@ -396,9 +396,19 @@ def _and_more(count: int) -> str:
 def _find_contact_adapter(
     ctx: ToolContext, args: Mapping[str, object]
 ) -> ToolObservation:
+    """`plans/brain-tool-calls/performance-review.md`'s required fix:
+    `tools.find_contact`'s own `limit` truncates *before* enrichment, so
+    this adapter enriches only the `BRAIN_TOOL_LIST_CAP` contacts it will
+    actually show. The unenriched call (`enrichment` omitted) is the total
+    admitted count for the "and N more" note -- cheap, since it skips
+    `_add_enrichment_facts`'s world-model work entirely, and counted before
+    either call truncates."""
     text = str(args["text"])
-    results = tools.find_contact(ctx.store, text, ctx.now_sim, ctx.enrichment)
-    shown, extra = _cap(list(results))
+    total = len(tools.find_contact(ctx.store, text, ctx.now_sim))
+    shown = tools.find_contact(
+        ctx.store, text, ctx.now_sim, ctx.enrichment, limit=BRAIN_TOOL_LIST_CAP
+    )
+    extra = max(0, total - len(shown))
     if not shown:
         return ToolObservation(summary="no matching contacts")
     handles: list[str] = []
@@ -421,10 +431,18 @@ def _find_contact_adapter(
 def _list_contacts_adapter(
     ctx: ToolContext, args: Mapping[str, object]
 ) -> ToolObservation:
+    """Same fix as `_find_contact_adapter` above, for `tools.get_contacts`."""
     filter_arg = args.get("filter")
     contact_filter = None if filter_arg is None else str(filter_arg)
-    results = tools.get_contacts(ctx.store, ctx.now_sim, contact_filter, ctx.enrichment)  # type: ignore[arg-type]
-    shown, extra = _cap(list(results))
+    total = len(tools.get_contacts(ctx.store, ctx.now_sim, contact_filter))  # type: ignore[arg-type]
+    shown = tools.get_contacts(
+        ctx.store,
+        ctx.now_sim,
+        contact_filter,  # type: ignore[arg-type]
+        ctx.enrichment,
+        limit=BRAIN_TOOL_LIST_CAP,
+    )
+    extra = max(0, total - len(shown))
     if not shown:
         return ToolObservation(summary="no contacts")
     handles: list[str] = []

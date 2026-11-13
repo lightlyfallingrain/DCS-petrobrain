@@ -479,6 +479,7 @@ def get_contacts(
     now_sim: float,
     filter: ContactFilter | None = None,
     enrichment: EnrichmentContext | None = None,
+    limit: int | None = None,
 ) -> list[ContactResult]:
     """List current contacts, most-recently-seen first. `filter` is
     deliberately minimal -- `"visible"` (currently `certainty == "observed"`)
@@ -489,7 +490,17 @@ def get_contacts(
     watched/priority `AttentionArea` shows up here even with an unmarked
     direct attention, matching what `facts.attention` reports for it via
     `describe_contact`. `enrichment` (BL-3, optional) is threaded into every
-    returned result the same way."""
+    returned result the same way.
+
+    `limit` (`plans/brain-tool-calls/performance-review.md`'s required
+    fix) truncates the already-sorted contact list *before* enrichment,
+    not after -- so a caller that only displays a handful (BR-2's brain-tool
+    adapters, `BRAIN_TOOL_LIST_CAP`) does not pay `_add_enrichment_facts`'s
+    per-contact world-model cost for every contact this call would have
+    enriched and then discarded. `None` (the default) enriches every
+    admitted contact exactly as before -- every existing caller
+    (`report_all`, the phrasebook `report`/`watch` loops, this module's own
+    tests) is unaffected byte-for-byte."""
     contacts = store.contacts
     if filter == "visible":
         contacts = [c for c in contacts if certainty_of(c, now_sim) == "observed"]
@@ -501,6 +512,8 @@ def get_contacts(
             in ("watch", "priority")
         ]
     contacts = sorted(contacts, key=lambda c: c.last_seen_sim, reverse=True)
+    if limit is not None:
+        contacts = contacts[:limit]
     return [
         _contact_result(contact, now_sim, store, enrichment) for contact in contacts
     ]
@@ -572,6 +585,7 @@ def find_contact(
     text: str,
     now_sim: float,
     enrichment: EnrichmentContext | None = None,
+    limit: int | None = None,
 ) -> list[ContactResult]:
     """Text search over contacts' *perceived* classification -- never a
     truth field. Searches the held best claim (`Contact.classification.
@@ -587,7 +601,9 @@ def find_contact(
     here too for consistency with `get_contacts`/`describe_contact` -- both
     build the same `ContactResult` via `_contact_result`, so leaving this
     one unenriched would be a surprising, undocumented gap) is threaded
-    into every returned result the same way."""
+    into every returned result the same way. `limit` is `get_contacts`'s
+    own pre-enrichment truncation (see its docstring) -- applied after this
+    sort, before any contact is enriched."""
     needle = text.strip().lower()
     if not needle:
         return []
@@ -598,6 +614,8 @@ def find_contact(
         and needle in c.classification.value.lower()
     ]
     matches.sort(key=lambda c: c.last_seen_sim, reverse=True)
+    if limit is not None:
+        matches = matches[:limit]
     return [_contact_result(contact, now_sim, store, enrichment) for contact in matches]
 
 

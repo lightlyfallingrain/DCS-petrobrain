@@ -22,7 +22,12 @@ from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.referent import Mention
 from belief.tasks import TaskStore
-from belief.tool_api import BRAIN_TOOLS_BY_NAME, ToolContext, ToolObservation
+from belief.tool_api import (
+    BRAIN_TOOL_LIST_CAP,
+    BRAIN_TOOLS_BY_NAME,
+    ToolContext,
+    ToolObservation,
+)
 from belief.tools import watch_contact_task
 from mission_memory.store import MissionMemory
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -1114,3 +1119,114 @@ def test_header_ref_ambiguity_with_because_dispatches() -> None:
     assert len(lines) == 1
     assert not lines[0].startswith("Which one -- ")
     assert "BMP" in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# `plans/brain-tool-calls/performance-review.md`'s required fix: the real
+# registered `find_contact`/`get_contacts` `BrainTool`s
+# (`belief.tool_api._find_contact_adapter`/`_list_contacts_adapter`) must
+# enrich only the `BRAIN_TOOL_LIST_CAP` contacts they display, not every
+# admitted contact before discarding the enrichment past the cap.
+# ---------------------------------------------------------------------------
+
+
+def _store_with_n_contacts(n: int, classification_raw: str = "T-72") -> ContactStore:
+    """`n` contacts, each ingested in its own poll at a distinct `t_sim`
+    (unambiguous most-recent-first order) and a bearing/range far enough
+    apart (100 km steps) that the spatial gate can never fold two of them
+    together -- confirmed by the assertion below rather than assumed."""
+    store = ContactStore()
+    for i in range(n):
+        store.ingest(
+            [
+                Observation(
+                    id=f"OBS_{i}",
+                    contact_id=None,
+                    t_sim=float(i),
+                    t_wall=float(i),
+                    source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                    classification_raw=classification_raw,
+                    bearing_deg=float((i * 73) % 360),
+                    range_m=10_000.0 + i * 100_000.0,
+                    ownship_at_observation=_ownship(),
+                    derived_world_position=DerivedWorldPosition(
+                        x=99999.0,
+                        z=99999.0,
+                        confidence=0.9,
+                        method="bearing_range_terrain",
+                    ),
+                    provenance="test_fixture",
+                )
+            ],
+            now_sim=float(i),
+        )
+    assert len(store.contacts) == n
+    return store
+
+
+def _counting_enrichment_context(
+    monkeypatch: pytest.MonkeyPatch, calls: dict[str, int]
+) -> EnrichmentContext:
+    def _counting_describe_position(
+        conn: object, theatre: str, x: float, z: float
+    ) -> _FakeDescription:
+        calls["n"] += 1
+        return _FakeDescription()
+
+    monkeypatch.setattr(
+        enrichment_module, "describe_position", _counting_describe_position
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
+    return EnrichmentContext(
+        conn=sqlite3.connect(":memory:"), theatre="Syria", ownship=_ownship()
+    )
+
+
+def test_find_contact_adapter_caps_enrichment_before_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real registered `BrainTool` (`belief.tool_api.
+    _find_contact_adapter`), not just `belief.tools.find_contact`
+    directly: enriches only `BRAIN_TOOL_LIST_CAP` of 50 matching contacts,
+    and the "and N more" note still reflects the full 50, counted before
+    either call truncates."""
+    calls = {"n": 0}
+    enrichment = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50)
+    ctx = ToolContext(
+        store=store, enrichment=enrichment, memory=MissionMemory(), now_sim=49.0
+    )
+
+    observation = BRAIN_TOOLS_BY_NAME["find_contact"].invoke(ctx, {"text": "T-72"})
+
+    assert calls["n"] == BRAIN_TOOL_LIST_CAP
+    assert len(observation.handles) == BRAIN_TOOL_LIST_CAP
+    assert observation.summary.endswith(f"and {50 - BRAIN_TOOL_LIST_CAP} more")
+
+
+def test_list_contacts_adapter_caps_enrichment_before_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same fix, through `belief.tool_api._list_contacts_adapter`
+    (`get_contacts`, no filter)."""
+    calls = {"n": 0}
+    enrichment = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50)
+    ctx = ToolContext(
+        store=store, enrichment=enrichment, memory=MissionMemory(), now_sim=49.0
+    )
+
+    observation = BRAIN_TOOLS_BY_NAME["get_contacts"].invoke(ctx, {})
+
+    assert calls["n"] == BRAIN_TOOL_LIST_CAP
+    assert len(observation.handles) == BRAIN_TOOL_LIST_CAP
+    assert observation.summary.endswith(f"and {50 - BRAIN_TOOL_LIST_CAP} more")
