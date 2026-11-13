@@ -8113,3 +8113,66 @@ class TestDrainSightLockTracking:
         console.drain_sight_lock_tracking(4.0, previously_seen=False, seen=False)
         console.drain_sight_lock_tracking(5.0, previously_seen=False, seen=True)
         assert output.getvalue() == "Tracking.\nTracking.\n"
+
+
+class TestBrainCommandsAreRealDispatchTokens:
+    """`plans/brain-tool-calls/plan.md` D5/Stage 3: `belief.tool_api.
+    BRAIN_COMMANDS`' own docstring claims every member's `name` equals a
+    real `DISPATCHED_COMMAND_TOKENS` entry -- `tool_api.py` cannot import
+    `crew_console` to check that itself (the import runs the other way),
+    so this is the one place it actually is checked, per that module's
+    own comment."""
+
+    def test_every_brain_command_name_is_a_real_dispatched_token(self) -> None:
+        from belief.tool_api import BRAIN_COMMANDS
+
+        for command in BRAIN_COMMANDS:
+            assert command.name in DISPATCHED_COMMAND_TOKENS, (
+                f"BRAIN_COMMANDS names {command.name!r}, which handle_command "
+                "does not dispatch at all"
+            )
+
+    def test_the_clock_report_family_is_the_real_nine_forward_hours(self) -> None:
+        """D5's plan prose says "report_clock_1..12"; the real token set
+        (`_CLOCK_REPORT_TOKENS`) is the nine forward hours only -- no
+        5/6/7, the same no-omniscience reason `_CLOCK_SCAN_TOKENS`
+        excludes them. `BRAIN_COMMANDS` must match the real set, not the
+        plan's own shorthand."""
+        from belief.crew_console import _CLOCK_REPORT_TOKENS
+        from belief.tool_api import BRAIN_COMMANDS
+
+        brain_clock_tokens = {c.name for c in BRAIN_COMMANDS if "clock" in c.name}
+        assert brain_clock_tokens == set(_CLOCK_REPORT_TOKENS)
+
+    def test_the_bearing_report_family_is_the_real_eight_point_compass(self) -> None:
+        """Likewise the plan's "north/south/east/west" shorthand is four
+        words; the real token set (`_BEARING_REPORT_TOKENS`) is the full
+        eight-point compass."""
+        from belief.crew_console import _BEARING_REPORT_TOKENS
+        from belief.tool_api import BRAIN_COMMANDS
+
+        brain_bearing_tokens = {c.name for c in BRAIN_COMMANDS if "bearing" in c.name}
+        assert brain_bearing_tokens == set(_BEARING_REPORT_TOKENS)
+
+    def test_u2_excluded_tokens_are_not_in_brain_commands(self) -> None:
+        """U2 (user decision): weapons/sight tokens, flight tokens and
+        the never-a-free-speech-job tokens are excluded by construction
+        -- not by a denylist, by simply never appearing here."""
+        from belief.tool_api import BRAIN_COMMANDS
+
+        excluded = {
+            "engage",
+            "disengage",
+            "weapons_armed",
+            "weapons_safe",
+            "observ_on",
+            "observ_off",
+            "point",
+            "silence",
+            "stop_talking",
+            "radio_check",
+            "greeting",
+            "step",
+        }
+        brain_names = {c.name for c in BRAIN_COMMANDS}
+        assert brain_names & excluded == set()
