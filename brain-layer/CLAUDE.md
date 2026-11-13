@@ -29,7 +29,26 @@ surface ever blocks a caller waiting for a `Decider` to finish -- that is
 the one invariant every other design choice here serves, per the user's
 own constraint: "the game world moves on."
 
-**Stage 2** (current) adds `OllamaDecider` -- a real local model behind
+**BR-2 (Stages 0-3 merged 2026-11-13, `brain-layer/ROADMAP/BR-2.md`,
+`plans/brain-tool-calls/plan.md`) adds a second mode on the same wire.**
+An *addressed* utterance ("Petrovich, ...") arrives with
+`mode == "addressed"` plus body-layer's offered `tools` and `commands`,
+and is answered by `ToolLoopDecider` (`src/decider.py`): one `decide()`
+call is one round of a tool loop, Ollama's native `/api/chat` `tools`
+(Stage 0's measured pick over a closed one-line grammar,
+`research/2026-11-12-tool-call-form.md`). The reply is either
+`{"kind": "tool_call", "tool", "args"}` -- which body-layer executes
+itself against `BrainTool.invoke` and sends back as `steps` on the next
+POST, brain-layer staying stateless across rounds (D1) -- or one `FINAL`
+line parsed by `src/final_reply.py` into `answer`/`command`/`ask`/
+`unable`. Body-layer re-validates every tool call and every final (the
+D3/D10 trust boundary, `belief.brain_reply`); this process never holds
+the candidate set, so a malformed reply degrades to `ask` and a transport
+failure to `unable NO_BRAIN`. The BR-1 paragraph below is the
+*unaddressed* path and still stands; `--decider tool_loop` selects the
+BR-2 decider (`__main__.py`), and the default is still `stub`.
+
+**Stage 2** (BR-1) adds `OllamaDecider` -- a real local model behind
 the same `Decider` protocol, calling a local Ollama daemon over stdlib
 `urllib` (`src/ollama_client.py`). `decider.py`'s `structural_unable_reason`
 is reused, not duplicated: an empty candidate list is `UNABLE NO_MATCH`
@@ -123,9 +142,21 @@ design ... is provable at the REPL without Ollama running").
   (module independence) since this offers the classify call what to
   choose from -- the body-side D10 validator (`belief.brain_reply`) is
   the real authority on whether a returned token is legal.
+- `src/tool_loop_prompts.py` (BR-2) -- `build_system_prompt` (Petrovich
+  persona, the offered tools as JSON schema, the allowed command block,
+  the `FINAL ...` grammar) and `build_user_message` (transcript,
+  situational header, prior `steps`). `tool_to_json_schema` turns
+  body-layer's wire tool specs into Ollama's `tools` entries.
+- `src/final_reply.py` (BR-2) -- `parse_final_text`/`final_to_dict`:
+  the `FINAL answer|command|ask|unable ...` line to the wire dict
+  `belief.escalation.BrainReply` decodes. Unparseable text is not
+  guessed at; the decider degrades it to `ask`.
 - `src/ollama_client.py` -- `OllamaClient`, stdlib `urllib` against
-  Ollama's `/api/generate` (`stream: false`, explicit `num_ctx`/
-  `num_predict`). Its own per-request timeout
+  Ollama's `/api/generate` (`generate()`, BR-1) and `/api/chat` with
+  native `tools` (`chat()` returning `ChatResult`/`ToolCall`, BR-2),
+  both `stream: false`, explicit `num_ctx`/`num_predict`.
+  `MAX_OLLAMA_RESPONSE_BYTES` (1 MiB) caps what a reply may carry.
+  Its own per-request timeout
   (`DEFAULT_TIMEOUT_S`, 5.0s) is the actual fix for a hung Ollama daemon,
   not `server.py`'s wrapper (see that module's own docstring).
   `warm_up()` is D8's mitigation, called once at `__main__.py` startup.
@@ -137,7 +168,8 @@ design ... is provable at the REPL without Ollama running").
 - `src/server.py` -- `BrainLayerServer`: `POST /escalate` (202,
   fire-and-forget -- submits to `JobSlot`, starts a daemon worker thread,
   never waits on it), `GET /replies/poll` (drains `ReplyQueue`),
-  `GET /health`. Structurally a copy of `audio-adapter/src/server.py`'s
+  `GET /health`. `MAX_ESCALATE_BODY_BYTES` (256 KiB) bounds a request
+  body before it is parsed (BR-2 security review). Structurally a copy of `audio-adapter/src/server.py`'s
   `ThreadingHTTPServer` + handler-factory shape. `_run_job` (the daemon
   worker's body) now races `Decider.decide()` on a throwaway
   `ThreadPoolExecutor` bounded by `DEFAULT_DECIDE_TIMEOUT_S` -- see the
@@ -145,6 +177,6 @@ design ... is provable at the REPL without Ollama running").
   primary fix for a hung model call.
 - `src/brain_layer/__main__.py` -- `python -m brain_layer` entrypoint,
   untested by design (a live-process driver, same posture as every other
-  subproject's own `__main__.py`/`main()`). `--decider stub|ollama`,
+  subproject's own `__main__.py`/`main()`). `--decider stub|ollama|tool_loop`,
   `--brain-model` (default `qwen3:4b-instruct-2507-q4_K_M`),
   `--ollama-url`, `--decide-timeout-s`.
