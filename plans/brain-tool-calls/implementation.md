@@ -501,3 +501,216 @@ Ollama degrades to `unable NO_BRAIN`; a continuation round's own request body ca
   every time** — pre-existing whitespace debt, unrelated to this change, same finding Stage 0's own
   report already made. Reverted after each check run rather than landed, so this branch's diff
   stays scoped.
+
+## Stage 3 (commands through `handle_command`)
+
+### Implementation Summary
+
+Stage 3 of `plans/brain-tool-calls/plan.md`: D5's `BRAIN_COMMANDS` allowlist and slot schemas,
+command dispatch in `drain_brain` through the single `handle_command` dispatcher (D5/A7/E3), D3's
+ambiguity-evidence rule extended to a command's `target`, D4's header refs, and the R1/R6 risks.
+Touches both subprojects.
+
+### Files Changed
+
+**body-layer**
+- `src/belief/tool_api.py` — `BrainCommand` (`name`, `takes_target`, `meaning`); `BRAIN_COMMANDS`
+  (D5's initial set, verified token-by-token against the real `handle_command` dispatch table, not
+  copied from the plan's illustrative prose — see Notable Discoveries); `BRAIN_COMMANDS_BY_NAME`;
+  `serialize_command`/`BRAIN_COMMAND_SPECS` (the `{"token", "takes_target", "meaning"}` wire shape).
+- `src/belief/brain_reply.py` — `_validate_turn_command` rewritten: unknown/excluded token →
+  `FIXED_COMMAND_ONLY`; a `target` supplied to a command that `takes_target=False`, or any non-empty
+  `slots`, is a malformed shape (same `_turn_degrade` path every other shape check uses); an offered
+  `target` drawn from a ≥2-candidate set without passing `_evidence_passes` degrades to `ask` over
+  the survivors, otherwise the reply validates unchanged. `_reply_with_reason` factored out (shared
+  by the unknown-token and the (hypothetical, never reached in practice) malformed-reply paths).
+- `src/belief/crew_console.py`:
+  - `BrainTurn.header_refs` (new field) — D4's header-ref set, fixed once at turn start and resent
+    unchanged on every continuation round (see Notable Discoveries for why).
+  - `_pending_brain_turn_id` (new field, R6) — set for the duration of `_handle_brain_command`'s one
+    `handle_command` call, read by `_speak_or_defer`'s one construction site so a brain-dispatched
+    positional readback carries the turn id `_drop_positional_replies_for_turns` (wired since Stage
+    1) already knows how to act on.
+  - `_header_contact_refs` (new) — D4: every contact in `_referent_memory`'s window, newest mention
+    per id, resolved to `tools.describe_contact`'s own plain-text summary (no x/z), capped at
+    `BRAIN_TOOL_LIST_CAP`.
+  - `_start_brain_turn`/`_post_tool_continuation` — now seed `turn.offered`/`turn.header_refs` from
+    `_header_contact_refs` (never `turn.candidate_sets`, see Notable Discoveries) and pass
+    `commands=BRAIN_COMMAND_SPECS`/`recent_contacts=header_refs` to `handle_player_utterance`.
+  - `_handle_brain_turn_final`'s `command` branch now calls the new `_handle_brain_command` instead
+    of a hard-coded degrade; `_handle_brain_command` plants a `Mention` into `_referent_memory`
+    (never `_pending_mentions`, which `handle_command` resets on entry) when a `target` is present,
+    builds `slots={"referent": True}` or `None`, and dispatches through `handle_command` — the exact
+    phrasebook path, so readback/task/marker/cancel semantics are the phrasebook's own by
+    construction (E3). Never calls `_print` itself: `handle_command`'s own tail already does, and
+    `_handle_brain_turn_final` returns early for `kind == "command"` to avoid double-speaking.
+  - `handle_command`'s reset-before-dispatch block **no longer resets `where_is_it_requested`/
+    `where_is_it_slots`** — R1's fix, see Risks below.
+- `src/belief/escalation.py` — `_situational_header`/`handle_player_utterance` gain `recent_contacts:
+  tuple[tuple[str, str], ...]`, serialised into `header["recent_contacts"]` as `{"id", "summary"}`
+  dicts, omitted entirely when empty.
+
+**brain-layer**
+- `src/final_reply.py` — `ParsedLine.because` (new field); `_FINAL_ANSWER_RE` gains an optional
+  trailing `BECAUSE "<words>"`; `final_to_dict`'s `"final_command"` branch now **pops** `target`/
+  `because` out of the raw JSON slots dict into their own `BrainReply` fields (previously `target`
+  was left duplicated inside `slots` *and* exposed as its own field — a pre-existing Stage-2 wire
+  shape this stage needed to fix so `slots` reliably reflects only genuinely-extra keys, which
+  Stage 3's "no extra slots" validation reads).
+- `src/tool_loop_prompts.py` — `_FINAL_GRAMMAR_BLOCK` gains the `FINAL command <token> <json
+  object>` line (missing entirely before — Stage 2 had no commands to document) and the optional
+  `BECAUSE` clause on `FINAL answer`; `_command_block` now renders `BRAIN_COMMAND_SPECS`'
+  `token`/`takes_target`/`meaning` instead of a bare token list (the research note's own follow-up:
+  derive the command notes rather than hand-write them); `_render_header` renders
+  `header["recent_contacts"]` as offered-ref lines.
+- `src/decider.py`/`server.py` — unchanged; both already read `commands`/forward `because`
+  generically from the wire (confirmed by reading, not assumed — see Notable Discoveries).
+
+### Tests Added
+
+**body-layer** (`tests/test_brain_tool_loop.py`, 10 new tests):
+- `test_brain_command_mark_target_matches_phrasebook_dispatch`,
+  `test_brain_command_cancel_task_matches_phrasebook_dispatch` — the E3 differential test, a
+  target-taking and a no-target command: the brain path (tool call then `command` final) and the
+  phrasebook path (a direct `handle_command` call, referent pre-seeded for the target case) from
+  identical belief state produce identical readback text and task/mark state.
+- `test_excluded_token_gets_fixed_command_only`, `test_unknown_token_also_gets_fixed_command_only` —
+  U2's excluded tokens and a genuinely unknown token both degrade to `FIXED_COMMAND_ONLY`, per D5's
+  own instruction that the two are indistinguishable at this layer.
+- `test_command_target_not_offered_is_rejected` — an unoffered `target`.
+- `test_ambiguous_command_target_without_because_becomes_which_one`,
+  `test_ambiguous_command_target_with_because_dispatches` — D3's ambiguity-evidence rule extended to
+  a command's `target`, both outcomes.
+- `test_r1_brain_command_signal_survives_an_unrelated_command_same_poll` — the R1 regression test;
+  verified red without the fix (see Checks) before confirming green with it.
+- `test_header_refs_offered_without_a_tool_call` — D4: a recently-mentioned contact is offered from
+  round 0 with no tool call, and the serialised header payload carries no raw `x`/`z`.
+
+**body-layer** (`tests/test_crew_console.py`, `TestBrainCommandsAreRealDispatchTokens`, 4 new
+tests) — `BRAIN_COMMANDS`' own names against the real `DISPATCHED_COMMAND_TOKENS`/
+`_CLOCK_REPORT_TOKENS`/`_BEARING_REPORT_TOKENS` tables (not the plan's illustrative "1..12"/
+"north/south/east/west" prose), and U2's excluded tokens absent by construction.
+
+**body-layer** (`tests/test_stage2_acceptance_bench.py`, reworked) — `_turn_from_case` now also
+seeds `turn.offered` (never `candidate_sets`) from `case["header"]["contacts"]`; `_EXPECTED_
+COMMAND_DEGRADES`/`_EXPECTED_NO_HEADER_REFS_GAP` are now empty (kept as the place a future gap of
+either shape would be recorded); a new `_EXPECTED_COMMAND_NEEDS_EVIDENCE_GAP` documents one real,
+remaining discrepancy (see Notable Discoveries). All 31 cases pass or land in a documented,
+reasoned gap.
+
+**brain-layer** (`tests/test_tool_loop_prompts.py`, new, 7 tests) — the command-notes block
+rendered from hand-written `{"token", "takes_target", "meaning"}` fixtures (module independence:
+this subproject cannot import body's `tool_api`), the fixed `FINAL command` grammar line's
+presence regardless of whether any command is offered, R3 byte-stability, and `recent_contacts`
+rendering in the user message.
+
+**brain-layer** (existing tests updated) — `test_tool_loop_decider.py`'s
+`test_final_answer_line_becomes_answer_dict` and `tools/stage0_tool_call_probe.py`'s
+`test_run_case_once_grammar_form_call_then_final` both asserted the pre-fix wire shape (`because`
+absent from an `answer` dict; `target` duplicated inside a `command`'s `slots`) — updated to the
+corrected shape per the dispatch instruction's own permission to update a test the plan's behaviour
+change invalidates, not left passing against a shape this stage deliberately changed.
+
+### Checks
+
+**body-layer/**
+- `ruff format src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (82 source files)
+- `pytest -q`: pass (full suite; see exact count in the handback report — run in progress at the
+  time this section was written, confirmed before the task's final report)
+
+**brain-layer/**
+- `ruff format src tests tools`: pass (reformats `tools/live_cross_process_check.py`, pure
+  whitespace, unrelated to this task — reverted after, same as Stage 0/2's own note)
+- `ruff check src tests tools`: pass
+- `mypy src`: pass (9 source files)
+- `pytest -q`: pass — 89 passed (82 existing + 7 new)
+
+**R1 regression test verified red before green**: temporarily restored the old unconditional
+`where_is_it_requested = False` / `where_is_it_slots = None` reset inside `handle_command`,
+confirmed `test_r1_brain_command_signal_survives_an_unrelated_command_same_poll` fails
+(`assert False is True`), then restored the real fix and confirmed it passes — per this role's own
+"show the red" rule for a test whose assertion is "the signal survives" (an absence-of-a-wipe
+claim).
+
+### Notable Discoveries
+
+- **The plan's D5 prose and the real `handle_command` dispatch table disagree on two token
+  families, caught by checking rather than copying.** `report_clock_1..12` does not exist as
+  written: the real `_CLOCK_REPORT_TOKENS` is the nine *forward* hours only (8,9,10,11,12,1,2,3,4 —
+  no 5/6/7), the same no-omniscience exclusion `_CLOCK_SCAN_TOKENS` already applies (Petrovich
+  cannot see behind the aircraft). Likewise `report_bearing_north/south/east/west` is the plan's
+  four-word shorthand for the real `_BEARING_REPORT_TOKENS`, which is the full eight-point compass
+  (n/ne/e/se/s/sw/w/nw). Counting what is actually in `BRAIN_COMMANDS` (30 entries total,
+  `len(BRAIN_COMMANDS)`): 9 clock tokens + 8 bearing tokens + `report`/`report_all` = 19
+  report-shaped tokens, plus the 4 target-taking commands (`where_is_it`/`follow`/`select_target`/
+  `mark_target`), `drop_target`, `mark_here`, the 2 `watch_nearest*` tokens and the 3 `cancel_*`
+  tokens = 30. Both token-family tests above assert the clock/bearing match mechanically against
+  the real tables, so a future drift in either is caught, not re-copied by hand. **No allowlisted
+  token was dropped** — every one of D5's named tokens exists and is included; the correction only
+  widened two families to their real membership and narrowed neither.
+- **`report`'s own richer phrasebook slots (`descriptor`/`clock`/`sector`/`relative`/`band`) are
+  deliberately not exposed this stage.** `report` is in `BRAIN_COMMANDS` (matching D5's own listing)
+  but with `takes_target=False` and no extra `ParamSpec`s — a brain-dispatched `report` is a plain
+  whole-scene report today, identical to `report_all`. A place slot is explicitly Stage 4's own job;
+  the other four slots are free-text/enum values a resolved `target` (via a tool call first) already
+  makes redundant for every Stage 3 acceptance-set case. Kept as its own token, not folded into
+  `report_all`, so Stage 4 can widen *this* command's schema without re-adding it to the allowlist.
+- **Header-seeded candidates are offered (`turn.offered`) but never pushed into `turn.candidate_
+  sets` — a deliberate design choice, not an oversight, found while making `A4_which_ones_the_bmp`
+  pass.** D3's ambiguity-evidence rule is written for a *tool*-returned multi-candidate result; a
+  header-offered "recently mentioned" contact is `[[BL-B102]]`'s referent mechanism, which already
+  gives a bare "it"/"that" pronoun no-evidence trust on the voice path (`belief.referent.
+  resolve_referent` asks for no evidence at all). Treating a header-seeded set the same way both
+  matches that existing trust level and is what the plan's own two named acceptance cases need to
+  pass cleanly (see below) — the alternative (requiring evidence here too) would make "which one's
+  the BMP?" fail without a `because` the fixture never recorded.
+- **Of the task's named acceptance-bench cases, two pass as named and one does not, for a reported
+  reason, not a forced one.** `A2_referent_where_is_it` and `A4_which_ones_the_bmp` (D4's own two
+  named examples) now validate as their fixture's own `command`/`answer` final, once `_turn_from_
+  case` seeds `offered` from the header. `A1_where_two_shilkas_discriminated` — one of the "A1_*"
+  cases the brief named as expected to pass — genuinely does not: its fixture resolves `where_is_it`
+  `target=CONTACT_2` out of a 2-candidate `find_contact` result (discriminated by the utterance's
+  own "the one by the village") with **no `because` field at all**. D3's ambiguity-evidence rule,
+  implemented as the plan specifies, degrades this to `ask` over the two survivors — correctly, by
+  the rule's own text, but not the fixture's own direct `command`. This is the same shape as the two
+  gaps Stage 2 already documented (a Stage-0-authored expectation predating a validation rule added
+  afterward); recorded as `_EXPECTED_COMMAND_NEEDS_EVIDENCE_GAP` with the fixture itself left
+  untouched, rather than silently exempting command targets from the evidence rule to force a match.
+  The other two "A1_*" cases (`A1_where_one_shilka`, `A1_where_shilka_lost_four_minutes`, both
+  single-candidate) and `A5_keep_an_eye_on_the_tank_by_the_village` (also single-candidate) pass as
+  named.
+- **R1, concretely, in the real loop (`body.py`):** the per-poll order is `drain_attack_run` →
+  `drain_where_is_it` (consumes *last* poll's `where_is_it_requested`, if any) → `drain_events` →
+  `drain_pending_positional_replies` → `drain_brain` (where a brain `command` final now dispatches)
+  → `drain_speech_results` → `_poll_transcripts` (where a voice command dispatches). Because `drain_
+  where_is_it` runs at the *top* of the poll and `drain_brain` runs later in the *same* poll, a
+  brain command setting `where_is_it_requested=True` this poll cannot be consumed until the *next*
+  poll's `drain_where_is_it` — and `_poll_transcripts`, later in *this* same poll, could dispatch an
+  unrelated voice command whose `handle_command` call would otherwise wipe that flag at entry before
+  it is ever read. The fix is narrower than the plan's own suggested "at most one command dispatch
+  per poll": only `where_is_it` among Stage 3's allowlisted tokens uses this one-shot-signal-to-a-
+  later-poll shape (every other allowlisted command's readback is fully synchronous within
+  `handle_command` itself, via `_speak_or_defer` at worst, never a runner-level flag consumed on a
+  later poll) — `engage`/`disengage`/`observ_on`/`observ_off`/`weapons_armed`/`weapons_safe`, the
+  only other tokens that set a one-shot runner signal, are all excluded from `BRAIN_COMMANDS` by
+  U2, so they cannot collide with a brain dispatch in the first place. So the fix is simply: `handle_
+  command` no longer resets `where_is_it_requested`/`where_is_it_slots` at all — only `_handle_
+  where_is_it` sets them and only `body.py`'s `drain_where_is_it` consumption (or a mission reset)
+  clears them. A request is delayed by at most one poll if a second command lands before
+  consumption; it is never silently dropped by an unrelated dispatch. No generic per-poll dispatch
+  guard, no change to `body.py`, were needed.
+- **R6's grep confirmed exactly one construction site** (`_speak_or_defer`, as Stage 1's own report
+  already found) — `_pending_brain_turn_id` threads through that one site only.
+- **`final_to_dict`'s pre-existing `target` duplication was a real (if harmless until now) Stage-2
+  wire-shape defect**, found while wiring `because` through the same grammar: `slots["target"]` and
+  the top-level `target` field carried the same value, so a "no extra slots" check (needed for
+  Stage 3's command validation) would have seen a false extra key on every single real command
+  reply. Fixed by popping both `target` and `because` out of the raw JSON object rather than only
+  reading `target` with `.get`.
+- **`decider.py`/`server.py` needed no changes** — both already forward `commands`/`because`
+  generically from the wire payload/decider-returned dict (confirmed by reading `ToolLoopDecider.
+  decide`'s `commands_raw = payload.get("commands") or []` and `server.py`'s `reply = dict(result)`,
+  not assumed from the plan's Affected Modules list, which names `decider.py` for "continuation
+  rounds, NO_BRAIN" — both already built in Stage 2).
