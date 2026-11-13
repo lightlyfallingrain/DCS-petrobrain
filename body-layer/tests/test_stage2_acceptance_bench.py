@@ -69,6 +69,24 @@ _EXPECTED_COMMAND_DEGRADES = {
     "A5_keep_an_eye_on_the_tank_by_the_village",
 }
 
+#: **A second, genuine gap, found by this bench rather than designed
+#: around.** `A4_which_ones_the_bmp`'s fixture carries its two
+#: candidates in the *header* (`case["header"]["contacts"]`), with
+#: `expected.steps == []` -- Stage 0's fixture assumes a turn can start
+#: with contacts already offered, pre-seeded from (plausibly) a recent
+#: callout or report. Stage 2's real `belief.escalation.
+#: _situational_header` offers no contact refs at all (only
+#: `contact_counts`/`estimated_units`/`our_position`) -- D2's "header
+#: refs" line in the plan's own Affected Modules list was never built
+#: this stage, since nothing in Stage 2's scope bullet ("the tool loop,
+#: query tools only, template answers") calls for it. So today this
+#: exact acceptance-set case cannot be answered without a `find_contact`
+#: round first, and degrades to `unable CANNOT_ANSWER` rather than the
+#: fixture's own direct `answer`. Recorded as a real gap for whoever
+#: picks up header-ref population (Stage 4's landmark work, or a
+#: dedicated follow-up), not quietly accepted as equivalent.
+_EXPECTED_NO_HEADER_REFS_GAP = {"A4_which_ones_the_bmp"}
+
 
 def _load_cases() -> list[dict[str, Any]]:
     data = json.loads(_CASES_PATH.read_text())
@@ -87,7 +105,10 @@ def _turn_from_case(case: dict[str, Any]) -> BrainTurn:
     every one of those tool calls had already happened this turn, which
     is the state the fixture's `expected.final` was measured against."""
     turn = BrainTurn(
-        started_sim=0.0, transcript=case["utterance"], parse=_empty_parse(), addressed=True
+        started_sim=0.0,
+        transcript=case["utterance"],
+        parse=_empty_parse(),
+        addressed=True,
     )
     for entry in case.get("observations", []):
         observation = entry["observation"]
@@ -96,7 +117,8 @@ def _turn_from_case(case: dict[str, Any]) -> BrainTurn:
         candidates = observation.get("candidates") or observation.get("places") or []
         if len(candidates) >= 2:
             texts = tuple(
-                (c["ref"], c.get("class") or c.get("name") or c["ref"]) for c in candidates
+                (c["ref"], c.get("class") or c.get("name") or c["ref"])
+                for c in candidates
             )
             turn.candidate_sets.append(texts)
     return turn
@@ -116,14 +138,23 @@ def _reply_from_expected(case_id: str, final: dict[str, Any]) -> BrainReply:
     if kind == "answer":
         refs = tuple(final.get("refs", []))
         return BrainReply(
-            utterance_id=case_id, kind="answer", t_sim=0.0, form=final.get("form"), refs=refs
+            utterance_id=case_id,
+            kind="answer",
+            t_sim=0.0,
+            form=final.get("form"),
+            refs=refs,
         )
     if kind == "ask":
         return BrainReply(
-            utterance_id=case_id, kind="ask", t_sim=0.0, refs=tuple(final.get("refs", []))
+            utterance_id=case_id,
+            kind="ask",
+            t_sim=0.0,
+            refs=tuple(final.get("refs", [])),
         )
     assert kind == "unable"
-    return BrainReply(utterance_id=case_id, kind="unable", t_sim=0.0, reason=final.get("reason"))
+    return BrainReply(
+        utterance_id=case_id, kind="unable", t_sim=0.0, reason=final.get("reason")
+    )
 
 
 @pytest.mark.parametrize("case", _load_cases(), ids=lambda case: case["id"])
@@ -158,6 +189,11 @@ def test_stage0_expected_final_validates_or_degrades_as_documented(
 
     if case["id"] in _EXPECTED_COMMAND_DEGRADES:
         assert final["kind"] == "command"
+        assert validated.kind == "unable"
+        assert validated.reason == "CANNOT_ANSWER"
+        return
+
+    if case["id"] in _EXPECTED_NO_HEADER_REFS_GAP:
         assert validated.kind == "unable"
         assert validated.reason == "CANNOT_ANSWER"
         return
