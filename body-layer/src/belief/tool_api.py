@@ -694,3 +694,188 @@ def serialize_tool(tool: BrainTool) -> dict[str, object]:
 BRAIN_TOOL_SPECS: tuple[dict[str, object], ...] = tuple(
     serialize_tool(tool) for tool in BRAIN_TOOLS
 )
+
+
+# ---------------------------------------------------------------------------
+# BR-2 Stage 3 (`plans/brain-tool-calls/plan.md` D5) -- the explicit,
+# opt-in `handle_command` allowlist. A token not listed here is excluded
+# by construction (U2's weapons/sight tokens, every flight token, and
+# anything BL-16 adds later, all without a denylist anyone has to
+# remember) and gets `unable FIXED_COMMAND_ONLY` (`belief.brain_reply.
+# _validate_turn_command`). `name` is test-enforced to equal a
+# `belief.crew_console.DISPATCHED_COMMAND_TOKENS` member -- this module
+# cannot import `crew_console` to check that itself (the import runs the
+# other way), so `test_crew_console.py` carries the check.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BrainCommand:
+    """One `handle_command` token the brain may dispatch directly, once
+    `belief.brain_reply._validate_turn_command` has validated the final
+    that names it. `takes_target` is the whole slot schema this stage
+    needs: every allowlisted command takes at most one optional `target`
+    (a `contact_ref` handle, resolved by the model through a tool call
+    first -- D5: "the model never fills descriptor/clock slots when it
+    has a resolved id") or no slot at all. `report`'s own richer
+    phrasebook slots (`descriptor`/`clock`/`sector`/`relative`/`band`) are
+    deliberately **not** exposed yet -- a place slot is Stage 4's own job
+    ("A place slot... mapped onto the existing sector/radius filter
+    shapes"), and the other four are free-text/enum slots a resolved
+    target already makes redundant for every acceptance-set case this
+    stage covers. A brain-dispatched `report` is a plain whole-scene
+    report today, the same answer `report_all` already gives -- kept as
+    its own token (not folded into `report_all`) so Stage 4 can widen
+    *this* command's schema without re-adding it to the allowlist."""
+
+    name: str
+    takes_target: bool
+    #: One-line meaning for the brain-facing command-notes block
+    #: (`brain-layer/src/tool_loop_prompts.py`'s `_command_block`,
+    #: rendered from this field rather than hand-written prose the two
+    #: sides could drift from -- the research note's own open follow-up).
+    meaning: str
+
+
+#: D5's initial set, in the plan's own order. **Every `report_clock_*`/
+#: `report_bearing_*` member is the *real* token set this project's
+#: `handle_command` actually dispatches, not the plan prose's "1..12"/
+#: "north/south/east/west" shorthand**: `belief.crew_console.
+#: _CLOCK_REPORT_TOKENS` only ever covers the nine forward hours (no
+#: 5/6/7 -- Petrovich cannot see behind the aircraft, the same
+#: no-omniscience reason `_CLOCK_SCAN_TOKENS` excludes them), and `_
+#: BEARING_REPORT_TOKENS` is the full eight-point compass, not four. Both
+#: verified against `crew_console.py` directly (`test_crew_console.py`
+#: asserts the match) rather than copied from the plan's illustrative
+#: wording.
+BRAIN_COMMANDS: tuple[BrainCommand, ...] = (
+    BrainCommand(
+        name="report",
+        takes_target=False,
+        meaning="a whole-scene report (no place slot yet, Stage 4)",
+    ),
+    BrainCommand(name="report_all", takes_target=False, meaning="report everything"),
+    BrainCommand(
+        name="report_clock_8",
+        takes_target=False,
+        meaning="report at the 8 o'clock",
+    ),
+    BrainCommand(
+        name="report_clock_9", takes_target=False, meaning="report at the 9 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_10", takes_target=False, meaning="report at the 10 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_11", takes_target=False, meaning="report at the 11 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_12", takes_target=False, meaning="report at the 12 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_1", takes_target=False, meaning="report at the 1 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_2", takes_target=False, meaning="report at the 2 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_3", takes_target=False, meaning="report at the 3 o'clock"
+    ),
+    BrainCommand(
+        name="report_clock_4", takes_target=False, meaning="report at the 4 o'clock"
+    ),
+    BrainCommand(
+        name="report_bearing_n", takes_target=False, meaning="report to the north"
+    ),
+    BrainCommand(
+        name="report_bearing_ne",
+        takes_target=False,
+        meaning="report to the north-east",
+    ),
+    BrainCommand(
+        name="report_bearing_e", takes_target=False, meaning="report to the east"
+    ),
+    BrainCommand(
+        name="report_bearing_se",
+        takes_target=False,
+        meaning="report to the south-east",
+    ),
+    BrainCommand(
+        name="report_bearing_s", takes_target=False, meaning="report to the south"
+    ),
+    BrainCommand(
+        name="report_bearing_sw",
+        takes_target=False,
+        meaning="report to the south-west",
+    ),
+    BrainCommand(
+        name="report_bearing_w", takes_target=False, meaning="report to the west"
+    ),
+    BrainCommand(
+        name="report_bearing_nw",
+        takes_target=False,
+        meaning="report to the north-west",
+    ),
+    BrainCommand(
+        name="where_is_it",
+        takes_target=True,
+        meaning="give a positional update on a target, resolved via a tool first",
+    ),
+    BrainCommand(
+        name="follow",
+        takes_target=True,
+        meaning="watch a resolved target (binoculars up)",
+    ),
+    BrainCommand(
+        name="select_target",
+        takes_target=True,
+        meaning="select a resolved target for an attack run",
+    ),
+    BrainCommand(name="drop_target", takes_target=False, meaning="drop the current target"),
+    BrainCommand(
+        name="mark_here", takes_target=False, meaning="mark our own current position"
+    ),
+    BrainCommand(
+        name="mark_target",
+        takes_target=True,
+        meaning="mark a resolved target's position (or the current target if none given)",
+    ),
+    BrainCommand(
+        name="watch_nearest", takes_target=False, meaning="watch the nearest contact"
+    ),
+    BrainCommand(
+        name="watch_nearest_air_defence",
+        takes_target=False,
+        meaning="watch the nearest air-defence contact",
+    ),
+    BrainCommand(name="cancel_task", takes_target=False, meaning="cancel every task"),
+    BrainCommand(
+        name="cancel_scan", takes_target=False, meaning="cancel the pending scan task"
+    ),
+    BrainCommand(
+        name="cancel_watch", takes_target=False, meaning="cancel the watch task"
+    ),
+)
+
+#: Name -> `BrainCommand`, for `belief.brain_reply`'s validator.
+BRAIN_COMMANDS_BY_NAME: dict[str, BrainCommand] = {
+    command.name: command for command in BRAIN_COMMANDS
+}
+
+
+def serialize_command(command: BrainCommand) -> dict[str, object]:
+    """One `BrainCommand` -> the wire shape `brain-layer`'s command-notes
+    block reads (`tool_loop_prompts._command_block`) -- `token` rather
+    than `name`, matching `BrainReply.token`'s own wire field name."""
+    return {
+        "token": command.name,
+        "takes_target": command.takes_target,
+        "meaning": command.meaning,
+    }
+
+
+#: Serialised once at import time, same reasoning as `BRAIN_TOOL_SPECS`
+#: above -- a process-lifetime-fixed tuple, not re-serialised per round.
+BRAIN_COMMAND_SPECS: tuple[dict[str, object], ...] = tuple(
+    serialize_command(command) for command in BRAIN_COMMANDS
+)
