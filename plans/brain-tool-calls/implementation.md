@@ -837,4 +837,59 @@ live at `brain-layer/ROADMAP/BR-B2.md`/`BR-B3.md` (this layer's own `ROADMAP/` b
 not `todo/backlog/`), marked `[x]`/`#status/done` there instead, each with a one-line resolution
 naming this branch. `todo/backlog/todo-backlog.md`'s only mention of either (the `X-B9` entry
 recording that they were *filed*) needed no change — it is a historical record of the filing
+
+## Performance fix: `find_contact`/`get_contacts` enrich only the displayed contacts, not every admitted one
+
+`plans/brain-tool-calls/performance-review.md`'s single required fix (NEEDS MITIGATION): BR-2's
+two brain-tool adapters (`belief.tool_api._find_contact_adapter`/`_list_contacts_adapter`) were
+calling `belief.tools.find_contact`/`get_contacts` with no limit, which enriches (world-model
+`describe_position` plus `terrain_divide_qualifier`) **every** admitted contact before
+`tool_api._cap(..., BRAIN_TOOL_LIST_CAP=5)` discarded the work on everything past the first 5 —
+measured at 8-18 s mean / up to ~30-66 s tail at a realistic 132-142-contact sortie scene.
+
+- **`belief.tools.find_contact`/`get_contacts` both gain `limit: int | None = None`**, applied
+  *after* the existing sort (both already sort most-recently-seen-first before enriching — no
+  ordering change needed) and *before* the per-contact `_contact_result` call that does the
+  enrichment. `None` is the default and enriches every admitted contact exactly as before — every
+  existing caller (`report_all`, the phrasebook `report`/`watch` loops, every pre-existing test in
+  `test_tools.py`) is unaffected.
+- **`belief.tool_api._find_contact_adapter`/`_list_contacts_adapter` now pass
+  `limit=BRAIN_TOOL_LIST_CAP`** on the call that will actually be enriched and shown, and compute
+  the admitted total via a second, unenriched call (`enrichment` omitted) for the "and N more"
+  count. The unenriched call is cheap — it still runs the filter/sort/`_contact_result` path, but
+  `_contact_result` only calls `_add_enrichment_facts` (the world-model-bound cost) when
+  `enrichment is not None`, so this second call never touches the world-model connection. The
+  count is taken from that call's own length, i.e. the *total admitted* count, before either call
+  truncates — not the enriched subset.
+- **Ordering**: both functions already sort by `last_seen_sim` descending (most-recently-seen
+  first) before the enrichment step, so truncating at that same point preserves exactly the order
+  an unlimited call would show first — confirmed by a dedicated test rather than assumed (see
+  below).
+- Tests added, `test_tools.py` (`belief.tools` level, a 50-contact store built across 50 separate
+  polls so `last_seen_sim` orders them unambiguously, with a `describe_position` call-counting
+  monkeypatch mirroring `test_tools.py`'s own existing enrichment fixture):
+  `test_get_contacts_limit_enriches_only_the_shown_contacts` (`limit=5` → exactly 5
+  `describe_position` calls), `test_get_contacts_limit_none_enriches_every_admitted_contact_
+  unchanged` (`limit=None` → 50 calls, unchanged from pre-fix behaviour),
+  `test_get_contacts_limit_preserves_most_recently_seen_first_ordering` (`limit=5`'s result is
+  exactly `limit=None`'s first 5), and the same three for `find_contact`.
+- Tests added, `test_brain_tool_loop.py` (the real registered `BrainTool`s via
+  `BRAIN_TOOLS_BY_NAME`, not `belief.tools` directly):
+  `test_find_contact_adapter_caps_enrichment_before_display`/
+  `test_list_contacts_adapter_caps_enrichment_before_display` — 50-contact store, asserts exactly
+  `BRAIN_TOOL_LIST_CAP` (5) `describe_position` calls and a summary ending `"and 45 more"`.
+- **Not touched, per the dispatch's scope**: `tools.py`'s other callers (`report_all`, the
+  phrasebook `report`/`watch_nearest` family) keep calling with `limit=None` (the default),
+  unchanged. The sibling `crew-query-path`/`report` escalation
+  (`.claude/agent-memory/performance-reviewer/project_report_query_enrichment_dominates.md`) is
+  untouched — it stays filed MONITOR + Architect escalation, since its fix is entangled with
+  `report`'s own shared slot-filtering/position-rendering logic in a way this narrower, unentangled
+  BR-2 path never was.
+- Checks: `cd body-layer && .venv/bin/ruff format src tests && .venv/bin/ruff check src tests &&
+  .venv/bin/mypy src && .venv/bin/pytest -q` — all green: 3274 passed, 4 xfailed (3278 collected).
+  8 new tests this fix adds (6 in `test_tools.py`, 2 in `test_brain_tool_loop.py`), each confirmed
+  passing **by name** in a `-v` run of just those two files, not inferred from the aggregate count
+  — the performance review's own pre-fix baseline (3265 passed/4 xfailed) is not directly
+  comparable to the post-fix total above since this subproject's suite also gained tests from the
+  two security fixes committed between that measurement and this one (`BR-B2`/`BR-B3`).
 session, not a live status tracker for either item.
