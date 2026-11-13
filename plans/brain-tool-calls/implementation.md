@@ -779,3 +779,62 @@ fix being shaped to avoid touching the fixture. `_EXPECTED_COMMAND_NEEDS_EVIDENC
 genuine, already-documented gap, `A1_where_two_shilkas_discriminated`) is unaffected — it is a
 tool-returned candidate set, not header-seeded, and was already going through the evidence check
 before this fix.
+
+### Security fixes
+
+**U4 (plan.md's Decisions: fold `[[BR-B2]]`/`[[BR-B3]]` into Stage 2) was accepted by the user but
+never built** — Stage 0's implementation log correctly deferred it to Stage 2, but Stage 2's own
+log and Files Changed list make no mention of it at all, and `review.md` did not raise it either.
+The security deep analysis caught this directly: both backlog items were still open in code,
+exactly as filed, with the call frequency U4's own rationale named as the reason to act now now
+realised (every addressed turn calls `_post_json` up to `TOOL_LOOP_MAX_ROUNDS + 1` times). Built
+now, on this branch, as the security review's two Required-equivalent (option C, "fix now")
+findings:
+
+**Fix 1 — U4 itself:**
+- `brain-layer/src/server.py`'s `_handle_escalate` now reads the body through a `_read_body`
+  method, ported from `audio-adapter/src/server.py`'s own guard shape (same non-numeric/negative
+  `Content-Length` rejection, `400` before `rfile.read` is ever called), plus a declared-length cap
+  (`MAX_ESCALATE_BODY_BYTES = 262_144`) audio-adapter's own version does not need. `[[BR-B2]]`
+  marked done.
+- `brain-layer/src/ollama_client.py`'s `_post_json` now reads one byte past
+  `MAX_OLLAMA_RESPONSE_BYTES` (`1_048_576`) and raises `OllamaRequestError` if the response
+  exceeds the cap — shared by `generate()`/`generate_with_usage()` and `chat()` alike, since both
+  go through this one method. `[[BR-B3]]` marked done. Both constants are behaviour-affecting by
+  this project's tuning rule and would want the tuning mechanism; `brain-layer` has no loader yet
+  (body-layer-only), so both stay plain module constants with a `#:` comment saying so, per the
+  Implementer role's standing instruction for this case.
+- Tests: `test_escalate_non_numeric_content_length_returns_400_without_raising`,
+  `test_escalate_negative_content_length_returns_400`,
+  `test_escalate_oversized_content_length_returns_400`,
+  `test_escalate_valid_content_length_still_succeeds` (`test_server.py`, ported helper
+  `_post_raw_content_length` from `audio-adapter/tests/test_server.py`); `test_generate_raises_
+  when_response_exceeds_byte_cap`, `test_chat_raises_when_response_exceeds_byte_cap`,
+  `test_generate_under_cap_still_succeeds` (`test_ollama_client.py`).
+- Pruned `ollama_client.py`'s module docstring paragraph claiming `chat()` "reproduces
+  `generate()`'s own unbounded `response.read()`" — now false, since both share the fixed
+  `_post_json` (root `CLAUDE.md`'s "prune the comment you are standing next to").
+
+**Fix 2 — the uncaught-exception gap on the tool-dispatch path (security review's Recommended,
+non-blocking finding, also taken as option C):**
+- `body-layer/src/belief/crew_console.py`'s `_handle_brain_tool_call` now wraps the single
+  `self.run_brain_tool(tool_name, validated, now_sim)` call in `try`/`except Exception`: on an
+  exception it logs with `logger.exception` (traceback kept), pops the turn, and speaks the
+  existing `unable NO_ANSWER` degrade (`render_unable("NO_ANSWER")`) — the same reason the
+  round-cap path already uses, not a new one. Never re-raises into `drain_brain`/body.py's poll
+  loop, which also owns perception/belief/speech.
+- Corrected the function's own docstring in passing — it claimed `_handle_brain_tool_call` "never
+  calls `self._print`," which was already false for the round-cap degrade (`_speak_turn_degrade`
+  does call it); now states both exits that do.
+- Test: `test_run_brain_tool_raising_ends_the_turn_and_logs_rather_than_propagating`
+  (`test_brain_tool_loop.py`) — a `run_brain_tool` closure that raises `RuntimeError`; asserts the
+  turn ends with `["Unable, no answer."]`, the exception is logged, and a second, unrelated
+  utterance afterward still completes normally (the console itself stays usable, not just the
+  process).
+
+**`todo/backlog/BR-B2.md`/`BR-B3.md` named in the dispatch do not exist** — both backlog items
+live at `brain-layer/ROADMAP/BR-B2.md`/`BR-B3.md` (this layer's own `ROADMAP/` backlog directory,
+not `todo/backlog/`), marked `[x]`/`#status/done` there instead, each with a one-line resolution
+naming this branch. `todo/backlog/todo-backlog.md`'s only mention of either (the `X-B9` entry
+recording that they were *filed*) needed no change — it is a historical record of the filing
+session, not a live status tracker for either item.
