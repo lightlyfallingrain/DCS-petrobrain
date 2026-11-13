@@ -72,6 +72,16 @@ _EXPECTED_COMMAND_DEGRADES: set[str] = set()
 #: so this case validates as the fixture's own direct `answer`. Kept
 #: empty (not deleted) for the same "record future gaps here" reason
 #: `_EXPECTED_COMMAND_DEGRADES` above gives.
+#:
+#: **Reviewer fix note**: `A4_which_ones_the_bmp` is a 2-candidate header
+#: (`CONTACT_8`: T-72, `CONTACT_9`: BMP), which the review found was not
+#: pushed into `turn.candidate_sets`, so D3's ambiguity-evidence rule
+#: never ran against it -- the model's pick was trusted with zero
+#: grounding. The fixture itself was updated (`because: "BMP"`, the
+#: pilot's own word) to carry the evidence the rule now requires, rather
+#: than exempting header-seeded picks from the rule the plan asks for.
+#: This set stays empty; the case validates again, now through the
+#: evidence path instead of around it.
 _EXPECTED_NO_HEADER_REFS_GAP: set[str] = set()
 
 #: **A third, genuine gap, found by this bench rather than designed
@@ -112,13 +122,15 @@ def _turn_from_case(case: dict[str, Any]) -> BrainTurn:
     every one of those tool calls had already happened this turn, which
     is the state the fixture's `expected.final` was measured against.
 
-    **BR-2 Stage 3 addition**: also seeds `offered` (never
-    `candidate_sets`) from `case["header"]["contacts"]`, mirroring the
-    real `CrewConsole._header_contact_refs`/`_start_brain_turn`'s own
-    choice not to apply D3's ambiguity-evidence rule to a header-offered
-    "recently mentioned" contact -- see that method's own docstring for
-    why (the same no-evidence trust a bare "it"/"that" pronoun already
-    gets on the voice path)."""
+    **BR-2 Stage 3 addition**: also seeds `offered` from
+    `case["header"]["contacts"]`, mirroring the real `CrewConsole.
+    _header_contact_refs`/`_start_brain_turn`.
+
+    **Reviewer fix**: a header with >=2 contacts is also pushed into
+    `candidate_sets`, mirroring `_start_brain_turn`'s own fix -- D3's
+    ambiguity-evidence rule now applies to a header-seeded pick too, the
+    same as a tool-returned multi-candidate set. A single header contact
+    still gets the no-evidence pronoun trust (not pushed)."""
     turn = BrainTurn(
         started_sim=0.0,
         transcript=case["utterance"],
@@ -127,6 +139,12 @@ def _turn_from_case(case: dict[str, Any]) -> BrainTurn:
     )
     header_contacts = case.get("header", {}).get("contacts", [])
     turn.offered.update(c["ref"] for c in header_contacts)
+    if len(header_contacts) >= 2:
+        header_texts = tuple(
+            (c["ref"], c.get("class") or c.get("name") or c["ref"])
+            for c in header_contacts
+        )
+        turn.candidate_sets.append(header_texts)
     for entry in case.get("observations", []):
         observation = entry["observation"]
         handles = observation.get("handles", [])

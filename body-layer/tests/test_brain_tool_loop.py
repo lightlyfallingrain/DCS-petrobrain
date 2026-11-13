@@ -631,7 +631,14 @@ def test_brain_command_mark_target_matches_phrasebook_dispatch() -> None:
     phrasebook path, `[[BL-B102]]`'s "mark it" shape) produce identical
     readback text from identical belief state -- `_handle_brain_
     command`'s own docstring: both ultimately call the same
-    `handle_command`."""
+    `handle_command`.
+
+    This and `test_brain_command_cancel_task_matches_phrasebook_dispatch`
+    below deliberately cover only 2 of `BRAIN_COMMANDS`' 30 tokens --
+    every allowlisted token dispatches through the identical
+    `_handle_brain_command` -> `handle_command` call with only two
+    possible slot shapes (`takes_target` or none), and this pair covers
+    both shapes, not 2 of 30 by accident."""
     marks: list[tuple[str, float]] = []
 
     def _mark_target_fn(contact_id: str, now_sim: float) -> str:
@@ -903,10 +910,14 @@ def test_r1_brain_command_signal_survives_an_unrelated_command_same_poll() -> No
 def test_header_refs_offered_without_a_tool_call() -> None:
     """D4's header refs: a contact already in `_referent_memory`'s short
     window (`[[BL-B102]]`'s "recently mentioned") is offered from the
-    *first* round, with no tool call needed -- "which one's the BMP?"
-    style, D3's ambiguity-evidence rule included (a header-seeded
-    candidate set is not pushed, so no `because` is demanded of it,
-    `CrewConsole._start_brain_turn`'s own docstring)."""
+    *first* round, with no tool call needed. A single header-offered
+    contact (this test's shape) is not pushed into `candidate_sets`, so
+    no `because` is demanded of it -- the bare-pronoun trust
+    `CrewConsole._start_brain_turn`'s own docstring describes. See
+    `test_header_ref_ambiguity_without_because_becomes_which_one`/
+    `test_header_ref_ambiguity_with_because_dispatches` below for the
+    >=2-candidate header shape, which is pushed and does demand
+    evidence."""
     store = _store_with_two_far_apart_contacts()
     ids = [contact.id for contact in store.contacts]
     brain_client = _ScriptedBrainClient()
@@ -937,3 +948,111 @@ def test_header_refs_offered_without_a_tool_call() -> None:
     )
     assert lines == []
     assert console.where_is_it_requested is True
+
+
+def _store_with_two_far_apart_differently_classed_contacts() -> ContactStore:
+    """Like `_store_with_two_far_apart_contacts`, but one T-72 and one
+    BMP -- so `tools.describe_contact`'s own summary text (what
+    `CrewConsole._header_contact_refs` offers) differs between them,
+    the same shape `plans/brain-tool-calls/plan.md`'s named acceptance
+    case `A4_which_ones_the_bmp` fixture uses."""
+    store = ContactStore()
+    t72 = _observation("OBS_1", "T-72")
+    bmp = Observation(
+        id="OBS_2",
+        contact_id=None,
+        t_sim=0.0,
+        t_wall=0.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw="BMP",
+        bearing_deg=180.0,
+        range_m=5000.0,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=-5000.0, z=0.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+    )
+    store.ingest([t72, bmp], now_sim=0.0)
+    assert len(store.contacts) == 2
+    return store
+
+
+def test_header_ref_ambiguity_without_because_becomes_which_one() -> None:
+    """Reviewer fix (`plans/brain-tool-calls/review.md`): a header
+    offering two or more recently-mentioned contacts is pushed into
+    `turn.candidate_sets`, so D3's ambiguity-evidence rule applies to a
+    header-seeded final exactly as it already does to a tool-returned
+    one. A final naming one of the two header contacts with no
+    `because` degrades to "which one?" over the survivors -- before the
+    fix, this was accepted unconditionally."""
+    store = _store_with_two_far_apart_differently_classed_contacts()
+    ids = [contact.id for contact in store.contacts]
+    bmp_id = next(c.id for c in store.contacts if c.classification.value == "BMP")
+    other_id = next(i for i in ids if i != bmp_id)
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console._referent_memory.record(
+        [
+            Mention(kind="contact", id=other_id, t_sim=0.0),
+            Mention(kind="contact", id=bmp_id, t_sim=0.0),
+        ],
+        0.0,
+    )
+
+    console.handle_line("Petrovich, which one's the BMP?", now_sim=0.5)
+    assert len(brain_client.payloads) == 1
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="answer",
+            t_sim=0.5,
+            form="contacts",
+            refs=(bmp_id,),
+            because=None,
+        )
+    )
+    lines = console.drain_brain(now_sim=1.0)
+    assert len(lines) == 1
+    assert lines[0].startswith("Which one -- ")
+
+
+def test_header_ref_ambiguity_with_because_dispatches() -> None:
+    """The same two header-offered contacts, but `because` is the
+    pilot's own word from the transcript ("BMP") that appears in the
+    chosen contact's own summary and in no other header contact's --
+    the answer validates and is spoken, not degraded."""
+    store = _store_with_two_far_apart_differently_classed_contacts()
+    ids = [contact.id for contact in store.contacts]
+    bmp_id = next(c.id for c in store.contacts if c.classification.value == "BMP")
+    other_id = next(i for i in ids if i != bmp_id)
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console._referent_memory.record(
+        [
+            Mention(kind="contact", id=other_id, t_sim=0.0),
+            Mention(kind="contact", id=bmp_id, t_sim=0.0),
+        ],
+        0.0,
+    )
+
+    console.handle_line("Petrovich, which one's the BMP?", now_sim=0.5)
+    assert len(brain_client.payloads) == 1
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="answer",
+            t_sim=0.5,
+            form="contacts",
+            refs=(bmp_id,),
+            because="BMP",
+        )
+    )
+    lines = console.drain_brain(now_sim=1.0)
+    assert len(lines) == 1
+    assert not lines[0].startswith("Which one -- ")
+    assert "BMP" in lines[0]

@@ -657,7 +657,8 @@
           "form": "contacts",
           "refs": [
             "CONTACT_9"
-          ]
+          ],
+          "because": "BMP"
         }
       }
     },

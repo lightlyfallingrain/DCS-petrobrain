@@ -811,6 +811,12 @@ class BrainTurn:
     #: *different* set on a later continuation round would disagree with
     #: what was already validated-offered. `_post_tool_continuation`
     #: resends this unchanged on every round's `situational_header`.
+    #: Reviewer fix (`plans/brain-tool-calls/review.md`): when this set
+    #: has >=2 members it is also pushed into `candidate_sets` at turn
+    #: start (`_start_brain_turn`), so a final naming one of several
+    #: header-offered contacts needs the same verbatim `because` evidence
+    #: a tool-returned multi-candidate pick already needs -- a single
+    #: header contact still gets the bare-pronoun no-evidence trust.
     header_refs: tuple[tuple[str, str], ...] = ()
 
 
@@ -5835,13 +5841,20 @@ class CrewConsole:
         )
         # D4's header refs: every recently-mentioned contact is offered
         # from the first round, same as a tool observation's own
-        # handles -- but **not** pushed into `candidate_sets`. D3's
-        # ambiguity-evidence rule governs a *tool*-returned multi-
-        # candidate result; a recently-mentioned contact gets the same
-        # no-evidence trust a bare "it"/"that" pronoun already gets on
-        # the voice path (`belief.referent.resolve_referent` asks for no
-        # evidence either) -- see `_header_contact_refs`'s own docstring.
+        # handles. A single header contact gets the same no-evidence
+        # trust a bare "it"/"that" pronoun already gets on the voice path
+        # (`belief.referent.resolve_referent` asks for no evidence
+        # either) -- see `_header_contact_refs`'s own docstring. But once
+        # the header offers **two or more** genuine candidates with equal
+        # trust, the pronoun analogy no longer holds (the pronoun path
+        # never has a "which one did it pick" question to ask evidence
+        # of) -- reviewer fix, `plans/brain-tool-calls/review.md`: push
+        # the set into `candidate_sets` too, so D3's ambiguity-evidence
+        # rule applies the same verbatim-`because` check a tool-returned
+        # multi-candidate pick already gets.
         turn.offered.update(cid for cid, _ in header_refs)
+        if len(header_refs) >= 2:
+            turn.candidate_sets.append(header_refs)
         self._brain_turns[utterance.id] = turn
         # `plans/brain-tool-calls/plan.md` D1/D2/D5: every addressed turn
         # is the tool-loop mode, round 0, no steps yet, the full

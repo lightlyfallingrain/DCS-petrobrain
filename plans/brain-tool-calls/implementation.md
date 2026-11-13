@@ -657,19 +657,30 @@ claim).
   the other four slots are free-text/enum values a resolved `target` (via a tool call first) already
   makes redundant for every Stage 3 acceptance-set case. Kept as its own token, not folded into
   `report_all`, so Stage 4 can widen *this* command's schema without re-adding it to the allowlist.
-- **Header-seeded candidates are offered (`turn.offered`) but never pushed into `turn.candidate_
-  sets` — a deliberate design choice, not an oversight, found while making `A4_which_ones_the_bmp`
-  pass.** D3's ambiguity-evidence rule is written for a *tool*-returned multi-candidate result; a
-  header-offered "recently mentioned" contact is `[[BL-B102]]`'s referent mechanism, which already
-  gives a bare "it"/"that" pronoun no-evidence trust on the voice path (`belief.referent.
-  resolve_referent` asks for no evidence at all). Treating a header-seeded set the same way both
-  matches that existing trust level and is what the plan's own two named acceptance cases need to
-  pass cleanly (see below) — the alternative (requiring evidence here too) would make "which one's
-  the BMP?" fail without a `because` the fixture never recorded.
+- **Review fix (`plans/brain-tool-calls/review.md`): a header offering two or more candidates is
+  now pushed into `turn.candidate_sets`, closing a real trust-boundary gap this stage's original
+  design left open.** As first implemented, header-seeded candidates were offered (`turn.offered`)
+  but never pushed into `candidate_sets` at all, on the theory that a header-offered "recently
+  mentioned" contact deserved the same no-evidence trust a bare "it"/"that" pronoun already gets
+  on the voice path (`belief.referent.resolve_referent` asks for no evidence at all). The review
+  found that analogy false once the header offers **two or more** genuine candidates with equal
+  trust: a bare pronoun never makes a choice among several candidates (it deterministically
+  returns the single most recent mention), so there is no "which one did it pick" question to ask
+  evidence of — but the header can and does offer several, and `_validate_turn_answer`/
+  `_validate_turn_command` were silently skipping the evidence check entirely for any final naming
+  one, trusting the model's pick on competence alone, not D10's deterministic safety net. `_start_
+  brain_turn` now pushes `header_refs` into `turn.candidate_sets` when `len(header_refs) >= 2`; a
+  single header contact is unaffected and keeps the pronoun-level trust. `A4_which_ones_the_bmp`'s
+  fixture (`brain-layer/tools/stage0_cases.json`) gained a `"because": "BMP"` field (the pilot's
+  own word from "which one's the BMP?") to carry the evidence the rule now requires, rather than
+  the fix being shaped to keep the fixture passing unchanged.
 - **Of the task's named acceptance-bench cases, two pass as named and one does not, for a reported
   reason, not a forced one.** `A2_referent_where_is_it` and `A4_which_ones_the_bmp` (D4's own two
   named examples) now validate as their fixture's own `command`/`answer` final, once `_turn_from_
-  case` seeds `offered` from the header. `A1_where_two_shilkas_discriminated` — one of the "A1_*"
+  case` seeds `offered` from the header. (Review fix, see above: `A4`'s 2-candidate header is now
+  also pushed into `candidate_sets`, so this case passes through the evidence check rather than
+  around it — the fixture itself gained a `"because": "BMP"` field to carry that evidence, since
+  `A2`'s header has only one candidate and needs none.) `A1_where_two_shilkas_discriminated` — one of the "A1_*"
   cases the brief named as expected to pass — genuinely does not: its fixture resolves `where_is_it`
   `target=CONTACT_2` out of a 2-candidate `find_contact` result (discriminated by the utterance's
   own "the one by the village") with **no `because` field at all**. D3's ambiguity-evidence rule,
@@ -714,3 +725,57 @@ claim).
   decide`'s `commands_raw = payload.get("commands") or []` and `server.py`'s `reply = dict(result)`,
   not assumed from the plan's Affected Modules list, which names `decider.py` for "continuation
   rounds, NO_BRAIN" — both already built in Stage 2).
+
+## Review fix (`plans/brain-tool-calls/review.md`)
+
+The one required fix: `_start_brain_turn` (`body-layer/src/belief/crew_console.py`) now pushes
+`header_refs` into `turn.candidate_sets` when `len(header_refs) >= 2`, so `_candidate_set_for_ref`
+(`body-layer/src/belief/brain_reply.py`) finds a header-seeded multi-candidate set and
+`_validate_turn_answer`/`_validate_turn_command` apply the same verbatim-`because` evidence check a
+tool-returned multi-candidate set already got. A single header contact is unaffected (not pushed)
+and keeps the bare-pronoun no-evidence trust. See the Stage 3 "Notable Discoveries" entry above
+(now rewritten) for the full reasoning the review itself gave.
+
+Added two tests in `body-layer/tests/test_brain_tool_loop.py`
+(`test_header_ref_ambiguity_without_because_becomes_which_one`,
+`test_header_ref_ambiguity_with_because_dispatches`) against a new local helper, `_store_with_two_
+far_apart_differently_classed_contacts` (one T-72, one BMP, so the evidence check's substring test
+has real signal to discriminate on) — a two-contact header naming one with no `because` degrades to
+"which one?"; with the pilot's own verbatim word ("BMP" from "which one's the BMP?") it dispatches.
+Confirmed red without the fix (reverted the `_start_brain_turn` change locally, both new tests
+failed — the no-`because` case wrongly spoke the answer instead of degrading), then green with it.
+
+Updated `brain-layer/tools/stage0_cases.json`'s `A4_which_ones_the_bmp` case to carry
+`"because": "BMP"` on its `expected.final`, and `body-layer/tests/test_stage2_acceptance_bench.py`'s
+`_turn_from_case` to push a >=2-contact header into `candidate_sets` (mirroring the real fix) — the
+bench's own comments were updated in place rather than left asserting the pre-fix design.
+
+Added a one-line comment to the E3 differential tests
+(`test_brain_command_mark_target_matches_phrasebook_dispatch`,
+`test_brain_command_cancel_task_matches_phrasebook_dispatch`) noting they deliberately cover the two
+dispatch shapes (`takes_target`/none), not 2 of 30 `BRAIN_COMMANDS` tokens by accident — the review's
+non-blocking note.
+
+No wire-shape change, no change outside `body-layer`'s own files plus the `brain-layer` fixture.
+
+### Checks (review fix)
+
+**body-layer/**
+- `ruff format src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass
+- `pytest -q`: pass (see handback report for the exact count)
+
+**brain-layer/**
+- `ruff check src tests tools`: pass
+- `mypy src`: pass
+- `pytest -q`: pass
+
+### A4 outcome
+
+As predicted by the review: `A4_which_ones_the_bmp` now needs `because` to validate as its own
+fixture's direct `answer`. The fixture was updated to carry it (`"because": "BMP"`), rather than the
+fix being shaped to avoid touching the fixture. `_EXPECTED_COMMAND_NEEDS_EVIDENCE_GAP` (the one
+genuine, already-documented gap, `A1_where_two_shilkas_discriminated`) is unaffected — it is a
+tool-returned candidate set, not header-seeded, and was already going through the evidence check
+before this fix.
