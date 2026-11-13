@@ -25,8 +25,17 @@ from typing import Any
 _FINAL_COMMAND_RE = re.compile(
     r"^\s*FINAL\s+command\s+(\w+)\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
 )
+#: `BECAUSE "<words>"` is optional and trailing -- D3's ambiguity-evidence
+#: rule (`plans/brain-tool-calls/plan.md`) needs it only when `refs`/
+#: `target` names one survivor out of a multi-candidate set this turn;
+#: the overwhelming common case (a single candidate, or no candidates at
+#: all) never needs it, so it is not threaded through the JSON blob the
+#: `command` line already carries `target`/other slots in -- quoted the
+#: same way `brain-layer/src/decider.py`'s own `PICK ... BECAUSE` is, for
+#: one shared `_unquote`-style strip (`parse_final_text` below).
 _FINAL_ANSWER_RE = re.compile(
-    r"^\s*FINAL\s+answer\s+(\w+)\s+(\[.*\])\s*$", re.IGNORECASE | re.DOTALL
+    r'^\s*FINAL\s+answer\s+(\w+)\s+(\[.*?\])(?:\s+BECAUSE\s+"([^"]*)")?\s*$',
+    re.IGNORECASE | re.DOTALL,
 )
 _FINAL_ASK_RE = re.compile(r"^\s*FINAL\s+ask\s+(\[.*\])\s*$", re.IGNORECASE | re.DOTALL)
 _FINAL_UNABLE_RE = re.compile(r"^\s*FINAL\s+unable\s+(\w+)\s*$", re.IGNORECASE)
@@ -55,6 +64,10 @@ class ParsedLine:
     form: str | None = None
     refs: list[str] | None = None
     reason: str | None = None
+    #: D3's ambiguity-evidence words -- `"final_answer"`'s own optional
+    #: trailing `BECAUSE "..."`, or `"final_command"`'s `slots["because"]`
+    #: (popped out by `final_to_dict`, same as `slots["target"]`).
+    because: str | None = None
 
 
 def parse_final_text(text: str) -> ParsedLine:
@@ -74,7 +87,7 @@ def parse_final_text(text: str) -> ParsedLine:
         return ParsedLine(kind="final_command", token=token, slots=slots)
     match = _FINAL_ANSWER_RE.match(stripped)
     if match:
-        form, refs_json = match.groups()
+        form, refs_json, because = match.groups()
         try:
             refs_raw = json.loads(refs_json)
         except json.JSONDecodeError:
@@ -82,7 +95,10 @@ def parse_final_text(text: str) -> ParsedLine:
         if not isinstance(refs_raw, list):
             return ParsedLine(kind="malformed")
         return ParsedLine(
-            kind="final_answer", form=form, refs=[str(r) for r in refs_raw]
+            kind="final_answer",
+            form=form,
+            refs=[str(r) for r in refs_raw],
+            because=because,
         )
     match = _FINAL_ASK_RE.match(stripped)
     if match:
@@ -105,15 +121,28 @@ def final_to_dict(parsed: ParsedLine) -> dict[str, Any] | None:
     that is not one of the four final shapes (a `"malformed"` line, or a
     bare tool call, which this function is never called for)."""
     if parsed.kind == "final_command":
-        slots = parsed.slots or {}
+        # `target`/`because` are dedicated `belief.escalation.BrainReply`
+        # fields, not ordinary slots -- popped out here so `slots` holds
+        # only whatever else the model tried to fill (Stage 3 exposes no
+        # such extra slot yet; `belief.brain_reply._validate_turn_command`
+        # rejects a non-empty one).
+        slots = dict(parsed.slots or {})
+        target = slots.pop("target", None)
+        because = slots.pop("because", None)
         return {
             "kind": "command",
             "token": parsed.token,
             "slots": slots,
-            "target": slots.get("target"),
+            "target": target,
+            "because": because,
         }
     if parsed.kind == "final_answer":
-        return {"kind": "answer", "form": parsed.form, "refs": parsed.refs or []}
+        return {
+            "kind": "answer",
+            "form": parsed.form,
+            "refs": parsed.refs or [],
+            "because": parsed.because,
+        }
     if parsed.kind == "final_ask":
         return {"kind": "ask", "refs": parsed.refs or []}
     if parsed.kind == "final_unable":
