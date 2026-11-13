@@ -217,7 +217,7 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.contacts import Contact, ContactStore
-from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
+from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext, relative_geometry
 from belief.events import (
     CONTACT_ABSENT,
     CONTACT_BURNING_SEEN,
@@ -237,9 +237,15 @@ from belief.group_view import CollapseDepth, CollapseNode, collapse_members
 from belief.groups import Group
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.threat import envelope_for
-from belief.tools import ContactResult, acknowledge_event, describe_contact
+from belief.tools import (
+    ContactResult,
+    acknowledge_event,
+    describe_contact,
+    describe_our_position,
+)
 from belief.utterance import ReferenceCandidate
-from perception.geometry import angular_delta_deg
+from perception.geometry import GeoPosition, angular_delta_deg
+from perception.source import OwnshipState
 
 Template = Literal[
     "readback", "contact_report", "lifecycle_event", "threat_reaction", "attack_run"
@@ -946,6 +952,111 @@ def render_no_view(direction_label: str) -> OutgoingSpeech:
     return OutgoingSpeech(
         text=f"Can't see {direction_label}.", template="contact_report"
     )
+
+
+#: `plans/brain-tool-calls/plan.md` D7's "nothing seen" wording for a
+#: `nothing_seen(scope)` answer final -- always this, never "confirmed
+#: empty" (the plan's own "Finding 7" pointer, the same no-omniscience
+#: posture `render_clear`'s own docstring already states for the
+#: `report_*` family: Petrovich not having seen something is not a claim
+#: that there is nothing there).
+def render_nothing_seen() -> OutgoingSpeech:
+    return OutgoingSpeech(text="Nothing seen.", template="readback")
+
+
+def render_our_position_answer(enrichment: EnrichmentContext) -> OutgoingSpeech:
+    """D7's `our_position` answer final -- `belief.tools.
+    describe_our_position`'s own one-line summary (heading, altitude, the
+    highest-confidence nearby semantic fact), already free of any raw
+    coordinate (that function's own docstring)."""
+    result = describe_our_position(enrichment)
+    return OutgoingSpeech(text=str(result["summary"]), template="readback")
+
+
+#: D7's freshness phrase, spoken only when a `contacts` answer names a
+#: contact that is not currently `"observed"` -- the model-facing tool
+#: observation already carries this certainty (`belief.tools.
+#: _contact_phrasing_hints`), but D7's answer form is rendered fresh at
+#: speech time from *current* belief (D4), not from the turn's own
+#: snapshot, so this is computed here rather than threaded through.
+def _freshness_phrase(facts: dict[str, object], now_sim: float) -> str | None:
+    if facts.get("certainty") == "observed":
+        return None
+    last_seen_ago_s = facts.get("last_seen_ago_s")
+    if not isinstance(last_seen_ago_s, (int, float)):
+        return "not seen recently"
+    minutes = int(last_seen_ago_s // 60)
+    if minutes < 1:
+        return "not seen recently"
+    unit = "minute" if minutes == 1 else "minutes"
+    return f"not seen for {minutes} {unit}"
+
+
+def render_contact_answer(
+    store: ContactStore,
+    contact_id: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> OutgoingSpeech | None:
+    """D7's `contacts(refs)` answer final, one contact: `render_contact_
+    report`'s own line, plus the freshness phrase above when the contact
+    is not currently observed. `None` if `contact_id` no longer exists --
+    the caller (`belief.crew_console`) is what turns that into "lost
+    him" (D4 revalidation at speech time)."""
+    result = describe_contact(store, contact_id, now_sim, enrichment)
+    if result is None:
+        return None
+    speech = render_contact_report(store, contact_id, now_sim, enrichment)
+    assert speech is not None  # `describe_contact` above already found it
+    freshness = _freshness_phrase(result["facts"], now_sim)
+    if freshness is None:
+        return speech
+    return OutgoingSpeech(
+        text=f"{speech.text} {freshness.capitalize()}.", template="readback"
+    )
+
+
+def render_memory_entry(
+    entry: dict[str, object], ownship: OwnshipState
+) -> OutgoingSpeech:
+    """D7's `memory(refs)` answer final, one entry: `"Your mark one,
+    6 o'clock, 4 km, by Gemerek."` -- reuses `relative_geometry`'s own
+    clock/range derivation (the same one `_contact_report_text` reads via
+    `facts["relative_now"]`), computed fresh against `ownship`'s *current*
+    position rather than the position the entry was written at (D7: "the
+    entry's position relative to current ownship"). `entry` is `mission_
+    memory.query.entry_to_dict`'s shape -- no raw `x`/`z` is spoken, only
+    the bearing/range this function derives from them and the entry's own
+    frozen `landmark` phrase, never a coordinate."""
+    payload = entry.get("payload")
+    kind = entry.get("kind")
+    if kind == "mark" and isinstance(payload, dict):
+        index = payload.get("index")
+        label = payload.get("label")
+        subject = f"Your mark {index}" if isinstance(index, int) else "Your mark"
+        if isinstance(label, str) and label:
+            subject += f", {label}"
+    else:
+        subject = str(kind) if kind else "that entry"
+    parts = [subject]
+    pos = entry.get("pos")
+    if isinstance(pos, dict):
+        x, z = pos.get("x"), pos.get("z")
+        if isinstance(x, (int, float)) and isinstance(z, (int, float)):
+            geometry = relative_geometry(
+                ownship, GeoPosition(x=float(x), z=float(z), alt_m=0.0)
+            )
+            clock_position = geometry["clock_position"]
+            range_m_value = geometry["range_m"]
+            assert isinstance(range_m_value, float)
+            parts.append(f"{clock_position} o'clock")
+            parts.append(_format_range_km(range_m_value))
+        landmark = pos.get("landmark")
+        if isinstance(landmark, str) and landmark:
+            parts.append(f"by {landmark}")
+    if entry.get("struck_by") is not None:
+        parts.append("struck")
+    return OutgoingSpeech(text=", ".join(parts) + ".", template="readback")
 
 
 def render_report(group_texts: list[str], truncated: bool) -> OutgoingSpeech:

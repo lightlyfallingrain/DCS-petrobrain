@@ -55,14 +55,18 @@ extension of the BL-6 freeze, after BL-7 chose not to be the first."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Literal, TypeVar
 
+import tuning
 from belief import tools
 from belief.contacts import ContactStore
+from belief.enrichment import EnrichmentContext
 from mission_memory import query as mission_memory_query
 from mission_memory import tools as mission_memory_tools
 from mission_memory.store import MissionMemory
+from perception.geometry import GeoPosition
 
 
 @dataclass(frozen=True)
@@ -256,3 +260,437 @@ TOOL_SET: list[ToolSpec] = [
         fn=mission_memory_tools.remember_location,
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# BR-2 Stage 2 (`plans/brain-tool-calls/plan.md` D2/D5) -- the brain-facing
+# query-tool surface. `TOOL_SET` above is body's own tool registry, keyed
+# by name/description/callable with no calling convention of its own (see
+# `.claude/agent-memory/implementer/project_tool_set_has_no_dispatcher_
+# yet.md`: nothing called a `ToolSpec.fn` generically before this). `
+# BrainTool` is BR-2's calling convention: `invoke(ctx, args)` where `ctx`
+# is bound entirely by body (`run_brain_tool`'s closure in `body.py`, D2)
+# and `args` are the model's own (already-`belief.brain_reply`-validated)
+# keyword values -- never a raw `ToolSpec.fn` call with model arguments.
+# D5's seven query tools, one hand-written adapter each -- names are
+# test-enforced to equal a `TOOL_SET` name (`test_tool_api.py`).
+# `remember_location` is Stage 6, deliberately not exposed here yet (D8).
+# ---------------------------------------------------------------------------
+
+#: `plans/brain-tool-calls/plan.md` D5 -- `recall_memory`'s "near a place"
+#: filter radius. Behaviour-affecting (it decides which memory entries
+#: "near Gemerek" surfaces), so it goes through the tuning mechanism
+#: rather than as a bare literal, per root `CLAUDE.md`'s standing rule --
+#: unmeasured, a first guess pending flight evidence.
+RECALL_MEMORY_NEAR_RADIUS_M: float = tuning.real(
+    "belief.tool_api.RECALL_MEMORY_NEAR_RADIUS_M",
+    5000.0,
+    lo=500.0,
+    hi=50000.0,
+    status="agreed-guess",
+)
+
+#: D2's compactness rule -- a tool observation's own list is capped here,
+#: with an "and N more" note for the rest, so a turn's prompt never grows
+#: with the size of the contact store/memory ledger.
+BRAIN_TOOL_LIST_CAP: int = 5
+
+ParamKind = Literal[
+    "str", "int", "bool", "enum", "contact_ref", "place_ref", "memory_ref"
+]
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """One `BrainTool` parameter -- serialisable to the JSON-schema
+    subset `brain-layer`'s `ToolLoopDecider` shows the model (D2), and the
+    exact shape `belief.brain_reply`'s tool-call validator (D3) checks a
+    model-supplied value against: type/enum/range/length per the kind
+    below, and -- for the three `*_ref` kinds -- offered-this-turn
+    membership (`BrainTurn.offered`), never "any id that exists"."""
+
+    name: str
+    kind: ParamKind
+    required: bool = False
+    choices: tuple[str, ...] = ()
+    lo: int | None = None
+    hi: int | None = None
+    max_len: int = 40
+    #: `recall_memory`'s `near` parameter only (D5: `place_ref | "ownship"`)
+    #: -- the one place a `*_ref` kind's value may legally be something
+    #: other than an offered handle. Kept as an explicit per-param flag
+    #: rather than a special-cased parameter name, so the validator has
+    #: one rule to read rather than a name to recognise.
+    allow_ownship: bool = False
+
+
+@dataclass(frozen=True)
+class ToolObservation:
+    """What a `BrainTool.invoke` call hands back to the brain turn -- D2's
+    "compact, model-facing projection": a one-line `summary` (never a raw
+    `x`/`z`, never more than `BRAIN_TOOL_LIST_CAP` items spelled out), the
+    handles this call introduced (added to `BrainTurn.offered`), and,
+    for a `find_*` call that returned two or more candidates,
+    `candidate_texts` -- handle -> that candidate's own short identifying
+    text, which is exactly what `belief.brain_reply`'s ambiguity-evidence
+    rule (D3) needs to reuse `_validate_pick`'s existing substring test
+    against, the same way `belief.utterance.ReferenceCandidate.why` already
+    serves `_validate_pick` on the BR-1 path."""
+
+    summary: str
+    handles: tuple[str, ...] = ()
+    candidate_texts: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ToolContext:
+    """Bound entirely by body, never accepted from the wire (D2) -- the
+    closure `body.py`'s `_run_brain_tool_fn` builds reads `store`/
+    `enrichment` *live* off the running `ConsolePerceptionRunner`, the same
+    "never capture, always read live" rule `_mark_here_fn` already follows,
+    and passes `now_sim` fresh per call.
+
+    `place_positions` is this turn's own place-handle -> resolved-position
+    cache, populated by `_find_place_adapter` and read by
+    `_recall_memory_adapter`'s `near` resolution -- it lets one tool call's
+    result be used as another's input without ever putting a coordinate on
+    the wire to the model (D2's "no exposed parameter is a coordinate"):
+    the model only ever says `near="PLACE_7"`, never a position. Mutable
+    (unlike most dataclasses in this codebase) because it accumulates
+    within one turn's own rounds; a fresh `ToolContext` is built by
+    `body.py` for each round, so nothing here is ever shared *across*
+    turns."""
+
+    store: ContactStore
+    enrichment: EnrichmentContext | None
+    memory: MissionMemory
+    now_sim: float
+    place_positions: dict[str, GeoPosition] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BrainTool:
+    """One tool the brain may call -- D2's calling convention. `name` must
+    equal a `TOOL_SET` entry's `name` (test-enforced, `test_tool_api.py`):
+    this is a second, narrower surface over the same underlying functions,
+    not a parallel naming scheme."""
+
+    name: str
+    params: tuple[ParamSpec, ...]
+    invoke: Callable[[ToolContext, Mapping[str, object]], ToolObservation]
+
+
+_T = TypeVar("_T")
+
+
+def _cap(items: list[_T], limit: int = BRAIN_TOOL_LIST_CAP) -> tuple[list[_T], int]:
+    """D2's cap, shared by every adapter below: the first `limit` items,
+    plus how many were left off (0 if none)."""
+    return items[:limit], max(0, len(items) - limit)
+
+
+def _and_more(count: int) -> str:
+    return "" if count == 0 else f", and {count} more"
+
+
+def _find_contact_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    text = str(args["text"])
+    results = tools.find_contact(ctx.store, text, ctx.now_sim, ctx.enrichment)
+    shown, extra = _cap(list(results))
+    if not shown:
+        return ToolObservation(summary="no matching contacts")
+    handles: list[str] = []
+    candidate_texts: dict[str, str] = {}
+    lines: list[str] = []
+    for result in shown:
+        cid = str(result["facts"]["id"])
+        text_line = str(result["summary"])
+        handles.append(cid)
+        candidate_texts[cid] = text_line
+        lines.append(f"{cid}: {text_line}")
+    summary = "; ".join(lines) + _and_more(extra)
+    return ToolObservation(
+        summary=summary,
+        handles=tuple(handles),
+        candidate_texts=candidate_texts if len(handles) >= 2 else {},
+    )
+
+
+def _list_contacts_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    filter_arg = args.get("filter")
+    contact_filter = None if filter_arg is None else str(filter_arg)
+    results = tools.get_contacts(ctx.store, ctx.now_sim, contact_filter, ctx.enrichment)  # type: ignore[arg-type]
+    shown, extra = _cap(list(results))
+    if not shown:
+        return ToolObservation(summary="no contacts")
+    handles: list[str] = []
+    lines: list[str] = []
+    for result in shown:
+        cid = str(result["facts"]["id"])
+        handles.append(cid)
+        lines.append(f"{cid}: {result['summary']}")
+    return ToolObservation(
+        summary="; ".join(lines) + _and_more(extra), handles=tuple(handles)
+    )
+
+
+def _describe_contact_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    contact_id = str(args["contact_ref"])
+    result = tools.describe_contact(ctx.store, contact_id, ctx.now_sim, ctx.enrichment)
+    if result is None:
+        return ToolObservation(summary=f"{contact_id}: no such contact")
+    return ToolObservation(
+        summary=f"{contact_id}: {result['summary']}", handles=(contact_id,)
+    )
+
+
+def _get_contact_history_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    contact_id = str(args["contact_ref"])
+    entries = get_contact_history_with_memory(ctx.store, ctx.memory, contact_id)
+    if not entries:
+        return ToolObservation(
+            summary=f"{contact_id}: no history", handles=(contact_id,)
+        )
+    recent = entries[-BRAIN_TOOL_LIST_CAP:]
+    extra = max(0, len(entries) - len(recent))
+    lines = [_describe_history_entry(entry) for entry in recent]
+    summary = f"{contact_id}: " + "; ".join(lines) + _and_more(extra)
+    return ToolObservation(summary=summary, handles=(contact_id,))
+
+
+def _describe_history_entry(entry: dict[str, object]) -> str:
+    """One `get_contact_history_with_memory` row, compactly -- no `pos`
+    (every row that carries one is a memory-chain fold entry, and position
+    is a coordinate, D2's "no raw x/z")."""
+    kind = entry.get("type")
+    if kind == "sighting":
+        return f"seen by {entry.get('source')}"
+    if kind == "event":
+        return f"{entry.get('kind')}"
+    if kind == "memory":
+        return _describe_memory_entry(entry)
+    return str(kind)
+
+
+def _describe_memory_entry(entry: dict[str, object]) -> str:
+    """A mission-memory entry dict (`mission_memory.query.entry_to_dict`'s
+    shape), compactly and with no coordinates -- used by both the history
+    fold above and `_recall_memory_adapter` below."""
+    mem_kind = entry.get("kind")
+    payload = entry.get("payload")
+    parts = [str(mem_kind)]
+    if isinstance(payload, dict) and mem_kind == "mark":
+        label = payload.get("label")
+        if label:
+            parts.append(f"'{label}'")
+    pos = entry.get("pos")
+    if isinstance(pos, dict):
+        landmark = pos.get("landmark")
+        if landmark:
+            parts.append(str(landmark))
+    if entry.get("struck_by") is not None:
+        parts.append("struck")
+    return ", ".join(parts)
+
+
+def _memory_entry_handle(entry: dict[str, object]) -> str:
+    """`MARK_<index>` for a mark entry (matching the spoken "mark one"
+    numbering, `MarkPayload.index`), `MEM_<seq>` for every other kind."""
+    if entry.get("kind") == "mark":
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            index = payload.get("index")
+            if isinstance(index, int):
+                return f"MARK_{index}"
+    return f"MEM_{entry.get('seq')}"
+
+
+def _find_place_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    if ctx.enrichment is None:
+        return ToolObservation(summary="world model not available")
+    text = str(args["text"])
+    results = tools.find_place(ctx.enrichment, text)
+    shown, extra = _cap(list(results))
+    if not shown:
+        return ToolObservation(summary="no matching place")
+    handles: list[str] = []
+    candidate_texts: dict[str, str] = {}
+    lines: list[str] = []
+    for result in shown:
+        facts = result["facts"]
+        feature_id = facts.get("feature_id")
+        name = str(facts.get("name"))
+        handle = (
+            f"PLACE_{feature_id}"
+            if feature_id is not None
+            else f"PLACE_{abs(hash(name)) % 100000}"
+        )
+        position = facts.get("position")
+        if isinstance(position, dict):
+            dcs = position.get("dcs")
+            if isinstance(dcs, dict):
+                ctx.place_positions[handle] = GeoPosition(
+                    x=float(dcs["x"]), z=float(dcs["z"]), alt_m=0.0
+                )
+        handles.append(handle)
+        text_line = str(result["summary"])
+        candidate_texts[handle] = text_line
+        lines.append(f"{handle}: {text_line}")
+    return ToolObservation(
+        summary="; ".join(lines) + _and_more(extra),
+        handles=tuple(handles),
+        candidate_texts=candidate_texts if len(handles) >= 2 else {},
+    )
+
+
+def _describe_our_position_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    del args  # no parameters
+    if ctx.enrichment is None:
+        return ToolObservation(summary="world model not available")
+    result = tools.describe_our_position(ctx.enrichment)
+    return ToolObservation(summary=str(result["summary"]))
+
+
+def _recall_memory_adapter(
+    ctx: ToolContext, args: Mapping[str, object]
+) -> ToolObservation:
+    kind_arg = args.get("kind")
+    include_struck = bool(args.get("include_struck", False))
+    near = args.get("near")
+    center: GeoPosition | None = None
+    radius_m: float | None = None
+    if near is not None:
+        near_str = str(near)
+        if near_str == "ownship":
+            if ctx.enrichment is None:
+                return ToolObservation(summary="world model not available")
+            ownship = ctx.enrichment.ownship
+            center = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+        else:
+            center = ctx.place_positions.get(near_str)
+            if center is None:
+                return ToolObservation(
+                    summary=f"{near_str}: not a known place this turn"
+                )
+        radius_m = RECALL_MEMORY_NEAR_RADIUS_M
+    entries = mission_memory_tools.recall_memory(
+        ctx.memory,
+        kind=kind_arg,  # type: ignore[arg-type]
+        center=center,
+        radius_m=radius_m,
+        include_struck=include_struck,
+    )
+    shown, extra = _cap(list(entries))
+    if not shown:
+        return ToolObservation(summary="nothing in memory matches")
+    handles: list[str] = []
+    candidate_texts: dict[str, str] = {}
+    lines: list[str] = []
+    for entry in shown:
+        handle = _memory_entry_handle(entry)
+        text_line = _describe_memory_entry(entry)
+        handles.append(handle)
+        candidate_texts[handle] = text_line
+        lines.append(f"{handle}: {text_line}")
+    return ToolObservation(
+        summary="; ".join(lines) + _and_more(extra),
+        handles=tuple(handles),
+        candidate_texts=candidate_texts if len(handles) >= 2 else {},
+    )
+
+
+BRAIN_TOOLS: tuple[BrainTool, ...] = (
+    BrainTool(
+        name="find_contact",
+        params=(ParamSpec(name="text", kind="str", required=True, max_len=40),),
+        invoke=_find_contact_adapter,
+    ),
+    BrainTool(
+        name="get_contacts",
+        params=(
+            ParamSpec(
+                name="filter", kind="enum", choices=("all", "visible", "watched")
+            ),
+        ),
+        invoke=_list_contacts_adapter,
+    ),
+    BrainTool(
+        name="describe_contact",
+        params=(ParamSpec(name="contact_ref", kind="contact_ref", required=True),),
+        invoke=_describe_contact_adapter,
+    ),
+    BrainTool(
+        name="get_contact_history",
+        params=(ParamSpec(name="contact_ref", kind="contact_ref", required=True),),
+        invoke=_get_contact_history_adapter,
+    ),
+    BrainTool(
+        name="find_place",
+        params=(ParamSpec(name="text", kind="str", required=True, max_len=40),),
+        invoke=_find_place_adapter,
+    ),
+    BrainTool(
+        name="describe_our_position",
+        params=(),
+        invoke=_describe_our_position_adapter,
+    ),
+    BrainTool(
+        name="recall_memory",
+        params=(
+            ParamSpec(
+                name="kind",
+                kind="enum",
+                choices=("group", "air_defence", "attack_run", "mark", "fired_on"),
+            ),
+            ParamSpec(name="near", kind="place_ref", allow_ownship=True),
+            ParamSpec(name="include_struck", kind="bool"),
+        ),
+        invoke=_recall_memory_adapter,
+    ),
+)
+
+#: Name -> `BrainTool`, for `belief.brain_reply`'s validator and
+#: `belief.crew_console`'s dispatch -- both need O(1) lookup, not a scan.
+BRAIN_TOOLS_BY_NAME: dict[str, BrainTool] = {tool.name: tool for tool in BRAIN_TOOLS}
+
+
+def _param_spec_to_dict(param: ParamSpec) -> dict[str, object]:
+    return {
+        "name": param.name,
+        "kind": param.kind,
+        "required": param.required,
+        "choices": list(param.choices),
+        "lo": param.lo,
+        "hi": param.hi,
+        "max_len": param.max_len,
+    }
+
+
+def serialize_tool(tool: BrainTool) -> dict[str, object]:
+    """One `BrainTool` -> the JSON-schema subset `brain-layer` mirrors
+    into Ollama's native `tools` (D1's measured form) -- module
+    independence: this process never imports `brain-layer/` code, and
+    `brain-layer` never imports this one, so the wire carries the whole
+    shape rather than either side assuming the other's Python types."""
+    return {"name": tool.name, "params": [_param_spec_to_dict(p) for p in tool.params]}
+
+
+#: Serialised once at import time -- the tool set does not change within a
+#: process, so every brain turn's escalation payload reuses this same
+#: tuple rather than re-serialising it per round (also keeps the prompt's
+#: tool block byte-stable across rounds, R3's KV-cache-reuse point).
+BRAIN_TOOL_SPECS: tuple[dict[str, object], ...] = tuple(
+    serialize_tool(tool) for tool in BRAIN_TOOLS
+)

@@ -53,6 +53,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from final_reply import ParsedLine, final_to_dict, parse_final_text
 from ollama_client import ChatResult, OllamaClient, OllamaRequestError
 
 #: Stand-in for the body-side tunable `BRAIN_MAX_TOOL_ROUNDS` (plan D9,
@@ -353,80 +354,22 @@ def build_steps_block(steps: list[Step]) -> str:
 # --------------------------------------------------------------------------
 
 _CALL_RE = re.compile(r"^\s*CALL\s+(\w+)\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
-_FINAL_COMMAND_RE = re.compile(
-    r"^\s*FINAL\s+command\s+(\w+)\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
-)
-_FINAL_ANSWER_RE = re.compile(
-    r"^\s*FINAL\s+answer\s+(\w+)\s+(\[.*\])\s*$", re.IGNORECASE | re.DOTALL
-)
-_FINAL_ASK_RE = re.compile(r"^\s*FINAL\s+ask\s+(\[.*\])\s*$", re.IGNORECASE | re.DOTALL)
-_FINAL_UNABLE_RE = re.compile(r"^\s*FINAL\s+unable\s+(\w+)\s*$", re.IGNORECASE)
 
-
-@dataclass(frozen=True)
-class ParsedLine:
-    """The parsed shape of one model reply line, from either form.
-    `kind` is one of `"call"`, `"final_command"`, `"final_answer"`,
-    `"final_ask"`, `"final_unable"`, `"malformed"`."""
-
-    kind: str
-    tool: str | None = None
-    args: dict[str, Any] | None = None
-    token: str | None = None
-    slots: dict[str, Any] | None = None
-    form: str | None = None
-    refs: list[str] | None = None
-    reason: str | None = None
-
-
-def _parse_final_text(text: str) -> ParsedLine:
-    """The four `FINAL ...` shapes only -- used directly for a native
-    reply's `content` (which must never itself contain a `CALL` line;
-    the model has the native `tools` field for that) and as the second
-    half of `parse_grammar_line`."""
-    stripped = text.strip()
-    match = _FINAL_COMMAND_RE.match(stripped)
-    if match:
-        token, slots_json = match.groups()
-        try:
-            slots = json.loads(slots_json)
-        except json.JSONDecodeError:
-            return ParsedLine(kind="malformed")
-        if not isinstance(slots, dict):
-            return ParsedLine(kind="malformed")
-        return ParsedLine(kind="final_command", token=token, slots=slots)
-    match = _FINAL_ANSWER_RE.match(stripped)
-    if match:
-        form, refs_json = match.groups()
-        try:
-            refs_raw = json.loads(refs_json)
-        except json.JSONDecodeError:
-            return ParsedLine(kind="malformed")
-        if not isinstance(refs_raw, list):
-            return ParsedLine(kind="malformed")
-        return ParsedLine(
-            kind="final_answer", form=form, refs=[str(r) for r in refs_raw]
-        )
-    match = _FINAL_ASK_RE.match(stripped)
-    if match:
-        try:
-            refs_raw = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            return ParsedLine(kind="malformed")
-        if not isinstance(refs_raw, list):
-            return ParsedLine(kind="malformed")
-        return ParsedLine(kind="final_ask", refs=[str(r) for r in refs_raw])
-    match = _FINAL_UNABLE_RE.match(stripped)
-    if match:
-        return ParsedLine(kind="final_unable", reason=match.group(1))
-    return ParsedLine(kind="malformed")
+#: `ParsedLine`'s own `kind` vocabulary gains `"call"` here, on top of
+#: `final_reply.parse_final_text`'s four final shapes plus `"malformed"`
+#: -- this probe's own grammar form needs a fifth kind that module has
+#: no reason to know about (a `CALL ...` line never reaches
+#: `ToolLoopDecider`, which gets tool calls through Ollama's native
+#: `tool_calls` field instead, per Stage 0's own conclusion). `tool`/
+#: `args` below are this probe-local extension of `final_reply.
+#: ParsedLine`'s shape for that one extra kind.
 
 
 def parse_grammar_line(raw: str) -> ParsedLine:
-    """The grammar form's full vocabulary: `CALL ...` or one of the four
-    `FINAL ...` shapes. Anything else is `"malformed"` -- never guessed
-    at, matching `decider.py`'s own "unparseable degrades, never invents"
-    posture."""
+    """The grammar form's full vocabulary: `CALL ...` or one of
+    `final_reply.parse_final_text`'s four `FINAL ...` shapes. Anything
+    else is `"malformed"` -- never guessed at, matching `decider.py`'s
+    own "unparseable degrades, never invents" posture."""
     stripped = raw.strip()
     match = _CALL_RE.match(stripped)
     if match:
@@ -438,7 +381,7 @@ def parse_grammar_line(raw: str) -> ParsedLine:
         if not isinstance(args, dict):
             return ParsedLine(kind="malformed")
         return ParsedLine(kind="call", tool=tool_name, args=args)
-    return _parse_final_text(raw)
+    return parse_final_text(raw)
 
 
 def _interpret_native_result(result: ChatResult) -> tuple[ParsedLine, bool, str]:
@@ -463,7 +406,7 @@ def _interpret_native_result(result: ChatResult) -> tuple[ParsedLine, bool, str]
             well_formed,
             raw,
         )
-    parsed = _parse_final_text(result.content)
+    parsed = parse_final_text(result.content)
     return parsed, parsed.kind != "malformed", result.content
 
 
@@ -481,24 +424,6 @@ def find_observation(
         if entry.tool == tool:
             return entry.observation, True
     return {"error": "no canned observation for this call"}, False
-
-
-def _final_from_parsed(parsed: ParsedLine) -> dict[str, Any] | None:
-    if parsed.kind == "final_command":
-        slots = parsed.slots or {}
-        return {
-            "kind": "command",
-            "token": parsed.token,
-            "slots": slots,
-            "target": slots.get("target"),
-        }
-    if parsed.kind == "final_answer":
-        return {"kind": "answer", "form": parsed.form, "refs": parsed.refs or []}
-    if parsed.kind == "final_ask":
-        return {"kind": "ask", "refs": parsed.refs or []}
-    if parsed.kind == "final_unable":
-        return {"kind": "unable", "reason": parsed.reason}
-    return None
 
 
 def _refs_match(final: dict[str, Any], expected: dict[str, Any]) -> bool:
@@ -692,7 +617,7 @@ def run_case_once(
             continue
 
         # A final reply (well-formed or not) always ends the turn.
-        final_dict = _final_from_parsed(parsed) if well_formed else None
+        final_dict = final_to_dict(parsed) if well_formed else None
         final_correct = final_dict is not None and _final_matches_expected(
             final_dict, case.expected.get("final", {})
         )

@@ -271,6 +271,12 @@ SLEW_AZ_DPS = 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
 
+[belief.tool_api]
+# `plans/brain-tool-calls/plan.md` D5 -- `recall_memory`'s "near a place" filter radius.
+# status: agreed-guess | range: 500.0 .. 50000.0
+# source: belief/tool_api.py:RECALL_MEMORY_NEAR_RADIUS_M
+RECALL_MEMORY_NEAR_RADIUS_M = 5000.0
+
 [belief.voice_commands]
 # STT confidence at or above which a matched command acts without asking "confirm?", kept above `CONFIRM_FLOOR` and at or below `ACT_FLOOR_CANCEL` (the loader does not check that ordering) -- lowered 0.60 -> 0.45 on 2026-10-31 because the pilot got many "confirm?" requests per mission for commands that were mostly heard right (`docs/acceptance/2026-10-31-sortie-feedback.md`).
 # status: judgement | range: 0.2 .. 0.95

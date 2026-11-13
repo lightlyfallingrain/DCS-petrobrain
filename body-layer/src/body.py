@@ -205,6 +205,7 @@ from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.speech_worker import SpeechWorker
 from belief.tasks import TaskStore
+from belief.tool_api import BRAIN_TOOLS_BY_NAME, ToolContext, ToolObservation
 from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
 from coordinates.projections import THEATRE_PROJECTIONS
@@ -220,6 +221,7 @@ from eyesight_view import (
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
 from mission_memory import admission, marks
+from mission_memory import query as mission_memory_query
 from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.entries import MarkPayload
 from mission_memory.log import MissionMemoryLogWriter
@@ -3525,6 +3527,83 @@ def _mark_target_fn(
     return mark_target
 
 
+def _run_brain_tool_fn(
+    memory: MissionMemory, runner: ConsolePerceptionRunner
+) -> Callable[[str, dict[str, object], float], ToolObservation]:
+    """Builds `CrewConsole.run_brain_tool` -- `plans/brain-tool-calls/
+    plan.md` D2's one entry point `_handle_brain_tool_call` calls to
+    execute an already-D3-validated tool call. `belief.tool_api.
+    ToolContext` is built fresh **every call**, reading `runner.store`/
+    `runner.enrichment` live (`_mark_here_fn`'s own reasoning: a captured
+    reference would go stale the first time `run_once` rebuilds
+    `enrichment`) -- `place_positions` therefore also starts empty every
+    call, which is correct within one round but means a place handle a
+    `find_place` call minted in an *earlier* round of the same turn would
+    not resolve in `recall_memory`'s `near` argument should this function
+    be called again for a later round. Flagged rather than fixed: no
+    acceptance case in Stage 2's own set chains `find_place` into
+    `recall_memory`'s `near` within one turn, and body.py has no other
+    place to persist a per-*turn* cache without `CrewConsole` itself
+    owning one -- a real gap if Stage 4's landmark `report` work finds it
+    matters."""
+
+    def run_brain_tool(
+        tool_name: str, args: dict[str, object], now_sim: float
+    ) -> ToolObservation:
+        tool = BRAIN_TOOLS_BY_NAME.get(tool_name)
+        if tool is None:
+            return ToolObservation(summary=f"no such tool {tool_name!r}")
+        ctx = ToolContext(
+            store=runner.store,
+            enrichment=runner.enrichment,
+            memory=memory,
+            now_sim=now_sim,
+        )
+        return tool.invoke(ctx, args)
+
+    return run_brain_tool
+
+
+def _lookup_memory_entry_fn(
+    memory: MissionMemory,
+) -> Callable[[str], dict[str, object] | None]:
+    """Builds `CrewConsole.lookup_memory_entry_fn` -- D7's `memory(refs)`
+    answer final needs the entry's own raw position to re-render
+    bearing/range against *current* ownship, which `belief.tool_api`'s
+    compact `ToolObservation` text (cached from the tool-call round) does
+    not carry. `"MARK_<index>"`/`"MEM_<seq>"` are exactly the two handle
+    shapes `belief.tool_api._memory_entry_handle` mints -- a handle
+    neither pattern matches (never minted by this process) returns
+    `None`, same as an index/seq that no longer exists."""
+
+    def lookup(handle: str) -> dict[str, object] | None:
+        if handle.startswith("MARK_"):
+            try:
+                index = int(handle[len("MARK_") :])
+            except ValueError:
+                return None
+            for entry in memory.entries:
+                if (
+                    entry.kind == "mark"
+                    and isinstance(entry.payload, MarkPayload)
+                    and entry.payload.index == index
+                ):
+                    return mission_memory_query.entry_to_dict(entry, memory.struck_by)
+            return None
+        if handle.startswith("MEM_"):
+            try:
+                seq = int(handle[len("MEM_") :])
+            except ValueError:
+                return None
+            for entry in memory.entries:
+                if entry.seq == seq:
+                    return mission_memory_query.entry_to_dict(entry, memory.struck_by)
+            return None
+        return None
+
+    return lookup
+
+
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
 ) -> None:
@@ -3946,6 +4025,13 @@ def _run_crew_text_poll_loop(
     # unlike the poll loop's own observed-entry writes just below.
     crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner)
     crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner)
+    # `plans/brain-tool-calls/plan.md` D2 -- same seam, same reason: the
+    # brain's tool loop reaches `crew_console` on the REPL/brain thread,
+    # and `belief.tool_api.ToolContext` needs a live `MissionMemory` for
+    # `recall_memory` without `crew_console.py` importing `mission_memory`
+    # itself.
+    crew_console.run_brain_tool = _run_brain_tool_fn(mission_memory, runner)
+    crew_console.lookup_memory_entry_fn = _lookup_memory_entry_fn(mission_memory)
     fired_on_tracker = FiredOnTracker()
     lost_contact_tracker = LostContactTracker()
     try:

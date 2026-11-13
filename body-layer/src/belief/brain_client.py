@@ -143,6 +143,14 @@ def _partial_parse_to_dict(parse: PartialParse) -> dict[str, Any]:
 
 
 def _payload_to_dict(payload: EscalationPayload) -> dict[str, Any]:
+    """`plans/brain-tool-calls/plan.md` D1 -- `mode`/`round`/`steps`/
+    `tools`/`commands` ride alongside the BR-1 fields unchanged above.
+    None of these five carries a coordinate: `tools`/`commands` are
+    `belief.tool_api.BRAIN_TOOL_SPECS`-shaped parameter *schemas*, and
+    `steps` is each round's own `{tool, args, observation}` dict, where
+    `args` are already-validated handles/scalars (D3) and `observation`
+    is a `belief.tool_api.ToolObservation.summary` string -- D2's "no raw
+    x/z" by construction of what is put into each, not by a check here."""
     return {
         "utterance_id": payload.utterance_id,
         "transcript": payload.transcript,
@@ -151,6 +159,11 @@ def _payload_to_dict(payload: EscalationPayload) -> dict[str, Any]:
         "partial_parse": _partial_parse_to_dict(payload.partial_parse),
         "situational_header": payload.situational_header,
         "awaiting_reply_to": payload.awaiting_reply_to,
+        "mode": payload.mode,
+        "round": payload.round,
+        "steps": list(payload.steps),
+        "tools": list(payload.tools),
+        "commands": list(payload.commands),
     }
 
 
@@ -158,17 +171,33 @@ def _reply_from_dict(data: dict[str, Any]) -> BrainReply | None:
     """Defensive structural parse of one `GET /replies/poll` item -- `None`
     (skip, not raise) on anything malformed, the same "schema mismatch is
     skipped, not fatal" posture `body._poll_transcripts` already applies
-    to its own drain-on-poll payload. This is *not* D10's validator (that
-    checks a reply's *semantic* legality -- a `PICK`'s id was actually
-    offered, a `BECAUSE` clause's words actually appear in the transcript
-    -- against the original payload; Stage 2's job, once a real model can
-    produce a malformed answer at all). `StubDecider` never emits anything
-    this structural check would reject."""
+    to its own drain-on-poll payload. This is *not* D10/D3's validator
+    (that checks a reply's *semantic* legality -- a `PICK`'s id was
+    actually offered, a tool-call's args match its `ParamSpec`s -- against
+    the original payload/turn; `belief.brain_reply`'s job). `StubDecider`
+    never emits anything this structural check would reject, and neither
+    does a well-behaved `ToolLoopDecider` -- this is the floor under a
+    malformed or adversarial reply from either.
+
+    **`plans/brain-tool-calls/plan.md` D1/D2/D7's three new kinds** widen
+    the structural checks below: `tool_call` needs `tool`/`args`,
+    `answer` needs `form`/`refs`, `command` needs `target`/`slots` (plus
+    the shared `token`/`because`) -- each optional at this layer (a
+    missing field degrades at validation, not here) but type-checked when
+    present, same posture as every existing field."""
     utterance_id = data.get("utterance_id")
     kind = data.get("kind")
     if not isinstance(utterance_id, str) or not utterance_id:
         return None
-    if kind not in ("pick", "ask", "confirm", "unable"):
+    if kind not in (
+        "pick",
+        "ask",
+        "confirm",
+        "unable",
+        "tool_call",
+        "answer",
+        "command",
+    ):
         return None
     t_sim = data.get("t_sim")
     if t_sim is not None and not isinstance(t_sim, (int, float)):
@@ -177,9 +206,26 @@ def _reply_from_dict(data: dict[str, Any]) -> BrainReply | None:
     because = data.get("because")
     token = data.get("token")
     reason = data.get("reason")
-    for value in (contact_id, because, token, reason):
+    tool = data.get("tool")
+    form = data.get("form")
+    target = data.get("target")
+    for value in (contact_id, because, token, reason, tool, form, target):
         if value is not None and not isinstance(value, str):
             return None
+    args = data.get("args")
+    if args is not None and not isinstance(args, dict):
+        return None
+    refs_raw = data.get("refs")
+    refs: tuple[str, ...] | None = None
+    if refs_raw is not None:
+        if not isinstance(refs_raw, list) or not all(
+            isinstance(ref, str) for ref in refs_raw
+        ):
+            return None
+        refs = tuple(refs_raw)
+    slots = data.get("slots")
+    if slots is not None and not isinstance(slots, dict):
+        return None
     return BrainReply(
         utterance_id=utterance_id,
         kind=kind,
@@ -188,6 +234,12 @@ def _reply_from_dict(data: dict[str, Any]) -> BrainReply | None:
         because=because,
         token=token,
         reason=reason,
+        tool=tool,
+        args=args,
+        form=form,
+        refs=refs,
+        target=target,
+        slots=slots,
     )
 
 

@@ -550,14 +550,23 @@ def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
 
 
 def test_drain_brain_ask_two_survivors_speaks_disambiguation() -> None:
-    """D4: `ASK`, >=2 candidates still present -> ask, using the
-    survivors."""
+    """`plans/brain-tool-calls/plan.md` D7's `ask` final, Stage 2 wire
+    shape: a plain `kind="ask"` reply with no `refs` falls back to the
+    turn's own most-recently-recorded `candidate_sets` entry (as a
+    `find_contact` tool call this turn would have produced) -- "ask,
+    using the survivors," reworked for the tool-loop seam rather than
+    the BR-1 decider's `parse.referenced_contact_candidates`, which no
+    longer carries Stage 2's wire at all."""
     store = _two_ambiguous_bmp_contacts()
+    ids = [contact.id for contact in store.contacts]
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, which one's the BMP?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
+    console._brain_turns[utterance_id].candidate_sets.append(
+        ((ids[0], "BMP-1, observed."), (ids[1], "BMP-2, observed."))
+    )
 
     brain_client.replies_to_return = [
         BrainReply(utterance_id=utterance_id, kind="ask", t_sim=0.0)
@@ -569,14 +578,20 @@ def test_drain_brain_ask_two_survivors_speaks_disambiguation() -> None:
 
 
 def test_drain_brain_ask_zero_survivors_yields_lost_him() -> None:
-    """D4: `ASK`, 0 candidates still present -> "lost him"."""
+    """D4 revalidation applies to the Stage 2 `ask` path too: every
+    candidate from the recorded set is gone from the store by the time
+    the reply lands -> "lost him", not a question about contacts that no
+    longer exist."""
     store = _two_ambiguous_bmp_contacts()
     ids = [contact.id for contact in store.contacts]
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, which one's the BMP?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
+    console._brain_turns[utterance_id].candidate_sets.append(
+        ((ids[0], "BMP-1, observed."), (ids[1], "BMP-2, observed."))
+    )
 
     for contact_id in ids:
         del store._contacts[contact_id]
@@ -589,18 +604,24 @@ def test_drain_brain_ask_zero_survivors_yields_lost_him() -> None:
     assert lines == ["Lost him."]
 
 
-def test_drain_brain_ask_one_survivor_confirms_rather_than_acts() -> None:
-    """D4: `ASK`, exactly 1 candidate still present -> confirm the
-    survivor rather than acting on it -- "only one left" is not the same
-    as "the pilot meant this one"."""
+def test_drain_brain_ask_one_survivor_reports_it_directly() -> None:
+    """D4 revalidation: exactly one candidate from the recorded set
+    survives -> there is nothing left to ask, so it is reported directly
+    (Stage 2 has no confirm-band re-dispatch for this path; that was the
+    BR-1 decider's own `_pending_confirmation.contact_pick` mechanism,
+    tied to re-running `_act` on a `parse_utterance` match that Stage 2's
+    tool-loop turns never produce)."""
     store = _two_ambiguous_bmp_contacts()
     survivor_id = store.contacts[0].id
     doomed_id = store.contacts[1].id
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
 
-    console.handle_line("Petrovich, watch that bmp", now_sim=0.0)
+    console.handle_line("Petrovich, which one's the BMP?", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
+    console._brain_turns[utterance_id].candidate_sets.append(
+        ((survivor_id, "BMP-1, observed."), (doomed_id, "BMP-2, observed."))
+    )
 
     del store._contacts[doomed_id]
 
@@ -609,22 +630,12 @@ def test_drain_brain_ask_one_survivor_confirms_rather_than_acts() -> None:
     ]
     lines = console.drain_brain(now_sim=1.0)
 
+    # No id is ever spoken (this module's own "no id spoken anywhere"
+    # convention) -- a single survivor is reported directly, not asked
+    # about and not named by id.
     assert len(lines) == 1
-    assert lines[0].endswith(", confirm?")
-    # Not yet acted on.
-    assert store.contacts[0].attention != "watch"
-
-    # Affirming now acts on the confirmed survivor.
-    affirm_lines = console.handle_transcript(
-        "affirm",
-        confidence=0.9,
-        token=None,
-        match_ratio=0.0,
-        verb_anchored=False,
-        ambiguous=False,
-        now_sim=2.0,
-    )
-    assert affirm_lines == [f"Watching {survivor_id}."]
+    assert lines[0] not in ("Lost him.",)
+    assert "Which one" not in lines[0]
 
 
 def test_drain_brain_confirm_sets_pending_confirmation() -> None:
@@ -651,6 +662,10 @@ def test_drain_brain_confirm_sets_pending_confirmation() -> None:
 
 
 def test_drain_brain_unable_speaks_the_reason() -> None:
+    """Stage 2's own `unable` reason vocabulary (`belief.brain_reply.
+    VALID_TURN_UNABLE_REASONS`, D7) replaces the BR-1 decider's three
+    (`NO_SUCH_COMMAND`/`NO_MATCH`/`NO_LINE_OF_SIGHT`) for every addressed
+    turn's final reply -- a tool-loop turn never produces the old three."""
     store = ContactStore()
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=store, brain_client=brain_client)
@@ -663,12 +678,12 @@ def test_drain_brain_unable_speaks_the_reason() -> None:
             utterance_id=utterance_id,
             kind="unable",
             t_sim=0.0,
-            reason="NO_SUCH_COMMAND",
+            reason="CANNOT_ANSWER",
         )
     ]
     lines = console.drain_brain(now_sim=1.0)
 
-    assert lines == ["Unable, no such command."]
+    assert lines == ["Unable, don't know."]
 
 
 def test_drain_brain_discards_stale_reply() -> None:
