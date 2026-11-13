@@ -2422,9 +2422,10 @@ class CrewConsole:
         caller, `drain_brain`, already enforces "at most one tool
         execution per poll" across the whole batch), append the step,
         advance `round`, and either post the continuation or -- past
-        `BRAIN_MAX_TOOL_ROUNDS` -- degrade and end the turn. Never calls
-        `self._print`: a `tool_call` round produces no speech of its own,
-        only the eventual final reply does."""
+        `BRAIN_MAX_TOOL_ROUNDS` -- degrade and end the turn. A normal
+        continuation round never calls `self._print`; only the round-cap
+        degrade and the tool-execution-failure guard below do, both of
+        which end the turn."""
         tool_name = reply.tool or ""
         args = reply.args or {}
         validated = validate_tool_call(tool_name, args, turn)
@@ -2438,7 +2439,26 @@ class CrewConsole:
             if self.run_brain_tool is None:
                 observation = ToolObservation(summary="tool execution unavailable")
             else:
-                observation = self.run_brain_tool(tool_name, validated, now_sim)
+                try:
+                    observation = self.run_brain_tool(tool_name, validated, now_sim)
+                except Exception:
+                    # Security review (`plans/brain-tool-calls/
+                    # security-review.md`): a `BrainTool.invoke` raising
+                    # must not propagate through `drain_brain` into
+                    # body.py's poll loop -- that thread also owns
+                    # perception/belief/speech, same posture as
+                    # `_poll_transcripts`'s own per-call isolation in
+                    # `body.py`. Degrade this turn exactly like the
+                    # round-cap path below, never a new reason.
+                    logger.exception(
+                        "brain tool %r raised for utterance %s; ending turn",
+                        tool_name,
+                        reply.utterance_id,
+                    )
+                    self._brain_turns.pop(reply.utterance_id, None)
+                    lines = [render_unable("NO_ANSWER").text]
+                    self._print(lines, now_sim)
+                    return lines
             turn.offered.update(observation.handles)
             if len(observation.candidate_texts) >= 2:
                 turn.candidate_sets.append(tuple(observation.candidate_texts.items()))

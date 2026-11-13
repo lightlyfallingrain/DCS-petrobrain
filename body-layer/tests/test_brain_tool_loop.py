@@ -9,6 +9,7 @@ code -- nothing here talks to brain-layer or Ollama."""
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -526,6 +527,63 @@ def test_round_cap_exceeded_degrades_the_turn() -> None:
     # and the turn ends once it exceeds the cap.
     assert utterance_id not in console._brain_turns
     assert lines == ["Unable, no answer."] or lines[0].startswith("Which one")
+
+
+def test_run_brain_tool_raising_ends_the_turn_and_logs_rather_than_propagating(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Security review (`plans/brain-tool-calls/security-review.md`): a
+    `BrainTool.invoke`/`run_brain_tool` exception must not propagate
+    through `drain_brain` -- that would kill body.py's poll thread,
+    taking perception/belief/speech down with it. The turn degrades to
+    `unable NO_ANSWER` (the existing degrade, not a new reason), the
+    exception is logged, and a second, unrelated utterance still works
+    afterwards -- the console itself is still usable."""
+
+    def _raising_tool_runner(
+        tool_name: str, args: dict[str, object], now_sim: float
+    ) -> ToolObservation:
+        raise RuntimeError("adapter blew up")
+
+    store = _store_with_one_contact()
+    brain_client = _ScriptedBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console.run_brain_tool = _raising_tool_runner
+
+    utterance_id = _start_turn(console, brain_client)
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="tool_call",
+            t_sim=0.0,
+            tool="describe_our_position",
+            args={},
+        )
+    )
+    with caplog.at_level(logging.ERROR):
+        lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == ["Unable, no answer."]
+    assert utterance_id not in console._brain_turns
+    assert any(
+        "adapter blew up" in record.message or record.exc_info is not None
+        for record in caplog.records
+    )
+
+    # The console remains usable for the next utterance.
+    console.handle_line("Petrovich, where's the T-72?", now_sim=2.0)
+    utterance_id_2 = brain_client.payloads[-1].utterance_id
+    assert utterance_id_2 != utterance_id
+    brain_client.queue(
+        BrainReply(
+            utterance_id=utterance_id_2,
+            kind="unable",
+            t_sim=2.0,
+            reason="NO_PLACE",
+        )
+    )
+    lines_2 = console.drain_brain(now_sim=2.5)
+    assert lines_2 == ["Unable, don't know that place."]
 
 
 def test_serialised_tool_call_payload_carries_no_raw_coordinates() -> None:
