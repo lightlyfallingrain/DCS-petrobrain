@@ -13,14 +13,21 @@ grammar instead of fixed verbs, and it speaks *proactively* (`drain_events`)
 in a way the debug console never did. See the plan's "Module boundary"
 decision for the full argument.
 
-**Dispatch.** `handle_line` sends one typed line through `parse_utterance`.
-A `"handled"` disposition acts directly (`belief.tools.set_attention` or
-`belief.tools.describe_contact`) and speaks a body-written template
-(`belief.speech.render_readback`/`render_contact_report`) -- no brain call.
-Anything else (`"escalated"`) is handed to `belief.escalation.
-handle_player_utterance`, which this milestone's stand-in `BrainClient`s
-never turn into spoken output (see `escalation.py`'s module docstring) --
-consistent with §3.5's "if the brain does nothing, body says nothing."
+**Dispatch** is by wake word first (`plans/brain-tool-calls/plan.md` D4),
+then by `belief.utterance.parse_utterance`. An **addressed** line
+("Petrovich, ...") always becomes a brain turn (`_start_brain_turn`) --
+`parse_utterance` still runs, but only as a hint carried in the escalation
+payload, never acted on directly, even when it resolves cleanly. An
+**unaddressed** line that `parse_utterance` resolves (`"handled"`) acts
+directly (`belief.tools.set_attention`/`describe_contact`) and speaks a
+body-written template -- no brain call, unchanged from before this plan
+(E1). An unaddressed line `parse_utterance` cannot resolve is answered
+deterministically by `_handle_unaddressed_miss` (U1) -- "which one?" over
+whatever candidates the grammar found, otherwise "say again" -- never a
+brain call either; this supersedes the plan's own predecessor
+(`plans/inbound-speech/plan.md`), which escalated this case and relied on
+`belief.escalation.handle_player_utterance`'s stand-in `BrainClient`s
+turning it into silence.
 
 **`drain_events`.** Called once per poll, after each `ContactStore.tick()`,
 it delegates to `self.scheduler.tick` (`belief.callouts.CalloutScheduler`, `plans/
@@ -106,7 +113,11 @@ from belief.attack_run import decide as decide_attack_run
 from belief.attack_run import query as query_attack_run
 from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
-from belief.brain_reply import validate_brain_reply
+from belief.brain_reply import (
+    validate_brain_reply,
+    validate_tool_call,
+    validate_turn_final,
+)
 from belief.callouts import (
     CALLOUT_GROUP_CLOCK_SPAN_HOURS,
     CalloutScheduler,
@@ -137,6 +148,7 @@ from belief.speech import (
     render_cancel_readback,
     render_clear,
     render_confirm_request,
+    render_contact_answer,
     render_contact_report,
     render_disambiguation,
     render_engage_readback,
@@ -144,10 +156,13 @@ from belief.speech import (
     render_group_full_disclosure,
     render_group_report,
     render_lost_contact,
+    render_memory_entry,
     render_no_contact,
     render_no_target,
     render_no_view,
+    render_nothing_seen,
     render_observ_on_wait,
+    render_our_position_answer,
     render_point_readback,
     render_radio_check,
     render_readback,
@@ -166,6 +181,12 @@ from belief.speech import (
 )
 from belief.speech_worker import SpeechWorker
 from belief.tasks import PendingIntent, TaskKind, TaskStore
+from belief.tool_api import (
+    BRAIN_COMMAND_SPECS,
+    BRAIN_TOOL_LIST_CAP,
+    BRAIN_TOOL_SPECS,
+    ToolObservation,
+)
 from belief.tools import (
     _find_contact,
     attack_target_task,
@@ -180,6 +201,7 @@ from belief.utterance import (
     PartialParse,
     PlayerUtterance,
     ReferenceCandidate,
+    opens_with_vocative,
     parse_utterance,
 )
 from belief.voice_commands import (
@@ -708,6 +730,94 @@ class _PendingPositionalReply:
     #: so `drain_pending_positional_replies`'s own `_print` call records
     #: the same mention it would have recorded had the channel been clear.
     mentions: list[Mention] | None = None
+    #: `plans/brain-tool-calls/plan.md` R6/Co-moving Fields -- which brain
+    #: turn (`BrainTurn`, keyed by `utterance_id` on `CrewConsole.
+    #: _brain_turns`) this readback belongs to, if any. `None` for every
+    #: readback a phrasebook command defers today (Stage 1 never sets
+    #: this to anything else: no brain command dispatches through
+    #: `handle_command` yet). Once Stage 3 wires a brain command's own
+    #: dispatch, a new addressed utterance superseding that turn must
+    #: also drop any readback still waiting here for it -- a stale
+    #: position re-rendered for a question the pilot has already
+    #: replaced is exactly E5's "never answers a question the pilot has
+    #: since replaced."
+    brain_turn_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolStep:
+    """One round of a brain turn's tool loop -- `plans/brain-tool-calls/
+    plan.md` D1/D3: `args` is the already-D3-validated argument dict (the
+    exact value `belief.tool_api.BrainTool.invoke` was called with, never
+    the model's raw, unvalidated one), and `observation` is the plain-text
+    result shown back to the model next round -- either a `ToolObservation
+    .summary` or an `"invalid: <why>"` string. This is what rides the
+    wire on every continuation POST (`EscalationPayload.steps`, D1:
+    brain-layer is stateless across rounds) and what `validate_tool_call`'s
+    repeated-call check reads back against."""
+
+    tool: str
+    args: dict[str, object]
+    observation: str
+
+
+@dataclass
+class BrainTurn:
+    """One addressed utterance currently awaiting (or mid) a brain turn --
+    `plans/brain-tool-calls/plan.md`'s fold of the former `_pending_
+    escalations`/`_stand_by_spoken_for` pair into one object, keyed by
+    `utterance_id` on `CrewConsole._brain_turns`. A new addressed
+    utterance supersedes every older turn outright and silently (D3:
+    brain-layer itself holds only one job at a time) -- see `CrewConsole.
+    _pop_all_brain_turns`.
+
+    `round`/`steps`/`offered`/`candidate_sets` are Stage 2's tool-loop
+    fields, declared now so this fold happens once rather than twice --
+    Stage 1 leaves them at their defaults, since no tool call exists yet
+    to populate them, and Stage 1's own turns still go through the BR-1
+    decider (`parse`/`transcript` are what that decider's reply gets
+    revalidated against, the same job `_pending_escalations`' tuple
+    value used to do)."""
+
+    started_sim: float
+    transcript: str
+    parse: PartialParse
+    addressed: bool
+    round: int = 0
+    #: Stage 2's real shape for the placeholder Stage 1 declared: one
+    #: entry per round that called a tool (valid or not), oldest first --
+    #: both the record `validate_tool_call`'s repeated-call check reads
+    #: and the `steps` list re-sent on every continuation POST (D1:
+    #: brain-layer is stateless across rounds).
+    steps: list[ToolStep] = field(default_factory=list)
+    #: Stage 2: every `*_ref` offered to the brain this turn (header refs
+    #: plus each observation's own handles) -- D3's "every `*_ref` must
+    #: be offered" check reads this.
+    offered: set[str] = field(default_factory=set)
+    #: Stage 2's real shape: each entry is one `find_*` call's own
+    #: `(handle, text)` pairs, for D3's ambiguity-evidence rule --
+    #: redefined from Stage 1's bare-id-tuple placeholder (that
+    #: declaration's own docstring invited this) since the evidence test
+    #: needs each candidate's identifying text, not just its id.
+    candidate_sets: list[tuple[tuple[str, str], ...]] = field(default_factory=list)
+    stand_by_spoken: bool = False
+    correlation_id: str | None = None
+    #: Stage 3 (`plans/brain-tool-calls/plan.md` D4's "header refs"):
+    #: `(handle, text)` pairs for every contact `CrewConsole.
+    #: _header_contact_refs` found in `_referent_memory`'s short window
+    #: at the moment this turn started, fixed once rather than
+    #: recomputed per round -- `offered`/`candidate_sets` above are
+    #: seeded from this same value at turn start, so resending a
+    #: *different* set on a later continuation round would disagree with
+    #: what was already validated-offered. `_post_tool_continuation`
+    #: resends this unchanged on every round's `situational_header`.
+    #: Reviewer fix (`plans/brain-tool-calls/review.md`): when this set
+    #: has >=2 members it is also pushed into `candidate_sets` at turn
+    #: start (`_start_brain_turn`), so a final naming one of several
+    #: header-offered contacts needs the same verbatim `because` evidence
+    #: a tool-returned multi-candidate pick already needs -- a single
+    #: header contact still gets the bare-pronoun no-evidence trust.
+    header_refs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1100,19 +1210,42 @@ def _join_task_descriptions(descriptions: list[str]) -> str | None:
 logger = logging.getLogger(__name__)
 
 
-#: `plans/brain-layer/plan.md` D8 -- how long an outstanding escalation
-#: waits for a brain reply before Petrovich speaks "stand by" once, purely
-#: deterministically (no model involvement). **Unmeasured**, same debt
-#: class as `CONFIRM_WINDOW_S`/`DEFAULT_SCAN_DEADLINE_S` before it -- a
-#: round guess at human patience, pending Stage 4's live-sortie tuning.
-STAND_BY_AFTER_S: Final[float] = 2.0
+#: `plans/brain-layer/plan.md` D8 -- how long an outstanding brain turn
+#: waits for a reply before Petrovich speaks "stand by" once, purely
+#: deterministically (no model involvement). A round guess at human
+#: patience, tunable (`plans/brain-tool-calls/plan.md` D9) so a sortie can
+#: adjust it without a redeploy.
+STAND_BY_AFTER_S: Final[float] = tuning.real(
+    "belief.crew_console.STAND_BY_AFTER_S", 2.0, lo=0.5, hi=10.0, status="agreed-guess"
+)
 
-#: `plans/brain-layer/plan.md` D4 -- a brain reply older than this (by
-#: `EscalationPayload.t_sim`, carried back unchanged on `BrainReply.
-#: t_sim`) is discarded silently rather than acted on or spoken, since the
-#: game world has moved on in the time the brain took to answer.
-#: **Unmeasured**, same debt class as `STAND_BY_AFTER_S` above.
-BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
+#: How long an addressed utterance waits for a brain reply before
+#: Petrovich gives up and speaks the turn's unable reason. Too low cuts
+#: off a genuinely slow but still-coming answer; too high leaves the
+#: pilot wondering whether he was heard at all. `plans/brain-layer/
+#: plan.md` D4 originally used this same constant only to discard a reply
+#: that finally arrived too late; `plans/brain-tool-calls/plan.md` D9
+#: repurposes it as the turn's own budget, checked every poll regardless
+#: of whether a reply ever comes, so that old discard check now mostly
+#: fires on a reply whose own timestamp is already old by the time it
+#: lands, not on the turn's wait time. `hi=60.0` is the user's own hard
+#: ceiling ("no more than 1 minute"), enforced by the bound itself.
+BRAIN_REPLY_MAX_AGE_S: Final[float] = tuning.real(
+    "belief.crew_console.BRAIN_REPLY_MAX_AGE_S",
+    20.0,
+    lo=1.0,
+    hi=60.0,
+    status="agreed-guess",
+)
+
+#: `plans/brain-tool-calls/plan.md` D9/D5 -- the tool loop's own round
+#: cap, declared now alongside the turn-budget constants it is bounded
+#: by though nothing calls it until Stage 2 builds that loop. When
+#: exceeded, a turn degrades to D3's ask/unable rather than looping
+#: forever against a model that keeps calling tools.
+BRAIN_MAX_TOOL_ROUNDS: Final[int] = tuning.whole(
+    "belief.crew_console.BRAIN_MAX_TOOL_ROUNDS", 4, lo=1, hi=8, status="agreed-guess"
+)
 
 #: `BL-15` Stage 3 (`plans/bl15-mission-start/plan.md`, user direction
 #: 2026-10-19: *"On error loud refusal is better."*) -- the fixed line
@@ -1197,6 +1330,30 @@ class CrewConsole:
     #: "no mission memory configured" rather than raising.
     mark_here_fn: Callable[[float], str] | None = None
     mark_target_fn: Callable[[str, float], str] | None = None
+    #: `plans/brain-tool-calls/plan.md` D2 -- the one closure
+    #: `_handle_brain_tool_call` calls to actually execute a validated
+    #: tool call, built by `body.py`'s `_run_brain_tool_fn` the same
+    #: "inject a callable over live state, this console never captures
+    #: it" way as `mark_here_fn` above (and for the same reason:
+    #: `belief.tool_api.ToolContext` is bound to `runner.store`/
+    #: `runner.enrichment`, read live, never to a value this console
+    #: would otherwise have to re-import `mission_memory` to reach).
+    #: `None` (every test double that does not wire it) means a tool
+    #: call cannot be executed at all -- `_handle_brain_tool_call` then
+    #: reports it as an `"invalid: tool execution unavailable"`
+    #: observation, costing a round rather than raising.
+    run_brain_tool: (
+        Callable[[str, dict[str, object], float], ToolObservation] | None
+    ) = None
+    #: D7's `memory(refs)` answer final needs the entry's own raw
+    #: position to re-render bearing/range against *current* ownship
+    #: (D4) -- the turn's own cached observation text is not enough (it
+    #: is a rendered string, not the position itself). Built by
+    #: `body.py`'s `_lookup_memory_entry_fn` over the live
+    #: `MissionMemory`, same injected-closure shape as `run_brain_tool`
+    #: above, for the same `mission_memory` import-direction reason
+    #: (`tool_api.py` is the one `belief/` file allowed to import it).
+    lookup_memory_entry_fn: Callable[[str], dict[str, object] | None] | None = None
     #: How many player commands this console has dispatched, F10 or spoken
     #: -- typed free text and voice's `"fallthrough"` disposition alike
     #: (`plans/binocular-optic/plan.md` D4: "not a special case per
@@ -1275,10 +1432,14 @@ class CrewConsole:
     #: the resolving optic all live on `logger.ConsolePerceptionRunner`, not
     #: here, so this class leaves a narrow instruction instead of computing
     #: or speaking the answer synchronously (`_handle_where_is_it`'s own
-    #: docstring). Reset to `False` at the top of every `handle_command`
-    #: dispatch, same convention as `attack_run_transition`/`observ_
-    #: transition`, and consumed-and-cleared by the poll loop's `drain_
-    #: where_is_it` the moment it is applied.
+    #: docstring). **Not** reset at the top of `handle_command` dispatch
+    #: (unlike `attack_run_transition`/`observ_transition`) --
+    #: `plans/brain-tool-calls/plan.md` R1: this signal's consumer,
+    #: `drain_where_is_it`, runs at the top of the *next* poll rather
+    #: than later in the same one, so an unrelated command dispatched in
+    #: between (voice or brain) must not wipe it first. Only
+    #: `_handle_where_is_it` sets it and only `drain_where_is_it`'s own
+    #: consumption (or a mission reset) clears it.
     where_is_it_requested: bool = False
     #: `[[BL-B102]]`'s co-moving field alongside `where_is_it_requested` --
     #: *this* dispatch's slots (`referent`/`descriptor`/`clock`, or `None`
@@ -1308,6 +1469,18 @@ class CrewConsole:
     #: directly instead (carried on the deferred entry, not through this
     #: field) -- see that method's own docstring.
     _pending_mentions: list[Mention] | None = field(default=None, repr=False)
+    #: `plans/brain-tool-calls/plan.md` R6 -- the brain turn (`BrainTurn.
+    #: utterance_id`, i.e. `_brain_turns`' own key) currently dispatching
+    #: through `handle_command`, if any. Set by `_handle_brain_command`
+    #: for the duration of its one `handle_command(...)` call and reset
+    #: to `None` immediately after (never through `handle_command`'s own
+    #: reset-before-dispatch block -- it must survive that reset, not be
+    #: wiped by it); read by `_speak_or_defer` so a positional readback a
+    #: brain command defers is tagged with this turn id, the same way
+    #: `correlation_id` is already threaded through. A later addressed
+    #: utterance superseding this turn then drops the tagged entry
+    #: (`_drop_positional_replies_for_turns`, wired since Stage 1).
+    _pending_brain_turn_id: str | None = field(default=None, repr=False)
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `speech_client`: `None` is a true no-op.
@@ -1431,30 +1604,19 @@ class CrewConsole:
     #: docstring for why that escalation was the defect the pilot heard).
     #: `None` means no question has ever expired on this console.
     _confirmation_expired_sim: float | None = field(default=None, repr=False)
-    #: `plans/brain-layer/plan.md` -- every escalation currently awaiting a
-    #: brain reply, keyed by `utterance_id`: `(t_sim it was escalated at,
-    #: the belief.utterance.PartialParse that was escalated, the original
-    #: transcript)`. `_handle_brain_reply` pops its entry once a reply
-    #: lands (or is aged out); `_speak_stand_by_if_due` reads it every
-    #: poll to decide whether D8's "stand by" is due. **The transcript is
-    #: Stage 2's own addition** -- D10's validator (`belief.brain_reply`)
-    #: needs the pilot's own original words to check a `PICK ... BECAUSE
-    #: <words>` reply's quote is genuine, and nothing else on this class
-    #: already keeps it once escalation has posted. `brain-layer` itself
-    #: only ever holds one job in flight (D3), but body-side this stays a
-    #: dict rather than a single optional slot -- a reply can arrive for
-    #: an id no longer of interest (raced by a newer escalation
-    #: client-side, `belief.brain_client.BrainLayerClient`'s own
-    #: newest-wins slot), and `.pop` on a dict degrades to `None` cleanly
-    #: rather than needing a separate "does this match what I'm tracking"
-    #: branch.
-    _pending_escalations: dict[str, tuple[float, PartialParse, str]] = field(
-        default_factory=dict, repr=False
-    )
-    #: Which `_pending_escalations` keys D8's "stand by" has already been
-    #: spoken for -- so it fires **once** per question, not once per poll
-    #: while the question remains outstanding.
-    _stand_by_spoken_for: set[str] = field(default_factory=set, repr=False)
+    #: `plans/brain-layer/plan.md`, folded into one `BrainTurn` per
+    #: `utterance_id` by `plans/brain-tool-calls/plan.md` (formerly two
+    #: separately-kept-in-sync fields, `_pending_escalations`/`_stand_by_
+    #: spoken_for`). `_handle_brain_reply` pops a turn once its reply
+    #: lands; `_expire_overdue_brain_turns` pops one that outlived its
+    #: budget; `_start_brain_turn` pops *every* entry when a new addressed
+    #: utterance supersedes them (D3: brain-layer itself only ever holds
+    #: one job in flight). `.pop`/`.get` on a dict degrade to `None`
+    #: cleanly for a reply that arrives for a turn no longer tracked
+    #: (raced by a newer escalation client-side, `belief.brain_client.
+    #: BrainLayerClient`'s own newest-wins slot), rather than needing a
+    #: separate "does this match what I'm tracking" branch.
+    _brain_turns: dict[str, BrainTurn] = field(default_factory=dict, repr=False)
     #: Stage 6, `plans/voice-latency-instrumentation/plan.md` -- positional
     #: readbacks deferred because the channel was modeled busy at command
     #: time, drained once per poll by `drain_pending_positional_replies`.
@@ -1635,9 +1797,9 @@ class CrewConsole:
         (`plans/effector-sequences/plan.md` D6: "a mission restart does not
         clear it") -- it describes this process's own startup state, not
         per-mission state. Everything else (`scheduler`, `_pending_
-        confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
-        `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
-        contact_id`, `attack_run_transition`, `observ_transition`,
+        confirmation`, `_confirmation_expired_sim`, `_brain_turns`,
+        `commands_handled`, `last_command_target_contact_id`,
+        `attack_run_transition`, `observ_transition`,
         `weapon_safety_transition`, `where_is_it_slots`, `_referent_memory`,
         `_pending_mentions`, `on_ground`, `sight_ready`,
         `enrichment`, `refused`, `_positional_reply_overflow_
@@ -1713,7 +1875,17 @@ class CrewConsole:
         self._print(lines, now_sim, correlation_id=correlation_id)
         return lines
 
-    def handle_line(self, line: str, now_sim: float) -> list[str]:
+    def handle_line(
+        self, line: str, now_sim: float, addressed: bool | None = None
+    ) -> list[str]:
+        """`addressed` (`plans/brain-tool-calls/plan.md` D4) is `None` for
+        a typed console line -- this method's own entry point for that
+        surface -- and computed here from `belief.utterance.
+        opens_with_vocative`, the typed-console twin of `audio-adapter`'s
+        `opens_with_wake_word`. Voice's "fallthrough" disposition
+        (`_act_on_voice_decision`) instead passes the wire's own
+        `addressed` flag explicitly, since body-layer cannot re-derive
+        audio-adapter's fuzzy wake-word match from text alone."""
         stripped = line.strip()
         if not stripped:
             return []
@@ -1741,7 +1913,9 @@ class CrewConsole:
         # utterance`) sets this when it has a subject, and a stale value
         # from an earlier typed line must not leak into this one.
         self._pending_mentions = None
-        lines = self._handle_utterance(stripped, now_sim)
+        if addressed is None:
+            addressed = opens_with_vocative(stripped)
+        lines = self._handle_utterance(stripped, now_sim, addressed)
         self._print(lines, now_sim, bypass_gate=False, mentions=self._pending_mentions)
         return lines
 
@@ -1925,6 +2099,10 @@ class CrewConsole:
                 queued_since_sim=now_sim,
                 render=render,
                 mentions=mentions,
+                # R6 -- `None` for every phrasebook dispatch (the common
+                # case); set only while `_handle_brain_command` is mid
+                # `handle_command` call.
+                brain_turn_id=self._pending_brain_turn_id,
             )
         )
         return []
@@ -1975,28 +2153,29 @@ class CrewConsole:
     def drain_brain(self, now_sim: float) -> list[str]:
         """`plans/brain-layer/plan.md` -- drains `self.brain_client.
         poll_replies()`, revalidates each reply against *current* belief
-        (D4) and speaks the result, and, first, speaks D8's deterministic
-        "stand by" for any escalation that has been outstanding too long.
-        Called once per poll from `body.py`'s poll loop, alongside
-        `drain_events`/`_poll_transcripts` -- the established pattern for
-        pulling asynchronous input into this loop without ever blocking
-        it (`belief.brain_client.
-        BrainLayerClient.handle`'s own docstring is where the
-        never-blocks guarantee actually lives; this method is a plain
-        synchronous poll, like the other two).
+        (D4) and speaks the result; first expires any brain turn that has
+        outlived its budget (D9, `_expire_overdue_brain_turns`), then
+        speaks D8's deterministic "stand by" for any turn still
+        outstanding past `STAND_BY_AFTER_S`. Called once per poll from
+        `body.py`'s poll loop, alongside `drain_events`/`_poll_
+        transcripts` -- the established pattern for pulling asynchronous
+        input into this loop without ever blocking it (`belief.
+        brain_client.BrainLayerClient.handle`'s own docstring is where
+        the never-blocks guarantee actually lives; this method is a
+        plain synchronous poll, like the other two).
 
         **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
         `self.brain_client.poll_replies()` is still drained -- a reply
         left queued in the brain client here would otherwise surface
         later, once refusal clears, as speech about a world model it was
-        never computed against -- but each reply is only popped from
-        `_pending_escalations`/`_stand_by_spoken_for`, **not** run through
-        `_handle_brain_reply`. That method calls `self._print`
-        unconditionally and, via `_handle_brain_pick`/`_handle_brain_
-        confirm`, can call `self._act` -- both real side effects discarding
-        a return value does not undo, so it cannot be reused here without
-        defeating the guard it is meant to enforce. `_speak_stand_by_if_
-        due` is skipped entirely for the same reason (nothing is "overdue"
+        never computed against -- but each reply only pops its turn from
+        `_brain_turns`, **not** run through `_handle_brain_reply`. That
+        method calls `self._print` unconditionally and, via `_handle_
+        brain_pick`/`_handle_brain_confirm`, can call `self._act` -- both
+        real side effects discarding a return value does not undo, so it
+        cannot be reused here without defeating the guard it is meant to
+        enforce. `_expire_overdue_brain_turns`/`_speak_stand_by_if_due`
+        are skipped entirely for the same reason (nothing is "overdue" or
         worth announcing while refused). Drain and discard, matching
         `drain_events`'s identical choice -- see the review that required
         this (`plans/bl15-mission-start/review.md`, Batch 2 "(a)")."""
@@ -2007,9 +2186,9 @@ class CrewConsole:
                 logger.warning("brain reply poll failed (continuing)", exc_info=True)
                 return []
             for reply in replies:
-                self._pending_escalations.pop(reply.utterance_id, None)
-                self._stand_by_spoken_for.discard(reply.utterance_id)
+                self._brain_turns.pop(reply.utterance_id, None)
             return []
+        self._expire_overdue_brain_turns(now_sim)
         self._speak_stand_by_if_due(now_sim)
         try:
             replies = self.brain_client.poll_replies()
@@ -2022,9 +2201,76 @@ class CrewConsole:
             logger.warning("brain reply poll failed (continuing)", exc_info=True)
             return []
         lines: list[str] = []
+        tool_executed_this_poll = False
         for reply in replies:
+            if reply.kind == "tool_call":
+                # D6: "at most one tool execution per poll" -- a second
+                # `tool_call` reply landing in the same poll's batch
+                # (only possible if more than one accumulated in the
+                # client's reply buffer between polls) is simply not
+                # acted on this poll; it is still sitting in
+                # `self.brain_client`'s own buffer only if a fresh
+                # `poll_replies()` call would return it again, which it
+                # would not (already drained above) -- so in practice
+                # this guards the same-poll-batch case only, and a
+                # dropped extra tool_call here means that round's own
+                # continuation is simply never posted, which the turn's
+                # budget expiry (D9) already covers if it recurs.
+                if tool_executed_this_poll:
+                    continue
+                tool_executed_this_poll = True
             lines.extend(self._handle_brain_reply(reply, now_sim))
         return lines
+
+    def _expire_overdue_brain_turns(self, now_sim: float) -> None:
+        """D9's turn budget: an addressed utterance that has waited
+        `BRAIN_REPLY_MAX_AGE_S` with no reply is popped and answered
+        `unable NO_ANSWER` once (`plans/brain-tool-calls/plan.md` D4
+        table), replacing the old silent discard (E2). A reply that
+        arrives for a turn already popped here is simply untracked --
+        `_handle_brain_reply`'s own `turn is None` branch discards it,
+        the same as any other reply raced by a newer escalation."""
+        overdue = [
+            utterance_id
+            for utterance_id, turn in self._brain_turns.items()
+            if now_sim - turn.started_sim >= BRAIN_REPLY_MAX_AGE_S
+        ]
+        for utterance_id in overdue:
+            self._brain_turns.pop(utterance_id, None)
+            self._drop_positional_replies_for_turns((utterance_id,))
+            self._print([render_unable("NO_ANSWER").text], now_sim)
+
+    def _pop_all_brain_turns(self) -> tuple[str, ...]:
+        """Supersede every currently outstanding brain turn at once --
+        `plans/brain-tool-calls/plan.md` Co-moving Fields: a new
+        addressed utterance (`_start_brain_turn`) pops every older turn
+        silently, and the same primitive is what `cancel_nevermind` would
+        call once that token has a real dispatch path (it has none yet --
+        `audio-adapter`'s `vocabulary.ROUTING_TOKENS` lists it, but no
+        `command_matcher`/`crew_console` code resolves it to anything
+        today). Returns the popped ids so the caller can drop any `_
+        pending_positional_replies` entry tagged with one of them."""
+        popped = tuple(self._brain_turns)
+        self._brain_turns.clear()
+        return popped
+
+    def _drop_positional_replies_for_turns(self, turn_ids: Collection[str]) -> None:
+        """Drop every deferred positional readback tagged
+        (`_PendingPositionalReply.brain_turn_id`) with one of `turn_ids`
+        -- a readback for a brain turn that has just been superseded or
+        expired must never surface later as if it still answered the
+        pilot's current question (E5). A no-op in Stage 1: nothing sets
+        `brain_turn_id` yet (see that field's own docstring), so this
+        always iterates to an unchanged list -- the mechanism is wired
+        now so Stage 3's brain-command dispatch has somewhere to plug
+        in without a second pass over this class."""
+        if not turn_ids:
+            return
+        self._pending_positional_replies = [
+            entry
+            for entry in self._pending_positional_replies
+            if entry.brain_turn_id not in turn_ids
+        ]
 
     def drain_speech_results(self, now_sim: float) -> None:
         """`[[BL-B106]]` (`plans/async-speech/plan.md` Decision 2) --
@@ -2076,19 +2322,15 @@ class CrewConsole:
                 )
 
     def _speak_stand_by_if_due(self, now_sim: float) -> None:
-        """D8: speak "stand by" **once** for any escalation that has been
+        """D8: speak "stand by" **once** for any brain turn that has been
         outstanding for at least `STAND_BY_AFTER_S` and has not already
-        had it spoken. No model involvement -- body already knows how
-        long it has been waiting."""
-        for utterance_id, (
-            started_sim,
-            _parse,
-            _transcript,
-        ) in self._pending_escalations.items():
-            if utterance_id in self._stand_by_spoken_for:
+        had it spoken (`BrainTurn.stand_by_spoken`). No model involvement
+        -- body already knows how long it has been waiting."""
+        for turn in self._brain_turns.values():
+            if turn.stand_by_spoken:
                 continue
-            if now_sim - started_sim >= STAND_BY_AFTER_S:
-                self._stand_by_spoken_for.add(utterance_id)
+            if now_sim - turn.started_sim >= STAND_BY_AFTER_S:
+                turn.stand_by_spoken = True
                 self._print([render_stand_by().text], now_sim)
 
     def _handle_brain_reply(self, reply: BrainReply, now_sim: float) -> list[str]:
@@ -2102,18 +2344,49 @@ class CrewConsole:
         that it was ever a legal reply at all; the two are independent
         checks in sequence, not alternatives.
 
-        `pending` is popped unconditionally -- whether or not the reply
-        turns out to be actionable, this utterance is no longer
-        outstanding once a reply for it has landed."""
-        pending = self._pending_escalations.pop(reply.utterance_id, None)
-        self._stand_by_spoken_for.discard(reply.utterance_id)
-        if pending is None:
+        `turn` is popped **unconditionally for every kind except
+        `tool_call`** -- a `tool_call` reply keeps the turn alive (it is
+        put back, updated, by `_handle_brain_tool_call`); every other
+        kind ends the turn whether or not the reply turns out to be
+        actionable, since a reply for it has now landed."""
+        if reply.kind == "tool_call":
+            turn = self._brain_turns.get(reply.utterance_id)
+            if turn is None:
+                return []
+            return self._handle_brain_tool_call(reply, turn, now_sim)
+
+        turn = self._brain_turns.pop(reply.utterance_id, None)
+        if turn is None:
             # A reply for an utterance this session is no longer
-            # tracking -- superseded client-side, or a duplicate poll.
-            # Nothing to revalidate against; discard silently, same
-            # honest-silence posture `NullBrainClient` already documents.
+            # tracking -- superseded client-side, or a duplicate poll, or
+            # already expired by `_expire_overdue_brain_turns`. Nothing
+            # to revalidate against; discard silently, same honest-
+            # silence posture `NullBrainClient` already documents.
             return []
-        _started_sim, parse, transcript = pending
+
+        if reply.kind in ("answer", "command", "ask", "unable"):
+            # `plans/brain-tool-calls/plan.md` D1/D3/D7 -- every addressed
+            # turn is the tool-loop mode now (`_start_brain_turn` always
+            # sends `mode="addressed"`), so `ToolLoopDecider` is the only
+            # thing that ever answers one, and it only ever emits these
+            # four kinds plus `tool_call` (handled above). `pick`/
+            # `confirm` below are the BR-1 decider's own kinds, kept for
+            # that decider's own (now unaddressed-only, in practice
+            # unreachable per U1) callers -- not a shape a tool-loop turn
+            # can produce.
+            if (
+                reply.t_sim is not None
+                and now_sim - reply.t_sim > BRAIN_REPLY_MAX_AGE_S
+            ):
+                logger.info(
+                    "discarding stale brain reply for %s (age %.1fs)",
+                    reply.utterance_id,
+                    now_sim - reply.t_sim,
+                )
+                return []
+            return self._handle_brain_turn_final(reply, turn, now_sim)
+
+        parse, transcript = turn.parse, turn.transcript
         reply = validate_brain_reply(
             reply, parse, transcript, DISPATCHED_COMMAND_TOKENS
         )
@@ -2141,6 +2414,231 @@ class CrewConsole:
 
         self._print(lines, now_sim, mentions=self._pending_mentions)
         return lines
+
+    def _handle_brain_tool_call(
+        self, reply: BrainReply, turn: BrainTurn, now_sim: float
+    ) -> list[str]:
+        """D3/D1: validate the call, execute it **at most once** (the
+        caller, `drain_brain`, already enforces "at most one tool
+        execution per poll" across the whole batch), append the step,
+        advance `round`, and either post the continuation or -- past
+        `BRAIN_MAX_TOOL_ROUNDS` -- degrade and end the turn. A normal
+        continuation round never calls `self._print`; only the round-cap
+        degrade and the tool-execution-failure guard below do, both of
+        which end the turn."""
+        tool_name = reply.tool or ""
+        args = reply.args or {}
+        validated = validate_tool_call(tool_name, args, turn)
+        if isinstance(validated, str):
+            turn.steps.append(
+                ToolStep(
+                    tool=tool_name, args=dict(args), observation=f"invalid: {validated}"
+                )
+            )
+        else:
+            if self.run_brain_tool is None:
+                observation = ToolObservation(summary="tool execution unavailable")
+            else:
+                try:
+                    observation = self.run_brain_tool(tool_name, validated, now_sim)
+                except Exception:
+                    # Security review (`plans/brain-tool-calls/
+                    # security-review.md`): a `BrainTool.invoke` raising
+                    # must not propagate through `drain_brain` into
+                    # body.py's poll loop -- that thread also owns
+                    # perception/belief/speech, same posture as
+                    # `_poll_transcripts`'s own per-call isolation in
+                    # `body.py`. Degrade this turn exactly like the
+                    # round-cap path below, never a new reason.
+                    logger.exception(
+                        "brain tool %r raised for utterance %s; ending turn",
+                        tool_name,
+                        reply.utterance_id,
+                    )
+                    self._brain_turns.pop(reply.utterance_id, None)
+                    lines = [render_unable("NO_ANSWER").text]
+                    self._print(lines, now_sim)
+                    return lines
+            turn.offered.update(observation.handles)
+            if len(observation.candidate_texts) >= 2:
+                turn.candidate_sets.append(tuple(observation.candidate_texts.items()))
+            turn.steps.append(
+                ToolStep(
+                    tool=tool_name, args=validated, observation=observation.summary
+                )
+            )
+        turn.round += 1
+        if turn.round > BRAIN_MAX_TOOL_ROUNDS:
+            self._brain_turns.pop(reply.utterance_id, None)
+            return self._speak_turn_degrade(turn, now_sim)
+        self._post_tool_continuation(reply.utterance_id, turn)
+        return []
+
+    def _speak_turn_degrade(self, turn: BrainTurn, now_sim: float) -> list[str]:
+        """D3 rule 6/D9's round-cap degrade: "which one?" (D4-revalidated,
+        `_render_turn_ask`) over the most recent candidate set this turn
+        actually offered, else `unable NO_ANSWER` -- shared by the
+        round-cap path above and by `validate_turn_final`'s own degrades
+        (`_handle_brain_turn_final` renders whatever that validator
+        returns instead, this method is only for the case nothing from
+        the brain exists to validate)."""
+        if turn.candidate_sets:
+            lines = self._render_turn_ask(None, turn, now_sim)
+        else:
+            lines = [render_unable("NO_ANSWER").text]
+        self._print(lines, now_sim)
+        return lines
+
+    def _render_turn_ask(
+        self, refs: tuple[str, ...] | None, turn: BrainTurn, now_sim: float
+    ) -> list[str]:
+        """D7's `ask(refs)` final: "Which one, ...?" over the candidates
+        -- `refs` from the reply when it names a known candidate set,
+        otherwise the turn's own most recently offered set, so a model
+        that names no `refs` at all still gets a real question rather
+        than a bare "Which one?" when candidates exist.
+
+        **D4 revalidation applies here too**: a contact-shaped handle
+        (`CONTACT_...`) no longer in the store by now is dropped from
+        the survivors before asking -- `belief.crew_console`'s existing
+        "ids are rechecked against current belief at speech time" rule,
+        unchanged by which wire generation produced the reply. Zero
+        survivors -> "lost him"; exactly one -> reported directly
+        (there is nothing left to ask); two or more -> the question."""
+        candidate_set = None
+        if refs:
+            for entry in reversed(turn.candidate_sets):
+                if {cid for cid, _ in entry} & set(refs):
+                    candidate_set = entry
+                    break
+        if candidate_set is None and turn.candidate_sets:
+            candidate_set = turn.candidate_sets[-1]
+        if candidate_set is None:
+            return [render_say_again().text]
+        survivors = [
+            (cid, text)
+            for cid, text in candidate_set
+            if not cid.startswith("CONTACT_")
+            or _find_contact(self.store, cid) is not None
+        ]
+        if not survivors:
+            return [render_lost_contact().text]
+        if len(survivors) == 1:
+            cid, text = survivors[0]
+            if cid.startswith("CONTACT_"):
+                speech = render_contact_answer(
+                    self.store, cid, now_sim, self.enrichment
+                )
+                if speech is not None:
+                    return [speech.text]
+            return [f"{text}."]
+        candidates = tuple(
+            ReferenceCandidate(id=cid, why=text) for cid, text in survivors
+        )
+        return [render_disambiguation(candidates).text]
+
+    def _handle_brain_turn_final(
+        self, reply: BrainReply, turn: BrainTurn, now_sim: float
+    ) -> list[str]:
+        """D3's validator first (`validate_turn_final`), exactly the same
+        "validate before acting" posture `_handle_brain_reply`'s old BR-1
+        branch already has -- then D7's rendering per kind. `mentions`
+        (`[[BL-B102]]`) are planted only by a successfully rendered
+        `contacts`/`memory` answer, same convention as every other
+        successful readback in this class.
+
+        **`command` is special-cased ahead of the shared tail `_print`
+        call below**, not folded into it: `_handle_brain_command`
+        dispatches through `handle_command`, which already calls
+        `self._print` itself (its own existing tail, exactly as any
+        voice/confirm-band dispatch does) -- calling it a second time
+        here would double-speak every brain command's readback."""
+        reply = validate_turn_final(reply, turn, turn.transcript)
+        if reply.kind == "command":
+            return self._handle_brain_command(reply, now_sim)
+        mentions: list[Mention] | None = None
+        if reply.kind == "unable":
+            lines = [render_unable(reply.reason or "CANNOT_ANSWER").text]
+        elif reply.kind == "ask":
+            lines = self._render_turn_ask(reply.refs, turn, now_sim)
+        else:  # "answer"
+            lines, mentions = self._render_turn_answer(reply, now_sim)
+        self._print(lines, now_sim, mentions=mentions)
+        return lines
+
+    def _handle_brain_command(self, reply: BrainReply, now_sim: float) -> list[str]:
+        """D5/Stage 3: a validated `command` final dispatches through the
+        single `handle_command` dispatcher -- the exact phrasebook path
+        (E3), so readback/task/marker/cancel semantics are the
+        phrasebook's own, by construction. **`[[BL-B102]]`'s way (A7)**:
+        a `target` is planted directly into `_referent_memory`, not
+        `_pending_mentions` -- `handle_command` resets the latter on
+        entry, and `_resolve_referent_target` (what `slots={"referent":
+        True}` actually triggers) reads the former. The model never
+        fills `descriptor`/`clock` itself (D5): a resolved `target`
+        always arrives as a bare referent, letting whichever handler
+        `token` dispatches to resolve it exactly as "follow it"/"mark
+        that" already do on the voice path.
+
+        `_pending_brain_turn_id` (R6) is set for the one `handle_command`
+        call below so a positional readback it defers (`_speak_or_defer`)
+        is tagged with this turn -- a later addressed utterance
+        superseding this turn then drops it (`_drop_positional_replies_
+        for_turns`, wired since Stage 1)."""
+        token = reply.token
+        assert token is not None  # guaranteed by `_validate_turn_command`
+        slots: dict[str, int | str] | None = None
+        if reply.target is not None:
+            self._referent_memory.record(
+                [Mention(kind="contact", id=reply.target, t_sim=now_sim)], now_sim
+            )
+            slots = {"referent": True}
+        self._pending_brain_turn_id = reply.utterance_id
+        try:
+            return self.handle_command(token, now_sim, slots=slots)
+        finally:
+            self._pending_brain_turn_id = None
+
+    def _render_turn_answer(
+        self, reply: BrainReply, now_sim: float
+    ) -> tuple[list[str], list[Mention] | None]:
+        """D7's four answer forms, rendered at speech time against
+        *current* belief (D4) -- a contact named by `form == "contacts"`
+        that is gone by now speaks "lost him" (D4's own wording), never a
+        stale readback."""
+        form = reply.form
+        refs = reply.refs or ()
+        if form == "our_position":
+            if self.enrichment is None:
+                return [render_unable("CANNOT_ANSWER").text], None
+            return [render_our_position_answer(self.enrichment).text], None
+        if form == "nothing_seen":
+            return [render_nothing_seen().text], None
+        if form == "contacts":
+            lines: list[str] = []
+            mentions: list[Mention] = []
+            for contact_id in refs:
+                speech = render_contact_answer(
+                    self.store, contact_id, now_sim, self.enrichment
+                )
+                if speech is None:
+                    lines.append(render_lost_contact().text)
+                    continue
+                lines.append(speech.text)
+                mentions.append(Mention(kind="contact", id=contact_id, t_sim=now_sim))
+            return lines, (mentions or None)
+        if form == "memory":
+            if self.lookup_memory_entry_fn is None or self.enrichment is None:
+                return [render_unable("CANNOT_ANSWER").text], None
+            lines = []
+            for handle in refs:
+                entry = self.lookup_memory_entry_fn(handle)
+                if entry is None:
+                    lines.append(render_lost_contact().text)
+                    continue
+                lines.append(render_memory_entry(entry, self.enrichment.ownship).text)
+            return lines, None
+        return [render_unable("CANNOT_ANSWER").text], None
 
     def _handle_brain_confirm(self, reply: BrainReply, now_sim: float) -> list[str]:
         """D9: a `CONFIRM <token>` reply sets `_pending_confirmation`,
@@ -2272,10 +2770,25 @@ class CrewConsole:
         # Same reset, same reason, for the weapons safety bar
         # (`weapon_safety_transition`'s own docstring).
         self.weapon_safety_transition = None
-        # Same reset, same reason, for "where is it?"
-        # (`where_is_it_requested`'s own docstring).
-        self.where_is_it_requested = False
-        self.where_is_it_slots = None
+        # `where_is_it_requested`/`where_is_it_slots` are deliberately
+        # **not** reset here -- `plans/brain-tool-calls/plan.md` R1.
+        # Every other one-shot signal above is consumed in the *same*
+        # poll it is set (by `drain_attack_run`/`drain_events`'s own
+        # callers, earlier in `body.py`'s loop than any `handle_command`
+        # call), so an unrelated dispatch this poll can safely clear a
+        # stale one without racing its own consumer. "Where is it?"'s
+        # consumer, `body.py`'s `drain_where_is_it`, instead runs at the
+        # *top* of the **next** poll -- and Stage 3 adds a second
+        # dispatcher (a brain command, `drain_brain`) that can set this
+        # flag in the same poll a transcript's own `handle_command` call
+        # (`_poll_transcripts`, later in that same poll) would otherwise
+        # reset it right back to `False` before `drain_where_is_it` ever
+        # sees it `True`. Leaving the reset out means the flag can only
+        # ever be set by `_handle_where_is_it` and only ever cleared by
+        # `drain_where_is_it`'s own consumption (or a mission reset,
+        # `reset_for_new_mission`'s `__init__` call) -- a request is
+        # delayed at worst, by one poll if a second command lands before
+        # consumption, never silently dropped by an unrelated dispatch.
         # Same reset, same reason, for `[[BL-B102]]`'s referent-mention
         # recording -- see `_pending_mentions`' own docstring.
         self._pending_mentions = None
@@ -4918,6 +5431,7 @@ class CrewConsole:
         now_sim: float,
         slots: dict[str, int | str] | None = None,
         correlation_id: str | None = None,
+        addressed: bool = False,
     ) -> list[str]:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
         point -- a sibling of `handle_line`/`handle_command`, per the
@@ -4964,7 +5478,14 @@ class CrewConsole:
         recognised clip carried one -- threaded into `_log_transcript`'s
         row and on to `_act_on_voice_decision`/`handle_command` so a
         dispatched command's own readback (and any deferred positional one,
-        Stage 6) can be joined back to this utterance."""
+        Stage 6) can be joined back to this utterance.
+
+        `addressed` (`plans/brain-tool-calls/plan.md` D4) is `audio-
+        adapter`'s own `opens_with_wake_word` result, carried through
+        unchanged -- `command_matcher.match_transcript` already forces
+        `verb_anchored=False`/`token=None` whenever it is `True`, so this
+        transcript always reaches `_act_on_voice_decision`'s
+        `"fallthrough"` branch, which is the only place this flag matters."""
         # `BL-15` Stage 3: checked before any of the confirm-band/
         # late-answer/classify logic below -- while refused, a pending
         # confirmation (if any) is left exactly as it was rather than
@@ -5070,7 +5591,12 @@ class CrewConsole:
             correlation_id=correlation_id,
         )
         return self._act_on_voice_decision(
-            decision, transcript, now_sim, slots, correlation_id=correlation_id
+            decision,
+            transcript,
+            now_sim,
+            slots,
+            correlation_id=correlation_id,
+            addressed=addressed,
         )
 
     def _log_transcript(self, **row: object) -> None:
@@ -5092,6 +5618,7 @@ class CrewConsole:
         now_sim: float,
         slots: dict[str, int | str] | None = None,
         correlation_id: str | None = None,
+        addressed: bool = False,
     ) -> list[str]:
         if decision.disposition == "fallthrough":
             # `handle_line` re-strips/re-checks the `!`-prefixed harness
@@ -5102,8 +5629,12 @@ class CrewConsole:
             # paths pass no correlation id, unchanged behaviour") -- the
             # brain-layer free-text path this disposition is heading
             # towards gets its own instrumentation pass once it exists
-            # (plan "Second-Order Effect"), not folded in here.
-            return self.handle_line(transcript, now_sim)
+            # (plan "Second-Order Effect"), not folded in here. `addressed`
+            # is passed explicitly (`plans/brain-tool-calls/plan.md` D4) --
+            # this is always the only disposition it can be `True` for,
+            # since `command_matcher.match_transcript` forces `verb_
+            # anchored=False` on a wake-prefixed utterance.
+            return self.handle_line(transcript, now_sim, addressed=addressed)
         if decision.disposition == "act":
             assert decision.token is not None
             return self.handle_command(
@@ -5233,26 +5764,79 @@ class CrewConsole:
         self._next_utterance_number += 1
         return f"{_UTTERANCE_ID_PREFIX}_{self._next_utterance_number}"
 
-    def _handle_utterance(self, transcript: str, now_sim: float) -> list[str]:
-        # `plans/binocular-optic/plan.md` D4, narrowed by `plans/
-        # sortie-2026-09-26-fixes/decisions.md` Decision 2: the player
-        # asking for something *that was understood* is itself evidence
-        # Petrovich's current optic activity matters less than what was
-        # just asked -- unconditional across surfaces, not a per-command
-        # special case, but only once there is something to prefer over
-        # the current look. An utterance the free-text parser also fails to
-        # understand (escalated to the brain layer, `disposition ==
-        # "escalated"` below) is not a new task -- "say again" is not a
-        # request to stop what he is doing, it is a recognition failure,
-        # and lowering the binoculars there would destroy real work in
-        # response to one. This is the one point both `handle_line` (typed
-        # free text) and voice's `"fallthrough"` disposition (which itself
-        # calls `handle_line` -- see `_act_on_voice_decision`) pass
-        # through, so counting here (moved inside the `"handled"` branch,
-        # not called unconditionally as it used to be) covers both without
-        # double-counting `handle_command`'s own call for the token-dispatch
-        # surface.
+    def _handle_utterance(
+        self, transcript: str, now_sim: float, addressed: bool
+    ) -> list[str]:
+        """`addressed` (`plans/brain-tool-calls/plan.md` D4) decides which
+        of three things this utterance becomes: an *addressed* one always
+        becomes a brain turn (`_start_brain_turn`) regardless of what
+        `parse_utterance` makes of it -- its result still runs, but only
+        as a `partial_parse` hint for the brain, never acted on directly
+        (Stage 1 still routes that turn through the BR-1 decider; Stage 2
+        onward is the tool loop). An *unaddressed* one keeps today's
+        behaviour when `parse_utterance` resolves it (`"handled"`, E1);
+        when it does not, U1's deterministic degrade
+        (`_handle_unaddressed_miss`) answers without ever calling the
+        brain -- superseding the implicit second escalation route
+        `plans/inbound-speech/plan.md` Decision 4 REVISED AGAIN left open
+        for exactly this case."""
         parse = parse_utterance(self.store, transcript, now_sim)
+        if not addressed and parse.disposition == "handled":
+            # `plans/binocular-optic/plan.md` D4, narrowed by `plans/
+            # sortie-2026-09-26-fixes/decisions.md` Decision 2: the player
+            # asking for something *that was understood* is itself
+            # evidence Petrovich's current optic activity matters less
+            # than what was just asked -- unconditional across surfaces,
+            # not a per-command special case, but only once there is
+            # something to prefer over the current look. This is the one
+            # point both `handle_line` (typed free text) and voice's
+            # "fallthrough" disposition (which itself calls `handle_line`
+            # -- see `_act_on_voice_decision`) pass through, so counting
+            # here covers both without double-counting `handle_command`'s
+            # own call for the token-dispatch surface.
+            self._note_player_command()
+            # A recognised free-text command ends silence too (`plans/
+            # silence-command/plan.md`) -- the grammar resolved an actual
+            # intent here, which is a real command, not the stray speech
+            # an unresolved utterance represents. `handle_command`'s own
+            # "silence" branch is the only place this reset is skipped,
+            # and this path can never reach it: `parse_utterance`'s
+            # grammar has no `silence` intent, so this branch is never
+            # how silence itself begins.
+            self.silenced = False
+            return self._act(parse, now_sim)
+        if not addressed:
+            return self._handle_unaddressed_miss(parse)
+        return self._start_brain_turn(transcript, parse, now_sim)
+
+    def _handle_unaddressed_miss(self, parse: PartialParse) -> list[str]:
+        """U1 (`plans/brain-tool-calls/plan.md`, user decision
+        2026-11-01, verbatim: *"1,2,4 - as recommended"*): speech with no
+        wake word that neither the phrasebook nor `parse_utterance`'s
+        grammar could place is answered deterministically, never by a
+        model call -- "which one?" over the candidates the grammar
+        itself already found, otherwise "say again". Follows A4 (the
+        pilot picks fast or slow by how he speaks) and A10 (avoid
+        unnecessary model calls)."""
+        candidates = parse.referenced_contact_candidates
+        if len(candidates) >= 2:
+            return [render_disambiguation(candidates).text]
+        return [render_say_again().text]
+
+    def _start_brain_turn(
+        self, transcript: str, parse: PartialParse, now_sim: float
+    ) -> list[str]:
+        """D4: an addressed utterance always becomes a brain turn.
+        Supersedes every older turn first, unconditionally and silently
+        (D3: brain-layer itself only ever holds one job in flight) --
+        including when this one turns out unavailable, since a turn
+        nothing will ever answer is exactly the case that should not be
+        left outstanding either. `available()` false speaks "Unable, no
+        brain." (A6) immediately, with no escalation at all."""
+        popped = self._pop_all_brain_turns()
+        self._drop_positional_replies_for_turns(popped)
+        if not self.brain_client.available():
+            return [render_unable("NO_BRAIN").text]
         utterance = PlayerUtterance(
             id=self._new_utterance_id(),
             t_sim=now_sim,
@@ -5261,32 +5845,124 @@ class CrewConsole:
             source="debug_console",
             parse=parse,
         )
-        if parse.disposition == "handled":
-            self._note_player_command()
-            # A recognised free-text command ends silence too (`plans/
-            # silence-command/plan.md`) -- the grammar resolved an actual
-            # intent here, which is a real command, not the stray speech
-            # an *unrecognised* utterance (the `escalated` branch below)
-            # represents. `handle_command`'s own "silence" branch is the
-            # only place this reset is skipped, and this path can never
-            # reach it: `parse_utterance`'s grammar has no `silence`
-            # intent, so this branch is never how silence itself begins.
-            self.silenced = False
-            return self._act(parse, now_sim)
-        # `plans/brain-layer/plan.md` -- tracked so `_handle_brain_reply`
-        # knows what to act on if/when a reply lands (D4's table), and so
-        # `_speak_stand_by_if_due` knows this question is outstanding
-        # (D8). Recorded before `handle_player_utterance` posts, not
-        # after -- the brain-layer client's own worker thread can in
-        # principle complete faster than this method returns (an
-        # artificial `delay_s=0` stub, say), and a reply for an
-        # utterance_id not yet in `_pending_escalations` would otherwise
-        # be silently dropped as untracked.
-        self._pending_escalations[utterance.id] = (now_sim, parse, transcript)
+        header_refs = self._header_contact_refs(now_sim)
+        # Recorded before `handle_player_utterance` posts, not after --
+        # the brain-layer client's own worker thread can in principle
+        # complete faster than this method returns (an artificial
+        # `delay_s=0` stub, say), and a reply for an utterance_id not yet
+        # in `_brain_turns` would otherwise be silently dropped as
+        # untracked.
+        turn = BrainTurn(
+            started_sim=now_sim,
+            transcript=transcript,
+            parse=parse,
+            addressed=True,
+            header_refs=header_refs,
+        )
+        # D4's header refs: every recently-mentioned contact is offered
+        # from the first round, same as a tool observation's own
+        # handles. A single header contact gets the same no-evidence
+        # trust a bare "it"/"that" pronoun already gets on the voice path
+        # (`belief.referent.resolve_referent` asks for no evidence
+        # either) -- see `_header_contact_refs`'s own docstring. But once
+        # the header offers **two or more** genuine candidates with equal
+        # trust, the pronoun analogy no longer holds (the pronoun path
+        # never has a "which one did it pick" question to ask evidence
+        # of) -- reviewer fix, `plans/brain-tool-calls/review.md`: push
+        # the set into `candidate_sets` too, so D3's ambiguity-evidence
+        # rule applies the same verbatim-`because` check a tool-returned
+        # multi-candidate pick already gets.
+        turn.offered.update(cid for cid, _ in header_refs)
+        if len(header_refs) >= 2:
+            turn.candidate_sets.append(header_refs)
+        self._brain_turns[utterance.id] = turn
+        # `plans/brain-tool-calls/plan.md` D1/D2/D5: every addressed turn
+        # is the tool-loop mode, round 0, no steps yet, the full
+        # query-tool surface, and (Stage 3) the command allowlist.
         handle_player_utterance(
-            self.store, utterance, self.brain_client, self.enrichment
+            self.store,
+            utterance,
+            self.brain_client,
+            self.enrichment,
+            mode="addressed",
+            tools=BRAIN_TOOL_SPECS,
+            commands=BRAIN_COMMAND_SPECS,
+            round=0,
+            steps=(),
+            recent_contacts=header_refs,
         )
         return []
+
+    def _header_contact_refs(self, now_sim: float) -> tuple[tuple[str, str], ...]:
+        """D4's "header refs" (plan Affected Modules) -- every contact in
+        `_referent_memory`'s short window (`[[BL-B102]]`'s "recently
+        mentioned", `belief.referent.REFERENT_WINDOW_S`), newest mention
+        per id winning, each resolved to the same plain-text summary
+        `belief.tool_api._find_contact_adapter` already builds for a
+        tool observation's own candidates (class/certainty/clock/range/
+        landmark text, **never a raw x/z** -- D2's rule, same cap as a
+        tool's own list, `BRAIN_TOOL_LIST_CAP`). This is what makes
+        "Petrovich, where is it?" and "which one's the BMP?" answerable
+        without a tool call at all -- both are header-seeded acceptance-
+        set cases (Stage 0's fixture), and both need only this turn's
+        header, no `find_contact` round.
+
+        Group mentions are not offered here (they have no single
+        `describe_contact` summary of their own, and no acceptance-set
+        case needs one yet) -- a scoping choice, not an oversight."""
+        seen: dict[str, None] = {}
+        for mention in reversed(self._referent_memory.recent(now_sim)):
+            if mention.kind != "contact" or mention.id in seen:
+                continue
+            seen[mention.id] = None
+        refs: list[tuple[str, str]] = []
+        for contact_id in seen:
+            if len(refs) >= BRAIN_TOOL_LIST_CAP:
+                break
+            result = describe_contact(self.store, contact_id, now_sim, self.enrichment)
+            if result is None:
+                continue
+            refs.append((contact_id, str(result["summary"])))
+        return tuple(refs)
+
+    def _post_tool_continuation(self, utterance_id: str, turn: BrainTurn) -> None:
+        """D1: brain-layer is stateless across rounds -- each continuation
+        is a fresh `POST /escalate` with the same `utterance_id`, this
+        turn's updated `round`, and its full `steps` record so far (not
+        just the newest one). Reuses `handle_player_utterance` rather than
+        building a second `EscalationPayload` constructor; the
+        `PlayerUtterance` rebuilt here is a wire convenience, not a new
+        utterance -- `transcript_confidence`/`source` are not read again
+        past the turn's first round.
+
+        `turn.header_refs` is resent **unchanged** every round, never
+        recomputed against `_referent_memory`'s own clock -- it was fixed
+        into `turn.offered`/the wire at turn start, and a continuation
+        payload offering a *different* header than the one already
+        validated-offered would disagree with this turn's own record."""
+        utterance = PlayerUtterance(
+            id=utterance_id,
+            t_sim=turn.started_sim,
+            transcript=turn.transcript,
+            transcript_confidence=1.0,
+            source="debug_console",
+            parse=turn.parse,
+        )
+        handle_player_utterance(
+            self.store,
+            utterance,
+            self.brain_client,
+            self.enrichment,
+            mode="addressed",
+            tools=BRAIN_TOOL_SPECS,
+            commands=BRAIN_COMMAND_SPECS,
+            round=turn.round,
+            steps=tuple(
+                {"tool": step.tool, "args": step.args, "observation": step.observation}
+                for step in turn.steps
+            ),
+            recent_contacts=turn.header_refs,
+        )
 
     def _act(self, parse: PartialParse, now_sim: float) -> list[str]:
         contact_id = parse.referenced_contact_id

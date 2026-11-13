@@ -474,6 +474,141 @@ def test_find_contact_threads_enrichment_through_every_result(
     assert "semantic" in results[0]["facts"]
 
 
+# --- `limit` -- enrich-before-cap fix (plans/brain-tool-calls/
+# performance-review.md) --------------------------------------------------
+
+
+def _store_with_n_contacts(n: int, classification_raw: str = "T-72") -> ContactStore:
+    """`n` contacts, each ingested in its own poll at a distinct `t_sim`
+    (so `last_seen_sim` orders them unambiguously, contact `i` least
+    recent) and a bearing/range far enough apart (100 km steps) that the
+    spatial gate can never fold two of them together -- confirmed by the
+    assertion below rather than assumed."""
+    store = ContactStore()
+    for i in range(n):
+        store.ingest(
+            [
+                _observation(
+                    obs_id=f"OBS_{i}",
+                    t_sim=float(i),
+                    classification_raw=classification_raw,
+                    bearing_deg=float((i * 73) % 360),
+                    range_m=10_000.0 + i * 100_000.0,
+                )
+            ],
+            now_sim=float(i),
+        )
+    assert len(store.contacts) == n
+    return store
+
+
+def _counting_enrichment_context(
+    monkeypatch: pytest.MonkeyPatch, calls: dict[str, int]
+) -> EnrichmentContext:
+    """`_enrichment_context`'s own three stubs, plus a call counter on
+    `describe_position` -- the one call `_add_enrichment_facts` makes per
+    contact (via `WorldEnrichmentCache.get_or_compute` ->
+    `semantic_facts_for`) that this fix exists to avoid paying for every
+    admitted contact when only a handful will ever be shown."""
+
+    def _counting_describe_position(
+        conn: object, theatre: str, x: float, z: float
+    ) -> _FakeDescription:
+        calls["n"] += 1
+        return _FakeDescription(nearest_settlement=_FakeInfo(name="Jableh"))
+
+    monkeypatch.setattr(
+        enrichment_module, "describe_position", _counting_describe_position
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+        ),
+    )
+
+
+def test_get_contacts_limit_enriches_only_the_shown_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    context = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50)
+
+    results = get_contacts(store, now_sim=49.0, enrichment=context, limit=5)
+
+    assert len(results) == 5
+    assert calls["n"] == 5
+
+
+def test_get_contacts_limit_none_enriches_every_admitted_contact_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    context = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50)
+
+    results = get_contacts(store, now_sim=49.0, enrichment=context, limit=None)
+
+    assert len(results) == 50
+    assert calls["n"] == 50
+
+
+def test_get_contacts_limit_preserves_most_recently_seen_first_ordering() -> None:
+    store = _store_with_n_contacts(50)
+    full = get_contacts(store, now_sim=49.0)
+    capped = get_contacts(store, now_sim=49.0, limit=5)
+    assert [r["facts"]["id"] for r in capped] == [r["facts"]["id"] for r in full[:5]]
+    # The least-recently-seen contact (OBS_0, ingested first) must not be
+    # among the first 5 of 50 -- a sanity check that this is testing a
+    # real "most-recent-first" order, not an accidental tie.
+    assert full[0]["facts"]["id"] != full[-1]["facts"]["id"]
+
+
+def test_find_contact_limit_enriches_only_the_shown_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    context = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50, classification_raw="T-72")
+
+    results = find_contact(store, "T-72", now_sim=49.0, enrichment=context, limit=5)
+
+    assert len(results) == 5
+    assert calls["n"] == 5
+
+
+def test_find_contact_limit_none_enriches_every_match_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    context = _counting_enrichment_context(monkeypatch, calls)
+    store = _store_with_n_contacts(50, classification_raw="T-72")
+
+    results = find_contact(store, "T-72", now_sim=49.0, enrichment=context, limit=None)
+
+    assert len(results) == 50
+    assert calls["n"] == 50
+
+
+def test_find_contact_limit_preserves_most_recently_seen_first_ordering() -> None:
+    store = _store_with_n_contacts(50, classification_raw="T-72")
+    full = find_contact(store, "T-72", now_sim=49.0)
+    capped = find_contact(store, "T-72", now_sim=49.0, limit=5)
+    assert [r["facts"]["id"] for r in capped] == [r["facts"]["id"] for r in full[:5]]
+
+
 # --- overlay clock/range summary fragment ---------------------------------
 
 

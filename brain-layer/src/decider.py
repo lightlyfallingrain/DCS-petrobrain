@@ -30,8 +30,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from ollama_client import OllamaClient
+from final_reply import final_to_dict, parse_final_text
+from ollama_client import OllamaClient, OllamaRequestError
 from prompts import render_classify_prompt, render_discriminate_prompt
+from tool_loop_prompts import (
+    build_system_prompt,
+    build_user_message,
+    tool_to_json_schema,
+)
 
 #: D11's closed set, minus `NO_LINE_OF_SIGHT` -- that reason needs a real
 #: world-model LOS call this module has no access to (the payload crossing
@@ -278,3 +284,125 @@ class OllamaDecider:
             num_predict=self.num_predict,
         )
         return _parse_discriminate_reply(raw)
+
+
+#: `brain-layer/research/2026-11-12-tool-call-form.md` conclusion 2/4 --
+#: Stage 0's measured `num_ctx` (the largest prompt seen was 1801 tokens
+#: at this value, with headroom) and round cap. `TOOL_LOOP_NUM_CTX`
+#: deliberately does not reuse `DEFAULT_NUM_CTX` above (BR-1's own 2048,
+#: measured against a ~155-token prompt) even though the numbers
+#: coincide today -- the two are independent measurements against very
+#: different prompt sizes, and a future change to one must not silently
+#: move the other.
+TOOL_LOOP_NUM_CTX = 2048
+
+#: Conclusion 3 -- `BRAIN_MAX_TOOL_ROUNDS`' body-side default (plan D9).
+#: brain-layer has no tuning loader (root `CLAUDE.md`'s "Outside
+#: body-layer the loader does not exist yet"), so this stays a plain
+#: literal; noted here as wanting the mechanism if this subproject ever
+#: grows one.
+TOOL_LOOP_MAX_ROUNDS = 4
+
+#: Generous relative to a `FINAL ...` line's own length (~20-60 tokens
+#: measured) -- large enough that a `BECAUSE`/slots clause is never cut
+#: off mid-line, small enough that a runaway generation is still capped,
+#: same reasoning as `DEFAULT_NUM_PREDICT` above but sized for this
+#: prompt's longer closed vocabulary (four final forms, not one).
+TOOL_LOOP_NUM_PREDICT = 120
+
+#: Per-round network timeout for the tool loop's own `OllamaClient`
+#: instance -- independent of `ollama_client.DEFAULT_TIMEOUT_S` (5.0s,
+#: BR-1's own two-call-per-decide budget) because a tool-loop turn can
+#: run up to `TOOL_LOOP_MAX_ROUNDS + 1` rounds, each needing to fit
+#: inside `server.py`'s own `DEFAULT_DECIDE_TIMEOUT_S` (12.0s) -- a
+#: single round, not the whole turn, is what `decide()` is called for
+#: (D1: each round is its own `POST /escalate`), so this is sized the
+#: same as a BR-1 round rather than the whole turn's budget. Plain
+#: literal, same "no tuning loader here" note as the two constants
+#: above.
+TOOL_LOOP_TIMEOUT_S = 5.0
+
+
+@dataclass
+class ToolLoopDecider:
+    """`plans/brain-tool-calls/plan.md` D1's `Decider` for `mode ==
+    "addressed"` -- one `decide()` call is one round (D1: brain-layer is
+    stateless across rounds; body-layer's `steps`/`round` carry the
+    turn's own history on the wire, re-sent every POST). Builds the
+    system prompt once per call from `payload["tools"]`/`["commands"]`
+    (byte-stable within a turn, R3 -- `tools` never changes process-wide
+    and `commands` is `()` throughout Stage 2) and the user message from
+    `payload["transcript"]`/`["situational_header"]`/`["steps"]`, then
+    calls Ollama's native `/api/chat` `tools` (Stage 0's measured
+    winner -- `brain-layer/research/2026-11-12-tool-call-form.md`
+    conclusion 1).
+
+    Returns one of the wire shapes `belief.escalation.BrainReply`
+    decodes: `{"kind": "tool_call", "tool": ..., "args": ...}` from a
+    native `tool_calls` entry, or `final_reply.final_to_dict`'s dict
+    from a `FINAL ...` line in `content`. **Never raises and never
+    invents** -- a transport failure (`OllamaRequestError`, Ollama
+    itself unreachable or wedged) degrades to `{"kind": "unable",
+    "reason": "NO_BRAIN"}`, D4's own wording for exactly this case ("If
+    brain-layer is up but Ollama is not, brain-layer replies `unable
+    NO_BRAIN`" -- body's *own* `available()` check guards the other
+    half, "brain-layer itself is down"), and a malformed/multi-tool-call
+    reply degrades to `{"kind": "ask"}` so body's own D3 validator (which
+    has the actual candidate set to render from) decides what "ask" ends
+    up meaning rather than this decider guessing at refs it cannot see."""
+
+    model: str
+    ollama_client: OllamaClient = field(default_factory=OllamaClient)
+    num_ctx: int = TOOL_LOOP_NUM_CTX
+    num_predict: int = TOOL_LOOP_NUM_PREDICT
+
+    def decide(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tools_raw = payload.get("tools") or []
+        commands_raw = payload.get("commands") or []
+        tools = tuple(t for t in tools_raw if isinstance(t, dict))
+        commands = tuple(c for c in commands_raw if isinstance(c, dict))
+        transcript = payload.get("transcript")
+        transcript_text = transcript if isinstance(transcript, str) else ""
+        header = payload.get("situational_header")
+        header_dict = header if isinstance(header, dict) else {}
+        steps_raw = payload.get("steps") or []
+        steps = tuple(s for s in steps_raw if isinstance(s, dict))
+
+        system_prompt = build_system_prompt(tools, commands)
+        user_message = build_user_message(transcript_text, header_dict, steps)
+        native_tool_schemas = [tool_to_json_schema(tool) for tool in tools]
+
+        try:
+            result = self.ollama_client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                tools=native_tool_schemas,
+                num_ctx=self.num_ctx,
+                num_predict=self.num_predict,
+            )
+        except OllamaRequestError:
+            return {"kind": "unable", "reason": "NO_BRAIN"}
+
+        if result.tool_calls:
+            if len(result.tool_calls) != 1:
+                # D3's "one round, one tool" rule has no native-API
+                # equivalent to appeal to -- more than one call in a
+                # single reply is simply not well-formed. Degrading to
+                # `ask` (not `tool_call`) means body's own validator
+                # never sees an ambiguous multi-call reply at all.
+                return {"kind": "ask"}
+            call = result.tool_calls[0]
+            return {
+                "kind": "tool_call",
+                "tool": call.name,
+                "args": dict(call.arguments),
+            }
+
+        parsed = parse_final_text(result.content)
+        final_dict = final_to_dict(parsed)
+        if final_dict is None:
+            return {"kind": "ask"}
+        return final_dict
