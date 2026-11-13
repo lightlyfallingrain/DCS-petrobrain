@@ -215,3 +215,121 @@ fixture update matches the review's own prediction rather than working around it
 subprojects' checks pass with counts matching the implementer's log. One non-blocking note left for
 a future touch of header-ref seeding (the bench's hand-mirrored `_turn_from_case`), consistent with
 "Optional Refinements" above and not a reason to withhold approval.
+
+### Review of the security and performance fixes (a31be8c2..1b13975f)
+
+Reviewed on branch `feature/brain-tool-calls`, fast-forwarded this worktree from `415fa135` (strict
+ancestor of `1b13975f`, tree clean) to `1b13975f`. This is the change-request re-entry required by
+root `CLAUDE.md`: Security's two option-C findings and Performance Reviewer's one required
+mitigation, reviewed as ordinary new code per that rule. Diff reviewed: five commits,
+`a31be8c2..1b13975f` (`5011349f`, `023b1fed`, `4d021768`, `9d3e944c`, `1b13975f`).
+
+Inputs read in full: `plans/brain-tool-calls/security-review.md` (findings 1 and 2, both option C),
+`plans/brain-tool-calls/performance-review.md` (the required enrich-before-cap mitigation),
+`implementation.md`'s "Security fixes" and "Performance fix" sections, this file's own prior review
+and re-review above.
+
+**Security fix 1 (BR-B2/BR-B3).** `brain-layer/src/server.py`'s new `_read_body` is the same shape
+as `audio-adapter/src/server.py`'s own — read side by side, both reject a non-numeric or negative
+`Content-Length` with a clean `400` before `rfile.read` is ever touched, and brain-layer's version
+adds only the declared-length cap `audio-adapter`'s single-utterance bodies don't need. A ported
+guard, not a third variant. `test_escalate_non_numeric_content_length_returns_400_without_raising`/
+`test_escalate_negative_content_length_returns_400`/`test_escalate_oversized_content_length_
+returns_400` exercise this over a real HTTP round trip (`running_server` fixture) — a 400 with a
+JSON body, not an uncaught exception, and `test_escalate_valid_content_length_still_succeeds`
+confirms the legitimate path (202) is unaffected. `ollama_client.OllamaClient._post_json` is the
+one method `generate()`, `generate_with_usage()`, and `chat()` all route through (read the class:
+`generate()` calls `generate_with_usage()`, which calls `_post_json`; `chat()` calls `_post_json`
+directly) — the byte cap at `response.read(MAX_OLLAMA_RESPONSE_BYTES + 1)` plus the
+over-cap-raises check covers all three, confirmed by dedicated tests for `generate()` and `chat()`
+plus an under-cap success case. Both constants (`MAX_ESCALATE_BODY_BYTES`,
+`MAX_OLLAMA_RESPONSE_BYTES`) carry a `#:` comment explicitly noting they are behaviour-affecting
+and would want the tuning mechanism, with the stated reason (`brain-layer` has no loader yet) —
+correct per the Implementer's standing instruction for this case. **Nothing left unbounded on this
+path**: `rfile.read(length)` is bounded by the now-capped `length`; `json.loads(raw)` on the
+Ollama side parses at most `MAX_OLLAMA_RESPONSE_BYTES + 1` bytes (1 MiB), cheap. The pruned
+`ollama_client.py` docstring paragraph is a correct prune — it stated a now-false claim
+("`chat()` reproduces `generate()`'s own unbounded `response.read()`"), and the replacement
+correctly describes the shared, now-fixed path; nothing durable was lost (no date, no verbatim
+user quote, no measurement).
+
+**Security fix 2 (uncaught-exception gap).** The `except Exception` in `_handle_brain_tool_call`
+wraps exactly the single `self.run_brain_tool(...)` call — not validation (`validate_tool_call`
+runs outside the `try`), not the round-cap degrade path, not `turn.offered`/`turn.candidate_sets`/
+`turn.steps` bookkeeping, all of which stay outside the guard and still fail loudly if something
+there is wrong. The turn is popped (`self._brain_turns.pop(reply.utterance_id, None)`) before
+speaking the degrade, so a later utterance gets a fresh turn rather than colliding with a dead one.
+`test_run_brain_tool_raising_ends_the_turn_and_logs_rather_than_propagating` genuinely asserts the
+logged exception (`caplog` at `ERROR`, checks the message or `exc_info is not None`) and drives a
+second, unrelated utterance afterward to completion — not just that the first call returned
+cleanly. `logger.exception` is the same call shape `body.py`'s own poll-loop guards use
+(`"live LOS coverage summary failed (ignoring)"`, `"crew-text poll cycle failed; continuing"`) —
+consistent, not a new logging convention.
+
+**Performance fix.** Read `belief.tools.get_contacts`/`find_contact`: `limit=None` is the default
+and the only new code path is `if limit is not None: contacts = contacts[:limit]` / `matches =
+matches[:limit]`, placed after the existing sort and strictly before the enrichment comprehension
+— for `limit=None` this is a no-op, so every existing caller (`report_all`, the phrasebook
+`report`/`watch` loops) is byte-for-byte unaffected; confirmed by reading the diff rather than
+assuming it. The two adapters (`_find_contact_adapter`/`_list_contacts_adapter`) compute `total`
+from an unenriched call (`enrichment` omitted) and `shown` from the enriched, capped call;
+`_contact_result`'s own `enrichment` parameter gates `_add_enrichment_facts` entirely (confirmed in
+`tools.py`), so the unenriched count call never touches the world-model connection — genuinely
+cheap, not just asserted to be. Both calls share the same deterministic filter/sort logic (only
+`enrichment`/`limit` differ between them), so `total >= len(shown)` always holds and `extra =
+max(0, total - len(shown))` is never actually clamping a negative value in practice — the `max(0,
+...)` is defensive, not masking a real miscount. Ordering is preserved because the cap is applied
+after the pre-existing `sorted(..., key=lambda c: c.last_seen_sim, reverse=True)` — exactly as
+claimed, and `test_get_contacts_limit_preserves_most_recently_seen_first_ordering`/the `find_contact`
+twin verify this directly against the unlimited call's own first-N, not by assumption. The call-count
+tests genuinely count `describe_position` invocations via a monkeypatch counter (`test_tools.py`'s
+`_counting_enrichment_context`), not something that would pass trivially: `limit=5` on a 50-contact
+store asserts exactly 5 calls, `limit=None` asserts exactly 50 — both directions checked, and the
+`test_brain_tool_loop.py` pair exercises this through the real registered `BrainTool`s
+(`BRAIN_TOOLS_BY_NAME`), not `belief.tools` directly, with the same assertion plus the "and N more"
+summary text.
+
+**Backlog bookkeeping.** `BR-B2`/`BR-B3` are marked `[x]`/`#status/done` in
+`brain-layer/ROADMAP/BR-B2.md`/`BR-B3.md` with a resolution line naming this branch. The dispatch
+named `todo/backlog/BR-B2.md`/`BR-B3.md`, which do not exist — the implementer correctly found and
+fixed the real location instead of creating a duplicate pair, and said so in `implementation.md`.
+`brain-layer/ROADMAP/brain-layer-roadmap.md` (the index) correctly carries no status marker next to
+either entry — that file's own "Keeping this current" section states status lives only on the
+entry file, never the index, so no index edit was owed here.
+
+**Checks (independently re-run in this worktree, fresh, not taken from any log):**
+
+- `body-layer`: `ruff format --check src tests` — pass. `ruff check src tests` — pass. `mypy src`
+  (strict, 82 files) — pass. `pytest -q` — **3274 passed, 4 xfailed** (matches the implementer's
+  claimed count exactly).
+- `brain-layer`: `ruff format --check src tests` — pass (the one reformat `ruff format --check`
+  reports, `tools/live_cross_process_check.py`, is pre-existing and untouched by this diff —
+  confirmed via `git diff` — per the dispatch's own note, ignored). `ruff check src tests tools` —
+  pass. `mypy src` (strict, 9 files) — pass. `pytest -q` — **96 passed** (matches the implementer's
+  figure once the four new security tests plus three others from the batch are accounted for —
+  consistent with growth from 89 at the prior review to 96 here).
+- `audio-adapter`: `ruff format --check src tests` — pass. `ruff check src tests` — pass.
+  `mypy src` (strict, 16 files) — pass. `pytest -q` — **391 passed, 2 skipped** (the two skips are
+  the pre-existing env-var-gated live-binary/live-Piper classes, unrelated to this diff).
+
+### Verdict (security/performance fix re-review)
+
+**APPROVED.** Security fix 1 ports the existing guard shape rather than inventing a third variant,
+covers `generate`/`generate_with_usage`/`chat` uniformly, and leaves nothing unbounded downstream
+of the cap; the two new constants are correctly flagged for the tuning mechanism that doesn't yet
+exist in this subproject. Security fix 2's guard is scoped to exactly the one call that needed it,
+pops the turn so the console stays usable, and is proven by a test that drives a second utterance
+through afterward rather than just asserting no crash. The performance fix's `limit=None` path is a
+genuine no-op confirmed by reading the diff, the unenriched count call is cheap by construction (no
+world-model touch), the count is correct because both calls share one deterministic filter, and
+ordering/call-count are each verified by a dedicated test rather than assumed. Backlog bookkeeping
+correctly located and fixed the real files instead of the ones the dispatch named. All three
+subprojects' format/lint/type/test commands pass, fresh in this worktree.
+
+No required fixes. No optional refinements beyond what the earlier review already logged.
+
+### Review Confidence (security/performance fix re-review)
+
+Full read — all five commits' diffs read in full, every named test read and evaluated for whether
+it could pass trivially (none can), and all three subprojects' checks re-run fresh rather than
+taken from any prior log.
