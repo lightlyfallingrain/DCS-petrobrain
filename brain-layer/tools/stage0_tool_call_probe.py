@@ -49,7 +49,7 @@ import re
 import statistics
 import time
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -118,6 +118,12 @@ class CaseFile:
     tools: tuple[ToolSpec, ...]
     commands: tuple[str, ...]
     cases: tuple[Case, ...]
+    #: Optional one-line meaning per command token, rendered beside it.
+    #: Added after the first Mac run: with bare tokens the model picked
+    #: `watch_nearest {target}` for "keep an eye on the tank" (the slot
+    #: belongs to `follow`). Stage 2's `BRAIN_COMMANDS` carries this as
+    #: the slot schema + description, so the probe should too.
+    command_notes: dict[str, str] = field(default_factory=dict)
 
 
 def load_case_file(path: Path) -> CaseFile:
@@ -139,6 +145,7 @@ def load_case_file(path: Path) -> CaseFile:
         for tool in data["tools"]
     )
     commands = tuple(data["commands"])
+    command_notes = {str(k): str(v) for k, v in data.get("command_notes", {}).items()}
     cases = tuple(
         Case(
             id=case["id"],
@@ -157,7 +164,9 @@ def load_case_file(path: Path) -> CaseFile:
         )
         for case in data["cases"]
     )
-    return CaseFile(tools=tools, commands=commands, cases=cases)
+    return CaseFile(
+        tools=tools, commands=commands, cases=cases, command_notes=command_notes
+    )
 
 
 # --------------------------------------------------------------------------
@@ -188,8 +197,21 @@ def render_tool_block(tools: tuple[ToolSpec, ...]) -> str:
     return "\n".join(lines)
 
 
-def render_command_block(commands: tuple[str, ...]) -> str:
-    return ", ".join(commands)
+def render_command_block(
+    commands: tuple[str, ...], notes: dict[str, str] | None = None
+) -> str:
+    notes = notes or {}
+    if not notes:
+        return ", ".join(commands)
+    # Tokens with a note get a line each; the rest (the report_clock_*
+    # family and the like) stay one comma-joined line so the block does
+    # not grow past what a 4B model will read.
+    noted = [f"- {token} -- {notes[token]}" for token in commands if token in notes]
+    bare = [token for token in commands if token not in notes]
+    lines = noted
+    if bare:
+        lines.append("- also, no target: " + ", ".join(bare))
+    return "\n".join(lines)
 
 
 def render_header_block(header: dict[str, Any]) -> str:
@@ -258,6 +280,7 @@ Rules:
 - The header below lists only what has already been offered this turn. It is EMPTY at the start of most turns. An empty header never means "nothing out there": if the pilot asks about something the header does not contain, CALL a tool first. That is how you find out.
 - Every ref you name must be one offered to you this turn, in the header or in a tool's observation. Never invent a ref, a position, a bearing or a range.
 - Do not reply FINAL unable just because the header is empty. Reply FINAL unable only for the three reasons above.
+- Never repeat a call that is already listed under "So far this turn": its observation is there, use it. If a place is offered, the next step is list_contacts with a filter naming it, or a FINAL.
 
 Examples (header empty each time):
 Pilot said: "Petrovich, where's the BMP?"          -> CALL find_contact {"text": "bmp"}
@@ -273,12 +296,15 @@ Reply with EXACTLY ONE line, nothing else, no explanation, no markdown, no think
 
 
 def build_system_prompt(
-    tools: tuple[ToolSpec, ...], commands: tuple[str, ...], form: str
+    tools: tuple[ToolSpec, ...],
+    commands: tuple[str, ...],
+    form: str,
+    command_notes: dict[str, str] | None = None,
 ) -> str:
     """Byte-stable across every round and every case run in `form` --
     see the module docstring's note on why nothing case-specific is
     allowed in here."""
-    command_block = f"\n\nCommands you may issue as a FINAL command, and no others:\n{render_command_block(commands)}"
+    command_block = f"\n\nCommands you may issue as a FINAL command, and no others:\n{render_command_block(commands, command_notes)}"
     if form == "grammar":
         call_block = (
             "\n\nTools you may call -- to use one, reply with ONE line of the form:\n"
@@ -798,7 +824,9 @@ def main(argv: list[str] | None = None) -> int:
 
     all_results: list[CaseRunResult] = []
     for form in forms:
-        system_prompt = build_system_prompt(case_file.tools, case_file.commands, form)
+        system_prompt = build_system_prompt(
+            case_file.tools, case_file.commands, form, case_file.command_notes
+        )
         native_schemas = (
             [tool_to_json_schema(tool) for tool in case_file.tools]
             if form == "native"

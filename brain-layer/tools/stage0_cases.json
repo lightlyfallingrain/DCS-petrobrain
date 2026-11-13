@@ -1,40 +1,62 @@
 {
   "_comment": "Acceptance fixture for plans/brain-tool-calls/plan.md Stage 0 (brain-layer/tools/stage0_tool_call_probe.py). One case per bullet of the plan's 'Acceptance set (A1 categories)' section. `tools` and `commands` are shared across every case (D5: the same 7 query tools and the same BRAIN_COMMANDS allowlist are offered on every turn). No raw x/z coordinates anywhere in this file, per D2 -- positions are clock/range/landmark text only.",
-
   "tools": [
     {
       "name": "find_contact",
       "description": "Find a contact matching a short description (class, colloquial name, or landmark).",
       "params": [
-        {"name": "text", "kind": "str", "required": true, "max_len": 40}
+        {
+          "name": "text",
+          "kind": "str",
+          "required": true,
+          "max_len": 40
+        }
       ]
     },
     {
       "name": "list_contacts",
       "description": "List known contacts, optionally filtered by class, place or freshness.",
       "params": [
-        {"name": "filter", "kind": "str", "required": false, "max_len": 40}
+        {
+          "name": "filter",
+          "kind": "str",
+          "required": false,
+          "max_len": 40
+        }
       ]
     },
     {
       "name": "describe_contact",
       "description": "Describe one already-offered contact in detail: class, group, motion, nearest landmark.",
       "params": [
-        {"name": "contact_ref", "kind": "contact_ref", "required": true}
+        {
+          "name": "contact_ref",
+          "kind": "contact_ref",
+          "required": true
+        }
       ]
     },
     {
       "name": "get_contact_history",
       "description": "When an already-offered contact was last observed.",
       "params": [
-        {"name": "contact_ref", "kind": "contact_ref", "required": true}
+        {
+          "name": "contact_ref",
+          "kind": "contact_ref",
+          "required": true
+        }
       ]
     },
     {
       "name": "find_place",
       "description": "Find a named place (settlement, landmark) on the map.",
       "params": [
-        {"name": "text", "kind": "str", "required": true, "max_len": 40}
+        {
+          "name": "text",
+          "kind": "str",
+          "required": true,
+          "max_len": 40
+        }
       ]
     },
     {
@@ -46,20 +68,45 @@
       "name": "recall_memory",
       "description": "Recall pilot-marked locations (mission memory), optionally filtered by kind or nearness to a place or to ownship.",
       "params": [
-        {"name": "kind", "kind": "str", "required": false, "max_len": 40},
-        {"name": "near", "kind": "str", "required": false, "max_len": 40},
-        {"name": "include_struck", "kind": "bool", "required": false}
+        {
+          "name": "kind",
+          "kind": "str",
+          "required": false,
+          "max_len": 40
+        },
+        {
+          "name": "near",
+          "kind": "str",
+          "required": false,
+          "max_len": 40
+        },
+        {
+          "name": "include_struck",
+          "kind": "bool",
+          "required": false
+        }
       ]
     }
   ],
-
   "commands": [
     "report",
     "report_all",
-    "report_clock_1", "report_clock_2", "report_clock_3", "report_clock_4",
-    "report_clock_5", "report_clock_6", "report_clock_7", "report_clock_8",
-    "report_clock_9", "report_clock_10", "report_clock_11", "report_clock_12",
-    "report_bearing_north", "report_bearing_south", "report_bearing_east", "report_bearing_west",
+    "report_clock_1",
+    "report_clock_2",
+    "report_clock_3",
+    "report_clock_4",
+    "report_clock_5",
+    "report_clock_6",
+    "report_clock_7",
+    "report_clock_8",
+    "report_clock_9",
+    "report_clock_10",
+    "report_clock_11",
+    "report_clock_12",
+    "report_bearing_north",
+    "report_bearing_south",
+    "report_bearing_east",
+    "report_bearing_west",
     "where_is_it",
     "follow",
     "select_target",
@@ -72,7 +119,21 @@
     "cancel_scan",
     "cancel_watch"
   ],
-
+  "command_notes": {
+    "where_is_it": "{\"target\": ref} -- tell the pilot where that one contact is (bearing and range are rendered for you)",
+    "follow": "{\"target\": ref} -- keep an eye on that one contact (\"keep an eye on\", \"watch that\", \"track\")",
+    "select_target": "{\"target\": ref} -- make that contact the selected target",
+    "mark_target": "{\"target\": ref} -- remember that contact's position as a mark",
+    "drop_target": "no target -- forget the selected target",
+    "mark_here": "no target -- remember our own position as a mark",
+    "watch_nearest": "no target -- watch whichever contact is nearest",
+    "watch_nearest_air_defence": "no target -- watch the nearest air-defence contact",
+    "report": "no target -- a general contact report",
+    "report_all": "no target -- report every contact",
+    "cancel_task": "no target -- stop whatever task is running",
+    "cancel_scan": "no target -- stop scanning",
+    "cancel_watch": "no target -- stop watching"
+  },
   "cases": [
     {
       "id": "A1_where_one_shilka",
@@ -86,19 +147,38 @@
       "observations": [
         {
           "tool": "find_contact",
-          "args_hint": {"text": "shilka"},
+          "args_hint": {
+            "text": "shilka"
+          },
           "observation": {
             "summary": "one match: a Shilka, 2 o'clock, 3 km, south of the road",
-            "handles": ["CONTACT_1"],
+            "handles": [
+              "CONTACT_1"
+            ],
             "candidates": [
-              {"ref": "CONTACT_1", "class": "Shilka", "certainty": "observed", "clock": "2 o'clock", "range_text": "3 km", "landmark": "south of the road"}
+              {
+                "ref": "CONTACT_1",
+                "class": "Shilka",
+                "certainty": "observed",
+                "clock": "2 o'clock",
+                "range_text": "3 km",
+                "landmark": "south of the road"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_contact"}],
-        "final": {"kind": "command", "token": "where_is_it", "target": "CONTACT_1"}
+        "steps": [
+          {
+            "tool": "find_contact"
+          }
+        ],
+        "final": {
+          "kind": "command",
+          "token": "where_is_it",
+          "target": "CONTACT_1"
+        }
       }
     },
     {
@@ -113,20 +193,47 @@
       "observations": [
         {
           "tool": "find_contact",
-          "args_hint": {"text": "shilka"},
+          "args_hint": {
+            "text": "shilka"
+          },
           "observation": {
             "summary": "two matches: a Shilka near the village, and a Shilka on the ridge",
-            "handles": ["CONTACT_2", "CONTACT_3"],
+            "handles": [
+              "CONTACT_2",
+              "CONTACT_3"
+            ],
             "candidates": [
-              {"ref": "CONTACT_2", "class": "Shilka", "certainty": "observed", "clock": "10 o'clock", "range_text": "4 km", "landmark": "near the village"},
-              {"ref": "CONTACT_3", "class": "Shilka", "certainty": "observed", "clock": "1 o'clock", "range_text": "5 km", "landmark": "on the ridge"}
+              {
+                "ref": "CONTACT_2",
+                "class": "Shilka",
+                "certainty": "observed",
+                "clock": "10 o'clock",
+                "range_text": "4 km",
+                "landmark": "near the village"
+              },
+              {
+                "ref": "CONTACT_3",
+                "class": "Shilka",
+                "certainty": "observed",
+                "clock": "1 o'clock",
+                "range_text": "5 km",
+                "landmark": "on the ridge"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_contact"}],
-        "final": {"kind": "command", "token": "where_is_it", "target": "CONTACT_2"}
+        "steps": [
+          {
+            "tool": "find_contact"
+          }
+        ],
+        "final": {
+          "kind": "command",
+          "token": "where_is_it",
+          "target": "CONTACT_2"
+        }
       }
     },
     {
@@ -141,19 +248,38 @@
       "observations": [
         {
           "tool": "find_contact",
-          "args_hint": {"text": "shilka"},
+          "args_hint": {
+            "text": "shilka"
+          },
           "observation": {
             "summary": "one match: a Shilka, last seen 11 o'clock, 6 km, not seen for four minutes",
-            "handles": ["CONTACT_4"],
+            "handles": [
+              "CONTACT_4"
+            ],
             "candidates": [
-              {"ref": "CONTACT_4", "class": "Shilka", "certainty": "not seen for four minutes", "clock": "11 o'clock", "range_text": "6 km", "landmark": "near the crossroads"}
+              {
+                "ref": "CONTACT_4",
+                "class": "Shilka",
+                "certainty": "not seen for four minutes",
+                "clock": "11 o'clock",
+                "range_text": "6 km",
+                "landmark": "near the crossroads"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_contact"}],
-        "final": {"kind": "command", "token": "where_is_it", "target": "CONTACT_4"}
+        "steps": [
+          {
+            "tool": "find_contact"
+          }
+        ],
+        "final": {
+          "kind": "command",
+          "token": "where_is_it",
+          "target": "CONTACT_4"
+        }
       }
     },
     {
@@ -162,7 +288,15 @@
       "utterance": "Petrovich, where is it?",
       "header": {
         "contacts": [
-          {"ref": "CONTACT_5", "class": "BMP", "certainty": "observed", "clock": "3 o'clock", "range_text": "2 km", "landmark": "by the bridge", "last_mentioned": true}
+          {
+            "ref": "CONTACT_5",
+            "class": "BMP",
+            "certainty": "observed",
+            "clock": "3 o'clock",
+            "range_text": "2 km",
+            "landmark": "by the bridge",
+            "last_mentioned": true
+          }
         ],
         "places": [],
         "marks": []
@@ -170,7 +304,11 @@
       "observations": [],
       "expected": {
         "steps": [],
-        "final": {"kind": "command", "token": "where_is_it", "target": "CONTACT_5"}
+        "final": {
+          "kind": "command",
+          "token": "where_is_it",
+          "target": "CONTACT_5"
+        }
       }
     },
     {
@@ -185,29 +323,71 @@
       "observations": [
         {
           "tool": "find_place",
-          "args_hint": {"text": "gemerek"},
+          "args_hint": {
+            "text": "gemerek"
+          },
           "observation": {
             "summary": "found: Gemerek",
-            "handles": ["PLACE_1"],
-            "places": [{"ref": "PLACE_1", "name": "Gemerek"}]
+            "handles": [
+              "PLACE_1"
+            ],
+            "places": [
+              {
+                "ref": "PLACE_1",
+                "name": "Gemerek"
+              }
+            ]
           }
         },
         {
           "tool": "list_contacts",
-          "args_hint": {"filter": "near PLACE_1"},
+          "args_hint": {
+            "filter": "near PLACE_1"
+          },
           "observation": {
             "summary": "two contacts near Gemerek: a T-72 and a BTR",
-            "handles": ["CONTACT_6", "CONTACT_7"],
+            "handles": [
+              "CONTACT_6",
+              "CONTACT_7"
+            ],
             "candidates": [
-              {"ref": "CONTACT_6", "class": "T-72", "certainty": "observed", "clock": "12 o'clock", "range_text": "5 km", "landmark": "north of Gemerek"},
-              {"ref": "CONTACT_7", "class": "BTR", "certainty": "observed", "clock": "1 o'clock", "range_text": "5.5 km", "landmark": "north of Gemerek"}
+              {
+                "ref": "CONTACT_6",
+                "class": "T-72",
+                "certainty": "observed",
+                "clock": "12 o'clock",
+                "range_text": "5 km",
+                "landmark": "north of Gemerek"
+              },
+              {
+                "ref": "CONTACT_7",
+                "class": "BTR",
+                "certainty": "observed",
+                "clock": "1 o'clock",
+                "range_text": "5.5 km",
+                "landmark": "north of Gemerek"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_place"}, {"tool": "list_contacts"}],
-        "final": {"kind": "answer", "form": "contacts", "refs": ["CONTACT_6", "CONTACT_7"]}
+        "steps": [
+          {
+            "tool": "find_place"
+          },
+          {
+            "tool": "list_contacts"
+          }
+        ],
+        "final": {
+          "kind": "answer",
+          "form": "contacts",
+          "refs": [
+            "CONTACT_6",
+            "CONTACT_7"
+          ]
+        }
       }
     },
     {
@@ -222,16 +402,27 @@
       "observations": [
         {
           "tool": "find_place",
-          "args_hint": {"text": "gemerek"},
+          "args_hint": {
+            "text": "gemerek"
+          },
           "observation": {
             "summary": "found: Gemerek",
-            "handles": ["PLACE_2"],
-            "places": [{"ref": "PLACE_2", "name": "Gemerek"}]
+            "handles": [
+              "PLACE_2"
+            ],
+            "places": [
+              {
+                "ref": "PLACE_2",
+                "name": "Gemerek"
+              }
+            ]
           }
         },
         {
           "tool": "list_contacts",
-          "args_hint": {"filter": "south of PLACE_2"},
+          "args_hint": {
+            "filter": "south of PLACE_2"
+          },
           "observation": {
             "summary": "nothing seen south of Gemerek",
             "handles": [],
@@ -240,8 +431,18 @@
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_place"}, {"tool": "list_contacts"}],
-        "final": {"kind": "answer", "form": "nothing_seen"}
+        "steps": [
+          {
+            "tool": "find_place"
+          },
+          {
+            "tool": "list_contacts"
+          }
+        ],
+        "final": {
+          "kind": "answer",
+          "form": "nothing_seen"
+        }
       }
     },
     {
@@ -256,7 +457,9 @@
       "observations": [
         {
           "tool": "find_place",
-          "args_hint": {"text": "bridge"},
+          "args_hint": {
+            "text": "bridge"
+          },
           "observation": {
             "summary": "no place matching \"bridge\"",
             "handles": [],
@@ -265,8 +468,15 @@
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_place"}],
-        "final": {"kind": "unable", "reason": "NO_PLACE"}
+        "steps": [
+          {
+            "tool": "find_place"
+          }
+        ],
+        "final": {
+          "kind": "unable",
+          "reason": "NO_PLACE"
+        }
       }
     },
     {
@@ -289,8 +499,15 @@
         }
       ],
       "expected": {
-        "steps": [{"tool": "describe_our_position"}],
-        "final": {"kind": "answer", "form": "our_position"}
+        "steps": [
+          {
+            "tool": "describe_our_position"
+          }
+        ],
+        "final": {
+          "kind": "answer",
+          "form": "our_position"
+        }
       }
     },
     {
@@ -300,7 +517,12 @@
       "header": {
         "contacts": [],
         "places": [],
-        "marks": [{"ref": "MARK_1", "label": "mark one"}]
+        "marks": [
+          {
+            "ref": "MARK_1",
+            "label": "mark one"
+          }
+        ]
       },
       "observations": [
         {
@@ -308,14 +530,34 @@
           "args_hint": {},
           "observation": {
             "summary": "mark one: 6 o'clock, 4 km, by Gemerek",
-            "handles": ["MARK_1"],
-            "memory_entries": [{"ref": "MARK_1", "label": "mark one", "clock": "6 o'clock", "range_text": "4 km", "landmark": "by Gemerek"}]
+            "handles": [
+              "MARK_1"
+            ],
+            "memory_entries": [
+              {
+                "ref": "MARK_1",
+                "label": "mark one",
+                "clock": "6 o'clock",
+                "range_text": "4 km",
+                "landmark": "by Gemerek"
+              }
+            ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "recall_memory"}],
-        "final": {"kind": "answer", "form": "memory", "refs": ["MARK_1"]}
+        "steps": [
+          {
+            "tool": "recall_memory"
+          }
+        ],
+        "final": {
+          "kind": "answer",
+          "form": "memory",
+          "refs": [
+            "MARK_1"
+          ]
+        }
       }
     },
     {
@@ -325,7 +567,16 @@
       "header": {
         "contacts": [],
         "places": [],
-        "marks": [{"ref": "MARK_1", "label": "mark one"}, {"ref": "MARK_2", "label": "fuel depot"}]
+        "marks": [
+          {
+            "ref": "MARK_1",
+            "label": "mark one"
+          },
+          {
+            "ref": "MARK_2",
+            "label": "fuel depot"
+          }
+        ]
       },
       "observations": [
         {
@@ -333,17 +584,43 @@
           "args_hint": {},
           "observation": {
             "summary": "two marks: mark one, by Gemerek; fuel depot, on the ridge",
-            "handles": ["MARK_1", "MARK_2"],
+            "handles": [
+              "MARK_1",
+              "MARK_2"
+            ],
             "memory_entries": [
-              {"ref": "MARK_1", "label": "mark one", "clock": "6 o'clock", "range_text": "4 km", "landmark": "by Gemerek"},
-              {"ref": "MARK_2", "label": "fuel depot", "clock": "9 o'clock", "range_text": "7 km", "landmark": "on the ridge"}
+              {
+                "ref": "MARK_1",
+                "label": "mark one",
+                "clock": "6 o'clock",
+                "range_text": "4 km",
+                "landmark": "by Gemerek"
+              },
+              {
+                "ref": "MARK_2",
+                "label": "fuel depot",
+                "clock": "9 o'clock",
+                "range_text": "7 km",
+                "landmark": "on the ridge"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "recall_memory"}],
-        "final": {"kind": "answer", "form": "memory", "refs": ["MARK_1", "MARK_2"]}
+        "steps": [
+          {
+            "tool": "recall_memory"
+          }
+        ],
+        "final": {
+          "kind": "answer",
+          "form": "memory",
+          "refs": [
+            "MARK_1",
+            "MARK_2"
+          ]
+        }
       }
     },
     {
@@ -352,8 +629,22 @@
       "utterance": "Petrovich, which one's the BMP?",
       "header": {
         "contacts": [
-          {"ref": "CONTACT_8", "class": "T-72", "certainty": "observed", "clock": "11 o'clock", "range_text": "3 km", "landmark": "near the crossroads"},
-          {"ref": "CONTACT_9", "class": "BMP", "certainty": "observed", "clock": "1 o'clock", "range_text": "3.5 km", "landmark": "on the road"}
+          {
+            "ref": "CONTACT_8",
+            "class": "T-72",
+            "certainty": "observed",
+            "clock": "11 o'clock",
+            "range_text": "3 km",
+            "landmark": "near the crossroads"
+          },
+          {
+            "ref": "CONTACT_9",
+            "class": "BMP",
+            "certainty": "observed",
+            "clock": "1 o'clock",
+            "range_text": "3.5 km",
+            "landmark": "on the road"
+          }
         ],
         "places": [],
         "marks": []
@@ -361,7 +652,13 @@
       "observations": [],
       "expected": {
         "steps": [],
-        "final": {"kind": "answer", "form": "contacts", "refs": ["CONTACT_9"]}
+        "final": {
+          "kind": "answer",
+          "form": "contacts",
+          "refs": [
+            "CONTACT_9"
+          ]
+        }
       }
     },
     {
@@ -376,19 +673,38 @@
       "observations": [
         {
           "tool": "find_contact",
-          "args_hint": {"text": "tank"},
+          "args_hint": {
+            "text": "tank"
+          },
           "observation": {
             "summary": "one match: a T-72, by the village",
-            "handles": ["CONTACT_10"],
+            "handles": [
+              "CONTACT_10"
+            ],
             "candidates": [
-              {"ref": "CONTACT_10", "class": "T-72", "certainty": "observed", "clock": "12 o'clock", "range_text": "2.5 km", "landmark": "by the village"}
+              {
+                "ref": "CONTACT_10",
+                "class": "T-72",
+                "certainty": "observed",
+                "clock": "12 o'clock",
+                "range_text": "2.5 km",
+                "landmark": "by the village"
+              }
             ]
           }
         }
       ],
       "expected": {
-        "steps": [{"tool": "find_contact"}],
-        "final": {"kind": "command", "token": "follow", "target": "CONTACT_10"}
+        "steps": [
+          {
+            "tool": "find_contact"
+          }
+        ],
+        "final": {
+          "kind": "command",
+          "token": "follow",
+          "target": "CONTACT_10"
+        }
       }
     },
     {
@@ -403,7 +719,10 @@
       "observations": [],
       "expected": {
         "steps": [],
-        "final": {"kind": "unable", "reason": "FIXED_COMMAND_ONLY"}
+        "final": {
+          "kind": "unable",
+          "reason": "FIXED_COMMAND_ONLY"
+        }
       }
     },
     {
@@ -418,7 +737,10 @@
       "observations": [],
       "expected": {
         "steps": [],
-        "final": {"kind": "unable", "reason": "FIXED_COMMAND_ONLY"}
+        "final": {
+          "kind": "unable",
+          "reason": "FIXED_COMMAND_ONLY"
+        }
       }
     },
     {
@@ -433,7 +755,10 @@
       "observations": [],
       "expected": {
         "steps": [],
-        "final": {"kind": "unable", "reason": "CANNOT_ANSWER"}
+        "final": {
+          "kind": "unable",
+          "reason": "CANNOT_ANSWER"
+        }
       }
     }
   ]
