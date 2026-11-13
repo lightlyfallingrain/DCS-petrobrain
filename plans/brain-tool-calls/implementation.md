@@ -287,3 +287,217 @@ the `NO_BRAIN` path).
   add two more such threads to the same pre-existing pool rather than a new category of hazard.
   Flagging for whoever next touches test isolation in this file, not fixing here (out of Stage 1's
   scope and would touch test infrastructure well beyond this plan).
+
+## Stage 2 (the tool loop, query tools only, template answers)
+
+### Implementation Summary
+
+Stage 2 of `plans/brain-tool-calls/plan.md`: the tool loop, D5's seven query tools, D7's template
+answer forms, and `ToolLoopDecider`. Touches two subprojects.
+
+### Files Changed
+
+**body-layer**
+- `src/belief/tool_api.py` — D2's calling convention and D5's tool surface: `ParamSpec` (kinds
+  `str`/`int`/`bool`/`enum`/`contact_ref`/`place_ref`/`memory_ref`, plus `allow_ownship` for
+  `recall_memory`'s `near`), `BrainTool`, `ToolObservation` (`summary`, `handles`,
+  `candidate_texts`), `ToolContext` (mutable `place_positions` cache, populated by `find_place`'s
+  own adapter and read by `recall_memory`'s — the one place one tool call's result feeds another's
+  input without a coordinate ever reaching the wire). `BRAIN_TOOLS` — seven hand-written adapters
+  over `tools.find_contact`/`get_contacts`/`describe_contact`/`get_contact_history_with_memory`/
+  `find_place`/`describe_our_position`/`mission_memory_tools.recall_memory`, each capped at
+  `BRAIN_TOOL_LIST_CAP` (5) with an "and N more" tail. `BrainTool.name` equals the wrapped
+  `TOOL_SET` entry's own name (`get_contacts`, not D5's illustrative "list_contacts" prose — see
+  Notable Discoveries). `RECALL_MEMORY_NEAR_RADIUS_M` is the one new tunable (`tuning.real`, 5000.0,
+  500–50000).
+- `src/belief/brain_reply.py` — `_evidence_passes` factored out of `_validate_pick` (identical
+  behaviour, now shared); `validate_tool_call` (D3: name/unknown-args/per-`ParamSpec` checks,
+  offered-ref membership, the repeated-`(tool, args)` rejection); `validate_turn_final` dispatching
+  `answer`/`command`/`ask`/`unable`; `_validate_turn_answer` (D7's four forms, the ambiguity-evidence
+  degrade reusing `_evidence_passes`); `_validate_turn_command` (Stage 3 hook, see Notable
+  Discoveries); `VALID_TURN_UNABLE_REASONS` (`NO_ANSWER`/`NO_PLACE`/`CANNOT_ANSWER`/
+  `FIXED_COMMAND_ONLY`/`NO_BRAIN` — `NO_BRAIN` included because `ToolLoopDecider` itself emits it on
+  an Ollama failure, not only client-side).
+- `src/belief/crew_console.py` — `ToolStep` (the real shape Stage 1's placeholder `BrainTurn.steps`
+  invited); `BrainTurn.candidate_sets`' type widened to `(handle, text)` pairs (same invitation).
+  `_start_brain_turn`/new `_post_tool_continuation` build the mode-`"addressed"` payload with
+  `BRAIN_TOOL_SPECS`. `drain_brain` caps tool execution at one per poll across its reply batch.
+  `_handle_brain_reply` branches: `tool_call` keeps the turn alive (`_handle_brain_tool_call`);
+  `answer`/`command`/`ask`/`unable` pop it and dispatch to the new `_handle_brain_turn_final`
+  (with the same staleness check the old `pick`/`confirm` path already had); `pick`/`confirm` keep
+  their original BR-1 path, now dead in practice (every addressed turn is tool-loop mode) but not
+  removed. `_render_turn_ask` D4-revalidates a candidate set against the current store before
+  asking (0 survivors → lost him, 1 → reported directly, ≥2 → the question) — a gap in my own first
+  pass, caught by rewriting the Stage 1 tests below. New `run_brain_tool`/`lookup_memory_entry_fn`
+  injected-closure fields, same shape as `mark_here_fn`.
+- `src/belief/escalation.py` — `BrainReplyKind` widened (`tool_call`/`answer`/`command` added);
+  `BrainReply` gains `tool`/`args`/`form`/`refs`/`target`/`slots`; `EscalationPayload` gains
+  `mode`/`round`/`steps`/`tools`/`commands`; `handle_player_utterance` gains matching keyword-only
+  parameters, every existing call site unaffected by the new defaults.
+- `src/belief/brain_client.py` — `_payload_to_dict`/`_reply_from_dict` widened for the five new
+  fields each way.
+- `src/belief/speech.py` — `render_nothing_seen`, `render_our_position_answer`,
+  `render_contact_answer` (adds the freshness phrase via new `_freshness_phrase`),
+  `render_memory_entry` (reuses `relative_geometry` against *current* ownship, never the entry's
+  own written position).
+- `src/body.py` — `_run_brain_tool_fn`/`_lookup_memory_entry_fn` closures (same "inject over live
+  `runner`/`memory` state" shape as `_mark_here_fn`), wired onto `crew_console` beside the existing
+  mark closures.
+- `config/defaults.toml` — regenerated for `RECALL_MEMORY_NEAR_RADIUS_M`.
+
+**brain-layer**
+- `src/final_reply.py` *(new)* — the closed `FINAL ...` grammar, **moved** out of
+  `tools/stage0_tool_call_probe.py` rather than duplicated (`parse_final_text`, `final_to_dict`,
+  `ParsedLine`) so `ToolLoopDecider` and the probe parse the identical grammar. The probe now
+  imports from here; its own `parse_grammar_line` (the grammar-form's `CALL ...` extension, probe-
+  only) is the one piece that stays local.
+- `src/tool_loop_prompts.py` *(new)* — `build_system_prompt`/`build_user_message`/
+  `tool_to_json_schema`, adapted from the research note's own measured prompt (the `_FINAL_GRAMMAR_
+  BLOCK` text, byte-stable system-prompt-per-turn shape, R3) to the real wire shapes
+  (`belief.tool_api.BRAIN_TOOL_SPECS`'s `{name, params}`, not the probe's local fixture classes).
+- `src/decider.py` — `ToolLoopDecider`: one `decide()` call is one round: native `tool_calls` →
+  `{"kind": "tool_call", ...}` (>1 call degrades to `ask`, D3 has no native "one tool" equivalent);
+  a `FINAL ...` line in `content` → `final_reply.final_to_dict`'s dict; a transport failure
+  (`OllamaRequestError`) → `{"kind": "unable", "reason": "NO_BRAIN"}` (D4's own wording for "brain-
+  layer up, Ollama not"); anything unparseable → `{"kind": "ask"}`, deferring to body's own D3
+  validator rather than guessing at refs this decider cannot see. `TOOL_LOOP_NUM_CTX` (2048),
+  `TOOL_LOOP_MAX_ROUNDS` (4), `TOOL_LOOP_NUM_PREDICT` (120) are the research note's own measured
+  values, kept independent of `OllamaDecider`'s own constants even where the numbers coincide.
+- `src/brain_layer/__main__.py` — `--decider tool_loop` wires `ToolLoopDecider`; `stub`/`ollama`
+  unchanged (default still `stub`).
+- `tools/stage0_tool_call_probe.py` — refactored to import the grammar from `final_reply` instead
+  of defining it; `_final_from_parsed` removed (now `final_to_dict`).
+
+### Tests Added
+
+**body-layer** (`tests/test_brain_tool_loop.py`, new, 12 tests) — a scripted fake `BrainClient` plus
+a scripted fake `run_brain_tool` drive exact step sequences through the real `CrewConsole`:
+- `test_scripted_tool_call_then_final_answer_drives_the_whole_turn` — the plan's own worked case,
+  full round-trip including the continuation payload's `round`/`steps`.
+- `test_unoffered_ref_is_rejected_and_costs_a_round`, `test_unoffered_tool_call_arg_is_rejected_
+  as_invalid_and_continues` — D3's offered-ref membership check, both directions (a final citing an
+  unoffered ref; a tool call arguing an unoffered one).
+- `test_ambiguous_answer_without_evidence_becomes_which_one`,
+  `test_evidence_grounded_in_transcript_and_candidate_passes` — D3's ambiguity-evidence rule, both
+  outcomes.
+- `test_contact_lost_between_call_and_speech_says_lost_him` — D4 revalidation at speech time.
+- `test_superseded_turn_never_speaks` — D3's silent supersession.
+- `test_at_most_one_tool_execution_per_poll` — D6.
+- `test_repeated_identical_tool_call_is_rejected` — the research note's design input.
+- `test_round_cap_exceeded_degrades_the_turn` — D9.
+- `test_serialised_tool_call_payload_carries_no_raw_coordinates`,
+  `test_describe_our_position_observation_has_no_x_or_z` — D2's "no raw x/z," grep-style over the
+  actual JSON and over one adapter's own observation text.
+
+**body-layer** (`tests/test_stage2_acceptance_bench.py`, new, 31 tests, parametrised over the 15
+Stage 0 cases) — "the acceptance bench runs offline on the Mac": every case's `expected.final`
+replayed against the *real* `belief.brain_reply.validate_turn_final`/`belief.tool_api.
+BRAIN_TOOLS_BY_NAME`, no Ollama, no brain-layer process. Finds and records two real discrepancies
+between the Stage 0 fixture and the shipped Stage 2 implementation rather than hiding either behind
+a passing assertion — see Notable Discoveries.
+
+**body-layer** (`tests/test_crew_console.py`, reworked) — four Stage-1-era tests
+(`test_drain_brain_ask_two_survivors_speaks_disambiguation`, `test_drain_brain_ask_zero_survivors_
+yields_lost_him`, `test_drain_brain_ask_one_survivor_confirms_rather_than_acts` → renamed
+`..._reports_it_directly`, `test_drain_brain_unable_speaks_the_reason`) exercised the BR-1 decider's
+old `ask`/`unable` wire shape for an addressed turn — Stage 1's own docstring on these invited this:
+"still go through the BR-1 decider... Stage 2 onward is the tool loop." Since every addressed turn
+now posts `mode="addressed"` and only `ToolLoopDecider` ever answers one, these four were rewritten
+against the new wire shape (`candidate_sets` seeded directly on the `BrainTurn`, the new `unable`
+reason vocabulary) rather than left asserting dead behaviour. Per the Implementer role's own
+"treat the plan's test-impact list as a hypothesis" step — this was found by running the full suite
+after wiring the new dispatch, not predicted up front.
+
+**brain-layer** (`tests/test_tool_loop_decider.py`, new, 8 tests) — `ToolLoopDecider` against the
+existing fake Ollama HTTP server (`test_ollama_client._FakeOllamaServer`, reused via import rather
+than duplicated): native `tool_calls` → `tool_call` dict; >1 native tool call degrades to `ask`;
+`FINAL answer`/`FINAL unable` lines parsed; malformed content degrades to `ask`; an unreachable
+Ollama degrades to `unable NO_BRAIN`; a continuation round's own request body carries the grown
+`steps` block; the system prompt is byte-identical across two rounds (R3).
+
+### Checks
+
+**body-layer/**
+- `ruff format src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (82 source files)
+- `pytest -q`: pass — 3250 passed, 4 xfailed (full suite, run twice; second run, after the final
+  acceptance-bench edits and the four reworked Stage-1 tests, is the number quoted)
+
+**brain-layer/**
+- `ruff format src tests tools`: pass (reformats `tools/live_cross_process_check.py`, pure
+  whitespace, unrelated to this task — reverted after, same as Stage 0's own note)
+- `ruff check src tests tools`: pass
+- `mypy src`: pass (9 source files)
+- `pytest -q`: pass — 82 passed (74 existing + 8 new)
+
+### Notable Discoveries
+
+- **`BrainTool.name` must equal `TOOL_SET`'s own name, not D5's illustrative prose.** The dispatch
+  instruction ("names test-enforced to equal `TOOL_SET` names") settles this explicitly, but D5's
+  own table in the plan calls the `get_contacts` wrapper `list_contacts`. `brain-layer/tools/
+  stage0_cases.json` (built before this naming decision, against D5's prose) uses `list_contacts`
+  throughout — `tests/test_stage2_acceptance_bench.py`'s `_FIXTURE_TOOL_NAME_TO_REAL` documents and
+  translates the one name that differs; the fixture file itself is untouched (it is brain-layer's
+  own Stage 0 artifact, already measured against).
+- **Stage 2's `situational_header` offers no contact refs at all — a real gap against one of the
+  plan's own acceptance cases**, found by the offline bench, not designed around in advance.
+  `A4_which_ones_the_bmp` ("Petrovich, which one's the BMP?") is a Stage 0 fixture case whose two
+  candidates are pre-seeded in the *header*, with `expected.steps == []` — i.e. Stage 0 assumed a
+  turn can start with contacts already offered (plausibly from a recent callout/report). The plan's
+  own Affected Modules list names "header refs" as a Stage 2 deliverable for `escalation.py`/
+  `brain_client.py`, but nothing in the Stage 2 scope bullet ("the tool loop, query tools only,
+  template answers") calls for populating them, and I did not add it on my own initiative (a
+  genuine design decision — what counts as "recently mentioned," how long it stays offered — not a
+  one-line gap). Today this exact case degrades to `unable CANNOT_ANSWER` rather than answering
+  directly; `test_stage0_fixture_discrepancies_are_recorded`-style documentation
+  (`_EXPECTED_NO_HEADER_REFS_GAP`) records this as a tracked fact for whoever picks up header-ref
+  population next (Stage 4's landmark work is the natural place, or a dedicated follow-up).
+- **A second fixture/implementation mismatch, same bench**: `A2_anything_near_gemerek`'s
+  `list_contacts` step is called with `{"filter": "near PLACE_1"}` — Stage 0 measured the model
+  producing a "near a place handle" filter syntax that Stage 2's real `ParamSpec` for `get_contacts`
+  (`filter` is an `enum` of `"all"`/`"visible"`/`"watched"` only) does not implement.
+  `test_stage0_fixture_discrepancies_are_recorded` asserts the real validator rejects it today, so
+  the gap is a checked fact rather than a silently-skipped args check.
+- **A gap in my own first implementation pass, caught by rewriting the four old `ask`/`unable`
+  tests**: the first version of `_render_turn_ask` rendered the turn's recorded candidate set
+  without re-checking which of its contacts still exist in the store — a direct miss of D4's own
+  "ids are rechecked against current belief at speech time" rule, which the *old* BR-1 `_handle_
+  brain_ask` already honoured. Fixed before committing (0 survivors → lost him, 1 → reported
+  directly, ≥2 → the question), and `_speak_turn_degrade`'s own round-cap path now delegates to the
+  same revalidated renderer rather than carrying a second, unrevalidated copy.
+- **D1's "command finals accept an optional `because` slot" choice**: `_validate_turn_command`
+  structurally validates a `command` final's `target` (offered-ref check) but always degrades to
+  `unable CANNOT_ANSWER`, never `FIXED_COMMAND_ONLY` — that reason means "excluded by policy" (U2),
+  and a Stage 2 command final is excluded by *construction* (no `BRAIN_COMMANDS` exists yet), a
+  different fact that would become indistinguishable from U2's own degrade once Stage 3 ships.
+  Flagged as the dispatch instruction asked ("say which you chose and why").
+- **The four design inputs from `brain-layer/research/2026-11-12-tool-call-form.md` ("Design inputs
+  for Stage 2"), and where each landed**:
+  1. *Reject a repeated identical call* → `belief.brain_reply.validate_tool_call`'s own
+     `(tool, canonical_args)` check against `turn.steps`, costing a round via an `invalid:` and
+     never executing `run_brain_tool` for the repeat (`test_repeated_identical_tool_call_is_
+     rejected`).
+  2. *`command` finals carry an optional `because`* → `BrainReply.because` is reused (not a second
+     field) for both `answer` and `command` finals; `_validate_turn_command` reads it (currently a
+     no-op, since there is no command allowlist yet to validate against) and `_validate_turn_
+     answer` is where it actually matters this stage, via `_evidence_passes`.
+  3. *The invalid-call observation must name the fix* → every `validate_tool_call` rejection string
+     states the tool/param and the concrete reason (`"get_contacts.filter must be one of all,
+     visible, watched"`, `"already called find_contact with these args, see the observation
+     above"`), not a generic "invalid."
+  4. *The research note's prompt is the starting point for `ToolLoopDecider`'s prompt* →
+     `tool_loop_prompts.py`'s `_FINAL_GRAMMAR_BLOCK`/`_SYSTEM_PROMPT_HEAD` are that prompt's own
+     text, adapted to the real wire shapes; the system prompt stays byte-stable per turn (R3,
+     `test_system_prompt_is_identical_across_rounds`).
+- **Mechanical note on the Stage 0 probe refactor**: `final_reply.ParsedLine` keeps `tool`/`args`
+  fields that only the probe's own grammar-form `"call"` kind ever populates — `ToolLoopDecider`
+  never produces that kind (native tool calls are read straight off `ollama_client.ChatResult`, not
+  through this grammar), so those two fields are dead weight from `decider.py`'s point of view but
+  necessary for the probe's own `parse_grammar_line` to keep working unchanged. Noted rather than
+  split into two dataclasses, since the probe is a measurement tool, not production code, and a
+  second near-identical dataclass would cost more clarity than it buys.
+- **`brain-layer/tools/live_cross_process_check.py` reformats under a bare `ruff format tools`
+  every time** — pre-existing whitespace debt, unrelated to this change, same finding Stage 0's own
+  report already made. Reverted after each check run rather than landed, so this branch's diff
+  stays scoped.
