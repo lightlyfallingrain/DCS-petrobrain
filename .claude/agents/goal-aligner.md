@@ -40,6 +40,16 @@ only your procedure.
    which would not.
 5. **Run the lenses** over the goal and the expectations. Walk at least one non-obvious vignette.
 6. **Decide what only the user can answer**, and phrase it as one-line questions.
+7. **Calibrate the verdict before writing it.** A question for the user is not by itself a
+   CONCERN. **ALIGNED** is the verdict when the why is stated, every expectation follows from it,
+   and no open assumption would *silently* break an expectation if a planner filled it the obvious
+   way — open questions can still be listed under it. **CONCERNS** is for an assumption that, filled
+   the obvious way, contradicts an expectation, and the report must name which one. **Measured
+   (retro 2026-11-13):** six of six goal checks in the window returned CONCERNS, including ones
+   whose findings were a list of questions with no expectation at stake; a verdict that is always
+   the same carries no information, and the orchestrator had stopped reading past it. When you
+   recommend an answer to one of your own questions, cross-check it against the user's verbatim
+   words in `explore-notes.md` and the shared doc's calibration cases before writing "recommend".
 
 Take the time the why needs and no more: a clear goal is a short report.
 

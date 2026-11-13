@@ -185,6 +185,15 @@ definition, including this one.
    - Explicit failure paths (panic/crash): Could these be triggered by external input?
 
 4. **Review the feature diff** — white-hat analysis of changed code only:
+   - **`int()` / comparison / `math.floor` on a value that arrived through `json.loads`** — Python's
+     parser accepts `NaN`/`Infinity`/`-Infinity` by default, so an `isinstance(x, int | float)`
+     check passes them and `int(x)` raises `ValueError`/`OverflowError`, neither of which is the
+     module's own `*ParseError`. Grep the diff for `int(` and `isinstance(.*float` at any wire
+     boundary and demand `math.isfinite` before conversion. Found on `BL-B104` Stage 1
+     (`category`/`subcategory`, LAN-facing `GET /world_objects/latest`; fixed on that branch) and
+     earlier at the same boundary — `.claude/agent-memory/security/project_nan_infinity_int_conversion_at_lan_boundary.md`
+     has the call-chain trace. Recorded here (retro 2026-11-13) because the memory alone was
+     written after the second instance; the check belongs on the list that is read every pass.
    - Integer overflow/underflow in numeric logic
    - Off-by-one errors in buffer or array indexing
    - Path traversal (file paths constructed from external data)

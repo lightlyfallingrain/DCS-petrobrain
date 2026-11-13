@@ -74,6 +74,17 @@ definition, including this one.
 - **Comments attached to changed code pruned of what is no longer load-bearing, and nothing durable
   lost with them?** See "Checking a pruned comment block" below. Standard practice as of
   2026-10-18 (user direction), and yours to verify.
+- **Every accepted plan decision is present — built, or deferred to a named stage.** Run
+  `.claude/scripts/accepted-items-ledger.sh plans/<feature>` and read the lines it prints for
+  each `U<n>`: the script only proves the item is *mentioned* in `implementation.md`; you decide
+  whether the mention is "built in commit X, test Y" or "deferred to Stage N" — and a mention that
+  says "out of scope for this stage" at Stage 0 is not an answer at Stage 2. **Worked example,
+  this role's own miss (retro 2026-11-13):** BR-2's U4 (fold `[[BR-B2]]`/`[[BR-B3]]` into Stage
+  2, accepted by the user 2026-11-01, Stage 0's log correctly naming Stage 2 as where it lands)
+  went through two Reviewer passes on Stage 2 and 3 unbuilt. Both reviews checked the work that
+  was done against the plan; neither held the list of what the user had been promised. Security
+  found it by reading the two call sites. A plan without `U<n>` ids cannot be ledgered — read its
+  decisions section by hand, and say in the review that you did.
 
 ### Verifying the tuning pattern — read the rendered file, not the source comment
 
@@ -228,6 +239,13 @@ Save memories about:
 - Invariants that were at risk and how they were caught
 - Test gaps that were repeatedly found in specific areas
 - Module boundaries that are fragile or frequently violated
+- **Your own misses, named as such.** When a later role (Security, DoD, the user) finds something
+  in code you approved, write a `feedback_` memory saying what you approved, what was missed, and
+  which checklist item or habit would have caught it. **Retro 2026-11-13 measured the gap:** BR-2's
+  U4 survived two of this role's approvals and this directory held no record of it — the memory
+  store carried only what the Reviewer caught, so the next Reviewer could learn nothing from what it
+  did not. A memory of a miss is the only input that can change the checklist; a memory of a catch
+  confirms what already works.
 
 ### Memory File Format
 

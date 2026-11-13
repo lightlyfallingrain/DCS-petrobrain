@@ -96,9 +96,56 @@ corpus right after a rebuild (2026-10-19) — the bare figure does not move when
 so it cannot tell you anything. Run this from the repo root; `root='.'` is what keys the
 repo-relative paths in `.corpus.txt`.
 
-If nothing needs extraction, skip to **Finish**. Otherwise run `/graphify` — it reads the cache,
-extracts only the uncached files, and rebuilds. Dispatch extraction subagents with
-`subagent_type="general-purpose"`; `Explore` is read-only and silently drops results.
+If nothing needs extraction, skip to **Finish**. Otherwise extract and rebuild with the recipe
+below. **Do not run bare `/graphify .`**: it detects a *directory*, and this corpus is a file list —
+the directory walk would pull in every `.md` under `plans/archive/`, `notes/`, research triage
+drafts and the agent-memory store (deliberately outside the corpus, root `CLAUDE.md`). Dispatch
+extraction subagents with `subagent_type="general-purpose"`; `Explore` is read-only and silently
+drops results.
+
+### The file-list recipe (retro 2026-11-13: this lived only in a session transcript until now)
+
+Every step runs from the repo root with `PY=$(cat graphify-out/.graphify_python)` and
+`SPEC=$HOME/.claude/skills/graphify/references/extraction-spec.md`.
+
+1. **Detect, then override the document set with the corpus.** `detect(Path('.'))` gives the code
+   files; replace its `document` list with `.corpus.txt`, empty `paper`/`image`/`video`, and
+   filter `code` of `.claude/worktrees/`, `graphify-out/` and `/.venv/`:
+
+   ```python
+   import json; from pathlib import Path; from graphify.detect import detect
+   d = detect(Path('.'))
+   corpus = [l.strip() for l in Path('graphify-out/.corpus.txt').read_text().splitlines() if l.strip()]
+   d['files']['document'] = corpus
+   for k in ('paper', 'image', 'video'): d['files'][k] = []
+   d['files']['code'] = [f for f in d['files']['code']
+                         if not any(s in f for s in ('.claude/worktrees/', 'graphify-out/', '/.venv/'))]
+   Path('graphify-out/.graphify_detect.json').write_text(json.dumps(d))
+   ```
+
+2. **AST over the code files** — `graphify.extract.extract(code_files, cache_root=Path('.'))` →
+   `.graphify_ast.json`, as `/graphify` Part A does. Run it as a script file, not via stdin: the
+   multiprocessing pool re-imports `__main__` and prints a `FileNotFoundError: '<stdin>'` traceback
+   per worker before falling back to sequential (harmless, but it looks like a failure).
+
+3. **Semantic extraction on `.uncached.txt` only** — chunks of 20–25, one `general-purpose`
+   subagent per chunk with the `extraction-spec.md` prompt, each writing
+   `graphify-out/.graphify_chunk_NN.json` (absolute path in the prompt). Add the SUPERSEDED
+   instruction below. Then merge the chunks with the cached entries exactly as `/graphify` Step B3
+   does (`check_semantic_cache(..., root='.', prompt_file=SPEC)` for the cached half, and save the
+   new chunks to the cache with the same `prompt_file`).
+
+4. **Build** — `build_from_json(extraction, root='.', directed=False)`, `cluster`, `score_all`,
+   `god_nodes`, `surprising_connections`, `suggest_questions`, `to_json` (which carries the shrink
+   guard — a graph more than ~20% smaller than the previous one refuses to overwrite it), then
+   `generate` for `GRAPH_REPORT.md`, then name the top communities and re-run `to_json(...,
+   community_labels=labels)`, then `graphify export html` and `save_manifest` via
+   `_stamped_manifest_files`. These are the `/graphify` Steps 4–5 calls; the only difference from a
+   stock run is the detect override in step 1.
+
+5. **Verify by querying**, per **Finish** below. On 2026-11-13 this recipe produced 18 607 nodes
+   from a 637-file corpus; a result far below that is the shrink guard's case, not a smaller
+   project.
 
 **Delete stale chunk files before dispatching, and count them after:**
 
