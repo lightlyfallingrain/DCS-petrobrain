@@ -212,8 +212,16 @@ class DebugPrintBrainClient:
 
 
 def _situational_header(
-    store: ContactStore, enrichment: EnrichmentContext | None
+    store: ContactStore,
+    enrichment: EnrichmentContext | None,
+    recent_contacts: tuple[dict[str, object], ...] = (),
 ) -> dict[str, object]:
+    """`plans/brain-tool-calls/plan.md` D4's "header refs" -- `belief.
+    crew_console.CrewConsole._header_contact_refs`'s already-resolved
+    `(handle, text)` pairs, serialised as `{"id", "summary"}` dicts under
+    `"recent_contacts"`. Omitted entirely when empty (the overwhelming
+    common case, a turn with nothing recently mentioned), matching
+    `"our_position"`'s own absent-not-null convention just below."""
     header: dict[str, object] = {
         "contact_counts": len(store.contacts),
         "estimated_units": _estimated_units_lower_bound(store),
@@ -223,6 +231,8 @@ def _situational_header(
             "x": enrichment.ownship.x,
             "z": enrichment.ownship.z,
         }
+    if recent_contacts:
+        header["recent_contacts"] = list(recent_contacts)
     return header
 
 
@@ -237,6 +247,7 @@ def handle_player_utterance(
     commands: tuple[dict[str, object], ...] = (),
     round: int = 0,
     steps: tuple[dict[str, object], ...] = (),
+    recent_contacts: tuple[dict[str, object], ...] = (),
 ) -> None:
     """The one body->brain entry point (§3.5). Builds the escalation payload
     from `utterance` (its `parse: belief.utterance.PartialParse` is what the
@@ -249,14 +260,17 @@ def handle_player_utterance(
     everything else empty); `CrewConsole`'s tool-loop turn is the one
     caller that passes `mode="addressed"` plus a non-empty `tools`, and
     passes a growing `round`/`steps` on each continuation POST for the
-    same `utterance.id`."""
+    same `utterance.id`. `recent_contacts` (Stage 3, D4) is each `{"id",
+    "summary"}` dict `_situational_header` folds into the wire header,
+    unchanged across a turn's own rounds (`CrewConsole._post_tool_
+    continuation`'s own docstring)."""
     payload = EscalationPayload(
         utterance_id=utterance.id,
         transcript=utterance.transcript,
         transcript_confidence=utterance.transcript_confidence,
         t_sim=utterance.t_sim,
         partial_parse=utterance.parse,
-        situational_header=_situational_header(store, enrichment),
+        situational_header=_situational_header(store, enrichment, recent_contacts),
         awaiting_reply_to=None,
         mode=mode,
         round=round,

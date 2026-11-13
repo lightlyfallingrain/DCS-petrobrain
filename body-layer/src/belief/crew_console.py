@@ -2519,24 +2519,59 @@ class CrewConsole:
         branch already has -- then D7's rendering per kind. `mentions`
         (`[[BL-B102]]`) are planted only by a successfully rendered
         `contacts`/`memory` answer, same convention as every other
-        successful readback in this class."""
+        successful readback in this class.
+
+        **`command` is special-cased ahead of the shared tail `_print`
+        call below**, not folded into it: `_handle_brain_command`
+        dispatches through `handle_command`, which already calls
+        `self._print` itself (its own existing tail, exactly as any
+        voice/confirm-band dispatch does) -- calling it a second time
+        here would double-speak every brain command's readback."""
         reply = validate_turn_final(reply, turn, turn.transcript)
+        if reply.kind == "command":
+            return self._handle_brain_command(reply, now_sim)
         mentions: list[Mention] | None = None
         if reply.kind == "unable":
             lines = [render_unable(reply.reason or "CANNOT_ANSWER").text]
         elif reply.kind == "ask":
             lines = self._render_turn_ask(reply.refs, turn, now_sim)
-        elif reply.kind == "command":
-            # `_validate_turn_command` (Stage 3 hook) always returns
-            # `unable` -- reaching here with `kind == "command"` would
-            # mean that contract changed without this branch being
-            # updated, so this degrades the same way rather than
-            # asserting, per this module's degrade-never-crash posture.
-            lines = [render_unable(reply.reason or "CANNOT_ANSWER").text]
         else:  # "answer"
             lines, mentions = self._render_turn_answer(reply, now_sim)
         self._print(lines, now_sim, mentions=mentions)
         return lines
+
+    def _handle_brain_command(self, reply: BrainReply, now_sim: float) -> list[str]:
+        """D5/Stage 3: a validated `command` final dispatches through the
+        single `handle_command` dispatcher -- the exact phrasebook path
+        (E3), so readback/task/marker/cancel semantics are the
+        phrasebook's own, by construction. **`[[BL-B102]]`'s way (A7)**:
+        a `target` is planted directly into `_referent_memory`, not
+        `_pending_mentions` -- `handle_command` resets the latter on
+        entry, and `_resolve_referent_target` (what `slots={"referent":
+        True}` actually triggers) reads the former. The model never
+        fills `descriptor`/`clock` itself (D5): a resolved `target`
+        always arrives as a bare referent, letting whichever handler
+        `token` dispatches to resolve it exactly as "follow it"/"mark
+        that" already do on the voice path.
+
+        `_pending_brain_turn_id` (R6) is set for the one `handle_command`
+        call below so a positional readback it defers (`_speak_or_defer`)
+        is tagged with this turn -- a later addressed utterance
+        superseding this turn then drops it (`_drop_positional_replies_
+        for_turns`, wired since Stage 1)."""
+        token = reply.token
+        assert token is not None  # guaranteed by `_validate_turn_command`
+        slots: dict[str, int | str] | None = None
+        if reply.target is not None:
+            self._referent_memory.record(
+                [Mention(kind="contact", id=reply.target, t_sim=now_sim)], now_sim
+            )
+            slots = {"referent": True}
+        self._pending_brain_turn_id = reply.utterance_id
+        try:
+            return self.handle_command(token, now_sim, slots=slots)
+        finally:
+            self._pending_brain_turn_id = None
 
     def _render_turn_answer(
         self, reply: BrainReply, now_sim: float
@@ -5784,22 +5819,33 @@ class CrewConsole:
             source="debug_console",
             parse=parse,
         )
+        header_refs = self._header_contact_refs(now_sim)
         # Recorded before `handle_player_utterance` posts, not after --
         # the brain-layer client's own worker thread can in principle
         # complete faster than this method returns (an artificial
         # `delay_s=0` stub, say), and a reply for an utterance_id not yet
         # in `_brain_turns` would otherwise be silently dropped as
         # untracked.
-        self._brain_turns[utterance.id] = BrainTurn(
+        turn = BrainTurn(
             started_sim=now_sim,
             transcript=transcript,
             parse=parse,
             addressed=True,
+            header_refs=header_refs,
         )
-        # `plans/brain-tool-calls/plan.md` D1/D2: every addressed turn is
-        # now the tool-loop mode, round 0, no steps yet, and the full
-        # query-tool surface -- `commands=()` until Stage 3 builds
-        # `BRAIN_COMMANDS`.
+        # D4's header refs: every recently-mentioned contact is offered
+        # from the first round, same as a tool observation's own
+        # handles -- but **not** pushed into `candidate_sets`. D3's
+        # ambiguity-evidence rule governs a *tool*-returned multi-
+        # candidate result; a recently-mentioned contact gets the same
+        # no-evidence trust a bare "it"/"that" pronoun already gets on
+        # the voice path (`belief.referent.resolve_referent` asks for no
+        # evidence either) -- see `_header_contact_refs`'s own docstring.
+        turn.offered.update(cid for cid, _ in header_refs)
+        self._brain_turns[utterance.id] = turn
+        # `plans/brain-tool-calls/plan.md` D1/D2/D5: every addressed turn
+        # is the tool-loop mode, round 0, no steps yet, the full
+        # query-tool surface, and (Stage 3) the command allowlist.
         handle_player_utterance(
             self.store,
             utterance,
@@ -5807,11 +5853,44 @@ class CrewConsole:
             self.enrichment,
             mode="addressed",
             tools=BRAIN_TOOL_SPECS,
-            commands=(),
+            commands=BRAIN_COMMAND_SPECS,
             round=0,
             steps=(),
+            recent_contacts=header_refs,
         )
         return []
+
+    def _header_contact_refs(self, now_sim: float) -> tuple[tuple[str, str], ...]:
+        """D4's "header refs" (plan Affected Modules) -- every contact in
+        `_referent_memory`'s short window (`[[BL-B102]]`'s "recently
+        mentioned", `belief.referent.REFERENT_WINDOW_S`), newest mention
+        per id winning, each resolved to the same plain-text summary
+        `belief.tool_api._find_contact_adapter` already builds for a
+        tool observation's own candidates (class/certainty/clock/range/
+        landmark text, **never a raw x/z** -- D2's rule, same cap as a
+        tool's own list, `BRAIN_TOOL_LIST_CAP`). This is what makes
+        "Petrovich, where is it?" and "which one's the BMP?" answerable
+        without a tool call at all -- both are header-seeded acceptance-
+        set cases (Stage 0's fixture), and both need only this turn's
+        header, no `find_contact` round.
+
+        Group mentions are not offered here (they have no single
+        `describe_contact` summary of their own, and no acceptance-set
+        case needs one yet) -- a scoping choice, not an oversight."""
+        seen: dict[str, None] = {}
+        for mention in reversed(self._referent_memory.recent(now_sim)):
+            if mention.kind != "contact" or mention.id in seen:
+                continue
+            seen[mention.id] = None
+        refs: list[tuple[str, str]] = []
+        for contact_id in seen:
+            if len(refs) >= BRAIN_TOOL_LIST_CAP:
+                break
+            result = describe_contact(self.store, contact_id, now_sim, self.enrichment)
+            if result is None:
+                continue
+            refs.append((contact_id, str(result["summary"])))
+        return tuple(refs)
 
     def _post_tool_continuation(self, utterance_id: str, turn: BrainTurn) -> None:
         """D1: brain-layer is stateless across rounds -- each continuation
@@ -5821,7 +5900,13 @@ class CrewConsole:
         building a second `EscalationPayload` constructor; the
         `PlayerUtterance` rebuilt here is a wire convenience, not a new
         utterance -- `transcript_confidence`/`source` are not read again
-        past the turn's first round."""
+        past the turn's first round.
+
+        `turn.header_refs` is resent **unchanged** every round, never
+        recomputed against `_referent_memory`'s own clock -- it was fixed
+        into `turn.offered`/the wire at turn start, and a continuation
+        payload offering a *different* header than the one already
+        validated-offered would disagree with this turn's own record."""
         utterance = PlayerUtterance(
             id=utterance_id,
             t_sim=turn.started_sim,
@@ -5837,12 +5922,13 @@ class CrewConsole:
             self.enrichment,
             mode="addressed",
             tools=BRAIN_TOOL_SPECS,
-            commands=(),
+            commands=BRAIN_COMMAND_SPECS,
             round=turn.round,
             steps=tuple(
                 {"tool": step.tool, "args": step.args, "observation": step.observation}
                 for step in turn.steps
             ),
+            recent_contacts=turn.header_refs,
         )
 
     def _act(self, parse: PartialParse, now_sim: float) -> list[str]:
