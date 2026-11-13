@@ -181,7 +181,12 @@ from belief.speech import (
 )
 from belief.speech_worker import SpeechWorker
 from belief.tasks import PendingIntent, TaskKind, TaskStore
-from belief.tool_api import BRAIN_TOOL_SPECS, ToolObservation
+from belief.tool_api import (
+    BRAIN_COMMAND_SPECS,
+    BRAIN_TOOL_LIST_CAP,
+    BRAIN_TOOL_SPECS,
+    ToolObservation,
+)
 from belief.tools import (
     _find_contact,
     attack_target_task,
@@ -797,6 +802,16 @@ class BrainTurn:
     candidate_sets: list[tuple[tuple[str, str], ...]] = field(default_factory=list)
     stand_by_spoken: bool = False
     correlation_id: str | None = None
+    #: Stage 3 (`plans/brain-tool-calls/plan.md` D4's "header refs"):
+    #: `(handle, text)` pairs for every contact `CrewConsole.
+    #: _header_contact_refs` found in `_referent_memory`'s short window
+    #: at the moment this turn started, fixed once rather than
+    #: recomputed per round -- `offered`/`candidate_sets` above are
+    #: seeded from this same value at turn start, so resending a
+    #: *different* set on a later continuation round would disagree with
+    #: what was already validated-offered. `_post_tool_continuation`
+    #: resends this unchanged on every round's `situational_header`.
+    header_refs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1411,10 +1426,14 @@ class CrewConsole:
     #: the resolving optic all live on `logger.ConsolePerceptionRunner`, not
     #: here, so this class leaves a narrow instruction instead of computing
     #: or speaking the answer synchronously (`_handle_where_is_it`'s own
-    #: docstring). Reset to `False` at the top of every `handle_command`
-    #: dispatch, same convention as `attack_run_transition`/`observ_
-    #: transition`, and consumed-and-cleared by the poll loop's `drain_
-    #: where_is_it` the moment it is applied.
+    #: docstring). **Not** reset at the top of `handle_command` dispatch
+    #: (unlike `attack_run_transition`/`observ_transition`) --
+    #: `plans/brain-tool-calls/plan.md` R1: this signal's consumer,
+    #: `drain_where_is_it`, runs at the top of the *next* poll rather
+    #: than later in the same one, so an unrelated command dispatched in
+    #: between (voice or brain) must not wipe it first. Only
+    #: `_handle_where_is_it` sets it and only `drain_where_is_it`'s own
+    #: consumption (or a mission reset) clears it.
     where_is_it_requested: bool = False
     #: `[[BL-B102]]`'s co-moving field alongside `where_is_it_requested` --
     #: *this* dispatch's slots (`referent`/`descriptor`/`clock`, or `None`
@@ -1444,6 +1463,18 @@ class CrewConsole:
     #: directly instead (carried on the deferred entry, not through this
     #: field) -- see that method's own docstring.
     _pending_mentions: list[Mention] | None = field(default=None, repr=False)
+    #: `plans/brain-tool-calls/plan.md` R6 -- the brain turn (`BrainTurn.
+    #: utterance_id`, i.e. `_brain_turns`' own key) currently dispatching
+    #: through `handle_command`, if any. Set by `_handle_brain_command`
+    #: for the duration of its one `handle_command(...)` call and reset
+    #: to `None` immediately after (never through `handle_command`'s own
+    #: reset-before-dispatch block -- it must survive that reset, not be
+    #: wiped by it); read by `_speak_or_defer` so a positional readback a
+    #: brain command defers is tagged with this turn id, the same way
+    #: `correlation_id` is already threaded through. A later addressed
+    #: utterance superseding this turn then drops the tagged entry
+    #: (`_drop_positional_replies_for_turns`, wired since Stage 1).
+    _pending_brain_turn_id: str | None = field(default=None, repr=False)
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `speech_client`: `None` is a true no-op.
@@ -2062,6 +2093,10 @@ class CrewConsole:
                 queued_since_sim=now_sim,
                 render=render,
                 mentions=mentions,
+                # R6 -- `None` for every phrasebook dispatch (the common
+                # case); set only while `_handle_brain_command` is mid
+                # `handle_command` call.
+                brain_turn_id=self._pending_brain_turn_id,
             )
         )
         return []
@@ -2674,10 +2709,25 @@ class CrewConsole:
         # Same reset, same reason, for the weapons safety bar
         # (`weapon_safety_transition`'s own docstring).
         self.weapon_safety_transition = None
-        # Same reset, same reason, for "where is it?"
-        # (`where_is_it_requested`'s own docstring).
-        self.where_is_it_requested = False
-        self.where_is_it_slots = None
+        # `where_is_it_requested`/`where_is_it_slots` are deliberately
+        # **not** reset here -- `plans/brain-tool-calls/plan.md` R1.
+        # Every other one-shot signal above is consumed in the *same*
+        # poll it is set (by `drain_attack_run`/`drain_events`'s own
+        # callers, earlier in `body.py`'s loop than any `handle_command`
+        # call), so an unrelated dispatch this poll can safely clear a
+        # stale one without racing its own consumer. "Where is it?"'s
+        # consumer, `body.py`'s `drain_where_is_it`, instead runs at the
+        # *top* of the **next** poll -- and Stage 3 adds a second
+        # dispatcher (a brain command, `drain_brain`) that can set this
+        # flag in the same poll a transcript's own `handle_command` call
+        # (`_poll_transcripts`, later in that same poll) would otherwise
+        # reset it right back to `False` before `drain_where_is_it` ever
+        # sees it `True`. Leaving the reset out means the flag can only
+        # ever be set by `_handle_where_is_it` and only ever cleared by
+        # `drain_where_is_it`'s own consumption (or a mission reset,
+        # `reset_for_new_mission`'s `__init__` call) -- a request is
+        # delayed at worst, by one poll if a second command lands before
+        # consumption, never silently dropped by an unrelated dispatch.
         # Same reset, same reason, for `[[BL-B102]]`'s referent-mention
         # recording -- see `_pending_mentions`' own docstring.
         self._pending_mentions = None

@@ -67,7 +67,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from belief.escalation import BrainReply
-from belief.tool_api import BRAIN_TOOLS_BY_NAME, BrainTool, ParamSpec
+from belief.tool_api import BRAIN_COMMANDS_BY_NAME, BRAIN_TOOLS_BY_NAME, BrainTool, ParamSpec
 from belief.utterance import PartialParse
 
 if TYPE_CHECKING:
@@ -445,32 +445,66 @@ def _validate_turn_answer(
     return reply
 
 
+def _reply_with_reason(reply: BrainReply, reason: str) -> BrainReply:
+    return BrainReply(
+        utterance_id=reply.utterance_id, kind="unable", t_sim=reply.t_sim, reason=reason
+    )
+
+
 def _validate_turn_command(
     reply: BrainReply, turn: BrainTurn, transcript: str
 ) -> BrainReply:
-    """**Stage 3 hook, not a dispatcher** -- `belief.tool_api.
-    BRAIN_COMMANDS` does not exist yet (plan Stage 3), so there is no
-    allowlist a `command` final could be checked against. Structural
-    shape is validated anyway (a `target` must be offered, same rule as
-    every other `*_ref`) so a malformed command degrades exactly like a
-    malformed answer rather than being dispatched on trust once Stage 3
-    does add the allowlist -- but every *legal-shaped* command final
-    still degrades to `unable CANNOT_ANSWER` here, deliberately, because
-    nothing downstream of this function can act on it yet. Chosen over
-    `FIXED_COMMAND_ONLY` (the plan's other suggested wording): that
-    reason means "this specific command is excluded by policy" (U2), and
-    a command final in Stage 2 is excluded by *construction*, not by
-    policy -- using `FIXED_COMMAND_ONLY` here would make Stage 3's own
-    U2 degrade indistinguishable from "not built yet" once it ships."""
-    if reply.target is not None and reply.target not in turn.offered:
+    """D5/Stage 3's command dispatcher-facing validator. `belief.tool_api.
+    BRAIN_COMMANDS` is the explicit, opt-in allowlist -- a token not in
+    it (whether genuinely excluded by U2's policy, a flight token, or
+    simply not a real command) is indistinguishable at this layer and
+    gets `unable FIXED_COMMAND_ONLY` either way (D5's own instruction:
+    "a token not in the allowlist -> unable FIXED_COMMAND_ONLY" -- there
+    is no second reason to invent for "not a command at all").
+
+    A legal-shaped `target` is the same offered-ref rule every other
+    `*_ref` gets; a command that does not `takes_target` but was handed
+    one anyway is a malformed final (the model does not get to invent a
+    slot its own command schema never offered it), degraded the same
+    way D3's other shape checks already degrade. Non-empty `slots`
+    (anything the model tried to fill beyond `target`/`because`, which
+    `brain-layer`'s own grammar parser already pulls out of the raw JSON
+    before this ever sees it) is the same kind of malformed shape --
+    Stage 3 exposes no command with an extra slot yet.
+
+    **D3's ambiguity-evidence rule, extended to a command's own
+    `target`** (plan D3: "a target drawn from a >=2-candidate set in
+    this turn needs because evidence... else degrade to 'which one?'"):
+    reuses `_evidence_passes` against whichever `turn.candidate_sets`
+    entry this `target` actually came from, the identical check
+    `_validate_turn_answer` already runs for an `answer(contacts, refs)`
+    final naming one ref out of a multi-candidate set."""
+    token = reply.token
+    command = BRAIN_COMMANDS_BY_NAME.get(token) if isinstance(token, str) else None
+    if command is None:
+        return _reply_with_reason(reply, "FIXED_COMMAND_ONLY")
+    if reply.slots:
         return _carry_ids(reply, _turn_degrade(turn))
-    del transcript  # no evidence check possible with no command allowlist yet
-    return BrainReply(
-        utterance_id=reply.utterance_id,
-        kind="unable",
-        t_sim=reply.t_sim,
-        reason="CANNOT_ANSWER",
-    )
+    target = reply.target
+    if target is None:
+        return reply
+    if not command.takes_target:
+        return _carry_ids(reply, _turn_degrade(turn))
+    if target not in turn.offered:
+        return _carry_ids(reply, _turn_degrade(turn))
+    candidate_set = _candidate_set_for_ref(turn, target)
+    if candidate_set is not None and len(candidate_set) >= 2:
+        texts = dict(candidate_set)
+        chosen_text = texts[target]
+        other_texts = [text for cid, text in texts.items() if cid != target]
+        if not _evidence_passes(reply.because, transcript, chosen_text, other_texts):
+            return BrainReply(
+                utterance_id=reply.utterance_id,
+                kind="ask",
+                t_sim=reply.t_sim,
+                refs=tuple(texts),
+            )
+    return reply
 
 
 __all__ = [
