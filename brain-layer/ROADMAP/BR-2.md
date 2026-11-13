@@ -52,8 +52,8 @@
   routing is by wake word; `[[BL-B79]]` closes by making a mark label the pilot's verbatim words.
   Four user decisions (U1–U4) open. Status stays open until implemented.
 
-  **Stages 0–3 merged 2026-11-13 (`feature/brain-tool-calls`, DoD-PASSED, `#needs-flight`). Status
-  stays open — this milestone is not done.**
+  **Stages 0–3 merged 2026-11-13 (`feature/brain-tool-calls`, merge commit `e804b686`, DoD-PASSED,
+  `#needs-flight`). Status stays open — this milestone is not done.**
 
   **What shipped.** The tool loop end to end, on real `qwen3:4b-instruct-2507-q4_K_M` behind
   native `/api/chat` `tools` (Stage 0's own measured pick). Addressed utterances
