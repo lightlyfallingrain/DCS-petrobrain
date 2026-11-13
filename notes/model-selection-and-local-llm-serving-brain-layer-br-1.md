@@ -575,3 +575,18 @@
   Architect. Lesson: a plan's cost/rate arguments need their inputs checked against the current
   value in code, not just checked for internal consistency — a wrong constant and a consistent
   argument built on it both read as "checked."
+- **A prompt-engineering question ("does the model handle form A or form B better") cannot be
+  answered while the prompt itself still carries a defect that makes the model refuse to act at
+  all — measure in rounds, and expect the first round to be dominated by the prompt, not the
+  model.** BR-2 Stage 0's probe set out to compare Ollama's native `/api/chat` `tools` against a
+  closed one-line grammar for tool-calling. Run 1 scored 0/15 on *both* forms, for two prompt
+  defects that had nothing to do with which form was better: the four answer forms were never
+  enumerated for the model to choose from (so it literally wrote the word `form`), and an empty
+  turn-start header plus a blanket "never invent a contact" instruction read together as "nothing
+  offered, so say unable" rather than "look it up with a tool." Fixing those two sentences alone
+  took the native form from 0/15 to 12/15 in the very next run, with no change to the model or the
+  form being tested. Lesson: when a small local model scores near-zero on a first measurement pass,
+  suspect the prompt before concluding anything about model capability or the form/mechanism under
+  test — and budget at least one full round of prompt-defect fixing before the comparison the probe
+  was built to make is actually measuring what it claims to (`brain-layer/research/
+  2026-11-12-tool-call-form.md`, Run 1 → Run 2).

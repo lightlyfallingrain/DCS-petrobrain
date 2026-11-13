@@ -969,6 +969,20 @@ out.
 
 ### Decision 4 REVISED AGAIN — gate confidence and match independently (user, 2026-09-20)
 
+> **REVISED by `plans/brain-tool-calls/plan.md` D4/U1, merged 2026-11-13 (BR-2 Stages 0–3).** This
+> decision's own table below gives "heard clearly, no command match" a second, implicit route to
+> the brain with no wake word required — "today it is indistinguishable from 'did not hear', which
+> is why it could only be guessed at" was the stated reason. BR-2's U1 (accepted by the user
+> verbatim, "1,2,4 - as recommended") closes that route: an unprefixed, unanchored utterance the
+> phrasebook cannot use is now answered deterministically ("which one?" on ≥2 candidates, else "say
+> again"), with **no model call at all**. BR-2's own plan cites a graph check finding this row's
+> *earlier* sibling (the 2026-09-19 "Two-tier routing" design note) never described a third,
+> unprefixed path to the brain in the first place — so U1 is closer to a correction of this REVISED
+> AGAIN table than a new restriction. The table immediately below is **superseded** for the
+> "heard clearly / no command match" cell only; every other cell (confirm band, say-again,
+> act-then-readback) is unaffected, and the wake-word route into the brain (now addressed-utterance
+> routing, BR-2 D4) is unchanged by this note.
+
 **The defect.** `ACT_FLOOR = 0.60` is justified by Stage 1's measured *confidence* distribution —
 correct answers ran 0.60–0.95, so 0.60 is the minimum confidence of a correct answer. But the band
 test was applied to `combined = confidence × match_ratio`, a **product of two sub-1 quantities**
