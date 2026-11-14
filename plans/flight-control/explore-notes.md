@@ -651,3 +651,7 @@ specification for parked mode (S0-P3b / mode 2); the reconciled model is in
 
 **Correction, user 2026-11-15:** *"'short left press is HDG LOS' -> my typo, meant right."* So:
 **short left = mode cycle, short right = `HDG LOS`, never pressed by code.**
+
+**Parked attack alignment, user 2026-11-15:** *"When controls are parked, there's only ED's
+ALIGN available. Petrobrain cannot directly fly. We'll have to do with ED's control then."* ED's
+`ALIGN TO 9K113` / `ALIGN FOR LAUNCH` are the parked-mode alignment; BL-B67's own is unparked.

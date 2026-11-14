@@ -118,9 +118,10 @@ altitude tap step is **2 m**, which fixes the unit the 2026-10-31 recon §7 coul
 2. **Mode selection matters before any nudge**: FLT/HVR share the hold vocabulary, HVRT is
    2 m / translate steps, CBTM is the 9K113 alignment set. The nudge loop has to read `mode_text`
    first and cycle modes if needed.
-3. **CBTM `ALIGN TO 9K113` / `ALIGN FOR LAUNCH` are ED's versions of BL-B67's launch alignment.**
-   Whether to reuse them in parked mode or keep Petrobrain's own alignment is a plan decision,
-   not settled here.
+3. **CBTM `ALIGN TO 9K113` / `ALIGN FOR LAUNCH` are the only alignment while parked.** User,
+   2026-11-15: *"When controls are parked, there's only ED's ALIGN available. Petrobrain cannot
+   directly fly. We'll have to do with ED's control then."* Not a fork: BL-B67's own alignment
+   is the unparked case, ED's is the parked case.
 4. **Open for a probe:** ~~which presses reach outer versus inner ring~~ (answered by the user,
    §5: inner = short, outer = long), the long-press threshold (user: probably > 0.5 s, matches
    `long_press_time = 0.5`), the speed steps' exact values, the FLT↔HVR speed criterion, and
