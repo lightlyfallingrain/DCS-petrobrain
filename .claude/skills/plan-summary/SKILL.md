@@ -67,7 +67,7 @@ fi
 echo "## Plan Status"
 echo "| File | Exists |"
 echo "|------|--------|"
-for f in plan.md implementation.md review.md debug.md security-plan-review.md security-review.md dod-check.md; do
+for f in plan.md implementation.md review.md debug.md security-review.md dod-check.md; do   # security-plan-review.md is on demand only since 2026-10-30, so its absence is not reported
   if [ -f "plans/$FEATURE/$f" ]; then
     echo "| \`plans/$FEATURE/$f\` | ✓ exists |"
   else

@@ -29,7 +29,17 @@
 # only see what is numbered. That is why architect.md now numbers user decisions U<n>.
 set -uo pipefail
 
-REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+# Hook mode (no argument) reads the PreToolUse JSON from stdin once, here; standalone mode has an
+# argument and no stdin.
+if [ $# -eq 0 ]; then input=$(cat); else input=""; fi
+# Resolve the repository from the hook payload's `cwd`, which follows the session, NOT from
+# $CLAUDE_PROJECT_DIR, which is root-fixed (AGENTS.md rule 4). Every commit has happened in a
+# worktree since 2026-10-09, so the old form ran `git diff --cached` against the root's index,
+# i.e. main's clean tree, and passed silently on every worktree commit. Found by the 2026-11-14
+# integrity audit (Tier 1 #1), reproduced with the real payload. $CLAUDE_PROJECT_DIR is still
+# the right thing for locating sibling scripts.
+_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
+REPO=$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 check_feature() {
@@ -81,9 +91,8 @@ if [ $# -gt 0 ]; then
     exit $?
 fi
 
-# Hook mode: stdin is the PreToolUse JSON. Only a `git commit` with a staged review.md or
+# Hook mode: `input` holds the PreToolUse JSON (read at the top). Only a `git commit` with a staged review.md or
 # dod-check.md under plans/ is a report-commit; everything else passes silently.
-input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+([^;&|]*\s)?commit(\s|$)' || exit 0
 

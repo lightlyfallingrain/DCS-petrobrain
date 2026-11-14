@@ -157,3 +157,12 @@ is what fires. Observed 2026-10-06: a sha-gate fix was committed to `main` while
 was parked on `fix/los-hook-statics`, and the pre-fix gate stayed active for that whole session. If
 a hook misbehaves right after you fixed it, check which branch the main checkout is on before
 re-reading the script. Kept as a one-line pointer in `AGENTS.md`, because nothing announces it.
+
+**A second, separate question: which *index* a hook reads.** The paragraph above is about which
+*script* runs. A commit-time hook that resolved the repository from `$CLAUDE_PROJECT_DIR` (root-fixed)
+ran `git diff --cached` against the root's index -- main's clean tree -- for every worktree commit
+since 2026-10-09, and passed silently; the 2026-11-14 integrity audit reproduced it on four hooks
+(`commit-quality-gate`, `push-roadmap-gate`, `branch-delete-guard`, `accepted-items-ledger`). They
+now resolve the repository from the payload's `cwd`, which follows the session. Rule for any new
+hook that inspects git state: `cwd` for the tree, `$CLAUDE_PROJECT_DIR` only for locating sibling
+scripts.

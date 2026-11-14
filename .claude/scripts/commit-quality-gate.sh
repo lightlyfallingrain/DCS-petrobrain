@@ -13,7 +13,15 @@ set -uo pipefail
 # evaluated. The behaviour was still fail-open for a PreToolUse hook (a non-zero, non-2 exit is a
 # non-blocking error), but by accident rather than by the stated mechanism. This is the pattern
 # the sibling gates in this directory already use, and it also makes the script runnable by hand.
-REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+input=$(cat)
+# Resolve the repository from the hook payload's `cwd`, which follows the session, NOT from
+# $CLAUDE_PROJECT_DIR, which is root-fixed (AGENTS.md rule 4). Every commit has happened in a
+# worktree since 2026-10-09, so the old form ran `git diff --cached` against the root's index,
+# i.e. main's clean tree, and passed silently on every worktree commit. Found by the 2026-11-14
+# integrity audit (Tier 1 #1), reproduced with the real payload. $CLAUDE_PROJECT_DIR is still
+# the right thing for locating sibling scripts.
+_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
+REPO=$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 STAGED=$(git diff --cached --name-only)

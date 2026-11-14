@@ -271,9 +271,10 @@ else
 fi
 ```
 
-Note: **before treating a missing `security-review.md`/`security-plan-review.md` as a real FAIL,
-read root `CLAUDE.md`'s "Agents" section** for the scope currently set for `security` and
-`performance-reviewer` — whether they run per feature, per stage, or are exempt for this project
+Note: **a missing `security-plan-review.md` is never a FAIL** -- the plan review left the role
+sequences 2026-10-30 and runs on demand only (`AGENTS.md`, "Behaviour alignment"; `security.md` Mode 1).
+**Before treating a missing `security-review.md` as a real FAIL, read root `CLAUDE.md`'s "Agents"
+section** for the scope currently set for `security` and `performance-reviewer` — whether they run per feature, per stage, or are exempt for this project
 phase, and when in the sequence. That scope has been changed by user direction more than once, so
 it is read at check time, never quoted here. If the current scope means no security document was
 ever owed for this feature, the sign-off rows are not applicable rather than failing.

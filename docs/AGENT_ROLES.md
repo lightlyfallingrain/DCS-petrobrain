@@ -23,11 +23,11 @@ Responsibilities:
 
 Priorities: 1. Preserve invariants from `CLAUDE.md` 2. Keep module responsibilities clear 3. Avoid premature abstraction 4. Keep the design incrementally implementable
 
-Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input, a Co-moving Fields table whenever the trigger above fires, and at least one second-order effect this feature has on later milestones (if any — state "none identified" if truly isolated).
+Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input (numbered `U<n>`), a Co-moving Fields table whenever the trigger above fires, and at least one second-order effect this feature has on later milestones (if any — state "none identified" if truly isolated).
 
 Must not: write large amounts of code before the plan is accepted; introduce new abstractions without clear need; expand scope silently.
 
-Output: write plan in `plans/<featurename>.md` (create `plans/` if missing), add plan file to git.
+Output: write the plan to `plans/<featurename>/plan.md` (one directory per feature; `implementation.md`, `review.md`, `alignment.md` and the rest land beside it), add it to git. User decisions are numbered `U<n>` with an `**Answered <date> (user, verbatim):**` line once decided -- `accepted-items-ledger.sh` can only see numbered ones.
 
 ---
 
@@ -134,8 +134,7 @@ Checklist:
 - All new files staged with `git add`
 - Tests are present and meaningful
 - All Reviewer required fixes addressed
-- `security-plan-review.md` exists and is APPROVED
-- `security-review.md` exists and is APPROVED (or all findings resolved)
+- `security-review.md` exists and is APPROVED (or all findings resolved). No `security-plan-review.md` is owed: the plan review left the sequences 2026-10-30 and runs on demand only (`AGENTS.md`, "Behaviour alignment")
 
 Must not: merge or push (belongs to the user); skip acceptance testing even when the automated check passes; add `notes/` entries obvious from code or already in CLAUDE.md.
 
@@ -173,7 +172,7 @@ derives the player's expectations from it (E1, E2 … observable in the cockpit)
 assumptions, and asks whether the goal makes sense in DCS World and the player's experience.
 
 **Plan Aligner** (sonnet) — after Architect, before Implementer. Traces each expectation to a plan
-stage: met / missing / contradicted; checks every open assumption was settled the way that serves the
+stage: met / missing / contradicted / deferred (with the `[[ID]]` or stage it goes to, which must itself mention it); checks every open assumption was settled the way that serves the
 why. Does not re-derive the why.
 
 Priorities: 1. The user's own words and sortie evidence 2. Project invariants 3. DCS behaviour as the
@@ -185,7 +184,7 @@ Must not: review technique (code, feasibility, performance, security); redesign.
 
 ## Output Style by Role
 
-- **Architect**: concise plan, affected modules, risks and open decisions.
+- **Architect**: concise plan, affected modules, risks and open decisions (`U<n>`-numbered).
 - **Implementer**: what was changed, tests added, checks run, anything notable discovered.
 - **Reviewer**: findings ordered by severity, required fixes first, optional refinements separately.
 - **Debugger**: observed issue, hypothesis, evidence, fix applied, verification.
