@@ -532,3 +532,12 @@ player in seat 2; unparked hold check → 3055 → 10 s constant 2001 offset, lo
 852/857/859/865 + `list_indication(0)` and `(6)` per frame. Odds low. `SimplifiedAI=true` a cheap
 third variant; `HumanOrchestra` skipped (MP-scoped, disables seat switching). Caveat carried:
 whether AutoHandover was already false on the 2026-11-01 flight is unverified.
+
+### Decision: skip probe v3, two modes (user, 2026-11-14, verbatim)
+
+> *"2 - skip it. BL-16 has to go with two modes: normal ops - write control axises ; controls
+> parked - manipulate DCS AI via the AI wheel commands."*
+
+Stage 0 is closed on this. S0-P3 negative, S0-P3b promoted from fallback to the parked-mode
+design. The plan's effector table and S0 rows need re-cutting before any build; recorded on the
+`BL-16` entry.
