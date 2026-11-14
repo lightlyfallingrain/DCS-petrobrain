@@ -247,7 +247,7 @@ The roster is `.claude/agents/` — read that directory rather than trusting thi
 it has been wrong before (`investigator` existed here, and in root `CLAUDE.md`, while this section
 listed seven).
 
-1. **Architect** — plan new features, module boundaries, design tradeoffs. Writes `plans/<featurename>.md`.
+1. **Architect** — plan new features, module boundaries, design tradeoffs. Writes `plans/<featurename>/plan.md`, user decisions numbered `U<n>`.
 2. **Implementer** — writes code for an approved plan, adds tests, straightforward refactors.
 3. **Reviewer** — reviews completed work against the plan and `CLAUDE.md` before handoff.
 4. **Debugger** — bugs, regressions, unexpected behavior. Reproduce → isolate → fix → verify.
