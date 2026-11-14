@@ -142,7 +142,7 @@ flight overlay usage for BL-16". Tag `[user]` throughout; nothing below is from 
 | long press left / right (no hold) | outer | — | — | break turn 90° left / right |
 | long press down (no hold) | outer | — | — | break 180°, direction undetermined — **avoid**; two `BREAK LEFT` with a short delay instead (Mi-24 turns faster left) |
 | short left | inner | **mode cycle** | mode cycle | mode cycle |
-| short right | inner | `HDG LOS` — **never pressed by code** (turns to where the player looks) | same | same |
+| short right | inner | `HDG LOS` — **never pressed by code** (turns to where the player looks; user confirmed 2026-11-15, their text's "short left" was a typo) | same | same |
 | centre | — | toggle radar / baro reference; re-read and re-set altitude after | — | — |
 
 - Speed steps `[user]`: `0, 60, 120, 160(?), 200, 250, MAX` km/h IAS.

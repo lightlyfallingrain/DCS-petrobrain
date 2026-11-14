@@ -649,7 +649,5 @@ specification for parked mode (S0-P3b / mode 2); the reconciled model is in
 >   target and must instead go for level flight. This probably requires mode change to FLT and
 >   setting altitude.
 
-**Reading noted by the orchestrator, to confirm with the user:** the line *"short left press is
-HDG LOS"* conflicts with *"state is changed by short left"* and *"must not short-press right"*;
-the screenshots put `HDG LOS` inner-right and the mode name inner-left. Taken as: **short left =
-mode cycle, short right = `HDG LOS`, never pressed by code.**
+**Correction, user 2026-11-15:** *"'short left press is HDG LOS' -> my typo, meant right."* So:
+**short left = mode cycle, short right = `HDG LOS`, never pressed by code.**
