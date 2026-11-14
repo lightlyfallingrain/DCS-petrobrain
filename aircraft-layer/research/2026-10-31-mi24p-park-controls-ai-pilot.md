@@ -165,6 +165,8 @@ Ranked by how directly they might neutralise the AI pilot while 852 stays stowed
    might not have identical side effects on the AI pilot.
 4. **Read `list_indication(10)` while parked, with the wheel open.** This is the only way to see the
    AI pilot's own option labels, and whether any of them is a "release controls" or hold-off.
+   **Answered 2026-11-14 from screenshots** (`2026-11-14-mi24p-ai-pilot-wheel-layout.md`): four
+   modes, all options nudges or fixed manoeuvres, no release option.
 5. **`External_Roll/Pitch/Yaw` (10, 3051/3052/3054).** Check whether a value sent through
    `performClickableAction` or `SetCommand` moves the aircraft while parked. If it does, it may be
    the AI pilot's own steering input, and writing it continuously would compete with the AI rather

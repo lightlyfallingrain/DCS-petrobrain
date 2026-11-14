@@ -541,3 +541,15 @@ whether AutoHandover was already false on the 2026-11-01 flight is unverified.
 Stage 0 is closed on this. S0-P3 negative, S0-P3b promoted from fallback to the parked-mode
 design. The plan's effector table and S0 rows need re-cutting before any build; recorded on the
 `BL-16` entry.
+
+### AI pilot wheel transcribed (user screenshots, 2026-11-14)
+
+Five screenshots, operator seat, parked, ED's AI flying (`win-mac-sync/from-windows/AI_flight_wheel/`,
+not in git by user direction). Transcription:
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md`. Four modes `FLT` / `CBTM` /
+`HVR` / `HVRT`; FLT and HVR carry `ALTITUDE ±`, `SPEED ±`, `HDG LEFT/RIGHT`, `ALT REF RAD|BARO`,
+`HDG LOS`; CBTM carries `ALIGN FOR LAUNCH`, `ALIGN TO 9K113`, `BREAK LEFT/RIGHT/180`; HVRT carries
+`HOVER FWD/BACK/LEFT/RIGHT` and `HOVER ±2m`. No "release controls" option in any mode. The
+overlay shows the AI's held IAS, heading, ALT with `R`/`B` reference and the mode as text, so the
+`list_indication(6)` readback of recon §7 is very probably real. The `±2m` label fixes
+`alt_change_step = 2` as metres.
