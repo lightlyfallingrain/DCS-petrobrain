@@ -358,3 +358,205 @@ re-open a decision the user already made.
    have controls" first. That is a second way he takes the aircraft, not a spoken one — is that what
    you want, or should parking without a prior handover leave the controls with ED's AI until you
    say "you have controls"?
+
+## Goal check — parked mode (2026-11-15)
+
+**Verdict:** CONCERNS
+
+Addendum for **mode 2 only** (controls parked, Petrovich drives ED's AI pilot through the HELPER_AI
+wheel), now the first build of BL-16. The 2026-10-31 goal check above stands for mode 1; E1–E10
+there are not re-derived. Checked against: `explore-notes.md` from "Decision: skip probe v3, two
+modes" to the end (the user's wheel write-up, the short-right typo correction, "We'll have to do
+with ED's control then"), the user's direction of 2026-11-15 relayed by the main loop (park itself
+activates parked mode — quoted below; the main loop has recorded it in `explore-notes.md`),
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` §5, `body-layer/ROADMAP/BL-16.md`,
+`body-layer/ROADMAP/BL-B67.md`, plan rows S0-P3b and S0-12.
+
+> *"Since AI helper takes over automatically and immediately when controls are parked, so should
+> Petrobrain flight controlling mode activate for the AI helper. Regardless of Player commanding
+> 'your controls' or not."* (user, 2026-11-15)
+
+That answers the plan check's question 1 above: parking is the handover. There is no spoken
+exchange on park.
+
+### Why
+
+The player parks for one reason, the 9K113 sight view. DCS then gives the aircraft to ED's AI, and
+nothing can stop that (stage 0, closed). Without help, the player has to run that AI from the
+sight seat through a wheel menu. That costs him his hands and eyes when he needs them on the
+crosshair, and ED's AI makes two mistakes on its own: it sinks right after the park, and it dives
+into the ground after a launch if it is left in ALIGN FOR LAUNCH.
+
+Asked once more: why does the player need the AI run for him? So he can **keep his eye in the
+sight from the moment he parks until the missile hits, and trust that the aircraft will not hit
+the ground meanwhile**. Parked mode does not make the flying good. The user has accepted that
+(*"We'll have to do with ED's control then"*). It fixes ED's interface (voice in place of the wheel)
+and ED's two known traps. The earlier why, "replace ED's AI because it flies badly", still belongs
+to mode 1 and does not apply here.
+
+What the player **gets**: the flight parameters set by voice, alignment by voice, and protection
+from the park sink and the post-launch dive. What he **does not get**: smooth or precise flying,
+the S-curve response (decision 5), continuation of a turn already in progress at takeover (decision
+3; at the park, ED's AI does what it does), arbitrary speeds, or more terrain awareness than ED's AI
+plus the two fixes. The plan and the test card must say this, so a sloppy hold is not filed as a
+defect of parked mode.
+
+### Player expectations
+
+- **E-P1: Parking is the handover, and the aircraft holds what it was doing.** Within a second or
+  two of the park, without the player saying anything, the aircraft stops the ED sink and holds the
+  current altitude (the user's "set altitude first on park"). If ED's AI also drifts heading or
+  speed on park, the same rule applies to those. Seen from the seat: the altitude readout does not
+  wind down after the park.
+- **E-P2: The player hears one short line when Petrovich takes over on park**, so he knows the
+  aircraft is managed and not just ED's AI on its own. The wording is open (Q1). It is never a
+  question, and it never waits for an answer.
+- **E-P3: Spoken heading, altitude and speed goals happen, approximately and honestly.** The
+  readback names what the AI will actually hold. A speed goes to the nearest wheel step, so
+  "speed 2 2 0" is read back as "two hundred" and not as "two twenty". Altitude is good to about 20
+  m, heading to what the overlay sets. After the readback, silence (settled 2026-10-31 answer 4: no
+  "unable" for a goal not quite reached). Several goals at once all start moving early, through
+  interleaved steps, not one after another.
+- **E-P4: The latest spoken goal wins.** A new command replaces one still in progress, and the
+  readback names the new goal. Petrovich does not narrate mode hops, presses or partial progress.
+- **E-P5: Petrovich never undoes the player.** If the player works the wheel himself (a set value,
+  a mode change, HDG LOS), Petrovich does not fight it or press it back. The new set values become
+  the goal. What "not fighting" means for a mode the player selected is open (Q4).
+- **E-P6: Petrovich never presses HDG LOS (short right).** The user called this an invariant
+  (*"We must not"*).
+- **E-P7: Alignment happens on the player's word, and only then.** "Align" (heading to the 9K113
+  azimuth) and "align for launch" (boresight onto the sight vector) are said by the player in the
+  sight seat. Petrovich presses ED's CBTM option. He never starts an alignment on his own, because
+  choosing the target and the moment is the shooter's job.
+- **E-P8: After the launch, the aircraft levels off and the missile stays guidable.** Once the
+  missile leaves, Petrovich takes the AI out of ALIGN FOR LAUNCH and back to level flight on his
+  own (the user's second issue), without a spoken word. He does it so the target stays inside the
+  sight's limits until impact (F-P2).
+- **E-P9: Parked, the aircraft never flies into the ground because of a mode Petrovich put it in.**
+  This is decision 7 ("whoever flies avoids the terrain") as it applies here. ED's AI is flying, so
+  Petrovich's share is the traps he can see: the park sink, the dive in ALIGN FOR LAUNCH before and
+  after launch, and an alignment abandoned without a launch (F-P1).
+- **E-P10: Unparking gives the aircraft back at once.** The moment the controls unpark, Petrovich
+  stops pressing (a press being held is released) and drops any unfinished goal. He does not
+  re-apply it on the next park. A new park is a fresh takeover, E-P1. What he says, if anything,
+  is Q2.
+- **E-P11: He keeps being a crewmate while "flying".** Naked-eye contact and threat calls continue,
+  as in the 2026-10-31 answer 5. The wheel work is silent background work.
+
+### Open assumptions
+
+- **What happens on park.** Serves the why: hold current altitude, heading and speed as found, with
+  altitude first because that is the trap. Would not: holding only altitude while the AI settles on
+  a stale heading or speed it carried from an earlier park. Whether ED's AI resets heading and speed
+  on park is for the user (Q3).
+- **Which altitude reference parked mode holds.** Serves the why: radar by default. Over rising
+  ground ED's AI then follows the terrain, which is the only terrain avoidance parked mode has
+  beyond the two fixes. This is decision 9's default carried over. Would not: keeping whatever
+  reference the overlay happened to show, which can be barometric at 50 m over hills. It needs the
+  user's confirmation that ED's AI really follows terrain in radar mode (Q6).
+- **When ALIGN FOR LAUNCH ends.** Serves the why: it ends on the launch, on the player aborting, or
+  when height drops below a floor. Would not: ending it on launch only, which is the obvious reading
+  of the user's text. See F-P1.
+- **What "level flight" after the launch means.** Serves the why: hold the current heading (or
+  track the sight's azimuth) so the target stays in the sight until impact, and an altitude that is
+  safe. Would not: a return to FLT that lets ED's AI turn back to the heading it held before the
+  alignment, swinging the target out of the sight while the missile is still flying. See F-P2.
+- **Where parked mode sits relative to BL-B67.** Serves the why: the parked case is the player on
+  the sight. He tracks, he launches, and Petrovich runs the AI. Would not: wiring parked mode into
+  BL-B67's ATGM run, which is built on Petrovich holding the sight and the pilot launching. See
+  F-P3.
+- **What a mode change by the player means.** Serves the why: the player's mode is his intent, so
+  Petrovich defers to it. Would not: cycling straight back to FLT to finish a speed step and
+  pulling the player out of CBTM. Q4.
+- **Which goal a parked command answers to after an alignment.** Serves the why: the alignment
+  overrode the goal, so after launch level flight is the new goal. Would not: resuming an earlier
+  spoken heading that points away from the target. This is part of F-P2.
+
+### Findings
+
+1. **F-P1: Ending ALIGN FOR LAUNCH only on launch leaves the dive unguarded.** Lens: the non-obvious case,
+   and whose job (decision 7).
+   - Assumption: the trap is "after the launch", so the exit is triggered by the launch.
+   - In the sim (user's words): the AI *"keeps that alignment … constant speed increase and altitude
+     decrease … flies the aircraft into ground"*. The dive comes from holding the boresight on a
+     target below. It begins when the alignment begins, not when the missile leaves.
+   - The pilot would see: he aligns at 60 m AGL on a target 4 km out, the missile takes a few seconds
+     to get permission, or he decides not to fire, and the aircraft keeps descending with nobody
+     pulling out. A player who has said "align" and then gone quiet can fly into the ground with no
+     launch ever happening.
+   - Grounded in: the user's issue 2 and decision 7, *"whoever flies avoids the terrain"*.
+   - Suggests: the exit has three triggers (launch, a spoken abort or cancel, and a height floor). The
+     floor is Petrovich acting unbidden, as in decision 7. The user should confirm that an
+     automatic pull-out before launch is wanted (Q5), because it can spoil a shot the player was
+     about to take.
+
+2. **F-P2: Leaving ALIGN for "level flight" must not turn the target out of the sight.** Lens: unit of
+   action. The action is a missile guided to impact, not "the aircraft is level".
+   - Assumption: post-launch means switch to FLT and set altitude.
+   - In the sim: the 9K113 is guided by the operator until impact, and the sight can only look so far
+     off the nose. FLT holds a set heading. If that set heading is still the one from before the
+     alignment, ED's AI turns back to it, and the target may leave the sight's limits mid-flight.
+     "One parameter at a time" makes this worse if altitude is set first and heading second.
+   - The pilot would see: a good launch, the aircraft swings off, the crosshair hits its stop, and the
+     missile is lost.
+   - Grounded in: the user's FLT/CBTM model (FLT holds set heading) and the sight's gimbal limits as
+     modelled in `belief/sight_head.py`. **Whether FLT resumes the pre-alignment heading is the
+     agent's inference, so it is Q7.**
+   - Suggests: on leaving ALIGN, the first press makes the set heading the current heading (or the
+     sight's azimuth), and the altitude comes after. The altitude target is the pre-alignment
+     altitude or a safe floor, not wherever the dive ended (Q8).
+
+3. **F-P3: "BL-B67's parked case" is a role swap, not a variant of the ATGM run.** Lens: whose job.
+   - Assumption (from the dispatch): parked mode serves BL-B67's attack run.
+   - In the project: BL-B67 is Petrovich on the sight (pin, single-unit aim, range calls, guidance
+     transmitter reset), with the pilot launching. Parked, the **player** is on the sight and
+     launches, and Petrovich is in the pilot's place running ED's AI. None of BL-B67's sight
+     behaviour applies. Its alignment is unparked (user, 2026-11-15: *"BL-B67's own is unparked"*).
+   - The pilot would see: if a planner wired parked mode through BL-B67's run, Petrovich would try to
+     drive or announce a sight the player is holding.
+   - Grounded in: root `CLAUDE.md` "Whose job is whose", BL-B67's entry, the user's 2026-11-15 line.
+   - Suggests: parked mode re-uses only BL-B67's **launch detection** (loadout −1 from the payload
+     feed) as the post-launch trigger, which is what Petrovich could perceive from the seat.
+     Alignment is called by the player's voice (E-P7). Range calls for the player's own shot are
+     out of scope unless the user asks for them.
+
+4. **F-P4: Taking over on park is consistent with decision 3, which is why it is not autonomy creep.**
+   Lens: crew sense. Informational, nothing at stake.
+   - The user's "set altitude first on park" looks like Petrovich acting unbidden. It is decision 3
+     ("on takeover he maintains the current state") applied to a takeover that the park, not a word,
+     triggers. ED's AI would otherwise change the state. Read this way, E-P1 also covers heading and
+     speed (Q3) and needs no separate rule. The one truly unbidden act is the alignment exit
+     (F-P1/F-P2), and decision 7 covers it.
+
+5. **F-P5: The player on the sight cannot tell ED's AI from Petrobrain-managed ED's AI.** Lens: would
+   the pilot notice and use this?
+   - The same AI flies in both cases, with the same sloppiness. Without E-P2's line on park, the only
+     sign that Petrobrain is working is the sink not happening. The line on park is not ceremony.
+     It is the only way the player knows his voice commands have a listener.
+
+Vignette walked (off the happy path): the player parks at 70 m AGL and 200 km/h, enters the sight
+(DCS switches to CBTM), and Petrovich cycles to FLT to set altitude. The player says "align". Back
+to CBTM, ALIGN TO 9K113. Then "align for launch": the nose drops toward a target 3 km out, and
+the player waits for the lamp. Height falls to 35 m with no launch yet. Today nothing catches that
+(F-P1). He fires, Petrovich goes to FLT, ED's AI holds its old heading 40° off, the target leaves
+the sight, and the missile is lost (F-P2). Each step follows the user's model as written. The gaps
+are only in what triggers the exit and in what order things are set on the way out.
+
+### Questions for the user
+
+- **Q1** — When you park, what should Petrovich say, if anything: "I have controls", something
+  else, or nothing?
+- **Q2** — When you unpark (take the stick back), should he say "you have controls", or stay
+  silent?
+- **Q3** — On park, does ED's AI also wander off in heading or speed, or only sink? Should he
+  re-set heading and speed to current as well as altitude?
+- **Q4** — If you change the AI wheel's mode yourself (e.g. to CBTM) while he is midway through a
+  goal, should he leave your mode alone and drop his goal, or finish his goal and cycle back?
+- **Q5** — Before launch, in ALIGN FOR LAUNCH, should he pull out on his own if height drops below
+  a floor (and say so), even though that may spoil the shot?
+- **Q6** — With ALT REF on radar, does ED's AI follow rising terrain well enough that this can be
+  parked mode's terrain avoidance?
+- **Q7** — When the AI leaves CBTM for FLT, does it go back to the heading set before the
+  alignment, or hold the heading it has now?
+- **Q8** — After the launch, which altitude: the one held before the alignment, or the current
+  one (with a floor)? And which heading: current, or follow the sight's azimuth until impact?
