@@ -166,3 +166,171 @@ since 2026-10-09, and passed silently; the 2026-11-14 integrity audit reproduced
 now resolve the repository from the payload's `cwd`, which follows the session. Rule for any new
 hook that inspects git state: `cwd` for the tree, `$CLAUDE_PROJECT_DIR` only for locating sibling
 scripts.
+
+## Moved from `AGENTS.md` "Where work happens", 2026-11-14 (verbatim)
+
+`AGENTS.md` was 4,674 words against a 3,194-word always-loaded guideline (2026-11-14 integrity
+audit, Tier 2); the rule text stayed there, and the passages below — handoff mechanics that
+`/harvest-agent-commit` now holds, transcripts, superseded wordings and detail two dispatch hooks
+inject — came here verbatim.
+
+### Rule 1 — the handoff, in full
+
+An agent writes far more than its headline document:
+
+| output | where it lands |
+|---|---|
+| the role's report (`review.md`, `dod-check.md`, `plan.md`) | worktree |
+| **agent-memory files** (`.claude/agent-memory/<role>/…`) | worktree |
+| **`notes/` harvest** (Definition of Done) | worktree |
+| research notes, roadmap and `todo/` edits | worktree |
+
+All of it is invisible outside that worktree, and `git worktree remove --force` destroys anything
+uncommitted without warning. That nearly happened on the first isolated run: only the report was
+copied back, and it was luck that the agent had written no memory file that time.
+
+**So the handoff is:**
+
+- **Instruct the agent, in its prompt, to commit everything it writes** inside the worktree — a
+  detached-HEAD commit is fine, it is reachable by sha — and to **report the sha, the file list,
+  and a clean `git status --porcelain`** in its final message.
+- **Prefer `git merge --ff-only worktree-agent-<id>`; cherry-pick only when that refuses.**
+  Agents fast-forward to the named tip before working (rule 4), so their branch is normally a
+  **descendant** of the feature branch and a fast-forward is available. Check it:
+
+  ```sh
+  git merge-base --is-ancestor <feature-branch> worktree-agent-<id>   # true => ff available
+  ```
+
+  **Why this is not a style choice.** A fast-forward preserves the agent's shas, so the branch
+  registers as merged and `git branch -d` works — which answers "has this been harvested?" with
+  git instead of bookkeeping. A cherry-pick rewrites the shas, the branch never registers as
+  merged, and that unanswerable question is what left 67 agent branches against 58 real ones in
+  September. Revised 2026-10-09, when the old wording — written while agents still started at
+  `origin/main`, where cherry-pick was the only option — stopped being true.
+
+  **A fast-forward is only available if the main loop has not advanced the branch while the agent
+  held it.** If it has, the branch has diverged and cherry-pick is correct — that is a fallback,
+  not a failure. Prefer not to commit to a branch an agent is working on; check with
+  `git merge-base --is-ancestor` before you do.
+- **Verify against the agent's own file list** rather than assuming the harvest caught everything.
+- **Only then remove the worktree**, with a plain `git worktree remove` — **never `--force`,
+  which is now in the deny list** (`.claude/settings.json`).
+- **Then delete the agent's branch**, `git branch -D worktree-agent-<id>`, so that a branch's
+  existence means "not yet harvested". They never register as merged, because the harvest is a
+  cherry-pick, so nothing else retires them.
+
+  **The check before `git branch -D` is not "did I cherry-pick its report's sha" but "is the
+  branch tip the sha I harvested".** One command:
+
+  ```sh
+  git rev-parse worktree-agent-<id>   # must equal the sha you picked
+  ```
+
+  **A mismatch means there is work you have not taken.** An agent can commit *again* after
+  reporting — one did, and the branch was deleted on the strength of the first harvest, the
+  second commit surviving only because `gc` had not run. Nothing announces a second commit
+  except the agent choosing to say so, and messaging an agent mid-run makes it likelier.
+
+  If a plain `git worktree remove` ever refuses, **read what it names** and fix that rather than
+  reaching for `--force`: the refusal fires in exactly the case where something unaccounted-for
+  would be destroyed.
+
+The failure mode is silent by construction: the report arrives, the work looks done, and the
+memory file that would have stopped the next agent repeating a mistake is simply gone.
+
+### Rule 2 — as first written
+
+Git will not check the same branch out twice, so an implementer in a worktree commits to
+`worktree-agent-<id>`, and the main loop fast-forwards that into the feature branch afterwards.
+Trialled 2026-09-21 and **in force**; what the trial surfaced is above in this document.
+
+### Rule 3 — the two tested workarounds, and the superseded wording
+
+```
+$ git worktree add <path> main
+fatal: 'main' is already used by worktree at '/Users/sg/Code/DCS-petrobrain'
+$ git fetch . HEAD:main
+fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
+```
+
+This project wants a real merge commit summarising the branch, and never a squash or a rebase of
+`main` (`.claude/skills/merge/SKILL.md`). The `--ff-only` preference in rule 1 is for harvesting an
+*agent* branch, which is a different operation; conflating the two is a mistake this rule made on
+its first writing. **The exception is narrow on purpose**: it moves `main` forward, which is what a
+merge is, and it does not change which branch the root has checked out — so it does not take the
+root away from the user. Check `git -C <root> status --short` is empty first; if they have work in
+progress there, stop and ask rather than merging around it.
+
+> **Superseded** by rule 3 above, 2026-10-09: this granted the main loop a share of the repo
+> root and so exempted side quests from needing a worktree. Agents always getting one is
+> unchanged; the main loop's share is what went.
+
+### Rule 4 — the dispatch contract, in full
+
+A worktree is created from **`origin/HEAD`** — the remote-tracking ref for the default branch — not
+from the target branch and not from the dispatching session's HEAD. Established by reflog
+2026-10-09 (`branch: Created from origin/main`), so **a stale base is the guaranteed starting
+state for any dispatch whose target is not `origin/main`, which is every feature-branch dispatch
+there will ever be.** Six consecutive dispatches that day landed stale, the worst 35 commits
+behind. **Assume a stale base. Never hope for a fresh one.** Mechanism, the three roles that
+verified the wrong code before this rule existed, and the open question of whether
+`worktree.baseRef` can change it: `plans/agent-stale-base/plan.md`.
+
+- **The dispatching prompt states the branch and the expected tip sha.** "Review the fix" is not
+  an address. **It also names the input documents**, because a stale base is harmless for source
+  and dangerous for inputs — the check is not "is the source the same" but "is everything I was
+  told to read present".
+- **The agent's first action is `git rev-parse HEAD`**, compared against that sha. A mismatch is
+  reported first, always, and never worked around silently.
+- **Then, if and only if HEAD is a strict *ancestor* of the named tip and the tree is clean,
+  `git merge --ff-only <tip>` and say so in the report.** It cannot lose work and cannot pick up
+  anything the dispatcher did not name. **Anything else — diverged HEAD, unique commits, a dirty
+  tree — stops.**
+- **When the tip cannot be checked out at all**, verify against an isolated snapshot:
+  `git archive <branch> | tar -x -C <scratch>`, running every command with `cwd` inside that
+  tree's own subproject directory. `pyproject.toml`'s `[tool.pytest.ini_options] pythonpath`
+  resolves relative to pytest's own rootdir, so `PYTHONPATH` alone does **not** redirect imports.
+  For a single *document*, `git show <tip>:<path>` works even when a checkout does not.
+- **Agent tooling is only as current as the agent's base commit** — a fix being on `main` does
+  not mean an agent has it.
+
+A `PreToolUse` hook on `Agent` (`agent-worktree-reminder.sh`, `agent-sha-gate.sh`) injects this
+at dispatch, because the moment it matters is the moment attention is on the task instead — the
+same argument that made rule 1 structural. A session developing a hook cannot exercise it through
+the hook mechanism; run the script directly instead. Being fixed, not accepted —
+`plans/all-work-in-worktrees/plan.md`.
+
+### "Naming the branch" and "Status" — as first written
+
+**The user tests in the repo root, and they check branches out there themselves** (*"no problem"*,
+2026-10-09). Nothing else moves that checkout. "It's ready" is not actionable if they cannot tell
+what to check out. **This used to have a backstop and no longer does.** The rule before 2026-10-09
+was *"leave the main checkout on the branch the user should test"*, so the root's branch told them
+what to test even when nobody said it. With the root theirs, that signal is gone — **naming the
+branch is the whole of the channel.** Forgetting it now means they have nothing to go on. Observed
+the same day the rule changed: their checkout sat on `main` for a 43-commit session, and the branch
+name was the only thing that would have led them to any of it. Those scaffolding branches mean
+nothing to the person flying the aircraft. A listed worktree should mean live work.
+
+All four rules are in force; rule 2 was trialled on cones 2B (2026-09-21) and worked. The third
+friction — the agent-memory hook once denying the only correct path an isolated agent had — is
+fixed, and is above in this document along with why a memory that is never written is the most
+expensive loss in this system.
+
+### "Why a feature branch's history still stays clean" — as first written
+
+Cross-cutting bookkeeping — skill edits, backlog notes, workflow-doc fixes — does not belong in a
+feature branch's commits. **That still holds; how to honour it changed on 2026-10-09.** There is no
+longer a main-loop session sitting in the root to commit such work directly, so it takes **its own
+worktree on its own branch**, named after the work, and merges on its own. One more worktree is
+cheap; `git worktree list` showing it is the point.
+
+> **Superseded** by the paragraph above, 2026-10-09: this had cross-cutting work committed to
+> `main` directly from the root, which rule 3 now forbids because it moves the user's branch under
+> their feet.
+
+**The user may override this for a specific piece of work, and did so twice on 2026-10-09**
+(*"Use the same branch"*, *"Continue in this branch"*), putting cross-cutting convention edits onto
+a feature branch deliberately so there was one thing to review rather than several. Their call to
+make; the default stands.
