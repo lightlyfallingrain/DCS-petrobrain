@@ -553,3 +553,103 @@ not in git by user direction). Transcription:
 overlay shows the AI's held IAS, heading, ALT with `R`/`B` reference and the mode as text, so the
 `list_indication(6)` readback of recon §7 is very probably real. The `±2m` label fixes
 `alt_change_step = 2` as metres.
+
+### AI helper flight overlay usage for BL-16 (user, 2026-11-15, verbatim)
+
+The user's operating knowledge of the wheel, written after the screenshots. This is the
+specification for parked mode (S0-P3b / mode 2); the reconciled model is in
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` §5.
+
+> - inner ring = short press
+> - outer ring = long press or hold (> 0.5s I think counts as long press, need to verify)
+> - center press toggles baro and radar alt
+>
+> **states**
+>
+> - when controls parked, initial status is FLT if enough forward speed or HVR if near hover. Exact
+>   speed criteria unknown.
+> - when user enters CPG view -> AI overlay automatically changes to CBMT
+>   - it does not automatically change back to FLT, though I cannot remember for certain
+> - state is changed by short left command
+> - HVR cannot be ented unless speed is set to 0
+> - HVRT can only be entered from HVR
+> - I all model short left press is HDG LOS -> NEVER use that. It means, turn to heading where
+>   Player is looking at. We *must not* short-press right in code for the AI flight helper.
+>
+> **controlling**
+>
+> What we need is control of
+> - speed
+> - heading
+> - altitude
+>
+> In FLT/HVR mode
+> - speed is short press up/down -> speed one step up/down
+>   - speed steps: 0, 60, 120, 160(?), 200, 250, MAX
+> - altitude is long press and hold up/down -> altitude up/down
+>   - left overlay shows the current alt value -> keep pressed until desired value reached.
+>   - alt value does not need to be exact, allow within 20m of target value
+>   - short middle press changes between baro alt and radar alt. After change, values need to be
+>     read from the left wheel and set again if not what was desired.
+> - heading is long press left/right -> heading counterclockwise / clockwise
+>   - current set value in left wheel, top mid value
+>
+> In HVRT mode
+> - Long press and hold up/down/left/right -> translate (drift) forward/backward/left/right
+> - short up/down -> alt up/down by 2 m
+>
+> In CMBT mode
+> - long left/right press (not hold) -> break turn 90 deg left/right
+> - long press down (not hold) -> break turn 180 deg
+>   - prefer not to use this as direction of turn is undetermined. Instead break left and after a
+>     short delay break left again to get 180 deg left. Mi-24 turn faster left, therefore 180
+>     should be to the left, unless otherwise commanded.
+> - short press up aligns heading to 9K113 azimuth. This is very usefull for getting the
+>   helicopter to head to target.
+> - long press up (not hold) aligns for missile launch -> aircraft boresight to 9K113 sight
+>   vector. This is needed for missile launch.
+>
+> **states and controlling**
+>
+> State may change without out input: player may press left on AI wheel -> state changes. Or DCS
+> may itself change the state when CPG view activates (->CMBT state) or when transitioning in and
+> out of hover (FLT<>HVR).
+> Therefore, we must read the current state from DCS every tick and react to it changing.
+> To get desired behaviour, we must first have the correct state to give the commands. If current
+> state is not desired state, then short left press to change state. Read state and check if it
+> is what we need, if not short left press again and read again, repeat until correct state.
+> To get from FLT to HVR, first set speed to 0 and then wait for aircraft to slow down -> state to
+> HVR.
+> HVRT can only be reached from HVR (by one left press).
+> To get to FLT from HVR, increase speed to more than 0. (From HVRT first need to get to HVR and
+> then increase speed.)
+> Align to 9K113 can only be done from CMBT, so change to that mode first.
+> Break turns require CMBT mode.
+> Normal flight parameter setting requires FLT/HVR mode, so that must be activated first.
+> When long press and hold is ongoing, mode may change. If that happens, hold must end
+> immediately.
+> To fulfill Player command (or desired flight state in general) we need to hop between command
+> modes so that the required commands can be given and flight parameters set for the AI helper.
+> *We can only set one parameter/command at a time.*
+>   - could set in steps if multiple need to change: speed +1 tap, heading -30 deg, alt +50 m,
+>     speed +1 tap, heading -15 deg, alt +200 m -> changes towards desired state in steps so that
+>     all params start changing
+>
+> **issues**
+>
+> - initial altitude is something weird. AI tends to descend to low alt initially regardless of
+>   what the set alt is. When alt is set, then AI flies to set alt. -> Therefore when controls are
+>   parkes, the immediate initial thing to do is set the desired altitude to what is actual current
+>   altitude. If they match, just move the alt a bit higher so that the AI get's an input for alt
+>   change.
+> - when commanding align for launch AI aligns aircarft boresight to where 9K113 points (if it can,
+>   it flies very poorly). However, it keeps that alignment even after missile launch causing
+>   constant speed increase and altitude decrease and therefore flies the aircraft into ground.
+>   Therefore, one the missile is launched, we no longer need to point the aircraft boresight at
+>   target and must instead go for level flight. This probably requires mode change to FLT and
+>   setting altitude.
+
+**Reading noted by the orchestrator, to confirm with the user:** the line *"short left press is
+HDG LOS"* conflicts with *"state is changed by short left"* and *"must not short-press right"*;
+the screenshots put `HDG LOS` inner-right and the mode name inner-left. Taken as: **short left =
+mode cycle, short right = `HDG LOS`, never pressed by code.**
