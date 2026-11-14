@@ -497,3 +497,23 @@ Reading (main loop):
 - **Windows recon: go, deferred** until the Windows machine is on. Targets: (1) what gates the CPG
   sight view on park state; (2) park without AI start (levers 3011–3013, `set_ai_piloting`, any
   other park path); (3) how ED's AI writes the pilot-seat controls.
+
+### Windows recon, targets 1 and 3 answered outside the repo (2026-11-12)
+
+The user ran the recon as a separate investigation (`../dcs-investigation/`, discarded); carried
+over as `aircraft-layer/research/2026-11-12-mi24p-cpg-view-gate-investigation.md`.
+
+- **Target 1 — closed, negative.** The view gate is `Command_Aiming` (3028) and
+  `Command_StickPark_Ext` (3055) both handled by `av9K113` inside `CockpitMi24.dll`, which is
+  encrypted on disk (code decrypted only in a running licensed process; reading it would mean
+  defeating ED's protection — not done). User's in-game observation: unparking while in the view
+  is refused or exits it, so the check is continuous. **R1 closed: no command sequence from Lua
+  gives the sight view with the stick live.** Fix belongs to ED. R2 candidates a–e all negative.
+- **Target 3 — answered at the symbol level.** Parked, ED's AI flies via the generic
+  `AI::Controller` / `wControl` setpoints imported from `WorldGeneral.dll`, not the SAU. Confirms
+  the 2026-11-02 call (a, b dropped) and probe v2 findings 2–3.
+- **Target 2 — still open, now the only one.** Probe v3 = parked with the helper AI unavailable
+  (`controlHelperMi24` off / Petrovich absent / 3011–3013 variants): does the stick stay live, does
+  the view still open. That is S0-P3's last candidate.
+- Option C stays noted: sight slew works from the normal operator view (`SightWithCockpitView`),
+  only the eyepiece picture is gated.
