@@ -517,3 +517,18 @@ over as `aircraft-layer/research/2026-11-12-mi24p-cpg-view-gate-investigation.md
   the view still open. That is S0-P3's last candidate.
 - Option C stays noted: sight slew works from the normal operator view (`SightWithCockpitView`),
   only the eyepiece picture is gated.
+
+### Windows recon target 2 answered (2026-11-14, Windows-side session)
+
+`aircraft-layer/research/2026-11-14-mi24-stick-park-without-ai-pilot.md`. **No Lua-level path
+parks the stick without the AI pilot**: neither `Mi24AutoHandover` nor `controlHelperMi24` is read
+by any Lua (DLL-only), the HELPER_AI device is created unconditionally, the stow animation (arg
+852) is a HelperAI output, and nothing in Lua reaches `set_ai_piloting`. The user already flies
+with `Mi24AutoHandover=false` and still saw 2001–2003 ignored while parked (probe v2) — that
+option governs the *automatic* request, not the coupling. Last untested lever: the mission unit
+property `NetCrewControlPriority` (0 Pilot / 1 Copilot-gunner / −1 Ask / −2 Equal), DLL-owned.
+**Probe v3 candidate**: `current-probe.miz` copy with `NetCrewControlPriority=1`, then `=-2`,
+player in seat 2; unparked hold check → 3055 → 10 s constant 2001 offset, log args
+852/857/859/865 + `list_indication(0)` and `(6)` per frame. Odds low. `SimplifiedAI=true` a cheap
+third variant; `HumanOrchestra` skipped (MP-scoped, disables seat switching). Caveat carried:
+whether AutoHandover was already false on the 2026-11-01 flight is unverified.
