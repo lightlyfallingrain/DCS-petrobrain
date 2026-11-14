@@ -655,3 +655,18 @@ specification for parked mode (S0-P3b / mode 2); the reconciled model is in
 **Parked attack alignment, user 2026-11-15:** *"When controls are parked, there's only ED's
 ALIGN available. Petrobrain cannot directly fly. We'll have to do with ED's control then."* ED's
 `ALIGN TO 9K113` / `ALIGN FOR LAUNCH` are the parked-mode alignment; BL-B67's own is unparked.
+
+### BL-16 un-deferred, parked mode first (user, 2026-11-15, verbatim)
+
+> *"take BL-16, remove deferred status. Let's build it. Let's actually start with the AI helper,
+> that's the Player uses 9K113 case and it's important to get done. After that we can build our
+> own controls-not-parked flight controlling."*
+
+### Parked mode activates on park, not on a spoken handover (user, 2026-11-15, verbatim)
+
+> *"Since AI helper takes over automatically and immediately when controls are parked, so should
+> Petrobrain flight controlling mode activate for the AI helper. Regardless of Player commanding
+> 'your controls' or not."*
+
+So in parked mode the park signal (arg 852, S0-12) is the activation, and explore decision 2's
+spoken handover applies to the unparked mode only.
