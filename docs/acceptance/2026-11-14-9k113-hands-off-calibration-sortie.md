@@ -29,3 +29,19 @@ distances and heights agree with this to within 10 m AGL.
 the file, from line 324554** — the file held 25 runs), `aircraft_layer_debug-20261114-215821.log` (this
 session from line 160387). **No `--detection-trace` or belief-truth log was written this flight**, so
 truth came from the debug log's world-object dump. The units were static, so that is sufficient here.
+
+## Second sortie, same evening — stamp `20261114-224028`
+
+> at about T+5min commanded engage with missiles on BTR60. Distance about 1km
+> at about T+5:30 - 6:00 held target manually in 9K113
+> after that, around T+7 min manual slew to 9K113 limits, left, right, up, down.
+
+| phase | mission t | matched to |
+|---|---|---|
+| engage (voice "engage missiles") | 302 s | `dcs-speech` |
+| hand-hold | ≈ 332–377 s | BTR-60 `Ground-6-1` (id 16779520), 1.06–1.10 km, **189 m AGL**, el ≈ −11° |
+| sweep | 376–435 s (log ends) | azimuth to both mark clips; elevation only 0.517 → 0.743 raw (−11.4° → −3.3°) before the log ends |
+
+Logs: `aircraft_layer_slew_trace-20261114-224028.log` (this flight from line 436119),
+`aircraft_layer_debug-20261114-224028.log` (session from line 166331), plus the body-layer jsonl.
+No detection trace again.

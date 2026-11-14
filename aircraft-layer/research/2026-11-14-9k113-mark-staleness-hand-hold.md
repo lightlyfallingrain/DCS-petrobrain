@@ -48,6 +48,31 @@ rose by 1.1°. The mark did not move.
    (`body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`). The mark cannot confirm it.
    **Unverified; a hold at about −20…−25° inside the mark's range would settle it.**
 
+## Second sortie (stamp `20261114-224028`): BTR-60 at 1.07 km, 189 m AGL, el ≈ −11°
+
+| | n | mark − truth |
+|---|---|---|
+| elevation, fresh (< 0.3 s) | 12 | **+0.06° ± 0.01°** |
+| elevation, stale (> 2 s) | 71 | −0.46° ± 0.40° |
+| azimuth, fresh | 85 | −0.01° ± 0.27° |
+
+The stale elevation error regresses on airframe pitch with **slope 1.27, residual 0.08°**. The error
+is the attitude change since the last slew input, which confirms conclusion 2 with a second target and
+range. It was the same −11° band as hold 2, so it adds nothing below −15°.
+
+Limit sweep: azimuth reached the mark's clip on both sides (raw 0.3333 / 0.6667 = ±4.27°) and stayed
+there for 12–13 s each. **The mark cannot show where the sight's own azimuth stops.** Elevation moved
+only from −11.4° to −3.3° before the log ended at t = 435 s, so it reached neither stop. The gimbal
+args (`az`/`elev`) stayed at 0 throughout, as before.
+
+## Next instrument, if the limits matter
+
+The 555/566 mark cannot measure the sight's limits: it clips at ±4.3° in azimuth and about −30° in elevation, and it is stale
+between inputs. **`LoGetCameraPosition()` while the player is in the 9K113 view** may give the sight's
+actual line of sight directly. That is unverified: it assumes the view camera is bound to the sight
+LOS. Only reading is proposed here. The 2026-09-11 rejection (`2026-09-11-petrovich-detection-readout.md`)
+is of *setting* the camera.
+
 ## Not established
 
 The mechanism behind the staleness: update-on-input, or a body-relative value that is not recomputed
