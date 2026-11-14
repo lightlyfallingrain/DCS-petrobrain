@@ -290,3 +290,194 @@ The reason is not presentation. A card is read in glances, at the controls, poss
 has to carry verified commands, an explicit statement of what is *not* testable this time, per-block
 expectations as numbers where numbers exist, and checkboxes that survive an interruption. A plan
 file satisfies none of that while being just as correct.
+
+## Moved from `CLAUDE.md` and `AGENTS.md`, 2026-11-14 (verbatim)
+
+Root `CLAUDE.md` was 6,253 words against a 4,201-word always-loaded guideline and `AGENTS.md` 4,674
+against 3,194 (2026-11-14 integrity audit, Tier 2). The passages below were cut from them by the
+test the budget hook states — a rule a hook delivers at the point of use, a procedure a script or
+skill holds, or a third-plus incident for a rule that already carries one — and are kept here
+verbatim so a revert is a copy, not a rewrite. Each names the section it came from.
+
+### `CLAUDE.md` "Whose job is whose"
+
+This is written down because the failure it prevents is silent and has happened: work that is
+internally coherent and correct, aimed at nothing the pilot would notice or use. Two of this project's
+own corrections were exactly that — a planned transport removed once mission frequency was considered,
+and an F10 contact-list menu dropped because the player would still have to click through it. Both
+were caught by asking this question, and the cost of asking it is one paragraph in a plan.
+
+### `CLAUDE.md` "Current priority"
+
+A written list goes stale silently while reading as an instruction — four skills inherited a stale
+three-subproject list and could report PASS while never looking at half the repo. `todo/` no longer
+duplicates milestone narrative. (Not restated here on purpose: two copies of one fact drift. The
+roadmap files' own "Keeping this current" note has how that is enforced at merge time.)
+
+### `CLAUDE.md` "Agents" — why the "whole feature" wording had to go
+
+It was unenforceable on this project's actual shape, where a feature's stages routinely ship in
+separate merges days or weeks apart. Read strictly it would hold both passes until the last stage of
+`BL-14` or the 9K113 series; read loosely it justifies a pass per stage, which is what practice
+drifted into. Neither was intended. The drift was found by *counting commits in a retro*, not by
+anyone noticing at the time: a cadence nobody re-checks outlives its premise.
+
+**`investigator`** is this project's recon role, needed because much of the World Model Builder
+depends on unverified DCS internals (file formats, coordinate systems, scripting-API availability).
+It sits *before* Architect's plan is finalized, not in the Implementer→Reviewer→DoD chain:
+**Architect invokes it proactively whenever a plan would otherwise depend on an unverified
+DCS-internals claim** (see `.claude/agents/architect.md` step 2) — this is not a user-invocation-only
+role. It writes dated findings to the `research/` directory of whichever module the finding is about
+(e.g. `world-model/research/`, `aircraft-layer/research/`), per the format in
+`docs/concept/WORLD_MODEL_BUILDER.md`, and does not write pipeline code.
+
+### `CLAUDE.md` "Session Start" — the five steps and the incident in full
+
+1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP/` index of whichever
+   subproject looks most active — `<subproject>/ROADMAP/<subproject>-roadmap.md` (its Status table
+   row says which subproject). **Not `<subproject>/ROADMAP.md`**, which is a four-line pointer.
+2. Read `todo/todo/todo-tasks.md` for any User priority tasks, and `todo/backlog/todo-backlog.md`
+   for cross-cutting/unscoped backlog items. (`todo/todo.md` and `todo/backlog.md` are now pointers
+   to those; both were split into one file per item on 2026-10-09 — `docs/DOC_CONVENTIONS.md`.)
+3. Identify the next actionable milestone (first non-done, non-deferred/blocked item in the
+   relevant subproject's roadmap).
+4. Show that milestone and its subitems to the user.
+5. Ask what they want to work on.
+
+**The `grep -v` is not cosmetic.** 41 already-cherry-picked `worktree-agent-<id>` branches cannot
+be told apart from unharvested work, so they stay; without the filter an unfiltered `head -20`
+buried the only live feature branch among them. The handoff now deletes each one at harvest
+(`AGENTS.md`, rule 1), so the backlog does not grow — see `docs/AGENT_WORKTREE_PROTOCOL.md`.
+
+**Clearing context between tasks is the right habit** (it is what keeps long sessions affordable),
+and it is safe *only* because this repo records its decisions. The cost of a clear is paid at
+session start by reading, not avoided by remembering.
+
+**This step exists because it was skipped, 2026-09-25.** A cleared session was told "continue with
+brain layer work", read the roadmap, saw BR-1 Stage 2 as next, and built it — while
+`feature/br1-stage2` already held a near-identical implementation from earlier the same day, and
+`feature/d10-structured-candidates` held the follow-on. Two implementations of one milestone,
+~2000 lines each. The roadmap was not wrong and the user's instruction was not ambiguous; the state
+was simply never checked. `git branch` costs one second and would have caught it.
+
+### `CLAUDE.md` "Knowledge graph"
+
+A copied `graphify-corpus/` mirror was tried and removed: it keyed cache lookups and node names on
+the staging path, leaking the mirror directory into the graph's own vocabulary. **Do not reintroduce
+a mirror** — `/graph-refresh` carries the full reasoning.
+
+The two stores hold different things and the memory half was, until now, unreachable in practice.
+**Search every role, not only the one you are in** — the cross-role hit is the one the old per-role
+indexes could not surface at all.
+
+**Why a tool and not the `MEMORY.md` index that used to sit in each directory.** That index was
+loaded on every agent dispatch while no role file ever told an agent to read it — unconditional
+cost, optional benefit — and it drifted. The tool derives the same index on demand from each file's
+`description:` frontmatter, so it cannot drift and cannot be asked to shrink. Full account, and why
+the compaction it was repeatedly asked for was impossible as phrased: `todo/todo/X-T25.md`.
+
+The graph goes first — that is what the section above is for. But the sentence immediately above
+decides a second case against it, and the distinction is the verb. A correction sweep is the second
+kind, so *"the graph found no remaining mention"* is not evidence the claim is gone. The graph says
+*where* to look, not what the text says: edge annotations quote fragments, and a fragment can lose
+its tense. The wrapper assembles the sources and re-renders annotations as `fragment@path` so they
+read as coordinates rather than claims. They keep the graph's structural spine current per commit
+(AST over changed `.py`, ~1.5s) and record that a semantic rebuild is owed when docs change. The
+merge can sit anywhere around those two; what must not happen is the rebuild being skipped.
+
+### `CLAUDE.md` "Verification" — tuning
+
+The procedure, the three measured traps (constants bind by value at import; `lo`/`hi` must be AST
+literals; per-key bounds cannot catch cross-key couplings) and the inclusion test live in
+`.claude/agents/implementer.md`. **The one habit worth repeating, because it is where every `X-T26`
+defect hid:** check the **rendered** `defaults.toml`, not the `#:` comment it was generated from. The
+generator emits only the first sentence, so a warning written second reaches nobody — and that
+survived three review passes by readers reading the diff.
+
+### `CLAUDE.md` "Do not reinvent the wheel"
+
+Reuse before declaring is already the rule for tuning constants ("Behaviour-affecting constants are
+tunable"); this generalises it. **Finding the existing thing is the work.** This project's recurring
+failure is not missing documentation but failing to find documentation that already exists — which
+is why the knowledge graph and `memory-search.py` have observable triggers rather than a "before
+concluding" rule. The same applies here: *"I did not see one"* is not evidence there is none, and a
+skill, a script or a convention you did not look for is the most expensive kind to duplicate. That
+line is the difference between a deliberate exception — like the body-layer ↔ world-model in-process
+import, which carries its justification everywhere it is mentioned — and a second way of doing
+something that nobody decided on.
+
+### `CLAUDE.md` "Direction before speed"
+
+This is not a counsel of slowness. Most of what this project does is ordinary work that should be
+done briskly and merged. It is a rule about *one specific moment*: when new information arrives
+and the obvious next move is to act on the first reading of it. Paraphrasing the user's words loses
+the part that decides the design. This is `AGENTS.md`'s "Explore Before Deciding" applied to the
+case it most obviously covers. Three hooks, because a rule that must be recalled at the exact
+moment attention is elsewhere will keep being broken — the same reasoning `AGENTS.md` applies to the
+worktree rule. A hook that refused to dispatch would be the hook overruling the user. The hooks were
+written the same day the failure happened: five observations arrived from a sortie and an Architect
+was dispatched on all five within one turn. Nothing was lost, but only because the user separately
+asked for the feedback to be written down.
+
+### `CLAUDE.md` "Talking to the user"
+
+Most turns need a few lines. Drop the walkthrough, keep the load-bearing step. Repeating mechanics in
+chat is noise that buries the line that mattered. Self-corrections about process stay internal.
+"I'll dispatch a reviewer, then DoD" tells them nothing they can use. Note the last clause of the
+visualisation direction: a visual **replaces** the text rather than decorating it. **Rough and early
+beats polished and late**, for the same reason `/explore` asks for mock output — an o'clock bearing
+missing from a mock callout, spotted 2026-10-17, is one such correction. **Honest limit, to be stated
+rather than promised around:** there is no image-generation model here, so "visual" means SVG,
+Canvas, HTML or Mermaid — geometry, charts, mock interfaces and diagrams, not photographic or
+artistic renderings. **This direction already existed and was scoped too narrowly to fire.** The
+2026-09-18 version lives in `.claude/skills/explore/SKILL.md`, which only runs during an `/explore`
+conversation; the restatement in `CLAUDE.md` is general and applies to any answer. Brevity is not
+the same as smoothing.
+
+### `CLAUDE.md` "Workflow"
+
+The feature-branch bullet read *"checkout `main` first, then create the branch"* until 2026-10-09 —
+the pre-worktree procedure, and the one action rule 3 now forbids. The stale wording and the hook
+that enforced it were found together by the 2026-10-09 integrity audit, findings 2 and 3. The user
+parks the root wherever they like — usually `main`, so they can add input documents or check out a
+branch to fly without colliding with anything running. So naming the branch is the only way they
+learn what to test: the root's branch no longer tells them, and that former backstop is gone.
+Committing cross-cutting work on `main` from the root is no longer the way: the root is the user's,
+and moving its branch under them is what rule 3 forbids. A short code comment saying what a testing
+aid is for is enough.
+
+### `CLAUDE.md` "Backlog Management"
+
+`todo/todo/` and `todo/backlog/` were separated 2026-09-27 — each edit used to re-extract the other
+into the knowledge graph — and split to one file per item on 2026-10-09. `--list` is why no
+prefix-to-directory table is written in `CLAUDE.md`: it derives the map from where each prefix's
+files actually are. The two ways the hand-rolled command has been got wrong — a prefix-agnostic
+pattern reading another space's maximum, and `sort -t B -k2 -n` returning `BL-B9` against a real
+`BL-B46` — are both measured, both silent, and both impossible in the script, which carries the
+account in its header. An ID that silently comes to mean a different item is worse than no ID,
+because a commit message or plan citing the old meaning now reads as evidence for the new one. For
+the same reason an item moving between spaces takes a **new** ID: an ID belongs to one directory's
+sequence, and carrying one across would make two sequences collide.
+
+### `AGENTS.md` "A change request from Security or Performance Reviewer re-enters the loop" — the worked case
+
+The reason is the same one that put Reviewer after Implementer in the first place: a fix written in
+response to a review is ordinary new code, arriving late, usually under time pressure, and touching
+a path the original author had already stopped thinking about. It deserves the same reading as the
+code it patches. The failure this prevents is specific and was demonstrated on
+`feature/watch-reporting` the day this rule was written. The performance review asked for one
+short-circuit; applying it also skipped a piece of masking bookkeeping the review had not mentioned,
+which would have made a contact read as line-of-sight-masked on its first tick back in range with
+no masked sample ever taken there. The fix was correct in the end, but *the review that requested
+it was not the review that would have caught that* — it had already reported and finished.
+
+### `AGENTS.md` "Explore Before Deciding" and "Effort/Value Check"
+
+Menus are for settling a decision whose shape is already understood, not for finding that shape.
+Observing real output is what cues recall — several of this project's most important corrections
+arrived that way rather than in answer to a question. `.claude/skills/explore/SKILL.md` has the
+procedure and the graph-versus-`grep` split. Not money — engineering effort, added complexity, new
+failure surface, and future maintenance. Ending at "this is expensive" without a route forward is
+not useful. This role supplies implementation insight and the effort/value read the user cannot get
+without looking at the code. Applied to routine work the check becomes friction and trains the user
+to skip past it.
