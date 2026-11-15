@@ -53,6 +53,9 @@ findings [[X-T6]] and [[X-T8]]. ([[X-T24]] was dropped and [[X-T7]] closed on 20
 merged the same evening, and what they owe now is **your flying, not more agent passes** — they are
 `#status/done #needs-flight` on their own entries:
 
+**2026-11-15: both accepted without a sortie** (testing-debt cleanup,
+`docs/acceptance/2026-11-15-testing-debt-cleanup.md`).
+
 - **[[BL-B70]]** (attack-run guidance, merged `077d188`) — plain checkout, pure Python. Five test
   cases in `plans/attack-run-sortie-fixes/dod-check.md`. Do **not** read a never-heard
   `", obstructed"` as a failure: that is [[BL-B76]], still open.

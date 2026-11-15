@@ -2,7 +2,7 @@
 
 - [x] **Two sortie-reported defects in the attack-run loss/regain register, from the 2026-10-24
   sortie: "eyes on" fired for a target still behind a mountain (F2), and a new voice command,
-  "where is it?", to get a guidance update on demand (F3).** #status/done #needs-flight Captured
+  "where is it?", to get a guidance update on demand (F3).** #status/done needs-flight Captured
   verbatim in `docs/acceptance/2026-10-24-sortie-feedback.md` F2/F3, explored with the user the
   same day, planned in `plans/attack-run-los/plan.md`, implemented per
   `plans/attack-run-los/implementation.md`, reviewed APPROVED (no required fixes) in
@@ -69,3 +69,9 @@
   there outrank this entry. Related: `[[BL-B70]]` (the register this entry re-keys), `[[BL-B76]]`
   (the open question Decision 2 narrows but does not close), `[[BL-14]]` (attack-run target
   selection and run guidance, the milestone this register belongs to).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -2,7 +2,7 @@
 
 - [x] **Spoken callouts say "near a village" / "in the town" / "near a road" / "near a river"
   instead of a settlement/water body's proper name plus a bracketed distance figure.**
-  #status/done #needs-flight **Merged to `main` 2026-10-20 (`83bf80bc`)**, `feature/landmark-words-no-names`.
+  #status/done needs-flight **Merged to `main` 2026-10-20 (`83bf80bc`)**, `feature/landmark-words-no-names`.
 
   **User, verbatim** (`docs/acceptance/2026-10-20-sortie-feedback.md`, F7): *"I get call outs that
   refer to settlement by it's name. While correct, I notice that's not very usefull actually.
@@ -47,7 +47,7 @@
   new query. DoD mechanical checks pass in both touched subprojects (body-layer, world-model) at
   tip `34b9f659`, plus the retroactive security-plan-review commit layered on top.
 
-  **`#needs-flight`, not fully closed.** Everything above is fixture-verified; what no fixture
+  **`needs-flight`, not fully closed.** Everything above is fixture-verified; what no fixture
   reaches is whether the wording actually reads right at the controls — "near a village"/"in the
   town" cadence against real terrain, and whether dropping the distance figure (rather than
   rounding it, as speech used to) loses something a pilot actually wanted. Clear this tag once
@@ -59,3 +59,9 @@
   replies ever start reading tool results aloud, that boundary needs revisiting there, not here
   (plan's own "Second-order effect" section, confirmed independently by DoD and both Security
   passes).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

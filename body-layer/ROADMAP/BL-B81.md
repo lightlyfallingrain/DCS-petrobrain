@@ -1,11 +1,11 @@
 # BL-B81 — Radio check
 
 - [x] **BL-B81 — Radio check: a command whose only job is to get an answer.** #status/done
-  #needs-flight Raised by the user 2026-10-19, built after `[[BL-15]]`'s Stage 1, together with
+  needs-flight Raised by the user 2026-10-19, built after `[[BL-15]]`'s Stage 1, together with
   `[[BL-B82]]` on `feature/radio-check`. Reviewer/Performance Reviewer/Security all APPROVED; DoD
   passed (mechanical checks, `plans/radio-check/dod-check.md`) at merge commit
   `92ae5b3cbee63548fa49344d171296ff3aca40b8` — **merged to `main` 2026-10-19 (`14898014`)**, not blocked on live
-  acceptance. `#needs-flight`: the command/greeting tokens are verified directly against
+  acceptance. `needs-flight`: the command/greeting tokens are verified directly against
   `match_transcript`/`CrewConsole.handle_command` (not reasoned from the code), but the real
   microphone → whisper → intercom chain is unverified. Acceptance card published:
   https://claude.ai/artifact/QxCKq1kgUVKZnG1bfxzd8t (`docs/acceptance/2026-10-19-radio-check-card.md`).
@@ -39,3 +39,9 @@
     world model not loaded". That answer serves the check just as well — the pilot hears that
     Petrobrain is up and what is wrong — so radio check takes the refusal like every other command.
   - Input surfaces: voice, crew-text, and F10 if a menu item is wanted.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

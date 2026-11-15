@@ -32,7 +32,7 @@
   re-reviewed), Performance Reviewer APPROVED/MONITOR, Security deep-analysis APPROVED, and a
   retroactive Security plan review (missed in sequence, closed at DoD — see "Process note" below)
   also APPROVED. All mechanical checks (ruff format/check, mypy --strict, pytest: 318 passed/2
-  skipped) pass on tip `6e200483b714d00f86b607e8aa59af59a7a6491d`. `#needs-flight`: **Stage 4
+  skipped) pass on tip `6e200483b714d00f86b607e8aa59af59a7a6491d`. `needs-flight`: **Stage 4
   (live verification on Mac and Windows) is explicit scope, not done** — it needs the user's own
   hands on both machines and was never claimed as covered by any automated check. The milestone
   stays `[~]`, not `[x]`, until Stage 4 runs. Acceptance checklist for Stage 4:
@@ -71,3 +71,9 @@
 
   Out of scope here: the other subprojects' OS-independence (user: *"first"* the audio adapter),
   and a Russian-accented character voice.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -2,7 +2,7 @@
 
 - [x] **BL-B73 — While a unit is firing a gun or autocannon, admit it at `PRESENCE` out to
   `PLAYER_BUBBLE_RADIUS_M` and through tree cover, using `S_EVENT_SHOOTING_START`/`_END` over the
-  mission-scripting bridge.** #status/done #needs-flight Split out of `[[BL-B72]]` at Architect
+  mission-scripting bridge.** #status/done needs-flight Split out of `[[BL-B72]]` at Architect
   stage, 2026-10-15 — `plans/emitter-visibility/plan.md` Stage B, Decision 2. Same user direction
   and same acceptance document (`docs/acceptance/2026-10-15-firing-unit-visibility.md`).
 
@@ -17,7 +17,7 @@
   APPROVED, Performance APPROVED-MONITOR (`plans/emitter-visibility/security-stage-b.md`,
   `performance-stage-b.md`).
 
-  **`#needs-flight`, not fully closed**: same outstanding sortie as `[[AC-B8]]` — whether
+  **`needs-flight`, not fully closed**: same outstanding sortie as `[[AC-B8]]` — whether
   `S_EVENT_SHOOTING_START` retriggers mid-burst — plus the cockpit judgement no fixture reaches:
   whether *"taking fire"* vs. *"something firing, far"* reads right in the moment, and whether a
   firing section's clustering (one `count_bucket` cluster at range, per `[[BL-B72]]`'s existing
@@ -47,7 +47,7 @@
   half, which shares this entry's channel), `[[AC-B8]]` (the channel itself), `[[BL-2]]` (what
   decays afterwards).
 
-  **A live sortie exercised the `#needs-flight` cockpit-judgement question above and found a real
+  **A live sortie exercised the `needs-flight` cockpit-judgement question above and found a real
   defect, not a pass.** `docs/acceptance/2026-10-20-sortie-feedback.md` F6/F6-follow-up, fixed on
   `fix/taking-fire-visible-shooter` (DoD-passed, **merged to `main` 2026-10-20, `45dd91f9`**, not yet flown): a Leopard-2A5 at 1,073 m firing at
   ownship, admitted
@@ -63,8 +63,14 @@
   tier is unaffected by either fix (asserted in tests); `visibility.py`/`emitters.py`/`gaze.py` are
   untouched.
 
-  **`#needs-flight` carries forward, narrower than before.** This sortie closed the "does the
+  **`needs-flight` carries forward, narrower than before.** This sortie closed the "does the
   bypass-needed wording read right" half implicitly (it was the visible/no-bypass half that broke);
   what is still outstanding is this *fix* itself (not yet flown) plus the two questions this entry
   already carried: whether `S_EVENT_SHOOTING_START` retriggers mid-burst, and whether a multi-unit
   firing section's clustering looks sane in the moment. All three can likely clear on one sortie.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

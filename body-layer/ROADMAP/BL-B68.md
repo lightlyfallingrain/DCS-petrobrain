@@ -1,8 +1,8 @@
 # BL-B68 — Belief survives a DCS mission restart, because nothing resets it
 
-- [~] **The collector holds every piece of belief state in plain dataclass fields with no lifecycle
+- [x] **The collector holds every piece of belief state in plain dataclass fields with no lifecycle
   hook, so a DCS mission reload inside one service run carries the whole of the previous mission's
-  belief into the next one.** #status/in-progress Diagnosed 2026-10-15 from the user's own test
+  belief into the next one.** #status/done Diagnosed 2026-10-15 from the user's own test
   flight; full evidence in `plans/position-belief-runaway/debug-2026-10-15.md`.
 
   **Deferred by user direction, 2026-10-15:** *"defer mission end/start mechanics. We'll do them at
@@ -15,7 +15,7 @@
   `reset_for_new_mission()` on each class named, confirmed by Reviewer against this table
   explicitly (`plans/bl15-mission-start/review.md` Batch 1). **This entry stays `[~]`/in-progress,
   not `[x]`, until the live sortie confirms the fix in the cockpit** — that is tracked on
-  `[[BL-15]]` itself as `#needs-flight`, not duplicated here as a second debt marker. Mark `[x]`/
+  `[[BL-15]]` itself as `needs-flight`, not duplicated here as a second debt marker. Mark `[x]`/
   `#status/done` once that sortie clears.
 
   **How it presented.** The belief-truth tripwire fired on 18 contacts at ranges of ~532 km against
@@ -78,3 +78,9 @@
   Related: `[[BL-B69]]` (the object-permanence distance gap, same investigation), `[[BL-14]]`
   (whose `attack_run_state` is the second-order risk above), `[[BL-B64]]` (whose acceptance sortie
   needs the workaround).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

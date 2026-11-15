@@ -2,7 +2,7 @@
 
 - [x] **BL-B47 — `speech._is_air_defence` resolved through `object_model.profile_for`, which keyword-matches
   *type* names, so a believed classification held at class level was never recognised as air defence.
-  FIXED, DoD-PASSED, merged 2026-10-11 — UNFLOWN.** #status/done #needs-flight
+  FIXED, DoD-PASSED, merged 2026-10-11 — UNFLOWN.** #status/done needs-flight
   Branch `fix/air-defence-class-level`, merge commit `1063f2a`. Reports:
   `plans/air-defence-class-level/{implementation,review,security,dod-check}.md`. Acceptance rides
   [[BL-13]]'s card, `docs/acceptance/2026-10-10-crew-query-path-sortie.md` (one sortie, both
@@ -83,3 +83,9 @@
   `parent_class_of("ZSU-23-4")` is `None` while `parent_class_of("ZSU-23-4 Shilka")` is `OP_SPAAG` —
   the bare designation is fixture-authored and the real DCS type carries the suffix, so that one is
   a note, not a defect.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

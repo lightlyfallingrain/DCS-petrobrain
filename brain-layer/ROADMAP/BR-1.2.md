@@ -1,7 +1,7 @@
 # BR-1.2 — Brain layer, Stage 2 — OllamaDecider
 
 - [x] **BR-1 Stage 2 — `OllamaDecider`, a real local model behind the wire. DoD PASSED and
-  merged 2026-09-25 (`4bc0df9`, from `feature/brain-layer-stage2`); unflown.** #status/done #needs-flight Replaces Stage 1's
+  merged 2026-09-25 (`4bc0df9`, from `feature/brain-layer-stage2`); unflown.** #status/done needs-flight Replaces Stage 1's
   `StubDecider` with a real `qwen3:4b-instruct-2507-q4_K_M` call over `brain-layer/src/
   ollama_client.py`, the classify/discriminate prompt pair (`brain-layer/src/prompts.py`), and a
   new body-side D10 trust boundary (`body-layer/src/belief/brain_reply.py`) that re-validates every
@@ -47,3 +47,8 @@
   from an alternative ~43-token version the folded-in branch had built) under-serves real
   utterances before either downstream piece is built further.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

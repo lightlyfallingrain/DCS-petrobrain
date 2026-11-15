@@ -1,7 +1,7 @@
 # BL-W6 — Sortie 2026-09-26 fixes (Fix A/B1/B2/C)
 
 - [x] **`sortie-2026-09-26-fixes` (Fix A/B1/B2/C) — merged, DoD PASSED on fixtures/console only,
-  not yet flown.** #status/done #needs-flight All three fixes have real in-cockpit observables and this is deliberately
+  not yet flown.** #status/done needs-flight All three fixes have real in-cockpit observables and this is deliberately
   *deferred*, not waived — the plan and DoD gate both treat a flown sortie as needed, not optional
   (unlike e.g. BL-3, waived by its own plan). Card: see the acceptance card DoD published for this
   branch. What it should clear: (1) crossing/motion callouts stop for contacts behind the cockpit
@@ -18,9 +18,14 @@
 
   **Part (2) is CLEARED 2026-10-16 — binoculars are used, observed by the user from the debug
   visualization** (*"binoculars are used now, I can see that in the debug visualization"*), closing
-  `[[X-T7]]`. **Parts (1) and (3) are still owed**, which is why this entry keeps `#needs-flight`:
+  `[[X-T7]]`. **Parts (1) and (3) are still owed**, which is why this entry keeps `needs-flight`:
   mask/occlusion callout suppression and the interrupted-look behaviour are separate observables of
   the same merge, and neither is visible in the optic cone. The constants named above
   (`CALLOUT_OBSERVABILITY_GRACE_S`, `OPTIC_RETRY_INTERVAL_S`) still have no measured feedback — the
   verdict is that the behaviour fires, not that its cadence is right.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

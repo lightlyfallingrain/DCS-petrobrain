@@ -1,6 +1,6 @@
 # BL-8 — Memory layer interfaces
 
-- [~] **BL-8 — Memory layer interfaces.** #status/in-progress #needs-flight Deliberately last (user decision, 2026-09-10:
+- [~] **BL-8 — Memory layer interfaces.** #status/in-progress needs-flight Deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
   Standing awareness note while BL-2..BL-7 touch in-mission memory shapes (`Contact`/`ContactStore`,
   BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
@@ -74,3 +74,8 @@
   `GROUP_ENTRY_CONFIDENCE_FLOOR`, `FIRED_ON_FOLD_WINDOW_S`) are guesses until this sortie runs.
   Card: `docs/acceptance/2026-10-17-bl8-mission-memory-sortie.md`.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -1,7 +1,7 @@
 # BL-B99 — Petrovich POV debug view: optic FOV and detections, in angle space
 
 - [x] **BL-B99 — An optional ASCII "Petrovich's point of view" debug view, the forward-looking twin
-  of the top-down `--eyesight-view`.** #status/done #needs-flight Merged `7796206d` from
+  of the top-down `--eyesight-view`.** #status/done needs-flight Merged `7796206d` from
   `feature/pov-view` (2026-10-25). Run with `--pov-view` (`run-scripts/run-body-layer.sh
   --pov-view`). Perf/security waived by the user (*"skip perf and sec as this is debug tool
   only"*). DoD: `plans/pov-view/dod-check.md`; live check
@@ -64,7 +64,7 @@
 
   The `-200` on the example's last line is read as a typo for `-20`.
 
-  **Follow-on fix, 2026-10-26, `#needs-flight`:** `--eyesight-view` and `--pov-view` disagreed on
+  **Follow-on fix, 2026-10-26, `needs-flight`:** `--eyesight-view` and `--pov-view` disagreed on
   where Petrovich was actually looking for the same poll (sortie screenshot,
   `docs/acceptance/2026-10-26-sortie-feedback.md`: *"both should show what Petrovich is really
   looking at and with what optic. Scan plan is useless data unless he actually looks there."*).
@@ -86,4 +86,10 @@
   the POV boresight is, not where the free-scan plan would be; (b) binoculars/any fixed-look case
   -- same agreement, this is the case the original screenshot did not happen to exercise; (c)
   naked-eye free scan still shows the scan sector (regression check -- this path is unchanged by
-  the fix). Clears `#needs-flight` on confirmation, naming the sortie.
+  the fix). Clears `needs-flight` on confirmation, naming the sortie.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

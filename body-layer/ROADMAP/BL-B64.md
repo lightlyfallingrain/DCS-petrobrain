@@ -2,7 +2,7 @@
 
 - [x] **BL-B64 — Simulate what the 9K113 lets Petrovich *see*: the wide and narrow optics, the
   directional 20 km player-bubble exemption, a non-instant slew, a long-dwell timing shape, and a
-  range model that is approximate rather than exact.** #status/done #needs-flight
+  range model that is approximate rather than exact.** #status/done needs-flight
   **Merged to `main` 2026-10-15 as `ec39c0e`**, DoD PASS (`plans/9k113-sight/dod-check.md`).
   **The acceptance sortie is outstanding** — card at
   `docs/acceptance/2026-10-15-9k113-sight-acceptance-card.md`, and it must be flown with the
@@ -163,7 +163,7 @@
   ---
 
   **Follow-on: `feature/9k113-narrow-search` merged to `main` 2026-10-21 as `ceb3ba81`, DoD PASS
-  (batch 1 at `1147dacc`, batch 2 at `9f4b9610`; `plans/9k113-narrow-search/dod-check.md`).** #needs-flight
+  (batch 1 at `1147dacc`, batch 2 at `9f4b9610`; `plans/9k113-narrow-search/dod-check.md`).** needs-flight
 
   Closed two defects the 2026-10-19 sortie found in this entry's own shipped perception (sortie
   feedback F4/F5, `docs/acceptance/2026-10-20-sortie-feedback.md`): the idle sight had no real
@@ -245,7 +245,7 @@
   "Deep analysis — batch 2" (APPROVED, no required fixes). Mechanical checks (format/lint/mypy
   --strict/tests, this subproject) re-run clean by DoD at the merge tip, no flakes.
 
-  `#needs-flight` unchanged — same outstanding sortie (card A8), not a new one; this batch
+  `needs-flight` unchanged — same outstanding sortie (card A8), not a new one; this batch
   corrects the mechanism the acceptance test will fly, it does not add a second acceptance item.
   A process note worth carrying into `[[BL-B66]]`: this is the **fourth** occurrence of a
   field-of-regard enforcement defect on this one subsystem (the first three were "never checked at
@@ -253,3 +253,8 @@
   `.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md` and
   `notes/the-9k113-sight-bl-b64.md`.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

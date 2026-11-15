@@ -2,7 +2,7 @@
 
 - [x] **BL-B90 — Move cockpit switch sequences out of code into startup-loaded files: a named
   effector registry plus one sequence file per (aircraft, role, trigger).** #status/done
-  #needs-flight **Merged to `main` 2026-10-24 (`888a4f01`)**, Stages 0-4, at user direction
+  needs-flight **Merged to `main` 2026-10-24 (`888a4f01`)**, Stages 0-4, at user direction
   (*"merge all of effector-sequences to main"*), before the re-flight card was fully flown; card
   results still owed (https://claude.ai/artifact/HLSWLq5CT4Rm5ZbM62m8bi, now flown from `main`).
   Stage 4 needs `Export.lua` (wire version `2026-10-24`) redeployed on the DCS machine. Concept `docs/concept/configurable-cockpit-effector.md`; explore
@@ -78,7 +78,7 @@
   modules, the "add a new effector" how-to, the bad-file posture, and the two tunables.
 
   **Re-flight card published**: `docs/acceptance/2026-10-23-bl-b90-sequences-reflight.md`, branch
-  `feature/effector-sequences`, not yet merged. #needs-flight — six items (cold-start takeoff
+  `feature/effector-sequences`, not yet merged. needs-flight — six items (cold-start takeoff
   order/timing, second-takeoff no-op, Observ/weapons readback parity, warm air-start silence,
   hand-switched-off recovery, one deliberately broken sequence file) all clearable in one sortie on
   the branch above; nothing here has been flown yet, only built and reviewed.
@@ -133,7 +133,7 @@
   BL-B90 paragraph was stale) — both resolved and verified by mutation on re-review; **APPROVED**.
   Mechanical checks (ruff format/check, mypy --strict, pytest, Lua syntax) pass clean in both
   `aircraft-layer` (608 tests) and `body-layer` (2650 passed, 4 xfailed), re-confirmed
-  independently by DoD. #needs-flight — the re-flight card
+  independently by DoD. needs-flight — the re-flight card
   (`docs/acceptance/2026-10-23-bl-b90-sequences-reflight.md`) is updated for Stage 4 (branch
   `feature/effector-sequences-stage4`, Export.lua redeploy, revised block 2/3/5 expectations, new
   blocks 7-8 for collector-restart and mission-restart) but has not been flown — nothing here has
@@ -149,3 +149,9 @@
   names this choice explicitly, so that entry does not have to rediscover the mechanism. It also
   establishes the one-shot-read seam (`POST /query/read_args`) that `BL-B95`'s eventual scripted
   `effector(name):get` would reuse directly, before any scripting work begins.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

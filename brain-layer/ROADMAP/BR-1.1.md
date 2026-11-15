@@ -2,7 +2,7 @@
 
 - [x] **BR-1 Stage 1 — Brain layer, first working slice: merged 2026-09-25 (merge `fc4e4af`,
   `feature/brain-layer`). Merged before flying, deliberately, so any correction the sortie
-  produces lands on `main`; live acceptance remains outstanding.** #status/done #needs-flight body-layer's half of the first real seam to
+  produces lands on `main`; live acceptance remains outstanding.** #status/done needs-flight body-layer's half of the first real seam to
   a new subproject, `brain-layer/` (see that subproject's own roadmap entry in root `ROADMAP.md`,
   Architecture and Status-table sections). A free-text utterance that used to produce silence now
   produces a real spoken response, end to end, over HTTP — with `StubDecider` (a configurable-
@@ -32,3 +32,8 @@
   responsive while the brain "thinks," whether stand-by timing lands right, and whether hearing
   Petrovich answer at all (instead of silence) feels right.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

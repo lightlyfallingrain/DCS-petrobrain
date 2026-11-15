@@ -1,7 +1,7 @@
 # BL-B59 — The same fold drift that absorbs an unrelated contact also evicts a real member
 
 > **DoD-PASSED 2026-10-13 on `fix/bl-b59-retention-hysteresis` (tip `50428dd`), merge pending user
-> approval, `#needs-flight`.** The bound closes the eviction measured below: 0 membership
+> approval, `needs-flight`.** The bound closes the eviction measured below: 0 membership
 > transitions over 60 ticks of repeat folds, versus the unbounded baseline's 12 — `GROUP_1` stays
 > `['CONTACT_1','CONTACT_2','CONTACT_3']` throughout rather than evicting `CONTACT_2`. Reviewer
 > (APPROVED, full read, both NaN-safety fixes closed and re-reviewed), Performance (APPROVED —
@@ -86,7 +86,7 @@
   member out of the group on the same tick — the eviction half of [[BL-B58]], and the more dangerous
   half, because for an air-defence member it **suppresses** a report rather than fabricating one.
   FIXED by bounding the fold's own displacement (`plans/bounded-fold-displacement/plan.md`).**
-  #status/done #needs-flight Found 2026-10-12 by the Architect pass on [[BL-B58]], in the same
+  #status/done needs-flight Found 2026-10-12 by the Architect pass on [[BL-B58]], in the same
   reproduction that answered that entry's two open sub-questions. Measured, not argued.
 
   **The measurement** (probe 2 of `plans/group-cohesion-admission-gate/plan.md` §2a; three infantry
@@ -128,3 +128,9 @@
 
   Related: [[BL-B58]] (the absorption half), [[BL-B50]] (membership flipping on consecutive ticks),
   [[BL-12]] Stage 3, `plans/group-cohesion-admission-gate/plan.md` §2b and decision 2.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -1,6 +1,6 @@
 # BL-W12 — Group cohesion redesign
 
-- [~] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
+- [x] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
   and the delta taxonomy. Merged to `main` 2026-10-01 as `ff7934e` (branch was
   `fix/group-undermerging` @ `6d6ea3f`); flight outstanding. Reviewer (round 2), Security
   (deep analysis), and Performance (APPROVED — MONITOR, `BL-B23` filed) all passed; DoD's
@@ -8,7 +8,7 @@
   `ruff format`/`ruff check`/`mypy --strict` clean). Not merged as of this entry — pending the
   user's acceptance call, per the live-acceptance-debt entry below (which the project's own
   "never block a merge on live acceptance the user cannot currently perform" posture means the
-  user may choose to merge ahead of the flight rather than wait, tracking the flight as debt).** #status/in-progress #needs-flight
+  user may choose to merge ahead of the flight rather than wait, tracking the flight as debt).** #status/done needs-flight
   `plans/
   group-cohesion-redesign/plan.md`, built on `plans/group-undermerging/debug.md`'s 2026-10-01
   sortie debug (the re-trigger fix already merged) and three Explore rounds the same day. **Stage
@@ -74,7 +74,7 @@
 
 **Live-acceptance debt entry, folded in from the roadmap's former debt list (overlaps with the above):**
 
-- [ ] **Group cohesion redesign — merged to `main` 2026-10-01 (`ff7934e`), still unflown.**
+- [x] **Group cohesion redesign — merged to `main` 2026-10-01 (`ff7934e`), still unflown.**
   DoD's mechanical gate passed at `6d6ea3f`; the merge followed on the user's instruction, with
   live acceptance tracked as debt rather than blocking it. Reviewer (round 2),
   Security, and Performance (MONITOR, `BL-B23` filed — see Backlog) all approved; 1367 passed/4
@@ -90,3 +90,8 @@
   components do not single-merge) read as intended in the cockpit rather than as noise or a
   miss. Clear this entry only once a real sortie exercises it, and say which one.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

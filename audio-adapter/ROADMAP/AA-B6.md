@@ -1,7 +1,7 @@
 # AA-B6 — The whisper prompt carries every recognised word, and stays in sync by test
 
 - [x] **AA-B6 — `to_prompt()` lists every vocabulary word; a test enforces the sync.**
-  #status/done #needs-flight Merged 2026-10-23 (`0fbbfee5`, branch `fix/stt-prompt-vocab-sync`).
+  #status/done needs-flight Merged 2026-10-23 (`0fbbfee5`, branch `fix/stt-prompt-vocab-sync`).
 
   User, 2026-10-23: *"STT correctness is poor. There's quite many incorrect transcriptions of what I
   speak."* Whisper on the Mac; failures arrive as "say again", and *"depends a lot on the words I
@@ -34,3 +34,9 @@
 
   **If still poor after the flight:** record clips of the new commands, then bench `medium.en`
   (on disk) and `large-v3-turbo` against them.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

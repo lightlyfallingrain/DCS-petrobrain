@@ -4,7 +4,7 @@
 **Topics:** #push-to-talk
 <!-- doc-provenance:end -->
 
-- [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26, merged `1a8795d`** #status/done #needs-flight
+- [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26, merged `1a8795d`** #status/done needs-flight
 (`fix/audio-adapter-review-findings`, no `plan.md` — scoped directly from the 2026-09-26
 whole-subproject performance and security reviews, `docs/reviews/`). `--ptt dcs` now defaults to
 30 Hz (`ptt_source.DEFAULT_DCS_POLL_HZ`, which the perf review found defined but wired to
@@ -22,3 +22,9 @@ than deleted. The real defect was the unhandled `ValueError` on a non-numeric va
 frame-time measurement was ever taken, so nothing was gated on a sortie. Optional confirmation
 whenever the collector next runs with `--debug`: count `GET /ptt/state` lines over a fixed
 window, expect ~30/s rather than ~60/s.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

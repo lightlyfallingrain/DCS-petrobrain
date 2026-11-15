@@ -4,7 +4,7 @@
   repeats with nothing audibly changed, guidance keeps talking while the target is behind the
   airframe, reaching the 12 o'clock sector is silent, and `", obstructed"` is spoken for every
   reason Petrovich is not looking at the target rather than only for the one it means.**
-  #status/done #needs-flight Planned 2026-10-15, `plans/attack-run-sortie-fixes/plan.md`. Merged
+  #status/done needs-flight Planned 2026-10-15, `plans/attack-run-sortie-fixes/plan.md`. Merged
   `feature/attack-run-fixes` (DoD pass, tip `3b69371`); mechanical checks green
   (ruff format/check, `mypy src` 60 files, `pytest` 2016 passed/4 xfailed), full
   Architect→Implementer→Reviewer(×2)→Performance→Security chain complete and APPROVED at every
@@ -117,3 +117,9 @@
   carries the priority fix on its own schedule, and nothing about the LOS feed is a prerequisite
   for starting it. See `[[AC-8]]`/`[[WM-W2]]` for the measurement that would reopen the wider
   question.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.
