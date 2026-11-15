@@ -274,6 +274,19 @@ once Stage P1 lands the type.)
 | `BREAK_AWAY_GAP_S` | 2.0 (user, verbatim — added 2026-11-15) | Export.lua constants block | the gap between the two `BREAK LEFT` presses `cbtm_break_away` issues |
 | `HVRT_TRANSLATE_MAX_HOLD_S` | 15.0 (architect default, **not** user-specified — flag as a judgement call, revisit if a sortie shows it firing in ordinary use; added 2026-11-15) | Export.lua constants block | safety ceiling on a held HVRT translate press if the spoken "Hold" is lost |
 
+### Implementer notes from the plan checks (2026-11-15)
+
+- **Every new spoken token also goes into `audio-adapter/src/vocabulary.py`'s `TOKENS`/`PHRASES`**,
+  the table that biases whisper's prompt — hand-synced, no automated cross-check
+  (`audio-adapter/CLAUDE.md`; the 2026-10-23 "violence"/"same ahead" incident is what happens when
+  it is missed). Applies to Stages P2, P3 and P4.
+- **No shared `press(direction, duration)` entry point in Lua.** Each action hard-codes its own
+  fixed press shape (which button, short / long / held). This is what makes E-P6 ("`HDG LOS`,
+  short right, is never pressed") structural rather than conventional; with nine action paths a
+  generic combinator is one typo from pressing it.
+- **Q-P2 open, non-blocking:** `HVRT_TRANSLATE_MAX_HOLD_S` = 15 s is the architect's default, a
+  tunable; the user has not confirmed the order of magnitude.
+
 ### Stage P-ICS — ICS capture from the operator seat (prerequisite)
 
 Precedes P0; gates every parked-mode flight in this series, per the "Amended 2026-11-15" note
