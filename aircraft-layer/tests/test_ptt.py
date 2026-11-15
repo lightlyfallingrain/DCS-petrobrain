@@ -76,6 +76,58 @@ class TestPttSample:
         with pytest.raises(PttParseError):
             PttSample.from_dict({"t": 1.0, "ptt": True}, received_wall_clock_s=2.0)
 
+    def test_an_old_format_line_without_ptt_op_still_parses(self) -> None:
+        """Stage P-ICS: `raw_operator` defaults to `0.0` when `"ptt_op"` is
+        absent -- a deployed `Export.lua` predating this change keeps
+        working, same additive posture as every other feed here."""
+        sample = PttSample.from_json_line(
+            '{"t":11.423,"ptt":0.500}', received_wall_clock_s=99.0
+        )
+        assert sample.raw_operator == 0.0
+        assert sample.intercom is True
+
+    def test_ptt_op_boolean_is_not_a_number(self) -> None:
+        with pytest.raises(PttParseError):
+            PttSample.from_dict(
+                {"t": 1.0, "ptt": 0.0, "ptt_op": True}, received_wall_clock_s=2.0
+            )
+
+    def test_intercom_truth_table_across_both_seats(self) -> None:
+        """Stage P-ICS: `intercom` is an OR across both raw values --
+        "treat them equally" (user, verbatim)."""
+        released = 0.0
+        at_stop = 0.5
+        neither = PttSample(1.0, 2.0, released, released)
+        pilot_only = PttSample(1.0, 2.0, at_stop, released)
+        operator_only = PttSample(1.0, 2.0, released, at_stop)
+        both = PttSample(1.0, 2.0, at_stop, at_stop)
+        assert neither.intercom is False
+        assert pilot_only.intercom is True
+        assert operator_only.intercom is True
+        assert both.intercom is True
+
+    def test_operator_only_moved_opens_capture(self) -> None:
+        """The pilot's trigger never moved this frame; the operator's did
+        -- per Stage P-ICS, that alone must open the crew channel."""
+        sample = PttSample.from_json_line(
+            '{"t":1.0,"ptt":0.0,"ptt_op":0.5}', received_wall_clock_s=2.0
+        )
+        assert sample.intercom is True
+        assert sample.radio is False
+
+    def test_both_seats_moved_on_the_same_frame(self) -> None:
+        sample = PttSample.from_json_line(
+            '{"t":1.0,"ptt":1.0,"ptt_op":0.5}', received_wall_clock_s=2.0
+        )
+        assert sample.radio is True  # pilot's full press
+        assert sample.intercom is True  # operator's half stop
+
+    def test_last_seat_names_whichever_seat_fired(self) -> None:
+        assert PttSample(1.0, 2.0, 0.5, 0.0)._last_seat() == "pilot"
+        assert PttSample(1.0, 2.0, 0.0, 0.5)._last_seat() == "operator"
+        assert PttSample(1.0, 2.0, 0.5, 0.5)._last_seat() == "both"
+        assert PttSample(1.0, 2.0, 0.0, 0.0)._last_seat() is None
+
 
 class TestPttCache:
     def test_empty_until_the_trigger_moves(self) -> None:
@@ -206,6 +258,9 @@ class TestPttEndpoint:
             "raw": pytest.approx(0.5),
             "intercom": True,
             "radio": False,
+            # Stage P-ICS: diagnostic-only field added to `to_api_dict`,
+            # not read by any gating logic -- see `PttSample._last_seat`.
+            "last_seat": "pilot",
         }
 
     def test_intercom_is_gated_closed_when_either_spu8_switch_is_off(

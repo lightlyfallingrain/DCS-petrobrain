@@ -129,7 +129,7 @@ Ahead:
 - [[BL-13]] — The crew query path
 - [[BL-14]] — Attack run: target selection and run guidance
 - [[BL-15]] — Mission start actions: clean slate, theatre, briefing
-- [[BL-16]] — Petrovich flies the helicopter (planned, not built; stage 0 probe first)
+- [[BL-16]] — Petrovich flies the helicopter (in progress 2026-11-15; parked mode via ED AI wheel first, raw axes second)
 
 ## Backlog (body-layer)
 

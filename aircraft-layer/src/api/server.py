@@ -233,6 +233,13 @@ the body/brain process, on either Windows or Mac (compute topology note in
   what and how many, and the currently-selected station. Read-only, no
   write side: this layer carries the raw values and decides nothing (see
   `schema.payload`'s own module docstring).
+- `GET /ai_pilot_wheel/latest` -> the most recent `AiPilotWheelState`
+  (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1) as JSON, or
+  JSON `null` on the same "not an error" basis as every other `/latest`
+  endpoint. `Export.lua`'s own per-frame `run_ai_pilot_wheel` status --
+  whether the stick is parked, the flattened AI-pilot overlay readback
+  (mode/course/altitude/speed text), and the last press issued. Read-only,
+  no write side yet (Stage P2 adds the goal channel).
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -269,6 +276,7 @@ from collector.arg_read_broker import (
 )
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
+    AiPilotWheelCache,
     LineOfSightCache,
     MissionStartCache,
     PayloadCache,
@@ -309,6 +317,7 @@ _SPU8_STATE_PATH = "/spu8/state"
 _WATCHED_ARGS_LATEST_PATH = "/watched_args/latest"
 _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PAYLOAD_LATEST_PATH = "/payload/latest"
+_AI_PILOT_WHEEL_LATEST_PATH = "/ai_pilot_wheel/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
@@ -503,6 +512,16 @@ def _handle_payload_latest(
     return None if sample is None else sample.to_api_dict()
 
 
+def _handle_ai_pilot_wheel_latest(
+    cache: AiPilotWheelCache,
+) -> dict[str, Any] | None:
+    """`null` before the first AI-pilot-wheel line arrives -- same "not an
+    error" posture as `/sight_servo/latest` (`plans/flight-control/
+    plan.md`, BL-16 mode 2, Stage P1)."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -535,6 +554,7 @@ def _make_handler(
     sight_servo_cache: SightServoCache,
     arg_read_broker: ArgReadBroker | None,
     payload_cache: PayloadCache,
+    ai_pilot_wheel_cache: AiPilotWheelCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -579,6 +599,11 @@ def _make_handler(
                 return
             if path == _PAYLOAD_LATEST_PATH:
                 self._respond_json(200, _handle_payload_latest(payload_cache))
+                return
+            if path == _AI_PILOT_WHEEL_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_ai_pilot_wheel_latest(ai_pilot_wheel_cache)
+                )
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -1190,6 +1215,7 @@ class TelemetryAPIServer:
         sight_servo_cache: SightServoCache | None = None,
         arg_read_broker: ArgReadBroker | None = None,
         payload_cache: PayloadCache | None = None,
+        ai_pilot_wheel_cache: AiPilotWheelCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`unit_velocity_cache`/
@@ -1246,6 +1272,11 @@ class TelemetryAPIServer:
         )
         self._payload_cache = (
             payload_cache if payload_cache is not None else PayloadCache()
+        )
+        self._ai_pilot_wheel_cache = (
+            ai_pilot_wheel_cache
+            if ai_pilot_wheel_cache is not None
+            else AiPilotWheelCache()
         )
         # `arg_read_broker` defaults to `None`, same posture as
         # `command_sender`/`audio_sender` above --
@@ -1308,6 +1339,7 @@ class TelemetryAPIServer:
                 self._sight_servo_cache,
                 self._arg_read_broker,
                 self._payload_cache,
+                self._ai_pilot_wheel_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

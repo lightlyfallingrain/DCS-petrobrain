@@ -592,6 +592,11 @@ class FakeConsoleAircraftClient:
         #: A test exercising `drain_config_error`'s intercom gate drives
         #: this directly, the same way `raw_args` is driven.
         self.spu8_state: dict[str, Any] | None = None
+        #: `plans/flight-control/plan.md`, BL-16 mode 2, Stage P1 --
+        #: `None` (the default) means no `GET /ai_pilot_wheel/latest`
+        #: sample has arrived yet, same "not an error" posture as
+        #: `sight_servo_state` above.
+        self.ai_pilot_wheel_state: dict[str, Any] | None = None
         #: Performance review (`plans/effector-sequences/
         #: performance-stage1-2.md`) -- counts every `get_spu8_state_
         #: latest` call, so a test can assert the per-poll GET only fires
@@ -704,6 +709,9 @@ class FakeConsoleAircraftClient:
     def get_spu8_state_latest(self) -> dict[str, Any] | None:
         self.spu8_state_requests += 1
         return self.spu8_state
+
+    def get_ai_pilot_wheel_latest(self) -> dict[str, Any] | None:
+        return self.ai_pilot_wheel_state
 
 
 #: A frozen copy of `config/sequences/` (one `mi-24p/` subdirectory),

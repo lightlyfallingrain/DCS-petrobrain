@@ -61,6 +61,11 @@ A `PayloadCache` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4) is
 constructed the same way as `sight_servo_cache` -- fed by `CollectorServer`
 from Export.lua's "stations" lines, served by `GET /payload/latest`.
 
+An `AiPilotWheelCache` (`plans/flight-control/plan.md`, BL-16 mode 2, Stage
+P1) is constructed the same way again -- fed by `CollectorServer` from
+Export.lua's "apw_parked_active" lines, served by
+`GET /ai_pilot_wheel/latest`.
+
 A `WatchedArgsCache` + `ArgReadBroker` pair (`plans/effector-sequences/
 plan.md` Stage 4) replaces the former `CockpitSwitchCache` (decided,
 "remove"). `WatchedArgsCache` is constructed the same way as `spu8_cache`
@@ -96,6 +101,7 @@ from api.server import TelemetryAPIServer
 from collector.arg_read_broker import ArgReadBroker
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
+    AiPilotWheelCache,
     LineOfSightCache,
     MissionStartCache,
     PayloadCache,
@@ -315,6 +321,10 @@ def main() -> None:
     # loadout feed, same "latest of one, fed on change" shape as every
     # cache above.
     payload_cache = PayloadCache()
+    # `plans/flight-control/plan.md`, BL-16 mode 2, Stage P1 -- the
+    # AI-pilot-wheel status feed, same "latest of one" shape as
+    # sight_servo_cache above (a per-frame feed, constructed the same way).
+    ai_pilot_wheel_cache = AiPilotWheelCache()
 
     collector = CollectorServer(
         cache,
@@ -327,6 +337,7 @@ def main() -> None:
         watched_args_cache=watched_args_cache,
         arg_read_broker=arg_read_broker,
         payload_cache=payload_cache,
+        ai_pilot_wheel_cache=ai_pilot_wheel_cache,
         host=args.host,
         port=args.port,
     )
@@ -354,6 +365,7 @@ def main() -> None:
         sight_servo_cache=sight_servo_cache,
         arg_read_broker=arg_read_broker,
         payload_cache=payload_cache,
+        ai_pilot_wheel_cache=ai_pilot_wheel_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

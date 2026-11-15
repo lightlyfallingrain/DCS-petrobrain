@@ -133,6 +133,7 @@ from typing import Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.ai_pilot_wheel import ParkedFlightState, advance_parked_flight_state
 from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
@@ -493,6 +494,14 @@ class ConsolePerceptionRunner:
     #: here too moved to `effector_state` below (`plans/
     #: effector-sequences/plan.md` Stage 2).
     guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
+
+    #: BL-16 mode 2 (`plans/flight-control/plan.md`, "Revised 2026-11-15",
+    #: Stage P1) -- Petrovich's belief about ED's AI-pilot wheel while the
+    #: stick is parked. Same "replace wholesale, never mutate" shape as
+    #: `guidance_unit_state` above; advanced every poll a real ownship
+    #: state exists (`advance_parked_flight_state`, `belief.ai_pilot_
+    #: wheel`), no voice token yet -- activation is automatic (E-P1).
+    parked_flight_state: ParkedFlightState = field(default_factory=ParkedFlightState)
 
     #: The effector-sequence engine's own run state (`belief.
     #: effector_engine.EffectorRunState`, `plans/effector-sequences/
@@ -4314,6 +4323,20 @@ def _run_crew_text_poll_loop(
                             runner.guidance_unit_state,
                             readback_args,
                         )
+                        # `plans/flight-control/plan.md`, BL-16 mode 2,
+                        # Stage P1 -- same "every poll a real ownship
+                        # state exists" placement as `guidance_unit_state`
+                        # immediately above; a separate aircraft-layer
+                        # read (`GET /ai_pilot_wheel/latest`), not derived
+                        # from `readback_args`.
+                        try:
+                            runner.parked_flight_state = advance_parked_flight_state(
+                                runner.parked_flight_state, aircraft_client
+                            )
+                        except AircraftLayerError:
+                            logger.debug(
+                                "ai-pilot-wheel readback failed", exc_info=True
+                            )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
                         )

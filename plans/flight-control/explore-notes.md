@@ -269,3 +269,512 @@ So the lift-vector section describes **what the corrections act on**, not a mode
   is **not** a precondition. What stage 0 still needs is the sign and rough size of each response
   and the read side (attitude, rates, IAS, vertical speed, radar altitude, control positions per
   frame) — the inputs a feedback loop closes on.
+
+
+## Goal-check answers (user, verbatim, 2026-10-31)
+
+Questions from `alignment.md` (goal check, CONCERNS, 2026-10-31): 1 stop word; 2 slight bank at
+handover; 3 emergency take-back and "confirm?"; 4 a goal that stalls; 5 naked-eye calls while
+flying; 6 radar vs barometric, trees; 7 what the hands-off time is for; 8 seat jump while he flies.
+
+> *"1 - "level [off|flight]", "stop turn", "[fly] straight"*
+> *2 - heading. Let's say <5 deg bank gets level flight.*
+> *3 - no confirm. No key at this stage, will come back to that if needed.*
+> *4 - no, just fly within parameters*
+> *5 - yes*
+> *6 - AGL, unless player commands barometric. DCS radar alt does to see trees, I believe.*
+> *7 - look out, map, radios, navigation. Also, switch to copilot seat and use the 9K113, this is a
+> key reason for building Petrovich flight controlling. We'll build more proper handling of seat
+> change later, I need the flight controlling to work first.*
+> *8 - no change. This is not really about which seat is controlling the aircraft, but whether AI or
+> human player is controlling. Since player may swap seats at will, Petrovich will too at the same
+> time. Player hands off must remain player hands off and therefore Petrovich flying must remain
+> Petrovich flying.*
+>
+> *General rule: nothing is ever exact when flying old planes. The analogue instruments themselves
+> cannot give exact values and maintaining a given number exactly is not necessary. E.g. 200 km/h
+> desired speed can vary +-10 km/h with no problem. Maintaining 300 m AGL can also vary. Smoothness
+> is more important than maintaining an excat value. As general rule +-10% variation is allowed, but
+> of course goal is to still align with the desired value."*
+
+Reading (main loop):
+
+- (1) Stop/level vocabulary joins the first set: "level", "level off", "level flight", "stop turn",
+  "straight", "fly straight" -> roll out, hold current heading.
+- (2) At takeover, bank < 5 deg is level flight: hold heading. >= 5 deg continues the turn
+  (settled point 3). 5 deg is a tunable judgement default.
+- (3) "I have controls" acts at once, never "confirm?", whatever STT confidence the handover token
+  arrives with. No bound key now.
+- (4) No "unable" callout for a goal not reached. He flies within the aircraft's limits and gets as
+  close as those allow, silently.
+- (5) While flying he still makes naked-eye contact and threat calls and answers "what do you see?".
+  Only the optics (binoculars, 9K113) stop.
+- (6) Height hold is AGL by default, barometric on command. User believes DCS radar altitude sees
+  trees (reads canopy top, not bare ground); stage 0 confirms.
+- (7) Hands-off time: look out, map, radios, navigation -- and **the key case: the player moves to
+  the copilot seat and works the 9K113 while Petrovich flies.** Proper seat-change handling comes
+  later; flight control working comes first.
+- (8) Control authority is AI-vs-human, not seat-bound. When the player swaps seats Petrovich swaps
+  too; if he had the controls he keeps them (from the pilot seat). This refines the 2026-10-21 rule
+  ("Petrovich operates the seat the player does not occupy"): it still holds for *which seat*, and
+  handover state carries across the swap. Stage 0 must probe raw-axis writes with the player in the
+  operator seat -- the key case, not an edge.
+- **General tolerance rule:** hold targets within about +-10% (e.g. 200 +-10 km/h, 300 m AGL
+  loosely), always converging on the value; smoothness beats precision. This governs controller
+  gains and every acceptance test: no test asserts tight tracking; tests assert smooth convergence
+  and staying in band.
+
+## The key challenge: parked controls (user, verbatim, 2026-10-31)
+
+> *"note on Petrovich flying while I use the 9K113. DCS requires the "park controls" active for
+> player to be able to use the 9K113. That makes DCS AI Petrovich control the aircraft and any player
+> joystick input is ignored in the parked controls state. That is a key challenge that we must find a
+> workaround to. That it the key feature I need, Petrobrain to overpower the DCS AI flying."*
+
+Reading (main loop):
+
+- In the key case (player in the copilot seat on the 9K113), DCS requires "park controls". In that
+  state **ED's own AI Petrovich flies the aircraft** and player stick input is ignored.
+- So BL-16's central problem in that case is not ignoring the player's stick: it is **overriding
+  (or displacing) ED's AI pilot**, which is actively writing its own control inputs, so that
+  Petrobrain's loop is what flies the aircraft.
+- This is the feature the user needs most. Stage 0 must answer it first: in the parked-controls
+  state, do `LoSetCommand` raw-axis writes (2001-2004) / SAU commands from Export.lua take effect,
+  get overwritten by ED's AI each frame, or fight it? Is there a way to stop or neutralise ED's AI
+  pilot while staying parked (an ED-AI autopilot mode/command, a hold mode it obeys, an Export or
+  hook-level override)? What does ED's AI do when its inputs are contested?
+- If no workaround exists, BL-16's key case is blocked and that must be known before anything else
+  is built.
+
+### Two control states (user, verbatim, 2026-10-31)
+
+> *"So there's two states really. When controls are parked (player in copilot seat and selected to
+> park controls) and when they are not. In both cases Petrobrain must be able to control the
+> aircraft. These may need different solutions."*
+
+Reading: two first-class states, each a must-have, possibly with different control paths:
+**unparked** (no ED AI pilot; player stick may still send input and must be ignored) and **parked**
+(player in copilot seat with park-controls selected; ED's AI pilot is flying and must be overridden).
+Neither is the fallback for the other.
+
+### Steering ED's AI is rejected (user, verbatim, 2026-10-31)
+
+Main loop had floated "Petrobrain could steer ED's AI instead of fighting it" (set its heading/
+altitude targets through its own commands) as a parked-state path.
+
+> *""Petrobrain could steer ED's AI instead of fighting it," -> no. DCS AI flies hoorribly. That is
+> *the* reason I want Petrobrain to replace it."*
+
+Reading: rejected outright. In the parked state Petrobrain's own loop must fly the aircraft; ED's AI
+is to be replaced, not commanded. ED-AI command interfaces are of interest only as a way to
+**disable or neutralise** it, never as the control path.
+
+### Probable solution: overpower the axes (user, verbatim, 2026-10-31)
+
+> *"Probable solution is to somehow overpower the cyclic, rudder and collective control values that
+> DCS AI sets. Very similar to overpowerring the 9K113 sight slewing."*
+
+Reading: the parked-state hypothesis to probe first is the 9K113 precedent -- Petrobrain writes the
+cyclic (pitch/roll), pedal and collective values every frame so they win over ED's AI writes, the
+same way the 9K113 slew loop overrides ED's own sight slewing (`plans/9k113-sight-pointing/plan.md`,
+`aircraft-layer/research/2026-10-22-9k113-ai-axis-obedience-prior-art.md`). Stage 0 measures
+whether the per-frame write wins, at what write point/rate, and whether ED's AI fights back
+(oscillation, integrator wind-up when its commands are ignored).
+
+### Wobble on the flight axes (user, verbatim, 2026-10-31)
+
+> *"Regardless of how writing control axis values are done, that (invisible) wobble is needed on the
+> conrol axises, similat to 9K113 axises"*
+
+Reading: every flight-axis write (cyclic pitch/roll, pedal, collective), in both control states,
+carries the same invisible per-frame wobble the 9K113 sight axes use (`plans/9k113-sight-pointing/
+plan.md`, `SERVO_WOBBLE` dither/flicker) -- a requirement, not a stage-0 question. Its amplitude
+must stay below anything visible in the aircraft's motion or the cockpit stick animation; stage 0
+measures that bound and whether the wobble is what makes the write stick against ED's AI.
+
+### Where ED's AI acts (user, verbatim, 2026-10-31)
+
+Main loop relayed the recon's open question: ED's AI may fly through the SAU autopilot.
+
+> *"ED's AI may fly through the SAU autopilot -> does not, SAU is not very capably, DCS AI does
+> manouvres SAU cannot*
+> *Though, DCS AI probably does not use the cockpit controls either, but instead inputs the movemnt
+> somewhere internally. But that needs checking."*
+
+Reading: the SAU path is ruled out by the user's flying experience (ED's AI flies manoeuvres the SAU
+cannot). The user's working belief: ED's AI injects its control somewhere internal, **neither SAU
+nor the cockpit stick/collective/pedal positions** -- to be checked in stage 0. Consequence for the
+probe: stick args (1100-1113) staying where Petrobrain put them proves nothing; pass/fail must be
+judged on the aircraft's actual response (attitude, rates, heading, height) following Petrobrain's
+goal, not ED's AI's.
+
+### Fallback to investigate: numeric targets for ED's AI (user, verbatim, 2026-10-31)
+
+> *"one option to investigate: if we need to use the DCS AI to fly, can we input desired heading,
+> alt, speed values directly to it as numbers. Besides very poor controlling, the other problem
+> there is the very poor UI for telling what I want the DCS AI to maintain (heading, alt, speed)."*
+
+Reading: not a reversal of "steering ED's AI is rejected" as the design -- Petrobrain flying stays
+the goal. It is a **fallback to investigate for the parked state, only if the override (S0-P2) and
+the off-switch (S0-P3) both fail**: can Petrobrain set ED's AI's held heading, altitude and speed
+as numbers, so the pilot's spoken "turn heading 3 1 5 / hold 200 / speed 2 2 0" replaces ED's poor
+UI? That would fix one of ED's two problems (the UI), not the other (poor flying). The recon found
+the AI's voice/menu commands are discrete nudges (turn, climb, speed, stop, 180) with constants in
+`HelperAI.lua` and the logic in native code, so a numeric interface is unlikely but unchecked.
+
+### S0-P2 result and the real goal of the parked state (user, verbatim, 2026-11-01)
+
+Probe v2 (`Export.probe-control-command-hold.lua`, findings in
+`aircraft-layer/research/2026-11-01-bl16-command-hold-probe-findings.md`): per-frame
+`LoSetCommand` 2001–2003 flies the aircraft from either seat **unparked**; **parked, ED's AI wins
+outright** (no fight). User:
+
+> *"both pilot and copilot control works, but only when control is not parked. When I press to
+> park controls, DCS AI takes over flying and does it's own thing overriding ours."*
+
+Then the goal restated:
+
+> *"Parking controls enables DCS AI flight and the CPG view so that player can use the 9K113.
+> Now, what we really want, is to keep the CPG view available so that player can look throught the
+> 9K113 and have Petrobrain control the aircraft, not DCS AI. How to accomplish that is the key
+> question.*
+> *AI overlay there makes no difference. Switching the AI off very likely also unparks the controls
+> and CPG view is no longer available.*
+> *We'd need a solution to*
+> *- allow CPG view usage when controls are not parked, AI not flying OR*
+> *- somehow disable AI flight controlling when it's active and instead write our own control
+> values"*
+
+Reading (main loop):
+
+- **Parking is wanted for one thing: the player's 9K113 sight.** ED's AI flying is the unwanted
+  side effect. So the parked-state question is not "beat ED's AI" in general but either route:
+  (R1) the sight without parking, or (R2) parked with ED's AI's authority removed and Petrobrain's
+  values written instead.
+- The overlay is ruled out as an off-switch (user). An AI-off that also unparks fails the goal,
+  because it takes the sight away.
+- v2 log, t=77.4–89.1: while parked the **pilot-seat** args 1100–1103 move with the AI's flying
+  while the operator args read 0, so ED's AI acts as a hand on the pilot's controls (recon §6
+  path (b)), and `LoSetCommand` reaches only the player's own, now-disconnected, controls.
+
+### R1 answer and the R2 candidates (user, verbatim, 2026-11-02)
+
+Asked: (R1) when unparked, what is missing, the sight view or the sight's hand controls; and a
+verdict on R2 candidates a–e (a: SAU autopilot off 3047; b: emergency autopilot off; c: HELPER_AI
+"Request Aircraft Control" 3014; d: cockpit lever disengage 3011–3013 instead of the park keybind;
+e: read the AI wheel's options while parked).
+
+> *"I think I tried the probe so that I engaged it from pilot, then switched to copilot and parked
+> the controls there. DCS AI took over.*
+>
+> *R1 - when unparked DCS will not let me activate the CPG view that is needed to look throught
+> the 9K113.*
+>
+> *Canditates*
+> *A - DCS AI does not fly through the autopilot. SAU has nowhere near the control authority that
+> the AI moves like.*
+> *B - because of (a) changes nothing*
+> *C - hands back control and unparks. This is the control I have bound to my joystick, it parks
+> the sight and lets me use the 9K113. On the other hand, might there be some control that only
+> parks controls but does not start the DCS AI?*
+> *D - we should test this, not likely to work, but maybe*
+> *E - a workaround to controlling what DCS AI does, but a clumsy solution and does not rid us of
+> the DCS AI flying*
+>
+> *Go for the windows recon, but windows computer is off at the moment, so later."*
+
+Reading (main loop):
+
+- **R1: the view itself is gated.** Unparked, DCS refuses the CPG sight view. So R1 needs the place
+  where that view switch checks park state; if it is native, R1 is closed.
+- **a, b dropped**: ED's AI does not fly through the SAU (its authority is far beyond the SAU's).
+- **c is the park toggle itself** (the user's bound control). New question for recon: is there a
+  control that parks the controls (sight available) **without** starting ED's AI?
+- **d stays** as a cheap probe-v3 candidate, low odds.
+- **e is the S0-P3b fallback** (steer ED's AI), clumsy and does not remove ED's flying.
+- Probe v2 sequence clarified: hold engaged from the pilot seat, seat swapped, parked in the CPG
+  seat. Same result.
+- **Windows recon: go, deferred** until the Windows machine is on. Targets: (1) what gates the CPG
+  sight view on park state; (2) park without AI start (levers 3011–3013, `set_ai_piloting`, any
+  other park path); (3) how ED's AI writes the pilot-seat controls.
+
+### Windows recon, targets 1 and 3 answered outside the repo (2026-11-12)
+
+The user ran the recon as a separate investigation (`../dcs-investigation/`, discarded); carried
+over as `aircraft-layer/research/2026-11-12-mi24p-cpg-view-gate-investigation.md`.
+
+- **Target 1 — closed, negative.** The view gate is `Command_Aiming` (3028) and
+  `Command_StickPark_Ext` (3055) both handled by `av9K113` inside `CockpitMi24.dll`, which is
+  encrypted on disk (code decrypted only in a running licensed process; reading it would mean
+  defeating ED's protection — not done). User's in-game observation: unparking while in the view
+  is refused or exits it, so the check is continuous. **R1 closed: no command sequence from Lua
+  gives the sight view with the stick live.** Fix belongs to ED. R2 candidates a–e all negative.
+- **Target 3 — answered at the symbol level.** Parked, ED's AI flies via the generic
+  `AI::Controller` / `wControl` setpoints imported from `WorldGeneral.dll`, not the SAU. Confirms
+  the 2026-11-02 call (a, b dropped) and probe v2 findings 2–3.
+- **Target 2 — still open, now the only one.** Probe v3 = parked with the helper AI unavailable
+  (`controlHelperMi24` off / Petrovich absent / 3011–3013 variants): does the stick stay live, does
+  the view still open. That is S0-P3's last candidate.
+- Option C stays noted: sight slew works from the normal operator view (`SightWithCockpitView`),
+  only the eyepiece picture is gated.
+
+### Windows recon target 2 answered (2026-11-14, Windows-side session)
+
+`aircraft-layer/research/2026-11-14-mi24-stick-park-without-ai-pilot.md`. **No Lua-level path
+parks the stick without the AI pilot**: neither `Mi24AutoHandover` nor `controlHelperMi24` is read
+by any Lua (DLL-only), the HELPER_AI device is created unconditionally, the stow animation (arg
+852) is a HelperAI output, and nothing in Lua reaches `set_ai_piloting`. The user already flies
+with `Mi24AutoHandover=false` and still saw 2001–2003 ignored while parked (probe v2) — that
+option governs the *automatic* request, not the coupling. Last untested lever: the mission unit
+property `NetCrewControlPriority` (0 Pilot / 1 Copilot-gunner / −1 Ask / −2 Equal), DLL-owned.
+**Probe v3 candidate**: `current-probe.miz` copy with `NetCrewControlPriority=1`, then `=-2`,
+player in seat 2; unparked hold check → 3055 → 10 s constant 2001 offset, log args
+852/857/859/865 + `list_indication(0)` and `(6)` per frame. Odds low. `SimplifiedAI=true` a cheap
+third variant; `HumanOrchestra` skipped (MP-scoped, disables seat switching). Caveat carried:
+whether AutoHandover was already false on the 2026-11-01 flight is unverified.
+
+### Decision: skip probe v3, two modes (user, 2026-11-14, verbatim)
+
+> *"2 - skip it. BL-16 has to go with two modes: normal ops - write control axises ; controls
+> parked - manipulate DCS AI via the AI wheel commands."*
+
+Stage 0 is closed on this. S0-P3 negative, S0-P3b promoted from fallback to the parked-mode
+design. The plan's effector table and S0 rows need re-cutting before any build; recorded on the
+`BL-16` entry.
+
+### AI pilot wheel transcribed (user screenshots, 2026-11-14)
+
+Five screenshots, operator seat, parked, ED's AI flying (`win-mac-sync/from-windows/AI_flight_wheel/`,
+not in git by user direction). Transcription:
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md`. Four modes `FLT` / `CBTM` /
+`HVR` / `HVRT`; FLT and HVR carry `ALTITUDE ±`, `SPEED ±`, `HDG LEFT/RIGHT`, `ALT REF RAD|BARO`,
+`HDG LOS`; CBTM carries `ALIGN FOR LAUNCH`, `ALIGN TO 9K113`, `BREAK LEFT/RIGHT/180`; HVRT carries
+`HOVER FWD/BACK/LEFT/RIGHT` and `HOVER ±2m`. No "release controls" option in any mode. The
+overlay shows the AI's held IAS, heading, ALT with `R`/`B` reference and the mode as text, so the
+`list_indication(6)` readback of recon §7 is very probably real. The `±2m` label fixes
+`alt_change_step = 2` as metres.
+
+### AI helper flight overlay usage for BL-16 (user, 2026-11-15, verbatim)
+
+The user's operating knowledge of the wheel, written after the screenshots. This is the
+specification for parked mode (S0-P3b / mode 2); the reconciled model is in
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` §5.
+
+> - inner ring = short press
+> - outer ring = long press or hold (> 0.5s I think counts as long press, need to verify)
+> - center press toggles baro and radar alt
+>
+> **states**
+>
+> - when controls parked, initial status is FLT if enough forward speed or HVR if near hover. Exact
+>   speed criteria unknown.
+> - when user enters CPG view -> AI overlay automatically changes to CBMT
+>   - it does not automatically change back to FLT, though I cannot remember for certain
+> - state is changed by short left command
+> - HVR cannot be ented unless speed is set to 0
+> - HVRT can only be entered from HVR
+> - I all model short left press is HDG LOS -> NEVER use that. It means, turn to heading where
+>   Player is looking at. We *must not* short-press right in code for the AI flight helper.
+>
+> **controlling**
+>
+> What we need is control of
+> - speed
+> - heading
+> - altitude
+>
+> In FLT/HVR mode
+> - speed is short press up/down -> speed one step up/down
+>   - speed steps: 0, 60, 120, 160(?), 200, 250, MAX
+> - altitude is long press and hold up/down -> altitude up/down
+>   - left overlay shows the current alt value -> keep pressed until desired value reached.
+>   - alt value does not need to be exact, allow within 20m of target value
+>   - short middle press changes between baro alt and radar alt. After change, values need to be
+>     read from the left wheel and set again if not what was desired.
+> - heading is long press left/right -> heading counterclockwise / clockwise
+>   - current set value in left wheel, top mid value
+>
+> In HVRT mode
+> - Long press and hold up/down/left/right -> translate (drift) forward/backward/left/right
+> - short up/down -> alt up/down by 2 m
+>
+> In CMBT mode
+> - long left/right press (not hold) -> break turn 90 deg left/right
+> - long press down (not hold) -> break turn 180 deg
+>   - prefer not to use this as direction of turn is undetermined. Instead break left and after a
+>     short delay break left again to get 180 deg left. Mi-24 turn faster left, therefore 180
+>     should be to the left, unless otherwise commanded.
+> - short press up aligns heading to 9K113 azimuth. This is very usefull for getting the
+>   helicopter to head to target.
+> - long press up (not hold) aligns for missile launch -> aircraft boresight to 9K113 sight
+>   vector. This is needed for missile launch.
+>
+> **states and controlling**
+>
+> State may change without out input: player may press left on AI wheel -> state changes. Or DCS
+> may itself change the state when CPG view activates (->CMBT state) or when transitioning in and
+> out of hover (FLT<>HVR).
+> Therefore, we must read the current state from DCS every tick and react to it changing.
+> To get desired behaviour, we must first have the correct state to give the commands. If current
+> state is not desired state, then short left press to change state. Read state and check if it
+> is what we need, if not short left press again and read again, repeat until correct state.
+> To get from FLT to HVR, first set speed to 0 and then wait for aircraft to slow down -> state to
+> HVR.
+> HVRT can only be reached from HVR (by one left press).
+> To get to FLT from HVR, increase speed to more than 0. (From HVRT first need to get to HVR and
+> then increase speed.)
+> Align to 9K113 can only be done from CMBT, so change to that mode first.
+> Break turns require CMBT mode.
+> Normal flight parameter setting requires FLT/HVR mode, so that must be activated first.
+> When long press and hold is ongoing, mode may change. If that happens, hold must end
+> immediately.
+> To fulfill Player command (or desired flight state in general) we need to hop between command
+> modes so that the required commands can be given and flight parameters set for the AI helper.
+> *We can only set one parameter/command at a time.*
+>   - could set in steps if multiple need to change: speed +1 tap, heading -30 deg, alt +50 m,
+>     speed +1 tap, heading -15 deg, alt +200 m -> changes towards desired state in steps so that
+>     all params start changing
+>
+> **issues**
+>
+> - initial altitude is something weird. AI tends to descend to low alt initially regardless of
+>   what the set alt is. When alt is set, then AI flies to set alt. -> Therefore when controls are
+>   parkes, the immediate initial thing to do is set the desired altitude to what is actual current
+>   altitude. If they match, just move the alt a bit higher so that the AI get's an input for alt
+>   change.
+> - when commanding align for launch AI aligns aircarft boresight to where 9K113 points (if it can,
+>   it flies very poorly). However, it keeps that alignment even after missile launch causing
+>   constant speed increase and altitude decrease and therefore flies the aircraft into ground.
+>   Therefore, one the missile is launched, we no longer need to point the aircraft boresight at
+>   target and must instead go for level flight. This probably requires mode change to FLT and
+>   setting altitude.
+
+**Correction, user 2026-11-15:** *"'short left press is HDG LOS' -> my typo, meant right."* So:
+**short left = mode cycle, short right = `HDG LOS`, never pressed by code.**
+
+**Parked attack alignment, user 2026-11-15:** *"When controls are parked, there's only ED's
+ALIGN available. Petrobrain cannot directly fly. We'll have to do with ED's control then."* ED's
+`ALIGN TO 9K113` / `ALIGN FOR LAUNCH` are the parked-mode alignment; BL-B67's own is unparked.
+
+### BL-16 un-deferred, parked mode first (user, 2026-11-15, verbatim)
+
+> *"take BL-16, remove deferred status. Let's build it. Let's actually start with the AI helper,
+> that's the Player uses 9K113 case and it's important to get done. After that we can build our
+> own controls-not-parked flight controlling."*
+
+### Parked mode activates on park, not on a spoken handover (user, 2026-11-15, verbatim)
+
+> *"Since AI helper takes over automatically and immediately when controls are parked, so should
+> Petrobrain flight controlling mode activate for the AI helper. Regardless of Player commanding
+> 'your controls' or not."*
+
+So in parked mode the park signal (arg 852, S0-12) is the activation, and explore decision 2's
+spoken handover applies to the unparked mode only.
+
+### Answers to the parked-mode goal check (user, 2026-11-15, verbatim)
+
+Questions Q1–Q8 are in `plans/flight-control/alignment.md`, "Goal check — parked mode".
+
+> Q1 - nothing
+> Q2 - Petrobrain keeps flying unless player commands otherwise. Until non-parked flight is
+> implemented, just silent transfer to player.
+> Q3 - it sets the current heading as desired heading. Nearest speed step it has as desired speed.
+> Because it flies poorly it has a tense to wobble a bit at first, but then maintains params. ->
+> reset altitude only.
+> Q4 - when wheel mode changes, it may not be possible to finish the current goal without changing
+> the mode back. Assume that Player will not be changing modes, but DCS does automatically in
+> certain situations that I described above.
+> Q5 - yes, crash avoidance is necessary. This needs over speed avoidance as well. Configurable min
+> alt AGL (40 m default) and max speed (280 km/h default) trigger recovery. Say "leveling off". And
+> reset params to what they were before align for launch. In this situation a Player command for
+> break turn can be expected, but that is players decision.
+> Q6 - yes. It's jerky, that's the problem. Barometric alt hold is much smoother and therefore
+> preferred, but then needs manual terrain avoidance changes.
+> Q7 - holds current. Desired heading is set to alignment heading.
+> Q8 - quick transition to level flight, keep heading and alt at transition moment. Start smooth
+> climb back to altitude before alignment. Speed back to before alignment setting one step at a
+> time.
+
+Read as: no speech on park or unpark; on park reset altitude only; DCS-driven mode changes are
+handled by cycling back, player-driven ones are not expected; recovery from `ALIGN FOR LAUNCH` on
+launch, on spoken abort, or on **AGL < 40 m or IAS > 280 km/h** (both tunables), announced as
+*"leveling off"*, restoring the pre-alignment heading/altitude/speed with the climb smooth and the
+speed one step at a time; FLT after CBTM holds the current heading (the alignment heading becomes
+the set heading), so the post-launch transition keeps heading and altitude at the transition
+moment and then climbs back; radar hold is jerky, baro hold smoother and preferred, with terrain
+avoidance then Petrovich's own job.
+
+### U3 decided, mode-cycle orders, and the player command vocabulary (user, 2026-11-15, verbatim)
+
+Asked (plan check Q-P1): when the player changes the wheel mode himself mid-goal, reassert at
+once or leave it? Answer:
+
+> *"reassert at once — the goal is to use the wheel command via Petrobrain, not player directly."*
+
+> Mode changes using left press work as follows:
+> - FLT > CMBT > FLT
+> - HVR > HVRT > CMBT > HVR
+>
+> Other, automatic mode changes:
+> - FLT > HVR when speed set to 0 and helicopter slows to hover
+> - HVR > FLT when speed increased to more than 0 and helicopter accelerates
+> - FLT/HVR > CMBT when Player enters CPG view
+> - CMBT > FLT/HVR when Player exits CPG view, probably though I'm not sure of this
+
+> # Player commands for BL-16
+>
+> ## Audio capture
+>
+> Audio capture *must* listen to both pilot and copilot ICS (VOIP) triggers and treat them
+> equally. That is required so that player voice commands from copilot position are captured.
+> This is prerequirement for BL-16 player commands to work.
+>
+> ## Player commnads
+>
+> Voice commands, as everything else is.
+>
+> - "level flight" -> stabilize to current aircraft params
+>
+> Heading
+> - "Heading <degrees value>"
+> - "Heading <N/NE/E/...>" -> translate to numeric heading value and set
+> - "Turn left/right <amount of degrees>"
+> - "Break turn left/right" -> CMBT break left/right
+> - "Break away" -> CMBT break left, wait 2 s then CMBT break left again.
+> - "Align" -> CMBT align
+> - "Align [for] launch" -> CMBT align for launch
+> - "Straight" / "level off" -> stop turn, maintain current heading
+>   - If in align for launch mode, this stabilizes from the dive into level flight and does what
+>     is done when recovering from launch attitude after missile is launched.
+>
+> Speed
+> - "Speed <value>" -> select closest step to value and set it
+>   - "max" is allowed value
+> - "Slow down" -> speed down one step
+> - "Speed up" -> speed up one step
+> - "Hover" -> speed 0
+>
+> Altitude
+> - "alt[itude] <value> [radar/barometric]"
+> - "climb/descend <amoount of meters>"
+> - "hold alt[itude]"
+>
+> Hover (only when hovering. These need the HVRT state)
+> - "left/right/forward/back" -> HVRT translate commands. Hold until Player says "Hold" meaning
+>   hold position.
+> - "up/down" -> climd/descend one step.
+
+Read as: E-P5 ("never undoes the player") is narrowed by the user to *the player is not expected
+to use the wheel; if he does, Petrovich's goal wins*; "straight" / "level off" is the spoken
+abort of Q5's recovery; "break away" is the 180 by two lefts; hover translate is a held press
+ended by "hold"; and the ICS/PTT capture from the operator seat is a prerequisite stage, not a
+BL-16 nicety.
+
+> *"CPG seat audio capture should use the copilot ICS trigger"* (user, 2026-11-15)
+
+That trigger is first-party: `OP-STICK-PTT-PTR`, **arg 856**, `crew_member_access = {1}`,
+same encoding as the pilot's 738 (1.0 radio, 0.5 intercom, 0 released) —
+`aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md` line ~202 and
+`mi24p-command-surface.md`; DCS-SRS's `Mi24P.lua` reads 856 for the copilot seat. The 2026-09-19
+research marked it out of scope "unless the player ever flies from the gunner seat"; BL-16 parked
+mode is exactly that case, so the scope note is superseded.
