@@ -168,3 +168,75 @@ directly in this worktree for both touched subprojects, not taken from the
 implementer's report; two mutation checks performed (construction-site
 carry-forward, confirmed via test failure/restore) rather than accepted on read
 alone.
+
+## Re-review (fix 618ec14f)
+
+**Worktree note**: this agent's worktree started at `0fa6c92f` (`main`'s current
+tip), not an ancestor of `618ec14f`. Moved with `git switch -C
+worktree-agent-abf5b52a90ca91338 618ec14f`, confirmed `HEAD` == `618ec14f`, tree
+clean, before doing anything else.
+
+Scope of this pass is Required Fix 1 only: does `618ec14f`'s sole new file,
+`aircraft-layer/tests/test_ai_pilot_wheel_api.py` (227 lines, 15 tests, no other
+file touched), close the gap the first review named.
+
+- **Structure mirrors `test_sight_servo_api.py` one-to-one**: same module
+  docstring shape (names what it mirrors and why), same four-class layout —
+  `TestAiPilotWheelState` (schema) / `TestAiPilotWheelCache` (keep-latest) /
+  `TestCollectorRouting` / `TestAiPilotWheelLatestEndpoint` (live server) —
+  against `TestSightServoState`/`TestSightServoCache`/`TestCollectorRouting`/
+  `TestSightServoLatestEndpoint`.
+- **Schema parse/validation**: covers a well-formed line (every field read back
+  correctly), all-null optional fields (unparked/box-not-populated posture),
+  missing `t`, missing `apw_parked_active`, non-boolean `apw_parked_active`,
+  non-string optional field, and `to_api_dict()` round-tripping every field —
+  all against the real `AiPilotWheelState`/`AiPilotWheelParseError` from
+  `schema`, not a stub.
+- **Cache keep-latest**: empty-before-first-push, and a second push replacing
+  the first (`cache.latest() is second`, identity check) — matches
+  `TestSightServoCache`'s shape.
+- **Collector routing**: four cases, verified by reading
+  `aircraft-layer/src/collector/server.py:529-544` directly against each —
+  (1) a well-formed line reaches the cache; (2) routing happens ahead of the
+  telemetry fallthrough (asserts `telemetry.latest() is None` after feeding an
+  APW line to a collector constructed with both caches — the `if
+  "apw_parked_active" in data: ... return` block sits above the plain
+  `TelemetrySample.from_dict` fallthrough, confirmed by direct read, same
+  position/comment shape as every other named-kind branch above it); (3) a
+  collector built with no `ai_pilot_wheel_cache` drops the line without raising
+  (every pre-existing construction site passes no cache, so this is the
+  default-safe case); (4) a malformed line (`apw_parked_active: "nope"`) is
+  caught by `except AiPilotWheelParseError: ... return` and dropped, not
+  raised — `cache.latest()` stays `None`.
+- **Live endpoint**: a real `TelemetryAPIServer` on an OS-assigned port, a
+  background thread, `GET /ai_pilot_wheel/latest` via `urllib.request` — `null`
+  before the first sample, full dict after a `cache.push()`. Matches
+  `TestSightServoLatestEndpoint`'s fixture/teardown shape exactly.
+- **Everything the fix was asked for is present**: schema parse/validation
+  errors, cache keep-latest, collector routing ahead of the telemetry
+  fallthrough, malformed-dropped, no-cache-drop, and the live endpoint. Nothing
+  claimed in the test file's docstring is missing, and nothing beyond
+  `AiPilotWheelState`/`AiPilotWheelCache`/`CollectorServer`/
+  `TelemetryAPIServer` scope was touched — nothing else in the diff needed
+  re-checking since this commit touches exactly one file.
+- **Commands run fresh in this worktree** (fresh `.venv`, `pip install -e . ruff
+  mypy pytest`): `ruff format --check` (79 files already formatted), `ruff
+  check` (all checks passed), `cd aircraft-layer && .venv/bin/mypy src` (success,
+  no issues, 27 source files), `pytest -q` (**751 passed**, no failures, no
+  skips). 15 of those 751 are the new file; none of the other 736 regressed.
+
+No required fixes remain. No new optional findings from this narrow scope —
+the first review's Optional Refinements and performance/security hand-off items
+are unaffected by this one-file addition and still stand as written above.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read of the new test file against the production code it exercises
+(`collector/server.py`'s routing block read directly, line-by-line, against
+each of the four `TestCollectorRouting` cases); all four mechanical checks
+(`ruff format --check`, `ruff check`, `mypy --strict`, `pytest`) run fresh in
+this worktree, not taken from the commit message's account.
