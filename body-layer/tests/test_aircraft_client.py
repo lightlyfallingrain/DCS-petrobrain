@@ -58,6 +58,18 @@ _PAYLOAD_BODY = {
     ],
 }
 
+_AI_PILOT_WHEEL_BODY = {
+    "t": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "apw_parked_active": True,
+    "apw_mode_text": "FLT",
+    "apw_course_text": "71",
+    "apw_alt_text": "196",
+    "apw_alt_add_text": "R",
+    "apw_speed_text": "60",
+    "apw_last_press": "altitude_nudge_up",
+}
+
 
 def _make_handler(
     triggered_searches: list[str] | None = None,
@@ -89,6 +101,8 @@ def _make_handler(
                 self._respond(200, _WATCHED_ARGS_BODY)
             elif self.path == "/payload/latest":
                 self._respond(200, _PAYLOAD_BODY)
+            elif self.path == "/ai_pilot_wheel/latest":
+                self._respond(200, _AI_PILOT_WHEEL_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -277,6 +291,21 @@ def test_get_payload_latest_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.get_payload_latest()
+
+
+def test_get_ai_pilot_wheel_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_ai_pilot_wheel_latest()
+
+    assert result == _AI_PILOT_WHEEL_BODY
+
+
+def test_get_ai_pilot_wheel_latest_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.get_ai_pilot_wheel_latest()
 
 
 @pytest.fixture

@@ -156,7 +156,14 @@ loadout (`LoGetPayloadInfo()` + `LoGetNameByType()`, read at the aircraft
 layer's own export tick, sent only on change). Station selection, family
 identification, and the "count dropped without a launch" inference are
 `belief.atgm_run`'s job (Stage 3/5 of the plan), not this client's -- same
-division of labour every other `get_*` method here already has."""
+division of labour every other `get_*` method here already has.
+
+`get_ai_pilot_wheel_latest` (`plans/flight-control/plan.md`, BL-16 mode 2,
+Stage P1) is this seam's `GET /ai_pilot_wheel/latest` counterpart to
+`get_sight_servo_latest` -- same "not an error" empty-cache posture.
+`Export.lua`'s own per-frame AI-pilot-wheel status (parked state, the
+flattened overlay readback, the last press issued); `belief.ai_pilot_
+wheel.advance_parked_flight_state` is the one caller."""
 
 from __future__ import annotations
 
@@ -443,6 +450,26 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /payload/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_ai_pilot_wheel_latest(self) -> dict[str, Any] | None:
+        """`GET /ai_pilot_wheel/latest` -> the most recent AI-pilot-wheel
+        status (see `aircraft-layer/src/schema/ai_pilot_wheel.py`'s
+        `AiPilotWheelState.to_api_dict`), or `None` if nothing has been
+        received yet -- same "not an error" posture as `get_sight_servo_
+        latest` (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1).
+        `belief.ai_pilot_wheel.advance_parked_flight_state` is the one
+        caller, resolving the typed `ParkedFlightState` itself -- this
+        client does no interpretation, same division of labour every
+        other `get_*` method here already has."""
+        result = self._get_json("/ai_pilot_wheel/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                "expected a JSON object or null from /ai_pilot_wheel/latest, "
+                f"got {type(result).__name__}"
             )
         return result
 

@@ -9,6 +9,12 @@
 # (gitignored, created by you, sparse -- only the keys you change) and
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
+[belief.ai_pilot_wheel]
+# "Good enough" tolerance for the hold-up/down nudge loop Stage P2's `set_parked_altitude` goal will use (user, `aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5: "within 20m is good enough").
+# status: agreed-guess | range: 1.0 .. 200.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_ALTITUDE_TOLERANCE_M
+AI_PILOT_ALTITUDE_TOLERANCE_M = 20.0
+
 [belief.association_over_time]
 # How fast an unobserved-moving contact's position uncertainty grows, metres/second, when `Contact.motion` is `"stopped"` or `None` ("never observed moving") -- user direction, 2026-10-30 (explore-notes.md, "E5 fold on a closing run"): "not observed moving -> not expected to move -> tiny growth".
 # status: judgement | range: 0.0 .. 1.0
