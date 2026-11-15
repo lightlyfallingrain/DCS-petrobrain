@@ -240,3 +240,89 @@ Full read of the new test file against the production code it exercises
 each of the four `TestCollectorRouting` cases); all four mechanical checks
 (`ruff format --check`, `ruff check`, `mypy --strict`, `pytest`) run fresh in
 this worktree, not taken from the commit message's account.
+
+## Review of perf fix (8331086d)
+
+Diff reviewed: `git diff 40610e4c 8331086d` (`aircraft-layer/dcs-export/Export.lua`,
+`aircraft-layer/tests/test_ai_pilot_wheel_lua.py`, `plans/flight-control/implementation.md`).
+Checked against the mitigation specified in `plans/flight-control/perf-batch-a.md`.
+
+### Findings
+
+1. **The perf request is met.** `list_indication(HELPERAI_DEVICE_ID)` is now read exactly once
+   per 5 Hz tick (`helperai_raw`, `Export.lua:2651`), shared by the new
+   `update_ai_pilot_wheel_overlay` call and the existing `encode_petrovich_indication_line`
+   consumer further down `LuaExportAfterNextFrame`, which now reuses `helperai_raw` instead of
+   calling `get_helperai_indication()` a second time (grepped both call sites; only one
+   `get_helperai_indication()` call remains in the whole file). `run_ai_pilot_wheel`, still called
+   every frame, no longer reads or parses the device at all — it does only the open-press release
+   check, the two `get_argument_value` park-edge reads, and (on a rising edge) sets
+   `ai_pilot_pending_nudge`. This is exactly the shape the perf report's mitigation asked for, not
+   a narrower or broader fix.
+
+2. **E-P10 still holds, extended correctly.** The unpark branch
+   (`Export.lua:2185-2201`) clears the overlay text fields, the pending-release press, and now
+   `ai_pilot_pending_nudge`, all in the same frame unpark is detected — confirmed by
+   `test_unpark_before_the_next_tick_clears_the_pending_nudge`, which shows a stale parse arriving
+   at the next 5 Hz tick for an already-ended park produces zero presses. No regression.
+
+3. **E-P6 intact.** Grepped `Export.lua` for `AI_WHEEL_RIGHT`/`WHEEL_RIGHT`/`3002`: still exactly
+   one hit, the constant's own declaration (line 1993) — no new call site pairs it with a press,
+   and no generic short/long-press helper was introduced in this diff.
+
+4. **Moving the shared `list_indication` read ahead of the telemetry-send gates is safe.** It sits
+   between `last_export_t = t` and the `client == nil` check, i.e. it (and `push_sight_servo_
+   state`/`update_ai_pilot_wheel_overlay`/`push_ai_pilot_wheel_state`) now runs even on the
+   briefing/mission-editor screen and even with no client connected. `get_helperai_indication`'s
+   call is itself `safe_call`-wrapped (unchanged, line 2651), and `update_ai_pilot_wheel_overlay`
+   independently no-ops unless `ai_pilot_parked_active` is true — which can only become true once
+   `run_ai_pilot_wheel` has already run and read device 0's park args without error, i.e. not on
+   the briefing screen where device/arg calls are themselves wrapped in `safe_call`. So a
+   briefing-screen or disconnected-client tick costs one extra `safe_call`-guarded device read and
+   an early-return function call, nothing more. For `encode_petrovich_indication_line`'s existing
+   consumer: it already only runs inside the `if client ~= nil then` block further down, unchanged
+   by this diff except for reading `helperai_raw` instead of re-calling the getter — same value,
+   same timing relative to everything that follows it, no behaviour change for the existing
+   `petrovich_indication` push.
+
+5. **No wire-format change, so no version bump — correct per convention.** `apw_*` fields, their
+   semantics, and `push_ai_pilot_wheel_state`'s cadence are unchanged; only where the parse happens
+   moved. `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION`'s own comment (`Export.lua:120-196`) is
+   explicit that the bump is keyed to the wire format a collector parses, and every prior bump in
+   that history is either an additive/reshaped field or a behavioral fix to an inbound command
+   path — neither applies here. Correct to leave at `"2026-11-15b"`.
+
+6. **The two new Lua integration tests are load-bearing.** Re-ran the implementer's mutation
+   independently: removed `ai_pilot_pending_nudge = false` from the unpark branch
+   (`run_ai_pilot_wheel`), re-ran `test_ai_pilot_wheel_lua.py` — `test_unpark_before_the_next_
+   tick_clears_the_pending_nudge` failed exactly as claimed (`pending_after_unpark` read back
+   `"true"` instead of `"false"`), restored the line, confirmed green again.
+   `test_nudge_fires_only_once_the_cached_parse_resolves_it` is likewise non-tautological: it
+   asserts zero presses on the rising frame and on a further per-frame call with no tick in
+   between, one press on the first tick that resolves the armed flag, and no second press on a
+   repeat tick with the same settled parse — each assertion maps to a real line in
+   `update_ai_pilot_wheel_overlay`'s `if ai_pilot_pending_nudge then ... ai_pilot_pending_nudge =
+   false ...` block, not just "the function ran".
+
+7. **No regression in the prior suite.** Fresh `.venv` in this worktree (`pip install -e . ruff
+   mypy pytest`): `ruff format --check` (79 files already formatted), `ruff check` (all checks
+   passed), `cd aircraft-layer && .venv/bin/mypy src` (success, 27 source files), `pytest -q`
+   (**753 passed**, 751 prior + the 2 new `TestNudgeDrivenFromCachedParse` cases, no failures, no
+   skips). `luac5.1 -p Export.lua` passes; the `GETGLOBAL` scan shows only Lua stdlib, genuine DCS
+   APIs, and the pre-existing `DUMPED_*` one-shot-dump globals (unchanged by this diff) — no new
+   accidental global, and `ai_pilot_pending_nudge` is correctly `local`.
+
+No required fixes. No new optional findings — this diff is a narrow, surgical move of existing
+logic off the per-frame path, built exactly to the mitigation's own shape, and the P2 MONITOR item
+was left as a comment pointer rather than code, which is what a MONITOR action calls for.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read of the diff against `plans/flight-control/perf-batch-a.md`'s mitigation, line-by-line on
+`Export.lua`'s changed functions; independently reran the implementer's stated mutation rather than
+trusting its account; all four mechanical checks plus `luac5.1 -p`/`GETGLOBAL` run fresh in this
+worktree.
