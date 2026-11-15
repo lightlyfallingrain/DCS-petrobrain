@@ -674,3 +674,130 @@ ALIGNED.** In the same message the user gave the short-left cycle orders (`FLT >
 and a prerequisite: audio capture must gate on both the pilot's (arg 738) and the operator's
 (arg 856) ICS trigger, equally. Verbatim: `plans/flight-control/explore-notes.md`, "U3 decided,
 mode-cycle orders, and the player command vocabulary". These go to a plan amendment.
+
+## Plan check — amendment (2026-11-15)
+
+**Verdict:** ALIGNED, with two findings worth fixing before Implementer and one question.
+
+Scoped to `plans/flight-control/plan.md`'s "Amended 2026-11-15 (vocabulary, ICS capture, cycle
+orders)" and the stage rows it edited (P-ICS, P1, P2, P3, P4) — the rest of the plan check stands
+from the previous pass above.
+
+### Vocabulary trace
+
+Every spoken phrase in the user's verbatim list (`explore-notes.md`, "U3 decided...") maps to a
+token, a mode gate and a press shape in the amended table (plan.md lines 103-121); none dropped,
+none re-interpreted.
+
+| Spoken (user) | Token | Checked against |
+|---|---|---|
+| "level flight" | `level_flight` | stabilise to current, not a numeric target — matches |
+| "Heading <deg>" / "<compass point>" | `turn_heading` | both forms present, compass→degrees translation noted as new slot work |
+| "Turn left/right <deg>" | `turn_heading_relative` | computed once at command time, matches "relative, not re-derived" |
+| "Break turn left/right" | `cbtm_break` | long press, no hold, 90° — grounded in the wheel research (`2026-11-14-mi24p-ai-pilot-wheel-layout.md` line 143), not plan-invented |
+| "Break away" | `cbtm_break_away` | two long-left presses, `BREAK_AWAY_GAP_S = 2.0` — the user's own "wait 2 s" verbatim |
+| "Align" / "Align [for] launch" | `cbtm_align`/`cbtm_align_for_launch` | unchanged from Stage P3, carried forward |
+| "Straight" / "level off" | `level_off` | one token, two meanings gated by `align_phase` — correctly matches the task brief's reading that this is F-P1's spoken abort while aligning, and an ordinary turn-stop otherwise |
+| "Speed <value>" (incl. "max") | `set_speed` | matches |
+| "Slow down" / "Speed up" | `speed_step` | matches |
+| "Hover" | `set_speed(0)` | matches; correctly triggers the automatic FLT→HVR transition rather than a separate mode press |
+| "alt <value> [radar/barometric]" | `set_altitude` | matches |
+| "climb/descend <m>" | `altitude_step` | matches |
+| "hold altitude" | `hold_altitude` | matches |
+| "left/right/forward/back", held until "Hold" | `hvrt_translate`/`hvrt_hold` | HVRT-only, held press released on "Hold" **or** `HVRT_TRANSLATE_MAX_HOLD_S` — see Finding 2 |
+| "up/down" | `hvrt_step` | discrete short press, 2 m/tap — grounded in the same wheel research (`alt_change_step = 2`), not plan-invented |
+
+The ICS requirement is carried faithfully: Stage P-ICS extends `push_ptt_state` to arg 856
+alongside 738, and the schema layer's `intercom`/`radio` properties become an OR across both raw
+values — this is "treat them equally" as a design, not an assertion. **Verified by grep, not
+trusted:** `grep -rn "intercom\|radio" audio-adapter/src aircraft-layer/src body-layer/src`
+confirms `audio_adapter/src/ptt_source.py`'s `DcsPTT.is_down` is the only reader of those two
+booleans (the one `body-layer/src/aircraft_client.py` hit from the same grep is a
+`to_api_dict`-pattern false positive, not a PTT consumer) — so "no change needed there" holds.
+`aircraft-layer/src/schema/spu8.py`'s `Spu8Sample.gate_open` (`net1_on and ics_power_on`) already
+ANDs the pilot's NET-1 (377) and the co-pilot's ICS-power (664) switches regardless of which seat
+is talking, confirmed by reading it directly — the plan's "no change needed" claim for the SPU-8
+gate holds too.
+
+### Other checks
+
+- **HVRT dispatch gate is belief, not omniscient DCS truth.** `ai_mode` is declared a state param
+  ("mirrors Lua's parsed `mode_text`... never DCS truth directly") fed by the same
+  `list_indication` readback the player himself would see on the overlay, polled every tick — not
+  a bypass read of DCS's internal mode variable. This is the right boundary (root `CLAUDE.md`'s
+  no-omniscience rule) and the plan's own "read the mode every tick, never assume" posture already
+  covers the one latency risk this creates (a stale `ai_mode` for one poll around a mode
+  transition).
+- **No existing vocabulary collision.** The plan's own grep check (`crew_console.py`'s
+  `_RELATIVE_SCAN_TOKENS`/step-through, `audio-adapter/src/vocabulary.py`'s `PHRASES`) is correct
+  as far as it goes; checking the one table it did not name,
+  `body-layer/src/belief/voice_commands.py`'s `CANCEL_TOKENS`, turns up no bare "left"/"right"/
+  "hold"/"forward"/"back"/"up"/"down" there either — the new HVRT tokens remain the first bare
+  single-word phrases in the vocabulary, confirmed rather than assumed.
+- **`MODE_CYCLE_MAX_ATTEMPTS = 3` and `HVRT_TRANSLATE_MAX_HOLD_S = 15` don't contradict user
+  wording.** The first is derived arithmetic from the user's own cycle orders, not a guess. The
+  second is a safety ceiling under a hold the user described as open-ended ("Hold until Player
+  says Hold") — it doesn't contradict that wording for ordinary flight (15 s covers any plausible
+  deliberate translate), and the plan already flags it, unprompted, as the architect's own
+  judgement call rather than passing it off as settled. See Q-P2 below rather than treating this
+  as a finding.
+- **E-P6's structural guarantee still holds mechanically after the vocabulary grew.** No generic
+  `press(direction, duration)` entry point is described anywhere in the amendment; every "right"
+  in the new table is either a long press, no hold (`cbtm_break`) or a long held press released on
+  "Hold"/timeout (`hvrt_translate`) — never short. `up`/`down` (the only short presses added) never
+  pair with `left`/`right`. The guarantee is unchanged in kind from the prior pass's Finding 2: it
+  holds because every caller happens to need a different (direction, duration) pair, not because
+  one is withheld from existing.
+
+### Findings
+
+1. **The new vocabulary is never routed into `audio-adapter/src/vocabulary.py`'s
+   `TOKENS`/`PHRASES` tables, which is what actually gets a word into Petrovich's ears.** Lens:
+   do not reinvent the wheel / the non-obvious case.
+   - Assumption: Stage P2's text says "new slot parsers needed for the full vocabulary table
+     above" and stops there, as if `command_matcher.py`-level slot parsing is the whole of the
+     audio-adapter work.
+   - In the project: `audio-adapter/CLAUDE.md` states this as a rule, not a style preference —
+     `vocabulary.py` is "a deliberate hand-synced duplicate" of `crew_console.py`'s token tables,
+     kept in sync **by hand, with no automated check tying the three together**, and its
+     `to_prompt()` biases whisper's recognition toward every `PHRASES` word by construction,
+     enforced by `test_vocabulary.py`. The project's own account of why this matters: "Before
+     2026-10-23 the prompt sampled 24 of 66 tokens' phrasings and missed silence, engage, set
+     target, describe and every slot word — the cause of 'violence'/'same ahead' in the speech
+     logs."
+   - The pilot would see: he says "break away" or "hover" in the cockpit, and if the new tokens
+     never reach `vocabulary.py`'s `PHRASES`/`TOKENS` (and hence whisper's bias prompt), the
+     transcript comes back as something whisper guessed instead — the exact failure mode the
+     2026-10-23 fix was written to close, recurring on this feature's own ~15 new tokens.
+   - Grounded in: `audio-adapter/CLAUDE.md`, "Structure" → `src/vocabulary.py`'s entry.
+   - Suggests: add one line to Stage P2 (and P3 for `cbtm_break`/`cbtm_break_away`, P4 for the
+     dual-meaning `level_off`) naming `audio-adapter/src/vocabulary.py`'s `TOKENS`/`PHRASES` as
+     something the Implementer must also extend, hand-synced against `crew_console.py` the way
+     the file's own docstring already requires. Not a blocker to Implementer starting P-ICS/P1,
+     but it is a real gap in P2/P3/P4's own content, not a stylistic nit.
+
+2. **The prior pass's Implementer note (no shared `press(direction, duration)` entry point) still
+   has not been written into the plan, and the vocabulary growth makes it more worth saying, not
+   less.** Lens: the non-obvious case.
+   - Assumption: carried from the previous "Plan check — parked mode" Finding 2, marked "not a
+     blocker" there for a five-function vocabulary.
+   - In the sim: unchanged in kind, but the surface has grown — `cbtm_break`, `cbtm_break_away`,
+     and the four HVRT directions now all touch "right" with different timings (no-hold-long,
+     held-long, discrete-short-elsewhere-only). The structural guarantee (checked above) still
+     holds as described, but it holds only because the Implementer keeps hard-coding five-now-nine
+     separate press shapes rather than factoring them into one parameterised helper — a natural
+     refactor instinct once there are nine similar-looking call sites.
+   - The pilot would see nothing until the one time `HDG LOS` fires unbidden — the user's named
+     invariant ("We must not").
+   - Grounded in: the user's own correction on `HDG LOS`, and the growth between this plan revision
+     and the last.
+   - Suggests: the same one-line note as before, now worth actually adding to the plan text (e.g.
+     beside the "Architecture decision" section) rather than carrying it only in `alignment.md`
+     across two revisions.
+
+### Questions for the user
+
+- **Q-P2** — `HVRT_TRANSLATE_MAX_HOLD_S` defaults to 15 s, the architect's own judgement call, as a
+  safety ceiling in case a spoken "Hold" is lost. Is 15 s the right order of magnitude for how long
+  you'd expect to hold a hover translate in ordinary use, or should it be longer/shorter/tunable
+  from the start?
