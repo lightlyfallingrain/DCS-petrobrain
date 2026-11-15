@@ -158,23 +158,27 @@ flight overlay usage for BL-16". Tag `[user]` throughout; nothing below is from 
 stateDiagram-v2
     [*] --> FLT : park with forward speed
     [*] --> HVR : park near hover (criterion unknown)
-    FLT --> HVR : speed set 0, aircraft slows (DCS)
-    HVR --> FLT : speed set > 0 (DCS)
-    HVR --> HVRT : short left
-    HVRT --> HVR : short left
     FLT --> CBTM : short left
-    CBTM --> FLT : short left
-    FLT --> CBTM : player enters CPG view (DCS, automatic)
-    HVR --> CBTM : player enters CPG view (DCS, automatic)
-    note right of CBTM : no automatic return to FLT (user, not certain)
+    CBTM --> FLT : short left (from FLT side)
+    HVR --> HVRT : short left
+    HVRT --> CBTM : short left
+    CBTM --> HVR : short left (from HVR side)
+    FLT --> HVR : speed set 0, aircraft slows (DCS)
+    HVR --> FLT : speed set > 0, aircraft accelerates (DCS)
+    FLT --> CBTM : player enters CPG view (DCS)
+    HVR --> CBTM : player enters CPG view (DCS)
+    CBTM --> FLT : player exits CPG view (DCS, user not sure)
+    CBTM --> HVR : player exits CPG view (DCS, user not sure)
 ```
 
-- Mode changes **without** Petrobrain's input: the player pressing left on the wheel, DCS on CPG
-  view entry (→ CBTM), DCS on hover transitions (FLT ↔ HVR). **So the mode is read every tick,
-  never assumed.** A long hold in progress ends immediately on a mode change.
-- Full cycle order from a short left is not fixed by the user's text beyond `HVR → HVRT → HVR`
-  and the FLT ↔ CBTM pair; the loop is written as "press, read, compare, repeat", so the order
-  does not need to be known.
+- Short-left cycle orders `[user, 2026-11-15]`: **`FLT > CBTM > FLT`** and
+  **`HVR > HVRT > CBTM > HVR`**. So CBTM has two "homes": which one a short left returns to
+  depends on whether the aircraft is in forward flight or hover.
+- Mode changes **without** Petrobrain's input: DCS on CPG view entry (→ CBTM) and probably on
+  exit (→ FLT/HVR, user not certain), DCS on hover transitions (FLT ↔ HVR), and the player
+  pressing left (not expected; if it happens, Petrovich reasserts his mode at once, user
+  2026-11-15). **So the mode is read every tick, never assumed.** A long hold in progress ends
+  immediately on a mode change.
 - Preconditions: `HVR` only at speed 0; `HVRT` only from `HVR`; align-to-9K113, align-for-launch
   and break turns only in `CBTM`; speed / heading / altitude setting only in `FLT` / `HVR`.
 

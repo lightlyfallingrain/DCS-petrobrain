@@ -662,3 +662,15 @@ build" (Stages P0–P6) against the goal check above, as amended by the user's Q
   Petrovich should override a mode you set on purpose. Is overriding you here acceptable for the
   first build (matching U3), or should Petrovich leave your mode alone for some window before
   reasserting it (closer to E-P5 as written)?
+
+### Plan check Q-P1 answered by the user (2026-11-15)
+
+> *"reassert at once — the goal is to use the wheel command via Petrobrain, not player directly."*
+
+U3 stands. E-P5 is narrowed by the user to: the player is not expected to operate the wheel while
+parked mode runs; if he does, Petrovich's goal wins. **Plan check verdict after the answer:
+ALIGNED.** In the same message the user gave the short-left cycle orders (`FLT > CBTM > FLT`;
+`HVR > HVRT > CBTM > HVR`), the automatic transitions, a full spoken vocabulary for parked mode,
+and a prerequisite: audio capture must gate on both the pilot's (arg 738) and the operator's
+(arg 856) ICS trigger, equally. Verbatim: `plans/flight-control/explore-notes.md`, "U3 decided,
+mode-cycle orders, and the player command vocabulary". These go to a plan amendment.
