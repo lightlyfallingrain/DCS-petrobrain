@@ -395,6 +395,7 @@ def _make_handler(
                     t_wall=time.time(),
                     slots=match.slots,
                     correlation_id=correlation_id,
+                    addressed=match.addressed,
                 )
             )
             _log_latency(

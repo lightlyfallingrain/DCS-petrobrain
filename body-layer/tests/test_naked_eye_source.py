@@ -866,16 +866,20 @@ def test_candidate_leaving_and_re_entering_the_visible_set_re_emits() -> None:
     # 2C: acquisition state is time-based, not poll-indexed (module
     # docstring point 4a) -- an object stays "known" for
     # `_ACQUISITION_RETENTION_WINDOW_S` (== `perception.gaze.
-    # SCAN_CYCLE_PERIOD_S`, 16.0 s) after it was last actually seen, not
-    # just the one poll it was last visible on. A brief absence (under one
-    # scan cycle) is exactly what the fix is *for* -- a cone sweeping off a
-    # sector and back must not read as "gone" -- so re-emission on
-    # reappearance now needs a gap wider than one cycle to be a genuine
-    # re-emission rather than the tolerated-brief-gap case. Poll 2 sits
-    # 16.5 s after poll 1 (> `SCAN_CYCLE_PERIOD_S`, evicting the object),
-    # and poll 3, 0.2 s later, still lands in the same "12 o'clock" free-
-    # scan leg as poll 1 (16.1 % 16.0 == 0.1, inside `SCAN_PLAN`'s index-0
-    # dwell) so the gaze gate is not itself the reason for re-emission.
+    # WORST_REVISIT_S`, 32.0 s -- **moved from `SCAN_CYCLE_PERIOD_S`,
+    # `plans/expected-area-check/plan.md` Stage 1**) after it was last
+    # actually seen, not just the one poll it was last visible on. A
+    # brief absence (under one *busy* revisit) is exactly what the fix is
+    # *for* -- a cone sweeping off a sector and back, possibly with
+    # binoculars up elsewhere in between, must not read as "gone" -- so
+    # re-emission on reappearance now needs a gap wider than the worst
+    # revisit to be a genuine re-emission rather than the tolerated-
+    # brief-gap case. Poll 2 sits 32.1 s after poll 1 (> `WORST_REVISIT_
+    # S`, evicting the object), and poll 3, 0.2 s later, still lands in
+    # the same "12 o'clock" free-scan leg as poll 1 (32.1 % `SCAN_CYCLE_
+    # PERIOD_S` (16.0) == 0.1, inside `SCAN_PLAN`'s index-0 dwell -- that
+    # modulo is unchanged by this stage) so the gaze gate is not itself
+    # the reason for re-emission.
     visible = {"objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]}
     empty: dict[str, Any] = {"objects": []}
     client = FakeAircraftClient(visible)
@@ -887,9 +891,9 @@ def test_candidate_leaving_and_re_entering_the_visible_set_re_emits() -> None:
 
     first = source.poll(0.0, _ownship())
     client._world_objects = empty
-    second = source.poll(16.1, _ownship())
+    second = source.poll(32.1, _ownship())
     client._world_objects = visible
-    third = source.poll(16.3, _ownship())
+    third = source.poll(32.3, _ownship())
 
     assert len(first) == 1
     assert second == []
@@ -997,15 +1001,17 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
 
     # Force both back through the debounce cycle (leave, then re-enter).
     # 2C: acquisition is time-based (`_ACQUISITION_RETENTION_WINDOW_S` ==
-    # `perception.gaze.SCAN_CYCLE_PERIOD_S`, 16.0 s), so the gap has to
-    # exceed one full scan cycle for a genuine re-emission -- see
-    # `test_candidate_leaving_and_re_entering_the_visible_set_re_emits`'s
-    # own docstring for the same derivation. 16.1/16.3 both still land in
-    # the same "12 o'clock" free-scan leg as t=0.0 (16.1 % 16.0 == 0.1).
+    # `perception.gaze.WORST_REVISIT_S`, 32.0 s -- **moved from
+    # `SCAN_CYCLE_PERIOD_S`, `plans/expected-area-check/plan.md` Stage
+    # 1**), so the gap has to exceed the worst revisit for a genuine
+    # re-emission -- see `test_candidate_leaving_and_re_entering_the_
+    # visible_set_re_emits`'s own docstring for the same derivation.
+    # 32.1/32.3 both still land in the same "12 o'clock" free-scan leg as
+    # t=0.0 (32.1 % `SCAN_CYCLE_PERIOD_S` (16.0) == 0.1).
     client._world_objects = empty
-    assert source.poll(16.1, _ownship()) == []
+    assert source.poll(32.1, _ownship()) == []
     client._world_objects = world_objects
-    second = source.poll(16.3, _ownship())
+    second = source.poll(32.3, _ownship())
 
     assert len(second) == 2
     infantry_first = next(

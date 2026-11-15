@@ -29,6 +29,7 @@ import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from query.describe import describe_position
 from query.line_of_sight import line_of_sight_clear as _wm_line_of_sight_clear
@@ -521,3 +522,66 @@ def line_of_sight_clear(
         (target.x, target.z, target.alt_m),
         samples=samples,
     )
+
+
+#: Which "third" of the naked-eye free-scan's forward hemisphere each
+#: o'clock hour belongs to -- `plans/expected-area-check/plan.md`
+#: (`BL-B110`) Stage 1's own partition rule, the same boundary `perception.
+#: gaze.SECTOR_WEDGE_DEG`'s `ahead`/`left`/`right` wedges define (ahead
+#: 11-1, left 9-11, right 1-3; a boundary leg, 11 or 1, belongs to
+#: `"ahead"`, per that table's own convention). **Duplicated here, not
+#: imported from `gaze.py`**, because `sector_runs_for_legs`/`n_sectors_
+#: for_legs` below must be callable from `tuning.py`, which `gaze.py`
+#: itself imports (`tuning.real`/`tuning.sequence`) -- importing `gaze`
+#: from here would cycle straight back through `tuning`. This module has
+#: no dependency on `tuning` or `gaze`, which is why it is the one place
+#: both can reach. `test_gaze.py` fences this table against `perception.
+#: gaze.SECTOR_WEDGE_DEG` so the two cannot silently drift apart.
+_THIRD_FOR_CLOCK_HOUR: Final[dict[int, str]] = {
+    9: "left",
+    10: "left",
+    11: "ahead",
+    12: "ahead",
+    1: "ahead",
+    2: "right",
+    3: "right",
+}
+
+
+def sector_runs_for_legs(legs: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
+    """Partition an ordered o'clock-hour table (e.g. `perception.gaze.
+    SCAN_PLAN`, or a TOML override's raw list) into consecutive runs that
+    fall in the same "third" (`_THIRD_FOR_CLOCK_HOUR`) -- `plans/
+    expected-area-check/plan.md` Stage 1's own partition rule.
+
+    **Cyclic**: if the table's first and last runs fall in the same
+    third, they are merged into one -- the table's own wrap-around, not
+    angular adjacency (the default table's two `"ahead"` runs, `(12, 11)`
+    at the start and `(12, 1)` in the middle, are *not* merged with each
+    other; they are already separated by the `"left"` run between them
+    and are each their own run in the result). An hour not in 9..3 is not
+    a case this table (or this function) is ever handed -- `SCAN_PLAN`
+    and every `_SECTOR_LEGS` entry live entirely inside that span."""
+    if not legs:
+        return ()
+    runs: list[list[int]] = [[legs[0]]]
+    thirds: list[str] = [_THIRD_FOR_CLOCK_HOUR.get(legs[0], "ahead")]
+    for leg in legs[1:]:
+        third = _THIRD_FOR_CLOCK_HOUR.get(leg, "ahead")
+        if third == thirds[-1]:
+            runs[-1].append(leg)
+        else:
+            runs.append([leg])
+            thirds.append(third)
+    if len(runs) > 1 and thirds[0] == thirds[-1]:
+        runs[0] = runs[-1] + runs[0]
+        runs.pop()
+    return tuple(tuple(run) for run in runs)
+
+
+def n_sectors_for_legs(legs: tuple[int, ...]) -> int:
+    """`len(sector_runs_for_legs(legs))` -- its own name for the one
+    number `tuning.py`'s I2 coupling check and `perception.gaze.
+    WORST_REVISIT_S` both need, without either having to re-derive the
+    partition just to count it."""
+    return len(sector_runs_for_legs(legs))

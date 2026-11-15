@@ -119,7 +119,23 @@ class ObjectTypeProfile:
     an `op_class`-keyed set would merge an Osa and an S-125 launcher sitting
     a few hundred metres apart as "one installation," which is exactly what
     the settled single-vehicle exclusion forbids. `False` (the default) for
-    every row not named otherwise, so no existing entry needs an edit."""
+    every row not named otherwise, so no existing entry needs an edit.
+
+    `immobile`: `True` when this profile's real system cannot move under
+    its own power -- `[[BL-B112]]` (explore-notes.md Q3, user,
+    2026-11-12): *"a SAM site that is not a mobile SAM unit itself, will
+    not move"*. **A second, independent bit from `installation_component`
+    above, not a reuse of it** -- the two answer different questions and
+    collide on exactly one real case: SA-6/Kub is a genuine fixed-cohesion
+    installation (`installation_component=True`, its radar and launcher
+    must still report/match as one site) but the user named it mobile
+    (*"SA-6 is a mobile platform... can just up and go"*), so it needs
+    `installation_component=True` and `immobile=False` on the same row --
+    one field cannot hold both answers. Read only by `belief.
+    association_over_time.contact_growth_rate_mps` (never by `belief.
+    groups`' cohesion/reconciliation, which keeps reading
+    `installation_component` unchanged). `False` (the default) for every
+    row not named otherwise."""
 
     size_m: float
     op_class: str
@@ -128,6 +144,7 @@ class ObjectTypeProfile:
     height_m: float | None = None
     distinctiveness: float | None = None
     installation_component: bool = False
+    immobile: bool = False
 
 
 def apparent_extent_m(profile: ObjectTypeProfile, aspect_deg: float | None) -> float:
@@ -243,14 +260,32 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     # single-vehicle systems below (Osa/strela-10/strela-1/tor/chap_torm2)
     # deliberately keep the field's `False` default -- each is its own
     # radar+launcher, never a multi-component installation.
+    #
+    # `immobile`: `[[BL-B112]]` (explore-notes.md Q3) -- S-125/SA-3 is
+    # named fixed by the user ("a SAM site that is not a mobile SAM unit
+    # itself, will not move"); Kub/SA-6 is named mobile explicitly
+    # ("SA-6 is a mobile platform... can just up and go"), so it keeps
+    # `installation_component=True` (cohesion) but gets `immobile=False`
+    # -- see `ObjectTypeProfile.immobile`'s own docstring for why one
+    # field cannot answer both questions for this row.
     (
         "s-125",
-        ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM", installation_component=True),
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_SRSAM",
+            installation_component=True,
+            immobile=True,
+        ),
     ),  # SA-3
     (
         "kub ",
-        ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM", installation_component=True),
-    ),  # SA-6
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_MRSAM",
+            installation_component=True,
+            immobile=False,
+        ),
+    ),  # SA-6 -- mobile platform, user's explicit override (see above)
     ("osa", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-8
     # "strela-10" before "strela-1": "Strela-10M3" also contains "strela-1"
     # as a prefix, so the more specific SA-13 keyword must win first-match.
@@ -274,6 +309,15 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     # Per-field provenance, because these four numbers are NOT equally well
     # known and a reader of this file alone would otherwise not be able to
     # tell which is which. Two are cited; two are estimates.
+    #
+    # `installation_component=True`/`immobile=True` (`[[BL-B112]]`, plan's
+    # Decision 2) -- an opportunistic fix: this was `installation_component
+    # =False` (the dataclass default) until now, a pre-existing gap (the
+    # plan's "Finding 4"). S-300/SA-10 is the same kind of fixed,
+    # multi-component site as S-125/SA-3 above, and the user's own framing
+    # names it immobile ("a SAM site that is not a mobile SAM unit itself,
+    # will not move") -- fixing it gives SA-10's radar/launcher/CP the same
+    # cohesion grouping S-125 already gets.
     (
         "s-300ps 40b6m tr",
         ObjectTypeProfile(
@@ -295,6 +339,8 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
             # way infantry's does -- but `OP_LRSAM` also covers non-radar
             # launchers, so this is a per-type value, not a class default.
             distinctiveness=2.6,
+            installation_component=True,
+            immobile=True,
         ),
     ),  # SA-10 Flap Lid radar, tall mast
     (
@@ -316,8 +362,68 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
             # See the Flap Lid row above for the derivation -- same
             # per-type exception, same evidence.
             distinctiveness=2.6,
+            installation_component=True,
+            immobile=True,
         ),
     ),  # SA-10 Big Bird radar, low trailer
+    # SA-2 (S-75) components -- `[[BL-B112]]`, zero coverage existed before
+    # this; without these rows SA-2 falls to `OP_GROUPSOMETHING` (the
+    # default) and reads as an ordinary mobile contact, directly
+    # contradicting the user's own example ("SA-2 is and remains
+    # stationary"). Real DCS `object_type` strings, confirmed against
+    # `data/dcs_type_to_reporting_name.tsv` lines 369/407/409/411.
+    # `op_class="OP_LRSAM"` is a genuinely open judgment call, not a
+    # verified classification (`body-layer/research/2026-11-12-sa2-op-
+    # class-assignment.md`: no DCS/HelperAI source assigns a per-type
+    # `op_class` to anything, SA-2 included) -- chosen by range ratio
+    # against the project's own threat-envelope data
+    # (`data/threat_envelopes.json`: SA-2 51.9 km sits closer to SA-10's
+    # 74.1 km, 70%, than to SA-6's 35.6 km, 146%). `installation_component
+    # =True`/`immobile=True` on all four, including the rangefinder/
+    # trailer -- the investigator's own extension of the S-300 precedent
+    # above: a fixed site's non-launcher components get the same `op_
+    # class` + `installation_component=True` as the launcher ("part of
+    # this kind of site," not "this object can shoot you").
+    (
+        "snr_75v",
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_LRSAM",
+            installation_component=True,
+            immobile=True,
+        ),
+    ),  # SA-2 Fan Song radar
+    (
+        "rd_75",
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_LRSAM",
+            installation_component=True,
+            immobile=True,
+        ),
+    ),  # SA-2 rangefinder
+    (
+        "s_75m_volhov",
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_LRSAM",
+            installation_component=True,
+            immobile=True,
+        ),
+    ),  # SA-2 launcher
+    (
+        "s_75_zil_trailer",
+        ObjectTypeProfile(
+            size_m=9.0,
+            op_class="OP_LRSAM",
+            installation_component=True,
+            immobile=True,
+        ),
+    ),  # SA-2 missile trailer -- placed before the generic "zil" truck row
+    # below so first-match wins here, not there. "S_75_ZIL" (the tractor,
+    # a real, separate DCS type) is deliberately NOT one of these four
+    # rows -- it is not matched by "s_75_zil_trailer" and falls through to
+    # the generic "zil" keyword, OP_TRUCK, same as before this change.
     # No bare "tank" keyword. It was measured against all 595 real DCS type
     # names and scored 8 false positives and zero true positives -- real
     # armour is named T-72/Leopard/Merkava/Challenger2, never "tank", while

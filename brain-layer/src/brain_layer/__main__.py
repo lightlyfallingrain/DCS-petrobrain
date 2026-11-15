@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from decider import Decider, OllamaDecider, StubDecider
+from decider import Decider, OllamaDecider, StubDecider, ToolLoopDecider
 from ollama_client import OllamaClient, OllamaRequestError
 from server import (
     DEFAULT_DECIDE_TIMEOUT_S,
@@ -44,7 +44,11 @@ def _build_decider(args: argparse.Namespace) -> Decider:
     if args.decider == "stub":
         return StubDecider(delay_s=args.stub_delay_s)
     ollama_client = OllamaClient(base_url=args.ollama_url)
-    decider = OllamaDecider(model=args.brain_model, ollama_client=ollama_client)
+    decider: OllamaDecider | ToolLoopDecider
+    if args.decider == "tool_loop":
+        decider = ToolLoopDecider(model=args.brain_model, ollama_client=ollama_client)
+    else:
+        decider = OllamaDecider(model=args.brain_model, ollama_client=ollama_client)
     try:
         ollama_client.warm_up(model=args.brain_model, num_ctx=decider.num_ctx)
         logger.info("Ollama warm-up generation complete (model=%s)", args.brain_model)
@@ -67,9 +71,16 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="listener port")
     parser.add_argument(
         "--decider",
-        choices=("stub", "ollama"),
+        choices=("stub", "ollama", "tool_loop"),
         default="stub",
-        help="which Decider to run behind POST /escalate (default: stub)",
+        help=(
+            "which Decider to run behind POST /escalate (default: stub). "
+            "'tool_loop' is `plans/brain-tool-calls/plan.md` BR-2 Stage 2's "
+            "ToolLoopDecider -- the one body-layer's addressed turns "
+            "actually need; 'ollama' is BR-1's own classify/discriminate "
+            "decider, kept for the unaddressed path per that plan's own "
+            "'keep StubDecider/OllamaDecider working' note."
+        ),
     )
     parser.add_argument(
         "--stub-delay-s",

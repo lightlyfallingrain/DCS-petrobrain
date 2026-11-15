@@ -1,0 +1,155 @@
+== DIFFERENT groups: % B announced (today -> with look); trig, canlook
+s-125      gap    6 u_u 4.5/3.0 Bnear heard  34.5 -> 100.0  trig  65.5 canlook  99.0
+s-125      gap    6 u_u 4.5/3.0 Bfar  heard  34.5 ->  99.5  trig  65.5 canlook  99.5
+s-125      gap    6 u_u 5.0/3.5 Bnear heard  28.0 -> 100.0  trig  72.0 canlook  99.5
+s-125      gap    6 u_u 5.0/3.5 Bfar  heard  25.0 ->  99.5  trig  75.0 canlook  99.5
+s-125      gap    6 u_u 3.0/1.5 Bnear heard  77.0 -> 100.0  trig  23.0 canlook  99.5
+s-125      gap    6 u_u 3.0/1.5 Bfar  heard  76.5 -> 100.0  trig  23.5 canlook 100.0
+s-125      gap    6 b_b 4.5/3.0 Bnear heard  88.5 -> 100.0  trig  11.5 canlook 100.0
+s-125      gap    6 b_b 4.5/3.0 Bfar  heard  87.5 -> 100.0  trig  12.5 canlook 100.0
+s-125      gap    6 b_b 5.0/3.5 Bnear heard  78.5 -> 100.0  trig  21.5 canlook 100.0
+s-125      gap    6 b_b 5.0/3.5 Bfar  heard  75.0 ->  99.5  trig  25.0 canlook  99.5
+s-125      gap    6 b_b 3.0/1.5 Bnear heard  98.0 -> 100.0  trig   2.0 canlook 100.0
+s-125      gap    6 b_b 3.0/1.5 Bfar  heard  98.5 -> 100.0  trig   1.5 canlook  99.5
+s-125      gap    6 u_b 4.5/3.0 Bnear heard  22.5 -> 100.0  trig  77.5 canlook  99.0
+s-125      gap    6 u_b 4.5/3.0 Bfar  heard  64.0 -> 100.0  trig  36.0 canlook  99.5
+s-125      gap    6 u_b 5.0/3.5 Bnear heard  13.5 -> 100.0  trig  86.5 canlook  99.0
+s-125      gap    6 u_b 5.0/3.5 Bfar  heard  47.5 -> 100.0  trig  52.5 canlook  98.5
+s-125      gap    6 u_b 3.0/1.5 Bnear heard  57.5 -> 100.0  trig  42.5 canlook 100.0
+s-125      gap    6 u_b 3.0/1.5 Bfar  heard  97.5 -> 100.0  trig   2.5 canlook  99.0
+s-125      gap    6 b_u 4.5/3.0 Bnear heard  25.5 -> 100.0  trig  74.5 canlook 100.0
+s-125      gap    6 b_u 4.5/3.0 Bfar  heard  24.5 -> 100.0  trig  75.5 canlook 100.0
+s-125      gap    6 b_u 5.0/3.5 Bnear heard  12.5 -> 100.0  trig  87.5 canlook 100.0
+s-125      gap    6 b_u 5.0/3.5 Bfar  heard  18.0 -> 100.0  trig  82.0 canlook 100.0
+s-125      gap    6 b_u 3.0/1.5 Bnear heard  94.5 -> 100.0  trig   5.5 canlook 100.0
+s-125      gap    6 b_u 3.0/1.5 Bfar  heard  54.5 -> 100.0  trig  45.5 canlook 100.0
+s-125      gap  700 u_u 4.5/3.0 Bnear heard  91.5 ->  99.0  trig  63.0 canlook  99.0
+s-125      gap  700 u_u 4.5/3.0 Bfar  heard  94.5 ->  99.0  trig  55.5 canlook 100.0
+s-125      gap  700 u_u 5.0/3.5 Bnear heard  88.0 ->  98.5  trig  75.5 canlook  98.5
+s-125      gap  700 u_u 5.0/3.5 Bfar  heard  93.0 ->  98.0  trig  72.5 canlook 100.0
+s-125      gap  700 u_u 3.0/1.5 Bnear heard  97.5 -> 100.0  trig  28.5 canlook 100.0
+s-125      gap  700 u_u 3.0/1.5 Bfar  heard  98.0 ->  99.5  trig  37.5 canlook  97.5
+s-125      gap  700 b_b 4.5/3.0 Bnear heard  99.0 ->  99.5  trig  17.0 canlook 100.0
+s-125      gap  700 b_b 4.5/3.0 Bfar  heard 100.0 ->  99.5  trig  18.5 canlook 100.0
+s-125      gap  700 b_b 5.0/3.5 Bnear heard  99.0 ->  99.0  trig  21.0 canlook 100.0
+s-125      gap  700 b_b 5.0/3.5 Bfar  heard 100.0 ->  98.5  trig  19.0 canlook 100.0
+s-125      gap  700 b_b 3.0/1.5 Bnear heard 100.0 -> 100.0  trig   2.0 canlook 100.0
+s-125      gap  700 b_b 3.0/1.5 Bfar  heard 100.0 -> 100.0  trig   1.5 canlook 100.0
+s-125      gap  700 u_b 4.5/3.0 Bnear heard  44.5 ->  99.5  trig  78.0 canlook  99.5
+s-125      gap  700 u_b 4.5/3.0 Bfar  heard  81.0 ->  99.5  trig  38.0 canlook  99.5
+s-125      gap  700 u_b 5.0/3.5 Bnear heard  32.5 ->  99.0  trig  81.5 canlook  99.5
+s-125      gap  700 u_b 5.0/3.5 Bfar  heard  68.5 ->  98.0  trig  51.0 canlook  99.5
+s-125      gap  700 u_b 3.0/1.5 Bnear heard  77.5 ->  99.0  trig  42.5 canlook  97.5
+s-125      gap  700 u_b 3.0/1.5 Bfar  heard 100.0 -> 100.0  trig   1.5 canlook  97.5
+s-125      gap  700 b_u 4.5/3.0 Bnear heard  25.5 ->  94.5  trig  76.0 canlook 100.0
+s-125      gap  700 b_u 4.5/3.0 Bfar  heard  71.5 ->  93.0  trig  79.0 canlook 100.0
+s-125      gap  700 b_u 5.0/3.5 Bnear heard  14.0 ->  92.5  trig  87.5 canlook 100.0
+s-125      gap  700 b_u 5.0/3.5 Bfar  heard  58.5 ->  91.5  trig  85.5 canlook 100.0
+s-125      gap  700 b_u 3.0/1.5 Bnear heard  91.5 ->  99.5  trig   8.5 canlook 100.0
+s-125      gap  700 b_u 3.0/1.5 Bfar  heard  90.0 ->  98.0  trig  41.5 canlook 100.0
+OP_ARMORED gap    6 u_u 4.5/3.0 Bnear heard  39.0 ->  99.0  trig  61.0 canlook  98.5
+OP_ARMORED gap    6 u_u 4.5/3.0 Bfar  heard  36.5 ->  98.5  trig  63.5 canlook  98.5
+OP_ARMORED gap    6 u_u 5.0/3.5 Bnear heard  31.0 ->  99.5  trig  69.0 canlook  99.5
+OP_ARMORED gap    6 u_u 5.0/3.5 Bfar  heard  29.5 ->  99.5  trig  70.5 canlook  99.5
+OP_ARMORED gap    6 u_u 3.0/1.5 Bnear heard  70.5 ->  99.5  trig  29.5 canlook  98.5
+OP_ARMORED gap    6 u_u 3.0/1.5 Bfar  heard  76.5 ->  99.5  trig  23.5 canlook  98.0
+OP_ARMORED gap    6 b_b 4.5/3.0 Bnear heard  86.5 -> 100.0  trig  13.5 canlook 100.0
+OP_ARMORED gap    6 b_b 4.5/3.0 Bfar  heard  86.0 -> 100.0  trig  14.0 canlook 100.0
+OP_ARMORED gap    6 b_b 5.0/3.5 Bnear heard  77.0 ->  99.5  trig  23.0 canlook  99.5
+OP_ARMORED gap    6 b_b 5.0/3.5 Bfar  heard  81.0 -> 100.0  trig  19.0 canlook 100.0
+OP_ARMORED gap    6 b_b 3.0/1.5 Bnear heard  98.5 -> 100.0  trig   1.5 canlook 100.0
+OP_ARMORED gap    6 b_b 3.0/1.5 Bfar  heard  98.5 -> 100.0  trig   1.5 canlook  99.0
+OP_ARMORED gap    6 u_b 4.5/3.0 Bnear heard  24.5 -> 100.0  trig  75.5 canlook  97.0
+OP_ARMORED gap    6 u_b 4.5/3.0 Bfar  heard  53.5 -> 100.0  trig  46.5 canlook  99.0
+OP_ARMORED gap    6 u_b 5.0/3.5 Bnear heard  14.0 -> 100.0  trig  86.0 canlook 100.0
+OP_ARMORED gap    6 u_b 5.0/3.5 Bfar  heard  48.0 -> 100.0  trig  52.0 canlook  99.0
+OP_ARMORED gap    6 u_b 3.0/1.5 Bnear heard  56.0 -> 100.0  trig  44.0 canlook  98.0
+OP_ARMORED gap    6 u_b 3.0/1.5 Bfar  heard  98.5 -> 100.0  trig   1.5 canlook  96.0
+OP_ARMORED gap    6 b_u 4.5/3.0 Bnear heard  25.5 -> 100.0  trig  74.5 canlook 100.0
+OP_ARMORED gap    6 b_u 4.5/3.0 Bfar  heard  28.0 -> 100.0  trig  72.0 canlook 100.0
+OP_ARMORED gap    6 b_u 5.0/3.5 Bnear heard  16.5 -> 100.0  trig  83.5 canlook 100.0
+OP_ARMORED gap    6 b_u 5.0/3.5 Bfar  heard  21.0 -> 100.0  trig  79.0 canlook 100.0
+OP_ARMORED gap    6 b_u 3.0/1.5 Bnear heard  94.5 -> 100.0  trig   5.5 canlook  99.5
+OP_ARMORED gap    6 b_u 3.0/1.5 Bfar  heard  67.0 ->  99.5  trig  33.0 canlook  99.0
+OP_ARMORED gap  700 u_u 4.5/3.0 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 4.5/3.0 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 5.0/3.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 5.0/3.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 3.0/1.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 3.0/1.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 4.5/3.0 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 4.5/3.0 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 5.0/3.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 5.0/3.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 3.0/1.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 3.0/1.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 4.5/3.0 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 4.5/3.0 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 5.0/3.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 5.0/3.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 3.0/1.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 3.0/1.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 4.5/3.0 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 4.5/3.0 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 5.0/3.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 5.0/3.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 3.0/1.5 Bnear heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 3.0/1.5 Bfar  heard   0.0 -> 100.0  trig 100.0 canlook   0.0
+== SAME group: % duplicate heard (today -> with look); moved line; naive-rule false 'different'
+s-125      gap    6 u_u 2.0 dup   0.3 ->   1.0  moved  12.0/ 0.0 naive  97.3 trig  99.7 canlook  99.0
+s-125      gap    6 u_u 3.0 dup   0.7 ->   1.3  moved  19.7/ 0.3 naive  96.3 trig  99.3 canlook  99.3
+s-125      gap    6 u_u 4.5 dup   0.3 ->   1.0  moved  31.0/ 2.0 naive  98.0 trig  99.7 canlook  99.3
+s-125      gap    6 b_b 2.0 dup   0.3 ->   0.7  moved   9.0/ 0.0 naive  93.3 trig  99.7 canlook  99.7
+s-125      gap    6 b_b 3.0 dup   0.7 ->   1.0  moved  11.0/ 0.0 naive  92.3 trig  99.3 canlook  99.7
+s-125      gap    6 b_b 4.5 dup   0.7 ->   0.7  moved  17.3/ 0.0 naive  91.7 trig  99.3 canlook 100.0
+s-125      gap    6 u_b 2.0 dup   0.3 ->   1.7  moved  36.3/ 3.0 naive  96.7 trig  99.7 canlook  98.7
+s-125      gap    6 u_b 3.0 dup   1.3 ->   2.0  moved  47.0/14.0 naive  97.0 trig  98.7 canlook  99.3
+s-125      gap    6 u_b 4.5 dup   1.0 ->   2.0  moved  60.7/29.0 naive  96.3 trig  99.0 canlook  99.0
+s-125      gap    6 b_u 2.0 dup   1.0 ->   1.3  moved   5.7/ 0.0 naive  92.0 trig  99.0 canlook  99.7
+s-125      gap    6 b_u 3.0 dup   0.7 ->   0.7  moved  10.0/ 0.0 naive  92.7 trig  99.3 canlook 100.0
+s-125      gap    6 b_u 4.5 dup   0.3 ->   0.3  moved  14.3/ 0.3 naive  93.0 trig  99.7 canlook 100.0
+s-125      gap  700 u_u 2.0 dup  11.0 ->   2.7  moved  14.0/ 0.0 naive  95.3 trig  99.3 canlook  98.0
+s-125      gap  700 u_u 3.0 dup  12.0 ->   1.3  moved  16.3/ 0.0 naive  96.3 trig  99.3 canlook  99.3
+s-125      gap  700 u_u 4.5 dup  10.0 ->   2.0  moved  27.0/ 3.7 naive  96.3 trig  99.7 canlook  98.3
+s-125      gap  700 b_b 2.0 dup   7.0 ->   0.7  moved   5.7/ 0.0 naive  91.3 trig  99.3 canlook 100.0
+s-125      gap  700 b_b 3.0 dup   6.3 ->   0.3  moved  12.7/ 0.0 naive  92.0 trig  99.7 canlook 100.0
+s-125      gap  700 b_b 4.5 dup   6.7 ->   0.7  moved  20.3/ 0.0 naive  90.7 trig  99.3 canlook 100.0
+s-125      gap  700 u_b 2.0 dup   0.7 ->   1.0  moved  33.7/ 2.7 naive  97.3 trig  99.7 canlook  99.3
+s-125      gap  700 u_b 3.0 dup   0.7 ->   1.7  moved  51.3/11.7 naive  96.3 trig  99.7 canlook  98.7
+s-125      gap  700 u_b 4.5 dup   0.7 ->   2.0  moved  65.3/34.7 naive  96.7 trig  99.3 canlook  98.7
+s-125      gap  700 b_u 2.0 dup   1.7 ->   0.3  moved   7.3/ 0.0 naive  91.0 trig  99.7 canlook 100.0
+s-125      gap  700 b_u 3.0 dup   1.7 ->   1.0  moved   7.3/ 0.0 naive  91.0 trig  99.0 canlook 100.0
+s-125      gap  700 b_u 4.5 dup   2.7 ->   1.0  moved  15.0/ 0.0 naive  90.7 trig  99.0 canlook 100.0
+OP_ARMORED gap    6 u_u 2.0 dup   0.7 ->   2.3  moved  15.0/ 0.0 naive  96.7 trig  99.3 canlook  98.0
+OP_ARMORED gap    6 u_u 3.0 dup   0.7 ->   3.0  moved  20.7/ 0.3 naive  95.0 trig  99.3 canlook  97.7
+OP_ARMORED gap    6 u_u 4.5 dup   0.7 ->   2.7  moved  28.3/ 1.7 naive  95.3 trig  99.3 canlook  98.0
+OP_ARMORED gap    6 b_b 2.0 dup   0.3 ->   0.7  moved   9.3/ 0.0 naive  97.7 trig  99.7 canlook  99.7
+OP_ARMORED gap    6 b_b 3.0 dup   0.7 ->   0.7  moved  11.0/ 0.0 naive  95.3 trig  99.3 canlook 100.0
+OP_ARMORED gap    6 b_b 4.5 dup   0.3 ->   0.3  moved  19.7/ 0.0 naive  94.0 trig  99.7 canlook 100.0
+OP_ARMORED gap    6 u_b 2.0 dup   0.7 ->   3.7  moved  36.3/ 1.7 naive  96.0 trig  99.3 canlook  97.0
+OP_ARMORED gap    6 u_b 3.0 dup   0.7 ->   2.7  moved  52.0/12.3 naive  96.3 trig  99.3 canlook  98.0
+OP_ARMORED gap    6 u_b 4.5 dup   1.0 ->   2.3  moved  59.3/33.0 naive  96.7 trig  99.0 canlook  98.7
+OP_ARMORED gap    6 b_u 2.0 dup   0.7 ->   0.7  moved   8.3/ 0.0 naive  96.7 trig  99.3 canlook 100.0
+OP_ARMORED gap    6 b_u 3.0 dup   0.7 ->   0.7  moved  10.0/ 0.0 naive  96.0 trig  99.3 canlook 100.0
+OP_ARMORED gap    6 b_u 4.5 dup   0.7 ->   0.7  moved  14.7/ 0.0 naive  93.7 trig  99.3 canlook 100.0
+OP_ARMORED gap  700 u_u 2.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 3.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_u 4.5 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 2.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 3.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_b 4.5 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 2.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 3.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 u_b 4.5 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 2.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 3.0 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+OP_ARMORED gap  700 b_u 4.5 dup   0.0 -> 100.0  moved   0.0/ 0.0 naive   0.0 trig 100.0 canlook   0.0
+== ground cells (100 m AGL, s-125)
+ground diff gap    6 u_u 4.5/3.0 heard  41.5 -> 100.0
+ground same gap    6 u_u 3.0 dup   0.0 ->   1.0 moved  19.3/ 0.7 naive  98.0
+ground diff gap    6 b_u 4.5/3.0 heard  29.0 -> 100.0
+ground same gap    6 b_u 3.0 dup   0.3 ->   0.3 moved   9.7/ 0.0 naive  94.0
+ground diff gap  700 u_u 4.5/3.0 heard  91.0 -> 100.0
+ground same gap  700 u_u 3.0 dup  11.7 ->   0.7 moved  19.0/ 0.0 naive  98.7
+ground diff gap  700 b_u 4.5/3.0 heard  30.5 ->  95.0
+ground same gap  700 b_u 3.0 dup   1.7 ->   0.3 moved   7.0/ 0.0 naive  91.7

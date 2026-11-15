@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import inspect
 import itertools
@@ -36,6 +37,7 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
+from belief.expected_area import ExpectedAreaCheck
 from belief.percept import percept_of
 from belief.position_belief import fold_position
 from belief.tools import describe_contact, set_attention
@@ -712,7 +714,10 @@ def test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw()
         z=look_position.z,
         uncertainty=uncertainty,
         look_bearing_deg=percept.bearing_deg,
+        look_range_m=percept.range_m,
         t_sim=percept.t_sim,
+        observer_x=percept.ownship_at_observation.x,
+        observer_z=percept.ownship_at_observation.z,
         growth_rate_mps=correct_order_rate,
     )
     fused_with_wrong_order = fold_position(
@@ -721,7 +726,10 @@ def test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw()
         z=look_position.z,
         uncertainty=uncertainty,
         look_bearing_deg=percept.bearing_deg,
+        look_range_m=percept.range_m,
         t_sim=percept.t_sim,
+        observer_x=percept.ownship_at_observation.x,
+        observer_z=percept.ownship_at_observation.z,
         growth_rate_mps=wrong_order_rate,
     )
     # The two candidate fusions must actually differ, or this test could
@@ -2440,6 +2448,31 @@ def test_tick_reconciles_group_membership_for_a_cohering_trio() -> None:
         assert store.group_for_contact(contact_id) is store.groups[0]
 
 
+def test_tick_excludes_a_held_contact_from_group_membership() -> None:
+    """`plans/expected-area-look/plan.md` Stage 3a's own "while held"
+    bullet -- a held contact (an open `ExpectedAreaCheck`'s `b_id`) is
+    excluded from `GroupStore.reconcile`'s clustering input, even while
+    it would otherwise cohere with its neighbours, because its own
+    identity is not yet settled."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    held_id = store.contacts[1].id
+    store.open_check(_check_fixture(store, a_id=store.contacts[0].id, b_id=held_id))
+
+    store.tick(now_sim=0.0)
+
+    assert len(store.groups) == 1
+    assert held_id not in store.groups[0].member_contact_ids
+    assert store.group_for_contact(held_id) is None
+
+
 def test_tick_is_idempotent_for_group_membership() -> None:
     """Calling `tick()` again with the same `now_sim` and no belief change
     must not refound the group -- same idempotence `tick`'s own docstring
@@ -2685,3 +2718,353 @@ def test_clustering_cost_scales_with_live_not_total_ever_seen() -> None:
         store.contacts[-2].id,
         store.contacts[-1].id,
     }
+
+
+# --- `plans/expected-area-look/plan.md` (`BL-B111`): ContactStore's own --
+# --- expected-area-check primitives, exercised directly -- the same --
+# --- primitives `resolve_checks` and `ingest`'s own trigger wiring (see --
+# --- the dedicated section below) call. ---
+
+
+def _check_fixture(
+    store: ContactStore, *, a_id: str = "A", b_id: str = "B", kind: str = "fold"
+) -> ExpectedAreaCheck:
+    a = store.contact(a_id)
+    assert a is not None
+    return ExpectedAreaCheck(
+        b_id=b_id,
+        a_id=a_id,
+        kind=kind,  # type: ignore[arg-type]
+        opened_sim=0.0,
+        a_snapshot=copy.deepcopy(a),
+    )
+
+
+def test_open_check_registers_and_check_for_reads_it_back() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    check = _check_fixture(store, a_id=a_id)
+    store.open_check(check)
+    assert store.check_for("B") is check
+    assert store.checks == [check]
+
+
+def test_has_open_check_and_callout_held_before_and_after_release() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    check = _check_fixture(store, a_id=a_id)
+    store.open_check(check)
+
+    assert store.has_open_check("B") is True
+    assert store.callout_held("B") is True
+
+    store.release_check("B", now_sim=1.0)
+    # Still an open check (group/mission-memory admission still skips it)...
+    assert store.has_open_check("B") is True
+    # ...but no longer held for callout purposes.
+    assert store.callout_held("B") is False
+
+
+def test_release_check_is_idempotent() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.open_check(_check_fixture(store, a_id=a_id))
+    store.release_check("B", now_sim=1.0)
+    first = store.check_for("B")
+    store.release_check("B", now_sim=99.0)  # a second release -- no-op
+    assert store.check_for("B") is first
+    assert store.check_for("B").released_sim == 1.0  # type: ignore[union-attr]
+
+
+def test_close_check_removes_it() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.open_check(_check_fixture(store, a_id=a_id))
+    store.close_check("B")
+    assert store.check_for("B") is None
+    assert store.has_open_check("B") is False
+    assert store.checks == []
+
+
+def test_record_believed_distinct_is_order_independent() -> None:
+    store = ContactStore()
+    store.record_believed_distinct("A", "B")
+    assert store.is_believed_distinct("A", "B") is True
+    assert store.is_believed_distinct("B", "A") is True
+    assert store.is_believed_distinct("A", "C") is False
+
+
+def test_merge_contact_folds_bs_percepts_into_a_in_order_and_removes_b() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    a_id = store.contacts[0].id
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=10.0, bearing_deg=45.0, range_m=5000.0)],
+        now_sim=10.0,
+    )
+    # Two independent contacts before the merge.
+    assert len(store.contacts) == 2
+    b_id = next(c.id for c in store.contacts if c.id != a_id)
+    # A second percept lands on B before the merge -- both must replay
+    # onto A, in order.
+    store.ingest(
+        [_observation(obs_id="B2", t_sim=11.0, bearing_deg=46.0, range_m=5010.0)],
+        now_sim=11.0,
+    )
+    b_contact = store.contact(b_id)
+    assert b_contact is not None
+    assert b_contact.contributing_observation_ids == ["B1", "B2"]
+
+    store.merge_contact(into=a_id, source=b_id)
+
+    assert store.contact(b_id) is None
+    assert len(store.contacts) == 1
+    a_contact = store.contact(a_id)
+    assert a_contact is not None
+    assert a_id == a_contact.id  # no fresh Contact(...) for A
+    # A's own history now also carries B's two percepts.
+    assert a_contact.contributing_observation_ids == ["A1", "B1", "B2"]
+    assert a_contact.last_seen_sim == 11.0
+    # Stale observation-id -> contact-id entries were remapped to A.
+    assert store._observation_id_to_contact_id["B1"] == a_id
+    assert store._observation_id_to_contact_id["B2"] == a_id
+
+
+def test_merge_contact_drops_open_checks_and_believed_distinct_pairs_naming_source() -> (
+    None
+):
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A1", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=10.0, bearing_deg=20.0, range_m=4000.0)],
+        now_sim=10.0,
+    )
+    b_id = next(c.id for c in store.contacts if c.id != a_id)
+    store.open_check(_check_fixture(store, a_id=a_id, b_id=b_id))
+    store.record_believed_distinct(a_id, b_id)
+    store.record_believed_distinct(a_id, "C")  # must survive the merge
+
+    store.merge_contact(into=a_id, source=b_id)
+
+    assert store.check_for(b_id) is None
+    assert store.is_believed_distinct(a_id, b_id) is False
+    assert store.is_believed_distinct(a_id, "C") is True
+
+
+def test_mark_lost_now_makes_certainty_of_read_lost_immediately() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="A1", t_sim=0.0)], now_sim=0.0)
+    a_id = store.contacts[0].id
+    a = store.contact(a_id)
+    assert a is not None
+    assert contacts_module.certainty_of(a, 0.0) != "lost"
+
+    store.mark_lost_now(a_id, now_sim=0.0)
+
+    assert contacts_module.certainty_of(a, 0.0) == "lost"
+
+
+# --- `plans/expected-area-look/plan.md` (`BL-B111`) -- `ingest`'s own ----
+# --- trigger wiring, gated off by default (`ContactStore.__init__`'s -----
+# --- own docstring on why: the ten gate-characterisation tests above -----
+# --- (and every other pre-existing `ContactStore()` call site in this ----
+# --- file) hand-build `Observation`s with no continuity and would -------
+# --- otherwise see the trigger fire on every one of their gate-path ------
+# --- reacquisitions, which cannot happen in flight -- see `belief. -------
+# --- expected_area.a_out_of_view`'s own docstring and this project's -----
+# --- `.claude/agent-memory/implementer/ -----------------------------------
+# --- feedback_tautological_trigger_precondition.md`). Every test below --
+# --- passes `expected_area_checks=True` explicitly. ----------------------
+
+
+def test_trigger_opens_a_fold_check_at_a_6s_gate_path_gap() -> None:
+    """A gate-path fold against an eligible, out-of-view A (gap 6.0s >
+    `FOCUS_DWELL_S`) founds B fresh and holds a check instead of folding
+    silently -- Stage 3a's "Action", the plan's own named short gap."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=6.0, bearing_deg=0.0, range_m=3010.0)],
+        now_sim=6.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "fold"
+
+
+def test_trigger_opens_a_fold_check_at_a_700s_gate_path_gap() -> None:
+    """The plan's own long-gap named pair. A zero-growth class
+    (`classification_raw="s-125"`, `object_model`'s
+    `installation_component=True`) so A's believed area has not outgrown
+    one binocular sweep by 700s (`area_fits_one_look`) -- the point this
+    test isolates is the gap, not growth; `test_area_does_not_fit_one_
+    look_once_it_has_grown_wide` (`test_expected_area.py`) already covers
+    a growing class outgrowing the feasibility gate."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(
+                obs_id="A1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                range_m=3000.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="B1",
+                t_sim=700.0,
+                bearing_deg=0.0,
+                range_m=3010.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=700.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "fold"
+
+
+def test_trigger_never_fires_on_continuous_tracking_even_when_enabled() -> None:
+    """The two "hard rule" tests above (`test_slow_directional_drift_...`,
+    `test_position_runaway_...`) already prove this with the flag at its
+    default `False`. This is the same 1s-poll, 18-step continuous
+    sequence with the flag explicitly `True` -- `a_out_of_view`'s own
+    `FOCUS_DWELL_S` (2.0s) window is what protects this case, not the
+    flag being off."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    for i in range(1, 19):
+        store.ingest(
+            [
+                _observation(
+                    obs_id=f"B{i}",
+                    t_sim=float(i),
+                    bearing_deg=0.0,
+                    range_m=1000.0 + i,
+                )
+            ],
+            now_sim=float(i),
+        )
+    assert len(store.contacts) == 1
+    assert len(store.checks) == 0
+
+
+def test_trigger_opens_a_beside_lost_check_and_releases_it_at_once_for_a_threat() -> (
+    None
+):
+    """The founded-fresh path's own scan (`merge_echo_or_beside_lost_
+    target`): B does not pass the gate against A at all (range offset
+    850m, outside `passes_gate`'s own tighter test) but is still
+    `contacts_plausibly_same` (the founding-time scan's looser,
+    symmetric test) -- and A is already `lost` (gap 130.0s >
+    `LOST_THRESHOLD_S`, 120.0s default), so the check opens `kind=
+    "beside_lost"`. `classification_raw="s-125"` (air-defence) also
+    exercises Q2's immediate release (`b_is_threat`) through `ingest`
+    itself, not just the pure `b_is_threat` function
+    (`test_expected_area.py` already covers that in isolation)."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(
+                obs_id="A1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                range_m=3000.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="B1",
+                t_sim=130.0,
+                bearing_deg=0.0,
+                range_m=3850.0,
+                classification_raw="s-125",
+            )
+        ],
+        now_sim=130.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    check = store.checks[0]
+    assert check.kind == "beside_lost"
+    assert check.released is True
+    assert check.released_sim == 130.0
+
+
+def test_trigger_opens_a_merge_echo_check_for_a_not_lost_eligible_target() -> None:
+    """The same founded-fresh scan as the beside-lost case above, but A is
+    not yet `lost` (gap 6.0s, well inside `LOST_THRESHOLD_S`) -- `kind=
+    "echo"`, not `"beside_lost"`."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [_observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0)],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=6.0, bearing_deg=0.0, range_m=3900.0)],
+        now_sim=6.0,
+    )
+    assert len(store.contacts) == 2
+    assert len(store.checks) == 1
+    assert store.checks[0].kind == "echo"
+
+
+def test_trigger_cap_falls_through_to_an_ordinary_fold_at_the_third_candidate() -> None:
+    """`MAX_OPEN_CHECKS` (2): a third eligible gate-path fold, arriving
+    once two checks are already open, is not held -- it folds exactly as
+    it would with the trigger off (Stage 3a's "Third concurrent check",
+    main loop's call 2026-11-11)."""
+    store = ContactStore(expected_area_checks=True)
+    store.ingest(
+        [
+            _observation(obs_id="A1", t_sim=0.0, bearing_deg=0.0, range_m=3000.0),
+            _observation(obs_id="A2", t_sim=0.0, bearing_deg=90.0, range_m=3000.0),
+            _observation(obs_id="A3", t_sim=0.0, bearing_deg=180.0, range_m=3000.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 3
+
+    gap = 6.0
+    store.ingest(
+        [_observation(obs_id="B1", t_sim=gap, bearing_deg=0.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    store.ingest(
+        [_observation(obs_id="B2", t_sim=gap, bearing_deg=90.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    assert len(store.checks) == 2
+
+    store.ingest(
+        [_observation(obs_id="B3", t_sim=gap, bearing_deg=180.0, range_m=3010.0)],
+        now_sim=gap,
+    )
+    # Still 2 checks (the cap), and B3 folded directly onto A3 -- 3
+    # original contacts + the two held B1/B2 = 5, not 6.
+    assert len(store.checks) == 2
+    assert len(store.contacts) == 5

@@ -8,9 +8,9 @@ loops short phrases, hears "report" as "record"). Both are facts about
 `vocabulary.py`/whisper, not about Petrovich's belief state, so they stay
 on this side of the seam. `audio-adapter` owns everything mechanical --
 normalise, anchor a verb, fuzzy-match a phrase, check separation -- and
-hands body-layer a resolved `{token, match_ratio}` (plus two booleans this
-module adds, see `MatchResult`'s docstring) so body can decide what to do
-about it without ever seeing a phrase table.
+hands body-layer a resolved `{token, match_ratio}` (plus the extra fields
+this module adds, see `MatchResult`'s docstring) so body can decide what to
+do about it without ever seeing a phrase table.
 
 **The verb anchor fires first, but it is a cheap early-out, not the
 primary defence -- and it is deliberately permissive because of that.**
@@ -414,6 +414,14 @@ class MatchResult:
     verb_anchored: bool
     ambiguous: bool = False
     slots: dict[str, int | str] | None = None
+    #: `plans/brain-tool-calls/plan.md` D4's wire note -- set from the same
+    #: `opens_with_wake_word` check that already forces `verb_anchored=
+    #: False` below, so body-layer can route a wake-prefixed utterance to
+    #: the brain even though it carries no command token. `False` for
+    #: every other outcome, including the "not a command attempt, no wake
+    #: word" case -- those two are both `verb_anchored=False` but only one
+    #: of them is addressed.
+    addressed: bool = False
 
 
 def opens_with_wake_word(words: list[str]) -> bool:
@@ -845,7 +853,9 @@ def match_transcript(text: str) -> MatchResult:
     # brain -- the wake word used to anchor as a verb itself, so every
     # "Petrovich, ..." question got "say again".
     if opens_with_wake_word(words):
-        return MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
+        return MatchResult(
+            token=None, match_ratio=0.0, verb_anchored=False, addressed=True
+        )
 
     verb = words[0]
     if _verb_anchor_ratio(verb) < VERB_FLOOR:

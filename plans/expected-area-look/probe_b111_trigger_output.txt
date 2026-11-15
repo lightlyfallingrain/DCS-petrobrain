@@ -1,0 +1,150 @@
+== Part A: continuous gate-path tracking (FOCUS_DWELL_S=2.0)
+  drift test    gate matches 18  eligible: literal 18  amended  0
+  runaway test  gate matches 18  eligible: literal 18  amended  0
+== Part B: harness trigger rate per cell, model vs amended (%)
+  s-125      gap   6 u_u diff 4.5/3.0 Bnear   model  70.5 literal  70.5 amended  70.5
+  s-125      gap   6 u_u diff 4.5/3.0 Bfar    model  63.0 literal  63.0 amended  63.0
+  s-125      gap   6 u_u diff 5.0/3.5 Bnear   model  65.5 literal  65.5 amended  65.5
+  s-125      gap   6 u_u diff 5.0/3.5 Bfar    model  70.5 literal  70.5 amended  70.5
+  s-125      gap   6 u_u diff 3.0/1.5 Bnear   model  34.0 literal  34.0 amended  34.0
+  s-125      gap   6 u_u diff 3.0/1.5 Bfar    model  28.5 literal  28.5 amended  28.5
+  s-125      gap   6 u_u same 2.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 u_u same 3.0             model  99.0 literal  99.0 amended  99.0
+  s-125      gap   6 u_u same 4.5             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 b_b diff 4.5/3.0 Bnear   model  11.5 literal  11.5 amended  11.5
+  s-125      gap   6 b_b diff 4.5/3.0 Bfar    model  14.5 literal  14.5 amended  14.5
+  s-125      gap   6 b_b diff 5.0/3.5 Bnear   model  24.5 literal  24.5 amended  24.5
+  s-125      gap   6 b_b diff 5.0/3.5 Bfar    model  23.5 literal  23.5 amended  23.5
+  s-125      gap   6 b_b diff 3.0/1.5 Bnear   model   1.5 literal   1.5 amended   1.5
+  s-125      gap   6 b_b diff 3.0/1.5 Bfar    model   0.5 literal   0.5 amended   0.5
+  s-125      gap   6 b_b same 2.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 b_b same 3.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap   6 b_b same 4.5             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 u_b diff 4.5/3.0 Bnear   model  76.0 literal  76.0 amended  76.0
+  s-125      gap   6 u_b diff 4.5/3.0 Bfar    model  36.5 literal  36.5 amended  36.5
+  s-125      gap   6 u_b diff 5.0/3.5 Bnear   model  83.0 literal  83.0 amended  83.0
+  s-125      gap   6 u_b diff 5.0/3.5 Bfar    model  55.5 literal  55.5 amended  55.5
+  s-125      gap   6 u_b diff 3.0/1.5 Bnear   model  44.5 literal  44.5 amended  44.5
+  s-125      gap   6 u_b diff 3.0/1.5 Bfar    model   2.0 literal   2.0 amended   2.0
+  s-125      gap   6 u_b same 2.0             model  99.0 literal  99.0 amended  99.0
+  s-125      gap   6 u_b same 3.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 u_b same 4.5             model  99.3 literal  99.3 amended  99.3
+  s-125      gap   6 b_u diff 4.5/3.0 Bnear   model  75.0 literal  75.0 amended  75.0
+  s-125      gap   6 b_u diff 4.5/3.0 Bfar    model  76.0 literal  76.0 amended  76.0
+  s-125      gap   6 b_u diff 5.0/3.5 Bnear   model  86.0 literal  86.0 amended  86.0
+  s-125      gap   6 b_u diff 5.0/3.5 Bfar    model  82.5 literal  82.5 amended  82.5
+  s-125      gap   6 b_u diff 3.0/1.5 Bnear   model   4.5 literal   4.5 amended   4.5
+  s-125      gap   6 b_u diff 3.0/1.5 Bfar    model  43.0 literal  43.0 amended  43.0
+  s-125      gap   6 b_u same 2.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap   6 b_u same 3.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap   6 b_u same 4.5             model  99.3 literal  99.3 amended  99.3
+  s-125      gap 700 u_u diff 4.5/3.0 Bnear   model  62.5 literal  62.5 amended  62.5
+  s-125      gap 700 u_u diff 4.5/3.0 Bfar    model  60.0 literal  60.0 amended  60.0
+  s-125      gap 700 u_u diff 5.0/3.5 Bnear   model  76.0 literal  76.0 amended  76.0
+  s-125      gap 700 u_u diff 5.0/3.5 Bfar    model  70.5 literal  70.5 amended  70.5
+  s-125      gap 700 u_u diff 3.0/1.5 Bnear   model  23.5 literal  23.5 amended  23.5
+  s-125      gap 700 u_u diff 3.0/1.5 Bfar    model  32.0 literal  32.0 amended  32.0
+  s-125      gap 700 u_u same 2.0             model  99.0 literal  99.0 amended  99.0
+  s-125      gap 700 u_u same 3.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap 700 u_u same 4.5             model  99.0 literal  99.0 amended  99.0
+  s-125      gap 700 b_b diff 4.5/3.0 Bnear   model  15.0 literal  15.0 amended  15.0
+  s-125      gap 700 b_b diff 4.5/3.0 Bfar    model  15.5 literal  15.5 amended  15.5
+  s-125      gap 700 b_b diff 5.0/3.5 Bnear   model  25.0 literal  25.0 amended  25.0
+  s-125      gap 700 b_b diff 5.0/3.5 Bfar    model  18.5 literal  18.5 amended  18.5
+  s-125      gap 700 b_b diff 3.0/1.5 Bnear   model   2.5 literal   2.5 amended   2.5
+  s-125      gap 700 b_b diff 3.0/1.5 Bfar    model   2.0 literal   2.0 amended   2.0
+  s-125      gap 700 b_b same 2.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap 700 b_b same 3.0             model  99.7 literal  99.7 amended  99.7
+  s-125      gap 700 b_b same 4.5             model  99.7 literal  99.7 amended  99.7
+  s-125      gap 700 u_b diff 4.5/3.0 Bnear   model  78.5 literal  78.5 amended  78.5
+  s-125      gap 700 u_b diff 4.5/3.0 Bfar    model  37.0 literal  37.0 amended  37.0
+  s-125      gap 700 u_b diff 5.0/3.5 Bnear   model  87.5 literal  87.5 amended  87.5
+  s-125      gap 700 u_b diff 5.0/3.5 Bfar    model  53.5 literal  53.5 amended  53.5
+  s-125      gap 700 u_b diff 3.0/1.5 Bnear   model  41.0 literal  41.0 amended  41.0
+  s-125      gap 700 u_b diff 3.0/1.5 Bfar    model   2.5 literal   2.5 amended   2.5
+  s-125      gap 700 u_b same 2.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap 700 u_b same 3.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap 700 u_b same 4.5             model  99.0 literal  99.0 amended  99.0
+  s-125      gap 700 b_u diff 4.5/3.0 Bnear   model  76.5 literal  76.5 amended  76.5
+  s-125      gap 700 b_u diff 4.5/3.0 Bfar    model  71.0 literal  71.0 amended  71.0
+  s-125      gap 700 b_u diff 5.0/3.5 Bnear   model  85.5 literal  85.5 amended  85.5
+  s-125      gap 700 b_u diff 5.0/3.5 Bfar    model  84.0 literal  84.0 amended  84.0
+  s-125      gap 700 b_u diff 3.0/1.5 Bnear   model   7.5 literal   7.5 amended   7.5
+  s-125      gap 700 b_u diff 3.0/1.5 Bfar    model  38.5 literal  38.5 amended  38.5
+  s-125      gap 700 b_u same 2.0             model  98.7 literal  98.7 amended  98.7
+  s-125      gap 700 b_u same 3.0             model  99.3 literal  99.3 amended  99.3
+  s-125      gap 700 b_u same 4.5             model  99.7 literal  99.7 amended  99.7
+  OP_ARMORED gap   6 u_u diff 4.5/3.0 Bnear   model  66.0 literal  66.0 amended  66.0
+  OP_ARMORED gap   6 u_u diff 4.5/3.0 Bfar    model  68.0 literal  68.0 amended  68.0
+  OP_ARMORED gap   6 u_u diff 5.0/3.5 Bnear   model  73.0 literal  73.0 amended  73.0
+  OP_ARMORED gap   6 u_u diff 5.0/3.5 Bfar    model  68.0 literal  68.0 amended  68.0
+  OP_ARMORED gap   6 u_u diff 3.0/1.5 Bnear   model  26.5 literal  26.5 amended  26.5
+  OP_ARMORED gap   6 u_u diff 3.0/1.5 Bfar    model  31.0 literal  31.0 amended  31.0
+  OP_ARMORED gap   6 u_u same 2.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap   6 u_u same 3.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap   6 u_u same 4.5             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap   6 b_b diff 4.5/3.0 Bnear   model  11.5 literal  11.5 amended  11.5
+  OP_ARMORED gap   6 b_b diff 4.5/3.0 Bfar    model  11.5 literal  11.5 amended  11.5
+  OP_ARMORED gap   6 b_b diff 5.0/3.5 Bnear   model  24.0 literal  24.0 amended  24.0
+  OP_ARMORED gap   6 b_b diff 5.0/3.5 Bfar    model  22.5 literal  22.5 amended  22.5
+  OP_ARMORED gap   6 b_b diff 3.0/1.5 Bnear   model   1.0 literal   1.0 amended   1.0
+  OP_ARMORED gap   6 b_b diff 3.0/1.5 Bfar    model   1.0 literal   1.0 amended   1.0
+  OP_ARMORED gap   6 b_b same 2.0             model  99.3 literal  99.3 amended  99.3
+  OP_ARMORED gap   6 b_b same 3.0             model  99.7 literal  99.7 amended  99.7
+  OP_ARMORED gap   6 b_b same 4.5             model  99.7 literal  99.7 amended  99.7
+  OP_ARMORED gap   6 u_b diff 4.5/3.0 Bnear   model  76.5 literal  76.5 amended  76.5
+  OP_ARMORED gap   6 u_b diff 4.5/3.0 Bfar    model  40.5 literal  40.5 amended  40.5
+  OP_ARMORED gap   6 u_b diff 5.0/3.5 Bnear   model  80.0 literal  80.0 amended  80.0
+  OP_ARMORED gap   6 u_b diff 5.0/3.5 Bfar    model  55.0 literal  55.0 amended  55.0
+  OP_ARMORED gap   6 u_b diff 3.0/1.5 Bnear   model  40.0 literal  40.0 amended  40.0
+  OP_ARMORED gap   6 u_b diff 3.0/1.5 Bfar    model   1.0 literal   1.0 amended   1.0
+  OP_ARMORED gap   6 u_b same 2.0             model  99.3 literal  99.3 amended  99.3
+  OP_ARMORED gap   6 u_b same 3.0             model  98.7 literal  98.7 amended  98.7
+  OP_ARMORED gap   6 u_b same 4.5             model  99.3 literal  99.3 amended  99.3
+  OP_ARMORED gap   6 b_u diff 4.5/3.0 Bnear   model  71.0 literal  71.0 amended  71.0
+  OP_ARMORED gap   6 b_u diff 4.5/3.0 Bfar    model  76.0 literal  76.0 amended  76.0
+  OP_ARMORED gap   6 b_u diff 5.0/3.5 Bnear   model  85.0 literal  85.0 amended  85.0
+  OP_ARMORED gap   6 b_u diff 5.0/3.5 Bfar    model  76.0 literal  76.0 amended  76.0
+  OP_ARMORED gap   6 b_u diff 3.0/1.5 Bnear   model   4.0 literal   4.0 amended   4.0
+  OP_ARMORED gap   6 b_u diff 3.0/1.5 Bfar    model  41.5 literal  41.5 amended  41.5
+  OP_ARMORED gap   6 b_u same 2.0             model  99.0 literal  99.0 amended  99.0
+  OP_ARMORED gap   6 b_u same 3.0             model  99.0 literal  99.0 amended  99.0
+  OP_ARMORED gap   6 b_u same 4.5             model  99.7 literal  99.7 amended  99.7
+  OP_ARMORED gap 700 u_u diff 4.5/3.0 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u diff 4.5/3.0 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u diff 5.0/3.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u diff 5.0/3.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u diff 3.0/1.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u diff 3.0/1.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u same 2.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u same 3.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_u same 4.5             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 4.5/3.0 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 4.5/3.0 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 5.0/3.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 5.0/3.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 3.0/1.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b diff 3.0/1.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b same 2.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b same 3.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_b same 4.5             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 4.5/3.0 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 4.5/3.0 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 5.0/3.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 5.0/3.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 3.0/1.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b diff 3.0/1.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b same 2.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b same 3.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 u_b same 4.5             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 4.5/3.0 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 4.5/3.0 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 5.0/3.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 5.0/3.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 3.0/1.5 Bnear   model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u diff 3.0/1.5 Bfar    model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u same 2.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u same 3.0             model 100.0 literal 100.0 amended 100.0
+  OP_ARMORED gap 700 b_u same 4.5             model 100.0 literal 100.0 amended 100.0
+  cells 144; max |model - amended| = 0.0 points
+  merge-echo trials eligible: model 2561 amended 2561; lost-A trials eligible: model 14107 amended 14107

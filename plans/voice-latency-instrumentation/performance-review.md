@@ -38,6 +38,11 @@ imposes on itself: **measuring the voice round trip must not add to it.**
 - **Action:** MONITOR — note for a future pass: `push_speech` blocking the poll loop (pre-existing)
   is the more interesting candidate if cockpit-observable lag is ever traced to body-layer's own
   thread rather than the network/synthesis hops this plan's reducer already covers.
+- **Resolved 2026-11-12 by `[[BL-B106]]`** (`plans/async-speech/plan.md`): `push_speech` no longer
+  runs on the poll thread — `belief.speech_worker.SpeechWorker`'s background thread makes the call,
+  and `CrewConsole.drain_speech_results` deposits the same timing fields back on the poll thread
+  once it completes. The clock-read bracket this finding describes moved with it; this file's own
+  numbers stay a historical record of the pre-`BL-B106` architecture, not the current one.
 
 #### Stage 6 deferral and `drain_pending_positional_replies` cost per poll (body-layer)
 - **Location:** `CrewConsole._speak_or_defer` / `drain_pending_positional_replies`

@@ -91,7 +91,7 @@ from perception.association import (
     filter_ownship,
     filter_player_bubble,
 )
-from perception.estimation import perturbed_bearing_range
+from perception.estimation import perturbed_bearing_range, stable_down_sigma_m
 from perception.geometry import GeoPosition, horizontal_range_m
 from perception.source import (
     OBSERVATION_ID_PREFIX_HYBRID,
@@ -124,6 +124,16 @@ logger = logging.getLogger(__name__)
 #: whole plan exists to close, and it sat open on the channel the pilot
 #: actually flies with.
 SCOPE_UNCERTAINTY_M: Final[float] = 300.0
+
+#: This channel's own `optic_class` for `perception.estimation`'s
+#: correlated field model (`BL-B108` Stage 1) -- a scope/radar detection is
+#: not looked at through any of `perception.optics`' named optics, but
+#: still needs a field-seed key distinct from every one of them, so a
+#: scope-channel look and a naked-eye look of the same real object are
+#: never treated as correlated (module docstring of `perception.
+#: estimation`: a different "optic" is an independent look by
+#: construction).
+_SCOPE_OPTIC_CLASS: Final[str] = "scope"
 
 #: The five HelperAI list-text controller names, in on-screen top-to-bottom
 #: order -- a scrolling window into a multi-row target list (see module
@@ -282,6 +292,8 @@ class HybridPerceptionSource:
                 true_range_m=true_range_m,
                 sigma_cross_m=SCOPE_UNCERTAINTY_M,
                 sigma_down_m=SCOPE_UNCERTAINTY_M,
+                optic_class=_SCOPE_OPTIC_CLASS,
+                poll_key=now_sim,
             )
             observations.append(
                 Observation(
@@ -316,6 +328,8 @@ class HybridPerceptionSource:
                     position_uncertainty=PositionUncertainty(
                         sigma_cross_m=SCOPE_UNCERTAINTY_M,
                         sigma_down_m=SCOPE_UNCERTAINTY_M,
+                        sigma_down_stable_m=stable_down_sigma_m(SCOPE_UNCERTAINTY_M),
+                        optic_class=_SCOPE_OPTIC_CLASS,
                     ),
                     surface_alt_m=(
                         result.candidate.alt_m

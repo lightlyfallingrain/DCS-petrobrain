@@ -1,7 +1,10 @@
 # BR-B3 — The Ollama response body is read without a byte cap
 
-- [ ] **BR-B3 — `brain-layer/src/ollama_client.py:81` calls `response.read()` with no size limit, so
-  a runaway or malfunctioning model runtime can be read into memory unbounded.** #status/open
+- [x] **BR-B3 — `brain-layer/src/ollama_client.py:81` calls `response.read()` with no size limit, so
+  a runaway or malfunctioning model runtime can be read into memory unbounded.** #status/done
+  **Fixed on `feature/brain-tool-calls` (U4's security-review fast-follow):** `_post_json` now
+  caps the read at `MAX_OLLAMA_RESPONSE_BYTES`, raising `OllamaRequestError` when exceeded --
+  shared by `generate()` and `chat()` alike.
 
   **This item exists because a recommendation was never filed.** It is verbatim the Stage 2 security
   review's own **Finding 2** (`plans/brain-layer/security-review.md`, 2026-09-25) — written down as

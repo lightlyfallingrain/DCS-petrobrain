@@ -78,6 +78,13 @@ When asked to plan a feature or resolve a design question:
     like `Contact`, a decay ladder, a confidence/certainty field, an expiry or continuity window),
     grep the relevant module's existing half-life/expiry/cooldown constants (e.g.
     `body-layer/src/belief/decay.py`) before finalizing the plan, not after the user raises it.
+
+    **Widened 2026-11-13 (retro) to *any* new temporal or threshold constant** (`*_S`, `*_M`,
+    `*_DEG`, `MAX_*`/`MIN_*`, a window, cooldown or budget): grep the touched subproject's `src/`
+    and `body-layer/config/defaults.toml` (every behaviour constant renders there) for the same
+    unit and concept, and write what you found — or "no existing constant governs this" — in the
+    plan. Skipping it cost `BL-B110` five planning passes and `BL-B80` three versions, each revision
+    prompted by a constant already in the module.
 5. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
 6. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
 6a. **If the plan introduces a phase/mode state machine with more than one co-moving field, name
@@ -165,9 +172,16 @@ Use this structure in the file:
 - ...
 
 ### Decisions Requiring User Input
-- [Tradeoff or open question that must be resolved before implementation]
-- ...
+- **U1: <question>** — recommend: <option>; why: <one line>
+- **U2: ...**
 ```
+
+**Number user decisions `U<n>`, always.** `.claude/scripts/accepted-items-ledger.sh` checks that
+every accepted `U<n>` is accounted for in `implementation.md` before a review or DoD report can be
+committed, and it can only see what is numbered. A plan whose decisions are bullets with no id is
+invisible to it — and an accepted-but-unbuilt decision is exactly what it exists to catch (BR-2's
+U4, retro 2026-11-13). When the user answers, record it as a `**Answered <date> (user, verbatim):**`
+line at the top of the section; that line is what tells the ledger the items are now owed.
 
 Add a **Co-moving Fields** section whenever step 6a's trigger fires (a phase/mode state machine
 with more than one co-moving field, at least one externally written):

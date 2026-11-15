@@ -62,15 +62,26 @@ is excluded from the cohesion pass entirely before clustering begins.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Final
 
 from perception import object_model
 from perception.association import WorldObjectCandidate
 from perception.clustering import angular_separation_rad, angular_size_rad
+from perception.estimation import RANGE_RELATIVE_SHARE, look_sigma_m
 from perception.geometry import GeoPosition, range_m
 from perception.optics import Optic
 from perception.visibility import RESOLUTION_ANGULAR_RADIUS_RAD
+
+#: `belief.association_over_time.GATE_SIGMA_THRESHOLD`'s own value (3.0),
+#: duplicated rather than imported -- `perception` must not import
+#: `belief` (project invariant), and this constant is not registered
+#: through `tuning.py` on either side, so there is no shared source to
+#: both read from. `BL-B108` Stage 3's along-line cohesion check uses the
+#: same "how many sigma" the belief-side gate trusts, so a change to one
+#: should be mirrored in the other -- see that constant's own docstring.
+_GATE_SIGMA_THRESHOLD: Final[float] = 3.0
 
 #: Stated assumption (plan's "Decisions Requiring User Input") -- no data
 #: either way on whether a pair of vehicles reads as a group; 3 is the
@@ -88,13 +99,20 @@ GROUP_COHESION_GAP_UNIT_WIDTHS: Final[float] = 10.0
 
 def _resolvable_terms(
     candidate: WorldObjectCandidate, observer: GeoPosition, optic: Optic
-) -> tuple[GeoPosition, float] | None:
-    """`candidate`'s `(target position, apparent angular size)` pair if it
-    clears the loosest presence bound any admission path can use
-    (`RESOLUTION_ANGULAR_RADIUS_RAD`) at `optic`'s own
+) -> tuple[GeoPosition, float, float, float] | None:
+    """`candidate`'s `(target position, apparent angular size, slant range,
+    profile size_m)` if it clears the loosest presence bound any admission
+    path can use (`RESOLUTION_ANGULAR_RADIUS_RAD`) at `optic`'s own
     `presence_range_mult`, else `None` -- a candidate that fails even this
     bound has no mass or cohesion to contribute, and never enters the
     union-find pass below.
+
+    **`BL-B108` Stage 3**: `slant_range_m`/`size_m` are hoisted here too,
+    beside the pre-existing terms, for exactly the same reason (module
+    docstring's `BL-B40`/`BL-11` history) -- the along-line cohesion check
+    the pair loop now also runs needs each candidate's own range and size,
+    and recomputing them per pair would reopen the O(n^2) redundancy this
+    function exists to close.
 
     **Returns the two per-candidate terms rather than a bare `bool` so
     `group_salient_ids`'s pair loop never recomputes them.** Both depend on
@@ -127,16 +145,34 @@ def _resolvable_terms(
     theta_size = angular_size_rad(profile.size_m, slant_range_m)
     if theta_size * optic.presence_range_mult < RESOLUTION_ANGULAR_RADIUS_RAD:
         return None
-    return target, theta_size
+    return target, theta_size, slant_range_m, profile.size_m
 
 
 def _cohesive_from_terms(
-    theta_sep: float, theta_size_a: float, theta_size_b: float
+    theta_sep: float,
+    theta_size_a: float,
+    theta_size_b: float,
+    range_a_m: float,
+    range_b_m: float,
+    size_a_m: float,
+    size_b_m: float,
+    optic: Optic,
 ) -> bool:
     """The cohesion predicate itself, as pure arithmetic over terms the
     caller has already computed: angular separation no greater than
     `GROUP_COHESION_GAP_UNIT_WIDTHS` of the two candidates' mean apparent
-    angular size.
+    angular size, **and** (`BL-B108` Stage 3) along-line separation no
+    greater than `GROUP_COHESION_GAP_UNIT_WIDTHS` mean unit widths (in
+    metres this time, not angle) plus the relative-distance merge
+    budget -- `_GATE_SIGMA_THRESHOLD * sqrt(2) * RANGE_RELATIVE_SHARE *
+    sigma_down(mean_range, optic)`, no new constant: it is derived from
+    Stage 1's own tunables (`perception.estimation.RANGE_RELATIVE_SHARE`),
+    so the in-one-look half of E6 (the ambiguous "2.0 km vs 2.5 km" case)
+    is tuned where the error model itself is, not by a second knob here.
+    This is what keeps two real groups kilometres apart along the line of
+    sight from reading as one massed formation just because they fit the
+    same field of view (E2) -- the angular test alone cannot see that,
+    since it only measures *across*-line-of-sight separation.
 
     **The single definition of the predicate**, and `group_salient_ids`'s
     pair loop (which carries the per-candidate terms in parallel lists) is
@@ -148,7 +184,16 @@ def _cohesive_from_terms(
     `tests/test_group_salience_equivalence.py` pins it against its own copy
     of the pre-Stage-2 formula rather than importing this one."""
     mean_unit_rad = 0.5 * (theta_size_a + theta_size_b)
-    return theta_sep <= GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad
+    if theta_sep > GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad:
+        return False
+    mean_size_m = 0.5 * (size_a_m + size_b_m)
+    mean_range_m = 0.5 * (range_a_m + range_b_m)
+    _sigma_cross_m, sigma_down_m = look_sigma_m(mean_range_m, optic)
+    along_line_budget_m: float = GROUP_COHESION_GAP_UNIT_WIDTHS * mean_size_m + (
+        _GATE_SIGMA_THRESHOLD * math.sqrt(2.0) * RANGE_RELATIVE_SHARE * sigma_down_m
+    )
+    along_line_separation_m: float = abs(range_a_m - range_b_m)
+    return along_line_separation_m <= along_line_budget_m
 
 
 def group_salient_ids(
@@ -175,6 +220,8 @@ def group_salient_ids(
     resolvable: list[WorldObjectCandidate] = []
     targets: list[GeoPosition] = []
     theta_sizes: list[float] = []
+    ranges_m: list[float] = []
+    sizes_m: list[float] = []
     for candidate in candidates:
         terms = _resolvable_terms(candidate, observer, optic)
         if terms is None:
@@ -182,6 +229,8 @@ def group_salient_ids(
         resolvable.append(candidate)
         targets.append(terms[0])
         theta_sizes.append(terms[1])
+        ranges_m.append(terms[2])
+        sizes_m.append(terms[3])
 
     n = len(resolvable)
     parent = list(range(n))
@@ -202,7 +251,16 @@ def group_salient_ids(
         theta_size_i = theta_sizes[i]
         for j in range(i + 1, n):
             theta_sep = angular_separation_rad(observer, target_i, targets[j])
-            if _cohesive_from_terms(theta_sep, theta_size_i, theta_sizes[j]):
+            if _cohesive_from_terms(
+                theta_sep,
+                theta_size_i,
+                theta_sizes[j],
+                ranges_m[i],
+                ranges_m[j],
+                sizes_m[i],
+                sizes_m[j],
+                optic,
+            ):
                 union(i, j)
 
     groups: dict[int, list[int]] = {}

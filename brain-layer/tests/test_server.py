@@ -10,6 +10,7 @@ proven end to end through the real HTTP surface rather than only at
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import time
@@ -21,7 +22,7 @@ from typing import Any
 import pytest
 
 from decider import StubDecider
-from server import BrainLayerServer
+from server import MAX_ESCALATE_BODY_BYTES, BrainLayerServer
 
 
 @pytest.fixture
@@ -55,6 +56,31 @@ def _get(server: BrainLayerServer, path: str) -> tuple[int, Any]:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read())
+
+
+def _post_raw_content_length(
+    server: BrainLayerServer,
+    path: str,
+    body: bytes,
+    content_length: str | None,
+) -> tuple[int, object]:
+    """POST with a hand-set (possibly malformed) `Content-Length` header --
+    `urllib.request.Request` always computes a correct one from `data`, so
+    reaching `_read_body`'s own header-parsing guard needs a lower-level
+    client. `content_length=None` omits the header entirely. Ported from
+    `audio-adapter/tests/test_server.py`'s own helper of the same name
+    (`[[BR-B2]]`)."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    try:
+        conn.putrequest("POST", path)
+        if content_length is not None:
+            conn.putheader("Content-Length", content_length)
+        conn.endheaders()
+        conn.send(body)
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read())
+    finally:
+        conn.close()
 
 
 def test_health_ok(running_server: BrainLayerServer) -> None:
@@ -222,3 +248,61 @@ def test_superseded_job_reply_is_discarded_not_delivered() -> None:
     finally:
         server.close()
         thread.join(timeout=5)
+
+
+# -- Content-Length guard (`[[BR-B2]]`, security review) -------------------
+#
+# A non-numeric or negative header used to raise `ValueError` straight out of
+# `do_POST` (`ThreadingHTTPServer` isolates that to a stray traceback on one
+# connection, not a crash, but it should be a clean 400 instead). An
+# oversized declared length must also be rejected before `rfile.read` is
+# ever called, rather than reading an arbitrarily large body into memory.
+
+
+def test_escalate_non_numeric_content_length_returns_400_without_raising(
+    running_server: BrainLayerServer,
+) -> None:
+    body = json.dumps({"utterance_id": "U1", "t_sim": 100.0}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        running_server, "/escalate", body, content_length="not-a-number"
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+
+
+def test_escalate_negative_content_length_returns_400(
+    running_server: BrainLayerServer,
+) -> None:
+    body = json.dumps({"utterance_id": "U1", "t_sim": 100.0}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        running_server, "/escalate", body, content_length="-1"
+    )
+    assert status == 400
+    assert resp_body == {"error": "invalid Content-Length: '-1'"}
+
+
+def test_escalate_oversized_content_length_returns_400(
+    running_server: BrainLayerServer,
+) -> None:
+    oversized = MAX_ESCALATE_BODY_BYTES + 1
+    status, resp_body = _post_raw_content_length(
+        running_server,
+        "/escalate",
+        b"",  # the declared length, not the actual bytes sent, is what's guarded
+        content_length=str(oversized),
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "exceeds" in resp_body["error"]
+
+
+def test_escalate_valid_content_length_still_succeeds(
+    running_server: BrainLayerServer,
+) -> None:
+    body = json.dumps({"utterance_id": "U1", "t_sim": 100.0}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        running_server, "/escalate", body, content_length=str(len(body))
+    )
+    assert status == 202
+    assert resp_body == {"ok": True}

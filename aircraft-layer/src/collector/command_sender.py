@@ -387,3 +387,38 @@ class LookDirectionSender:
                 f"failed to send look direction hour={hour!r} "
                 f"fov_half_deg={fov_half_deg!r}: {exc}"
             ) from exc
+
+    def send_probe_points(self, seq: int, points: list[tuple[int, int]]) -> None:
+        """Send `{"op": "probe_points", "seq": seq, "points": [[x, z],
+        ...]}` to the **same** inbound listener `send_look_direction`
+        above targets (`plans/expected-area-look/plan.md` Stage 1 -- "the
+        existing 7797 listener") -- a second op on the same socket, not a
+        second channel. No validation here, same division of labour as
+        `send_look_direction`'s own docstring: `api.server`'s `POST
+        /command/probe_points` handler validates shape/bounds/count before
+        this is ever called, and the Hook script clamps a second time.
+        Raises `CommandSendError` on send failure, same raise-on-failure
+        posture as every write this class already has -- a dropped probe
+        push means an open expected-area check silently never resolves,
+        which `belief.expected_area`'s own fail-closed contract must be
+        able to see rather than guess past."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "probe_points", "seq": seq, "points": [list(p) for p in points]}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "probe-points command send failed: seq=%r points=%r",
+                seq,
+                points,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send probe points seq={seq!r} points={points!r}: {exc}"
+            ) from exc

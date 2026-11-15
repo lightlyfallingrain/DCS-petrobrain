@@ -43,10 +43,10 @@ A feature is done when **all** of the following are true:
 
 **Documentation**
 - [ ] Reviewer findings addressed (check `plans/<featurename>/review.md`)
+- [ ] Every accepted plan decision accounted for: run `.claude/scripts/accepted-items-ledger.sh plans/<featurename>` and, for each `U<n>` line it prints, say in `dod-check.md` whether it is built (commit, test) or deferred (to which stage or `[[ID]]`). The hook blocks a `dod-check.md` commit when a `U<n>` is unmentioned; "mentioned" is its floor and "built or deferred" is yours. BR-2's U4 was accepted and survived two Reviewer passes unbuilt (retro 2026-11-13)
 - [ ] Any non-obvious behavior explained via code structure or a `notes/` topic file
 
 **Security**
-- [ ] `plans/<featurename>/security-plan-review.md` exists and is APPROVED
 - [ ] `plans/<featurename>/security-review.md` exists and is APPROVED (or all findings resolved)
 
 ---
@@ -192,7 +192,7 @@ The feature is done. Perform knowledge harvest, then commit; **the main loop mer
 1. Run `/notes-harvest <featurename>` — extracts insight candidates from all plan files and flags likely duplicates against the topic files under `notes/`, naming the file
 2. Review the candidates table: append each non-duplicate, non-obvious insight to the `notes/<topic>.md` file it belongs to — short, factual, one idea per bullet. Skip anything obvious from code or already in CLAUDE.md. **No topic fits → create `notes/<kebab-case-topic>.md` with the topic as its `# ` heading and add a `- [[<topic>]] — <Topic>` line to `notes/notes-index.md`.** Never write to root `NOTES.md`: it has been a pointer since 2026-10-19 (`docs/DOC_CONVENTIONS.md`, "Split notes"), and a bullet added there lands where nothing reads it
 3. Stage every touched `notes/` file (and the index, if a topic was added) with `git add`
-4. Check `plans/<featurename>/review.md` required fixes against `.claude/agent-memory/dod/MEMORY.md` for prior "recurring fix" entries. If this feature's required fixes match a category seen 2+ times before (e.g. coordinate-frame mixups, missing provenance fields), add or update a pattern memory naming the category and how many times it's recurred, and note it in your report to the user as a process signal — this is process debt, not code debt, and may warrant a check earlier in the role sequence (e.g. at Architect) rather than repeatedly catching it at Reviewer.
+4. Check `plans/<featurename>/review.md` required fixes against prior "recurring fix" memories -- `python3 .claude/scripts/memory-search.py -r dod <fix terms>` (every `MEMORY.md` has been a pointer stub since X-T25; reading it finds nothing and reads as a check performed). If this feature's required fixes match a category seen 2+ times before (e.g. coordinate-frame mixups, missing provenance fields), add or update a pattern memory naming the category and how many times it's recurred, and note it in your report to the user as a process signal — this is process debt, not code debt, and may warrant a check earlier in the role sequence (e.g. at Architect) rather than repeatedly catching it at Reviewer.
 
 **Commit and merge:**
 7. Run `git status` to confirm what is staged

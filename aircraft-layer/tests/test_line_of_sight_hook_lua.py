@@ -52,21 +52,40 @@ def _extract_template() -> str:
     return match.group(1)
 
 
-def _extract_los_code_prefix() -> tuple[str, str]:
-    """The `LOS_CODE` chunk's load-time splice -- the two string-concat
-    lines that prepend `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` assignments
-    ahead of the bridged `[[ ... ]]` body, mirroring `_extract_template`'s
-    approach rather than inventing a second extraction strategy."""
+def _extract_los_code_prefix() -> tuple[str, str, str]:
+    """The `LOS_CODE` chunk's load-time splice -- the three string-concat
+    lines that prepend `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M`/`MAX_PROBES`
+    assignments ahead of the bridged `[[ ... ]]` body, mirroring
+    `_extract_template`'s approach rather than inventing a second
+    extraction strategy. The third line (`MAX_PROBES`,
+    `plans/expected-area-look/plan.md` Stage 1) joined the first two
+    2026-11-11 -- the bridged chunk runs in a different Lua state via
+    `net.dostring_in` and cannot see this file's own `local
+    MAX_PROBE_POINTS`, so its own clamp bound needs the same splice
+    treatment `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` already get."""
     text = _LUA_PATH.read_text(encoding="utf-8")
     match = re.search(
         r'local LOS_CODE = "local MAX_SIGHTLINES = "\n'
         r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", MAX_SIGHTLINES_PER_CALL\)\n"
         r'\s*\.\. "\\nlocal BUBBLE_RADIUS_M = "\n'
-        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", PLAYER_BUBBLE_RADIUS_M\)",
+        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", PLAYER_BUBBLE_RADIUS_M\)\n"
+        r'\s*\.\. "\\nlocal MAX_PROBES = "\n'
+        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", MAX_PROBE_POINTS\)",
         text,
     )
     assert match is not None, "LOS_CODE's load-time splice not found in the Lua file"
-    return match.group(1), match.group(2)
+    return match.group(1), match.group(2), match.group(3)
+
+
+def _extract_probes_template() -> str:
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        r'local SET_PROBES_TEMPLATE = ((?:"(?:[^"\\]|\\.)*"\s*(?:\.\.)?\s*)+)',
+        text,
+    )
+    assert match is not None, "SET_PROBES_TEMPLATE literal not found in the Lua file"
+    pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1))
+    return "".join(pieces)
 
 
 def test_set_look_template_has_exactly_two_percent_d_and_nothing_else() -> None:
@@ -99,18 +118,22 @@ def test_lua_file_contains_the_nan_and_infinity_guards() -> None:
 def test_lua_file_wraps_the_look_direction_apply_in_pcall() -> None:
     """Security plan review, required fix 1: no error path may leave a
     stale value silently in place -- the decode/clamp/format/dostring_in
-    sequence for an inbound datagram is wrapped end to end."""
+    sequence for an inbound datagram is wrapped end to end. Renamed
+    `pollLookDirection` -> `pollInbound` when `probe_points` joined this
+    listener (`plans/expected-area-look/plan.md` Stage 1)."""
     text = _LUA_PATH.read_text(encoding="utf-8")
-    assert "pcall(pollLookDirection)" in text
+    assert "pcall(pollInbound)" in text
 
 
 def test_lua_file_coalesces_to_one_setter_call_per_frame() -> None:
     """Security plan review, Finding 5/required fix 2: drain every queued
     datagram but apply only the last one, so a burst of duplicate/retried
     directives in one frame never triggers more than one `dostring_in`
-    setter call."""
+    setter call. `pollInbound` (renamed from `pollLookDirection` when the
+    `probe_points` op joined this listener, `plans/expected-area-look/
+    plan.md` Stage 1) is the one drain loop now applying both ops."""
     text = _LUA_PATH.read_text(encoding="utf-8")
-    assert "_applyLookDirection(latest)" in text
+    assert "_applyLookDirection(latestLook)" in text
     # Only one call site invokes the setter -- i.e. it is not called once
     # per datagram inside the drain loop.
     assert text.count("_applyLookDirection(") == 2  # def + the one call site
@@ -122,10 +145,12 @@ def test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g() -> None
     `SET_LOOK_TEMPLATE`), and it had no guard at all before this fix. A
     later edit reaching for the existing prefix pattern with a `%s` (e.g.
     to splice in a theatre name or a string flag) must not land unnoticed
-    -- the chunk is rebuilt at module load from these two `string.format`
+    -- the chunk is rebuilt at module load from these `string.format`
     calls, so a widened conversion set changes what can be injected into a
     `dostring_in`-bridged script."""
-    max_sightlines_spec, bubble_radius_spec = _extract_los_code_prefix()
+    max_sightlines_spec, bubble_radius_spec, max_probes_spec = (
+        _extract_los_code_prefix()
+    )
     assert _PRINTF_DIRECTIVE_RE.findall(max_sightlines_spec) == ["%d"], (
         "MAX_SIGHTLINES_PER_CALL's format spec must be exactly one '%d' and "
         f"nothing else -- found {max_sightlines_spec!r}."
@@ -134,20 +159,70 @@ def test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g() -> None
         "PLAYER_BUBBLE_RADIUS_M's format spec must be exactly one '%.17g' "
         f"and nothing else -- found {bubble_radius_spec!r}."
     )
+    assert _PRINTF_DIRECTIVE_RE.findall(max_probes_spec) == ["%d"], (
+        "MAX_PROBE_POINTS's format spec must be exactly one '%d' and "
+        f"nothing else -- found {max_probes_spec!r}."
+    )
 
 
-def test_los_code_prefix_sets_both_globals_the_bridged_chunk_reads() -> None:
+def test_los_code_prefix_sets_all_globals_the_bridged_chunk_reads() -> None:
     """The bridged chunk cannot see this file's own `local`s -- that is
     *why* the splice exists -- so a guard that the splice actually sets
-    the two names the chunk reads (`MAX_SIGHTLINES`, `BUBBLE_RADIUS_M`) is
-    load-bearing, not decoration: a typo here would silently leave the
-    chunk reading a nil global."""
+    the names the chunk reads (`MAX_SIGHTLINES`, `BUBBLE_RADIUS_M`,
+    `MAX_PROBES`) is load-bearing, not decoration: a typo here would
+    silently leave the chunk reading a nil global."""
     text = _LUA_PATH.read_text(encoding="utf-8")
     assert 'local LOS_CODE = "local MAX_SIGHTLINES = "' in text
     assert '.. "\\nlocal BUBBLE_RADIUS_M = "' in text
-    # And the bridged body actually reads both names back.
+    assert '.. "\\nlocal MAX_PROBES = "' in text
+    # And the bridged body actually reads every name back.
     assert "MAX_SIGHTLINES" in text
     assert "BUBBLE_RADIUS_M" in text
+    assert "MAX_PROBES" in text
+
+
+def test_set_probes_template_has_exactly_fourteen_percent_d_and_nothing_else() -> None:
+    """`plans/expected-area-look/plan.md` Stage 1: `SET_PROBES_TEMPLATE`
+    must carry exactly `2 + 2*MAX_PROBE_POINTS` (== 14, for
+    `MAX_PROBE_POINTS == 6`) `%d` conversions and no other format
+    specifier -- the same safety argument, and the same mechanical guard,
+    as `SET_LOOK_TEMPLATE` above."""
+    template = _extract_probes_template()
+    directives = _FORMAT_DIRECTIVE_RE.findall(template)
+    assert directives == ["%d"] * 14, (
+        "SET_PROBES_TEMPLATE must carry exactly fourteen '%d' conversions "
+        f"and no other format specifier -- found {directives!r}."
+    )
+
+
+def test_set_probes_template_sets_the_expected_globals() -> None:
+    template = _extract_probes_template()
+    assert "PB_PROBE_SEQ=%d" in template
+    assert "PB_PROBE_N=%d" in template
+    for i in range(1, 7):
+        assert f"PB_PROBE_X_{i}=%d" in template
+        assert f"PB_PROBE_Z_{i}=%d" in template
+
+
+def test_los_code_evaluates_probes_fail_closed() -> None:
+    """E11/E5: an unanswered probe (failed `getHeight`/`isVisible`, or a
+    non-number coordinate) must emit the empty "unknown" token, never a
+    guessed `"1"`/`"0"` -- unlike `terrainClear`, which fails `true`."""
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    assert 'local clearToken = ""' in text
+    assert 'clearToken = visible and "1" or "0"' in text
+
+
+def test_pollinbound_coalesces_both_ops_to_one_setter_call_each() -> None:
+    """The look-direction op's own coalescing guard (Security review
+    Finding 5/required fix 2) extended to the second op sharing the one
+    listener -- each of `_applyLookDirection`/`_applyProbePoints` must be
+    called at most once per frame, from the single drain loop."""
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    assert "local function pollInbound()" in text
+    assert text.count("_applyLookDirection(") == 2  # def + the one call site
+    assert text.count("_applyProbePoints(") == 2  # def + the one call site
+    assert "pcall(pollInbound)" in text
 
 
 # --- AC-B8's sort-key splice (plans/emitter-visibility/plan.md Stage B) ----

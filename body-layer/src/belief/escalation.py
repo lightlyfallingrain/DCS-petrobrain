@@ -61,7 +61,18 @@ from belief.utterance import PartialParse, PlayerUtterance
 #: minus `SAYAGAIN` (retired by D11's 2026-09-25 revision -- see
 #: `belief.brain_reply`'s eventual D10 validator, Stage 2; Stage 1's wire
 #: shape is already the four-form set the validator will enforce).
-BrainReplyKind = Literal["pick", "ask", "confirm", "unable"]
+#:
+#: **`plans/brain-tool-calls/plan.md` D1/D7 widens this with three more
+#: kinds**, for the tool-loop (`mode="addressed"`) seam only: `tool_call`
+#: (a round's call, `BrainReply.tool`/`.args`), `answer` (a template final,
+#: `.form`/`.refs`/`.because`), `command` (a Stage-3 hook final, `.token`/
+#: `.target`/`.slots`/`.because` -- parsed and D3-validated now, always
+#: degraded to `unable` until Stage 3 builds `BRAIN_COMMANDS`). `pick`/
+#: `confirm` stay exactly as they were for the BR-1 decider's own replies
+#: -- nothing in BR-2 removes them.
+BrainReplyKind = Literal[
+    "pick", "ask", "confirm", "unable", "tool_call", "answer", "command"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +97,13 @@ class BrainReply:
 
     Only the fields `kind` actually uses are populated by a real decider;
     the others default to `None` and are simply ignored by
-    `_handle_brain_reply`'s branch for a different `kind`."""
+    `_handle_brain_reply`'s branch for a different `kind`.
+
+    **`plans/brain-tool-calls/plan.md` D1/D2/D7's additional fields**, for
+    the three new kinds: `tool`/`args` (`tool_call`), `form`/`refs`
+    (`answer`), `target`/`slots` (`command`). `because` (already present
+    for `pick`) is reused by `answer`/`command` for D3's ambiguity-evidence
+    rule -- one field, same meaning, across both wire generations."""
 
     utterance_id: str
     kind: BrainReplyKind
@@ -95,13 +112,30 @@ class BrainReply:
     because: str | None = None
     token: str | None = None
     reason: str | None = None
+    tool: str | None = None
+    args: dict[str, object] | None = None
+    form: str | None = None
+    refs: tuple[str, ...] | None = None
+    target: str | None = None
+    slots: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EscalationPayload:
     """§3.5's `handle_player_utterance` payload shape, trimmed to what this
     milestone can actually populate (see module docstring on
-    `situational_header`)."""
+    `situational_header`).
+
+    **`plans/brain-tool-calls/plan.md` D1 adds `mode`/`round`/`steps`/
+    `tools`/`commands`.** `mode="unaddressed"` (the default) keeps every
+    existing BR-1 caller's payload byte-for-byte unchanged in shape;
+    `mode="addressed"` is what `CrewConsole._start_brain_turn`/
+    `_post_tool_continuation` build for the tool-loop seam -- `round`/
+    `steps` carry this turn's own call/observation record forward each
+    continuation POST (brain-layer is stateless across rounds, D1), and
+    `tools`/`commands` are the JSON-schema-subset tool/command lists
+    (`belief.tool_api.BRAIN_TOOL_SPECS`, `()` until Stage 3) the model may
+    use this turn."""
 
     utterance_id: str
     transcript: str
@@ -110,6 +144,11 @@ class EscalationPayload:
     partial_parse: PartialParse
     situational_header: dict[str, object]
     awaiting_reply_to: str | None = None
+    mode: Literal["addressed", "unaddressed"] = "unaddressed"
+    round: int = 0
+    steps: tuple[dict[str, object], ...] = ()
+    tools: tuple[dict[str, object], ...] = ()
+    commands: tuple[dict[str, object], ...] = ()
 
 
 class BrainClient(Protocol):
@@ -125,6 +164,8 @@ class BrainClient(Protocol):
 
     def poll_replies(self) -> list[BrainReply]: ...
 
+    def available(self) -> bool: ...
+
 
 class NullBrainClient:
     """See module docstring. Does nothing -- the honest "no brain yet"
@@ -138,6 +179,13 @@ class NullBrainClient:
 
     def poll_replies(self) -> list[BrainReply]:
         return []
+
+    def available(self) -> bool:
+        """`plans/brain-tool-calls/plan.md` D4 -- always unavailable:
+        there is no brain behind this client at all, so an addressed
+        utterance should hear "Unable, no brain." immediately rather than
+        wait out a turn budget for a reply that will never come."""
+        return False
 
 
 @dataclass
@@ -156,10 +204,24 @@ class DebugPrintBrainClient:
     def poll_replies(self) -> list[BrainReply]:
         return []
 
+    def available(self) -> bool:
+        """See `NullBrainClient.available`'s own docstring -- same
+        always-unavailable posture, this stand-in never has a real brain
+        behind it either."""
+        return False
+
 
 def _situational_header(
-    store: ContactStore, enrichment: EnrichmentContext | None
+    store: ContactStore,
+    enrichment: EnrichmentContext | None,
+    recent_contacts: tuple[tuple[str, str], ...] = (),
 ) -> dict[str, object]:
+    """`plans/brain-tool-calls/plan.md` D4's "header refs" -- `belief.
+    crew_console.CrewConsole._header_contact_refs`'s already-resolved
+    `(handle, text)` pairs, serialised as `{"id", "summary"}` dicts under
+    `"recent_contacts"`. Omitted entirely when empty (the overwhelming
+    common case, a turn with nothing recently mentioned), matching
+    `"our_position"`'s own absent-not-null convention just below."""
     header: dict[str, object] = {
         "contact_counts": len(store.contacts),
         "estimated_units": _estimated_units_lower_bound(store),
@@ -169,6 +231,10 @@ def _situational_header(
             "x": enrichment.ownship.x,
             "z": enrichment.ownship.z,
         }
+    if recent_contacts:
+        header["recent_contacts"] = [
+            {"id": handle, "summary": text} for handle, text in recent_contacts
+        ]
     return header
 
 
@@ -177,19 +243,43 @@ def handle_player_utterance(
     utterance: PlayerUtterance,
     brain_client: BrainClient,
     enrichment: EnrichmentContext | None = None,
+    *,
+    mode: Literal["addressed", "unaddressed"] = "unaddressed",
+    tools: tuple[dict[str, object], ...] = (),
+    commands: tuple[dict[str, object], ...] = (),
+    round: int = 0,
+    steps: tuple[dict[str, object], ...] = (),
+    recent_contacts: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """The one body->brain entry point (§3.5). Builds the escalation payload
     from `utterance` (its `parse: belief.utterance.PartialParse` is what the
     brain actually reasons from, never the bare transcript alone -- see
     module docstring) and hands it to `brain_client`. Callers decide *when*
-    to escalate; this function only delivers."""
+    to escalate; this function only delivers.
+
+    **`plans/brain-tool-calls/plan.md` D1's new keyword-only parameters**:
+    every BR-1 call site keeps working unchanged (`mode="unaddressed"`,
+    everything else empty); `CrewConsole`'s tool-loop turn is the one
+    caller that passes `mode="addressed"` plus a non-empty `tools`, and
+    passes a growing `round`/`steps` on each continuation POST for the
+    same `utterance.id`. `recent_contacts` (Stage 3, D4) is `CrewConsole.
+    _header_contact_refs`'s own `(handle, text)` pairs -- `belief.
+    crew_console.BrainTurn.header_refs`'s shape -- which `_situational_
+    header` serialises into `{"id", "summary"}` dicts on the wire,
+    unchanged across a turn's own rounds (`CrewConsole._post_tool_
+    continuation`'s own docstring)."""
     payload = EscalationPayload(
         utterance_id=utterance.id,
         transcript=utterance.transcript,
         transcript_confidence=utterance.transcript_confidence,
         t_sim=utterance.t_sim,
         partial_parse=utterance.parse,
-        situational_header=_situational_header(store, enrichment),
+        situational_header=_situational_header(store, enrichment, recent_contacts),
         awaiting_reply_to=None,
+        mode=mode,
+        round=round,
+        steps=steps,
+        tools=tools,
+        commands=commands,
     )
     brain_client.handle(payload)

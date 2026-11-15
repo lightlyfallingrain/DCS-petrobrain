@@ -135,7 +135,14 @@ def build_scenario_frames(
     placed_units: list[PlacedUnit],
     *,
     theatre: str,
-    poll_interval_s: float = 5.0,
+    # `BL-B108` Stage 0: 1.0, not 5.0 -- DCS's own real poll rate
+    # (`plans/relative-distance-grouping/plan.md` Stage 0), and the rate
+    # the whole relative-distance-grouping model is calibrated against
+    # (`perception.estimation`'s `z_look` term, `belief.position_belief`'s
+    # correlated gate). A scenario that genuinely needs a slower cadence
+    # passes `poll_interval_s` explicitly rather than relying on this
+    # default.
+    poll_interval_s: float = 1.0,
     start_wall_clock_s: float = 1000.0,
 ) -> list[Frame]:
     """Integrate `legs` from `ownship_start` into a frame list, one frame

@@ -217,8 +217,9 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.contacts import Contact, ContactStore
-from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
+from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext, relative_geometry
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -229,15 +230,22 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
+    CONTACT_RELOCATED,
     Event,
 )
 from belief.group_view import CollapseDepth, CollapseNode, collapse_members
 from belief.groups import Group
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.threat import envelope_for
-from belief.tools import ContactResult, acknowledge_event, describe_contact
+from belief.tools import (
+    ContactResult,
+    acknowledge_event,
+    describe_contact,
+    describe_our_position,
+)
 from belief.utterance import ReferenceCandidate
-from perception.geometry import angular_delta_deg
+from perception.geometry import GeoPosition, angular_delta_deg
+from perception.source import OwnshipState
 
 Template = Literal[
     "readback", "contact_report", "lifecycle_event", "threat_reaction", "attack_run"
@@ -490,6 +498,17 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # resolvable -- the "unable" half of the project's "say again" vs
     # "unable" distinction, same shape as `ON_GROUND`/`GUIDANCE_NOT_READY`.
     "NO_REFERENT": "Unable, no contact.",
+    # `plans/brain-tool-calls/plan.md` D4/U3 -- the brain seam's own five
+    # new reasons. `NO_BRAIN` fires the instant an addressed utterance is
+    # heard with no brain behind it (`BrainClient.available()` false);
+    # the other four are Stage 2+'s (tool-loop final-answer/command
+    # degradation), declared now alongside it since they share this one
+    # closed vocabulary. Wording is U3's first try, pending flight.
+    "NO_BRAIN": "Unable, no brain.",
+    "NO_ANSWER": "Unable, no answer.",
+    "NO_PLACE": "Unable, don't know that place.",
+    "CANNOT_ANSWER": "Unable, don't know.",
+    "FIXED_COMMAND_ONLY": "Unable, fixed command only.",
 }
 
 
@@ -935,6 +954,111 @@ def render_no_view(direction_label: str) -> OutgoingSpeech:
     )
 
 
+#: `plans/brain-tool-calls/plan.md` D7's "nothing seen" wording for a
+#: `nothing_seen(scope)` answer final -- always this, never "confirmed
+#: empty" (the plan's own "Finding 7" pointer, the same no-omniscience
+#: posture `render_clear`'s own docstring already states for the
+#: `report_*` family: Petrovich not having seen something is not a claim
+#: that there is nothing there).
+def render_nothing_seen() -> OutgoingSpeech:
+    return OutgoingSpeech(text="Nothing seen.", template="readback")
+
+
+def render_our_position_answer(enrichment: EnrichmentContext) -> OutgoingSpeech:
+    """D7's `our_position` answer final -- `belief.tools.
+    describe_our_position`'s own one-line summary (heading, altitude, the
+    highest-confidence nearby semantic fact), already free of any raw
+    coordinate (that function's own docstring)."""
+    result = describe_our_position(enrichment)
+    return OutgoingSpeech(text=str(result["summary"]), template="readback")
+
+
+#: D7's freshness phrase, spoken only when a `contacts` answer names a
+#: contact that is not currently `"observed"` -- the model-facing tool
+#: observation already carries this certainty (`belief.tools.
+#: _contact_phrasing_hints`), but D7's answer form is rendered fresh at
+#: speech time from *current* belief (D4), not from the turn's own
+#: snapshot, so this is computed here rather than threaded through.
+def _freshness_phrase(facts: dict[str, object], now_sim: float) -> str | None:
+    if facts.get("certainty") == "observed":
+        return None
+    last_seen_ago_s = facts.get("last_seen_ago_s")
+    if not isinstance(last_seen_ago_s, (int, float)):
+        return "not seen recently"
+    minutes = int(last_seen_ago_s // 60)
+    if minutes < 1:
+        return "not seen recently"
+    unit = "minute" if minutes == 1 else "minutes"
+    return f"not seen for {minutes} {unit}"
+
+
+def render_contact_answer(
+    store: ContactStore,
+    contact_id: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> OutgoingSpeech | None:
+    """D7's `contacts(refs)` answer final, one contact: `render_contact_
+    report`'s own line, plus the freshness phrase above when the contact
+    is not currently observed. `None` if `contact_id` no longer exists --
+    the caller (`belief.crew_console`) is what turns that into "lost
+    him" (D4 revalidation at speech time)."""
+    result = describe_contact(store, contact_id, now_sim, enrichment)
+    if result is None:
+        return None
+    speech = render_contact_report(store, contact_id, now_sim, enrichment)
+    assert speech is not None  # `describe_contact` above already found it
+    freshness = _freshness_phrase(result["facts"], now_sim)
+    if freshness is None:
+        return speech
+    return OutgoingSpeech(
+        text=f"{speech.text} {freshness.capitalize()}.", template="readback"
+    )
+
+
+def render_memory_entry(
+    entry: dict[str, object], ownship: OwnshipState
+) -> OutgoingSpeech:
+    """D7's `memory(refs)` answer final, one entry: `"Your mark one,
+    6 o'clock, 4 km, by Gemerek."` -- reuses `relative_geometry`'s own
+    clock/range derivation (the same one `_contact_report_text` reads via
+    `facts["relative_now"]`), computed fresh against `ownship`'s *current*
+    position rather than the position the entry was written at (D7: "the
+    entry's position relative to current ownship"). `entry` is `mission_
+    memory.query.entry_to_dict`'s shape -- no raw `x`/`z` is spoken, only
+    the bearing/range this function derives from them and the entry's own
+    frozen `landmark` phrase, never a coordinate."""
+    payload = entry.get("payload")
+    kind = entry.get("kind")
+    if kind == "mark" and isinstance(payload, dict):
+        index = payload.get("index")
+        label = payload.get("label")
+        subject = f"Your mark {index}" if isinstance(index, int) else "Your mark"
+        if isinstance(label, str) and label:
+            subject += f", {label}"
+    else:
+        subject = str(kind) if kind else "that entry"
+    parts = [subject]
+    pos = entry.get("pos")
+    if isinstance(pos, dict):
+        x, z = pos.get("x"), pos.get("z")
+        if isinstance(x, (int, float)) and isinstance(z, (int, float)):
+            geometry = relative_geometry(
+                ownship, GeoPosition(x=float(x), z=float(z), alt_m=0.0)
+            )
+            clock_position = geometry["clock_position"]
+            range_m_value = geometry["range_m"]
+            assert isinstance(range_m_value, float)
+            parts.append(f"{clock_position} o'clock")
+            parts.append(_format_range_km(range_m_value))
+        landmark = pos.get("landmark")
+        if isinstance(landmark, str) and landmark:
+            parts.append(f"by {landmark}")
+    if entry.get("struck_by") is not None:
+        parts.append("struck")
+    return OutgoingSpeech(text=", ".join(parts) + ".", template="readback")
+
+
 def render_report(group_texts: list[str], truncated: bool) -> OutgoingSpeech:
     """Joins a report's per-group texts (`crew_console.CrewConsole.
     _handle_report`'s own `_contact_report_text`/`render_group_report`
@@ -1211,11 +1335,9 @@ def _summary_air_defence_clause(
     return "and " + ", ".join(phrases)
 
 
-def _summary_deferral_clause(
-    facts_list: Sequence[dict[str, object]], stale_window_s: float
-) -> str | None:
+def _summary_deferral_clause(facts_list: Sequence[dict[str, object]]) -> str | None:
     """*"Still checking the truck group."* -- **at most one**, for a
-    contact Petrovich has not looked at inside `stale_window_s`.
+    contact `_needs_hedge` judges stale.
 
     This is the honest half of a summary: a summary can be vague where an
     enumeration would have to either lie or hedge four times (decision
@@ -1223,13 +1345,8 @@ def _summary_deferral_clause(
     declared rather than hidden. It is deliberately not emitted when
     *everything* in scope is stale -- the freshness qualifier already
     covers the whole answer then, and deferring to it as well would say
-    the same thing twice.
-
-    `stale_window_s` is `decay.OBSERVED_WINDOW_S` at the only call site.
-    Passed in rather than imported so this module keeps its one-way
-    dependency on `decay` through the caller, and so a test can state the
-    window it means instead of inheriting a tuned default."""
-    stale = [facts for facts in facts_list if _is_stale(facts, stale_window_s)]
+    the same thing twice."""
+    stale = [facts for facts in facts_list if _needs_hedge(facts)]
     if not stale or len(stale) == len(facts_list):
         return None
     op_class = _summary_op_class(stale[0])
@@ -1244,14 +1361,15 @@ def _summary_deferral_clause(
     return f"Still checking the {_respell_for_tts(word)} group."
 
 
-def _is_stale(facts: dict[str, object], stale_window_s: float) -> bool:
-    """Whether this contact was last seen longer ago than
-    `stale_window_s`. Reads `facts["last_seen_ago_s"]`, which
-    `tools._contact_facts` always populates."""
-    ago_s = facts.get("last_seen_ago_s")
-    if not isinstance(ago_s, (int, float)):
-        return False
-    return float(ago_s) > stale_window_s
+def _needs_hedge(facts: dict[str, object]) -> bool:
+    """Whether this contact's report-summary wording should hedge --
+    `[[BL-B112]]`: `facts["certainty"] == "estimated"` (never "lost",
+    already dropped from report scope by `crew_console.CrewConsole.
+    _report_scope`; never "observed"/"tracked", stated as fact). Replaces
+    the old age-based `_is_stale`: the certainty label is now itself
+    growth-distance-based (`belief.decay.certainty_of`), not a bare
+    elapsed-time comparison this module would have to duplicate."""
+    return facts.get("certainty") == "estimated"
 
 
 def _spoken_age_phrase(ago_s: float) -> str:
@@ -1304,7 +1422,7 @@ def _attack_run_last_seen_phrase(ago_s: float) -> str:
 
 
 def _summary_air_defence_freshness_clause(
-    facts_list: Sequence[dict[str, object]], stale_window_s: float
+    facts_list: Sequence[dict[str, object]],
 ) -> str | None:
     """*"The long range SAM is a couple minutes old."* -- the **selective**
     freshness marker, for a stale *air-defence* contact in a scene that is
@@ -1350,7 +1468,7 @@ def _summary_air_defence_freshness_clause(
     op_classes: list[str] = []
     oldest_ago_s = 0.0
     for facts in facts_list:
-        if not _is_stale(facts, stale_window_s):
+        if not _needs_hedge(facts):
             continue
         op_class = _summary_op_class(facts)
         if op_class is None or op_class not in AIR_DEFENSE_OP_CLASSES:
@@ -1389,7 +1507,6 @@ def render_report_summary(
     facts_list: list[dict[str, object]],
     *,
     band_label: str,
-    stale_window_s: float,
 ) -> OutgoingSpeech:
     """The slotted query's answer: **one summary utterance whose job is to
     aim the pilot's eyes** (`plans/crew-query-path/plan.md` Decision C,
@@ -1414,13 +1531,11 @@ def render_report_summary(
     `band_label` is the caller's, the same division of labour
     `render_clear`/`render_no_view` already follow -- the metre boundaries
     are a command-vocabulary fact (`crew_console._REPORT_BAND_BOUNDS_M`)
-    and this function only formats what it is handed. `stale_window_s` is
-    `decay.OBSERVED_WINDOW_S` at the live call site: the project's
-    existing "how long since a look is still fresh" bound, reused rather
-    than joined by a second staleness constant.
+    and this function only formats what it is handed.
 
     **Freshness is spoken, not implied.** When *every* in-scope contact
-    is older than `stale_window_s` the whole answer is prefixed *"Last I
+    `_needs_hedge`s (`[[BL-B112]]`: `certainty == "estimated"`, no longer
+    a bare elapsed-time comparison) the whole answer is prefixed *"Last I
     saw, "* -- a remembered contact must be spoken as remembered, which is
     the no-omniscience invariant's grip on a *pull* (Decision D). Note
     what this is not: it is not a filter. A contact Petrovich believes in
@@ -1428,11 +1543,12 @@ def render_report_summary(
 
     **In the *mixed* case it is spoken selectively, which is a user
     decision and not an omission.** In-scope runs to `decay.
-    LOST_THRESHOLD_S` (120 s) while `stale_window_s` is one scan cycle
-    (16 s), so one contact refreshed in the current cycle leaves the rest
-    unqualified by that prefix -- and the first implementation had no
-    other freshness signal (`plans/crew-query-path/security.md`, required
-    fix 1). His call, 2026-10-10: *"Freshness is spoken only when a stale
+    LOST_THRESHOLD_S` (120 s) while the hedge boundary can trigger much
+    earlier for a fast-moving class, so one contact refreshed in the
+    current cycle leaves the rest unqualified by that prefix -- and the
+    first implementation had no other freshness signal (`plans/
+    crew-query-path/security.md`, required fix 1). His call, 2026-10-10:
+    *"Freshness is spoken only when a stale
     contact is air defence or otherwise decision-relevant; a stale truck
     passes unqualified. Shortest answers, but it means accepting that some
     stale belief is spoken as present tense."* So a stale air-defence
@@ -1500,15 +1616,13 @@ def render_report_summary(
             class_clause = f"mostly {_respell_for_tts(plural)}"
 
     clock_clause = _summary_clock_clause(facts_list)
-    deferral_clause = _summary_deferral_clause(facts_list, stale_window_s)
-    all_stale = all(_is_stale(facts, stale_window_s) for facts in facts_list)
+    deferral_clause = _summary_deferral_clause(facts_list)
+    all_stale = all(_needs_hedge(facts) for facts in facts_list)
     # Computed once, outside `_assemble`: it does not depend on which
     # candidate the budget settles on, because it is in no candidate's
     # droppable part.
     freshness_clause = (
-        None
-        if all_stale
-        else _summary_air_defence_freshness_clause(facts_list, stale_window_s)
+        None if all_stale else _summary_air_defence_freshness_clause(facts_list)
     )
 
     def _assemble(with_deferral: bool, with_class: bool) -> str:
@@ -3473,6 +3587,30 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             return None
         lead = "Danger, " if event.engaged else "Safe from "
         return _contact_report_text(result["facts"], lead=lead)
+    if event.kind == CONTACT_RELOCATED:
+        # `plans/expected-area-look/plan.md` Stage 3b, Decision 4's
+        # provisional wording -- deliberately *not* `_contact_report_
+        # text`, which always leads with the unit-type word: this line's
+        # subject is the group Petrovich already knows about, so it leads
+        # with "that group" instead, the neutral wording the plan asks
+        # for. No unit-type claim, no identification lead -- A's own
+        # classification was already spoken when it was first announced.
+        relative_now = result["facts"].get("relative_now")
+        if relative_now is None:
+            # No current bearing to report -- say nothing rather than a
+            # directionless "now ..." (same "do not invent a look that
+            # was not taken" reasoning `CONTACT_BURNING_SEEN` follows).
+            return None
+        assert isinstance(relative_now, dict)
+        clock = relative_now["clock_position"]
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        return f"That group, now {clock} o'clock, {_format_range_km(range_m)}."
+    if event.kind == CONTACT_ABSENT:
+        # Stage 3b -- a fixed line, no position: the whole point is that
+        # A is no longer believed to be where it was, so there is no
+        # current place to report.
+        return "That group is no longer at its last place."
     return None
 
 

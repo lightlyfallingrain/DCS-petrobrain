@@ -64,3 +64,54 @@ def test_send_look_direction_raises_command_send_error_on_a_failed_send() -> Non
 
     with pytest.raises(CommandSendError):
         sender.send_look_direction(0, 45)
+
+
+# --- send_probe_points (`plans/expected-area-look/plan.md`, BL-B111, --
+# --- Stage 1) -- same inbound listener, a second op. ---
+
+
+def test_send_probe_points_delivers_well_formed_datagram() -> None:
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2.0)
+    port = receiver.getsockname()[1]
+
+    try:
+        with LookDirectionSender(host="127.0.0.1", port=port) as sender:
+            sender.send_probe_points(7, [(100, -200), (300, 400)])
+
+        data, _addr = receiver.recvfrom(4096)
+        decoded = json.loads(data.decode("utf-8"))
+        assert decoded == {
+            "op": "probe_points",
+            "seq": 7,
+            "points": [[100, -200], [300, 400]],
+        }
+    finally:
+        receiver.close()
+
+
+def test_send_probe_points_with_empty_list() -> None:
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2.0)
+    port = receiver.getsockname()[1]
+
+    try:
+        with LookDirectionSender(host="127.0.0.1", port=port) as sender:
+            sender.send_probe_points(0, [])
+
+        data, _addr = receiver.recvfrom(4096)
+        decoded = json.loads(data.decode("utf-8"))
+        assert decoded == {"op": "probe_points", "seq": 0, "points": []}
+    finally:
+        receiver.close()
+
+
+def test_send_probe_points_raises_command_send_error_on_a_failed_send() -> None:
+    sender = LookDirectionSender(host="127.0.0.1", port=1)
+    sender.open()
+    sender._socket = _FailingSocket()  # type: ignore[assignment]
+
+    with pytest.raises(CommandSendError):
+        sender.send_probe_points(1, [(0, 0)])

@@ -126,6 +126,8 @@ EventKind = Literal[
     "CONTACT_ENGAGEMENT_CHANGED",
     "CONTACT_BURNING_SEEN",
     "CONTACT_FIRING_SEEN",
+    "CONTACT_RELOCATED",
+    "CONTACT_ABSENT",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -178,6 +180,31 @@ CONTACT_BURNING_SEEN: Final[EventKind] = "CONTACT_BURNING_SEEN"
 #: `targets_ownship` variant more so) rather than reusing a classification-
 #: derived band -- see that function's own docstring.
 CONTACT_FIRING_SEEN: Final[EventKind] = "CONTACT_FIRING_SEEN"
+#: `plans/expected-area-look/plan.md` (`BL-B111`) Stage 3b -- an expected-
+#: area check resolved "same" and Decision 3's relocation rule fired (the
+#: spoken clock hour or 0.5 km range bucket changed between the check's
+#: `a_snapshot` and the merged position, *and* the move was >= 500 m or
+#: >= 30 degrees -- not bucket-edge jitter alone). **Minted directly by
+#: `belief.contacts.ContactStore.record_relocation`, called from `belief.
+#: expected_area.resolve_checks`'s own "same" branch** -- unlike every
+#: kind above, this is not a pure before/after comparison function in this
+#: module: the verdict is already resolved by `resolve_checks`, which
+#: knows the facts (the snapshot, the merged contact, the relocation
+#: predicate) that a `ContactStore.tick`-style comparison has no way to
+#: see.
+CONTACT_RELOCATED: Final[EventKind] = "CONTACT_RELOCATED"
+#: Stage 3b's sibling -- an expected-area check resolved "absent"
+#: (visible, A not observed, composition misfits) and A had previously
+#: been announced. **Minted directly by `belief.contacts.ContactStore.
+#: record_absence`, called from `resolve_checks`'s own "absent" branch**,
+#: same posture as `CONTACT_RELOCATED` above -- not a pure comparison
+#: function here. Deliberately a different kind from `CONTACT_LOST`
+#: (which still fires too, from the ordinary certainty-ladder comparison,
+#: once `mark_lost_now` rewinds `last_seen_sim`): "no longer at its last
+#: place" says something `CONTACT_LOST`'s silence does not -- the
+#: composition at that place does not match what was expected, not merely
+#: "not seen in a while".
+CONTACT_ABSENT: Final[EventKind] = "CONTACT_ABSENT"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 

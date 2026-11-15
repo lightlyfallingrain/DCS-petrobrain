@@ -388,3 +388,37 @@ def test_poll_replies_tick_rate_unaffected_by_a_wedged_server() -> None:
 def test_awaiting_reply_id_is_none_in_stage_1(fake_server: _FakeBrainServer) -> None:
     client = BrainLayerClient(base_url=fake_server.base_url)
     assert client.awaiting_reply_id() is None
+
+
+def test_available_is_false_before_the_first_poll_completes() -> None:
+    """`plans/brain-tool-calls/plan.md` D4 -- nothing has yet confirmed
+    this client's background poll thread is actually reaching
+    brain-layer, so it must not be read as available by default."""
+    client = BrainLayerClient(base_url="http://127.0.0.1:1")  # nothing listening
+    assert client.available() is False
+
+
+def test_available_becomes_true_after_a_successful_round(
+    fake_server: _FakeBrainServer,
+) -> None:
+    client = BrainLayerClient(base_url=fake_server.base_url)
+    assert client.available() is False
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and not client.available():
+        client.poll_replies()
+        time.sleep(0.01)
+
+    assert client.available() is True
+
+
+def test_available_stays_false_against_an_unreachable_server() -> None:
+    """A down brain-layer never has a successful round to report --
+    `available()` must stay `False` even after several of this client's
+    own background-thread retries, not just immediately at construction."""
+    client = BrainLayerClient(base_url="http://127.0.0.1:1")  # nothing listening
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        client.poll_replies()
+        time.sleep(0.01)
+    assert client.available() is False

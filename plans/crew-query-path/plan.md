@@ -302,6 +302,17 @@ not a redesign. **Not started in this plan.** In the meantime a spoken `"report 
 anchors, finds no *where* slot, and answers as a bare `report` — the honest degradation, and the
 pilot hears a general report rather than a `say_again`.
 
+> **ABSORBED by `plans/brain-tool-calls/plan.md` Stage 4 (not yet built; BR-2's merged batch is
+> Stages 0–3 only).** BR-2's own plan named this directly: *"`crew-query-path` Stage 5, built now
+> because A4's own example needs it."* Stage 5 above is parked pending free-speech STT, which BR-2's
+> addressed-utterance routing now supplies — the landmark `where` slot lands as a `place` handle in
+> brain dispatch (resolved via `find_place`, a tool call) plus `relation ∈ {near, north, ...}`,
+> mapped onto this same `sector`/radius filter shape, rather than as a second, voice-specific parser
+> bolted onto the typed-console path described above. When BR-2's Stage 4 is built, this Stage 5
+> should be marked done-by-absorption here rather than independently re-attempted; the typed-console
+> parser this stage describes stays as-is in the meantime (unaffected, still the honest-degradation
+> path for a spoken `"report south of Gemerek"` until BR-2 Stage 4 ships).
+
 Each stage runs its own touched subprojects' gate: `cd audio-adapter && .venv/bin/ruff format
 . && .venv/bin/ruff check . && .venv/bin/mypy src && .venv/bin/pytest`, and the same inside
 `body-layer`. mypy config discovery is CWD-only.

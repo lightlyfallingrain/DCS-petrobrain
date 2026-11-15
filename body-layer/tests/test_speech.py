@@ -26,11 +26,13 @@ from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext, semantic_facts_for
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RELOCATED,
     Event,
 )
 from belief.position_belief import Covariance2D, PositionEstimate
@@ -356,13 +358,6 @@ def test_render_report_appends_and_more_when_truncated() -> None:
 # --- render_report_summary (plans/crew-query-path/plan.md Decision C,
 # user decision 13 -- "answers summarise, they do not enumerate") ---
 
-#: Wide enough that nothing in these fixtures is stale unless the fixture
-#: says so, and stated rather than imported so the staleness tests read
-#: against a window they name. The live call site passes `decay.
-#: OBSERVED_WINDOW_S`; what this module tests is the *wording* a window
-#: produces, not the window's value.
-_STALE_WINDOW_S = 16.0
-
 
 def _summary_facts(
     *,
@@ -371,12 +366,20 @@ def _summary_facts(
     range_m: float = 1000.0,
     count: tuple[int, float] | None = None,
     last_seen_ago_s: float = 0.0,
+    certainty: str = "observed",
     contact_id: str = "CONTACT_1",
 ) -> dict[str, object]:
     """One in-scope contact's facts, with only the keys the summary
     reads. A dict rather than a `ContactStore` on purpose: this renderer
     is a pure function of the aggregate, so building real belief would
-    only make it unclear which input produced which clause."""
+    only make it unclear which input produced which clause.
+
+    `certainty` (`[[BL-B112]]`) drives whether the summary hedges this
+    contact (`speech._needs_hedge`: `certainty == "estimated"`) --
+    `last_seen_ago_s` is carried separately and feeds only the *age
+    wording* once a contact is already hedged
+    (`_spoken_age_phrase`/`_summary_air_defence_freshness_clause`), not
+    whether it is hedged at all."""
     facts: dict[str, object] = {
         "id": contact_id,
         "classification": {
@@ -384,6 +387,7 @@ def _summary_facts(
             "value": op_class if op_class else "ground",
         },
         "last_seen_ago_s": last_seen_ago_s,
+        "certainty": certainty,
         "relative_now": {
             "clock_position": clock,
             "range_m": range_m,
@@ -418,7 +422,7 @@ def test_render_report_summary_is_the_answer_the_user_chose() -> None:
             clock=2,
             range_m=1800.0,
             count=(1, 1.0),
-            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+            certainty="estimated",
             contact_id="CONTACT_TRUCK",
         ),
     ]
@@ -426,7 +430,6 @@ def test_render_report_summary_is_the_answer_the_user_chose() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -441,7 +444,6 @@ def test_render_report_summary_collapses_a_single_hour() -> None:
     speech = render_report_summary(
         [_summary_facts()],
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == "One armor, at 2 o'clock, inside 2 kilometres."
 
@@ -459,7 +461,6 @@ def test_render_report_summary_spans_the_arc_not_the_arithmetic() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert "11 o'clock through 1 o'clock" in speech.text
 
@@ -475,7 +476,6 @@ def test_render_report_summary_folds_one_class_into_the_count() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == "Three armor, at 2 o'clock, inside 2 kilometres."
     assert "mostly" not in speech.text
@@ -545,7 +545,6 @@ def test_render_report_summary_speaks_a_singular_noun_for_a_count_of_one(
     speech = render_report_summary(
         [_summary_facts(op_class=op_class)],
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == f"{expected_opening}, at 2 o'clock, inside 2 kilometres."
 
@@ -561,14 +560,12 @@ def test_render_report_summary_agrees_the_unit_noun_on_an_open_ended_count() -> 
     folded = render_report_summary(
         [_summary_facts(op_class="OP_TRUCK", count=(1, math.inf))],
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert folded.text == "At least one truck, at 2 o'clock, inside 2 kilometres."
 
     unfolded = render_report_summary(
         [_summary_facts(op_class=None, count=(1, math.inf))],
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert unfolded.text == "At least one unit, at 2 o'clock, inside 2 kilometres."
 
@@ -581,7 +578,6 @@ def test_render_report_summary_agrees_the_unit_noun_on_a_hedged_count_of_one() -
     speech = render_report_summary(
         [_summary_facts(op_class=None, count=(0, 1.0))],
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == "About one unit, at 2 o'clock, inside 2 kilometres."
 
@@ -595,7 +591,6 @@ def test_render_report_summary_hedges_a_mixed_scene() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert (
         speech.text == "Three units, mostly armor, at 2 o'clock, inside 2 kilometres."
@@ -614,7 +609,6 @@ def test_render_report_summary_counts_an_unclassified_contact_as_one_unit() -> N
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text.startswith("Two units, mostly armor,")
 
@@ -627,7 +621,6 @@ def test_render_report_summary_says_at_least_for_an_open_ended_count() -> None:
     speech = render_report_summary(
         [_summary_facts(count=(4, float("inf")))],
         band_label="beyond 5 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == "At least four armor, at 2 o'clock, beyond 5 kilometres."
 
@@ -648,7 +641,6 @@ def test_render_report_summary_names_air_defence_among_a_majority() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == (
         "Eight units, mostly infantry, at 2 o'clock, inside 2 kilometres, "
@@ -667,7 +659,6 @@ def test_render_report_summary_names_each_air_defence_tier_apart() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert "one short range SAM, one long range SAM" in speech.text
 
@@ -681,7 +672,6 @@ def test_render_report_summary_does_not_name_air_defence_twice() -> None:
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == ("Three short range SAMs, at 2 o'clock, inside 2 kilometres.")
     assert speech.text.count("short range SAM") == 1
@@ -699,7 +689,6 @@ def test_render_report_summary_never_says_a_before_a_vowel_or_an_acronym() -> No
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert "and one triple A." in speech.text
     assert " a AAA" not in speech.text
@@ -708,20 +697,20 @@ def test_render_report_summary_never_says_a_before_a_vowel_or_an_acronym() -> No
 
 def test_render_report_summary_qualifies_a_wholly_remembered_answer() -> None:
     """Decision D's freshness half: a remembered contact must be spoken as
-    remembered. When *every* in-scope contact is older than
-    `stale_window_s` the whole answer carries the qualifier.
+    remembered. When *every* in-scope contact `_needs_hedge`s
+    (`[[BL-B112]]`: `certainty == "estimated"`) the whole answer carries
+    the qualifier.
 
     **It qualifies, it never withholds.** The contact is still named and
     still counted -- filtering the pilot's own query by how recently
     Petrovich looked is exactly what Decision D forbids."""
     facts_list = [
-        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S + 1.0),
-        _summary_facts(contact_id="C_2", last_seen_ago_s=_STALE_WINDOW_S * 10),
+        _summary_facts(contact_id="C_1", certainty="estimated"),
+        _summary_facts(contact_id="C_2", certainty="estimated"),
     ]
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text == "Last I saw, two armor, at 2 o'clock, inside 2 kilometres."
     # Named, not withheld.
@@ -733,13 +722,12 @@ def test_render_report_summary_does_not_qualify_a_fresh_answer() -> None:
     """The counterpart, so the qualifier is not simply always present:
     the same scene seen just now carries no "Last I saw"."""
     facts_list = [
-        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S - 1.0),
-        _summary_facts(contact_id="C_2", last_seen_ago_s=0.0),
+        _summary_facts(contact_id="C_1"),
+        _summary_facts(contact_id="C_2"),
     ]
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert "Last I saw" not in speech.text
     assert speech.text == "Two armor, at 2 o'clock, inside 2 kilometres."
@@ -755,18 +743,17 @@ def test_render_report_summary_defers_at_most_one_stale_group() -> None:
         _summary_facts(
             op_class="OP_TRUCK",
             contact_id="C_STALE_1",
-            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+            certainty="estimated",
         ),
         _summary_facts(
             op_class="OP_TRUCK",
             contact_id="C_STALE_2",
-            last_seen_ago_s=_STALE_WINDOW_S + 2.0,
+            certainty="estimated",
         ),
     ]
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text.endswith("Still checking the truck group.")
     assert speech.text.count("Still checking") == 1
@@ -776,12 +763,11 @@ def test_render_report_summary_does_not_defer_when_everything_is_stale() -> None
     """The qualifier already covers the whole answer then, so a deferral
     would say the same thing twice."""
     facts_list = [
-        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S + 1.0),
+        _summary_facts(contact_id="C_1", certainty="estimated"),
     ]
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
     assert speech.text.startswith("Last I saw,")
     assert "Still checking" not in speech.text
@@ -812,14 +798,13 @@ def test_render_report_summary_drops_the_deferral_before_the_class_clause() -> N
             op_class="OP_TRUCK",
             clock=2,
             contact_id="C_STALE",
-            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+            certainty="estimated",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert len(speech.text.split()) <= REPORT_SUMMARY_MAX_WORDS
@@ -855,7 +840,6 @@ def test_render_report_summary_keeps_the_pointer_when_nothing_else_fits() -> Non
     speech = render_report_summary(
         facts_list,
         band_label="beyond 5 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert "Still checking" not in speech.text
@@ -873,9 +857,7 @@ def test_render_report_summary_rejects_an_empty_scope() -> None:
     different things, and only the caller knows which -- so an empty
     `facts_list` is a caller error rather than a summary of nothing."""
     with pytest.raises(AssertionError):
-        render_report_summary(
-            [], band_label="inside 2 kilometres", stale_window_s=_STALE_WINDOW_S
-        )
+        render_report_summary([], band_label="inside 2 kilometres")
 
 
 def test_render_report_summary_keeps_a_dominant_air_defence_class_when_the_clause_drops() -> (
@@ -913,14 +895,13 @@ def test_render_report_summary_keeps_a_dominant_air_defence_class_when_the_claus
             op_class="OP_TRUCK",
             clock=2,
             contact_id="C_STALE",
-            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+            certainty="estimated",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     # Both drops fired...
@@ -954,14 +935,17 @@ def test_render_report_summary_marks_a_stale_air_defence_contact() -> None:
             op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
         ),
         _summary_facts(
-            op_class="OP_LRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_LR"
+            op_class="OP_LRSAM",
+            clock=3,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_LR",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -995,20 +979,28 @@ def test_render_report_summary_marks_the_scene_the_security_finding_measured() -
             clock=2,
             count=(3, 4.0),
             last_seen_ago_s=118.0,
+            certainty="estimated",
             contact_id="C_INF_STALE",
         ),
         _summary_facts(
-            op_class="OP_SRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_SR"
+            op_class="OP_SRSAM",
+            clock=3,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_SR",
         ),
         _summary_facts(
-            op_class="OP_LRSAM", clock=4, last_seen_ago_s=119.0, contact_id="C_LR"
+            op_class="OP_LRSAM",
+            clock=4,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_LR",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -1042,14 +1034,17 @@ def test_render_report_summary_does_not_mark_a_stale_non_air_defence_contact() -
             op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
         ),
         _summary_facts(
-            op_class="OP_TRUCK", clock=2, last_seen_ago_s=119.0, contact_id="C_TRUCK"
+            op_class="OP_TRUCK",
+            clock=2,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_TRUCK",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -1074,14 +1069,18 @@ def test_render_report_summary_marks_a_stale_sam_the_air_defence_clause_skips() 
     and the predicate resolves through the lattice too -- this test still
     pins the marker to `_summary_op_class`, which is its mechanism."""
     facts_list = [
-        _summary_facts(op_class="OP_SRSAM", last_seen_ago_s=100.0, contact_id="C_1"),
+        _summary_facts(
+            op_class="OP_SRSAM",
+            last_seen_ago_s=100.0,
+            certainty="estimated",
+            contact_id="C_1",
+        ),
         _summary_facts(op_class="OP_SRSAM", contact_id="C_2"),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -1102,17 +1101,21 @@ def test_render_report_summary_does_not_say_freshness_twice_when_all_stale() -> 
             clock=1,
             count=(6, 8.0),
             last_seen_ago_s=119.0,
+            certainty="estimated",
             contact_id="C_INF",
         ),
         _summary_facts(
-            op_class="OP_LRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_LR"
+            op_class="OP_LRSAM",
+            clock=3,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_LR",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text == (
@@ -1142,13 +1145,16 @@ def test_render_report_summary_age_marker_is_true_at_every_age() -> None:
                 op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
             ),
             _summary_facts(
-                op_class="OP_LRSAM", clock=3, last_seen_ago_s=ago_s, contact_id="C_LR"
+                op_class="OP_LRSAM",
+                clock=3,
+                last_seen_ago_s=ago_s,
+                certainty="estimated",
+                contact_id="C_LR",
             ),
         ]
         speech = render_report_summary(
             facts_list,
             band_label="inside 2 kilometres",
-            stale_window_s=_STALE_WINDOW_S,
         )
         assert speech.text.endswith(f"The long range SAM is {expected}."), (
             ago_s,
@@ -1170,17 +1176,24 @@ def test_render_report_summary_age_marker_names_the_oldest_stale_contact() -> No
             op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
         ),
         _summary_facts(
-            op_class="OP_SRSAM", clock=2, last_seen_ago_s=20.0, contact_id="C_RECENT"
+            op_class="OP_SRSAM",
+            clock=2,
+            last_seen_ago_s=20.0,
+            certainty="estimated",
+            contact_id="C_RECENT",
         ),
         _summary_facts(
-            op_class="OP_SRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_OLD"
+            op_class="OP_SRSAM",
+            clock=3,
+            last_seen_ago_s=119.0,
+            certainty="estimated",
+            contact_id="C_OLD",
         ),
     ]
 
     speech = render_report_summary(
         facts_list,
         band_label="inside 2 kilometres",
-        stale_window_s=_STALE_WINDOW_S,
     )
 
     assert speech.text.endswith("The short range SAMs are a couple minutes old.")
@@ -2470,6 +2483,57 @@ def test_route_event_contact_firing_seen_auto_acknowledges(
     )
 
     assert firing_event not in store.unacknowledged_events
+
+
+# --- CONTACT_RELOCATED / CONTACT_ABSENT speech (plans/expected-area-look/
+# plan.md, BL-B111 Stage 3b) -------------------------------------------
+
+
+def test_route_event_contact_relocated_says_now_clock_and_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 4's provisional wording -- neutral "that group", not the
+    unit-type lead `_contact_report_text` would give (A's own
+    classification was already spoken when first announced)."""
+    store, contact_id = _store_with_one_contact()
+    store.record_relocation(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_RELOCATED)
+
+    speech = route_event(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text.startswith("That group, now ")
+    assert "o'clock" in speech.text
+
+
+def test_route_event_contact_relocated_omits_without_a_current_bearing() -> None:
+    store, contact_id = _store_with_one_contact()
+    store.record_relocation(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_RELOCATED)
+
+    # No `EnrichmentContext` -> no `relative_now` -> nothing to report,
+    # same "do not invent a look that was not taken" posture as
+    # `CONTACT_BURNING_SEEN`.
+    speech = route_event(store, event, now_sim=0.0)
+
+    assert speech is None
+
+
+def test_route_event_contact_absent_says_the_fixed_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, contact_id = _store_with_one_contact()
+    store.record_absence(contact_id, now_sim=0.0)
+    event = next(e for e in store.events if e.kind == CONTACT_ABSENT)
+
+    speech = route_event(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text == "That group is no longer at its last place."
 
 
 # --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --

@@ -137,3 +137,41 @@ def test_unresolvable_candidate_is_excluded_but_does_not_block_the_rest() -> Non
 
 def test_empty_candidate_list_yields_no_salient_ids() -> None:
     assert group_salient_ids([], _OBSERVER, UNAIDED_OPTIC) == frozenset()
+
+
+# --- BL-B108 Stage 3: the along-line cohesion check ---------------------
+
+
+def test_units_1km_apart_along_the_los_are_no_longer_mutually_salient() -> None:
+    """At 4 km / 200 m AGL, two units a kilometre apart *along the line of
+    sight* used to count as cohesive by the pre-`BL-B108` angular-only
+    test (zero cross-range offset means zero angular separation,
+    regardless of range) -- `alignment.md`'s "which mechanisms" finding.
+    The along-line check this stage adds rejects that pair outright: a
+    group of two cohesive-by-range near members plus one far member 1 km
+    further down the same bearing must come out with **no** salient
+    group at all (the near pair alone is only 2, below `GROUP_MIN_
+    MEMBERS`; the far member alone is 1) -- not three units correctly
+    read as one massed formation."""
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=200.0)
+    bearing_rad = math.radians(45.0)
+    cos_b, sin_b = math.cos(bearing_rad), math.sin(bearing_rad)
+    perp = (sin_b, -cos_b)
+
+    def point(range_m: float, cross_offset_m: float = 0.0) -> WorldObjectCandidate:
+        return WorldObjectCandidate(
+            object_id=int(range_m + cross_offset_m),
+            object_type="T-72B",
+            x=range_m * cos_b + perp[0] * cross_offset_m,
+            z=range_m * sin_b + perp[1] * cross_offset_m,
+            alt_m=200.0,
+            is_ownship=False,
+        )
+
+    near_a = point(4000.0, 0.0)
+    near_b = point(4000.0, 30.0)  # cohesive cross-range spacing at 4 km
+    far = point(5000.0, 0.0)  # same bearing, 1 km further down the line
+
+    salient_ids = group_salient_ids([near_a, near_b, far], observer, UNAIDED_OPTIC)
+
+    assert salient_ids == frozenset()

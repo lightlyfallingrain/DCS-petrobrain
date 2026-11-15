@@ -32,6 +32,54 @@ Optional: create `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any
 content, even empty) to turn on verbose logging to
 `Saved Games\DCS\Logs\aircraft_layer_debug.log`.
 
+## Deploy the line-of-sight Hook script (Windows box, once per change)
+
+`plans/dcs-driven-los/plan.md` (X-B29); the `probe_points` inbound op is
+`plans/expected-area-look/plan.md` Stage 1 (`BL-B111`). Copy:
+
+- `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` ->
+  `Saved Games\DCS\Scripts\Hooks\petrobrain-line-of-sight-hook.lua`
+
+Same discipline as every other Hook script here: the repo copy is canonical, never edit the
+deployed copy in place. Loads once into the GUI Lua state at DCS **application** startup, same as
+the mission-start Hook below — restart DCS (not just the mission) after copying for a change to
+take effect. Needs the same `net.allow_dostring_in = { "scripting" }` `autoexec.cfg` opt-in
+described below.
+
+Sends to the collector on loopback UDP 7796 at 1 Hz (unit/static terrain/building sightlines);
+listens on loopback UDP 7797 for two inbound ops, coalesced to at most one setter call per frame
+each (last wins): `look_direction` (pre-existing) and `probe_points`
+(`{"op": "probe_points", "seq", "points": [[x,z], ...]}`, at most `MAX_PROBE_POINTS` = 6 points,
+cleared by sending an empty list). `GET /line_of_sight/latest` serves the collector's cached
+snapshot, including the optional `"probes"` field once any have been pushed.
+
+**Stage 1 Windows card — confirm the probe op live, no body-layer needed:**
+
+1. Air start near a ridge (any mission), with the Hook deployed and the collector running (see
+   "Run the collector" below).
+2. Push three probe points by hand: one on the near slope, one behind the crest, one in open
+   ground. From the Mac (or WSL), with `<collector-host>` the Windows box's LAN address:
+
+   ```sh
+   curl -s -X POST http://<collector-host>:7791/command/probe_points \
+     -H 'Content-Type: application/json' \
+     -d '{"seq": 1, "points": [[<near-slope-x>, <near-slope-z>], [<behind-crest-x>, <behind-crest-z>], [<open-ground-x>, <open-ground-z>]]}'
+   ```
+
+   (Read `[x, z]` for each point off `GET /telemetry/latest`'s own ownship position plus a known
+   offset, or off the F10 map.)
+3. Confirm `PetrobrainLineOfSight` lines appear in `dcs.log`, and that
+   `GET /line_of_sight/latest` (`curl http://<collector-host>:7791/line_of_sight/latest`) carries
+   a `"probes"` field with three `clear` entries: `1` (clear) for open ground, `0` (blocked) for
+   behind the crest, flipping as the aircraft climbs past the ridge line for the near-slope point.
+4. Repeat step 2/3 **with the mission paused** — the LOS chunk must still answer (or, per the
+   fail-closed contract, answer `null`/absent rather than a stale `1`), never crash or freeze the
+   Hook.
+5. Confirm `bridge_call_ms` (in the same `GET /line_of_sight/latest` payload) does not move
+   measurably from its pre-probe baseline — the new terrain points are "~25 µs peak" per sightline
+   (`aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md`), not a new per-frame
+   cost class.
+
 ## Deploy the mission-start Hook script (Windows box, once per change)
 
 `plans/bl15-mission-start/plan.md`, BL-15 Stage 1. Unverified against a live DCS session as of

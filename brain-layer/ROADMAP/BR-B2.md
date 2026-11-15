@@ -1,7 +1,10 @@
 # BR-B2 — `brain-layer`'s HTTP server trusts the `Content-Length` header itself
 
-- [ ] **BR-B2 — `brain-layer/src/server.py:173-174` reads `Content-Length` and converts it without
-  guarding the header, so a non-numeric value raises an uncaught `ValueError`.** #status/open Filed
+- [x] **BR-B2 — `brain-layer/src/server.py:173-174` reads `Content-Length` and converts it without
+  guarding the header, so a non-numeric value raises an uncaught `ValueError`.** #status/done
+  **Fixed on `feature/brain-tool-calls` (U4's security-review fast-follow):** `_handle_escalate`
+  now reads through a `_read_body` guard ported from `audio-adapter/src/server.py`'s own, plus a
+  declared-length cap (`MAX_ESCALATE_BODY_BYTES`). Filed
   2026-10-16 from the whole-subproject security survey
   (`brain-layer/research/2026-10-16-security-audit.md`), which found no exploitable vulnerability and
   two low/low items; this is the first.

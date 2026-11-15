@@ -118,7 +118,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 import tuning
-from perception.geometry import angular_delta_deg
+from perception.geometry import angular_delta_deg, n_sectors_for_legs
 from perception.optics import Optic
 
 #: The crew-facing, ownship-relative sectors from `docs/concept/
@@ -328,12 +328,58 @@ _SECTOR_LEGS: Final[dict[RelativeSector, tuple[int, ...]]] = {
     "full": SCAN_PLAN,
 }
 
+
+def sector_legs_for(sector: RelativeSector) -> tuple[int, ...]:
+    """Public wrapper over `_SECTOR_LEGS` -- `plans/expected-area-check/
+    plan.md` Stage 1: `body.py` needs a commanded sector's own legs to
+    build its one-sector glass-budget period/wedge, the same "public
+    alias" reasoning `SECTOR_WEDGE_DEG` above already gives for not
+    reaching for the private table directly."""
+    return _SECTOR_LEGS[sector]
+
+
 #: Free scan's cycle period, derived rather than stated -- `len(SCAN_PLAN)
 #: * FOCUS_DWELL_S` rather than a bare `16.0`, so a future table edit (hard
 #: part 8's plan C) carries this constant with it automatically.
 #: `belief.decay.OBSERVED_WINDOW_S` imports this directly (hard part 8's
 #: "the scan period is not a free parameter").
 SCAN_CYCLE_PERIOD_S: Final[float] = len(SCAN_PLAN) * FOCUS_DWELL_S
+
+#: The most binocular time Petrovich spends across one full scan cycle,
+#: counted over the last cycle's glass steps, so no part of the
+#: windscreen waits longer than one sweep plus this -- `plans/
+#: expected-area-check/plan.md` (`BL-B110`) Stage 1, Decision 5 (user:
+#: *"four is too short... The 12 s sounds ok"*). The `lo` is `belief.
+#: optic_policy.MAX_LOOK_S` written as a literal (an AST literal is
+#: required for the tuning generator; `MAX_LOOK_S` is a plain `Final`, not
+#: tunable) -- below it no look could ever start at all. **Declared here**,
+#: alongside this module's other free-scan constants, not in `belief.
+#: optic_policy`: `perception.naked_eye_source` needs the worst-revisit
+#: figure below, and `perception` must not import `belief` -- `optic_
+#: policy` imports this constant from `gaze` instead, the same direction
+#: every other perceptual constant already flows.
+GLASS_BUDGET_PER_CYCLE_S: Final[float] = tuning.real(
+    "perception.gaze.GLASS_BUDGET_PER_CYCLE_S",
+    12.0,
+    lo=6.0,
+    hi=30.0,
+    status="judgement",
+)
+
+#: The worst-case true revisit for any one leg under the per-sector scan
+#: (`plans/expected-area-check/plan.md` Stage 1, "Revisit arithmetic"):
+#: one full quiet sweep of every sector (`SCAN_CYCLE_PERIOD_S`) plus the
+#: whole glass budget plus one poll of slack per sector. `naked_eye_
+#: source._ACQUISITION_RETENTION_WINDOW_S` must span this (not the bare
+#: sweep period) or a flank object ages out of the acquisition debounce
+#: before the eye returns and is re-acquired as "newly visible" every busy
+#: cycle. The `1.0` is poll slack, a literal (not a tunable): one 1 s poll
+#: per glass step that actually glasses, since a step starts and ends on
+#: a poll. `tuning._check_scan_decay_coupling`'s I2 invariant keeps this
+#: below `LOST_THRESHOLD_S`/`2 * POSITION_HALF_LIFE_S`.
+WORST_REVISIT_S: Final[float] = (
+    SCAN_CYCLE_PERIOD_S + GLASS_BUDGET_PER_CYCLE_S + n_sectors_for_legs(SCAN_PLAN) * 1.0
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +420,26 @@ class ScanPlan:
     #: commanded scan with nothing to look at is a construction bug, not a
     #: legal "commanded, but nowhere."
     commanded_legs: tuple[int, ...] | None = None
+
+    #: The current free-scan **sector's** own legs and sweep anchor --
+    #: `plans/expected-area-check/plan.md` Stage 1's "one-pass sweep
+    #: anchor". `None` (the default) keeps today's absolute-indexing
+    #: behaviour (`gaze_at` reads `t_sim % SCAN_CYCLE_PERIOD_S` over the
+    #: *whole* `SCAN_PLAN`) -- a true no-op for `FREE_SCAN_PLAN` and every
+    #: non-optic caller, which is why `test_gaze.py`'s free-scan cycling
+    #: tests keep their old premise. When set (`body.py`'s `_active_gaze`,
+    #: once per poll, from `belief.optic_policy.OpticState.scan_sector_
+    #: index` and `phase_started_sim`), `gaze_at` instead cycles only
+    #: `sweep_legs`, anchored at `sweep_started_sim` -- so the naked-eye
+    #: source, the LOS look-direction push, and the eyesight/POV debug
+    #: views all agree on exactly which leg is swept at a given poll, the
+    #: same resolved plan `optic_policy.decide` is reasoning about this
+    #: poll. Mutually exclusive with `commanded_sector`/`commanded_legs`
+    #: (those are a *player-commanded* scan, a different mode entirely);
+    #: `__post_init__` does not need to enforce this, since `body.py`'s one
+    #: construction site never sets both.
+    sweep_legs: tuple[int, ...] | None = None
+    sweep_started_sim: float | None = None
 
     #: A fixed direction to stare at, overriding the cycling legs entirely
     #: (`plans/binocular-optic/plan.md` Stage 2). Set only while binoculars
@@ -503,6 +569,25 @@ def clock_wedge_body_relative(clock_hour: int) -> tuple[float, float]:
     return gaze.center_azimuth_deg, gaze.half_width_deg
 
 
+def sector_azimuth_span_deg(legs: tuple[int, ...]) -> tuple[float, float]:
+    """`(lo, hi)` body-relative azimuth span covering every leg's own
+    `FOCUS_CONE_HALF_WIDTH_DEG` cone in `legs` -- the union envelope
+    `belief.optic_policy`'s glass step tests a candidate's believed
+    azimuth against (`plans/expected-area-check/plan.md` Stage 1,
+    "Glass step"), before the half-binocular-field margin is added by the
+    caller. A plain `min`/`max` over each leg's own `(center - half, center
+    + half)`, which is exact for every sector this project's tables ever
+    produce (all within the forward hemisphere, `-90` to `+90`, so there
+    is no wraparound to reason about)."""
+    los = []
+    his = []
+    for leg in legs:
+        gaze = _gaze_for_clock_hour(leg)
+        los.append(gaze.center_azimuth_deg - FOCUS_CONE_HALF_WIDTH_DEG)
+        his.append(gaze.center_azimuth_deg + FOCUS_CONE_HALF_WIDTH_DEG)
+    return min(los), max(his)
+
+
 def legs_within_wedge(
     center_azimuth_deg: float, half_width_deg: float
 ) -> tuple[int, ...]:
@@ -549,13 +634,22 @@ def gaze_at(t_sim: float, plan: ScanPlan) -> Gaze:
         legs = _SECTOR_LEGS[plan.commanded_sector]
     elif plan.commanded_legs is not None:
         legs = plan.commanded_legs
+    elif plan.sweep_legs is not None:
+        legs = plan.sweep_legs
     else:
         legs = SCAN_PLAN
-    if plan.commanded_sector is None and plan.commanded_legs is None:
-        elapsed_s = t_sim % SCAN_CYCLE_PERIOD_S
-    else:
+    if plan.commanded_sector is not None or plan.commanded_legs is not None:
         assert plan.command_t_sim is not None  # ScanPlan.__post_init__
         cycle_s = len(legs) * FOCUS_DWELL_S
         elapsed_s = (t_sim - plan.command_t_sim) % cycle_s
+    elif plan.sweep_legs is not None:
+        # The one-pass sector sweep anchor (module docstring, Stage 1):
+        # no modulo -- a sector's own sweep never repeats within its one
+        # pass, and holds at its last leg once reached (`min` below),
+        # which is correct while the step waits for the glass decision.
+        assert plan.sweep_started_sim is not None  # body.py's one caller
+        elapsed_s = max(0.0, t_sim - plan.sweep_started_sim)
+    else:
+        elapsed_s = t_sim % SCAN_CYCLE_PERIOD_S
     index = min(int(elapsed_s // FOCUS_DWELL_S), len(legs) - 1)
     return _gaze_for_clock_hour(legs[index])

@@ -850,6 +850,10 @@ amendment uses both rather than adding a third:
 
 **Amendment 5a-i — the kilometre deadband is the belief's own uncertainty, not a tuned constant.**
 
+> **Decision REVISED 2026-11-01 (`plans/relative-distance-grouping/plan.md`, BL-B108):** the
+> belief's down-range uncertainty no longer shrinks under same-geometry dwell, so this deadband
+> stays wide while hovering on one bearing and narrows as the geometry changes.
+
 Add `PositionEstimate.range_uncertainty_m(observer)` — the exact down-range mirror of the existing
 `bearing_uncertainty_deg`, projecting the covariance onto the ownship→contact bearing instead of its
 perpendicular. Then:

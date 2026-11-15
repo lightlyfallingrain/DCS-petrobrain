@@ -13,7 +13,15 @@ set -uo pipefail
 # variable is unset, never reaching its own `|| exit 0`. Still fail-open in effect for a hook, but
 # not by the mechanism the comment above promises -- so it is written the way the sibling gates in
 # this directory write it. (Review round 4, observations.)
-REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+input=$(cat)
+# Resolve the repository from the hook payload's `cwd`, which follows the session, NOT from
+# $CLAUDE_PROJECT_DIR, which is root-fixed (AGENTS.md rule 4). Every commit has happened in a
+# worktree since 2026-10-09, so the old form ran `git diff --cached` against the root's index,
+# i.e. main's clean tree, and passed silently on every worktree commit. Found by the 2026-11-14
+# integrity audit (Tier 1 #1), reproduced with the real payload. $CLAUDE_PROJECT_DIR is still
+# the right thing for locating sibling scripts.
+_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
+REPO=$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0

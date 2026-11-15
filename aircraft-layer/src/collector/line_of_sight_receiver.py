@@ -126,11 +126,21 @@ class LineOfSightReceiver:
             logger.debug("dropping malformed line of sight envelope: %r", envelope)
             return
 
+        # `plans/expected-area-look/plan.md` Stage 1 -- the probe answer
+        # rides as its own optional envelope key, never inside `payload`.
+        # Absent (older Hook) or not-a-string both mean "no probe answers
+        # this poll"; a malformed-but-present string is dropped on its own
+        # (below), not folded into the payload-parse failure above.
+        probes_raw = envelope.get("probes")
+        if not isinstance(probes_raw, str):
+            probes_raw = None
+
         try:
             snapshot = LineOfSightSnapshot.from_wire(
                 payload,
                 bridge_call_ms=float(bridge_call_ms),
                 received_wall_clock_s=time.time(),
+                probes_raw=probes_raw,
             )
         except LineOfSightParseError:
             logger.debug("dropping malformed line of sight payload: %r", payload)

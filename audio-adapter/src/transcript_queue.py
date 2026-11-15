@@ -69,6 +69,11 @@ class TranscriptEvent:
     #: (`tools/join_voice_latency.py`) simply has nothing to join that row
     #: against, not an error.
     correlation_id: str | None = None
+    #: `plans/brain-tool-calls/plan.md` D4's wire note -- `command_matcher.
+    #: MatchResult.addressed`, carried through unchanged. Additive: an
+    #: older body-layer reading this row treats an absent key as `False`
+    #: (`body._poll_transcripts`'s own `item.get("addressed", False)`).
+    addressed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +86,7 @@ class TranscriptEvent:
             "t_wall": self.t_wall,
             "slots": self.slots,
             "correlation_id": self.correlation_id,
+            "addressed": self.addressed,
         }
 
 

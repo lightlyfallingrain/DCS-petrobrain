@@ -1,6 +1,6 @@
 ---
 name: "security"
-description: "Use this agent to review security of a feature plan (after Architect) and to perform deep security analysis before DoD. Also invoke when the user asks for a full project security scan.\n\n<example>\nContext: Architect has produced plans/feature/plan.md with a new dependency.\nuser: \"Architect is done, run security review\"\nassistant: \"I'll launch the security agent to review the plan for vulnerabilities and security concerns.\"\n<commentary>\nSecurity plan review runs after Architect and before Implementer starts work.\n</commentary>\n</example>\n\n<example>\nContext: Reviewer has approved the feature. Ready for DoD.\nuser: \"Reviewer passed, do the security deep analysis\"\nassistant: \"I'll launch security for the deep analysis before DoD.\"\n<commentary>\nDeep security analysis runs after Reviewer, before DoD — it's the final code-level security gate.\n</commentary>\n</example>\n\n<example>\nContext: User wants to audit the whole project.\nuser: \"Run a full security scan on the project\"\nassistant: \"I'll use security in full-project scan mode.\"\n<commentary>\nOn-demand full scan is Mode 3.\n</commentary>\n</example>"
+description: "Use this agent for the deep security analysis that runs once per batch of stages, after Reviewer and before DoD (Mode 2), and when the user asks for a full project security scan (Mode 3). Plan review (Mode 1) is ON DEMAND ONLY -- it left the role sequences 2026-10-30 (user direction, AGENTS.md \"Behaviour alignment\"); do not dispatch it after Architect unless asked.\n\n<example>\nContext: Architect has produced plans/feature/plan.md with a new dependency.\nuser: \"Architect is done, run security review\"\nassistant: \"I'll launch the security agent to review the plan for vulnerabilities and security concerns.\"\n<commentary>\nSecurity plan review is on demand only since 2026-10-30; this example is the user asking for it explicitly.\n</commentary>\n</example>\n\n<example>\nContext: Reviewer has approved the feature. Ready for DoD.\nuser: \"Reviewer passed, do the security deep analysis\"\nassistant: \"I'll launch security for the deep analysis before DoD.\"\n<commentary>\nDeep security analysis runs after Reviewer, before DoD — it's the final code-level security gate.\n</commentary>\n</example>\n\n<example>\nContext: User wants to audit the whole project.\nuser: \"Run a full security scan on the project\"\nassistant: \"I'll use security in full-project scan mode.\"\n<commentary>\nOn-demand full scan is Mode 3.\n</commentary>\n</example>"
 model: claude-sonnet-5
 color: red
 memory: project
@@ -185,6 +185,15 @@ definition, including this one.
    - Explicit failure paths (panic/crash): Could these be triggered by external input?
 
 4. **Review the feature diff** — white-hat analysis of changed code only:
+   - **`int()` / comparison / `math.floor` on a value that arrived through `json.loads`** — Python's
+     parser accepts `NaN`/`Infinity`/`-Infinity` by default, so an `isinstance(x, int | float)`
+     check passes them and `int(x)` raises `ValueError`/`OverflowError`, neither of which is the
+     module's own `*ParseError`. Grep the diff for `int(` and `isinstance(.*float` at any wire
+     boundary and demand `math.isfinite` before conversion. Found on `BL-B104` Stage 1
+     (`category`/`subcategory`, LAN-facing `GET /world_objects/latest`; fixed on that branch) and
+     earlier at the same boundary — `.claude/agent-memory/security/project_nan_infinity_int_conversion_at_lan_boundary.md`
+     has the call-chain trace. Recorded here (retro 2026-11-13) because the memory alone was
+     written after the second instance; the check belongs on the list that is read every pass.
    - Integer overflow/underflow in numeric logic
    - Off-by-one errors in buffer or array indexing
    - Path traversal (file paths constructed from external data)

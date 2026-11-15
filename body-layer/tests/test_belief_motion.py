@@ -28,13 +28,53 @@ def test_founding_true_adopts_moving_outright() -> None:
     assert outcome.pending_stop_since_sim is None
 
 
-def test_founding_false_adopts_stopped_outright() -> None:
-    """No prior "moving" claim to demote away from -- the founding claim is
-    adopted as-is, same as classification/cardinality's founding rule."""
+def test_founding_false_starts_a_watch_rather_than_adopting_stopped_outright() -> None:
+    """`[[BL-B112]]`: at Mi-24 ranges a single glance cannot tell a unit
+    driving straight at the helicopter from one parked, so a founding
+    `False` reading no longer adopts "stopped" immediately -- it starts
+    the same `MOTION_STOP_CONFIRM_S` watch the demotion branch uses.
+    `motion` stays honestly `None` ("never observed for movement") until
+    the watch completes."""
     outcome = fold_motion(None, False, 10.0, None)
-    assert outcome.motion is not None
-    assert outcome.motion.state == "stopped"
-    assert outcome.pending_stop_since_sim is None
+    assert outcome.motion is None
+    assert outcome.pending_stop_since_sim == 10.0
+
+
+def test_founding_false_confirms_stopped_once_the_watch_completes() -> None:
+    """The counterpart: once `MOTION_STOP_CONFIRM_S` of continuous
+    sub-threshold evidence has elapsed since the founding reading, the
+    watch completes and `"stopped"` is adopted -- the same confirmation
+    the demotion branch (`test_demotion_requires_the_full_confirm_window`)
+    already requires, now also required at founding."""
+    started = fold_motion(None, False, 10.0, None)
+    since = started.pending_stop_since_sim
+    assert since is not None
+
+    # Just short of the window -- still unobserved-for-movement.
+    almost = fold_motion(None, False, since + MOTION_STOP_CONFIRM_S - 0.01, since)
+    assert almost.motion is None
+    assert almost.pending_stop_since_sim == since
+
+    # At (or past) the window -- confirms "stopped".
+    confirmed = fold_motion(None, False, since + MOTION_STOP_CONFIRM_S, since)
+    assert confirmed.motion is not None
+    assert confirmed.motion.state == "stopped"
+    assert confirmed.pending_stop_since_sim is None
+
+
+def test_founding_false_watch_is_cancelled_by_a_true_reading() -> None:
+    """A `True` reading mid-watch promotes to `"moving"` immediately, same
+    as mid-demotion (`test_a_true_reading_mid_countdown_cancels_the_
+    demotion`) -- the watch is not a separate mechanism from the
+    demotion countdown, it is the same one."""
+    started = fold_motion(None, False, 10.0, None)
+    since = started.pending_stop_since_sim
+    assert since is not None
+
+    resumed = fold_motion(None, True, since + 1.0, since)
+    assert resumed.motion is not None
+    assert resumed.motion.state == "moving"
+    assert resumed.pending_stop_since_sim is None
 
 
 def test_founding_none_stays_none() -> None:

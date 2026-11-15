@@ -99,6 +99,16 @@ _HEALTH_PATH = "/health"
 #: own default.
 DEFAULT_DECIDE_TIMEOUT_S = 12.0
 
+#: Caps `POST /escalate`'s request body (`[[BR-B2]]`). An escalated
+#: utterance's payload is a situational header plus a handful of
+#: candidate summaries -- a few KB in practice -- so 256KiB is generous
+#: headroom, not a measured ceiling. This is a behaviour-affecting
+#: constant (root `CLAUDE.md`'s tuning rule) that would want the tuning
+#: mechanism; `brain-layer` has no loader yet (`body-layer/CLAUDE.md`'s
+#: `tuning.py` is body-layer-only), so it stays a plain module constant
+#: until one exists here.
+MAX_ESCALATE_BODY_BYTES = 262_144
+
 
 def _run_job(
     decider: Decider,
@@ -169,9 +179,46 @@ def _make_handler(
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
+        def _read_body(self) -> bytes | None:
+            """Read the request body per `Content-Length`, guarding the
+            header itself before touching `rfile` (`[[BR-B2]]`) --
+            same shape as `audio-adapter/src/server.py`'s `_read_body`,
+            ported rather than reinvented (root `CLAUDE.md`'s "do not
+            reinvent the wheel"). A missing header reads as zero bytes.
+            A non-numeric or negative value is rejected with a clean
+            `400` rather than raising `ValueError` out of `do_POST` or
+            reading until EOF on a negative length. Also caps the
+            declared length at `MAX_ESCALATE_BODY_BYTES`, which audio-
+            adapter's own version does not need (its bodies are a single
+            short utterance) but an escalation payload carrying the
+            whole candidate/header shape does. Returns `None` (having
+            already sent the error response) when the header cannot be
+            trusted."""
+            raw_header = self.headers.get("Content-Length", "0") or "0"
+            try:
+                length = int(raw_header)
+            except ValueError:
+                length = -1
+            if length < 0:
+                self._respond_json(
+                    400, {"error": f"invalid Content-Length: {raw_header!r}"}
+                )
+                return None
+            if length > MAX_ESCALATE_BODY_BYTES:
+                self._respond_json(
+                    400,
+                    {
+                        "error": f"Content-Length {length} exceeds "
+                        f"{MAX_ESCALATE_BODY_BYTES} byte limit"
+                    },
+                )
+                return None
+            return self.rfile.read(length) if length > 0 else b""
+
         def _handle_escalate(self) -> None:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            raw_body = self.rfile.read(length) if length > 0 else b""
+            raw_body = self._read_body()
+            if raw_body is None:
+                return
             try:
                 data = json.loads(raw_body.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):

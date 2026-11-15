@@ -106,8 +106,12 @@ One file per feature, **appended to, never overwritten**: `## Goal check — <da
 dated section. The goal check's **Why** and **Player expectations** are the contract the plan check
 tests against.
 
-**Verdicts:** **ALIGNED** — nothing found, one line. **CONCERNS** — settle them (with the user where
-only they can answer), then proceed. **MISALIGNED** — reassess the goal or plan before the next
+**Verdicts:** **ALIGNED** — the why is stated, every expectation follows from it, and no open
+assumption would *silently* break an expectation if filled the obvious way; open questions for the
+user may still be listed under it. **CONCERNS** — an assumption that, filled the obvious way,
+contradicts a named expectation: settle it (with the user where only they can answer), then
+proceed. A question alone is not a concern — six of six goal checks in one window returned CONCERNS
+and the verdict stopped carrying information (retro 2026-11-13). **MISALIGNED** — reassess the goal or plan before the next
 stage; that is the role doing its job, not an escalation to route around.
 
 ## Handoff (both roles)

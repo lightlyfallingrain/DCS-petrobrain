@@ -156,6 +156,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
     assert isinstance(event["t_wall"], float)
     assert event["slots"] is None
     assert event["correlation_id"] is None
+    assert event["addressed"] is False
     # Never audio-shaped fields.
     assert set(event) == {
         "transcript",
@@ -167,6 +168,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
         "t_wall",
         "slots",
         "correlation_id",
+        "addressed",
     }
 
 
@@ -251,6 +253,30 @@ def test_non_command_speech_enqueues_with_null_token(
     finally:
         server.close()
         thread.join(timeout=5)
+
+
+def test_wake_prefixed_speech_enqueues_as_addressed(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    """`plans/brain-tool-calls/plan.md` D4's wire note -- a transmission
+    opening with the wake word round-trips `addressed: true` through
+    `POST /transcribe` -> `GET /transcripts/poll`, carrying no command
+    token (the wake word is checked before verb anchoring,
+    `command_matcher.match_transcript`'s own docstring)."""
+    server, engine = running_server_with_stt
+    engine.text = "Petrovich, where's the Shilka?"
+    status, body = _post(server, "/transcribe", {"wav_b64": _wav_b64()})
+    assert status == 200
+    assert body == {"ok": True}
+
+    status, body = _get(server, "/transcripts/poll")
+    assert status == 200
+    assert isinstance(body, list)
+    assert len(body) == 1
+    event = body[0]
+    assert event["token"] is None
+    assert event["verb_anchored"] is False
+    assert event["addressed"] is True
 
 
 def test_transcribe_without_stt_engine_returns_503() -> None:

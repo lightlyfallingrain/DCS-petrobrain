@@ -64,11 +64,14 @@ def _make_handler(
     watch_args_calls: list[tuple[str, list[int]]] | None = None,
     read_args_response: object | None = None,
     read_args_status: int = 200,
+    probe_points_calls: list[tuple[int, list[list[int]]]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     if triggered_searches is None:
         triggered_searches = []
     if watch_args_calls is None:
         watch_args_calls = []
+    if probe_points_calls is None:
+        probe_points_calls = []
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -115,6 +118,11 @@ def _make_handler(
                     if read_args_response is not None
                     else {"t": 5.0, "values": {}},
                 )
+            elif self.path == "/command/probe_points":
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = json.loads(self.rfile.read(length))
+                probe_points_calls.append((body["seq"], body["points"]))
+                self._respond(200, {"ok": True})
             else:
                 self._respond(404, {"error": "not found"})
 
@@ -378,3 +386,47 @@ def test_read_args_504_raises() -> None:
         client = AircraftLayerClient(base_url=url)
         with pytest.raises(AircraftLayerError):
             client.read_args([886])
+
+
+# --- post_probe_points (`plans/expected-area-look/plan.md`, BL-B111, ---
+# --- Stage 1) ---
+
+
+def test_post_probe_points_posts_to_command_endpoint() -> None:
+    probe_points_calls: list[tuple[int, list[list[int]]]] = []
+    httpd = HTTPServer(
+        ("127.0.0.1", 0), _make_handler(probe_points_calls=probe_points_calls)
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = AircraftLayerClient(base_url=f"http://127.0.0.1:{httpd.server_port}")
+        client.post_probe_points(3, [(100, -200), (300, 400)])
+        assert probe_points_calls == [(3, [[100, -200], [300, 400]])]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_post_probe_points_with_empty_list_clears() -> None:
+    probe_points_calls: list[tuple[int, list[list[int]]]] = []
+    httpd = HTTPServer(
+        ("127.0.0.1", 0), _make_handler(probe_points_calls=probe_points_calls)
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = AircraftLayerClient(base_url=f"http://127.0.0.1:{httpd.server_port}")
+        client.post_probe_points(0, [])
+        assert probe_points_calls == [(0, [])]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_post_probe_points_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1")
+    with pytest.raises(AircraftLayerError):
+        client.post_probe_points(1, [(0, 0)])

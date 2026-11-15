@@ -54,7 +54,14 @@ printf '%s' "$command" | grep -Eq 'git[[:space:]]+branch[[:space:]]+(-[a-zA-Z]*D
 # Explicit, deliberate override.
 printf '%s' "$command" | grep -q 'ALLOW-UNMERGED' && exit 0
 
-REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+# Resolve the repository from the hook payload's `cwd`, which follows the session, NOT from
+# $CLAUDE_PROJECT_DIR, which is root-fixed (AGENTS.md rule 4). Every commit has happened in a
+# worktree since 2026-10-09, so the old form ran `git diff --cached` against the root's index,
+# i.e. main's clean tree, and passed silently on every worktree commit. Found by the 2026-11-14
+# integrity audit (Tier 1 #1), reproduced with the real payload. $CLAUDE_PROJECT_DIR is still
+# the right thing for locating sibling scripts.
+_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
+REPO=$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 # Collect candidate branch names: every token after the -D flag that is not itself a

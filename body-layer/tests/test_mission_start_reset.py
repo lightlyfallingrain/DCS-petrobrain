@@ -40,7 +40,7 @@ from body import (
     _maybe_switch_theatre,
     _reset_mission_state,
 )
-from mission_memory.admission import FiredOnTracker
+from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
 from store.models import Region
@@ -87,15 +87,33 @@ def _assert_value_matches_fresh_default(
 # --- ContactStore / TaskStore -- plain classes, enumerated via vars() -------
 
 
+#: `ContactStore.reset_for_new_mission`'s own documented preserve-set --
+#: `plans/expected-area-look/plan.md` -- `_expected_area_checks` is
+#: `body.py`'s own standing choice of mechanism (Pass 2: always `True` in
+#: production), not per-mission belief state, so a mission restart must
+#: not silently turn the trigger back off. Compared by value below (same
+#: posture `test_crew_console_reset_preserves_declared_fields_and_resets_
+#: rest`'s own `silenced` field takes), not identity -- a plain `bool`.
+_CONTACT_STORE_PRESERVE = {"_expected_area_checks"}
+
+
 def test_contact_store_reset_clears_every_field() -> None:
-    store = ContactStore()
+    store = ContactStore(expected_area_checks=True)
     field_names = set(vars(store))
-    _poison(store, field_names, preserve=set())
+    assert _CONTACT_STORE_PRESERVE <= field_names, (
+        "the preserve-set names a field ContactStore no longer has"
+    )
+    preserved_value = store._expected_area_checks
+    _poison(store, field_names, preserve=_CONTACT_STORE_PRESERVE)
 
     store.reset_for_new_mission()
 
+    assert store._expected_area_checks == preserved_value, (
+        "preserved field '_expected_area_checks' was replaced, not passed through"
+    )
+
     fresh = ContactStore()
-    for name in field_names:
+    for name in field_names - _CONTACT_STORE_PRESERVE:
         _assert_value_matches_fresh_default(
             name, getattr(store, name), getattr(fresh, name)
         )
@@ -198,6 +216,16 @@ _CREW_CONSOLE_PRESERVE = {
     "transcript_log",
     "speech_client",
     "speech_log_sink",
+    # `[[BL-B106]]` (`plans/async-speech/plan.md` Decision 4 / "Refresh"
+    # section) -- the worker thread and the shared audio-adapter
+    # reporter both persist across a mission restart, same as
+    # `speech_client`/`brain_client` above. `speech_worker`'s own
+    # *queued content* does not survive (`reset_for_new_mission` calls
+    # `speech_worker.interrupt()` before passing it through) -- that is
+    # a side effect on the object this preserve-set's identity check
+    # cannot see, not a reason to leave it out of this set.
+    "speech_worker",
+    "audio_adapter_reporter",
     "silenced",
     # `plans/effector-sequences/plan.md` D6 -- describes this *process's*
     # startup state, not per-mission state, same as `silenced` above.
@@ -520,6 +548,24 @@ def test_reset_mission_state_is_a_noop_for_fired_on_tracker_when_omitted() -> No
     )
 
     _reset_mission_state(runner, None, MissionMemory())
+
+
+def test_reset_mission_state_resets_lost_contact_tracker_when_given() -> None:
+    """`[[BL-B112]]`: `LostContactTracker`'s own twin of
+    `test_reset_mission_state_resets_fired_on_tracker_when_given` --
+    brought under this mechanism from the day it is added, unlike
+    `FiredOnTracker`, which needed the Batch 2 review follow-up to
+    discover the gap."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    mission_memory = MissionMemory()
+    tracker = LostContactTracker()
+    tracker._scanned_event_count = 500
+
+    _reset_mission_state(runner, None, mission_memory, None, tracker)
+
+    assert tracker._scanned_event_count == 0
 
 
 # --- BL-15 Stage 3: theatre switching (`_maybe_switch_theatre`) and loud- --

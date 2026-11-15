@@ -28,6 +28,17 @@ from pathlib import Path
 DEFAULT_BELIEF = Path.home() / "dcs-belief-truth.jsonl"
 DEFAULT_TRACE = Path.home() / "dcs-detection-trace.jsonl"
 DEFAULT_SPEECH = Path.home() / "dcs-speech.jsonl"
+# `plans/expected-area-look/plan.md` Pass 3, `--expected-area-log` -- a
+# seventh per-run log (`body-layer/CLAUDE.md`'s "## Tuning"/structure
+# section lists it beside `--group-trace`/`--mission-memory`/
+# `--slew-trace`). Unlike `DEFAULT_BELIEF`/`DEFAULT_TRACE`/`DEFAULT_SPEECH`
+# above, `--expected-area-log` has **no default path in body.py itself**
+# (it defaults off, same posture as `--group-trace`/`--mission-memory`) --
+# so there is no home-directory filename to guess here either; `None`
+# means "point --expected-area at the stamped file this sortie actually
+# wrote" (the logger prints its resolved path to stderr as it starts,
+# same as every other per-run log).
+DEFAULT_EXPECTED_AREA: Path | None = None
 # `BL-B66` Stage 4b (`plans/9k113-effectors/plan.md`) -- the aircraft-layer
 # side's own per-frame log (`Export.lua`'s `push_slew_trace`, flag
 # `aircraft_layer_slew_debug.flag`), copied over from the Windows box's
@@ -369,6 +380,82 @@ def speech_report(path: Path, cap: int | None) -> None:
                   f"ratio {r.get('match_ratio', 0):.2f}  {r.get('transcript')!r}")
 
 
+def expected_area_report(path: Path, cap: int | None) -> None:
+    """`plans/expected-area-look/plan.md` Pass 3, `--expected-area-log` --
+    one row per check *opened* (`event == "open"`) and one per *verdict*
+    (`event == "verdict"`), see `body/expected_area_log.py`'s own module
+    docstring for why this log exists. Answers the plan's own top-listed
+    open risk ("how often the trigger fires in flight") and names BL-B114's
+    own flight signal directly: a `"cannot_look"` verdict on an `"echo"`-
+    kind check is exactly the silent merge-echo suppression Decision 2
+    keeps "as today" -- counted here as `merge-echo suppressed`, not
+    folded into the general cannot-look-cause histogram, since it is the
+    one cannot-look outcome that is not a missing probe/terrain/presence
+    fact but a deliberate silence."""
+    h(f"EXPECTED-AREA CHECKS  --  {path}")
+    data = list(rows(path, cap))
+    if not data:
+        print("no rows -- --expected-area-log was probably not set, or the trigger never "
+              "fired this sortie")
+        return
+
+    opens = [r for r in data if r.get("event") == "open"]
+    verdicts = [r for r in data if r.get("event") == "verdict"]
+    ts = [r["t_sim"] for r in data if "t_sim" in r]
+    if ts:
+        print(f"rows {len(data):,} | {fmt_span(min(ts), max(ts))}")
+
+    # `opens` has one row per poll a check is still open, not one per
+    # check -- a check open for 8 s at ~1 Hz produces ~8 open-rows. The
+    # count of *distinct* checks is the b_id/a_id pair count, which is
+    # what the plan's own "how often does the trigger fire" question
+    # actually asks.
+    kind_by_pair: dict[tuple[object, object], str] = {}
+    for r in opens:
+        pair = (r.get("b_id"), r.get("a_id"))
+        kind_by_pair.setdefault(pair, r.get("kind") or "?")
+    print(f"open-rows {len(opens):,} | distinct checks opened {len(kind_by_pair)} "
+          f"| verdict-rows {len(verdicts)}")
+
+    kind_counts: collections.Counter[str] = collections.Counter(kind_by_pair.values())
+    if kind_counts:
+        print("\ncheck kind (one count per distinct check):", dict(kind_counts.most_common()))
+
+    verdict_counts: collections.Counter[str] = collections.Counter(
+        r.get("verdict") or "?" for r in verdicts
+    )
+    if verdict_counts:
+        print("\nverdict histogram:")
+        for k, v in verdict_counts.most_common():
+            print(f"   {k:<14} {v:>6,}  {100 * v / max(len(verdicts), 1):5.1f}%")
+
+    merge_echo_suppressed = sum(
+        1 for r in verdicts
+        if r.get("verdict") == "cannot_look" and r.get("kind") == "echo"
+    )
+    if merge_echo_suppressed:
+        print(f"\nmerge-echo suppressed (BL-B114's flight signal): {merge_echo_suppressed}")
+
+    cause_counts: collections.Counter[str] = collections.Counter(
+        r.get("cannot_look_cause") or "?" for r in verdicts
+        if r.get("verdict") == "cannot_look" and r.get("kind") != "echo"
+    )
+    if cause_counts:
+        print("\ncannot-look cause (excluding the merge-echo rows above):")
+        for k, v in cause_counts.most_common():
+            print(f"   {k:<22} {v:>6,}")
+
+    relocations = sum(1 for r in verdicts if r.get("relocation"))
+    sames = sum(1 for r in verdicts if r.get("verdict") == "same")
+    if sames:
+        print(f"\n'that group, now ...' (CONTACT_RELOCATED): {relocations} of {sames} "
+              f"'same' verdicts")
+
+    paused = sum(1 for r in verdicts if r.get("paused"))
+    if paused:
+        print(f"\nresolved while paused (ATGM run / attack-run grant): {paused}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -382,6 +469,11 @@ def main() -> int:
     ap.add_argument("--body-slew", type=Path, default=DEFAULT_BODY_SLEW,
                     help="the body-layer per-poll --slew-trace file, a coarser "
                          "cross-check -- no default path, since the flag has none")
+    ap.add_argument("--expected-area", type=Path, default=DEFAULT_EXPECTED_AREA,
+                    help="the body-layer --expected-area-log file (plans/"
+                         "expected-area-look/plan.md Pass 3) -- no default path, "
+                         "since the flag has none; point this at the stamped file "
+                         "the sortie's own stderr line named")
     ap.add_argument("--no-snapshot", action="store_true",
                     help="read to end of file instead of to the size captured at start -- "
                          "only equivalent once the flight has ended")
@@ -395,6 +487,7 @@ def main() -> int:
         ("speech", args.speech, speech_report),
         ("slew", args.slew, slew_report),
         ("body-slew", args.body_slew, body_slew_report),
+        ("expected-area", args.expected_area, expected_area_report),
     ):
         if name == "trace" and args.skip_trace:
             continue

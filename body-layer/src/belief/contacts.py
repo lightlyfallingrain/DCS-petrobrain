@@ -36,9 +36,10 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from belief.association_over_time import (
@@ -76,12 +77,14 @@ from belief.classification import (
 from belief.decay import (
     CALLOUT_OBSERVABILITY_GRACE_S,
     LOS_MASK_CONFIRM_S,
+    LOST_THRESHOLD_S,
     OBSERVED_WINDOW_S,
     Certainty,
     certainty_of,
     object_id_continuity_valid,
 )
 from belief.events import (
+    CONTACT_ABSENT,
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
@@ -90,6 +93,7 @@ from belief.events import (
     CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
+    CONTACT_RELOCATED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
@@ -100,6 +104,13 @@ from belief.events import (
     firing_event_kind,
     lifecycle_event_kind,
     motion_event_kind,
+)
+from belief.expected_area import (
+    MAX_OPEN_CHECKS,
+    ExpectedAreaCheck,
+    b_is_threat,
+    eligible_trigger_target,
+    merge_echo_or_beside_lost_target,
 )
 from belief.groups import Group, GroupStore
 from belief.motion import MotionBelief, MotionState, fold_motion
@@ -656,7 +667,10 @@ class Contact:
             z=look_position.z,
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
+            look_range_m=percept.range_m,
             t_sim=percept.t_sim,
+            observer_x=observer.x,
+            observer_z=observer.z,
             growth_rate_mps=growth_rate_mps,
         )
         envelope_clamped = clamp_to_detection_envelope(
@@ -766,13 +780,27 @@ class Contact:
             z=percept.ownship_at_observation.z,
             alt_m=percept.ownship_at_observation.alt_m,
         )
+        # `[[BL-B112]]`: called once here (not inline at the `motion=`
+        # field below) so its `pending_stop_since_sim` can also be
+        # persisted -- a founding `False` reading no longer adopts
+        # "stopped" outright, it starts (or continues) the same
+        # `MOTION_STOP_CONFIRM_S` watch `record` already threads through
+        # `self.motion_pending_stop_since_sim`. Discarding this outcome's
+        # countdown, as the old single-field read below used to, would
+        # silently drop that watch for every founding contact.
+        founding_motion_outcome = fold_motion(
+            None, percept.apparent_motion, percept.t_sim, None
+        )
         founding_position = fold_position(
             None,
             x=look_position.x,
             z=look_position.z,
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
+            look_range_m=percept.range_m,
             t_sim=percept.t_sim,
+            observer_x=observer.x,
+            observer_z=observer.z,
         )
         contact = Contact(
             id=contact_id,
@@ -797,14 +825,12 @@ class Contact:
                 if percept.count_bucket is not None
                 else new_cardinality_belief(OP_1UNIT, percept.t_sim)
             ),
-            # `held=None` -- `fold_motion` adopts the founding percept's own
-            # motion evidence outright (its own "no prior claim to demote
-            # away from" rule), or stays `None` when the founding percept
-            # carries no motion evidence at all (`belief.motion`'s module
-            # docstring).
-            motion=fold_motion(
-                None, percept.apparent_motion, percept.t_sim, None
-            ).motion,
+            # `held=None` -- stays `None` when the founding percept carries
+            # no motion evidence at all, or (`[[BL-B112]]`) while a
+            # founding `False` reading's own watch has not yet completed
+            # (`belief.motion`'s module docstring).
+            motion=founding_motion_outcome.motion,
+            motion_pending_stop_since_sim=founding_motion_outcome.pending_stop_since_sim,
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
             live_los_clear=percept.live_los_clear,
@@ -848,7 +874,34 @@ class ContactStore:
     updated; `tick` is Stage 1's placeholder for Stage 2's decay/lifecycle
     ticker."""
 
-    def __init__(self) -> None:
+    def __init__(self, expected_area_checks: bool = False) -> None:
+        #: `plans/expected-area-look/plan.md` -- the trigger below is OFF by
+        #: default. `eligible_trigger_target`'s "out of view" precondition
+        #: (`a_out_of_view`, `now_sim - last_seen_sim > FOCUS_DWELL_S`) is
+        #: tautologically true for a gate-path match whenever object-
+        #: permanence continuity does not carry across an optic change --
+        #: which is never, in production (`perception.naked_eye_source`'s
+        #: `_object_id_to_last_observation_id` map is keyed by DCS
+        #: `object_id`, persists across an optic swap on the same source
+        #: instance, and is trusted for `OBJECT_ID_MEMORY_S`, 600s default
+        #: -- see that module's docstring and `body._apply_active_gaze`'s
+        #: `source.optic = optic` line), but *is* always true for a test
+        #: fixture that hand-builds an `Observation` via the test suite's
+        #: own `_observation()`-style helpers, which default
+        #: `continues_observation_id=None` and never go through that map.
+        #: Ten pre-existing tests across `test_expected_area_trigger.py`/
+        #: `test_relative_distance_scenarios.py`/
+        #: `test_relative_distance_sweep.py` characterise the spatial gate
+        #: itself using exactly that kind of fixture (same-group, cross-
+        #: optic, 4-6s apart, continuity deliberately absent) -- wiring the
+        #: trigger unconditionally breaks all ten for a reason that cannot
+        #: occur in flight. Gating it behind this constructor flag (default
+        #: `False`, matching every pre-existing `ContactStore()` call site
+        #: including those ten tests) keeps the trigger's own tests, which
+        #: pass it explicitly, isolated from the gate-characterisation
+        #: tests, which do not. `body.py` passes `True` (Pass 2) -- the one
+        #: call site where continuity is real.
+        self._expected_area_checks = expected_area_checks
         self._contacts: dict[str, Contact] = {}
         self._observations: dict[str, Observation] = {}
         self._events: list[Event] = []
@@ -887,6 +940,18 @@ class ContactStore:
         #: true no-op for them -- the same shape `tick`'s own `ownship is
         #: None` branch already uses at emission.
         self._observability_tracked = False
+        #: `plans/expected-area-look/plan.md` (`BL-B111`) -- open expected-
+        #: area checks, keyed by the held contact's own `b_id`. At most
+        #: `belief.expected_area.MAX_OPEN_CHECKS` entries at once; see
+        #: `open_check`/`has_open_check`/`callout_held`.
+        self._checks: dict[str, ExpectedAreaCheck] = {}
+        #: `plans/expected-area-look/plan.md` Stage 3a -- contact-id pairs
+        #: a check has resolved "different" for (`resolve_checks`'s own
+        #: `record_believed_distinct` action). Unordered: `frozenset({a,
+        #: b})`. Read by `belief.callouts`' merge-echo skip -- a pair this
+        #: store has already told apart must never be silenced as an echo
+        #: of each other again.
+        self._believed_distinct: set[frozenset[str]] = set()
 
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
@@ -898,8 +963,17 @@ class ContactStore:
         "reset mechanism" section). Object identity is unchanged, so
         `logger.ConsolePerceptionRunner.store`/`belief.crew_console.
         CrewConsole.store` (the same instance, by design) see the reset
-        with no further wiring."""
-        self.__init__()  # type: ignore[misc]
+        with no further wiring.
+
+        **`expected_area_checks` is the one constructor argument, not a
+        mission-scoped field** -- it is `body.py`'s own standing choice of
+        mechanism (Pass 2: always `True` in production), not belief state
+        to clear, so it must be threaded back through here rather than
+        silently reverting to the constructor's `False` default on every
+        mission restart (found while wiring `body.py`'s own `ContactStore`
+        construction -- a bare `self.__init__()` would have turned the
+        trigger off again at the second mission of every sortie)."""
+        self.__init__(expected_area_checks=self._expected_area_checks)  # type: ignore[misc]
 
     def callout_observable(self, contact: Contact, now_sim: float) -> bool:
         """Whether a spontaneous callout about `contact` may be *spoken*
@@ -945,6 +1019,181 @@ class ContactStore:
         if contact.last_observable_sim is None:
             return False
         return now_sim - contact.last_observable_sim < CALLOUT_OBSERVABILITY_GRACE_S
+
+    # --- Expected-area checks (`plans/expected-area-look/plan.md`, -----
+    # --- `BL-B111`) -----------------------------------------------------
+
+    @property
+    def checks(self) -> list[ExpectedAreaCheck]:
+        """Every currently-open expected-area check. A read-only view."""
+        return list(self._checks.values())
+
+    def check_for(self, b_id: str) -> ExpectedAreaCheck | None:
+        """The open check holding `b_id`, or `None`."""
+        return self._checks.get(b_id)
+
+    def has_open_check(self, contact_id: str) -> bool:
+        """Whether `contact_id` is the *held* side of an open check --
+        read by `belief.groups.GroupStore.reconcile` and `mission_memory.
+        admission.step` to skip a held contact entirely (plan: "it is
+        still glassed for classification" but excluded from both). True
+        regardless of `ExpectedAreaCheck.released` -- release only ever
+        changes whether B's *callout* is held (`callout_held` below), not
+        whether group/mission-memory admission should wait for the
+        verdict."""
+        return contact_id in self._checks
+
+    def callout_held(self, contact_id: str) -> bool:
+        """Whether `contact_id`'s own callout is currently held -- an open,
+        not-yet-`released` check. `belief.callouts.CalloutScheduler.tick`
+        reads this before its `CALLOUT_MAX_AGE_S` check (plan 3a: "the
+        hold check sits before `CALLOUT_MAX_AGE_S` and defers without
+        consuming")."""
+        check = self._checks.get(contact_id)
+        return check is not None and not check.released
+
+    def open_check(self, check: ExpectedAreaCheck) -> None:
+        """Register a freshly-opened check -- "hold" is nothing more than
+        this call (module docstring's own "'Hold' is not a separate
+        action" note). The caller (`ingest`) is responsible for the
+        `belief.expected_area.MAX_OPEN_CHECKS` cap; this method does not
+        enforce it, so a caller that checks capacity itself and still
+        calls this twice for the same `b_id` simply overwrites the first
+        check (not expected to happen -- each `b_id` is only ever the
+        held side of one check at a time, by construction)."""
+        self._checks[check.b_id] = check
+
+    def release_check(self, b_id: str, now_sim: float) -> None:
+        """Mark the check holding `b_id` released -- idempotent (a
+        second call after a threat release at open time is a no-op, same
+        `released_sim` kept)."""
+        check = self._checks.get(b_id)
+        if check is None or check.released:
+            return
+        self._checks[b_id] = replace(check, released=True, released_sim=now_sim)
+
+    def close_check(self, b_id: str) -> None:
+        """Drop the check holding `b_id` -- the verdict has been reached
+        and acted on; nothing further to hold open."""
+        self._checks.pop(b_id, None)
+
+    def record_believed_distinct(self, a_id: str, b_id: str) -> None:
+        """A "different" verdict's own bookkeeping -- `belief.callouts`'
+        merge-echo skip reads this via `is_believed_distinct` so a pair
+        this store has already told apart is never silenced as an echo of
+        each other again."""
+        self._believed_distinct.add(frozenset((a_id, b_id)))
+
+    def is_believed_distinct(self, a_id: str, b_id: str) -> bool:
+        return frozenset((a_id, b_id)) in self._believed_distinct
+
+    def merge_contact(self, *, into: str, source: str) -> None:
+        """The "same" verdict's own action: fold every percept `source`
+        (B) has ever contributed into `into` (A), through the existing
+        `Contact.record` -- in the order `source` received them -- then
+        remove `source` entirely. **No fresh `Contact(...)` for A** (the
+        plan's own Co-moving Fields requirement): `into`'s own identity,
+        `id`, and every belief field not touched by this fold (e.g. its
+        `classification_lockout_until_sim`) survive unchanged.
+
+        Lifecycle events (a `CONTACT_REACQUIRED` for a lost A) are **not**
+        emitted here -- they fall out of the very next `tick()` call
+        comparing A's own `last_emitted_certainty` against its
+        now-refreshed `last_seen_sim`, the same unmodified mechanism every
+        other re-observation already uses. This method only moves belief
+        state; `tick()` is still the one place a lifecycle event is ever
+        materialised.
+
+        Stale `_observation_id_to_contact_id` entries naming `source` are
+        remapped to `into`, so a later `continues_observation_id` lookup
+        against one of B's old observations resolves to the contact that
+        now actually holds that history. Open checks and believed-distinct
+        pairs naming `source` are dropped -- there is no longer a `source`
+        contact for either to refer to."""
+        a = self._contacts.get(into)
+        b = self._contacts.get(source)
+        if a is None or b is None:
+            return
+        for observation_id in b.contributing_observation_ids:
+            observation = self._observations.get(observation_id)
+            if observation is None:
+                continue
+            a.record(percept_of(observation))
+            self._observation_id_to_contact_id[observation_id] = into
+        del self._contacts[source]
+        self._checks.pop(source, None)
+        self._believed_distinct = {
+            pair for pair in self._believed_distinct if source not in pair
+        }
+
+    def mark_lost_now(self, contact_id: str, now_sim: float) -> None:
+        """The "absent" verdict's own action on A: make `belief.decay.
+        certainty_of` read `"lost"` for `contact_id` as of `now_sim`.
+
+        **A stated simplification, not a new belief-state concept.**
+        `certainty_of` has no stored state of its own -- it is a pure
+        function of `now_sim - contact.last_seen_sim` against `belief.
+        decay.LOST_THRESHOLD_S`. Rather than add a second, parallel
+        "declared absent" flag that `certainty_of` would also have to
+        consult, this rewinds `last_seen_sim` far enough into the past
+        that the existing threshold comparison already answers `"lost"`.
+        The cost, named rather than hidden: a later query of "how long ago
+        was A actually last seen" would read this rewound value, not the
+        true last sighting -- acceptable for what `mark_absent` exists to
+        do (make the *lifecycle* read lost immediately so `tick()`'s own
+        unmodified comparison fires `CONTACT_LOST` next poll), but a
+        narrower, dedicated field would be the more honest fix if a future
+        consumer ever needs the true last-seen time of a contact that was
+        separately declared absent."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        contact.last_seen_sim = now_sim - LOST_THRESHOLD_S - 1.0
+
+    def record_relocation(self, contact_id: str, now_sim: float) -> None:
+        """Mints a `CONTACT_RELOCATED` event for `contact_id` -- the
+        "same" verdict's own action when Decision 3's relocation rule
+        fires (`belief.expected_area.resolve_checks`'s own caller is the
+        only one that knows whether it fired; this method only appends
+        the event). Deliberately separate from `tick`'s own lifecycle
+        derivation: `CONTACT_RELOCATED` is not a before/after comparison
+        over stored state, it is a fact `resolve_checks` has already
+        established. A no-op if `contact_id` is unknown (defensive only --
+        `resolve_checks` only ever calls this for a contact it just
+        fetched)."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        self._events.append(
+            Event(
+                id=self._new_event_id(),
+                contact_id=contact_id,
+                kind=CONTACT_RELOCATED,
+                t_sim=now_sim,
+                certainty=certainty_of(contact, now_sim),
+            )
+        )
+
+    def record_absence(self, contact_id: str, now_sim: float) -> None:
+        """Mints a `CONTACT_ABSENT` event for `contact_id` -- the
+        "absent" verdict's own action, called by `resolve_checks` only
+        when A had previously been announced (plan: *"spoken only if A
+        was announced before"*). Separate from `mark_lost_now`, which
+        does the state rewind that makes the *lifecycle* read lost; this
+        method only appends the event, same posture as `record_relocation`
+        above. A no-op if `contact_id` is unknown."""
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return
+        self._events.append(
+            Event(
+                id=self._new_event_id(),
+                contact_id=contact_id,
+                kind=CONTACT_ABSENT,
+                t_sim=now_sim,
+                certainty=certainty_of(contact, now_sim),
+            )
+        )
 
     @property
     def contacts(self) -> list[Contact]:
@@ -1264,27 +1513,77 @@ class ContactStore:
                 ]
 
                 if len(passing) == 1:
-                    # A single passing candidate is also unambiguous --
-                    # same reset as the continuity branch above.
-                    contact = passing[0]
-                    contact.record(percept)
-                    contact.fold_displacement_m = 0.0
+                    fold_target: Contact | None = passing[0]
+                    ambiguous_fold = False
                 else:
                     fold_target = (
                         self._fold_target_for_ambiguous_candidates(passing, percept)
                         if len(passing) >= 2
                         else None
                     )
-                    if fold_target is not None:
-                        # The one call site that folds: `ambiguous_fold=True`
-                        # is what tells `Contact.record` to bound this
-                        # fuse's own displacement (`plans/
+                    ambiguous_fold = True
+
+                observer = GeoPosition(
+                    x=percept.ownship_at_observation.x,
+                    z=percept.ownship_at_observation.z,
+                    alt_m=percept.ownship_at_observation.alt_m,
+                )
+
+                # `plans/expected-area-look/plan.md` Stage 3a's trigger,
+                # "amended 2026-11-11" (`belief.expected_area.
+                # eligible_trigger_target`/`a_out_of_view` -- see that
+                # module for why the literal "A was not seen this poll"
+                # reading was wrong and what replaces it,
+                # `.claude/agent-memory/implementer/
+                # feedback_tautological_trigger_precondition.md`): a
+                # gate-path fold against an eligible, out-of-view A never
+                # folds -- B is founded fresh and held instead, so a
+                # check can decide whether B really is a second group.
+                # The "Third concurrent check" cap (plan, main loop's
+                # call 2026-11-11): at `MAX_OPEN_CHECKS` already open,
+                # this path falls through to today's fold unchanged --
+                # "B called new" is not possible here (fold_target, if
+                # any, is a real candidate), so the cap is honoured by
+                # simply not opening a third check.
+                # `self._expected_area_checks` (main loop's call,
+                # 2026-11-11, `__init__`'s own docstring): off by default,
+                # so every pre-existing `ContactStore()` call site -- in
+                # particular the gate-characterisation tests that hand-
+                # build an `Observation` with no continuity -- is
+                # unaffected until a caller opts in.
+                if (
+                    self._expected_area_checks
+                    and fold_target is not None
+                    and len(self._checks) < MAX_OPEN_CHECKS
+                    and eligible_trigger_target(fold_target, percept.t_sim, observer)
+                ):
+                    contact = Contact.from_percept(self._new_contact_id(), percept)
+                    self._contacts[contact.id] = contact
+                    threat = b_is_threat(contact)
+                    self.open_check(
+                        ExpectedAreaCheck(
+                            b_id=contact.id,
+                            a_id=fold_target.id,
+                            kind="fold",
+                            opened_sim=now_sim,
+                            a_snapshot=copy.deepcopy(fold_target),
+                            released=threat,
+                            released_sim=now_sim if threat else None,
+                        )
+                    )
+                elif fold_target is not None:
+                    if ambiguous_fold:
+                        # The one call site that folds ambiguously:
+                        # `ambiguous_fold=True` is what tells
+                        # `Contact.record` to bound this fuse's own
+                        # displacement (`plans/
                         # bounded-fold-displacement/plan.md`, `BL-B58`/
-                        # `BL-B59`) -- the budget tracks the *worst single
-                        # unretired fold* (`max()`, never accumulated),
-                        # never reset here (`Contact.fold_displacement_m`'s
-                        # own docstring; `plans/group-cohesion-admission-
-                        # gate/plan.md` §4).
+                        # `BL-B59`) -- the budget tracks the *worst
+                        # single unretired fold* (`max()`, never
+                        # accumulated), never reset here
+                        # (`Contact.fold_displacement_m`'s own
+                        # docstring; `plans/
+                        # group-cohesion-admission-gate/plan.md` §4).
                         contact = fold_target
                         position_before = contact.position
                         contact.record(percept, ambiguous_fold=True)
@@ -1296,8 +1595,57 @@ class ContactStore:
                             ),
                         )
                     else:
-                        contact = Contact.from_percept(self._new_contact_id(), percept)
-                        self._contacts[contact.id] = contact
+                        # A single passing candidate is also
+                        # unambiguous -- same reset as the continuity
+                        # branch above.
+                        contact = fold_target
+                        contact.record(percept)
+                        contact.fold_displacement_m = 0.0
+                else:
+                    contact = Contact.from_percept(self._new_contact_id(), percept)
+                    self._contacts[contact.id] = contact
+
+                    # Stage 3a's trigger, third case: B founded fresh
+                    # (no gate match at all) -- is there an earlier,
+                    # eligible A it could plausibly be an echo of, or
+                    # sit beside? At the cap, both outcomes
+                    # (`merge_echo_or_beside_lost_target` returning
+                    # "echo" or "beside_lost") already equal "leave B
+                    # as founded" -- Decision 2's "silent" for echo
+                    # and "B called new" for beside-lost are both
+                    # exactly what not opening a check already does
+                    # here -- so the cap is honoured by skipping the
+                    # scan entirely.
+                    if (
+                        self._expected_area_checks
+                        and len(self._checks) < MAX_OPEN_CHECKS
+                    ):
+                        certainty_of_a_is_lost = {
+                            candidate.id: certainty_of(candidate, now_sim) == "lost"
+                            for candidate in self._contacts.values()
+                            if candidate.id != contact.id
+                        }
+                        match = merge_echo_or_beside_lost_target(
+                            contact,
+                            list(self._contacts.values()),
+                            now_sim,
+                            observer,
+                            certainty_of_a_is_lost=certainty_of_a_is_lost,
+                        )
+                        if match is not None:
+                            nearest, kind = match
+                            threat = b_is_threat(contact)
+                            self.open_check(
+                                ExpectedAreaCheck(
+                                    b_id=contact.id,
+                                    a_id=nearest.id,
+                                    kind=kind,
+                                    opened_sim=now_sim,
+                                    a_snapshot=copy.deepcopy(nearest),
+                                    released=threat,
+                                    released_sim=now_sim if threat else None,
+                                )
+                            )
 
             claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id
@@ -1897,11 +2245,21 @@ class ContactStore:
         # `BL-B23`: filtered to not-`lost` contacts -- see this method's
         # own docstring above for why this is the right exclusion
         # (clustering input only) rather than pruning `_contacts` itself.
+        # `plans/expected-area-look/plan.md` Stage 3a's own "while held"
+        # bullet ("excluded from `GroupStore.reconcile` ... still glassed
+        # for classification") -- a held B's own identity is not yet
+        # settled, so it must not be clustered as a group member (or
+        # counted toward one) until the check resolves. `has_open_check`,
+        # not `callout_held`: this exclusion applies for the whole hold,
+        # regardless of whether the check has already released B's own
+        # callout (release only ever changes whether B's *callout* is
+        # held, per that method's own docstring).
         self._groups.reconcile(
             [
                 contact
                 for contact in self._contacts.values()
                 if certainty_of(contact, now_sim) != "lost"
+                and not self.has_open_check(contact.id)
             ],
             now_sim,
             trace_sink=group_trace_sink,
