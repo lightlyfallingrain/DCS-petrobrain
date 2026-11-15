@@ -258,6 +258,23 @@ construction site, found only by grep, not by the transition narrative).
 construction sites to grep against as of this plan revision; the Implementer's grep still applies
 once Stage P1 lands the type.)
 
+**Implementer's grep, Stage P1 landed (2026-11-15):** `grep -rn "ParkedFlightState(" body-layer/src
+body-layer/tests` finds exactly one production construction site
+(`belief/ai_pilot_wheel.py`'s `advance_parked_flight_state`, which only ever `replace()`s via a
+fresh `ParkedFlightState(...)` built from the latest feed, same single-construction-site shape
+`GuidanceUnitState` already has) plus `body.py`'s own `field(default_factory=ParkedFlightState)` —
+nothing else, and nothing in the Co-moving Fields table above is missing a row. **One naming
+departure from this table's own wording, stated here because the table uses `apw.mode`/`apw.press`
+as if they were literal Lua table fields and they are not**: Stage P1's `Export.lua` implementation
+uses individual named module-level locals (`ai_pilot_parked_active`, `ai_pilot_mode_text`,
+`ai_wheel_pending_cmd`, etc.), not a single Lua table named `apw` — there is no `apw.` assignment
+anywhere in `Export.lua` to grep for. The wire-level JSON keys *are* `apw_`-prefixed
+(`apw_parked_active`, `apw_mode_text`, …, matching this table's intent), and the table's own rows
+read correctly if `apw.mode` is read as "the AI-pilot-wheel mode state" rather than a literal field
+access. P2-P4 should keep using individual locals for the same reason P1 did: Lua has no hoisting,
+and a single `apw` table assembled before every field exists would invite exactly the
+declared-below-its-use bug this project's own `push_ptt_state` incident already demonstrated.
+
 ### Behaviour constants
 
 | Constant | Default | Where | Why |
