@@ -67,6 +67,79 @@ pre-alignment parameters. Unparking returns the aircraft to the player at once, 
 Naked-eye lookout continues throughout; this mode never touches the 9K113 sight itself (the
 player is on it).
 
+### Amended 2026-11-15 (vocabulary, ICS capture, cycle orders)
+
+Three things the user settled in the same message that answered plan check **Q-P1**
+(`plans/flight-control/alignment.md`, "Plan check Q-P1 answered by the user"), folded in below
+rather than re-cut — **the stage structure (P0–P6) is unchanged**; only P1–P4's content, the
+Co-moving Fields table, the Behaviour constants table and the Risks list are edited in place.
+Source, verbatim: `plans/flight-control/explore-notes.md`, "U3 decided, mode-cycle orders, and
+the player command vocabulary"; the cycle orders are also now carried in
+`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` §5's state diagram.
+
+**1. ICS capture from the operator seat is a new prerequisite stage, P-ICS, before P0** — see its
+own write-up, inserted just above Stage P0 below. *"Audio capture must listen to both pilot and
+copilot ICS (VOIP) triggers and treat them equally ... This is prerequirement for BL-16 player
+commands to work"* (user, verbatim). Gates every parked-mode flight in this series, since the
+pilot speaks from the CPG seat while parked.
+
+**2. The short-left cycle has known orders**, so the mode-cycle loop (P1/P2) can bound its own
+attempt count instead of an open-ended "escalate after N attempts": **`FLT > CBTM > FLT`** and
+**`HVR > HVRT > CBTM > HVR`**. CBTM has two homes — which one a short-left returns to depends on
+whether the aircraft was in forward flight or hover before the cycle into CBTM. The automatic
+(DCS-driven) transitions are unchanged from the research note: FLT→HVR on speed 0 + slowing,
+HVR→FLT on speed > 0 + accelerating, FLT/HVR→CBTM on CPG-view entry, CBTM→FLT/HVR on CPG-view
+exit (user not certain which — the "read the mode every tick, never assume" posture this plan
+already states covers that uncertainty without a design change). **U3 is answered**: a
+player-driven mode press is reasserted over at once, not deferred — *"reassert at once — the
+goal is to use the wheel command via Petrobrain, not player directly"* (user, verbatim). New
+constant `MODE_CYCLE_MAX_ATTEMPTS = 3` (table below) replaces the open-ended attempt language in
+P1/P2 — every mode in the cycle is at most 2 presses from any other, so 3 is a comfortable bound,
+not a guess.
+
+**3. The player vocabulary is now fully specified**, replacing the placeholder examples P2/P3
+used ("turn heading 3 1 5", "hold 200 m radar", "speed 2 2 0"):
+
+| Spoken | Token | Mode needed | Action / press | Notes |
+|---|---|---|---|---|
+| "level flight" | `level_flight` | FLT/HVR | `set_parked_heading`/`altitude`/`speed`, each to the **current** read value | stabilise, not a numeric target the pilot names |
+| "Heading &lt;deg&gt;" | `turn_heading` | FLT/HVR | `set_parked_heading(deg)` | numeric; audio-adapter slot parser, built here first (P2), reused by mode 1's own Stage 4 later |
+| "Heading &lt;N/NE/E/…&gt;" | `turn_heading` | FLT/HVR | same, after an 8/16-point compass→degrees translation | new audio-adapter slot parser |
+| "Turn left/right &lt;deg&gt;" | `turn_heading_relative` | FLT/HVR | `set_parked_heading(current ± deg)`, computed once at command time | relative, not re-derived as the aircraft turns |
+| "Break turn left/right" | `cbtm_break` | CBTM | Lua: long press left/right, no hold — 90° break | cycles to CBTM first if needed, same cycle-then-press shape as `cbtm_align` |
+| "Break away" | `cbtm_break_away` | CBTM | Lua: long press left, wait `BREAK_AWAY_GAP_S`, long press left again | the two-`BREAK LEFT` 180 — "Mi-24 turns faster left" (user); `BREAK 180`'s own press is avoided, direction undetermined |
+| "Align" / "Align [for] launch" | `cbtm_align` / `cbtm_align_for_launch` | CBTM | unchanged from Stage P3 | |
+| "Straight" / "level off" | `level_off` | any | stop turn, hold current heading; **while `align_phase` is `"aligning"`/`"launch_aligned"`, this token is F-P1's spoken abort** (ties into Stage P4's recovery trigger list) | one token, two meanings gated by `align_phase` |
+| "Speed &lt;value&gt;" | `set_speed` | FLT/HVR | nearest step; "max" is a legal value | |
+| "Slow down" / "Speed up" | `speed_step` | FLT/HVR | one step down/up | |
+| "Hover" | `set_speed` with value 0 | FLT/HVR | step 0 | causes the automatic FLT→HVR transition once DCS itself slows to hover |
+| "alt[itude] &lt;value&gt; [radar/barometric]" | `set_altitude` | FLT/HVR | centre-toggle reference if it differs, then hold to value | |
+| "climb/descend &lt;m&gt;" | `altitude_step` | FLT/HVR | relative, current ± m | |
+| "hold alt[itude]" | `hold_altitude` | FLT/HVR | freezes the goal at the current read altitude | |
+| "left/right/forward/back" | `hvrt_translate` | **HVRT only** | Lua holds the press open until body-layer clears it — see Stage P2's HVRT sub-section | state-gated, not grammar-gated — see note below |
+| "Hold" | `hvrt_hold` | HVRT only, while a translate is active | clears `held_translate_direction` | no existing token collision (grepped `crew_console.py`/`vocabulary.py`, none) |
+| "up/down" | `hvrt_step` | HVRT only | Lua: short up/down, 2 m per tap, no hold semantics | |
+
+**Vocabulary collision check, done rather than assumed**: `_RELATIVE_SCAN_TOKENS` already uses
+bare "left"/"right" as *sectors* (`scan left`/`scan right`, `body-layer/src/belief/
+crew_console.py` ~L321) and the step-through-contacts family uses them too (`step left`/`step
+right`, ~L3774) — but **every existing use pairs the direction word with a verb** ("scan",
+"step"); `audio-adapter/src/vocabulary.py`'s `PHRASES` table has no bare single-word phrase
+today (confirmed by grep, not assumed). The new HVRT tokens are the first **bare** "left"/
+"right"/"forward"/"back"/"up"/"down"/"hold" — `command_matcher.py`'s `VERB_ANCHOR_WORDS` is
+derived from each phrase's own first word, so a bare phrase anchors on itself and would match
+fine grammatically, but it would also fire outside HVRT with no mode check of its own. So this
+needs **state-gated dispatch, not grammar alone**: `CrewConsole.handle_command` must route
+`hvrt_translate`/`hvrt_step`/`hvrt_hold` to the AI-wheel handler only when `ai_mode == "HVRT"`,
+and treat them as unmatched (fall through, same as any other out-of-context token) otherwise.
+
+**`/command-map` must be redrawn once this vocabulary lands** — it spans Stage P2 (most of the
+table above), Stage P3 (break/break-away), and Stage P4 (`level_off` as abort token). No separate
+stage number is needed for the redraw itself: the merge skill's own stale-check
+(`.claude/skills/command-map/SKILL.md`) fires automatically on whichever merge lands
+`vocabulary.py` changes, per root `CLAUDE.md`'s existing merge sequence — flagged here so it is
+not forgotten, not because this plan needs to own a new stage for it.
+
 ### Architecture decision: per-frame press timing lives in Export.lua, not body-layer
 
 **The same split mode 1 already designed, reused rather than invented.** The wheel distinguishes
@@ -175,6 +248,15 @@ construction site, found only by grep, not by the transition narrative).
 | `goal` | external (voice) | new heading/altitude/speed command | `goal_seq` + 1; latest wins (E-P4); if `align_phase != "none"`, the goal is recorded but **not** issued to Lua until recovery reaches `"none"` (the alignment overrides it, per the open-assumption note in `alignment.md`) |
 | Lua `apw.mode` | internal | mode read differs from what the current goal/align_phase needs | one short-left press issued, re-read next frame; no second press before the readback confirms the mode changed |
 | Lua `apw.press` | internal | a press is open (long-hold in progress) and the mode changes underneath it | press released immediately (no held press survives a mode change — mirrors mode 1's own "a long hold in progress ends immediately on a mode change") |
+| mode-cycle attempt count | internal (Lua) | `MODE_CYCLE_MAX_ATTEMPTS` (3) exhausted without reaching the needed mode | `goal_progress = "mode_blocked"`; the goal itself is **not** dropped — retried next poll (added 2026-11-15: the open-ended "escalate after N" language is now a named bound, per the Amended note above) |
+| `held_translate_direction` | external (voice: left/right/forward/back, HVRT only) | HVRT translate command | set to that direction; Lua opens the matching outer-ring press that same frame it reads the change |
+| `held_translate_direction` | external (voice: "Hold") | hold command | cleared to `None`; Lua releases the press the same frame it reads the clear |
+| `held_translate_direction` | internal (Lua, `HVRT_TRANSLATE_MAX_HOLD_S` elapsed) | safety timeout | Lua releases the press and reports `"released_timeout"`; body-layer clears its own copy of the field on the next poll that observes the released status — no second source of truth held past that poll |
+| `held_translate_direction` | internal | mode changes away from HVRT underneath an open translate | cleared and the press released immediately — same mode-change rule as the general `apw.press` row above |
+
+(added 2026-11-15, the "Amended" note above — `ParkedFlightState`/`apw` still have no
+construction sites to grep against as of this plan revision; the Implementer's grep still applies
+once Stage P1 lands the type.)
 
 ### Behaviour constants
 
@@ -188,6 +270,58 @@ construction site, found only by grep, not by the transition narrative).
 | `LONG_PRESS_HOLD_S` | 0.7 (margin above the confirmed 0.5 s threshold) | Export.lua constants block | the far-slot/long-press timing; **would want the X-T26 mechanism, noted not improvised, same as the 9K113 servo block** |
 | `SHORT_PRESS_PULSE_S` | one or two frames (the existing `handle_petrovich_search_command` pattern) | Export.lua | short-tap timing |
 | `MODE_READ_SETTLE_S` | ~1.0 (user's recon §7 estimate, "~1 s AI lag") | Export.lua | how long to wait after a mode-cycle press before trusting the new `mode_text` |
+| `MODE_CYCLE_MAX_ATTEMPTS` | 3 (added 2026-11-15) | Export.lua constants block — the loop itself lives there, per the Architecture decision above | the known cycle orders (`FLT⇄CBTM`, `HVR→HVRT→CBTM→HVR`) bound every reachable mode within 2 presses; 3 gives one spare attempt rather than guessing at an open-ended N |
+| `BREAK_AWAY_GAP_S` | 2.0 (user, verbatim — added 2026-11-15) | Export.lua constants block | the gap between the two `BREAK LEFT` presses `cbtm_break_away` issues |
+| `HVRT_TRANSLATE_MAX_HOLD_S` | 15.0 (architect default, **not** user-specified — flag as a judgement call, revisit if a sortie shows it firing in ordinary use; added 2026-11-15) | Export.lua constants block | safety ceiling on a held HVRT translate press if the spoken "Hold" is lost |
+
+### Stage P-ICS — ICS capture from the operator seat (prerequisite)
+
+Precedes P0; gates every parked-mode flight in this series, per the "Amended 2026-11-15" note
+above — the pilot speaks from the CPG seat while parked, and today's capture path gates only on
+the pilot's own trigger.
+
+**Decision: one combined sample, not a per-seat pair.** `Export.lua`'s `push_ptt_state` (~L662)
+currently reads only `ARG_PILOT_PTT = 738` (pilot). Extend it to also read **arg 856**
+(`OP-STICK-PTT-PTR`, operator seat, `crew_member_access = {1}`, identical encoding — first-party,
+DCS-SRS's own `Mi24P.lua` reads it for the copilot seat too) and send both raw values on the same
+line: `{"t":..., "ptt":<pilot raw>, "ptt_op":<operator raw>}`. `schema.ptt.PttSample` gains a
+second raw field (`raw_operator: float`); its `intercom`/`radio` properties become an **OR across
+both raw values** — the trigger means "the crew channel is open", regardless of which seat
+pressed it, which is exactly what the one consumer (`audio-adapter/src/ptt_source.py`'s
+`DcsPTT.is_down`) wants and already reads (`payload.get("intercom")`/`"radio"`) with **no change
+needed there**. `aircraft-layer/src/api/server.py`'s `_handle_ptt_state` (~L424, the SPU-8 gate)
+also needs **no change**: `Spu8Sample.gate_open` (`schema/spu8.py`) already ANDs the pilot's
+NET-1 switch (arg 377) with the co-pilot's ICS-power switch (arg 664) regardless of which seat is
+talking, so the existing gate is already seat-symmetric.
+
+**Why this over a `seat` field + OR-in-audio-adapter**: tagging each sample `"seat":
+"pilot"|"operator"` and having `DcsPTT` fetch/OR two states is a bigger diff — a second cache
+slot or a second poll, and a second place (`audio-adapter`) that has to know the OR rule — for no
+behavioural gain, since nothing downstream needs to know *which* seat spoke. **The seat is still
+useful diagnostics**: add an optional `last_seat: "pilot"|"operator"|"both"|None` field to
+`PttSample`/`to_api_dict` (whichever raw value's own predicate fired; `"both"` if both did),
+read only by `--debug` logging, never by `DcsPTT` or any gating logic. This keeps "the Lua layer
+carries the raw value and decides nothing" true throughout: Lua ships two numbers, the Python
+schema layer does the OR — the same layer that already decides `intercom`/`radio` from one
+number — and `audio-adapter` is unchanged.
+
+**Affected files**: `aircraft-layer/dcs-export/Export.lua` (`push_ptt_state`, the `ARG_PILOT_PTT`
+block — add `ARG_OPERATOR_PTT = 856` beside it, extend the debounce-on-change check to fire on
+either value moving); `aircraft-layer/src/schema/ptt.py` (`PttSample`, `from_dict`,
+`to_api_dict`). `aircraft-layer/src/collector/server.py`'s `"ptt" in data` line-routing check
+(~L403) is unaffected — same wire key, more fields. No change to `audio-adapter/src/
+ptt_source.py` or `aircraft-layer/src/api/server.py`'s `_handle_ptt_state`.
+
+**Tests**: `PttSample.from_dict` with only `ptt_op` moved (pilot untouched), both moved on the
+same frame, and the `intercom`/`radio` OR truth table (neither / pilot-only / operator-only /
+both); Export.lua's debounce-on-either-change, desk-checkable the same way `push_ptt_state`'s
+existing logic already is (`aircraft-layer/CLAUDE.md`'s Export.lua testing note — no live DCS
+needed for parse/encode, only the live check below).
+
+**Flight P-ICS** (test card, named branch): from the **operator seat**, hold the ICS trigger to
+its intercom stop (not the pilot's), confirm `GET /ptt/state`'s `"intercom"` goes true and
+capture starts — the same observable behaviour the pilot's own trigger already produces. Release,
+confirm it drops. Then repeat from the pilot seat, to confirm nothing regressed.
 
 ### Stage P0 — measure (desk pass already done; one short Windows probe)
 
@@ -235,11 +369,14 @@ Minimal working version: the park signal takes over, holds altitude, does nothin
 ### Stage P2 — heading, altitude, speed goals
 
 - **Lua**: the nudge loop — given a goal (one of heading/altitude/speed), read current mode, cycle
-  to FLT/HVR if needed (short-left, re-read, repeat — bounded by `MODE_READ_SETTLE_S` per attempt,
-  escalate after N attempts rather than loop forever), then issue the single press the goal needs
+  to FLT/HVR if needed (short-left, re-read, repeat — bounded by `MODE_READ_SETTLE_S` per attempt
+  and `MODE_CYCLE_MAX_ATTEMPTS` (3) attempts overall, now a known quantity rather than an open
+  engineering default, per the "Amended 2026-11-15" note above: the cycle orders are known, and
+  every mode is at most 2 presses from any other), then issue the single press the goal needs
   (short tap for speed, long hold for altitude/heading, released once the readback is within
   tolerance or the body-layer goal changes), report `goal_progress: "pressing"|"settled"|
-  "mode_blocked"`.
+  "mode_blocked"` — `"mode_blocked"` on exhausting the attempt bound leaves the goal outstanding
+  for retry next poll, never silently dropped.
 - **Body-layer**: `set_parked_heading`/`set_parked_altitude`/`set_parked_speed`; interleaving
   across more than one outstanding goal (one parameter's step per poll, rotating); readback on
   acceptance, mirroring mode 1's Decision 10 shape (*"heading 3 1 5"*, *"speed 2 0 0"* — rounded to
@@ -248,28 +385,55 @@ Minimal working version: the park signal takes over, holds altitude, does nothin
 - Audio-adapter: reuse the slot parsers mode 1's plan already designed for `turn_heading`,
   `hold_altitude`, `speed` (Affected Modules, mode-1 series below) — **built here, first**, so
   mode 1's own Stage 4 does not redo this work; cross-reference added to that stage when mode 1 is
-  picked up.
+  picked up. New slot parsers needed for the full vocabulary table above: compass-point→degrees
+  (`turn_heading`'s second form), `turn_heading_relative`, `speed_step`, `altitude_step`.
+- **HVRT (hover translate) vocabulary — held press and the safety timeout.** "left"/"right"/
+  "forward"/"back" (bare direction, state-gated to `ai_mode == "HVRT"`, per the vocabulary note
+  above) set `held_translate_direction` to that direction; "Hold" clears it. **Lua holds the
+  actual press** — the Architecture decision above already gives Export.lua ownership of
+  press/hold timing, unchanged here — reading `held_translate_direction` each frame and keeping
+  the matching outer-ring press open for as long as it is non-`None`, releasing the instant
+  body-layer clears it (on "Hold") **or** `HVRT_TRANSLATE_MAX_HOLD_S` elapses, whichever comes
+  first. The timeout is a safety ceiling, not the normal stop path — the normal stop is always the
+  player's own "Hold" — but it exists because that stop is spoken and can be lost (a network drop
+  between audio-adapter and body-layer, a missed recognition), while an open wheel press cannot
+  discover that on its own. Lua reports `goal_progress: "released_timeout"` when it fires, so the
+  test card has something concrete to look for. "up/down" (`hvrt_step`) is a discrete short press,
+  2 m per tap, no hold semantics at all — unaffected by the timeout.
 - **Flight P2**: park, speak a heading, then a speed, then an altitude in quick succession
   (interleaving); confirm the overlay converges on all three without one blocking another, within
   the tolerances, and the mode cycles correctly between FLT (speed/altitude/heading) with no
-  player-visible stall.
+  player-visible stall. Then, from hover, cycle into HVRT and say "left", hold a few seconds, say
+  "Hold"; confirm the AI translates only while held and stops on the spoken word, and separately
+  confirm the AI eventually stops on its own if "Hold" is never said (the timeout, not flown to
+  full duration — confirm the mechanism exists via `goal_progress`, not by waiting out 15 s live).
 
-### Stage P3 — alignment on the player's word (E-P7)
+### Stage P3 — alignment and break turns on the player's word (E-P7)
 
 - **Body-layer**: `cbtm_align`/`cbtm_align_for_launch`, each refusing (no "unable" — see **U2**)
   outside the states where CBTM is reachable; snapshotting `pre_align_snapshot` on
-  `cbtm_align_for_launch`.
+  `cbtm_align_for_launch`. Same refusal posture for `cbtm_break`/`cbtm_break_away` — outside
+  CBTM-reachable state, the mode-cycle-then-press sequence is expected to succeed, per U1/U2.
 - **Lua**: mode-cycle to CBTM, short-up (`cbtm_align`) or long-press-up (`cbtm_align_for_launch`,
-  held for `LONG_PRESS_HOLD_S` then released — a discrete action, not an open hold).
+  held for `LONG_PRESS_HOLD_S` then released — a discrete action, not an open hold); long press
+  left/right, no hold (`cbtm_break`); long press left, wait `BREAK_AWAY_GAP_S`, long press left
+  again (`cbtm_break_away` — never the single `BREAK 180` press, direction undetermined per the
+  wheel research).
 - **Flight P3**: from the operator seat, say "align" then "align for launch"; confirm the AI
   boresights toward the target as the explore notes describe, and that no automatic recovery fires
-  yet (that is P4).
+  yet (that is P4). Then say "break turn left", "break turn right", and "break away"; confirm the
+  90° and the two-press 180 against the compass, and that nothing happens if the aircraft was not
+  already in or reachable from CBTM.
 
 ### Stage P4 — recovery (E-P8, E-P9, F-P1, F-P2)
 
 - **Body-layer**: `decide_ai_pilot_wheel`'s recovery branch — launch detection (payload count
-  drop, see "Launch detection" above), spoken abort, AGL floor, IAS ceiling; `recover_to_level`;
-  *"leveling off"*; the post-recovery goal sequencing (Q7/Q8) from the Co-moving Fields table.
+  drop, see "Launch detection" above), spoken abort (the `level_off` token — "straight"/"level
+  off" — while `align_phase` is `"aligning"`/`"launch_aligned"`, per the vocabulary table above;
+  the same token stops an ordinary turn and holds current heading when no alignment is in
+  progress, so the dispatcher's own `align_phase` check is what decides which meaning fires), AGL
+  floor, IAS ceiling; `recover_to_level`; *"leveling off"*; the post-recovery goal sequencing
+  (Q7/Q8) from the Co-moving Fields table.
 - **Lua**: mode-cycle CBTM → FLT on a recovery signal from body-layer (no new Lua mechanism — this
   is the same goal/mode-cycle machinery P2 built, just triggered by a different caller).
 - **Flight P4**: align for launch at a safe height, let it run past 40 m AGL without firing —
@@ -296,10 +460,11 @@ against E-P1, E-P3–E-P11 (E-P2 withdrawn) and Q1–Q8, written into `docs/acce
 
 | Expectation | Closed by |
 |---|---|
+| (prerequisite, not an E-P row) | Stage P-ICS — gates every parked-mode flight below; without it, the player's spoken goals from the CPG seat never reach Petrovich at all |
 | E-P1 (park is the handover, holds current state) | Stage P1 |
 | E-P3 (spoken goals, honest readback, interleaved) | Stage P2 |
 | E-P4 (latest wins) | Stage P2 |
-| E-P5 (never undoes the player) | Stage P2's "assume no player mode change" posture (**U3**) |
+| E-P5 (never undoes the player) | **Narrowed by the user, 2026-11-15, ALIGNED** (`alignment.md`, Plan check Q-P1): the player is not expected to operate the wheel while parked mode runs; if he does, Petrovich's goal wins and reasserts at once (**U3**, answered) |
 | E-P6 (`HDG LOS` never pressed) | Stage P1 — short-right is never in the press vocabulary at all, not merely unused |
 | E-P7 (alignment only on the player's word) | Stage P3 |
 | E-P8 (level off and guidable after launch) | Stage P4 |
@@ -319,13 +484,23 @@ against E-P1, E-P3–E-P11 (E-P2 withdrawn) and Q1–Q8, written into `docs/acce
   0.5 s threshold in a *different* wheel context (Petrovich's sensor wheel, not the AI pilot
   wheel). P0-2 exists because the threshold is a DLL constant shared across wheels per the recon,
   but has not been directly confirmed on this wheel.
-- **Mode-cycle order is unknown beyond the pairs the user named** (`HVR↔HVRT`, `FLT↔CBTM`). The
-  "press, read, compare, repeat" loop (explore notes) does not need the order, but a bounded
-  attempt count is needed so an unreachable mode request degrades to `mode_blocked` rather than
-  looping forever — not specified by the user, a straightforward engineering default, not escalated.
-- **The player is assumed not to change wheel modes himself** (Q4). If he does, E-P5's "never
-  undoes the player" is not implemented for this case (**U3**) — the cycle-back could visibly fight
-  a mode the player just picked.
+- ~~Mode-cycle order is unknown beyond the pairs the user named~~ **Resolved 2026-11-15**: the
+  full short-left cycle orders are now known (`FLT⇄CBTM`, `HVR→HVRT→CBTM→HVR`, Amended note
+  above), so `MODE_CYCLE_MAX_ATTEMPTS = 3` is a bound derived from the known graph, not a guess.
+  The CPG-view-exit transition (CBTM→FLT/HVR) stays unconfirmed by the user's own account
+  ("probably though I'm not sure") — unchanged risk, covered without a design change by "read the
+  mode every tick, never assume."
+- **The player is assumed not to change wheel modes himself** (Q4). **U3 is answered, 2026-11-15**:
+  if he does, Petrovich's cycle-back reasserts at once rather than deferring — the cycle-back
+  could visibly fight a mode the player just picked, and the user has accepted that for the first
+  build (*"the goal is to use the wheel command via Petrobrain, not player directly"*).
+- **`HVRT_TRANSLATE_MAX_HOLD_S`'s default (15 s) is the architect's own judgement call, not a
+  user-specified figure** — added 2026-11-15, flagged here rather than silently treated as settled.
+- **The ICS-capture OR-of-two-raw-values design (Stage P-ICS) changes `/ptt/state`'s meaning for
+  every existing consumer**, not just this plan's own: `"intercom"`/`"radio"` now mean "either
+  seat", where before they meant "the pilot." No other current consumer is seat-specific (checked:
+  `audio-adapter`'s `DcsPTT` is the only reader), so this is believed safe, but it is a semantic
+  widening of an existing field, not an additive one.
 - **Recovery while a goal is also in flight.** If the player sets a new heading moments before a
   launch, the Co-moving Fields table's rule (alignment overrides, goal resumes only after
   `"none"`) could feel like a dropped command. Acceptable per the goal check's own reading, but
@@ -354,10 +529,12 @@ overlay channel needs forcing open (P0-1) — a fact mode 1 never needed and now
 - **U3 — the player changing the AI wheel's mode himself.** Q4's answer assumes this does not
   happen; if it does, should Petrovich's cycle-back defer to the player's choice for some window
   before reasserting the mode his goal needs (closer to E-P5's spirit), or always reassert at
-  once (simpler, matches the literal Q4 answer but risks fighting the player)? **Recommend:**
-  always reassert at once for the first build — Q4 explicitly assumed this case away, so treating
-  it specially now would be solving a problem the user has not asked for; revisit if a sortie
-  shows it happening.
+  once (simpler, matches the literal Q4 answer but risks fighting the player)?
+
+  **Answered 2026-11-15 (user, verbatim):** *"reassert at once — the goal is to use the wheel
+  command via Petrobrain, not player directly."* Always-reassert stands as the production
+  behaviour; E-P5 is narrowed accordingly (see the E-P traceability table's E-P5 row and
+  `alignment.md`'s Plan check Q-P1). No longer open.
 
 ## Series — unparked mode (mode 1): later build, preserved unchanged
 
