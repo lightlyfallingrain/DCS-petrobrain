@@ -9,6 +9,367 @@ including both 2026-10-26 addenda and the 2026-10-31 "Goal-check answers", which
 `docs/concept/flight-control-{1,2,3}.jpeg`. Where this plan and those words disagree, the words win
 and this plan is wrong.
 
+## Revised 2026-11-15 — parked mode (mode 2) is the first build
+
+**Re-cut by the Architect**, user direction 2026-11-15: *"take BL-16, remove deferred status.
+Let's build it. Let's actually start with the AI helper, that's the Player uses 9K113 case and
+it's important to get done. After that we can build our own controls-not-parked flight
+controlling."* Everything below the next divider (`## Series — unparked mode (mode 1): later
+build, preserved unchanged`) is the **original 2026-10-26/10-31 plan, untouched** — its stage
+numbers (0–6), decisions, co-moving fields and risks all still describe **mode 1 only** and are
+not re-derived here. This section is the **new, separate stage series for mode 2**, numbered
+**P0–P6** so the two series never collide. `BL-16`'s own entry
+(`body-layer/ROADMAP/BL-16.md`) already carries the two-mode split and the stage-0 finding that
+forces it.
+
+### Why two modes, and why parked first
+
+Stage 0 (mode 1's own S0-P block, flown 2026-11-01, `main`'s
+`aircraft-layer/research/2026-11-01-bl16-command-hold-probe-findings.md` — that commit is on
+`main` but not yet merged into this feature branch; its content is quoted below because it is the
+fact that forces this re-cut) found that **a per-frame `LoSetCommand(2001–2003)` write is
+completely ignored while the controls are parked** — user, verbatim: *"both pilot and copilot
+control works, but only when control is not parked. When I press to park controls, DCS AI takes
+over flying and does it's own thing overriding ours."* The probe's own log: during a held
+operator-seat override, park cross-fades the cockpit args to the AI's own values over ~1.3 s and
+the aircraft follows the AI, "no fight visible — the aircraft follows the AI, not a blend." S0-P2
+(the raw-axis override, mode 1's lead hypothesis for the parked state) is **closed negative**.
+S0-P3 (neutralise the AI while parked) was never run — the user skipped it directly to the
+fallback: *"2 - skip it. BL-16 has to go with two modes: normal ops - write control axises;
+controls parked - manipulate DCS AI via the AI wheel commands."* So **S0-P3b, the plan's own
+documented fallback, is promoted from fallback to the production design for the parked state**,
+and S0-P1/S0-P1b/S0-P2/S0-P2a–c/S0-P3/S0-P5/S0-P6 (the raw-axis-override rows for the parked
+state) are now dead rows, closed by this finding — they are **not** re-run or re-planned; they
+stay in the mode-1 series below only as the historical record of why mode 2 exists.
+
+**Why parked first, not unparked:** the parked case is the user's named key use — *"that's the
+Player uses 9K113 case and it's important to get done"* — and it is also the harder, riskier half
+(driving ED's own AI through a menu rather than writing axes Petrobrain fully owns). Building it
+first means the project's hardest unknown is resolved before the easier unparked series is
+designed in depth; the 2026-10-26/10-31 unparked plan below stays as reference and is picked up
+unchanged once mode 2 passes DoD.
+
+**Goal check:** `plans/flight-control/alignment.md`, "Goal check — parked mode (2026-11-15)".
+Verdict **ALIGNED** after the user's answers. Player expectations E-P1, E-P3–E-P11 (E-P2
+withdrawn — no spoken line on park or unpark) are the specification this series has to satisfy;
+every stage below says which E-P row it closes.
+
+### Goal (mode 2)
+
+On the park signal — no spoken handover — Petrovich takes over driving ED's own AI pilot through
+the HELPER_AI wheel (device 30), resets its held altitude to current (the fix for the AI's known
+park-sink), and from then on turns the pilot's spoken heading/altitude/speed goals into wheel
+presses that move the AI's own held values toward them, one parameter at a time, within loose
+tolerances (A9's same ±10%/20 m posture carried over). "Align" and "align for launch" are pressed
+only on the pilot's word, from the sight seat. After a launch, an abort, or crossing a safety
+floor/ceiling, Petrovich takes the AI back to level flight on his own and restores the
+pre-alignment parameters. Unparking returns the aircraft to the player at once, silently.
+Naked-eye lookout continues throughout; this mode never touches the 9K113 sight itself (the
+player is on it).
+
+### Architecture decision: per-frame press timing lives in Export.lua, not body-layer
+
+**The same split mode 1 already designed, reused rather than invented.** The wheel distinguishes
+a short press (<0.5 s) from a long press/hold (>0.5 s, `HelperAI.lua:13`'s `long_press_time =
+0.5`, confirmed live at a 0.80 s hold in
+`aircraft-layer/research/2026-09-11-petrovich-detection-readout.md`, "CONFIRMED: far slots are
+long presses") by timing a `performClickableAction(30, cmd, 1)` → `(cmd, 0)` pair on the frame
+clock. Body-layer polls at roughly 1 Hz (`CrewConsole`'s poll loop); an HTTP-round-tripped press
+sequence could not reliably land on the right side of a 0.5 s threshold, and a long **hold**
+(altitude/heading, held "until the readback reaches target") needs to watch that readback every
+frame to know when to release, not once a second. So:
+
+- **Export.lua owns**: reading `list_indication(HELPERAI_DEVICE_ID)` (the same feed index, 6,
+  that already carries Petrovich's own sensor target list — while the AI pilot flies, this page's
+  content is the AI overlay instead, per
+  `aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` §3; **unverified whether it
+  is populated with the wheel/overlay closed — Stage P0's first row**), parsing out
+  `mode_text`/`course_text`/`alt_text`/`alt_add_text`/`speed_text`, deciding the next single press
+  (a mode-cycle short-left, or the press the current goal needs), running the press/hold timing
+  itself, and reporting a status line at the usual 5 Hz push rate (mirrors
+  `run_sight_servo`/`push_sight_servo_state`).
+- **Body-layer owns**: the handover/activation state (park signal → active, per E-P1), the
+  **goal** (target heading/altitude/speed, one at a time per the interleaving rule below), the
+  alignment/recovery state machine (E-P7–E-P9), and the vocabulary. It never decides *which wheel
+  button* to press — only *what value Petrovich wants held*.
+
+This keeps one Lua-side mechanism (`list_indication` parse → mode-aware nudge loop) that both the
+heading/altitude/speed goal and the align/recovery exits use, instead of forking per command; it
+is the same "controller vs effector" separation mode 1's plan already argues for its own loop.
+
+### Actions, state params, "when" (root `CLAUDE.md`, "Behaviour as actions and params")
+
+**Actions** (one thing, explicit params, report running/succeeded/failed, never decide *when*) —
+new module `body-layer/src/belief/ai_pilot_wheel.py`:
+
+- `set_parked_heading(deg: float)`, `set_parked_altitude(m: float, reference: "radar"|"baro")`,
+  `set_parked_speed(step_kmh: float)` — each clamps to limits, returns the value actually set
+  (A9's posture, carried over), bumps `goal_seq`.
+- `cbtm_align()`, `cbtm_align_for_launch()` — player-only triggers (E-P7); refuse (not "unable" —
+  silently ignored, since these are not spoken commands the player expects a readback failure
+  from — this needs the user, see **U2**) outside CBTM-reachable state.
+- `recover_to_level(reason: "launch"|"abort"|"agl_floor"|"ias_ceiling")` — internal-only entry
+  point `decide_ai_pilot_wheel` calls; never reachable from voice.
+
+**State params** (read-only queries over belief, typed, never DCS truth directly):
+- `parked_active: bool`, `ai_mode: "FLT"|"CBTM"|"HVR"|"HVRT"|None` (mirrors Lua's parsed
+  `mode_text`, `None` until first read), `held_heading/altitude/altitude_ref/speed: float | None`
+  (the AI's own current values, read back from the status feed — never written directly), `goal:
+  AiPilotWheelGoal | None`, `align_phase: "none"|"aligning"|"launch_aligned"|"recovering"`,
+  `pre_align_snapshot: FlightSnapshot | None`.
+
+**The "when"** — one function, `decide_ai_pilot_wheel(...)`, apart from the actions:
+- activation on the park signal, altitude-first reset (issues 2026-11-15 write-up, "on park, set
+  altitude to current, nudge if equal");
+- interleaving: when more than one goal is outstanding, step one parameter's worth of progress per
+  poll and rotate (the explore notes' own worked example: "speed +1 tap, heading −30°, alt +50 m,
+  speed +1 tap, …" — body-layer decides the **order**, Lua executes **one press** per decide call
+  and reports back before the next is issued, so the two loops stay in lockstep without body-layer
+  needing frame-level timing);
+- DCS-driven mode changes (CPG view → CBTM, hover transitions) are cycled back from toward
+  whatever mode the current goal needs (Q4); a player-driven mode change is not expected and is
+  not specially handled in this build (Q4) beyond the same cycle-back, which would otherwise
+  silently undo a player's own wheel press — flagged as **U3**;
+- alignment is entered only on `cbtm_align`/`cbtm_align_for_launch` (E-P7) and recovery fires on
+  launch detection (payload count drop, reusing the feed `[[BL-B67]]` Stage 4 already built — see
+  "Launch detection" below, never importing `belief.atgm_run` itself, per F-P3), a spoken abort, or
+  crossing AGL < `AI_PILOT_RECOVER_AGL_FLOOR_M` / IAS > `AI_PILOT_RECOVER_IAS_CEILING_KMH` (Q5);
+- recovery sequencing (Q7/Q8): snapshot heading+altitude at the recovery moment, mode-cycle to FLT
+  (which, per Q7, adopts whatever heading is current rather than an old held one — no explicit
+  heading press needed for the "hold current" half), say *"leveling off"*, then issue altitude and
+  speed goals back toward `pre_align_snapshot` (altitude climbs smoothly via the same long-hold
+  nudge loop; speed steps back **one step per decide cycle**, matching Q8's "one step at a time"
+  and the interleaving rule above — no new mechanism).
+
+### Launch detection, reusing BL-B67's feed only
+
+F-P3 (`alignment.md`): the parked case is a **role swap** (player on the sight, Petrovich flying),
+not a variant of `belief/atgm_run.py`'s own run. So `ai_pilot_wheel.py` reads
+`AircraftLayerClient.get_payload_latest()` directly (the same feed `atgm_run.py`'s
+`station_counts` already comes from) and watches for **any loaded station's count dropping
+poll-to-poll** — the same signal shape as `atgm_run.py`'s `selected_step_count_last_seen`
+bookkeeping, re-implemented locally rather than imported, because `atgm_run.py` is Petrovich's own
+run and importing it here would wire the two together exactly as F-P3 says not to. No station
+selection or knob logic is needed here — any count drop while `align_phase == "launch_aligned"`
+is the player's shot.
+
+### Co-moving Fields
+
+Trigger fires: an align/recovery sub-state-machine with fields written externally (the player's
+voice — `cbtm_align`/`cbtm_align_for_launch`/an abort word; DCS's own mode changes) and internally
+(`decide_ai_pilot_wheel`'s recovery logic; Lua's own mode-cycle presses). `ParkedFlightState` and
+the Lua `apw` table are new, so there are no construction sites yet to grep — **the Implementer
+greps `ParkedFlightState(` and every assignment to Lua `apw.` after Stage P1 and extends this
+table with any site not listed**, per step 6a's own worked lesson (`BL-B71`'s fourth
+construction site, found only by grep, not by the transition narrative).
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `parked_active` | external (park signal, arg 852/952) | park → true | altitude goal set to current (nudge if equal); `align_phase = "none"`; no spoken line (E-P2 withdrawn) |
+| `parked_active` | external (unpark) | unpark → false | Lua `apw.mode = off` same frame (held press released if any); any pending goal/align state dropped, not resumed on the next park (E-P10) |
+| `align_phase` | external (voice) | `cbtm_align` | `"aligning"`; Lua cycles to CBTM, presses short-up |
+| `align_phase` | external (voice) | `cbtm_align_for_launch` | `"launch_aligned"`; `pre_align_snapshot` captured from the **current** heading/altitude/speed goal (not the AI's raw readback, so a goal already in flight is what's restored); Lua cycles to CBTM, presses long-press-up |
+| `align_phase` | internal (`decide_ai_pilot_wheel`) | launch detected / spoken abort / AGL floor / IAS ceiling, while `"launch_aligned"` | `"recovering"`; *"leveling off"* spoken once; Lua cycles to FLT |
+| `align_phase` | internal | FLT reached and current heading/altitude snapshotted at that moment | `"recovering"` unchanged; `goal` set to `pre_align_snapshot`'s altitude and speed (heading is **not** re-issued — Q7, FLT already holds current) |
+| `align_phase` | internal | `goal` settles within band on both altitude and speed | `"none"`; `pre_align_snapshot = None` |
+| `goal` | external (voice) | new heading/altitude/speed command | `goal_seq` + 1; latest wins (E-P4); if `align_phase != "none"`, the goal is recorded but **not** issued to Lua until recovery reaches `"none"` (the alignment overrides it, per the open-assumption note in `alignment.md`) |
+| Lua `apw.mode` | internal | mode read differs from what the current goal/align_phase needs | one short-left press issued, re-read next frame; no second press before the readback confirms the mode changed |
+| Lua `apw.press` | internal | a press is open (long-hold in progress) and the mode changes underneath it | press released immediately (no held press survives a mode change — mirrors mode 1's own "a long hold in progress ends immediately on a mode change") |
+
+### Behaviour constants
+
+| Constant | Default | Where | Why |
+|---|---|---|---|
+| `AI_PILOT_RECOVER_AGL_FLOOR_M` | 40 (Q5) | body-layer `tuning.py` | crash-avoidance floor, named in the goal check as `U1`-adjacent but the number itself is already the user's own default |
+| `AI_PILOT_RECOVER_IAS_CEILING_KMH` | 280 (Q5) | body-layer `tuning.py` | over-speed avoidance ceiling, same source |
+| `AI_PILOT_ALTITUDE_TOLERANCE_M` | 20 (user) | body-layer `tuning.py`, sent in the goal | "good enough" for the hold-up/down nudge loop |
+| `AI_PILOT_HEADING_TOLERANCE_DEG` | 5 (same judgement call as mode 1's D-c; **not re-litigated, same default**) | body-layer `tuning.py` | no natural tolerance for a heading |
+| `AI_PILOT_SPEED_STEPS_KMH` | `(0, 60, 120, 160, 200, 250)` + a MAX sentinel | body-layer `tuning.py` (sequence) | the wheel's own discrete steps (user, unverified at 160 — Stage P0) |
+| `LONG_PRESS_HOLD_S` | 0.7 (margin above the confirmed 0.5 s threshold) | Export.lua constants block | the far-slot/long-press timing; **would want the X-T26 mechanism, noted not improvised, same as the 9K113 servo block** |
+| `SHORT_PRESS_PULSE_S` | one or two frames (the existing `handle_petrovich_search_command` pattern) | Export.lua | short-tap timing |
+| `MODE_READ_SETTLE_S` | ~1.0 (user's recon §7 estimate, "~1 s AI lag") | Export.lua | how long to wait after a mode-cycle press before trusting the new `mode_text` |
+
+### Stage P0 — measure (desk pass already done; one short Windows probe)
+
+No new Windows session needed beyond what the user already flew and screenshotted
+(2026-11-01/11-14); this stage closes the handful of items the existing recon flags
+`[inference]`/unverified, with a single short flight. Probe script:
+`aircraft-layer/dcs-export/Export.probe-ai-pilot-wheel.lua`, same scaffold as
+`Export.probe-9k113-flicker.lua`/the search-wheel handler, parked, operator seat, ED's AI flying.
+
+| # | Measures | Pass | Decides |
+|---|---|---|---|
+| P0-1 | `list_indication(HELPERAI_DEVICE_ID)` content while parked, wheel/overlay **closed** vs **open** | populated either way, or only with the overlay open | whether Export.lua must force the overlay visible to read it (a cosmetic HUD change the test card must mention) |
+| P0-2 | One held press at 0.7 s on each ring position in FLT, confirmed against the overlay readback moving as a long action (not a repeated short tap) | 0.7 s reliably reads as long in this wheel too | `LONG_PRESS_HOLD_S` final value |
+| P0-3 | Speed tap sequence from 0 to MAX, reading `speed_text` after each tap | the exact step list and MAX's displayed value | `AI_PILOT_SPEED_STEPS_KMH` |
+| P0-4 | Press-to-readback latency: time from a press release to the overlay text changing | a number, used as `MODE_READ_SETTLE_S`'s floor | the read-compare-repeat loop's minimum wait before re-checking |
+| P0-5 | Centre press (baro/radar toggle) from each reference, confirm readback flips and re-reading/re-setting altitude after is actually required (or the AI keeps the same numeric target across the toggle) | documented | whether the centre-press step in a reference change is needed at all |
+| P0-6 | On park, confirm the sink and the fix: set altitude to current immediately on park, observe whether the AI still sinks first | no sink, or sink stops within a few seconds of the write | confirms E-P1/the user's own write-up as the production behaviour, not an assumption |
+| P0-7 | FLT→HVR speed criterion: tap speed down to 0 in FLT, observe when `mode_text` itself flips without a mode-cycle press | a number or a settle time | whether `decide_ai_pilot_wheel` ever needs to *wait* for a DCS-driven mode change rather than press for one |
+
+Go/no-go: nothing here can fail into a blocker — every row either confirms a number already
+believed or narrows a cosmetic detail (P0-1). If P0-1 fails (overlay must be open), that is a
+**known limitation to state on the test card** (the HUD shows the AI overlay while Petrovich
+flies it), not a redesign.
+
+### Stage P1 — the seam and activation, no goals yet
+
+Minimal working version: the park signal takes over, holds altitude, does nothing else.
+
+- **Lua**: `run_ai_pilot_wheel(t)` per frame beside `run_sight_servo(t)`. Parses
+  `list_indication(HELPERAI_DEVICE_ID)` into `mode_text`/`course_text`/`alt_text`/
+  `alt_add_text`/`speed_text`. On the park signal rising (arg 852/952 ≈ 1, the same observable
+  mode 1's S0-12 already confirmed — reused, not re-probed), issues one altitude long-hold press
+  up by `LONG_PRESS_HOLD_S` if the read current altitude equals the AI's held altitude (the nudge,
+  per P0-6/the user's write-up), else holds nothing and leaves the AI's own value as the goal
+  until body-layer sends one. `apw` status pushed at 5 Hz: `mode_text` fields, `parked_active`,
+  last press issued. **No goal message yet** — this stage proves activation and the park-sink fix
+  only, Decision-free otherwise.
+- **Body-layer**: `ParkedFlightState`, advanced from the park-signal state param each poll (no
+  voice token yet — activation is automatic, E-P1); no spoken line (E-P2 withdrawn).
+- **Tests**: Lua parse function against the overlay's known text shapes (`R`/`B` suffix, mode
+  names); park-rising detection; altitude-nudge-if-equal logic as a pure function.
+- **Flight P1** (test card, named branch): park with the AI holding some altitude, confirm no
+  sink and no speech. Unpark, confirm nothing untoward (no goal exists yet to drop).
+
+### Stage P2 — heading, altitude, speed goals
+
+- **Lua**: the nudge loop — given a goal (one of heading/altitude/speed), read current mode, cycle
+  to FLT/HVR if needed (short-left, re-read, repeat — bounded by `MODE_READ_SETTLE_S` per attempt,
+  escalate after N attempts rather than loop forever), then issue the single press the goal needs
+  (short tap for speed, long hold for altitude/heading, released once the readback is within
+  tolerance or the body-layer goal changes), report `goal_progress: "pressing"|"settled"|
+  "mode_blocked"`.
+- **Body-layer**: `set_parked_heading`/`set_parked_altitude`/`set_parked_speed`; interleaving
+  across more than one outstanding goal (one parameter's step per poll, rotating); readback on
+  acceptance, mirroring mode 1's Decision 10 shape (*"heading 3 1 5"*, *"speed 2 0 0"* — rounded to
+  the nearest step per the explore notes, and the readback **names the step actually set**, per
+  E-P3); no "unable" for a goal not quite reached (same posture as mode 1's A4, not re-litigated).
+- Audio-adapter: reuse the slot parsers mode 1's plan already designed for `turn_heading`,
+  `hold_altitude`, `speed` (Affected Modules, mode-1 series below) — **built here, first**, so
+  mode 1's own Stage 4 does not redo this work; cross-reference added to that stage when mode 1 is
+  picked up.
+- **Flight P2**: park, speak a heading, then a speed, then an altitude in quick succession
+  (interleaving); confirm the overlay converges on all three without one blocking another, within
+  the tolerances, and the mode cycles correctly between FLT (speed/altitude/heading) with no
+  player-visible stall.
+
+### Stage P3 — alignment on the player's word (E-P7)
+
+- **Body-layer**: `cbtm_align`/`cbtm_align_for_launch`, each refusing (no "unable" — see **U2**)
+  outside the states where CBTM is reachable; snapshotting `pre_align_snapshot` on
+  `cbtm_align_for_launch`.
+- **Lua**: mode-cycle to CBTM, short-up (`cbtm_align`) or long-press-up (`cbtm_align_for_launch`,
+  held for `LONG_PRESS_HOLD_S` then released — a discrete action, not an open hold).
+- **Flight P3**: from the operator seat, say "align" then "align for launch"; confirm the AI
+  boresights toward the target as the explore notes describe, and that no automatic recovery fires
+  yet (that is P4).
+
+### Stage P4 — recovery (E-P8, E-P9, F-P1, F-P2)
+
+- **Body-layer**: `decide_ai_pilot_wheel`'s recovery branch — launch detection (payload count
+  drop, see "Launch detection" above), spoken abort, AGL floor, IAS ceiling; `recover_to_level`;
+  *"leveling off"*; the post-recovery goal sequencing (Q7/Q8) from the Co-moving Fields table.
+- **Lua**: mode-cycle CBTM → FLT on a recovery signal from body-layer (no new Lua mechanism — this
+  is the same goal/mode-cycle machinery P2 built, just triggered by a different caller).
+- **Flight P4**: align for launch at a safe height, let it run past 40 m AGL without firing —
+  confirm the automatic pull-out and the spoken line (F-P1); then a launch at a safe height — confirm
+  the post-launch level-off and the smooth altitude/speed restoration (F-P2, Q7, Q8), with the sight
+  (worked by the player, untouched by Petrovich) tracking the target throughout.
+
+### Stage P5 — terrain reference (Q6) and seat/scope boundaries
+
+- Default `ALT REF` to **baro** for the smoother hold (Q6 — radar is jerky), terrain avoidance
+  along the flight path explicitly deferred to the player's own judgement and to `[[BL-B101]]`
+  later, stated on the test card as a known limitation, not a silent gap.
+- Confirm `write_sight_target` is never called while `parked_active` (F-P3 — Petrovich never
+  touches the sight the player is working); confirm naked-eye calls continue unmodified (E-P11).
+- **Flight P5**: fly a sortie over rising terrain with baro hold active; confirm the card's stated
+  limitation matches what the player actually observes (no silent terrain-avoidance claim).
+
+### Stage P6 — tune and accept
+
+Flight-to-flight retunes of `LONG_PRESS_HOLD_S`/`MODE_READ_SETTLE_S`/the tolerances. Acceptance
+against E-P1, E-P3–E-P11 (E-P2 withdrawn) and Q1–Q8, written into `docs/acceptance/`.
+
+### E-P traceability
+
+| Expectation | Closed by |
+|---|---|
+| E-P1 (park is the handover, holds current state) | Stage P1 |
+| E-P3 (spoken goals, honest readback, interleaved) | Stage P2 |
+| E-P4 (latest wins) | Stage P2 |
+| E-P5 (never undoes the player) | Stage P2's "assume no player mode change" posture (**U3**) |
+| E-P6 (`HDG LOS` never pressed) | Stage P1 — short-right is never in the press vocabulary at all, not merely unused |
+| E-P7 (alignment only on the player's word) | Stage P3 |
+| E-P8 (level off and guidable after launch) | Stage P4 |
+| E-P9 (never flies into the ground because of a Petrovich-chosen mode) | Stage P4 |
+| E-P10 (unpark gives it back at once, nothing resumes) | Stage P1 |
+| E-P11 (naked-eye crew work continues) | Stage P5 (explicit check; nothing in this series touches `optic_policy`) |
+
+### Risks & Unknowns (mode 2)
+
+- **list_indication(6) is shared with Petrovich's own sensor overlay** (the feed this project
+  already streams for the `middle_list_text` target list). Nothing in this plan changes what that
+  feed means when Petrovich is *not* flying the AI pilot — the two contents never coexist, since
+  the park signal and HELPER_AI's own role are the same underlying state — but the parser added in
+  Stage P1 must not be read as a second meaning for an existing field; it is a **new** flattening
+  on the same raw dump, gated on `parked_active`.
+- **Press-and-release timing drift.** `LONG_PRESS_HOLD_S` at 0.7 s is a margin over a measured
+  0.5 s threshold in a *different* wheel context (Petrovich's sensor wheel, not the AI pilot
+  wheel). P0-2 exists because the threshold is a DLL constant shared across wheels per the recon,
+  but has not been directly confirmed on this wheel.
+- **Mode-cycle order is unknown beyond the pairs the user named** (`HVR↔HVRT`, `FLT↔CBTM`). The
+  "press, read, compare, repeat" loop (explore notes) does not need the order, but a bounded
+  attempt count is needed so an unreachable mode request degrades to `mode_blocked` rather than
+  looping forever — not specified by the user, a straightforward engineering default, not escalated.
+- **The player is assumed not to change wheel modes himself** (Q4). If he does, E-P5's "never
+  undoes the player" is not implemented for this case (**U3**) — the cycle-back could visibly fight
+  a mode the player just picked.
+- **Recovery while a goal is also in flight.** If the player sets a new heading moments before a
+  launch, the Co-moving Fields table's rule (alignment overrides, goal resumes only after
+  `"none"`) could feel like a dropped command. Acceptable per the goal check's own reading, but
+  worth naming on the test card.
+
+### Second-order effect (mode 2)
+
+Confirms the goal/vocabulary shape (heading/altitude/speed, one at a time, clamped and
+interleaved) a mission-day pilot already has to learn once; mode 1 inherits the same vocabulary
+rather than teaching a second one, and `[[BL-B95]]`'s eventual action catalogue gains its first
+two "flying" actions a release early. Also answers, in passing, whether `list_indication(6)`'s
+overlay channel needs forcing open (P0-1) — a fact mode 1 never needed and now has for free.
+
+### Decisions Requiring User Input (mode 2)
+
+- **U1 — `cbtm_align`/`cbtm_align_for_launch` outside CBTM-reachable state: silent no-op, or a
+  spoken refusal?** The alignment.md goal check left this open implicitly (E-P7 only says who may
+  trigger it). **Recommend:** a spoken "unable, not ready" only if the mode-cycle to CBTM itself
+  fails to resolve within the attempt bound (Stage P2's `mode_blocked`) — otherwise silent, since
+  the cycle-to-CBTM-then-press sequence is expected to succeed in ordinary flight and a refusal
+  for an ordinary in-progress cycle would be noise.
+- **U2 — same question, restated for scope**: should a refusal ever interrupt an in-progress
+  alignment attempt mid-cycle, or only report failure after the attempt bound is exhausted?
+  **Recommend:** only after exhaustion — matches mode 1's A4 posture ("fly within parameters,"
+  no mid-attempt narration).
+- **U3 — the player changing the AI wheel's mode himself.** Q4's answer assumes this does not
+  happen; if it does, should Petrovich's cycle-back defer to the player's choice for some window
+  before reasserting the mode his goal needs (closer to E-P5's spirit), or always reassert at
+  once (simpler, matches the literal Q4 answer but risks fighting the player)? **Recommend:**
+  always reassert at once for the first build — Q4 explicitly assumed this case away, so treating
+  it specially now would be solving a problem the user has not asked for; revisit if a sortie
+  shows it happening.
+
+## Series — unparked mode (mode 1): later build, preserved unchanged
+
+Everything from here to the end of this file is the **original 2026-10-26/10-31 Architect pass**,
+covering mode 1 (controls not parked, Petrovich writes the raw cyclic/collective/pedal axes).
+**Not re-cut by the 2026-11-15 pass above** — its Stage 0–6 numbering, decisions, co-moving
+fields, risks and open questions are untouched, and its own S0-P rows (the parked-state probe) are
+now a closed, historical record: S0-P2/S0-P2a–c/S0-P3/S0-P5/S0-P6 (the raw-axis parked
+hypotheses) are **closed negative** by the 2026-11-01 finding quoted above, and S0-P3b is
+**superseded** by the whole of the P0–P6 series above, which is its promoted, fully designed
+form. Pick this series up once mode 2 passes DoD, per the user's own ordering.
+
 Desk recon for stage 0: `aircraft-layer/research/2026-10-26-bl16-flight-control-desk-recon.md`
 (investigator, this pass). Its findings narrow stage 0; they do not replace it. What it changed
 here, all forum- or third-party-sourced and so working assumptions only:
