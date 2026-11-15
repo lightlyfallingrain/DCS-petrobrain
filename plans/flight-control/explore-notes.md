@@ -670,3 +670,36 @@ ALIGN available. Petrobrain cannot directly fly. We'll have to do with ED's cont
 
 So in parked mode the park signal (arg 852, S0-12) is the activation, and explore decision 2's
 spoken handover applies to the unparked mode only.
+
+### Answers to the parked-mode goal check (user, 2026-11-15, verbatim)
+
+Questions Q1–Q8 are in `plans/flight-control/alignment.md`, "Goal check — parked mode".
+
+> Q1 - nothing
+> Q2 - Petrobrain keeps flying unless player commands otherwise. Until non-parked flight is
+> implemented, just silent transfer to player.
+> Q3 - it sets the current heading as desired heading. Nearest speed step it has as desired speed.
+> Because it flies poorly it has a tense to wobble a bit at first, but then maintains params. ->
+> reset altitude only.
+> Q4 - when wheel mode changes, it may not be possible to finish the current goal without changing
+> the mode back. Assume that Player will not be changing modes, but DCS does automatically in
+> certain situations that I described above.
+> Q5 - yes, crash avoidance is necessary. This needs over speed avoidance as well. Configurable min
+> alt AGL (40 m default) and max speed (280 km/h default) trigger recovery. Say "leveling off". And
+> reset params to what they were before align for launch. In this situation a Player command for
+> break turn can be expected, but that is players decision.
+> Q6 - yes. It's jerky, that's the problem. Barometric alt hold is much smoother and therefore
+> preferred, but then needs manual terrain avoidance changes.
+> Q7 - holds current. Desired heading is set to alignment heading.
+> Q8 - quick transition to level flight, keep heading and alt at transition moment. Start smooth
+> climb back to altitude before alignment. Speed back to before alignment setting one step at a
+> time.
+
+Read as: no speech on park or unpark; on park reset altitude only; DCS-driven mode changes are
+handled by cycling back, player-driven ones are not expected; recovery from `ALIGN FOR LAUNCH` on
+launch, on spoken abort, or on **AGL < 40 m or IAS > 280 km/h** (both tunables), announced as
+*"leveling off"*, restoring the pre-alignment heading/altitude/speed with the climb smooth and the
+speed one step at a time; FLT after CBTM holds the current heading (the alignment heading becomes
+the set heading), so the post-launch transition keeps heading and altitude at the transition
+moment and then climbs back; radar hold is jerky, baro hold smoother and preferred, with terrain
+avoidance then Petrovich's own job.

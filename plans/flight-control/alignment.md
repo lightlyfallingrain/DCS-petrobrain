@@ -560,3 +560,27 @@ are only in what triggers the exit and in what order things are set on the way o
   alignment, or hold the heading it has now?
 - **Q8** — After the launch, which altitude: the one held before the alignment, or the current
   one (with a floor)? And which heading: current, or follow the sight's azimuth until impact?
+
+### Answered by the user (2026-11-15)
+
+Verbatim answers: `plans/flight-control/explore-notes.md`, "Answers to the parked-mode goal
+check". In short, numbered against the questions:
+
+- **Q1** nothing on park. **E-P2 is withdrawn**: no line on park.
+- **Q2** silent transfer on unpark; Petrobrain keeps flying unless the player commands otherwise
+  (the unparked follow-on handles the rest).
+- **Q3** the AI sets current heading and nearest speed step itself; reset **altitude only**.
+- **Q4** the player is assumed not to change modes; DCS does (CPG view → CBTM, hover
+  transitions), and Petrovich cycles back to the mode his goal needs.
+- **Q5** yes. Recovery triggers: launch, spoken abort, **AGL below 40 m** or **IAS above
+  280 km/h** (both tunables). He says *"leveling off"* and restores the pre-alignment
+  parameters. A break-turn call afterwards is the player's decision. Resolves F-P1 and E-P9.
+- **Q6** radar hold follows terrain but is jerky; baro hold is smoother and preferred, with
+  terrain avoidance then Petrovich's own job (BL-B101 territory).
+- **Q7** FLT after CBTM holds the current heading; the alignment heading becomes the set heading.
+  Resolves F-P2: no swing-back.
+- **Q8** quick transition to level flight keeping the heading and altitude at the transition
+  moment, then a smooth climb to the pre-alignment altitude, speed back one step at a time.
+
+**Verdict after answers: ALIGNED** for the plan re-cut; expectations E-P1, E-P3–E-P11 stand,
+E-P2 withdrawn, E-P9 refined by Q5's floor and ceiling.
