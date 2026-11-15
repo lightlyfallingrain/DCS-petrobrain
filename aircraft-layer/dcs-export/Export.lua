@@ -2035,6 +2035,14 @@ local ai_pilot_last_press = nil
 -- search wheel and may be open at the same time as this one.
 local ai_wheel_pending_release_t = nil
 local ai_wheel_pending_cmd = nil
+-- Set on the park-rising edge (per-frame, cheap), resolved at the next
+-- 5 Hz tick from that tick's freshly-parsed overlay fields -- the perf
+-- fix (`plans/flight-control/perf-batch-a.md`) that moves the
+-- `list_indication` read/parse off the per-frame path. Cleared by
+-- `update_ai_pilot_wheel_overlay` once resolved, or immediately on
+-- unpark (`run_ai_pilot_wheel`'s own branch) so a nudge never fires for
+-- a park that already ended.
+local ai_pilot_pending_nudge = false
 
 -- Flattens one `list_indication(HELPERAI_DEVICE_ID)` raw dump into a flat
 -- `{name: value}` table of every populated (non-child-only) node --
@@ -2042,11 +2050,12 @@ local ai_wheel_pending_cmd = nil
 -- `parse_indication_text` exactly (same recursive-descent algorithm,
 -- same "parent value wins over a same-named descendant" ordering), but
 -- is a **second, Lua-side** implementation, not a reuse of that Python
--- module: the per-frame AI-pilot nudge loop (`run_ai_pilot_wheel` below)
--- must decide its next press locally, every frame, without round-
--- tripping through body-layer (the Architecture decision above). Pure
--- function, degrades gracefully on unexpected structure (skips rather
--- than errors), same posture as the Python parser it mirrors.
+-- module: the AI-pilot nudge loop (`update_ai_pilot_wheel_overlay` below)
+-- must decide its next press locally, without round-tripping through
+-- body-layer (the Architecture decision above). Called from the 5 Hz
+-- export tick, not per frame (`plans/flight-control/perf-batch-a.md`).
+-- Pure function, degrades gracefully on unexpected structure (skips
+-- rather than errors), same posture as the Python parser it mirrors.
 local function parse_helperai_overlay_fields(raw)
     local lines = {}
     for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
@@ -2154,13 +2163,15 @@ end
 
 -- Per-frame AI-pilot-wheel loop, called every frame (not gated by the
 -- 5 Hz export throttle) beside `sight_servo_tick` -- Stage P1: proves
--- activation and the park-sink fix only, no goal yet. On the park
--- signal rising, nudges the altitude once if the AI's held altitude
--- already reads the same as the aircraft's actual altitude (P0-6/the
--- user's write-up: the AI has not yet received an explicit altitude
--- input and sinks regardless of what it displays until one is set).
--- E-P10: unpark releases any open press and drops all AI-pilot-wheel
--- state immediately, the same frame -- nothing resumes on the next park.
+-- activation and the park-sink fix only, no goal yet. Keeps only what is
+-- genuinely per-frame (perf fix, `plans/flight-control/perf-batch-a.md`):
+-- the open-press release deadline and park-signal edge detection. The
+-- overlay parse and the altitude-nudge decision itself are deferred to
+-- `update_ai_pilot_wheel_overlay`, run from the 5 Hz export tick -- on a
+-- rising edge this just arms `ai_pilot_pending_nudge` for that tick to
+-- resolve. E-P10: unpark releases any open press and drops all
+-- AI-pilot-wheel state, including a still-pending nudge, immediately,
+-- the same frame -- nothing resumes on the next park.
 local function run_ai_pilot_wheel(t)
     if ai_wheel_pending_release_t ~= nil and t >= ai_wheel_pending_release_t then
         safe_call(function()
@@ -2186,6 +2197,7 @@ local function run_ai_pilot_wheel(t)
         ai_pilot_alt_text = nil
         ai_pilot_alt_add_text = nil
         ai_pilot_speed_text = nil
+        ai_pilot_pending_nudge = false
         if ai_wheel_pending_release_t ~= nil then
             safe_call(function()
                 GetDevice(30):performClickableAction(ai_wheel_pending_cmd, 0)
@@ -2196,10 +2208,33 @@ local function run_ai_pilot_wheel(t)
         return
     end
 
-    local raw = safe_call(get_helperai_indication)
-    if raw == nil then
+    if rising then
+        ai_pilot_pending_nudge = true
+    end
+end
+
+-- Resolves the overlay parse and, if armed, the one-shot altitude nudge
+-- -- run from the 5 Hz export tick rather than every frame (perf fix,
+-- `plans/flight-control/perf-batch-a.md`), since nothing in the result
+-- was read per-frame in the first place: `apw_*` status pushes at 5 Hz
+-- already, and the nudge only ever fires once, on the park-rising edge.
+-- `raw` is the one `list_indication(HELPERAI_DEVICE_ID)` dump this
+-- tick's export already read -- shared with `encode_petrovich_
+-- indication_line`'s own consumer further down `LuaExportAfterNextFrame`,
+-- not a second device read. **Device 6 is one call per 5 Hz tick now,
+-- shared by both consumers; a future per-frame addition that needs its
+-- content must feed off that same tick-local read, not reintroduce its
+-- own per-frame `list_indication(6)` call** -- this is exactly the
+-- pattern Stage P2's readback-release check (plan's own Stage P2
+-- section) should default to as well, unless a live test there shows a
+-- 5 Hz comparison is not fast enough for that goal's tolerance.
+-- No-op while unparked (fields already cleared by `run_ai_pilot_wheel`'s
+-- own unpark branch) or before this tick's dump exists.
+local function update_ai_pilot_wheel_overlay(raw, t)
+    if not ai_pilot_parked_active or raw == nil then
         return
     end
+
     local fields = parse_helperai_overlay_fields(raw)
     ai_pilot_mode_text = fields.mode_text
     ai_pilot_course_text = fields.course_text
@@ -2207,15 +2242,18 @@ local function run_ai_pilot_wheel(t)
     ai_pilot_alt_add_text = fields.alt_add_text
     ai_pilot_speed_text = fields.speed_text
 
-    if rising and ai_wheel_pending_release_t == nil then
-        local held_altitude = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
-        local alt_agl = safe_call(LoGetAltitudeAboveGroundLevel)
-        local alt_msl = safe_call(LoGetAltitudeAboveSeaLevel)
-        local actual_altitude = ai_pilot_actual_altitude_m(
-            ai_pilot_alt_add_text, alt_agl, alt_msl)
-        if ai_pilot_should_nudge_altitude(held_altitude, actual_altitude) then
-            ai_pilot_press_altitude_up_long_hold(t)
-            ai_pilot_last_press = "altitude_nudge_up"
+    if ai_pilot_pending_nudge then
+        ai_pilot_pending_nudge = false
+        if ai_wheel_pending_release_t == nil then
+            local held_altitude = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
+            local alt_agl = safe_call(LoGetAltitudeAboveGroundLevel)
+            local alt_msl = safe_call(LoGetAltitudeAboveSeaLevel)
+            local actual_altitude = ai_pilot_actual_altitude_m(
+                ai_pilot_alt_add_text, alt_agl, alt_msl)
+            if ai_pilot_should_nudge_altitude(held_altitude, actual_altitude) then
+                ai_pilot_press_altitude_up_long_hold(t)
+                ai_pilot_last_press = "altitude_nudge_up"
+            end
         end
     end
 end
@@ -2593,7 +2631,9 @@ function LuaExportAfterNextFrame()
     -- `plans/flight-control/plan.md` Stage P1: must run every frame, same
     -- reasoning as `sight_servo_tick` above -- the park-rising edge and
     -- any open long-hold press need per-frame timing, not the 5 Hz
-    -- export cadence.
+    -- export cadence. The overlay parse itself does not live here any
+    -- more (perf fix, `plans/flight-control/perf-batch-a.md`) -- see
+    -- `update_ai_pilot_wheel_overlay` below, run from the 5 Hz tick.
     run_ai_pilot_wheel(t)
 
     if t - last_export_t < EXPORT_INTERVAL_S then
@@ -2601,10 +2641,23 @@ function LuaExportAfterNextFrame()
     end
     last_export_t = t
 
+    -- Perf fix (`plans/flight-control/perf-batch-a.md`): device 6
+    -- (`HELPERAI_DEVICE_ID`) read once here, per 5 Hz tick, and shared
+    -- by both consumers that need its dump this tick -- the AI-pilot-
+    -- wheel overlay parse immediately below, and
+    -- `encode_petrovich_indication_line`'s own consumer further down
+    -- this function, which reuses this same local rather than calling
+    -- `get_helperai_indication()` a second time.
+    local helperai_raw = safe_call(get_helperai_indication)
+
     -- `BL-B80` v2: the sight-servo status line, same 5 Hz cadence as
     -- the telemetry line below (step 8's own "status line at 5 Hz").
     push_sight_servo_state(t)
-    -- `plans/flight-control/plan.md` Stage P1: same 5 Hz cadence.
+    -- `plans/flight-control/plan.md` Stage P1/perf fix: the overlay
+    -- parse and the deferred altitude nudge now ride this 5 Hz gate
+    -- rather than running every frame -- see `run_ai_pilot_wheel`'s own
+    -- comment and `update_ai_pilot_wheel_overlay`'s docstring.
+    update_ai_pilot_wheel_overlay(helperai_raw, t)
     push_ai_pilot_wheel_state(t)
 
     if client == nil then
@@ -2733,12 +2786,13 @@ function LuaExportAfterNextFrame()
         end
     end
 
-    -- HelperAI (Petrovich detection text) poll, same throttle/socket/
-    -- pcall-guard/one-shot-dump mechanism as the LoGetWorldObjects poll
-    -- above -- only reached if the connection is still alive after that
-    -- send.
+    -- HelperAI (Petrovich detection text) poll, same socket/one-shot-dump
+    -- mechanism as the LoGetWorldObjects poll above -- only reached if
+    -- the connection is still alive after that send. Reuses `helperai_raw`
+    -- (read once, above, this tick) rather than a second
+    -- `get_helperai_indication()` call -- the perf fix's whole point.
     if client ~= nil then
-        local indication = safe_call(get_helperai_indication)
+        local indication = helperai_raw
         if indication ~= nil then
             if not DUMPED_PETROVICH_INDICATION then
                 DUMPED_PETROVICH_INDICATION = true

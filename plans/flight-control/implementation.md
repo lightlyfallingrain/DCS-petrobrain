@@ -180,3 +180,56 @@ plus `pip install -e .` for body-layer's `pyproj`/`numpy`).
   plan's own stated Risk ("a new flattening on the same raw dump"), not a
   new finding — recorded here only because the two call sites are now
   real code, not a plan description.
+
+### Perf fix (`plans/flight-control/perf-batch-a.md`, NEEDS MITIGATION)
+
+Implemented the mitigation exactly as specified. `run_ai_pilot_wheel(t)`
+(still called every frame) now keeps only: the open-press release-deadline
+check, park-signal edge detection (`stick_park`/`pedals_park` arg reads),
+and the unpark branch (clears overlay fields, drops any open press, and
+now also clears the new `ai_pilot_pending_nudge` flag — E-P10 extended to
+cover the deferred nudge, not just the open press). On a rising edge it
+only sets `ai_pilot_pending_nudge = true`; it no longer reads or parses
+`list_indication(HELPERAI_DEVICE_ID)` itself.
+
+A new function, `update_ai_pilot_wheel_overlay(raw, t)`, carries the
+overlay parse and the altitude-nudge decision that used to live in
+`run_ai_pilot_wheel`. It is called from the 5 Hz export block in
+`LuaExportAfterNextFrame`, which now reads `list_indication
+(HELPERAI_DEVICE_ID)` exactly **once** per tick into a local
+(`helperai_raw`) — the same read the existing `encode_petrovich_
+indication_line` consumer further down the function now reuses instead
+of calling `get_helperai_indication()` a second time, closing the "same
+dump read twice" finding directly above. `update_ai_pilot_wheel_overlay`
+no-ops while unparked or before a dump exists; while parked, it refreshes
+the five overlay text fields every tick and, if a nudge is armed,
+resolves it from that tick's freshly-parsed `alt_text`/`alt_add_text`
+(deferring the one-shot nudge by at most one 5 Hz tick, ≤ 200 ms, per the
+perf report's own accepted slack) and clears the flag whether or not it
+fired.
+
+No wire-format change (same `apw_*` fields, same semantics, same
+cadence for `push_ai_pilot_wheel_state`) — `EXPORT_SCRIPT_VERSION`/
+`EXPECTED_EXPORT_VERSION` left at `"2026-11-15b"`, not bumped, since the
+version-bump convention is keyed to the wire format a collector parses,
+which did not change.
+
+Left the perf report's P2 MONITOR item as a comment at the 5 Hz call
+site (`update_ai_pilot_wheel_overlay`'s own docstring) rather than code:
+P2's readback-release check should default to riding this same 5 Hz tick
+rather than reintroducing a per-frame `list_indication(6)` read, unless a
+live P2 test shows 5 Hz is not fast enough for that goal's tolerance.
+
+Added two Lua integration tests (`test_ai_pilot_wheel_lua.py`,
+`TestNudgeDrivenFromCachedParse`) against a `GetDevice` mock, following
+`test_sight_servo_lua.py`'s own established pattern for this: one proves
+the press only fires once `update_ai_pilot_wheel_overlay` resolves the
+armed flag (not on the rising frame, not on a second tick after it has
+already fired once), the other proves unparking before the next tick
+clears the armed flag so a stale parse never fires a nudge for a park
+that already ended. Verified both are load-bearing, not tautological, by
+mutation: removed the unpark branch's new `ai_pilot_pending_nudge = false`
+line, confirmed `test_unpark_before_the_next_tick_clears_the_pending_
+nudge` failed for the stated reason (`pending_after_unpark` read back
+`"true"`), restored the line, confirmed the file's checksum matched the
+pre-mutation value exactly (not just "tests pass again").

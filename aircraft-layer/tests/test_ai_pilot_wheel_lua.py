@@ -12,6 +12,15 @@ read:
   (arg 852/952 >= threshold).
 - `ai_pilot_should_nudge_altitude`/`ai_pilot_parse_altitude_text`/
   `ai_pilot_actual_altitude_m` -- the park-sink nudge's "equal" decision.
+- `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` together, against a
+  `GetDevice` mock (`TestNudgeDrivenFromCachedParse`) -- the perf fix
+  (`plans/flight-control/perf-batch-a.md`) that moves the overlay parse
+  and the altitude-nudge decision off the per-frame path and onto the
+  5 Hz tick: the rising edge only arms `ai_pilot_pending_nudge`, the
+  press itself happens only once `update_ai_pilot_wheel_overlay` runs
+  against that tick's parsed fields, and unparking before that tick
+  clears the armed flag so a stale parse can never fire a nudge for a
+  park that already ended (E-P10).
 
 Same extraction technique as `test_sight_servo_lua.py`'s own
 `_extract_lua_function` (duplicated rather than imported across test
@@ -313,3 +322,199 @@ class TestAiPilotAltitudeNudge:
         """
         out = _run_lua(["ai_pilot_actual_altitude_m"], tail)
         assert out.strip().split("\n") == ["100", "150", "nil"]
+
+
+#: `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` close over several
+#: more module-level constants than the pure functions above (the press
+#: shape and the device-30 command), extracted the same way.
+_AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
+    "AI_PILOT_PARK_THRESHOLD",
+    "AI_PILOT_NUDGE_EPSILON_M",
+    "LONG_PRESS_HOLD_S",
+    "ARG_STICK_PARK",
+    "ARG_PEDALS_PARK",
+    "AI_WHEEL_UP",
+)
+
+#: `_ALT_196_R_RAW` -- `alt_text`/`alt_add_text` "196"/"R", the same
+#: overlay shape `TestParseHelperaiOverlayFields.test_flt_mode_overlay`
+#: observes live, trimmed to only the two leaves the nudge decision reads.
+_ALT_196_R_RAW = (
+    "-----------------------------------------\n"
+    "alt_text\n"
+    "196\n"
+    "children are {\n"
+    "}\n"
+    "-----------------------------------------\n"
+    "alt_add_text\n"
+    "R\n"
+    "children are {\n"
+    "}\n"
+)
+
+
+def _run_ai_pilot_wheel_integration(script_body: str) -> str:
+    """Runs the real `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay`
+    together against a minimal `GetDevice` mock (device 0's park args,
+    device 30's `performClickableAction` press log) and stubbed altitude
+    readings, in one Lua process so module-level state
+    (`ai_pilot_parked_active`, `ai_pilot_pending_nudge`, the overlay text
+    fields, ...) persists across calls exactly as it does across real
+    per-frame calls and 5 Hz ticks. `script_body` is the test-specific
+    sequence of mock-state writes/calls/`print`s, appended after the
+    shared preamble and the two real functions' extracted bodies."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    constants = "\n".join(
+        _extract_lua_constant(name) for name in _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS
+    )
+    preamble = """
+local ai_pilot_parked_active = false
+local ai_pilot_mode_text = nil
+local ai_pilot_course_text = nil
+local ai_pilot_alt_text = nil
+local ai_pilot_alt_add_text = nil
+local ai_pilot_speed_text = nil
+local ai_pilot_last_press = nil
+local ai_wheel_pending_release_t = nil
+local ai_wheel_pending_cmd = nil
+local ai_pilot_pending_nudge = false
+
+local stick_park_value = 0.0
+local pedals_park_value = 0.0
+local agl_value = nil
+local msl_value = nil
+local press_log = {}
+
+local function GetDevice(id)
+    if id == 0 then
+        return {
+            get_argument_value = function(self, arg)
+                if arg == ARG_STICK_PARK then return stick_park_value end
+                if arg == ARG_PEDALS_PARK then return pedals_park_value end
+                return nil
+            end,
+        }
+    elseif id == 30 then
+        return {
+            performClickableAction = function(self, cmd, value)
+                table.insert(press_log, cmd .. ":" .. tostring(value))
+            end,
+        }
+    end
+    return nil
+end
+
+local function LoGetAltitudeAboveGroundLevel()
+    return agl_value
+end
+
+local function LoGetAltitudeAboveSeaLevel()
+    return msl_value
+end
+"""
+    functions = "\n".join(
+        _extract_lua_function(name)
+        for name in (
+            "safe_call",
+            "parse_helperai_overlay_fields",
+            "ai_pilot_should_nudge_altitude",
+            "ai_pilot_parse_altitude_text",
+            "ai_pilot_actual_altitude_m",
+            "ai_pilot_park_rising",
+            "ai_pilot_press_altitude_up_long_hold",
+            "run_ai_pilot_wheel",
+            "update_ai_pilot_wheel_overlay",
+        )
+    )
+    script = constants + "\n" + preamble + "\n" + functions + "\n" + script_body
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    return result.stdout
+
+
+class TestNudgeDrivenFromCachedParse:
+    """Perf fix (`plans/flight-control/perf-batch-a.md`): the rising edge
+    only arms `ai_pilot_pending_nudge`; the actual press only happens once
+    `update_ai_pilot_wheel_overlay` runs against a 5 Hz tick's parsed
+    fields, never on the rising frame itself."""
+
+    def test_nudge_fires_only_once_the_cached_parse_resolves_it(self) -> None:
+        raw_literal = json.dumps(_ALT_196_R_RAW)
+        script = f"""
+        stick_park_value = 0.0
+        run_ai_pilot_wheel(0.0)
+
+        -- Rising edge: pending-nudge armed, but no overlay has been
+        -- parsed yet this park, so no press can have happened.
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.2)
+        print("presses_at_rising=" .. #press_log)
+        print("pending_at_rising=" .. tostring(ai_pilot_pending_nudge))
+
+        -- A further per-frame call with no 5 Hz tick in between: still
+        -- no overlay parse, still no press.
+        run_ai_pilot_wheel(0.21)
+        print("presses_before_tick=" .. #press_log)
+
+        -- The 5 Hz tick: the cached parse (equal altitude) resolves the
+        -- armed nudge into exactly one press.
+        agl_value = 196.0
+        update_ai_pilot_wheel_overlay({raw_literal}, 0.21)
+        print("presses_after_tick=" .. #press_log)
+        print("pending_after_tick=" .. tostring(ai_pilot_pending_nudge))
+
+        -- A second tick with the same (now-settled) parse must not
+        -- press again -- the flag was consumed, not re-armed.
+        update_ai_pilot_wheel_overlay({raw_literal}, 0.22)
+        print("presses_after_second_tick=" .. #press_log)
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["presses_at_rising"] == "0"
+        assert values["pending_at_rising"] == "true"
+        assert values["presses_before_tick"] == "0"
+        assert values["presses_after_tick"] == "1"
+        assert values["pending_after_tick"] == "false"
+        assert values["presses_after_second_tick"] == "1"
+
+    def test_unpark_before_the_next_tick_clears_the_pending_nudge(self) -> None:
+        """E-P10: unpark drops AI-pilot-wheel state, including a still-
+        armed nudge, the same frame -- a cached parse that arrives at the
+        next 5 Hz tick for a park that already ended must never press."""
+        raw_literal = json.dumps(_ALT_196_R_RAW)
+        script = f"""
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        print("pending_after_rise=" .. tostring(ai_pilot_pending_nudge))
+
+        stick_park_value = 0.0
+        run_ai_pilot_wheel(0.1)
+        print("pending_after_unpark=" .. tostring(ai_pilot_pending_nudge))
+        print("parked_after_unpark=" .. tostring(ai_pilot_parked_active))
+
+        -- A stale parse arriving at the next tick must no-op: not
+        -- parked any more, regardless of what it would have decided.
+        agl_value = 196.0
+        update_ai_pilot_wheel_overlay({raw_literal}, 0.2)
+        print("presses_after_stale_tick=" .. #press_log)
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["pending_after_rise"] == "true"
+        assert values["pending_after_unpark"] == "false"
+        assert values["parked_after_unpark"] == "false"
+        assert values["presses_after_stale_tick"] == "0"
