@@ -363,7 +363,7 @@ No new Windows session needed beyond what the user already flew and screenshotte
 
 | # | Measures | Pass | Decides |
 |---|---|---|---|
-| P0-1 | `list_indication(HELPERAI_DEVICE_ID)` content while parked, wheel/overlay **closed** vs **open** | populated either way, or only with the overlay open | whether Export.lua must force the overlay visible to read it (a cosmetic HUD change the test card must mention) |
+| P0-1 | `list_indication(HELPERAI_DEVICE_ID)` content while parked, command (right) wheel **closed** vs **open** | populated either way, or only with the command wheel open | whether Export.lua must open the command wheel to read the texts. **Narrowed 2026-11-15 by the user:** the readback (left) overlay *"is always visible. There is no way to turn it off"* while the AI flies, so there is no cosmetic HUD cost either way; only the command wheel is normally off |
 | P0-2 | One held press at 0.7 s on each ring position in FLT, confirmed against the overlay readback moving as a long action (not a repeated short tap) | 0.7 s reliably reads as long in this wheel too | `LONG_PRESS_HOLD_S` final value |
 | P0-3 | Speed tap sequence from 0 to MAX, reading `speed_text` after each tap | the exact step list and MAX's displayed value | `AI_PILOT_SPEED_STEPS_KMH` |
 | P0-4 | Press-to-readback latency: time from a press release to the overlay text changing | a number, used as `MODE_READ_SETTLE_S`'s floor | the read-compare-repeat loop's minimum wait before re-checking |
@@ -372,9 +372,10 @@ No new Windows session needed beyond what the user already flew and screenshotte
 | P0-7 | FLT→HVR speed criterion: tap speed down to 0 in FLT, observe when `mode_text` itself flips without a mode-cycle press | a number or a settle time | whether `decide_ai_pilot_wheel` ever needs to *wait* for a DCS-driven mode change rather than press for one |
 
 Go/no-go: nothing here can fail into a blocker — every row either confirms a number already
-believed or narrows a cosmetic detail (P0-1). If P0-1 fails (overlay must be open), that is a
-**known limitation to state on the test card** (the HUD shows the AI overlay while Petrovich
-flies it), not a redesign.
+believed or narrows a mechanism detail (P0-1). If P0-1 fails (texts only filled while the
+command wheel is open), Export.lua would have to open the right wheel to read — a visible menu
+on the HUD, a **known limitation to state on the test card**, not a redesign. The left readback
+overlay is on screen regardless (user, 2026-11-15), so a pass costs nothing cosmetically.
 
 ### Stage P1 — the seam and activation, no goals yet
 

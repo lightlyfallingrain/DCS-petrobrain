@@ -778,3 +778,15 @@ same encoding as the pilot's 738 (1.0 radio, 0.5 intercom, 0 released) —
 `mi24p-command-surface.md`; DCS-SRS's `Mi24P.lua` reads 856 for the copilot seat. The 2026-09-19
 research marked it out of scope "unless the player ever flies from the gunner seat"; BL-16 parked
 mode is exactly that case, so the scope note is superseded.
+
+## Overlay visibility while parked (user, 2026-11-15, after batch A merged)
+
+> *"When controls are parked and DCS AI flies, the left overlay wheel is always visible. There is
+> no way to turn it off. The right wheel can be turned off and will likely be off."*
+
+Read as: the **left** overlay is the compass/readback wheel (mode box, heading, ALT, IAS boxes —
+research note §3) and it is on screen whenever the AI flies, unconditionally; the **right**
+wheel is the command menu (`ShowMenu`, the one with the option labels) and the player keeps it
+off. So the "cosmetic HUD change" worry in P0-1 is moot — the readback overlay is there anyway.
+P0-1 narrows to: does `list_indication(6)` carry the readback text with the right (command) wheel
+closed. Expected yes, since the texts belong to the always-drawn left overlay.
