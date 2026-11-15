@@ -123,6 +123,11 @@ logger = logging.getLogger(__name__)
 #: Stage 4) for the new ownship-loadout line (wire key `"stations"`) --
 #: additive only (an old deployed script keeps working, it just never
 #: sends a `"stations"` line, and `PayloadCache` stays empty).
+#: Bumped again 2026-10-30 (`[[BL-B104]]` Stage 1) for the additive
+#: `category`/`subcategory` fields on world-object samples. The Lua side
+#: was bumped in that commit and this side was not, so every session
+#: warned of a mismatch against a correctly deployed script;
+#: `tests/test_export_lua_constants_parity.py` now checks the pair.
 #: Bumped again 2026-11-15 (`plans/flight-control/plan.md` Stage P-ICS,
 #: BL-16 mode 2) for the push-to-talk line's new `"ptt_op"` field --
 #: additive only, same reasoning.
