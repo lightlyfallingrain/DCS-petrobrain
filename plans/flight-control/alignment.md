@@ -584,3 +584,81 @@ check". In short, numbered against the questions:
 
 **Verdict after answers: ALIGNED** for the plan re-cut; expectations E-P1, E-P3–E-P11 stand,
 E-P2 withdrawn, E-P9 refined by Q5's floor and ceiling.
+
+## Plan check — parked mode (2026-11-15)
+
+**Verdict:** CONCERNS
+
+Checked `plans/flight-control/plan.md`, "Revised 2026-11-15 — parked mode (mode 2) is the first
+build" (Stages P0–P6) against the goal check above, as amended by the user's Q1–Q8 answers.
+
+| expectation | stage | status |
+|---|---|---|
+| E-P1 | P1 | met — park-rising resets altitude only (Q3), no speech (Q1), matches F-P4's reading without over-reaching into heading/speed |
+| E-P3 | P2 | met — rounded readback, 20 m/5° tolerance, silence after, interleaved start |
+| E-P4 | P2 | met — `goal_seq`, latest wins, Co-moving Fields table |
+| E-P5 | P2, via **U3** | **contradicted** — see Finding 1 |
+| E-P6 | P1 | met, with a caveat — see Finding 2 |
+| E-P7 | P3 | met |
+| E-P8 | P4 | met |
+| E-P9 | P4 | met — AGL floor/IAS ceiling per Q5 |
+| E-P10 | P1 | met — unpark drops all state, nothing resumes on next park |
+| E-P11 | P5 | met — explicit check, `optic_policy` untouched |
+| F-P1 | P4 | met — launch/abort/AGL-floor/IAS-ceiling triggers, per Q5 |
+| F-P2 | P4 | met — FLT holds current heading (Q7), altitude/speed restored per Q8's order |
+| F-P3 | "Launch detection" section, P5 | met — payload-drop signal re-implemented locally, not imported from `atgm_run.py`; sight untouched |
+
+### Findings
+
+1. **E-P5 is marked "closed" by a posture that does the opposite of what it requires.** Lens:
+   whose job / the non-obvious case.
+   - Assumption: the traceability table (plan.md line 302) reads E-P5 ("Petrovich never undoes the
+     player... does not fight it") as satisfied by Stage P2's "assume no player mode change"
+     posture, cross-referenced to **U3**.
+   - In the sim: U3 asks exactly the case E-P5 names — the player presses the wheel himself — and
+     recommends *"always reassert at once"*, i.e. cycle back to whatever mode Petrovich's goal
+     needs, overriding the player's own press. That is fighting the player, the thing E-P5 calls
+     out as the one thing never to do, alongside "a set value" and `HDG LOS`.
+   - The pilot would see: he nudges the wheel to CBTM himself mid-flight for some reason of his
+     own, and Petrovich silently cycles it straight back to FLT a moment later — the aircraft
+     answering to a command the player didn't give, which is the "disconnecting the wire" feeling
+     decision 4 (mode 1) was written to avoid in a different context.
+   - Grounded in: E-P5's own wording (goal check, not re-derived here) and U3's recommendation in
+     the same plan.
+   - Suggests: this is Q4 narrowing E-P5, the [[project_bl_b111_decision_narrows_just_answered_expectation]]
+     shape — but Q4's own words only cover *DCS-driven* mode changes ("DCS does automatically in
+     certain situations"); Q4 says the **player** case is "assumed not to happen," not "and if it
+     does, override him." U3 goes further than Q4 licenses and the table's "closed by" wording
+     hides that gap. The row should read **contradicted**, not met, until the user either (a)
+     confirms U3's "always reassert" for the player case too — accepting that E-P5 does not hold
+     for a self-inflicted mode press, only for DCS-driven ones — or (b) asks for a short grace
+     window before reasserting, closer to E-P5's actual wording. Either answer is fine; the plan
+     currently asserts the first without having asked for it.
+
+2. **E-P6's structural guarantee rests on no function ever existing that could combine `short` +
+   `right`, which the plan states but does not yet pin down in code shape.** Lens: the non-obvious
+   case.
+   - Assumption: "short-right is never in the press vocabulary at all" (plan.md line 303).
+   - In the sim: the design as described keeps this true by construction — mode-cycle is always
+     `short-left`, speed is always `short-up/down`, heading is always `long-left/right`, so no
+     described code path ever pairs `short` with `right`. But this holds because every caller
+     happens to need a different (direction, duration) pair, not because a generic
+     `press(direction, duration)` is withheld from existing. If the Implementer builds one generic
+     press primitive for convenience, `short-right` becomes reachable by a typo in a constant.
+   - The pilot would see nothing until the one time it goes wrong — the aircraft snaps to
+     wherever he's looking, mid-flight, with no warning. This is exactly the invariant the user
+     called out unprompted (*"We must not"*).
+   - Grounded in: the user's correction and invariant on `HDG LOS`.
+   - Suggests: not a blocker, since the design as written doesn't call for a generic combinator —
+     but worth a one-line note to the Implementer that the five action functions
+     (`set_parked_heading`/`altitude`/`speed`, `cbtm_align`, `cbtm_align_for_launch`) should each
+     hard-code their own fixed press shape in Lua, with no shared `press(direction, duration)`
+     entry point that could be called with `("right", "short")`.
+
+### Questions for the user
+
+- **Q-P1** — U3 recommends always reassert the AI wheel's mode at once, even if you pressed it
+  yourself. Q4 only said to assume you won't do that for the DCS-automatic case; it didn't say
+  Petrovich should override a mode you set on purpose. Is overriding you here acceptable for the
+  first build (matching U3), or should Petrovich leave your mode alone for some window before
+  reasserting it (closer to E-P5 as written)?
