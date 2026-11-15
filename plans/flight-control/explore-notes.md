@@ -769,3 +769,12 @@ to use the wheel; if he does, Petrovich's goal wins*; "straight" / "level off" i
 abort of Q5's recovery; "break away" is the 180 by two lefts; hover translate is a held press
 ended by "hold"; and the ICS/PTT capture from the operator seat is a prerequisite stage, not a
 BL-16 nicety.
+
+> *"CPG seat audio capture should use the copilot ICS trigger"* (user, 2026-11-15)
+
+That trigger is first-party: `OP-STICK-PTT-PTR`, **arg 856**, `crew_member_access = {1}`,
+same encoding as the pilot's 738 (1.0 radio, 0.5 intercom, 0 released) —
+`aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md` line ~202 and
+`mi24p-command-surface.md`; DCS-SRS's `Mi24P.lua` reads 856 for the copilot seat. The 2026-09-19
+research marked it out of scope "unless the player ever flies from the gunner seat"; BL-16 parked
+mode is exactly that case, so the scope note is superseded.
