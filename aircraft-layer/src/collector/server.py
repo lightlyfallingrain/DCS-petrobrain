@@ -27,10 +27,14 @@ instead (see `schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
 `schema.PetrovichIndicationSample`/`schema.PetrovichWheelSample`/
 `schema.PttSample`/`schema.Spu8Sample`/`schema.WatchedArgsState`). The
 ownship loadout line (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage
-4) has a top-level `"stations"` key instead (`schema.PayloadSample`). An
-old `Export.lua`'s cockpit-switch line (top-level `"missl_pw"` key) is
-dropped at DEBUG rather than parsed -- that feed no longer exists on this
-side. `_handle_line` distinguishes them
+4) has a top-level `"stations"` key instead (`schema.PayloadSample`). The
+AI-pilot-wheel status line (`plans/flight-control/plan.md`, BL-16 mode 2,
+Stage P1) has a top-level `"apw_parked_active"` key instead
+(`schema.AiPilotWheelState`); the push-to-talk line's own `"ptt_op"`
+field (same plan, Stage P-ICS) is additive on the existing `"ptt"` line,
+not a new kind. An old `Export.lua`'s cockpit-switch line (top-level
+`"missl_pw"` key) is dropped at DEBUG rather than parsed -- that feed no
+longer exists on this side. `_handle_line` distinguishes them
 by that key's presence before parsing, rather than trying each parser in
 turn and falling back on failure -- a genuinely malformed line of any kind
 should be logged and dropped once, not misattributed to the wrong schema's
@@ -55,6 +59,7 @@ from typing import Self
 
 from collector.arg_read_broker import ArgReadBroker
 from collector.cache import (
+    AiPilotWheelCache,
     PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
@@ -66,6 +71,8 @@ from collector.cache import (
     WorldObjectsCache,
 )
 from schema import (
+    AiPilotWheelParseError,
+    AiPilotWheelState,
     PayloadParseError,
     PayloadSample,
     PetrovichIndicationParseError,
@@ -116,7 +123,13 @@ logger = logging.getLogger(__name__)
 #: Stage 4) for the new ownship-loadout line (wire key `"stations"`) --
 #: additive only (an old deployed script keeps working, it just never
 #: sends a `"stations"` line, and `PayloadCache` stays empty).
-EXPECTED_EXPORT_VERSION = "2026-10-29"
+#: Bumped again 2026-11-15 (`plans/flight-control/plan.md` Stage P-ICS,
+#: BL-16 mode 2) for the push-to-talk line's new `"ptt_op"` field --
+#: additive only, same reasoning.
+#: Bumped again the same day, "...15b" (Stage P1) for the new per-frame
+#: AI-pilot-wheel status line (wire key `"apw_parked_active"`) --
+#: additive only, same reasoning.
+EXPECTED_EXPORT_VERSION = "2026-11-15b"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -186,6 +199,10 @@ class CollectorServer:
         # Same optional-cache reasoning again: a collector without a
         # PayloadCache simply drops "stations" lines.
         payload_cache: PayloadCache | None = None,
+        # Same optional-cache reasoning again: a collector without an
+        # AiPilotWheelCache simply drops "apw_parked_active" lines
+        # (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1).
+        ai_pilot_wheel_cache: AiPilotWheelCache | None = None,
         # Not optional, unlike every cache above -- a collector with no
         # `ArgReadBroker` simply drops "read_id" lines (the one-shot read
         # reply has nowhere to go without it), same posture as a `None`
@@ -207,6 +224,7 @@ class CollectorServer:
         self._arg_read_broker = arg_read_broker
         self._sight_servo_cache = sight_servo_cache
         self._payload_cache = payload_cache
+        self._ai_pilot_wheel_cache = ai_pilot_wheel_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -509,6 +527,22 @@ class CollectorServer:
             logger.debug("parsed payload sample: %r", payload_sample)
             if self._payload_cache is not None:
                 self._payload_cache.push(payload_sample)
+            return
+
+        if "apw_parked_active" in data:
+            # `plans/flight-control/plan.md`, BL-16 mode 2, Stage P1 --
+            # ahead of the telemetry fallthrough for the same reason
+            # every other named kind above is.
+            try:
+                ai_pilot_wheel_sample = AiPilotWheelState.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except AiPilotWheelParseError:
+                logger.warning("dropping malformed ai-pilot-wheel line: %r", line)
+                return
+            logger.debug("parsed ai-pilot-wheel sample: %r", ai_pilot_wheel_sample)
+            if self._ai_pilot_wheel_cache is not None:
+                self._ai_pilot_wheel_cache.push(ai_pilot_wheel_sample)
             return
 
         try:

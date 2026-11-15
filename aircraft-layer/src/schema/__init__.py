@@ -35,6 +35,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .ai_pilot_wheel import AiPilotWheelParseError, AiPilotWheelState
 from .line_of_sight import (
     LineOfSightParseError,
     LineOfSightSnapshot,
@@ -71,6 +72,8 @@ from .world_objects import (
 __all__ = [
     "MAX_WATCHED_ARGS",
     "MAX_WATCHED_ARG_NUMBER",
+    "AiPilotWheelParseError",
+    "AiPilotWheelState",
     "LineOfSightParseError",
     "LineOfSightSnapshot",
     "LineOfSightVerdict",

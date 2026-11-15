@@ -43,6 +43,12 @@ only the latest one is still relevant.
 `PayloadCache` (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 4) is
 the same "latest of one" shape again, for the ownship loadout feed --
 `Export.lua` sends a line only on change, same reasoning as `PttCache`.
+
+`AiPilotWheelCache` (`plans/flight-control/plan.md`, BL-16 mode 2, Stage
+P1) is the same "latest of one" shape as `SightServoCache` -- a
+**separate** cache, same reasoning that module's own docstring gives for
+`SightServoCache` vs. `CockpitSwitchCache`: a dedicated per-frame rate
+class, not the change-gated feeds.
 """
 
 from __future__ import annotations
@@ -50,6 +56,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from schema import (
+    AiPilotWheelState,
     LineOfSightSnapshot,
     MissionStartEvent,
     PayloadSample,
@@ -323,6 +330,25 @@ class PayloadCache:
         """Return the most recently pushed sample, or `None` if no
         payload line has arrived yet this session -- the normal state at
         startup, same as `PttCache.latest`."""
+        return self._latest
+
+
+class AiPilotWheelCache:
+    """Holds the latest `AiPilotWheelState` sample (`plans/flight-control/
+    plan.md`, BL-16 mode 2, Stage P1) -- `run_ai_pilot_wheel`'s own
+    per-frame status. Same "latest of one" shape as `SightServoCache`."""
+
+    def __init__(self) -> None:
+        self._latest: AiPilotWheelState | None = None
+
+    def push(self, sample: AiPilotWheelState) -> None:
+        """Record a newly-received sample as the current AI-pilot-wheel
+        state."""
+        self._latest = sample
+
+    def latest(self) -> AiPilotWheelState | None:
+        """Return the most recently pushed sample, or `None` if no
+        AI-pilot-wheel line has arrived yet this session."""
         return self._latest
 
 

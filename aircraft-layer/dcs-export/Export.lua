@@ -186,7 +186,15 @@ local socket = require("socket.core")
 -- only, same reasoning as the SPU-8/sight-servo bumps above. Update
 -- `aircraft-layer/src/collector/server.py`'s `EXPECTED_EXPORT_VERSION`
 -- in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-30"
+--
+-- Bumped again 2026-11-15 (`plans/flight-control/plan.md` Stage P-ICS,
+-- BL-16 mode 2) for the push-to-talk line's new `"ptt_op"` field (the
+-- operator seat's own trigger, arg 856) -- additive only, same reasoning.
+--
+-- Bumped again the same day, "...15b" (Stage P1) for the new per-frame
+-- AI-pilot-wheel status line (wire key "apw_parked_active") -- additive
+-- only, same reasoning.
+local EXPORT_SCRIPT_VERSION = "2026-11-15b"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -459,12 +467,22 @@ end
 --: tuned and tested without redeploying a file into Saved Games.
 local ARG_PILOT_PTT = 738
 
---: Below this, two readings of arg 738 are the same reading. The arg is a
---: graduated value, so an exact-equality check would send a line whenever
---: it wobbled in the last decimal.
+--: `plans/flight-control/plan.md` Stage P-ICS (2026-11-15): the operator
+--: seat's own trigger, `OP-STICK-PTT-PTR`, identical encoding to arg 738
+--: above -- first-party, DCS-SRS's own `Mi24P.lua` reads it for the
+--: copilot seat too. Read and sent alongside 738 rather than a separate
+--: feed: "audio capture must listen to both pilot and copilot ICS (VOIP)
+--: triggers and treat them equally" (user, verbatim) -- the pilot speaks
+--: from the CPG seat while BL-16's parked mode runs.
+local ARG_OPERATOR_PTT = 856
+
+--: Below this, two readings of either arg are the same reading. The arg is
+--: a graduated value, so an exact-equality check would send a line
+--: whenever it wobbled in the last decimal.
 local PTT_EPSILON = 0.01
 
 local last_ptt_sent = nil
+local last_ptt_op_sent = nil
 
 
 local function encode_json_line(fields, order)
@@ -666,24 +684,32 @@ local function push_ptt_state(t)
     local ptt = safe_call(function()
         return GetDevice(0):get_argument_value(ARG_PILOT_PTT)
     end)
-    if ptt == nil then
+    local ptt_op = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OPERATOR_PTT)
+    end)
+    if ptt == nil or ptt_op == nil then
         return -- no mainpanel device (briefing screen, wrong airframe)
     end
-    if last_ptt_sent ~= nil and math.abs(ptt - last_ptt_sent) < PTT_EPSILON then
+    if last_ptt_sent ~= nil
+        and math.abs(ptt - last_ptt_sent) < PTT_EPSILON
+        and math.abs(ptt_op - last_ptt_op_sent) < PTT_EPSILON then
         return
     end
     last_ptt_sent = ptt
+    last_ptt_op_sent = ptt_op
     if not ptt_logged_first then
-        -- One line, the first time the trigger moves at all. Cheap, and it
-        -- is the difference between "the trigger is not wired" and "the
+        -- One line, the first time either trigger moves at all. Cheap, and
+        -- it is the difference between "the trigger is not wired" and "the
         -- trigger is wired and the value never changed" -- two failures
         -- that look identical from the capture process.
         ptt_logged_first = true
         debug_log("ptt first movement: arg " .. tostring(ARG_PILOT_PTT)
-            .. " = " .. tostring(ptt))
+            .. " = " .. tostring(ptt) .. ", arg " .. tostring(ARG_OPERATOR_PTT)
+            .. " = " .. tostring(ptt_op))
     end
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
-        .. ',"ptt":' .. string.format("%.3f", ptt) .. '}\n')
+        .. ',"ptt":' .. string.format("%.3f", ptt)
+        .. ',"ptt_op":' .. string.format("%.3f", ptt_op) .. '}\n')
     if not ok then
         debug_log("ptt send failed: " .. tostring(err))
         client:close()
@@ -1951,6 +1977,278 @@ local function push_sight_servo_state(t)
     end
 end
 
+-- BL-16 mode 2 (`plans/flight-control/plan.md`, "Revised 2026-11-15" --
+-- Stage P1): driving ED's own AI pilot through the HELPER_AI wheel
+-- (device 30) while the stick is parked. Up/Down/Left/Right are the
+-- SAME physical ring buttons/command ids Petrovich's own search wheel
+-- already uses (WHEEL_MENU_BUTTON/WHEEL_CENTER_BUTTON above) -- while
+-- parked, this device's wheel shows ED's AI-pilot overlay instead of the
+-- search page (confirmed per aircraft-layer/research/2026-11-14-
+-- mi24p-ai-pilot-wheel-layout.md), not a second device. A short press
+-- (<0.5 s) reaches the inner-ring option, a long press/hold reaches the
+-- outer-ring option -- that research note's "Operating model" section 5.
+local AI_WHEEL_UP = 3004
+local AI_WHEEL_DOWN = 3005
+local AI_WHEEL_LEFT = 3003
+local AI_WHEEL_RIGHT = 3002
+
+-- Confirmed > 0.5 s live for Petrovich's own search wheel
+-- (WHEEL_LONG_PRESS_S above, same DLL-level long-press constant per the
+-- recon); margin kept for this wheel too pending Stage P0-2's direct
+-- confirmation on the AI-pilot wheel itself. Would want the X-T26
+-- configurable-constants mechanism (root CLAUDE.md's "Behaviour-affecting
+-- constants are tunable"), noted not improvised, same as the 9K113 servo
+-- block above -- this file has no loader for it yet.
+local LONG_PRESS_HOLD_S = 0.7
+
+-- Stick-park animation readback (`plans/flight-control/plan.md` Stage
+-- P1) -- args 852 (cyclic stow) and 952 (pedals stow), a 0..1 lag
+-- element settling in ~0.2 s (`$S/HelperAI/HelperAI.lua:46`). ~1 means
+-- parked -- the cheapest observable, confirmed for mode 1's own S0-12
+-- probe (aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md
+-- section 1), reused here rather than re-probed. Either arg reading
+-- parked is enough (OR): the two animate together off one lever.
+local ARG_STICK_PARK = 852
+local ARG_PEDALS_PARK = 952
+local AI_PILOT_PARK_THRESHOLD = 0.9
+
+-- Tolerance for "the read current altitude equals the AI's held
+-- altitude" (the park-sink nudge, P0-6/the user's write-up): below this
+-- the two readings are the same reading. Mirrors body-layer's
+-- `AI_PILOT_ALTITUDE_TOLERANCE_M` tunable (`belief/ai_pilot_wheel.py`,
+-- default 20) -- duplicated here, not read over the wire, because Stage
+-- P1 sends no goal message yet (the Architecture decision's per-frame
+-- press timing stays entirely in this file until Stage P2 wires a goal
+-- channel through); revisit once that channel exists so there is one
+-- source of truth for this number.
+local AI_PILOT_NUDGE_EPSILON_M = 20.0
+
+local ai_pilot_parked_active = false
+local ai_pilot_mode_text = nil
+local ai_pilot_course_text = nil
+local ai_pilot_alt_text = nil
+local ai_pilot_alt_add_text = nil
+local ai_pilot_speed_text = nil
+local ai_pilot_last_press = nil
+-- A separate pending-release slot from `pending_release_t`/
+-- `WHEEL_CENTER_BUTTON` above -- that one belongs to Petrovich's own
+-- search wheel and may be open at the same time as this one.
+local ai_wheel_pending_release_t = nil
+local ai_wheel_pending_cmd = nil
+
+-- Flattens one `list_indication(HELPERAI_DEVICE_ID)` raw dump into a flat
+-- `{name: value}` table of every populated (non-child-only) node --
+-- mirrors `aircraft-layer/src/schema/petrovich_indication.py`'s
+-- `parse_indication_text` exactly (same recursive-descent algorithm,
+-- same "parent value wins over a same-named descendant" ordering), but
+-- is a **second, Lua-side** implementation, not a reuse of that Python
+-- module: the per-frame AI-pilot nudge loop (`run_ai_pilot_wheel` below)
+-- must decide its next press locally, every frame, without round-
+-- tripping through body-layer (the Architecture decision above). Pure
+-- function, degrades gracefully on unexpected structure (skips rather
+-- than errors), same posture as the Python parser it mirrors.
+local function parse_helperai_overlay_fields(raw)
+    local lines = {}
+    for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+        lines[#lines + 1] = line
+    end
+    local n = #lines
+    local fields = {}
+
+    local function parse_nodes(start)
+        local i = start
+        while i <= n do
+            local line = lines[i]
+            if line == "" then
+                i = i + 1
+            elseif line == "}" then
+                return i
+            elseif line ~= "-----------------------------------------" then
+                i = i + 1
+            else
+                i = i + 1
+                if i > n then break end
+                local name = lines[i]
+                i = i + 1
+                local value = nil
+                if i <= n and lines[i] == "children are {" then
+                    i = i + 1
+                elseif i <= n then
+                    value = lines[i]
+                    i = i + 1
+                    if i <= n and lines[i] == "children are {" then
+                        i = i + 1
+                    end
+                end
+                if value ~= nil then
+                    fields[name] = value
+                end
+                i = parse_nodes(i)
+                if i <= n and lines[i] == "}" then
+                    i = i + 1
+                end
+            end
+        end
+        return i
+    end
+
+    parse_nodes(1)
+    return fields
+end
+
+-- Pure decision (P1 test: "altitude-nudge-if-equal logic as a pure
+-- function"): `nil` either side means nothing to compare, so no nudge --
+-- a missing reading is never treated as "equal".
+local function ai_pilot_should_nudge_altitude(held_altitude_m, actual_altitude_m)
+    if held_altitude_m == nil or actual_altitude_m == nil then
+        return false
+    end
+    return math.abs(held_altitude_m - actual_altitude_m) < AI_PILOT_NUDGE_EPSILON_M
+end
+
+-- The AI's currently-held altitude, read off `alt_text` (purely numeric,
+-- e.g. "196" -- the "R"/"B" reference is the separate `alt_add_text`
+-- field, per the overlay-readback research note section 3). `nil` if
+-- `alt_text` is absent or not numeric this frame.
+local function ai_pilot_parse_altitude_text(alt_text)
+    if alt_text == nil then
+        return nil
+    end
+    return tonumber(alt_text)
+end
+
+-- The aircraft's own actual altitude, picked by the AI's currently-
+-- displayed reference ("R" radar/AGL, "B" barometric/MSL) so the nudge
+-- compares like with like. `nil` (no comparison) while the reference is
+-- unknown this frame, rather than guessing one.
+local function ai_pilot_actual_altitude_m(alt_add_text, alt_agl_m, alt_msl_m)
+    if alt_add_text == "R" then
+        return alt_agl_m
+    elseif alt_add_text == "B" then
+        return alt_msl_m
+    end
+    return nil
+end
+
+-- Park rising-edge detection (arg 852/952 >= threshold) -- pure decision,
+-- P1 test: "park-rising detection". Returns `(now_parked, rising)`.
+local function ai_pilot_park_rising(prev_parked, stick_park_arg, pedals_park_arg)
+    local now_parked = (stick_park_arg ~= nil and stick_park_arg >= AI_PILOT_PARK_THRESHOLD)
+        or (pedals_park_arg ~= nil and pedals_park_arg >= AI_PILOT_PARK_THRESHOLD)
+    return now_parked, (now_parked and not prev_parked)
+end
+
+-- Opens `cmd` now and schedules its own release `LONG_PRESS_HOLD_S`
+-- later (the per-frame release-deadline check in `run_ai_pilot_wheel`
+-- below) -- the long-hold press shape P1's altitude nudge needs. **No
+-- generic `press(direction, duration)` entry point** (plan's own
+-- Implementer note, E-P6): this is the one press shape Stage P1 issues,
+-- hard-coded to `AI_WHEEL_UP`, never parameterised by direction.
+local function ai_pilot_press_altitude_up_long_hold(t)
+    safe_call(function()
+        GetDevice(30):performClickableAction(AI_WHEEL_UP, 1)
+    end)
+    ai_wheel_pending_cmd = AI_WHEEL_UP
+    ai_wheel_pending_release_t = t + LONG_PRESS_HOLD_S
+end
+
+-- Per-frame AI-pilot-wheel loop, called every frame (not gated by the
+-- 5 Hz export throttle) beside `sight_servo_tick` -- Stage P1: proves
+-- activation and the park-sink fix only, no goal yet. On the park
+-- signal rising, nudges the altitude once if the AI's held altitude
+-- already reads the same as the aircraft's actual altitude (P0-6/the
+-- user's write-up: the AI has not yet received an explicit altitude
+-- input and sinks regardless of what it displays until one is set).
+-- E-P10: unpark releases any open press and drops all AI-pilot-wheel
+-- state immediately, the same frame -- nothing resumes on the next park.
+local function run_ai_pilot_wheel(t)
+    if ai_wheel_pending_release_t ~= nil and t >= ai_wheel_pending_release_t then
+        safe_call(function()
+            GetDevice(30):performClickableAction(ai_wheel_pending_cmd, 0)
+        end)
+        ai_wheel_pending_release_t = nil
+        ai_wheel_pending_cmd = nil
+    end
+
+    local stick_park = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_STICK_PARK)
+    end)
+    local pedals_park = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_PEDALS_PARK)
+    end)
+    local now_parked, rising = ai_pilot_park_rising(
+        ai_pilot_parked_active, stick_park, pedals_park)
+    ai_pilot_parked_active = now_parked
+
+    if not now_parked then
+        ai_pilot_mode_text = nil
+        ai_pilot_course_text = nil
+        ai_pilot_alt_text = nil
+        ai_pilot_alt_add_text = nil
+        ai_pilot_speed_text = nil
+        if ai_wheel_pending_release_t ~= nil then
+            safe_call(function()
+                GetDevice(30):performClickableAction(ai_wheel_pending_cmd, 0)
+            end)
+            ai_wheel_pending_release_t = nil
+            ai_wheel_pending_cmd = nil
+        end
+        return
+    end
+
+    local raw = safe_call(get_helperai_indication)
+    if raw == nil then
+        return
+    end
+    local fields = parse_helperai_overlay_fields(raw)
+    ai_pilot_mode_text = fields.mode_text
+    ai_pilot_course_text = fields.course_text
+    ai_pilot_alt_text = fields.alt_text
+    ai_pilot_alt_add_text = fields.alt_add_text
+    ai_pilot_speed_text = fields.speed_text
+
+    if rising and ai_wheel_pending_release_t == nil then
+        local held_altitude = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
+        local alt_agl = safe_call(LoGetAltitudeAboveGroundLevel)
+        local alt_msl = safe_call(LoGetAltitudeAboveSeaLevel)
+        local actual_altitude = ai_pilot_actual_altitude_m(
+            ai_pilot_alt_add_text, alt_agl, alt_msl)
+        if ai_pilot_should_nudge_altitude(held_altitude, actual_altitude) then
+            ai_pilot_press_altitude_up_long_hold(t)
+            ai_pilot_last_press = "altitude_nudge_up"
+        end
+    end
+end
+
+-- Sends `run_ai_pilot_wheel`'s own status at 5 Hz, same cadence as the
+-- telemetry line -- mirrors `push_sight_servo_state` immediately above.
+-- Wire key `"apw_parked_active"` doubles as the collector's route key,
+-- same pattern as `"servo_mode"`/`"net1"`/`"ptt"`.
+local function push_ai_pilot_wheel_state(t)
+    if client == nil then
+        return
+    end
+    local function text_or_null(value)
+        if value == nil then
+            return "null"
+        end
+        return '"' .. json_escape_string(value) .. '"'
+    end
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"apw_parked_active":' .. tostring(ai_pilot_parked_active)
+        .. ',"apw_mode_text":' .. text_or_null(ai_pilot_mode_text)
+        .. ',"apw_course_text":' .. text_or_null(ai_pilot_course_text)
+        .. ',"apw_alt_text":' .. text_or_null(ai_pilot_alt_text)
+        .. ',"apw_alt_add_text":' .. text_or_null(ai_pilot_alt_add_text)
+        .. ',"apw_speed_text":' .. text_or_null(ai_pilot_speed_text)
+        .. ',"apw_last_press":' .. text_or_null(ai_pilot_last_press) .. '}\n')
+    if not ok then
+        debug_log("ai-pilot-wheel send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
 -- Sends the continuous watched-args feed's own change-gated line
 -- (`plans/effector-sequences/plan.md` Stage 4) -- called inside the 5 Hz
 -- export section, *after* the telemetry line's own send has succeeded
@@ -2292,6 +2590,11 @@ function LuaExportAfterNextFrame()
         end)
         pending_release_t = nil
     end
+    -- `plans/flight-control/plan.md` Stage P1: must run every frame, same
+    -- reasoning as `sight_servo_tick` above -- the park-rising edge and
+    -- any open long-hold press need per-frame timing, not the 5 Hz
+    -- export cadence.
+    run_ai_pilot_wheel(t)
 
     if t - last_export_t < EXPORT_INTERVAL_S then
         return -- called every frame; enforce the 5 Hz export rate ourselves
@@ -2301,6 +2604,8 @@ function LuaExportAfterNextFrame()
     -- `BL-B80` v2: the sight-servo status line, same 5 Hz cadence as
     -- the telemetry line below (step 8's own "status line at 5 Hz").
     push_sight_servo_state(t)
+    -- `plans/flight-control/plan.md` Stage P1: same 5 Hz cadence.
+    push_ai_pilot_wheel_state(t)
 
     if client == nil then
         if t < next_reconnect_attempt_t then
