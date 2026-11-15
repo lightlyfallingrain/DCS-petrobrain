@@ -102,6 +102,12 @@ altitude tap step is **2 m**, which fixes the unit the 2026-10-31 recon §7 coul
   `mode_text` holders of `HelperAI_page_common.lua` (recon §7), so `list_indication(6)` should
   return exactly these strings while the AI flies. The `R` / `B` suffix is `alt_add_text`, the
   altitude reference. Still unverified: whether the texts are filled when the overlay is hidden.
+- `[user, 2026-11-15]` *"When controls are parked and DCS AI flies, the left overlay wheel is
+  always visible. There is no way to turn it off. The right wheel can be turned off and will
+  likely be off."* So this compass/readback overlay (the **left** wheel) is on screen whenever
+  the AI flies, unconditionally; the command menu (the **right** wheel, `ShowMenu`) is what the
+  player keeps off. The open question is therefore only whether the texts are filled with the
+  *command* wheel closed — expected yes, since they belong to the always-drawn overlay (P0-1).
 - `[screenshot]` `196 R` was shown with `ALT REF RAD` on the wheel and `948 B` with `ALT REF
   BARO`, consistent with `baro_alt_threshold = 700` switching the reference (196 < 700 < 948),
   though the wheel also carries an explicit toggle, so the threshold may only pick the default.
@@ -125,7 +131,8 @@ altitude tap step is **2 m**, which fixes the unit the 2026-10-31 recon §7 coul
 4. **Open for a probe:** ~~which presses reach outer versus inner ring~~ (answered by the user,
    §5: inner = short, outer = long), the long-press threshold (user: probably > 0.5 s, matches
    `long_press_time = 0.5`), the speed steps' exact values, the FLT↔HVR speed criterion, and
-   `list_indication(6)` content with the overlay hidden.
+   `list_indication(6)` content with the command (right) wheel closed — the readback (left)
+   overlay cannot be hidden while the AI flies (user, §3).
 
 ## 5. Operating model (user's lived knowledge, 2026-11-15)
 

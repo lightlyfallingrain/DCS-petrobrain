@@ -143,12 +143,12 @@ git pull --ff-only</pre>
 
 <section class="block prize">
   <div class="block-num">Flight P0 <span class="prize-tag">the prize</span></div>
-  <h3>P0-1: is the overlay readable with the wheel closed?</h3>
+  <h3>P0-1: is the readback text there with the command wheel closed?</h3>
   <div class="part">
-    <div class="k do">Do</div><div class="v">Nothing beyond parking. The probe dumps <code class="i">list_indication(6)</code> with the wheel closed, then opens it and dumps again.</div>
-    <div class="k expect">Expect</div><div class="v">Either the mode / heading / ALT / IAS text is present with the wheel closed (best case: Petrovich can read the AI silently), or only once the wheel is open (then every parked-mode flight will show the AI overlay on the HUD, a cosmetic limit to carry on the cards, not a redesign).</div>
+    <div class="k do">Do</div><div class="v">Nothing beyond parking, with the right (command) wheel off as you normally fly. The probe dumps <code class="i">list_indication(6)</code> with the command wheel closed, then opens it and dumps again. The left readback overlay is always on while the AI flies, as you said; that is expected.</div>
+    <div class="k expect">Expect</div><div class="v">Mode / heading / ALT / IAS text present with the command wheel closed (expected, since the text belongs to the always-on left overlay). If it only appears once the command wheel is open, Export.lua would have to open the menu to read, a visible limit to carry on later cards, not a redesign.</div>
     <div class="k record">Record</div><div class="v record">
-      <label class="chk"><input type="checkbox" data-k="p0-1">With the wheel closed, is the AI overlay visible on your screen at all? Did the log's first dump contain FLT / a heading / an ALT value?</label>
+      <label class="chk"><input type="checkbox" data-k="p0-1">Did the log's first dump (command wheel closed) contain FLT / a heading / an ALT value? Did the right wheel open by itself at any point?</label>
     </div>
   </div>
 </section>
@@ -185,7 +185,7 @@ git pull --ff-only</pre>
   <ol>
     <li>P-ICS: capture starts and stops on the operator's half press. Yes or no, and anything the pilot seat lost.</li>
     <li>P1: sink after park, in metres, and whether it stopped. Any speech.</li>
-    <li>P0-1: overlay text present with the wheel closed, or only open. <strong>This one decides how every later parked-mode flight looks.</strong></li>
+    <li>P0-1: readback text present with the command wheel closed, or only open. <strong>This one decides whether Petrovich can read the AI without opening the menu.</strong></li>
     <li>P0-3: the speed steps as displayed, and MAX's value.</li>
     <li>P0-4: press to readback, roughly, in seconds.</li>
     <li>P0-7: the IAS or delay at which FLT became HVR.</li>
