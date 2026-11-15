@@ -1,0 +1,212 @@
+<title>Parked Mode Batch A</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, two sessions, prize block marked in amber. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+.session{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.5rem; color:var(--ink); margin:32px 0 4px; padding-top:18px; border-top:2px solid var(--amber-dim);}
+.session small{display:block; font-family:'Source Sans 3',sans-serif; font-weight:400; font-size:0.95rem; color:var(--ink-dim);}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+
+<div class="wrap">
+<div class="eyebrow">BL-16 · mode 2 · batch A · 2026-11-15</div>
+<h1>Parked Mode Batch A</h1>
+<div class="subhead">Petrovich managing ED's AI pilot while your controls are parked. Three flights across two DCS sessions: ICS capture from the operator seat, the wheel probe, and the first activation on park. Nothing speaks yet, nothing takes a spoken goal yet. Batch A is plumbing and measurements.</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH TO FLY</div>
+  <pre>git fetch origin
+git checkout main
+git pull --ff-only</pre>
+  <div class="subhead" style="font-size:0.9rem">Merged to <code class="i">main</code> as <code class="i">c38740d0</code>, pushed as <code class="i">c9bc6b32</code>. Pull on both machines. Export.lua changed (version <code class="i">2026-11-15b</code>): redeploy it on Windows and restart the collector, or it will warn of a version mismatch. body-layer changed: restart it on the Mac. audio-adapter is unchanged.</div>
+</div>
+
+<div class="note warn"><span class="tag">Two sessions, not one.</span> Session B's probe <strong>replaces</strong> the production <code class="i">Export.lua</code>. It needs no collector and feeds nothing to body-layer. Fly Session A first on the production script, then swap in the probe, then re-copy the production script from the repo (never from a backup).</div>
+
+<div class="note"><strong>Not testable in this batch.</strong> No spoken flight command works yet ("heading", "altitude", "speed", "align" are Stage P2–P4). Petrovich says nothing on park or unpark by design. The only visible production behaviour is the altitude nudge on park. Nothing presses <code class="i">HDG LOS</code>, ever.</div>
+
+<div class="session">Session A <small>Production Export.lua, collector, capture with <code class="i">--ptt dcs</code>, body-layer. Your usual run commands, unchanged from the last sortie. Air start, straight and level, operator seat.</small></div>
+
+<section class="block">
+  <div class="block-num">Flight P-ICS</div>
+  <h3>Operator-seat intercom trigger</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">From the <strong>operator seat</strong>, squeeze the operator's own stick trigger to the <strong>intercom stop</strong> (the half press, not the full radio press). Say anything. Release. Then swap to the pilot seat and do the same on the pilot's trigger.</div>
+    <div class="k expect">Expect</div><div class="v">Capture starts on the operator's half press and stops on release, exactly as it already does on the pilot's. From the Mac, <code class="i">curl http://&lt;windows-ip&gt;:7791/ptt/state</code> shows <code class="i">"intercom": true</code> while held, <code class="i">false</code> after. Pilot seat behaves as before.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="ics-op">Operator half press: did capture start and stop with it?</label>
+      <label class="chk"><input type="checkbox" data-k="ics-pilot">Pilot half press: still starts and stops capture?</label>
+      <label class="chk"><input type="checkbox" data-k="ics-full">Operator full press (radio): does capture stay off, as it does for the pilot's full press?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">Flight P1</div>
+  <h3>Activation on park, altitude nudge</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Still in the operator seat, level at a steady height (100 to 300 m works). Note the altitude. <strong>Park the controls.</strong> Watch the AI overlay's ALT box and the altimeter for 30 s. Then unpark. Park and unpark once more.</div>
+    <div class="k expect">Expect</div><div class="v">ED's AI takes over as usual. Petrovich says <strong>nothing</strong> on park and nothing on unpark. The ALT box holds close to the altitude you parked at; if the AI had the same value already, Petrovich gives one long press up so the AI gets an altitude input. No sink below the parked altitude. Unpark hands the stick back with no held wheel press lingering.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="p1-sink">Did the aircraft sink after park? By how much, and did it recover?</label>
+      <label class="chk"><input type="checkbox" data-k="p1-speech">Any speech on park or unpark? (There should be none.)</label>
+      <label class="chk"><input type="checkbox" data-k="p1-alt">What did the overlay ALT box show right after park, and 30 s later?</label>
+      <label class="chk"><input type="checkbox" data-k="p1-unpark">Anything odd on unpark: a wheel option firing, the AI overlay stuck, a press still held?</label>
+      <label class="chk"><input type="checkbox" data-k="p1-api">From the Mac: does <code class="i">curl http://&lt;windows-ip&gt;:7791/ai_pilot_wheel/latest</code> show the mode, heading, ALT and IAS the overlay shows?</label>
+    </div>
+  </div>
+</section>
+
+<div class="session">Session B <small>Probe script only. No collector needed. Logs to <code class="i">Saved Games\DCS\Logs\aircraft_layer_probe_ai_pilot_wheel.log</code>. Air start, straight and level, operator seat, controls <strong>not</strong> parked at mission start.</small></div>
+
+<div class="branch-box">
+  <div class="label">SWAP IN THE PROBE (Windows)</div>
+  <pre>copy aircraft-layer\dcs-export\Export.probe-ai-pilot-wheel.lua ^
+     "%USERPROFILE%\Saved Games\DCS\Scripts\Export.lua"</pre>
+  <div class="subhead" style="font-size:0.9rem">Start the mission. Let the aircraft settle a few seconds, then <strong>park the controls once</strong>. The probe waits for that rising edge, then runs all seven rows itself. Stay parked and hands off until the log says it is done. Unparking aborts it (every open press is released the same frame).</div>
+</div>
+
+<section class="block prize">
+  <div class="block-num">Flight P0 <span class="prize-tag">the prize</span></div>
+  <h3>P0-1: is the overlay readable with the wheel closed?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Nothing beyond parking. The probe dumps <code class="i">list_indication(6)</code> with the wheel closed, then opens it and dumps again.</div>
+    <div class="k expect">Expect</div><div class="v">Either the mode / heading / ALT / IAS text is present with the wheel closed (best case: Petrovich can read the AI silently), or only once the wheel is open (then every parked-mode flight will show the AI overlay on the HUD, a cosmetic limit to carry on the cards, not a redesign).</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="p0-1">With the wheel closed, is the AI overlay visible on your screen at all? Did the log's first dump contain FLT / a heading / an ALT value?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">Flight P0, rows 2 to 7</div>
+  <h3>Wheel timings and steps (the probe runs these)</h3>
+  <div class="tbl"><table>
+    <tr><th>Row</th><th>What the probe does</th><th>What you watch for</th></tr>
+    <tr><td>P0-2</td><td>One 0.7 s hold on each outer-ring position in FLT</td><td>Did each read as a long action (ALT or heading moving), not a repeated tap?</td></tr>
+    <tr><td>P0-3</td><td>Speed taps from 0 to MAX, reading IAS after each</td><td>The step values you see in the IAS box. Is 160 real? What does MAX display?</td></tr>
+    <tr><td>P0-4</td><td>Times press release to overlay text change</td><td>Roughly how long from a press to the box changing?</td></tr>
+    <tr><td>P0-5</td><td>Centre press from radar, then from baro</td><td>Does the R / B suffix flip? Does the ALT number stay or change on the flip?</td></tr>
+    <tr><td>P0-6</td><td>On park: sets altitude to current, traces altitude 20 s</td><td>Did the sink happen anyway, and how fast did it stop?</td></tr>
+    <tr><td>P0-7</td><td>Speed to 0 in FLT, watches the mode box</td><td>At what IAS, or after how long, did FLT become HVR on its own?</td></tr>
+  </table></div>
+  <div class="part">
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="p0-done">Did the probe reach the end of its sequence, or did something abort it? (The log says which row it was on.)</label>
+      <label class="chk"><input type="checkbox" data-k="p0-wobble">How badly did the AI wobble during the speed and altitude rows? Anything you would not want in a real attack run?</label>
+    </div>
+  </div>
+</section>
+
+<div class="branch-box">
+  <div class="label">RESTORE PRODUCTION (Windows, after Session B)</div>
+  <pre>copy aircraft-layer\dcs-export\Export.lua ^
+     "%USERPROFILE%\Saved Games\DCS\Scripts\Export.lua"</pre>
+  <div class="subhead" style="font-size:0.9rem">From the repo, not from a backup. The collector checks the version on connect: it should report <code class="i">2026-11-15b</code>.</div>
+</div>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>P-ICS: capture starts and stops on the operator's half press. Yes or no, and anything the pilot seat lost.</li>
+    <li>P1: sink after park, in metres, and whether it stopped. Any speech.</li>
+    <li>P0-1: overlay text present with the wheel closed, or only open. <strong>This one decides how every later parked-mode flight looks.</strong></li>
+    <li>P0-3: the speed steps as displayed, and MAX's value.</li>
+    <li>P0-4: press to readback, roughly, in seconds.</li>
+    <li>P0-7: the IAS or delay at which FLT became HVR.</li>
+    <li>The probe log file, copied to <code class="i">win-mac-sync/from-windows/</code>.</li>
+  </ol>
+  <p style="margin:12px 0 0; color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+try{
+const KEY='bl16-batch-a-2026-11-15';
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{
+      const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+      s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+    }catch(e){}
+  });
+});
+}catch(e){}
+</script>
