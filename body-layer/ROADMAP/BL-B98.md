@@ -1,7 +1,7 @@
 # BL-B98 — 9K113 sight returns to dead-ahead after a glance-away instead of staying at its last position
 
 - [x] **BL-B98 — The 9K113 sight resumes dead ahead `(0.0, 0.0)` on every glance-away-triggered
-  resume, not at its last position.** #status/done #needs-flight Merged with `[[BL-B89]]` in `92da214a`. Folded into `[[BL-B89]]` on
+  resume, not at its last position.** #status/done needs-flight Merged with `[[BL-B89]]` in `92da214a`. Folded into `[[BL-B89]]` on
   `feature/9k113-scan-procedure` (user direction 2026-10-25, below). Found during the BL-B89 Stage 1 review
   (`plans/9k113-scan-procedure/review.md`, Required Fix 1), pre-existing — not this stage's
   defect to introduce, but newly measured by this stage's own tests.
@@ -55,3 +55,9 @@
   next OBSERV-on. Full `pytest`/`ruff`/`mypy` green; two pre-existing tests that pinned the buggy
   dead-ahead resume updated, one new regression test added. Status stays `[~]` here; the merge
   into `[[BL-B89]]`'s branch marks this done.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

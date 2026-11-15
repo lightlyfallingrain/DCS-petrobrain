@@ -133,7 +133,7 @@
   change in `belief_truth_log.py` only — no change to admission, no change to what belief holds, no
   new word in the cockpit. Then fly it mountainous and read the rate before deciding anything else.
 
-  ### Step 1 — `[x]` DONE 2026-10-16, `9616235a` (`feature/bl-b76-tripwire-rejected`) #needs-flight
+  ### Step 1 — `[x]` DONE 2026-10-16, `9616235a` (`feature/bl-b76-tripwire-rejected`) needs-flight
 
   **The entry's own box stays `[ ]`**: this is one of three steps, and steps 2 (fly it mountainous,
   read the rate) and 3 (decide whether the attack run should read the live gate outcome rather than
@@ -180,3 +180,9 @@
   rejected at admission, never updating the stored contact), the hold has nothing to latch onto and
   the `"unknown"` fail-open path still dominates exactly as before. **Step 2's mountainous-sortie
   measurement is unchanged and still the thing that answers this.**
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -2,7 +2,7 @@
 
 - [x] **BL-B96 — Make the player-facing crew session, with speech in and out, what body-layer
   simply does. Remove the `--console` REPL mode, the F10 radio menu and the text overlay entirely,
-  and rename the `logger` module to `body`.** #status/done #needs-flight Filed 2026-10-24 at user direction,
+  and rename the `logger` module to `body`.** #status/done needs-flight Filed 2026-10-24 at user direction,
   reading `logger --help`.
 
   > *"help text for logger says*
@@ -59,9 +59,15 @@ override in a local `config/tuning.toml` now only warns). Command map F10 badges
 Review APPROVED, light security+performance APPROVED, DoD PASS
 (`plans/default-crew-pipeline/{review,security-perf,dod-check}.md`).
 
-`#needs-flight`: delete the stale F10/overlay Hook `.lua`/`.dlg` from Saved Games `Scripts\Hooks\`;
+`needs-flight`: delete the stale F10/overlay Hook `.lua`/`.dlg` from Saved Games `Scripts\Hooks\`;
 restart the collector; run `body.py` with `--audio-adapter-url`; confirm speech out and in work with
 no flags and the connection warning appears/clears. Watch item (`security-perf.md`, not a defect):
 an adapter that times out rather than refuses stalls each poll tick up to 5 s.
 
 Milestone check: does not change BL-B89 or any downstream assumption.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

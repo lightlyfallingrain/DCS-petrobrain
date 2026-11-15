@@ -1,11 +1,11 @@
 # BL-B82 — No scanning before takeoff, replacing the on-ground silence default
 
 - [x] **BL-B82 — Petrovich does not scan before takeoff; this replaces the on-ground silence
-  default.** #status/done #needs-flight Raised by the user 2026-10-19, while scoping `[[BL-B81]]`
+  default.** #status/done needs-flight Raised by the user 2026-10-19, while scoping `[[BL-B81]]`
   (radio check). Built on `feature/radio-check`, after `[[BL-15]]`'s Stage 1 merged, as this
   entry's own build order specifies. Reviewer/Performance Reviewer/Security all APPROVED; DoD
   passed at merge commit `92ae5b3cbee63548fa49344d171296ff3aca40b8` (`plans/radio-check/
-  dod-check.md`) — **merged to `main` 2026-10-19 (`14898014`)**, not blocked on live acceptance. `#needs-flight`:
+  dod-check.md`) — **merged to `main` 2026-10-19 (`14898014`)**, not blocked on live acceptance. `needs-flight`:
   the gate logic is directly tested (both poll loops, mutation-verified by Reviewer; existing
   belief confirmed to decay but not be wiped on the ground) but whether 10 m AGL and "no callouts
   at all while grounded" feel right in the cockpit is unverified. Acceptance card published:
@@ -49,3 +49,9 @@
   3. `[[BL-B81]]` radio check — on the settled dispatch, an ordinary command.
 
   `feature/radio-check` is rebased onto `main` after `BL-15` merges, before building.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

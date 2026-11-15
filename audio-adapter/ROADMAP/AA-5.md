@@ -1,7 +1,7 @@
 # AA-5 — `silence` command phrase wiring
 
 - [x] **`silence` command phrase wiring — DONE, merged with body-layer's `feature/silence-
-  command` (tip `de6c530`).** #status/done #needs-flight `"silence"`/`"be quiet"`/`"shut up"` added to
+  command` (tip `de6c530`).** #status/done needs-flight `"silence"`/`"be quiet"`/`"shut up"` added to
   `vocabulary.VOICE_ONLY_TOKENS`/`PHRASES`, reachable through the existing `match_transcript` →
   `classify_response` → `handle_transcript` pipeline — no new ingress path, no `command_matcher.py`
   change. Bare `"quiet"` was in the original four-candidate set and was dropped after actually
@@ -13,3 +13,9 @@
   `ruff`/`mypy --strict` clean. **No live acceptance yet** — see `body-layer/ROADMAP.md`'s
   live-acceptance debt list, since this is reached only via the body-layer dispatcher and the two
   halves share one sortie's worth of verification.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

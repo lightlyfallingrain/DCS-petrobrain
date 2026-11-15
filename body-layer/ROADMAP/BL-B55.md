@@ -1,7 +1,7 @@
 # BL-B55 — Position uncertainty is optic-blind, and the 9K113 slice depends on it
 
 - [x] **BL-B55 — `naked_eye_sigma_m` takes range only, so every look gets naked-eye-grade position
-  error regardless of which optic made it.** #status/done #needs-flight
+  error regardless of which optic made it.** #status/done needs-flight
   **Closed as `[[BL-B64]]`'s own Stage 1b, merged 2026-10-15 in `ec39c0e`** — the two could not be
   separated, because a sight seeing to 8 km while every look carried naked-eye range error would
   report a confident range wrong by ~1.4 km, which is worse than having no sight. `naked_eye_sigma_m`
@@ -50,3 +50,9 @@
   magnification/FOV numbers (`optics.py:19` records wide 3.55/7.00/6.50, narrow — sourced but
   unused) or measured in-game the way the 2026-09-17 vision-range calibration was. The calibration
   precedent argues for measurement; that is the 9K113 slice's own call.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

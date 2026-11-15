@@ -1,7 +1,7 @@
 # BL-B89 — 9K113 scanning procedure: points of interest, not band sweeps
 
 - [x] **BL-B89 — Re-sequence the sight's search cycle to the way the user actually scans with the
-  9K113: wide S-scans find points of interest, then narrow visits them by priority.** #status/done #needs-flight
+  9K113: wide S-scans find points of interest, then narrow visits them by priority.** #status/done needs-flight
   **Done, merged `92da214a` (2026-10-25)** from `feature/9k113-scan-procedure`: Stage 1 (sector
   scan), `[[BL-B98]]` (aim persistence), Stage 2 (`look`/`sight`/`what is at <where>`). Merged before
   flight by user direction; flight card https://claude.ai/artifact/M9jAnsomghXnV1bSyds9Mj
@@ -40,3 +40,9 @@
   it"*, outside the operating altitude envelope). Residue (a nose-up test within 50–800 m AGL) is
   carried into this item's tests, not the high-altitude scan itself. Built in code. Queued after
   `[[BL-B96]]`.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

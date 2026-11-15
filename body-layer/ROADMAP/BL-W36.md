@@ -2,7 +2,7 @@
 
 - [x] **Group reporting: `belief.groups.Group`, the disclosure ladder. Stages 1-4, reviewed,
   security-approved (deep analysis), performance-approved (MONITOR), and DoD-passed 2026-09-29
-  pending the sortie's own acceptance verdict.** #status/done #needs-flight `plans/group-reporting/plan.md`, from the
+  pending the sortie's own acceptance verdict.** #status/done needs-flight `plans/group-reporting/plan.md`, from the
   2026-09-28 sortie's
   log analysis (`plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md`) — the noise was
   contact *count*, not per-contact chattiness (only 3 of 52 contacts ever plural), which an
@@ -79,3 +79,8 @@
   from what that flight actually shows about cohesion misses/false-merges, not from more code
   reading in advance of it.
 
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

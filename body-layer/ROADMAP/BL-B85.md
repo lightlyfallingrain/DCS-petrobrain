@@ -1,6 +1,6 @@
 # BL-B85 — a contact stuck at `presence` forever can fully starve the sight's search cycle
 
-- [~] **BL-B85 — Found by the `9k113-narrow-search` security re-review
+- [x] **BL-B85 — Found by the `9k113-narrow-search` security re-review
   (`plans/9k113-narrow-search/security-review.md`), empirically, not by inspection: a contact
   whose belief classification never advances past `presence` (a stuck/stalled belief-layer case,
   not modelled behaviour) is repeatedly re-admitted as "worth a look" while `OBSERV` is on, and the
@@ -8,7 +8,7 @@
   over 900 simulated seconds with three simultaneous close contacts held at `presence` forever: the
   sight was busy on a look 792/900 polls (88%), idle/search-eligible only 27/900 (3%), and
   `sight_search_leg` never advanced past its initial `"wide"` for the whole run — full starvation
-  of the new active search cycle (`plans/9k113-narrow-search/plan.md` Stage 3).** #status/in-progress
+  of the new active search cycle (`plans/9k113-narrow-search/plan.md` Stage 3).** #status/done
 
   **Merged to `main` 2026-10-21 as `ceb3ba81`** (`feature/9k113-narrow-search`, DoD PASS batch 2 at
   `9f4b9610`); stays `[~]` until flown — see the closing paragraph below.
@@ -16,7 +16,7 @@
   **Built on `feature/9k113-narrow-search`, not left as backlog** — the user overruled Reviewer/
   Security's non-blocking disposition: *"BL-B85 is required for 9K113, we can't just indefinately
   look at one thing. Needs a timer value or the like that forces moving on"*
-  (`docs/acceptance/2026-10-20-sortie-feedback.md` F4). `#needs-flight` — the fix is unflown; the
+  (`docs/acceptance/2026-10-20-sortie-feedback.md` F4). `needs-flight` — the fix is unflown; the
   measurement below is a 600 s synthetic reproduction of this entry's own pessimistic scenario, not
   a live sortie.
 
@@ -117,7 +117,7 @@
   **Settled and built** (user, 2026-10-20, F4 above) — a time bound, not a count of looks: handled
   by `SIGHT_STALL_COOLDOWN_S` above rather than an N-looks counter, consistent with the existing
   `OPTIC_RETRY_INTERVAL_S`/`RETRY_RANGE_FRACTION` retry mechanism this extends. Remaining before
-  `#status/done`: the live sortie (`#needs-flight`), and a judgement on whether 132.0 s is the right
+  `#status/done`: the live sortie (`needs-flight`), and a judgement on whether 132.0 s is the right
   default once flown — the whole-encounter timescale a pilot actually experiences this at is not
   something a synthetic 600 s reproduction can validate by itself.
 
@@ -127,3 +127,9 @@
   `GLASSING`'s call to `is_worth_a_look` does not, by construction. Extending the same cooldown to
   `GLASSING` would be a `GLASSING` behaviour change beyond what F4 asked for (binoculars, not the
   sight); filed as a backlog note rather than built here.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

@@ -4,7 +4,7 @@
   `feature/watch-reporting`). Merged before flying, deliberately, so any correction the sortie
   produces lands on `main` rather than a branch — live acceptance is still outstanding
   (`docs/acceptance/2026-09-25-crew-behaviour-sortie.md`, which superseded the
-  `2026-09-24-watch-reporting-sortie.md` written for this stage).** #status/done #needs-flight A watched contact now reports itself unprompted on three new
+  `2026-09-24-watch-reporting-sortie.md` written for this stage).** #status/done needs-flight A watched contact now reports itself unprompted on three new
   triggers, plus `follow` becomes both a `watch` synonym and a new best-match way to *name* which
   contact to watch. Correctness review APPROVED (full read), performance review flagged a real
   finding (LOS called before the range/altitude gate) which was fixed and the fix re-reviewed
@@ -71,3 +71,9 @@
 
 
 Live acceptance is tracked on [[BL-W9]]'s consolidated 2026-09-25 crew-behaviour sortie card, which supersedes this stage's own `docs/acceptance/2026-09-24-watch-reporting-sortie.md` card.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

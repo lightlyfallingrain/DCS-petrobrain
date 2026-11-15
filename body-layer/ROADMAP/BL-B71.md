@@ -2,7 +2,7 @@
 
 - [x] **During guidance, use the *least* capable optic that can still resolve the target, evaluated
   continuously in both directions — escalate when the current instrument cannot see it, de-escalate
-  as the range closes.** #status/done #needs-flight Planned 2026-10-15,
+  as the range closes.** #status/done needs-flight Planned 2026-10-15,
   `plans/attack-run-sortie-fixes/plan.md`. Depends on `[[BL-B70]]` for the cause taxonomy it reads.
   Merged `feature/bl-b71-optic-ladder` (DoD pass, tip `91b3c489`); mechanical checks green
   (ruff format/check, `mypy src` 60 files, `pytest` 2090 passed/4 xfailed), full
@@ -135,3 +135,9 @@
 
   Related: `[[BL-B70]]` (prerequisite), `[[BL-B64]]` (made the sight selectable; the bug class above),
   `[[BL-14]]`, `[[BL-B66]]`/`[[BL-B67]]` (the ATGM arm and the `GUIDING` consolidation).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

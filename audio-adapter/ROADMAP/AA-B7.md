@@ -1,7 +1,7 @@
 # AA-B7 — The wake word anchors as a command verb, so "Petrovich, …" gets "say again"
 
 - [x] **AA-B7 — A transmission that begins with the wake word must reach the brain as free speech;
-  today it is answered "say again".** #status/done #needs-flight Merged 2026-10-25 (`47219b3a`, branch
+  today it is answered "say again".** #status/done needs-flight Merged 2026-10-25 (`47219b3a`, branch
   `fix/aa-b7-wake-word-routing`). Sortie feedback F2,
   `docs/acceptance/2026-10-20-sortie-feedback.md`. Sequenced by the user: *"F2 - after 9K113 fixes
   are merged"* — the 9K113 work (`[[BL-B89]]`) merged 2026-10-25, so this is due.
@@ -86,3 +86,9 @@
   **Update, same day:** `[[BL-B100]]` fixed on this branch at the user's direction — body-layer's
   `parse_utterance` now strips the leading name, so `"Petrovich, where is mark one?"` describes the
   contact. Fly A14 with a contact question; `"where are we?"` still has no answer.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

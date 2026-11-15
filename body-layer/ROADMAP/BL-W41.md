@@ -1,12 +1,12 @@
 # BL-W41 — Voice latency instrumentation + positional readback freshness
 
-- [~] **A shared `correlation_id` and per-stage `time.monotonic()` timings now ride the whole voice
+- [x] **A shared `correlation_id` and per-stage `time.monotonic()` timings now ride the whole voice
   round trip (PTT release → STT → body-layer dispatch → TTS → playback), across audio-adapter,
   aircraft-layer and body-layer, plus a reducer that joins the logs into one timeline per
   utterance — and every positional readback (`select_target`, `mark_target`, `step`, `follow`,
   `watch_nearest`/`watch_nearest_air_defence`, the whole `report` family) is now re-rendered
   against current belief at the moment it is actually spoken, instead of the moment it was
-  commanded, when the channel is modeled busy.** #status/in-progress #needs-flight
+  commanded, when the channel is modeled busy.** #status/done needs-flight
   `feature/voice-latency-instrumentation`, DoD reviewed at tip `47952413`
   (`plans/voice-latency-instrumentation/{plan,implementation,review,security-plan-review,
   security-review,performance-review,dod-check}.md`). Built from `docs/acceptance/
@@ -20,7 +20,7 @@
   ("measure first"); `--latency-log` records failed STT/synthesis attempts too ("yes").
 
   **Merged to `main` 2026-10-20 (`9a5da6a4`)**, after `feature/9k113-narrow-search`. Stays
-  `#status/in-progress` until flown: `#needs-flight` is the open part. `feature/async-speech`
+  `#status/in-progress` until flown: `needs-flight` is the open part. `feature/async-speech`
   (F8, plan only) builds on this branch; the plan merged to `main` 2026-10-31 and is tracked as
   `[[BL-B106]]`.
 
@@ -72,7 +72,7 @@
   `--belief-truth-log` on body-layer's logger, then reduce them with
   `tools/join_voice_latency.py` — see "How to turn the logs on and read them" in
   `plans/voice-latency-instrumentation/dod-check.md`. That single flight is what clears
-  `#needs-flight` here, and what decides whether Decision 2 needs reopening.
+  `needs-flight` here, and what decides whether Decision 2 needs reopening.
 
   **Milestone completion question**: yes, conditionally. This does not add a new milestone to the
   BL-x sequence by itself, but its own outcome gates the next piece of work — if the first real
@@ -83,3 +83,9 @@
   instrumentation`'s current head, one commit past `47952413` as of this write-up) — "speech async,
   one mouth; layers don't wait on each other" — captured per this project's capture-then-explore
   rule, not yet explored or planned. This entry's own verdict is scoped to `47952413` only.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

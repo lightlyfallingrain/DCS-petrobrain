@@ -125,7 +125,7 @@
   **Stage B merged 2026-10-16** as `[[BL-B73]]`/`[[AC-B8]]`. **This entry stays open on Stage C
   only** — `[[BL-B74]]`'s decaying launch-smoke lifetime is the one emitter kind
   `resolve_emitters` does not yet fold in; neither Stage A nor Stage B has been flown
-  (`#needs-flight` sits on `[[BL-B73]]`/`[[AC-B8]]`/`[[AC-B7]]`).
+  (`needs-flight` sits on `[[BL-B73]]`/`[[AC-B8]]`/`[[AC-B7]]`).
 
   **Two findings from that pass worth having here**: the existing threat path keys on classification
   and so would schedule a `PRESENCE`-only firing contact at the *lowest* priority there is — new
@@ -136,3 +136,9 @@
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`
   (contact decay, which owns what happens after the firing stops).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

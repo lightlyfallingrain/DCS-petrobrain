@@ -88,7 +88,13 @@ CLASSIFY_COMMAND_VOCABULARY: dict[str, str] = {
    `.claude/agent-memory/implementer/project_br1_stage2_duplicate_branch_findings.md`.
 
 **Unblock condition:** a real sortie where the pilot's phrasing misses the 7-token set — `BR-1.2`
-is `#needs-flight` precisely to learn that. Do not widen speculatively before then; the whole
+is `needs-flight` precisely to learn that. Do not widen speculatively before then; the whole
 reason `main` narrowed it was that nobody had flown either version.
 
-#status/open #needs-flight
+#status/open needs-flight
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

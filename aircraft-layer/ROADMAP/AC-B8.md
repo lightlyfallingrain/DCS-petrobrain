@@ -3,7 +3,7 @@
 - [x] **AC-B8 — Productionise the firing-event probe: a Hook that registers `world.addEventHandler`
   in the `"scripting"` state, accumulates `S_EVENT_SHOOTING_START`/`_END` and `S_EVENT_SHOT`
   in-state, drains them per 1 Hz poll, and publishes a pollable emitter snapshot.** #status/done
-  #needs-flight Filed at Architect stage, 2026-10-15, as the transport half of `[[BL-B73]]` and
+  needs-flight Filed at Architect stage, 2026-10-15, as the transport half of `[[BL-B73]]` and
   `[[BL-B74]]` — `plans/emitter-visibility/plan.md` Stage B.
 
   **Delivered 2026-10-16** (`feature/emitter-events`, DoD @ `aafb20a`): a production Hook
@@ -18,7 +18,7 @@
   2041+4xfail). Security APPROVED, Performance APPROVED-MONITOR
   (`plans/emitter-visibility/security-stage-b.md`, `performance-stage-b.md`).
 
-  **`#needs-flight`, not fully closed**: the one thing no fixture can settle is whether
+  **`needs-flight`, not fully closed**: the one thing no fixture can settle is whether
   `S_EVENT_SHOOTING_START` retriggers mid-burst (plan Risks & Unknowns; the live check is named in
   Stage D item 12 — hold a unit firing past 180 s and read the detection trace). User direction
   2026-10-16 settled the *design* question this watchdog protects against (bursts are paired and
@@ -63,3 +63,9 @@
   fail-closed. Splicing the current emitter ids into that call's sort key belongs with this work.
 
   Related: `[[BL-B73]]`, `[[BL-B74]]`, `[[AC-B7]]`, `[[AC-B5]]`, `[[AC-B3]]`.
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.

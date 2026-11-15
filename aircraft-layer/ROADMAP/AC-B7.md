@@ -2,14 +2,14 @@
 
 - [x] **AC-B7 — Add `getLife()`/`getLife0()` to the mission-telemetry hook's existing in-state
   per-unit loop and carry them on the same feed, so body-layer can tell a burning unit from a
-  healthy one.** #status/done #needs-flight Filed at Architect stage, 2026-10-15, as the transport
+  healthy one.** #status/done needs-flight Filed at Architect stage, 2026-10-15, as the transport
   half of `[[BL-B72]]`'s burning emitter — `plans/emitter-visibility/plan.md` Stage A.
 
   **Delivered with Stage A, merged 2026-10-15 (`f06802e`, `feature/emitter-visibility`)** — DoD
   PASS at `plans/emitter-visibility/dod-check.md`; the life fields ride the existing
   `petrobrain-mission-telemetry-hook.lua` per-unit loop and body-layer resolves them in
   `perception/emitters.py`'s `burning_emitters`. **The per-unit cost measurement below is still
-  owed from a real sortie** — that is what the `#needs-flight` tag is for here, not the mechanism.
+  owed from a real sortie** — that is what the `needs-flight` tag is for here, not the mechanism.
 
   **This is a field addition, not a mechanism.** `petrobrain-mission-telemetry-hook.lua` already
   runs an `O(N)` per-unit loop inside the `"scripting"` state calling `getVelocity()`, bridged at
@@ -35,3 +35,9 @@
 
   Related: `[[BL-B72]]` (the consumer), `[[AC-B8]]` (the event channel, a genuinely new mechanism),
   `[[AC-B4]]` (the unmeasured-DCS-cost precedent).
+
+  **Accepted 2026-11-15 without a dedicated sortie, by user direction** (testing-debt cleanup:
+  *"If there's no probe waiting and the item has been merged earlier than this week, set item as
+  closed and accepted. If I find problems in my flights, I'll bring them up separately."* —
+  `docs/acceptance/2026-11-15-testing-debt-cleanup.md`). Any defect seen in mission flying comes
+  back as a new entry, not as a reopening of this one.
