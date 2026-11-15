@@ -703,3 +703,69 @@ speed one step at a time; FLT after CBTM holds the current heading (the alignmen
 the set heading), so the post-launch transition keeps heading and altitude at the transition
 moment and then climbs back; radar hold is jerky, baro hold smoother and preferred, with terrain
 avoidance then Petrovich's own job.
+
+### U3 decided, mode-cycle orders, and the player command vocabulary (user, 2026-11-15, verbatim)
+
+Asked (plan check Q-P1): when the player changes the wheel mode himself mid-goal, reassert at
+once or leave it? Answer:
+
+> *"reassert at once — the goal is to use the wheel command via Petrobrain, not player directly."*
+
+> Mode changes using left press work as follows:
+> - FLT > CMBT > FLT
+> - HVR > HVRT > CMBT > HVR
+>
+> Other, automatic mode changes:
+> - FLT > HVR when speed set to 0 and helicopter slows to hover
+> - HVR > FLT when speed increased to more than 0 and helicopter accelerates
+> - FLT/HVR > CMBT when Player enters CPG view
+> - CMBT > FLT/HVR when Player exits CPG view, probably though I'm not sure of this
+
+> # Player commands for BL-16
+>
+> ## Audio capture
+>
+> Audio capture *must* listen to both pilot and copilot ICS (VOIP) triggers and treat them
+> equally. That is required so that player voice commands from copilot position are captured.
+> This is prerequirement for BL-16 player commands to work.
+>
+> ## Player commnads
+>
+> Voice commands, as everything else is.
+>
+> - "level flight" -> stabilize to current aircraft params
+>
+> Heading
+> - "Heading <degrees value>"
+> - "Heading <N/NE/E/...>" -> translate to numeric heading value and set
+> - "Turn left/right <amount of degrees>"
+> - "Break turn left/right" -> CMBT break left/right
+> - "Break away" -> CMBT break left, wait 2 s then CMBT break left again.
+> - "Align" -> CMBT align
+> - "Align [for] launch" -> CMBT align for launch
+> - "Straight" / "level off" -> stop turn, maintain current heading
+>   - If in align for launch mode, this stabilizes from the dive into level flight and does what
+>     is done when recovering from launch attitude after missile is launched.
+>
+> Speed
+> - "Speed <value>" -> select closest step to value and set it
+>   - "max" is allowed value
+> - "Slow down" -> speed down one step
+> - "Speed up" -> speed up one step
+> - "Hover" -> speed 0
+>
+> Altitude
+> - "alt[itude] <value> [radar/barometric]"
+> - "climb/descend <amoount of meters>"
+> - "hold alt[itude]"
+>
+> Hover (only when hovering. These need the HVRT state)
+> - "left/right/forward/back" -> HVRT translate commands. Hold until Player says "Hold" meaning
+>   hold position.
+> - "up/down" -> climd/descend one step.
+
+Read as: E-P5 ("never undoes the player") is narrowed by the user to *the player is not expected
+to use the wheel; if he does, Petrovich's goal wins*; "straight" / "level off" is the spoken
+abort of Q5's recovery; "break away" is the 180 by two lefts; hover translate is a held press
+ended by "hold"; and the ICS/PTT capture from the operator seat is a prerequisite stage, not a
+BL-16 nicety.
