@@ -49,3 +49,4 @@ is now a pointer and holds no insights; writing to it puts the bullet where noth
 - [[the-9k113-sight-bl-b64]] — The 9K113 sight (BL-B64)
 - [[mission-memory-bl-8]] — Mission Memory (BL-8)
 - [[mission-start-and-reset-patterns-bl-15]] — Mission Start & Reset Patterns (BL-15)
+- [[lua-export-module-architecture]] — Lua Export module architecture (AC-B12)
