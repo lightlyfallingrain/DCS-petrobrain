@@ -22,7 +22,11 @@ A feature is done when **all** of the following are true:
 - [ ] For every subproject the branch touches (determine which from the diff —
       check `git diff --name-only` against the branch's fork point, same detection logic as
       `.claude/scripts/commit-quality-gate.sh`), that subproject's own format/lint/type/test
-      commands pass, per its own `CLAUDE.md` "Commands" section. **Derive the list from the diff,
+      commands pass, per its own `CLAUDE.md` "Commands" section. **DoD runs the FULL suite,
+      including `slow` tests: `.claude/scripts/fast-tests.sh --full <subproject>`** (parallel via
+      pytest-xdist, in the foreground). Everyone before DoD runs only the fast set, so this is the
+      one place every test runs before merge (root `CLAUDE.md`, "Verification"). Record the
+      tested tree's sha in the report: the merge skips its own full run when its tree matches. **Derive the list from the diff,
       never from memory** — which subprojects exist and which a milestone touches both change, and
       a hardcoded list is how this project twice shipped a gate that silently skipped whole
       subprojects.

@@ -30,6 +30,10 @@ mypy_path = "src:tests:../world-model/src"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "../world-model/src"]
+# `slow`: scenario mock flights and statistical sweeps -- seconds to tens of seconds each. The fast
+# set (`.claude/scripts/fast-tests.sh`, the commit gate) skips them with `-m "not slow"`; the full
+# suite (Definition of Done) runs them. User direction 2026-11-16.
+markers = ["slow: long-running scenario/sweep test; run by the full suite (DoD), not the fast set"]
 
 [tool.ruff.lint.isort]
 # See world-model/pyproject.toml and aircraft-layer/pyproject.toml for why

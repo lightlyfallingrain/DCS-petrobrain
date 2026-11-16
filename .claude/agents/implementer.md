@@ -164,7 +164,7 @@ knows to look. Volume and the concentrated files: `plans/always-loaded-compactio
    coverage disappears without a failing build.
 2. **Build the minimal working version first** — get it compiling and logically correct before adding polish
 3. **Add or update tests** — cover core logic; do not test infrastructure or external dependencies directly
-4. **Run quality checks** — for each subproject touched (derive the list from the diff, not from memory), that subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) must all pass before you consider the task done
+4. **Run quality checks** — for each subproject touched (derive the list from the diff, not from memory), that subproject's own `ruff format --check`, `ruff check`, `mypy src` and tests (per its own `CLAUDE.md` "Commands" section) must all pass before you consider the task done. **Tests: `.claude/scripts/fast-tests.sh <subproject>`** — smoke plus the tests touching your changes, in the foreground; not the full suite, which is DoD's (root `CLAUDE.md`, "Verification"). If your change could affect what a `slow`-marked scenario test covers, also run that test file by name
 5. **Stage new files** — `git add` every new source file or asset immediately after creating it; never add build artifacts
 6. **Report** — summarize what was changed, tests added, checks run, and anything notable discovered
 

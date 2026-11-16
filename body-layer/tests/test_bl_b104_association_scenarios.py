@@ -21,6 +21,7 @@ informative here)."""
 
 from __future__ import annotations
 
+import pytest
 from belief.contacts import ContactStore
 from perception.estimation import (
     look_sigma_m,
@@ -36,6 +37,9 @@ from perception.source import (
     OwnshipState,
     PositionUncertainty,
 )
+
+#: Scenario runs, ~9.5 s each: full suite (DoD) only, not the fast set (2026-11-16).
+pytestmark = pytest.mark.slow
 
 _CLASSIFICATION_RAW = "OP_ARMORED"
 _CLASSIFICATION_LEVEL = 2

@@ -140,7 +140,15 @@ logger = logging.getLogger(__name__)
 #: stage"`/`"apw_correction_path"`) **and** a non-additive reshape of
 #: `"apw_last_press"`'s own vocabulary -- see `Export.lua`'s own matching
 #: comment on `EXPORT_SCRIPT_VERSION`.
-EXPECTED_EXPORT_VERSION = "2026-11-16"
+#: Bumped again the same day, "...16b" (`[[AC-B12]]`, `plans/
+#: ac-b12-export-modules/plan.md`, main-loop decision on the review):
+#: the module split itself changes no wire field, but U1 made this
+#: version string the whole deployment-staleness check for the new
+#: multi-file `Scripts\Petrobrain\` deploy, which only works if the
+#: string changes whenever the deployed file set does -- before this
+#: bump, a deploy that missed the split reported the identical string as
+#: a correctly split one.
+EXPECTED_EXPORT_VERSION = "2026-11-16b"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it

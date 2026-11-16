@@ -186,6 +186,8 @@ returning the outdated claim with a citation and a confidence score attached. La
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section (every subproject has one; ruff format/check + mypy --strict + pytest in each case, and the set of subprojects comes from root `ROADMAP.md`'s status table). A change touching more than one subproject needs each touched subproject's own commands run. `.claude/scripts/commit-quality-gate.sh` enforces the same sequence at commit time; stating it here prompts self-verification earlier.
 
+**Tests: the fast set while working, the full suite once, at DoD** (user, 2026-11-16). `.claude/scripts/fast-tests.sh <subproject>` (smoke + tests touching the changes, `slow` skipped) is what the commit gate, Implementer and Reviewer run; `--full` is DoD's, in parallel via `pytest-xdist` (in every venv). Its header has the rest. Why: the harness backgrounds any command past ~3 min, and body-layer's serial suite took ~4:45.
+
 ### Behaviour-affecting constants are tunable — standard practice
 
 **User direction, 2026-10-15**, once `X-T26` shipped the mechanism: *"X-T26 pattern must become

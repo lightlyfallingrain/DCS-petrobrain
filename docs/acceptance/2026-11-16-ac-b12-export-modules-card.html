@@ -1,0 +1,207 @@
+<title>Export.lua Module Split</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, one session, prize block marked in amber. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.note.good{border-color:var(--good);}
+.note.good .tag{color:var(--good);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+.session{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.5rem; color:var(--ink); margin:32px 0 4px; padding-top:18px; border-top:2px solid var(--amber-dim);}
+.session small{display:block; font-family:'Source Sans 3',sans-serif; font-weight:400; font-size:0.95rem; color:var(--ink-dim);}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.verified-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--good); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+.already{background:var(--panel2); border:1px solid var(--good); border-radius:8px; padding:16px 20px; margin:18px 0;}
+.already h3{font-size:1.05rem; color:var(--good); margin-bottom:8px;}
+.already ul{margin:4px 0;}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+
+<div class="wrap">
+<div class="eyebrow">AC-B12 / AC-B13 &middot; Export.lua module split &middot; 2026-11-16</div>
+<h1>Export.lua Module Split</h1>
+<div class="subhead">The 3,200-line single <code class="i">Export.lua</code> is now a short loader plus eight module files under a new <code class="i">Petrobrain\</code> folder. No feed should behave differently &mdash; the one approved exception is AC-B13, releasing a stuck AI-pilot-wheel button on a mission restart. This card is the one risk a dev machine can't retire: a real multi-file deploy.</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH TO FLY</div>
+  <pre>git fetch origin
+git checkout main
+git pull --ff-only</pre>
+  <div class="subhead" style="font-size:0.9rem">This DoD pass merges the split to <code class="i">main</code> automatically.</div>
+</div>
+
+<div class="already">
+<h3>Already verified off-Windows, before you fly</h3>
+<ul>
+  <li>All 9 Lua files (loader + 8 modules) parse clean under <code class="i">luac5.1 -p</code>.</li>
+  <li><code class="i">ruff format</code>/<code class="i">ruff check</code>/<code class="i">mypy --strict</code>/<code class="i">pytest</code> all pass &mdash; 795 tests, 0 skipped, 0 failed.</li>
+  <li>The version handshake was run for real against the actual collector code (a loopback socket standing in for Export.lua): the match line and the mismatch warning both fire correctly.</li>
+  <li>AC-B13's fix has a passing Lua unit test extracting the real <code class="i">on_stop</code>: an open press releases and every field clears; no open press means no spurious release but the fields still clear.</li>
+</ul>
+</div>
+
+<div class="note warn"><span class="tag">Deploy carefully</span> Copy <strong>both</strong> <code class="i">Export.lua</code> and the whole <code class="i">Petrobrain\</code> folder to <code class="i">Saved Games\DCS\Scripts\</code>. The loader alone leaves every feed silently absent &mdash; there is no error for a missing module folder, only silence on that one feed.</div>
+
+<div class="session">Session <small>Air start, straight and level, one feed check plus a mission restart mid-correction-hold.</small></div>
+
+<section class="block">
+  <div class="block-num">1</div>
+  <h3>Version match <span class="verified-tag">handshake logic verified</span></h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Start the collector, connect DCS. Watch the collector's first lines.</div>
+    <div class="k expect">Expect</div><div class="v"><code class="i">Export.lua wire-format version 2026-11-16b (matches)</code>. A mismatch warning means a stale or partial deploy &mdash; stop and re-copy both the loader and the folder before continuing.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t1-match">Match or mismatch on connect?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">2</div>
+  <h3>Every feed still reports</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v"><code class="i">GET /telemetry/latest</code> while flying, then paused. <code class="i">GET /world_objects/latest</code>. Trigger Petrovich's search (<code class="i">POST /command/petrovich_search</code>), check <code class="i">GET /petrovich_wheel/latest</code>. OBSERV on, send a <code class="i">sight_target</code> command. Flip one switch via <code class="i">POST /command/cockpit_switch</code>. Install a <code class="i">watch_args</code> set and a <code class="i">read_args</code> one-shot.</div>
+    <div class="k expect">Expect</div><div class="v">Every one answers, moving and paused &mdash; stale while paused, never crashed or null. The sight mark closes on the commanded goal. The switch moves in the cockpit. Both arg reads reply.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t2-telemetry">Telemetry moving, then stale-not-crashed when paused?</label>
+      <label class="chk"><input type="checkbox" data-k="t2-objects">World objects, Petrovich search/wheel, sight, switch, watch/read args &mdash; all answered?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>No Export Lua errors</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Check <code class="i">dcs.log</code> after the session.</div>
+    <div class="k expect">Expect</div><div class="v">Nothing naming <code class="i">Export.lua</code> or a <code class="i">Petrobrain\</code> module. Any <code class="i">nil</code> or unhandled error there means a load-order or deploy problem the module split's own pcall-guard didn't expect.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t3-log">Anything in dcs.log naming Export.lua or a Petrobrain file?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">4 <span class="prize-tag">the prize</span></div>
+  <h3>AC-B13 &mdash; restart mid-correction-hold</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Park the stick (BL-16), induce a correction hold, then restart the mission <strong>while the hold is still open</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">No cockpit control is left pressed after the restart. The Lua unit test is the primary proof this fix exists &mdash; this is confirming it holds under the real DCS stop/restart path, not a Lua harness standing in for it. This is the one behaviour change this split makes on purpose; everything else above should look unchanged.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t4-stuck">Any AI-wheel button still pressed after the restart?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">5</div>
+  <h3>Paused-state check, once more</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Pause the mission a second time, covering the full feed set from block 2.</div>
+    <div class="k expect">Expect</div><div class="v">Same as block 2 &mdash; this subproject's own "always include a paused-state check" convention, applied twice rather than once.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t5-pause">Still holding correctly on the second pause?</label>
+    </div>
+  </div>
+</section>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>Match or mismatch on connect.</li>
+    <li>Every feed answering, paused and moving.</li>
+    <li>Anything in <code class="i">dcs.log</code> naming <code class="i">Export.lua</code> or a <code class="i">Petrobrain\</code> file.</li>
+    <li><strong>After a restart mid-correction-hold, is any AI-wheel button still pressed?</strong></li>
+    <li>Second paused-state check, same as the first.</li>
+  </ol>
+  <p style="margin:12px 0 0; color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+try{
+const KEY='ac-b12-export-modules-2026-11-16';
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{
+      const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+      s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+    }catch(e){}
+  });
+});
+}catch(e){}
+</script>

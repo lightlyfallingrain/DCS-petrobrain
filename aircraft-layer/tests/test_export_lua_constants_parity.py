@@ -15,21 +15,34 @@ from collector.server import EXPECTED_EXPORT_VERSION
 from schema.watched_args import MAX_WATCHED_ARG_NUMBER, MAX_WATCHED_ARGS
 
 _EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+#: `AC-B12` (`plans/ac-b12-export-modules/plan.md`): `MAX_WATCHED_ARGS`/
+#: `MAX_WATCHED_ARG_NUMBER` moved into `effectors.lua` with the rest of
+#: the watch_args/read_args mechanism; `EXPORT_SCRIPT_VERSION` stays in
+#: the loader (`Export.lua`), unaffected.
+_EFFECTORS_LUA = (
+    Path(__file__).resolve().parent.parent
+    / "dcs-export"
+    / "Petrobrain"
+    / "effectors.lua"
+)
 
 
-def _lua_constant(name: str) -> int:
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+def _lua_constant(path: Path, name: str) -> int:
+    text = path.read_text(encoding="utf-8")
     match = re.search(rf"^local {name} = (\d+)\s*$", text, re.MULTILINE)
-    assert match is not None, f"{name} not found in Export.lua"
+    assert match is not None, f"{name} not found in {path.name}"
     return int(match.group(1))
 
 
 def test_max_watched_args_matches() -> None:
-    assert _lua_constant("MAX_WATCHED_ARGS") == MAX_WATCHED_ARGS
+    assert _lua_constant(_EFFECTORS_LUA, "MAX_WATCHED_ARGS") == MAX_WATCHED_ARGS
 
 
 def test_max_watched_arg_number_matches() -> None:
-    assert _lua_constant("MAX_WATCHED_ARG_NUMBER") == MAX_WATCHED_ARG_NUMBER
+    assert (
+        _lua_constant(_EFFECTORS_LUA, "MAX_WATCHED_ARG_NUMBER")
+        == MAX_WATCHED_ARG_NUMBER
+    )
 
 
 def test_export_script_version_matches_collector_expectation() -> None:

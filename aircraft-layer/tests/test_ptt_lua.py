@@ -22,7 +22,9 @@ from pathlib import Path
 
 import pytest
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+_PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
+_CORE_LUA = _PETROBRAIN_DIR / "core.lua"
+_PTT_ICS_LUA = _PETROBRAIN_DIR / "ptt_ics.lua"
 
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
@@ -38,14 +40,14 @@ def _lua_executable() -> str | None:
     return None
 
 
-def _extract_lua_function(name: str) -> str:
+def _extract_lua_function(path: Path, name: str) -> str:
     """Same technique as `test_payload_lua.py`'s own helper -- counts
     `function`/`if`/`for`/`while`/`end` as block openers/closer, `--`
     line comments skipped while counting (`test_sight_servo_lua.py`'s
     refinement)."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
-    assert start_match is not None, f"{name} not found in Export.lua"
+    assert start_match is not None, f"{name} not found in {path.name}"
     token_re = re.compile(r"--[^\n]*|\b(function|if|for|while|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
@@ -61,10 +63,10 @@ def _extract_lua_function(name: str) -> str:
     raise AssertionError(f"unbalanced function body while extracting {name}")
 
 
-def _extract_lua_constant(name: str) -> str:
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+def _extract_lua_constant(path: Path, name: str) -> str:
+    text = path.read_text(encoding="utf-8")
     match = re.search(rf"^local {name} = (.+)$", text, re.MULTILINE)
-    assert match is not None, f"{name} not found in Export.lua"
+    assert match is not None, f"{name} not found in {path.name}"
     return f"local {name} = {match.group(1)}"
 
 
@@ -111,12 +113,16 @@ end
 local function debug_log(msg) end
 """
     constants = "\n".join(
-        _extract_lua_constant(name)
+        _extract_lua_constant(_PTT_ICS_LUA, name)
         for name in ("ARG_PILOT_PTT", "ARG_OPERATOR_PTT", "PTT_EPSILON")
     )
     lines = [constants, preamble]
     lines.extend(
-        _extract_lua_function(name) for name in ("safe_call", "push_ptt_state")
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_PTT_ICS_LUA, "push_ptt_state"),
+        )
     )
     lines.append("local out = {}")
     for frame in frames:

@@ -7,9 +7,19 @@ long-running process on the Windows box, polled live over LAN. See
 
 ## Deploy Export.lua (Windows box, once per change)
 
-Copy `aircraft-layer/dcs-export/Export.lua` to
+Copy `aircraft-layer/dcs-export/Export.lua` to `Saved Games\DCS\Scripts\Export.lua`, **and** the
+whole `aircraft-layer/dcs-export/Petrobrain\` folder to `Saved Games\DCS\Scripts\Petrobrain\` —
+`Export.lua` is now a loader (`AC-B12`, `plans/ac-b12-export-modules/plan.md`) that `dofile`s eight
+module files out of that folder; copying the loader alone leaves every feed silently absent.
+Canonical source for both lives in this repo; never edit either deployed copy in place — same
+convention as `world-model/tools/wsl/` -> `win-mac-sync/run-wsl/`. A synced copy of both is kept at
+`win-mac-sync/to-windows/aircraft-layer/` (`Export.lua` and its own `Petrobrain/` subfolder) for
+machines pulling via that sync folder instead of a direct repo checkout.
 
-**The deployed copy announces its version, and the collector checks it.** `Export.lua` carries
+**The deployed `Export.lua` announces its version, and the collector checks it — this is now the
+whole deployment-staleness check, covering the `Petrobrain/` modules too** (`AC-B12` U1, user
+direction 2026-11-16: *"I copy all the necessary files over with a script anyway, so if Export.lua
+matches, I assume the others do as well"*) — no per-module version stamp. `Export.lua` carries
 `EXPORT_SCRIPT_VERSION` and sends it on every connect; the collector compares it against
 `EXPECTED_EXPORT_VERSION` and logs either a match at INFO or a **loud WARNING** on mismatch. Watch
 the collector's first lines after DCS connects — that is where a stale deployment shows itself.
@@ -22,11 +32,6 @@ in the code. **When the wire format changes, bump both constants in the same com
 
 **Do not restore from a `.backup` you made before swapping in a probe** — that backup is a copy of
 whatever was deployed, which may itself be stale. Re-copy from the repository.
-`Saved Games\DCS\Scripts\Export.lua`. Canonical source lives in this repo;
-never edit the deployed copy in place — same convention as
-`world-model/tools/wsl/` -> `win-mac-sync/run-wsl/`. A synced copy is kept at
-`win-mac-sync/to-windows/aircraft-layer/Export.lua` for machines pulling via
-that sync folder instead of a direct repo checkout.
 
 Optional: create `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any
 content, even empty) to turn on verbose logging to

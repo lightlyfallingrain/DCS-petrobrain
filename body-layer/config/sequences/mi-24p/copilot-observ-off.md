@@ -1,5 +1,3 @@
-<!-- OBSERV. (NABL) OFF -- one unconditional write, parity with today's
-     `sight_effector.write_observ(aircraft_client, on=False)`. -->
 
 | file-param | for |
 | --- | --- |
@@ -9,4 +7,4 @@
 
 | condition | effector | value | petrovich-says | comment |
 | --- | --- | --- | --- | --- |
-| | observ | off | | OBSERV OFF |
+| | observ | off | "observ off" | OBSERV OFF |

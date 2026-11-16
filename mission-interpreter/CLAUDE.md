@@ -120,7 +120,7 @@ match `world-model/`'s own pins for consistency (no reason for the two to drift)
 
 ```sh
 python3 -m venv mission-interpreter/.venv
-mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==9.1.1"
+mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==9.1.1" "pytest-xdist==3.8.0"
 ```
 
 ## Testing

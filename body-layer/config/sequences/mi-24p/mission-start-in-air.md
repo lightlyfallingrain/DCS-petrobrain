@@ -12,6 +12,7 @@
 | | p_sight_grid_brightness | third | | |
 | | p_intercom_1 | on | | |
 | | p_intercom_2 | on | | |
+| | p_wpn_selector | off | | Set pilot weapon selector OFF |
 | | p_map_scale_selector | up | | |
 | | p_iff_power | on | | |
 

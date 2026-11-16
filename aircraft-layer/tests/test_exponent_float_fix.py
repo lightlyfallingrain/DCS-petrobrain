@@ -42,7 +42,11 @@ _EXPONENT_NUMBER_RE = re.compile(r"\d[eE][-+]?\d")
 
 from collector.command_sender import CommandSender, _format_fixed_point
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+#: `AC-B12` (`plans/ac-b12-export-modules/plan.md`): `extract_json_number_
+#: field` moved into `core.lua`'s shared helpers.
+_EXPORT_LUA = (
+    Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain" / "core.lua"
+)
 
 #: Execution tools, in preference order. Unlike `test_dcs_export_lua_
 #: syntax.py`'s parse-only tools, this *runs* the extracted function --
