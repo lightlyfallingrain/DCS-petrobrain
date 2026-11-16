@@ -2,9 +2,31 @@
 
 - [~] **RC-1 — Serve each terrain module's RasterCharts as a standard tiled map, zoom and pan in
   a browser, from a server on the Windows DCS machine, readable from any device on the LAN. One
-  more standalone service, independent of every other one.** #status/in-progress Filed 2026-11-16
-  by user direction. **Planning started 2026-11-16 on `feature/raster-chart-viewer`**; plan:
+  more standalone service, independent of every other one.** #status/in-progress #needs-flight
+  Filed 2026-11-16 by user direction. **Planning started 2026-11-16 on `feature/raster-chart-viewer`**; plan:
   `plans/raster-chart-viewer/plan.md`.
+
+  **DoD-PASSED 2026-11-16 for Stages 1-6** (`plans/raster-chart-viewer/dod-check.md`, tip
+  `91e2296c4236164633624121b0d587e4bac92b0a`); merging to `main` on this report per root
+  `CLAUDE.md`'s auto-merge workflow. **Branch to fly after merge: `main`.** Stage 7 — the user's
+  own live LAN check on the Windows box — has not been flown; this entry stays `[~]`/
+  `#status/in-progress` until it is. What Stage 7 must verify (full detail and run instructions:
+  `raster-chart-viewer/README.md`, "Stage 7 — the live check"):
+
+  - **Syria (both tiers, 32m/64m) and Caucasus** pan/zoom continuous, not scrambled — settles U3
+    (the sheet-mosaic convention, measured on Syria only, generalised to every terrain).
+  - **Afghanistan, Kola, Mariana Islands** (incl. Mariana's "unscaled" tier, U2) — a quick look;
+    a scrambled terrain is a follow-up to file, not a blocker (U3's own answer).
+  - **The first fully-zoomed-out view of a tier** is fast once Stage 6's background warm-up has
+    had a few seconds — the one slow path the whole cache design exists to hide.
+  - **No DCS session needed** — pausing/closing the mission, or not having one running, makes no
+    difference, since the service reads only installed files.
+
+  Record the result (which terrains/tiers looked right, which didn't, and the warm-up timing) on
+  this entry, and clear `#needs-flight` once flown — naming which sortie/session cleared it.
+
+  **Acceptance card:** https://claude.ai/artifact/21AkKixYQcXaLDKfnbRSvN (source:
+  `docs/acceptance/2026-11-16-raster-chart-viewer-rc1-stage7-sortie.md`).
 
   **Moved here from [[MI-B4]] on 2026-11-16, user direction:** *"move the backlog item for the
   chart viewer to a proper ROADMAP folder structure under the chart viewer sub-project. Let's
