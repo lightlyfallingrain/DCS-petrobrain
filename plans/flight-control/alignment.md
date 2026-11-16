@@ -887,3 +887,116 @@ unaffected and not re-checked.
   transient of that size acceptable as the normal cost of fixing the sink, or does it need a
   tighter bound (e.g. cap how far phase 1 is allowed to let the aircraft climb before switching to
   a more aggressive correction), given it is the common path, not a rare fallback?
+
+## Plan check — 2026-11-16 (Stage P2 ready to build)
+
+**Verdict:** CONCERNS
+
+Checked `plans/flight-control/plan.md`'s "Revised 2026-11-16 — Stage P2 ready to build" (the goal
+channel, the rotation rule, the 700 m radar cap, the takeover-coexistence rule, the readback table,
+and sub-stages P2a/P2b) against the goal check above (E-P3, E-P4) and the pilot's own vocabulary
+table ("Amended 2026-11-15"), which this stage is scoped to deliver without reopening. The earlier
+plan checks' own findings (vocabulary not routed to `audio-adapter`, U3/E-P5, the takeover
+transient) are all fixed in this revision — confirmed by rereading, not re-litigated here.
+
+| expectation | stage | status |
+|---|---|---|
+| E-P3 (spoken goals happen, approximately and honestly; several at once converge) | P2a | met |
+| E-P4 (latest wins, no narration of mode hops/presses/partial progress) | P2a | met |
+| FLT/HVR vocabulary rows (`level_flight` through `hold_altitude`) → token, goal, readback | P2a | met — traced row by row, see below |
+| Readback names the step/reference actually set, not the one requested | P2a | met — 700 m radar-cap rule, speed-step rounding, altitude-step/hold wording all name the achieved value |
+| A goal spoken during an in-progress takeover correction waits, doesn't fight it, and the pilot hears it was heard | P2a | met — `takeover_stage is not None` blocks promotion; readback still fires on acceptance |
+| "Radar" above the 700 m cap gives an honest answer | P2a | met, provisional — Stage P0-rad (the probe that confirms the refusal-then-fallback mechanism against a live above-cap radar attempt) is explicitly unflown; disclosed in Risks, not hidden |
+| Several goals at once converge without one starving another (`AI_PILOT_GOAL_SLICE_S` rotation) | P2a | met, open as **U4** — the ~17% dead-time cost is disclosed and the user is asked to confirm the tradeoff, not silently built |
+| HVRT vocabulary (`left`/`right`/`forward`/`back`, `hold`, `up`/`down`) → token, goal, readback | P2b | met for the fields themselves |
+| **HVRT is reachable by voice at all** | P2b | **missing — see Finding 1** |
+| `mode_blocked` is silent, retried forever, never spoken | P2a | **CONCERNS — see Finding 2** |
+| Nothing surprises the pilot or fights him | P2a/P2b | CONCERNS — both findings below are instances of this check |
+
+### Findings
+
+1. **Nothing in Stage P2 ever presses the wheel into HVRT, so the whole HVRT translate vocabulary
+   is unreachable by voice alone — a player in HVR who says "left" gets silence, not a translate.**
+   Lens: the non-obvious case / whose job / would the pilot notice and use this.
+   - Assumption: the vocabulary table's HVRT rows ("left/right/forward/back", "Hold", "up/down")
+     read as complete once each has a token, a mode gate, and a readback — this stage's own
+     traceability treats them as closed.
+   - In the sim: the vocabulary-collision note is explicit — `CrewConsole.handle_command` routes
+     `hvrt_translate`/`hvrt_step`/`hvrt_hold` to the AI-wheel handler **only when `ai_mode ==
+     "HVRT"`**, and "treat them as unmatched (fall through, same as any other out-of-context
+     token) otherwise." The mode-cycle orders say HVRT sits one short-left press past HVR
+     (`HVR > HVRT > CBTM > HVR`), and the only mode-cycle logic this plan describes is scoped to
+     "a goal (one of heading/altitude/speed)" (Stage P2's Lua bullet) — there is no rule anywhere
+     that presses short-left to enter HVRT when a bare direction word arrives in HVR. Because the
+     command is dropped at dispatch before it ever reaches `ai_pilot_wheel.py`, `decide_ai_pilot_
+     wheel` never even sees an attempt to set `hvrt_direction` while out of HVRT — there is nothing
+     for its own "when" logic to act on.
+   - The pilot would see: he says "Hover" (stops the aircraft, FLT→HVR fires automatically), then
+     says "left" to nudge sideways — and nothing happens, with no readback, no "say again," no
+     feedback of any kind. The only way into HVRT is pressing the physical wheel himself, which is
+     exactly the thing U3 says Petrovich should make unnecessary (*"the goal is to use the wheel
+     command via Petrobrain, not player directly"*).
+   - Grounded in: the plan's own vocabulary-collision-check text (line ~132-134) and the Flight
+     P2b card itself, which says "from hover, **cycle into HVRT**, say 'left'..." without ever
+     saying how — the only place in the whole plan that assumes a manual step it never specifies.
+     Also grounded in the plan's **own precedent for this exact problem**: `cbtm_align`/
+     `cbtm_break`/`cbtm_break_away` are every bit as mode-exclusive as HVRT translate, and each one
+     is explicitly built "cycle-then-press" — Stage P3's Lua bullet mode-cycles to CBTM before
+     pressing, and the vocabulary table says `cbtm_break` "cycles to CBTM first if needed, same
+     cycle-then-press shape as `cbtm_align`." HVRT translate is the one mode-exclusive action in
+     this vocabulary that does not get that treatment, with no stated reason for the difference.
+   - Suggests: either (a) give `hvrt_translate`/`hvrt_step` the same cycle-then-press shape every
+     other mode-exclusive action already has — a bare direction word spoken while in HVR (not yet
+     HVRT) triggers the short-left cycle first, then opens the press once the mode reads HVRT — or
+     (b) if manual wheel entry into HVRT is the accepted design for this build, say so explicitly in
+     the plan and the test card (the project's own practice elsewhere: P0's command-wheel cost, P5's
+     terrain-avoidance gap), and confirm Petrovich's own mode-cycle-back (U3) won't immediately
+     reassert HVR/FLT the moment the player enters HVRT with no goal of his own pending. See **Q1**.
+
+2. **`mode_blocked`'s "no spoken line, ever" posture is derived from A4, but A4 was never about this
+   failure, and the plan's own U1 recommends the opposite call for the sibling case.** Lens: crew
+   sense / the non-obvious case.
+   - Assumption: the Readbacks section reads `mode_blocked` as the same case A4/Decision 14
+     already settled ("no 'unable' for a goal not quite reached... fly within parameters"), so no
+     new decision is needed and Petrovich "keeps retrying silently next tick," forever, with
+     nothing said "unless the player asks or it never resolves (out of this stage's scope)."
+   - In the sim: A4 was about a goal the aircraft **cannot physically reach** — a speed limited by
+     weight, a collective at its ceiling, a terrain floor holding him above a spoken height. That
+     is a different failure from `mode_blocked`, which is Petrovich's **own control mechanism**
+     failing to drive the wheel into the mode a goal needs at all (the short-left cycle exhausting
+     `MODE_CYCLE_MAX_ATTEMPTS` without reaching FLT/HVR) — nothing about the aircraft's physics is
+     stopping it; the wheel interaction is. The plan's own **U1**, written in this same document for
+     the sibling case (`cbtm_align`/`cbtm_align_for_launch`), treats exactly this signal
+     differently: *"a spoken 'unable, not ready' only if the mode-cycle to CBTM itself fails to
+     resolve within the attempt bound... otherwise silent."* U1 is still open, but it already
+     establishes that mode-cycle exhaustion is a case the user might want spoken — the Readbacks
+     section forecloses that for heading/altitude/speed without asking the same question.
+   - The pilot would see: he says "heading 090" at a moment the wheel's mode-cycle genuinely cannot
+     resolve (the CBTM→FLT/HVR auto-transition is itself flagged elsewhere as "probably though not
+     sure") — readback fires once, and then nothing, forever, with no way to tell "still working on
+     it" apart from "stuck and will never happen." E-P3 promises goals happen "approximately and
+     honestly"; perpetual silent failure of the mechanism itself is not dishonest in the way a wrong
+     number would be, but it is not "honest" either — the pilot has no signal that this goal is the
+     one case where honesty would mean saying something.
+   - Grounded in: Decision 14/A4's own wording (goal not *reached*, not goal never *attempted*), and
+     U1's still-open recommendation for the identical `mode_blocked` signal on a sibling action.
+   - Suggests: this is a real question, not a foreclosed one — ask the user whether `mode_blocked`
+     exhaustion for a continuous heading/altitude/speed goal should eventually get the same "unable,
+     not ready"-style call U1 already contemplates for align, rather than treating A4 as having
+     already answered a case it was not written for. See **Q2**.
+
+### Questions for the user
+
+- **Q1** — Stage P2's HVRT vocabulary ("left"/"right"/"forward"/"back", "up"/"down") only fires once
+  the wheel is already in HVRT, and nothing in this plan ever presses the wheel into HVRT by voice —
+  every other mode-exclusive command (`cbtm_align`, `cbtm_break`) cycles there first, but HVRT
+  translate does not. Should a bare direction word spoken while in HVR trigger the same
+  cycle-then-press sequence (reaching HVRT automatically, matching the CBTM commands), or is
+  pressing the wheel into HVRT by hand the accepted way in for this build?
+- **Q2** — `mode_blocked` (the wheel's short-left cycle exhausting its attempt bound without
+  reaching the mode a goal needs) is planned as permanently silent for heading/altitude/speed
+  goals, reusing A4's "no callout for a goal not reached" — but A4 was about a physical limit, not
+  the wheel mechanism failing to engage at all, and the plan's own U1 recommends a spoken "unable,
+  not ready" for the identical signal on `cbtm_align`. Should a heading/altitude/speed goal that
+  never gets out of `mode_blocked` eventually say so too, or is silent-forever retry the intended
+  behaviour here?
