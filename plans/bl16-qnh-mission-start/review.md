@@ -127,3 +127,77 @@ APPROVED WITH MINOR FIXES
 Full read of the feature diff (schema, Lua hook, the new module, `body.py`, `crew_console.py`,
 every new/changed test) and the four plan/alignment/implementation/research documents. Not a
 spot-check.
+
+## Re-review
+
+Scope: the fix round only (commit `f9e084ad`, diffed against this review's own prior commit
+`0f255ca1`), per the dispatch's instruction — not a fresh full review.
+
+**Worktree addressing.** HEAD (`a7bea50d`) was a strict ancestor of the stated tip `8572ea0a`
+with a clean tree; fast-forwarded with `git merge --ff-only 8572ea0a2cad8ccbcf5f32da9bbfbea092893d94`.
+
+**Required fix — verified done.** `advance_altimeter_qnh_sync`'s `else` branch
+(`body-layer/src/belief/altimeter_qnh_sync.py:293-298`) now reads:
+
+```python
+else:
+    delta = _clamp(
+        _sign(error_mmhg) * ALTIMETER_QNH_CALIBRATION_STEP,
+        -ALTIMETER_QNH_MAX_STEP,
+        ALTIMETER_QNH_MAX_STEP,
+    )
+```
+
+Same `_clamp(..., -ALTIMETER_QNH_MAX_STEP, ALTIMETER_QNH_MAX_STEP)` shape as the gain-based
+branch immediately above it, sign logic (`_sign(error_mmhg) * ALTIMETER_QNH_CALIBRATION_STEP`)
+unchanged — only the clamp wrapper was added. `ALTIMETER_QNH_MAX_STEP`'s docstring claim ("bounds
+any single write regardless of a bad gain estimate") now holds for both branches, closing the gap
+this review's prior pass found (`.claude/agent-memory/reviewer/
+feedback_tuning_clamp_covers_one_branch_not_both.md`).
+
+**New test, reproduced independently.** Ran
+`test_calibration_step_is_clamped_to_max_step_even_when_configured_larger` standalone — passes.
+Then performed my own counterfactual, independent of the implementer's own logged one: edited
+`altimeter_qnh_sync.py` to strip the `_clamp(...)` back to the bare
+`_sign(error_mmhg) * ALTIMETER_QNH_CALIBRATION_STEP` (the pre-fix shape) and re-ran the same test
+— it goes red (`assert False` on `abs(delta) <= 0.05`, the override pair's `MAX_STEP`), for
+exactly the stated reason. Restored the file via `cp` from a pre-edit copy and confirmed
+`shasum` on the restored file (`d1affd34cf4c12623cdc771692f6894afa8f9840`) matches the
+implementation log's own cited checksum exactly, and `git status --porcelain` on the file is
+empty. The test is a genuine counterfactual, not a decorative one.
+
+**No new tunable, no `config/defaults.toml` change.** Both constants (`ALTIMETER_QNH_
+CALIBRATION_STEP`, `ALTIMETER_QNH_MAX_STEP`) already existed and were reviewed in the prior pass;
+this fix only wires an existing clamp into a second branch. `git diff` confirms
+`config/defaults.toml` has no change in this commit, which is correct — nothing about either
+constant's declaration, bounds, or rendered comment changed.
+
+**Roadmap line.** `body-layer/ROADMAP/BL-B118.md`'s closing line now reads "Implemented
+(Stages 1-3); not yet flown. #needs-flight" — accurate: Stages 1-3 are built and tested, the
+live sortie has not happened, and `#needs-flight` is the correct marker per this project's
+testing-debt convention. The prior "Not yet implemented or flown" was indeed stale against the
+merged implementation; this is a correct minor fix, not scope creep.
+
+**Nothing else moved.** `git diff 0f255ca1 f9e084ad --stat` touches exactly five files: the
+module, its test file, the roadmap entry, `implementation.md`'s own log, and one new implementer
+agent-memory file. No other behaviour, test, or doc changed in this round.
+
+**Checks, re-run from scratch in a fresh `body-layer/.venv`** (built for this re-review; not the
+prior pass's symlinked venv):
+- `ruff format --check src tests` — 206 files already formatted.
+- `ruff check src tests` — all checks passed.
+- `cd body-layer && .venv/bin/mypy src` — no issues, 84 source files (after installing `numpy`
+  into this venv too — required transitively via the world-model `coordinates` seam import,
+  same as every other body-layer mypy run).
+- `.claude/scripts/fast-tests.sh body-layer` — 2414 passed, 4 xfailed (one more pass than the
+  prior review's 2413, matching the one new test added).
+- `tests/test_altimeter_qnh_sync.py` alone — 13 passed.
+
+No regression, no new finding, nothing further to request.
+
+### Re-review Verdict
+APPROVED
+
+### Re-review Confidence
+Full read of the fix-round diff and both touched files (module + test), plus an independent
+counterfactual reproduction. Not a spot-check.
