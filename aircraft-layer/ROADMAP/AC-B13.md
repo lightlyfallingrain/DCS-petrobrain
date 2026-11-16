@@ -2,7 +2,7 @@
 
 - [x] **AC-B13 — Release any open AI-pilot-wheel press and clear the takeover state in
   `LuaExportStop`, the same way that function already resets every sibling per-session state —
-  done as part of `[[AC-B12]]`, DoD-PASSED 2026-11-16, pending merge.** #status/done
+  done as part of `[[AC-B12]]`, DoD-PASSED 2026-11-16, merged to `main` as `e9ae92c4`.** #status/done
   #needs-flight Filed 2026-11-16 from BL-16's takeover-revision security analysis
   (`plans/flight-control/security-takeover.md`, "Risk Communication: `LuaExportStop` does not release
   an open AI-pilot-wheel press"; verdict APPROVED, this finding non-blocking).

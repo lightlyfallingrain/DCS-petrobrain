@@ -1,8 +1,8 @@
 # AC-B12 — Split Export.lua into loaded modules, and read only what Petrobrain needs
 
 - [x] **AC-B12 Part 1 — split `Export.lua` into several files loaded with `dofile` — DoD-PASSED
-  2026-11-16 on `feature/ac-b12-export-modules` (tip `590eebb1`), merge sha filled in by the merge
-  step.** #status/done #needs-flight Filed 2026-11-16 by user direction. Architect plan:
+  2026-11-16 on `feature/ac-b12-export-modules` (tip `590eebb1`), merged to `main` as `e9ae92c4`
+  (aircraft-layer tree identical to the DoD-tested tree).** #status/done #needs-flight Filed 2026-11-16 by user direction. Architect plan:
   `plans/ac-b12-export-modules/plan.md`. **Branch to fly: `main`, after this DoD's merge.**
 
   **Part 2 ("read only what is needed") is not built here** — explicitly out of this plan's scope,
