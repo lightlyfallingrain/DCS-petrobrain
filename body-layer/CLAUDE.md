@@ -520,6 +520,10 @@ Belief — observation *consumption*:
   classification is dropped rather than guessed from the stale previous-mission sample;
   `TAKEOFF` suppression ends the same poll either way. `mission-start-in-air.md` ships
   (`97bad8fd`); nothing ships for `mission-start` yet.
+  **`seat-pilot`/`seat-copilot` triggers** (user, 2026-11-16) fire when the player moves between
+  the two seats, read from `apw_seat` (`Export.lua`'s camera-based seat, `belief.ai_pilot_wheel.
+  seat_change`): a change between two known seats only, never the mission's starting seat, and
+  suppressed (re-baselined) while a mission (re)start resolves, same window as `takeoff`.
 - `src/belief/altimeter_qnh_sync.py` (`[[BL-B118]]`, `plans/bl16-qnh-mission-start/plan.md`) —
   the operator (copilot) altimeter QNH sync: a self-calibrating secant loop on device 42/cmd
   3001/arg 834, armed by `body._maybe_start_altimeter_qnh_sync` at the same two moments
