@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# The tile/mip disk cache (cache.py) -- never committed, machine-local,
+# can be rebuilt from the installed DCS terrains at any time.
+cache/
