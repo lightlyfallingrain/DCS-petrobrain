@@ -236,3 +236,55 @@ complete tool set still keeps weapons, sight and flying fixed-phrase only; Q9 ro
 - **Q6 and Q9 are examples, not specs** (briefing target; contacts called as found).
 - **Q8 is open, to explore with the pilot.**
 - **Nothing is built until exploring is done.**
+
+## Explore, Q8 — what the brain may do, verbatim
+
+Asked: with BL-16 making Petrovich fly, how flying, the 9K113 sight and weapons, and scanning
+should work through the brain, and where a real crew draws the line.
+
+**The general goal:**
+
+> *"First, general goal. If I had the compute power, I'd have the brain handle a lot of the things
+> that deterministic code now does. But I need a fast response and do not want to rely on cloud
+> LLM's (to save on costs). Therefore deterministic actions exist for most of the things that
+> repeat often and can be done deterministically. The benefit on an LLM would be natural speech
+> and interaction, mimicking a human co-pilot.*
+>
+> *Now, since there's limited compute, the LLM used is small to be fast. But the goal kinda is the
+> same. Mimick a human pilot - copilot communication and operation. That is why the brain needs
+> access to the tool set. It must be able to get information it needs and command the body layer
+> to do things. Numeric values included.*
+>
+> *Now, the brain cannot do anything it pleases, there is only a given toolset available that the
+> body layer has."*
+
+**The four questions:**
+
+> *"Q1 - Normal use case is deterministic commands: "turn left 20". "Petrovich, get us behind the
+> ridge on right", would be brain stuff, but also much more complex that makes sense at this time.
+> Flight commands are expected to be deterministic at this stage. At some point, we'll need
+> instructions like, fly to a certain point, but whether that is deterministic, brain, or
+> combination of both needs to be determined later.*
+> *Q2 - sight, yes. Brain should be able to read weapon statuses.*
+> *Q3 - brain should be able to read scan data and command scans*
+> *Q4 - There is no definitive line. With a human copilot, everything would happen from just
+> talking to each other. We have to balance between fast, deterministic but inflexible solution
+> and flexible but slow LLM guided actions/speech."*
+
+**What this settles, as read (not yet a plan):**
+
+- **The brain is the human-copilot conversation; deterministic commands are the fast path for
+  what repeats.** Both reach the same body-layer tool set. The tool set is the boundary of what the
+  brain can do, and the brain can both read and command through it, **numeric values included**.
+- **Flying stays deterministic for now** ("turn left 20" is a fixed command). Terrain-reasoning
+  flight ("get us behind the ridge") is out of scope at this time. "Fly to a point" is a later
+  decision: deterministic, brain, or both.
+- **The 9K113 sight is open to the brain.** This revises the BR-2 plan's U2 exclusion of
+  `observ_on`/`observ_off`/`point`.
+- **Weapon status is readable by the brain.** *Read as read-only: the answer does not open arming
+  or engaging, so `weapons_armed`/`weapons_safe`/`engage`/`disengage` stay fixed-phrase until
+  the pilot says otherwise.*
+- **Scans: the brain reads scan data and commands scans.** The scan family is today missing from
+  the brain's command allowlist by omission, not decision.
+- **There is no fixed line between brain and deterministic paths.** It is a speed-versus-
+  flexibility balance, decided case by case.

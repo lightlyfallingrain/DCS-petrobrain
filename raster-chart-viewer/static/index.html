@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raster Chart Viewer</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1b1b1b;
+    color: #e8e8e8;
+    font-family: system-ui, sans-serif;
+  }
+  #toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    background: #262626;
+    border-bottom: 1px solid #3a3a3a;
+  }
+  #toolbar label { font-size: 14px; }
+  #toolbar select {
+    font-size: 14px;
+    padding: 4px 6px;
+    background: #1b1b1b;
+    color: #e8e8e8;
+    border: 1px solid #3a3a3a;
+  }
+  #status { font-size: 13px; color: #999; margin-left: auto; }
+  #viewer {
+    position: absolute;
+    top: 44px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <label for="terrain-select">Terrain</label>
+  <select id="terrain-select"></select>
+  <label for="tier-select">Tier</label>
+  <select id="tier-select"></select>
+  <span id="status"></span>
+</div>
+<div id="viewer"></div>
+
+<script src="openseadragon/openseadragon.min.js"></script>
+<script>
+"use strict";
+
+var terrainSelect = document.getElementById("terrain-select");
+var tierSelect = document.getElementById("tier-select");
+var statusEl = document.getElementById("status");
+
+var viewer = OpenSeadragon({
+  id: "viewer",
+  prefixUrl: "openseadragon/images/",
+  showNavigator: true,
+  visibilityRatio: 1.0,
+  constrainDuringPan: true
+});
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function fetchJson(url) {
+  return fetch(url).then(function (resp) {
+    if (!resp.ok) {
+      throw new Error(url + ": HTTP " + resp.status);
+    }
+    return resp.json();
+  });
+}
+
+// A plain-object OpenSeadragon TileSource -- no DZI/IIIF descriptor,
+// since this server's /tile endpoint is its own grid. The logical
+// canvas is declared as a square power-of-two multiple of the tile
+// size (2^maxLevel * tileSizePx), not the mosaic's own tiles_wide x
+// tiles_tall extent -- every full-res tile the server can be asked
+// for is a full tileSizePx x tileSizePx JPEG (blank-padded past the
+// real grid, same as a sparse-sheet gap), so declaring a slightly
+// larger logical canvas avoids OpenSeadragon's own partial/cropped
+// edge-tile handling entirely: every tile it ever requests, in or out
+// of the mosaic's real extent, gets the same full-size response.
+function buildTileSource(terrain, tier, info) {
+  var side = Math.pow(2, info.max_level) * info.tile_size_px;
+  return {
+    width: side,
+    height: side,
+    tileSize: info.tile_size_px,
+    maxLevel: info.max_level,
+    getTileUrl: function (level, x, y) {
+      return "tile/" + terrain + "/" + tier + "/" + level + "/" + x + "/" + y + ".jpg";
+    }
+  };
+}
+
+function openTier(terrain, tier) {
+  setStatus("loading " + terrain + " / " + tier + " ...");
+  fetchJson("terrains/" + encodeURIComponent(terrain) + "/tiers/" + encodeURIComponent(tier))
+    .then(function (info) {
+      viewer.open(buildTileSource(terrain, tier, info));
+      setStatus(terrain + " / " + tier);
+    })
+    .catch(function (err) {
+      setStatus("error: " + err.message);
+    });
+}
+
+function populateTiers(terrain) {
+  fetchJson("terrains/" + encodeURIComponent(terrain) + "/tiers").then(function (data) {
+    tierSelect.innerHTML = "";
+    data.tiers.forEach(function (tier) {
+      var option = document.createElement("option");
+      option.value = tier;
+      option.textContent = tier;
+      tierSelect.appendChild(option);
+    });
+    if (data.tiers.length > 0) {
+      openTier(terrain, data.tiers[0]);
+    }
+  });
+}
+
+terrainSelect.addEventListener("change", function () {
+  populateTiers(terrainSelect.value);
+});
+tierSelect.addEventListener("change", function () {
+  openTier(terrainSelect.value, tierSelect.value);
+});
+
+fetchJson("terrains").then(function (data) {
+  terrainSelect.innerHTML = "";
+  data.terrains.forEach(function (terrain) {
+    var option = document.createElement("option");
+    option.value = terrain;
+    option.textContent = terrain;
+    terrainSelect.appendChild(option);
+  });
+  if (data.terrains.length > 0) {
+    populateTiers(data.terrains[0]);
+  } else {
+    setStatus("no terrains discovered");
+  }
+}).catch(function (err) {
+  setStatus("error: " + err.message);
+});
+</script>
+</body>
+</html>
