@@ -437,3 +437,23 @@ T5: keep-open -- close the menu by hand; the probe reopens it
   type the engine has.
 - **The takeover fix stays as the safety net** either way: if the altimeter is set right, the
   wild target should stop appearing and the correction finds nothing to correct.
+
+### Explore — the pilot's answers, verbatim
+
+> *"the altitude thing:*
+> *1 use QNH for copilot*
+> *2 set at mission start, both ground start and air start*
+> *3 moves steadily*
+>
+> *ok for asking windows session"*
+
+Settled, as read (not yet a plan):
+
+- **Petrovich sets the copilot's (operator's) altimeter to the mission's QNH,** so it reads altitude
+  above sea level, consistent with what the AI's barometric hold flies.
+- **At mission start, both ground and air starts.** The existing `mission-start` trigger fires on
+  both.
+- **The knob moves the setting steadily while held** (no speed-up like the AI wheel's holds), so a
+  closed-loop hold-until-value is straightforward once the window can be read.
+- **Next: the Windows session looks up the operator altimeter's readout args and knob behaviour in
+  the Mi-24P cockpit files,** before a probe or a plan.
