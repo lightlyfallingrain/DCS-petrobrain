@@ -60,6 +60,8 @@ def test_pushed_event_is_returned(
         body = json.loads(response.read())
     assert body == {
         "sequence": 3,
+        "qnh": None,
+        "atmosphere_type": None,
         "theatre": "Afghanistan",
         "received_wall_clock_s": 1000.0,
     }
