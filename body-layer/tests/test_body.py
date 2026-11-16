@@ -3267,9 +3267,12 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
         look_started_sim=0.0,
     )
 
-    # The real command surface: "Observ off" speaks immediately...
+    # The real command surface: "Observ off" sets the transition
+    # immediately -- the line itself is now spoken by the engine when
+    # the `observ-off` sequence row completes (`[[BL-B119]]`), not
+    # returned here.
     lines = console.handle_command("observ_off", now_sim=1.0)
-    assert lines == ["Observ off."]
+    assert lines == []
     assert console.observ_transition == "off"
 
     # ...and the poll loop's own drain block (body.py) is what actually
@@ -6227,7 +6230,14 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
     the one-shot transition field. Also: "Observ on" *before* ready writes
     nothing and is refused (the gate is synchronous in `_handle_observ_on`,
     unit-tested in `test_crew_console.py`, but reproduced here against the
-    real loop so a future change to the gate's wiring is caught here too)."""
+    real loop so a future change to the gate's wiring is caught here too).
+
+    `handle_command` itself returns `[]` for every one of these three
+    (`[[BL-B119]]`) -- `_fixture_effector_config`'s frozen fixture rows
+    carry no `petrovich-says` text, so there is nothing for the engine to
+    speak either; `test_weapons_armed_sequence_row_speaks_through_the_
+    real_poll_loop` below is what exercises the engine's own spoken line
+    with a sequence that does carry one."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -6296,7 +6306,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
         assert crew_console.sight_ready is True
 
         lines = crew_console.handle_command("observ_on", now_sim=sim_t)
-        assert lines == ["Observ on."]
+        assert lines == []
         deadline = time.monotonic() + 5.0
         while (
             7,
@@ -6307,7 +6317,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
         assert (7, 3002, 1.0) in aircraft_client.cockpit_switch_writes
 
         lines = crew_console.handle_command("weapons_armed", now_sim=sim_t)
-        assert lines == ["Weapons armed."]
+        assert lines == []
         deadline = time.monotonic() + 5.0
         while (
             6,
@@ -6324,7 +6334,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
         aircraft_client.raw_args = {"886": 1.0, "673": 1.0}
 
         lines = crew_console.handle_command("weapons_safe", now_sim=sim_t)
-        assert lines == ["Weapons safe."]
+        assert lines == []
         deadline = time.monotonic() + 5.0
         while (
             6,
@@ -6340,6 +6350,122 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
     assert not poll_thread.is_alive()
     assert runner.effector_state.commanded_values["observ"] == "on"
     assert runner.effector_state.commanded_values["weapon_safety"] == "safe"
+
+
+def _effector_config_with_speaking_weapons_arm() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    """The real committed registry/sequences, plus a `weapons-arm` row
+    that carries a `petrovich-says` cell (`[[BL-B119]]`) -- unlike
+    `_fixture_effector_config`'s own frozen copy, whose rows predate the
+    pilot's commit `80a134c1` and so carry none. A fresh dict copy, same
+    shape as `_effector_config_with_mission_start_sequences`."""
+    sequences, registry = _fixture_effector_config()
+    merged = dict(sequences)
+    merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.WEAPONS_ARM.value)] = (
+        SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=EffectorTrigger.WEAPONS_ARM.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector="weapon_safety",
+                    value="armed",
+                    petrovich_says="weapons armed",
+                    comment="",
+                ),
+            ),
+            source_path=Path("fake-weapons-arm.md"),
+            read_args=frozenset({673}),
+        )
+    )
+    return merged, registry
+
+
+def test_weapons_armed_sequence_row_speaks_through_the_real_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """`[[BL-B119]]`: the "weapons armed" command drives the real
+    `handle_command` -> poll loop -> `advance_effectors` ->
+    `drain_effector_speech` path end to end, with a sequence row that
+    actually carries a `petrovich-says` cell -- `handle_command` itself
+    returns `[]` (checked by `test_observ_and_weapons_safety_write_
+    through_the_real_poll_loop` above), the line now comes from the
+    engine. Spoken exactly once even after several more polls once the
+    row has already completed -- the command fires the trigger once, the
+    completed run leaves `EffectorTrigger.WEAPONS_ARM` out of `state.
+    runs`, and `advance` never re-reports a line for a trigger that is
+    not currently running."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne; no readiness gate to clear
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.raw_args = {"673": 0.0}
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.output = io.StringIO()
+    effector_sequences, effector_registry = _effector_config_with_speaking_weapons_arm()
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        lines = crew_console.handle_command("weapons_armed", now_sim=sim_t)
+        assert lines == []
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3020,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (6, 3020, 1.0) in aircraft_client.cockpit_switch_writes
+
+        # The readback now reflects the just-armed switch, so a wrongly
+        # re-armed sequencer would see its own self-check already
+        # satisfied and have nothing further to write -- this is purely
+        # to give any such bug a few more polls to speak again, not to
+        # provoke a second write.
+        aircraft_client.raw_args = {"673": 1.0}
+        for _ in range(5):
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert isinstance(crew_console.output, io.StringIO)
+    spoken = crew_console.output.getvalue()
+    assert spoken.count("Weapons armed.") == 1, spoken
 
 
 # -- Mission-start triggers (`plans/effector-sequences/explore-notes.md`,
@@ -7727,7 +7853,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
         assert slew_trace_path.exists(), "no row was ever written"
 
         lines = crew_console.handle_command("observ_on", now_sim=sim_t)
-        assert lines == ["Observ on."]
+        assert lines == []
         deadline = time.monotonic() + 5.0
         while (
             7,
@@ -7757,7 +7883,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
         time.sleep(0.1)
 
         lines = crew_console.handle_command("observ_off", now_sim=sim_t)
-        assert lines == ["Observ off."]
+        assert lines == []
         deadline = time.monotonic() + 5.0
         while (
             7,

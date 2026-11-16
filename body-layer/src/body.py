@@ -4622,6 +4622,13 @@ def _run_crew_text_poll_loop(
                             effector_sequences_by_key,
                             effector_registry_entries,
                         )
+                        # `[[BL-B119]]`: whatever `advance_effectors` just
+                        # reported as completed this poll (own rows
+                        # written, or found already in position) -- the
+                        # engine itself never speaks, this is the drain.
+                        crew_console.drain_effector_speech(
+                            runner.last_t_sim, runner.effector_state.spoken
+                        )
                         # The "Guidance unit ready" edge, after the
                         # engine has had a chance to run this poll (plan's
                         # own poll-block ordering) -- unaffected either

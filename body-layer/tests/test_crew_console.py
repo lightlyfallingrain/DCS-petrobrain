@@ -1912,13 +1912,13 @@ def test_non_look_command_on_ground_dispatches_normally() -> None:
     the ground they dispatch exactly as if airborne (they only read
     existing belief or register a non-perception task). `sight_ready`
     set so this exercises the on-ground path, not `BL-B66` Stage 3's
-    separate readiness gate (see `test_observ_on_signals_the_poll_loop_
-    and_speaks` for that one)."""
+    separate readiness gate (see `test_observ_on_signals_the_poll_loop`
+    for that one). **Returns `[]`** (`[[BL-B119]]`), same as off-ground."""
     console = CrewConsole(store=ContactStore())
     console.on_ground = True
     console.sight_ready = True
 
-    assert console.handle_command("observ_on", now_sim=0.0) == ["Observ on."]
+    assert console.handle_command("observ_on", now_sim=0.0) == []
 
 
 def test_refusal_mode_wins_over_on_ground_for_a_look_command() -> None:
@@ -3604,13 +3604,20 @@ def test_dispatched_command_tokens_all_return_something(
     loop's own dispatch order, not a wiring gap, the reason a later token
     returns `[]`. 100s apart is far longer than any line this class speaks
     takes, so every call here sees a clear channel, exactly as a real
-    sortie's well-spaced commands would."""
+    sortie's well-spaced commands would.
+
+    `sight_ready` set (`[[BL-B119]]`) so `observ_on` takes its own
+    accepted path (`[]`, per `NO_RETURN_VALUE_COMMAND_TOKENS`'s own
+    comment) rather than its "Unable, guidance unit not ready." refusal
+    -- that refusal is real and unaffected by this flag, just not what
+    this completeness sweep is checking."""
     tasks = TaskStore()
     console = CrewConsole(
         store=ContactStore(),
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.sight_ready = True
     for index, token in enumerate(sorted(DISPATCHED_COMMAND_TOKENS)):
         lines = console.handle_command(token, now_sim=index * 100.0)
         if token in NO_RETURN_VALUE_COMMAND_TOKENS:
@@ -6117,17 +6124,19 @@ def test_where_is_it_with_an_engaged_run_reuses_the_live_state(
     assert answer[0].endswith("obstructed.")
 
 
-def test_observ_on_signals_the_poll_loop_and_speaks() -> None:
+def test_observ_on_signals_the_poll_loop() -> None:
     """`BL-B64` Stage 2, direction §6 -- the same one-shot-signal shape
     `attack_run_transition` uses, since `OpticState.home_phase` lives on
     `logger.ConsolePerceptionRunner`, not here. `sight_ready` set so this
     exercises the accepted path, not `BL-B66` Stage 3's readiness gate
     (see `test_observ_on_refused_when_guidance_unit_not_ready` for that
-    one)."""
+    one). **Returns `[]`** (`[[BL-B119]]`) -- "Observ on." is now the
+    `observ-on` sequence file's own line, spoken by the engine when its
+    row completes, not by this handler."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.sight_ready = True
     lines = console.handle_command("observ_on", now_sim=0.0)
-    assert lines == ["Observ on."]
+    assert lines == []
     assert console.observ_transition == "on"
 
 
@@ -6146,20 +6155,21 @@ def test_observ_on_refused_when_guidance_unit_not_ready() -> None:
 
 def test_observ_off_needs_no_readiness() -> None:
     """Plan §3: "OBSERV OFF needs no gating and no sequence" -- unlike
-    OBSERV ON, it dispatches regardless of `sight_ready`."""
+    OBSERV ON, it dispatches regardless of `sight_ready`. **Returns `[]`**
+    (`[[BL-B119]]`) -- see `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     assert console.sight_ready is False
 
     lines = console.handle_command("observ_off", now_sim=0.0)
 
-    assert lines == ["Observ off."]
+    assert lines == []
     assert console.observ_transition == "off"
 
 
-def test_observ_off_signals_the_poll_loop_and_speaks() -> None:
+def test_observ_off_signals_the_poll_loop() -> None:
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     lines = console.handle_command("observ_off", now_sim=0.0)
-    assert lines == ["Observ off."]
+    assert lines == []
     assert console.observ_transition == "off"
 
 
@@ -6273,7 +6283,8 @@ def test_point_during_attack_run_is_refused() -> None:
 def test_point_observ_off_asks_then_yes_queues_the_deferred_look() -> None:
     """OBSERV off -> "Need observ, confirm?" -> "yes" -> `_handle_observ_
     on` runs exactly once and, since `sight_ready` holds, queues a
-    `PendingPointRequest` with the original slots."""
+    `PendingPointRequest` with the original slots. **Returns `[]`**
+    (`[[BL-B119]]`) -- see `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.on_ground = False
     console.sight_ready = True
@@ -6293,7 +6304,7 @@ def test_point_observ_off_asks_then_yes_queues_the_deferred_look() -> None:
         ambiguous=False,
         now_sim=1.0,
     )
-    assert affirm_lines == ["Observ on."]
+    assert affirm_lines == []
     assert console.observ_transition == "on"
     assert console.pending_point_request is not None
     assert console.pending_point_request.slots == {"clock": 2}
@@ -6324,7 +6335,8 @@ def test_point_observ_off_saying_observ_on_also_counts_as_yes() -> None:
     """`classify_yes_no`'s own rule 2 ("a resolved command token is never
     an answer") would otherwise swallow this -- `"observ on"` resolves to
     the real `observ_on` token, scoped exception for this one pending-
-    confirmation kind only."""
+    confirmation kind only. **Returns `[]`** (`[[BL-B119]]`) -- see
+    `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.on_ground = False
     console.sight_ready = True
@@ -6340,7 +6352,7 @@ def test_point_observ_off_saying_observ_on_also_counts_as_yes() -> None:
         ambiguous=False,
         now_sim=1.0,
     )
-    assert lines == ["Observ on."]
+    assert lines == []
     assert console.pending_point_request is not None
     assert console._pending_confirmation is None
 
