@@ -154,6 +154,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B114]] — merge-echo callout rule silences real second groups the gate split (63–73% unannounced eye→eye); narrowed by `[[BL-B111]]` to the cannot-look remainder; deferred until seen in missions
 - [[BL-B115]] — kneeboard read-back: consult mission memory for the local map page (sector entry, phase change); split from `[[BL-B112]]`
 - [[BL-B116]] — body resource arbitration: eyes/hands/mouth as declared resources; finish the look, pilot first, queue ≤~5 s else "stand by", "unable" only in attack run (concept in `PETROBRAIN_RUNTIME.md`)
+- [[BL-B117]] — BL-16 sub-item: AI wheel's parked flag and overlay fields not reset on `LuaExportStop` (lands in AC-B12's AI-wheel module, beside AC-B13)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
