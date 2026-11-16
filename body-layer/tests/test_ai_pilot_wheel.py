@@ -28,6 +28,7 @@ from belief.ai_pilot_wheel import (
     AiPilotWheelGoal,
     ParkedFlightState,
     advance_parked_flight_state,
+    altitude_ref_from_letter,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
     nearest_speed_step,
@@ -115,6 +116,32 @@ class TestAdvanceParkedFlightState:
         assert state.raw_arg_952 is None
         assert state.takeover_stage is None
         assert state.correction_path is None
+        assert state.lua_goal_progress is None
+        assert state.lua_goal_seq is None
+
+    def test_the_goal_progress_fields_are_parsed_through(self) -> None:
+        body: dict[str, Any] = {
+            "t": 123.5,
+            "received_wall_clock_s": 1000.0,
+            "apw_parked_active": True,
+            "apw_goal_progress": "mode_blocked",
+            "apw_goal_seq": 7,
+        }
+        httpd = HTTPServer(("127.0.0.1", 0), _make_handler(body))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = AircraftLayerClient(
+                base_url=f"http://127.0.0.1:{httpd.server_port}"
+            )
+            state = advance_parked_flight_state(ParkedFlightState(), client)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+        assert state.lua_goal_progress == "mode_blocked"
+        assert state.lua_goal_seq == 7
 
     def test_the_takeover_diagnostic_fields_are_parsed_through(self) -> None:
         body: dict[str, Any] = {
@@ -369,6 +396,16 @@ class TestStepSpeed:
 
     def test_an_unknown_current_speed_is_never_treated_as_a_known_step(self) -> None:
         assert step_speed(None, "up") is None
+
+
+class TestAltitudeRefFromLetter:
+    def test_recognised_letters(self) -> None:
+        assert altitude_ref_from_letter("R") == "radar"
+        assert altitude_ref_from_letter("B") == "barometric"
+
+    def test_unrecognised_or_missing_is_none(self) -> None:
+        assert altitude_ref_from_letter(None) is None
+        assert altitude_ref_from_letter("MAX") is None
 
 
 class TestAiPilotGoalRequest:

@@ -242,6 +242,13 @@ def test_render_unable_unrecognised_reason_degrades_plainly() -> None:
     assert speech.template == "readback"
 
 
+def test_render_unable_not_ready() -> None:
+    """BL-16 mode 2 Stage P2a/P2b -- the mode-cycle bound and the HVRT
+    hover precondition both answer this exact phrase (pilot's own
+    words)."""
+    assert render_unable("NOT_READY").text == "Unable, not ready."
+
+
 def test_render_lost_contact() -> None:
     speech = render_lost_contact()
     assert speech.text == "Lost him."

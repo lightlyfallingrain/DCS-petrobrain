@@ -215,8 +215,14 @@ class ParkedFlightState:
     activation (never reset to `None` by `advance_parked_flight_state`
     itself, same "carried through unchanged" posture every later-stage
     field here has; only `decide_ai_pilot_wheel`/`request_goal`/unpark
-    write it). `align_phase`/`pre_align_snapshot` stay later-stage fields
-    (Stage P3/P4), `None`/`"none"` until those stages give them a writer."""
+    write it). `lua_goal_progress`/`lua_goal_seq` are read-only mirrors of
+    `Export.lua`'s own goal-tick report (`apw_goal_progress`/`apw_goal_
+    seq` on the wire) -- same posture as `takeover_stage`/`correction_
+    path` above: `body.py`'s own call site reads them to derive `decide_
+    ai_pilot_wheel`'s `settled_param`/`hvrt_released_timeout` arguments,
+    never decided from here. `align_phase`/`pre_align_snapshot` stay
+    later-stage fields (Stage P3/P4), `None`/`"none"` until those stages
+    give them a writer."""
 
     parked_active: bool = False
     ai_mode: str | None = None
@@ -230,6 +236,8 @@ class ParkedFlightState:
     takeover_stage: str | None = None
     correction_path: str | None = None
     goal: AiPilotWheelGoal | None = None
+    lua_goal_progress: str | None = None
+    lua_goal_seq: int | None = None
     # P3/P4's own fields -- see the module docstring's Co-moving Fields note.
     align_phase: str = "none"
     pre_align_snapshot: Any | None = None
@@ -251,6 +259,14 @@ def _as_optional_float(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
+
+
+def _as_optional_int(value: object) -> int | None:
+    """`apw_goal_seq` arrives as a JSON whole number -- `bool` excluded
+    for the same reason `_as_optional_float` excludes it."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def advance_parked_flight_state(
@@ -279,6 +295,8 @@ def advance_parked_flight_state(
         takeover_stage=sample.get("apw_takeover_stage"),
         correction_path=sample.get("apw_correction_path"),
         goal=state.goal,
+        lua_goal_progress=sample.get("apw_goal_progress"),
+        lua_goal_seq=_as_optional_int(sample.get("apw_goal_seq")),
         align_phase=state.align_phase,
         pre_align_snapshot=state.pre_align_snapshot,
     )
@@ -449,6 +467,23 @@ def step_speed(
     else:
         index = max(index - 1, 0)
     return float(ladder[index])
+
+
+def altitude_ref_from_letter(letter: str | None) -> AiPilotAltitudeRef | None:
+    """`ParkedFlightState.held_altitude_ref` arrives as the overlay's own
+    single-letter code (`"R"`/`"B"`, straight from `apw_alt_add_text`) --
+    this is the one place that letter becomes the typed `AiPilotAltitudeRef`
+    `crew_console`'s handlers need to construct an `AiPilotGoalRequest`
+    that freezes the *current* reference (`hold_altitude`/`level_flight`).
+    `None` for an unrecognised or absent letter, never a guessed default
+    -- the caller's job to decide what "unknown" means for its own
+    command (unlike `resolve_altitude_reference`, which has a real
+    default because a *target* reference is always resolved to one)."""
+    if letter == "R":
+        return "radar"
+    if letter == "B":
+        return "barometric"
+    return None
 
 
 def resolve_altitude_reference(
