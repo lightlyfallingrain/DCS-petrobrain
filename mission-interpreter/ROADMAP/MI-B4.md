@@ -48,38 +48,92 @@
   different chart scales, the way a real crew switches from a 1:500k to a 1:250k sheet. Decoding
   the four corner tiles of two adjacent sheets confirms or kills it in minutes.
 
-  ## Recommended shape — a build step and a static site, no tile server code
+  ## Direction so far — user, 2026-11-16
 
-  The tiles are already a regular grid of fixed-size images. So nothing needs to run per request:
+  Three answers, in order, each narrowing the shape:
 
-  1. **Build, once per theatre, on Windows.** A short Python script opens the zip, decodes each
-     `.tif.dds` with Pillow, writes it as a JPEG/WebP tile at the native zoom, and builds the
-     coarser zooms by 2×2 downsampling. Output is a plain `{z}/{x}/{y}` directory per theatre and
-     tier. Minutes of run time; output size is unmeasured, plausibly a few hundred MB per theatre.
-  2. **View.** One static HTML page with **Leaflet** in `L.CRS.Simple` mode (pixel space, no
-     projection), a theatre picker, and the 64m tier as an optional layer. Leaflet is vendored next
-     to the page so a LAN device needs no internet.
-  3. **Serve.** Any static file server bound to `0.0.0.0`. Python's own `http.server` is enough
-     for one user. Windows Firewall will ask once.
+  > *"what if we took the OpenSeadragon route. I'm ok installing libvips."*
+  >
+  > *"Would it be feasible to extract files on the fly, as needed and then cache them to temp
+  > folder? Just so that we would not need to extact many gigabytes of images to just sit on disk.
+  > I'd rather it happen as needed and then the temp folder gets wiped occasionally (by OS)."*
+  >
+  > *"I'll be running it from WSL (bash), so linux tools ok."*
 
-  **Existing components, and what each would save:**
+  The first version of this entry recommended a pre-rendered static site with Leaflet. Those
+  answers replace it: **OpenSeadragon as the viewer, tiles made on demand, a temp-folder cache.**
+  On-demand tiles also drop libvips — its only job, building the pyramid ahead of time, goes away.
 
-  | need | recommended | alternative | licence |
-  |---|---|---|---|
-  | decode DXT5 DDS | Pillow, already proven on these tiles | Microsoft `texconv`, ImageMagick | HPND / MIT / Apache |
-  | build the zoom pyramid | ~50 lines over Pillow | `vips dzsave` writes the whole pyramid in one command, but it is a new Windows install | — / LGPL-2.1 |
-  | pan/zoom page | Leaflet with `CRS.Simple`, room for overlays later | OpenSeadragon, zero code when paired with `dzsave` | BSD-2 / BSD-3 |
-  | serve on the LAN | `python -m http.server --bind 0.0.0.0` | any static server, e.g. Caddy | PSF / Apache |
+  ## Recommended shape — one small on-demand tile server
 
-  **Not recommended:** TileServer GL, MapTiler Server or GeoServer. They expect georeferenced
-  MBTiles or vector data and bring a runtime for what is a folder of images. GDAL `gdal2tiles` would
-  work in `--profile=raster` mode but is a heavy Windows install for no gain over Pillow. Every
-  licence above is compatible with the project's CC BY-NC-SA intent; none is GPL.
+  ```mermaid
+  flowchart LR
+    B[OpenSeadragon page, any LAN device] -->|GET tile| S[Python + Pillow server]
+    S -->|hit| C[(temp cache, size-capped)]
+    S -->|miss| Z[rasterCharts.zip]
+    Z -->|read one entry, pick mipmap, decode| S
+    S -->|write JPEG| C
+  ```
+
+  1. **Viewer.** One HTML page, OpenSeadragon vendored next to it so a LAN device needs no
+     internet. A custom tile source points at the server; a theatre picker and a 32m/64m tier
+     switch. Pinch zoom and a navigator minimap come built in.
+  2. **Tile requests map straight onto the source grid**, because the source is already a regular
+     grid of 1024 px tiles with mipmaps. At native zoom one view tile is one DDS tile. Each step
+     out, one view tile covers 2×2 more source tiles, each read at the next mipmap down. So **every
+     zoom level touches each zip entry at most once in total**, and no zoom level ever decodes more
+     than it shows.
+  3. **Reading a mipmap.** Pillow's DDS plugin returns only the base image. The smaller mipmaps sit
+     at computable offsets after it (DXT5: 16 bytes per 4×4 block, halving per level), and Pillow's
+     own BCn decoder — the one the DDS plugin itself uses — decodes a slice handed to it. About ten
+     lines; check the decoder's call signature against the installed Pillow at plan time.
+  4. **Cache.** Encoded JPEG tiles go to a temp folder keyed by theatre/tier/level/x/y. **The
+     server caps the folder itself** and drops the oldest tiles at startup: Windows clears `%TEMP%`
+     only when Storage Sense is on or Disk Cleanup runs, never on reboot, so "the OS wipes it" does
+     not hold on its own. The cap is a constant with a stated default.
+  5. **The one slow moment is the first fully-zoomed-out view**: its single tile reads all 1024
+     entries of a tier once. Seconds rather than minutes, by estimate, and cached after. How many
+     seconds depends on whether the zip stores entries or deflates them — the first check below.
+
+  **Running it from WSL — follow aircraft-layer's precedent, not a native Linux process.**
+  `aircraft-layer/WORKFLOW.md` already settled this for a LAN-facing server on the same machine:
+  WSL bash launches **Windows** `python.exe`, so the process binds the Windows network interface
+  and needs one firewall rule, exactly like the telemetry API on 7791. A native Linux Python in
+  WSL2's default NAT networking is reachable from Windows itself but **not from the rest of the
+  LAN** without `networkingMode=mirrored` or a `netsh portproxy` — configuration that WORKFLOW.md
+  already judged not worth it. It also keeps the zip read on the Windows filesystem rather than
+  through WSL's slower `/mnt/c` bridge. Linux tools stay useful around it: `unzip -v` for the
+  check below, and the probe-script conventions in `world-model/tools/wsl/` (`DCS_INSTALL_PATH`,
+  `to_wsl_path`).
+
+  **Existing components:**
+
+  | need | use | licence |
+  |---|---|---|
+  | pan/zoom viewer | OpenSeadragon, custom tile source | BSD-3 |
+  | decode DXT5, incl. mipmaps | Pillow (proven on these tiles; base image via its DDS plugin, mipmaps via its BCn decoder) | HPND |
+  | serve | Python stdlib `http.server` (`ThreadingHTTPServer`), run as Windows `python.exe` | PSF |
+  | read the archive | Python stdlib `zipfile` | PSF |
+
+  No libvips, GDAL or tile-server product. Nothing above is GPL, so all of it fits the project's
+  CC BY-NC-SA intent.
+
+  ## Checks before planning — on the DCS machine, from WSL
+
+  ```sh
+  unzip -v "$(wslpath "$DCS_INSTALL_PATH")/Mods/terrains/Syria/RasterCharts/rasterCharts.zip" | tail -3
+  unzip -v "$(wslpath "$DCS_INSTALL_PATH")/Mods/terrains/Syria/RasterCharts/rasterCharts.zip" | awk 'NR>3{print $2}' | sort | uniq -c
+  ```
+
+  The second line counts entries by method. **`Stored`** means a mipmap is one seek away and the
+  zoomed-out first load is fast. **`Defl:*`** means each read inflates the whole ~1.4 MB entry
+  first: still workable, slower on that first load. The middle line gives the real raw and zipped
+  totals. The raw DDS for Syria is about 1.8 GB by header arithmetic (1280 × 1,398,256 bytes).
 
   ## Constraints
 
-  - **The chart images belong to Eagle Dynamics.** Generated tiles go to a gitignored output
-    directory and are never committed or published. LAN only.
+  - **The chart images belong to Eagle Dynamics.** Cached tiles live in a temp folder outside the
+    repo and are never committed or published. LAN only.
   - **Runs on its own** (root `CLAUDE.md`, "Module independence"). Own venv, no import from
     world-model. The filename grammar is one regex, so copy it with a pointer to
     `world-model/src/raster/__init__.py` rather than importing it. Where the code lives under
@@ -90,7 +144,9 @@
 
   ## Open questions for plan time
 
-  1. Is the column/row reading above right? Settles how the 32m and 64m tiers stack.
+  1. Is the column/row reading above right? Settles how the 32m and 64m tiers stack and whether a
+     tier switch can be automatic by zoom level.
   2. Which theatres beyond Syria are wanted in the first cut?
   3. Overlays — DCS grid, lat/long, the player's own marks — are out of scope for the first cut.
-     Leaflet is the recommended viewer partly so they stay cheap later.
+     OpenSeadragon places markers in image pixels, and `registration.py` already maps DCS x/z to
+     tile pixels, so marks and own-ship would be cheap later; a lat/long grid would be hand-drawn.
