@@ -30,7 +30,7 @@ outcomes side by side, so they're a fast first place to look.
 
 **Second instance, a different module, same shape**: `body-layer/src/belief/
 altimeter_qnh_sync.py`'s `_clamp(value, lo, hi) = max(lo, min(hi, value))` (`[[BL-B118]]` security
-deep analysis, 2026-11-16, filed as `[[BL-B119]]`, not blocking). Verified directly in a Python
+deep analysis, 2026-11-16, filed as `[[BL-B120]]`, not blocking). Verified directly in a Python
 interpreter: `_clamp(nan, 670, 790)` resolves to `790.0` (bounded, not NaN-propagating) purely
 because `min(hi, value)` puts `hi` first — `min(a, b)` keeps `a` unless `b < a`, and every
 comparison with NaN is `False`, so `min(790, nan)` returns `790`. `+inf`/`-inf` both clamp

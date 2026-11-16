@@ -156,7 +156,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B116]] — body resource arbitration: eyes/hands/mouth as declared resources; finish the look, pilot first, queue ≤~5 s else "stand by", "unable" only in attack run (concept in `PETROBRAIN_RUNTIME.md`)
 - [[BL-B117]] — BL-16 sub-item: AI wheel's parked flag and overlay fields not reset on `LuaExportStop` (lands in AC-B12's AI-wheel module, beside AC-B13)
 - [[BL-B118]] — BL-16 sub-item: set the operator altimeter's pressure to the mission's QNH at mission start, a self-calibrating closed loop on device 42's baro knob (in progress, `feature/bl16-qnh-mission-start`, `plans/bl16-qnh-mission-start/plan.md`)
-- [[BL-B119]] — `altimeter_qnh_sync`'s QNH clamp stays bounded for NaN/±Infinity only by accident of `min`/`max` argument order, not a designed `math.isfinite` guard — low probability/impact, found in `[[BL-B118]]`'s security deep analysis
+- [[BL-B120]] — `altimeter_qnh_sync`'s QNH clamp stays bounded for NaN/±Infinity only by accident of `min`/`max` argument order, not a designed `math.isfinite` guard — low probability/impact, found in `[[BL-B118]]`'s security deep analysis
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
