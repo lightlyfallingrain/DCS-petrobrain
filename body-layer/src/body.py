@@ -3695,6 +3695,12 @@ def _poll_transcripts(
             ):
                 continue
             slots = slots_raw
+        # Every incoming player utterance, in the normal log, always on --
+        # `--speech-log` stays the full per-utterance record; this is the
+        # line you read live. Here rather than in `CrewConsole.
+        # handle_transcript` because only this module's logger is
+        # configured to show INFO (`_configure_logger_for_main`).
+        logger.info('-> "%s", confidence %.2f', transcript, float(confidence))
         crew_console.handle_transcript(
             transcript,
             float(confidence),
