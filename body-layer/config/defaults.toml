@@ -10,10 +10,30 @@
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
 [belief.ai_pilot_wheel]
+# Above this AGL-equivalent altitude, radar reference cannot hold the target at all -- a request above it always ends up barometric instead, whatever was asked for.
+# status: measured | range: 100.0 .. 2000.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M
+AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M = 700.0
+
 # "Good enough" tolerance for the hold-up/down nudge loop Stage P2's `set_parked_altitude` goal will use (user, `aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5: "within 20m is good enough").
 # status: agreed-guess | range: 1.0 .. 200.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_ALTITUDE_TOLERANCE_M
 AI_PILOT_ALTITUDE_TOLERANCE_M = 20.0
+
+# The rotation fairness budget (plan, "AiPilotWheelGoal -- the new co-moving state, and the rotation rule"): when more than one of heading/altitude/speed is outstanding, `decide_ai_pilot_wheel` demotes the active parameter and promotes the next one after this many seconds, so every outstanding goal starts moving early rather than waiting for strict FIFO-to-completion.
+# status: judgement | range: 0.5 .. 30.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_GOAL_SLICE_S
+AI_PILOT_GOAL_SLICE_S = 3.0
+
+# How close a spoken heading goal must read before Lua's hold-and-poll loop releases it -- same judgement call as mode 1's own D-c default (`plans/flight-control/plan.md`, "Series -- unparked mode"), not re-litigated here, same default.
+# status: judgement | range: 1.0 .. 30.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_HEADING_TOLERANCE_DEG
+AI_PILOT_HEADING_TOLERANCE_DEG = 5.0
+
+# The wheel's own discrete speed steps, km/h IAS -- corrected from the original table's `(0, 60, 120, 160, 200, 250)`: Stage P0's re-fly measured `120 -> 150 -> 200 -> 250 -> MAX`, not 160. The low end (0/60) stays the user's own unmeasured figures (flagged in the plan's Risks section).
+# status: agreed-guess
+# source: belief/ai_pilot_wheel.py:AI_PILOT_SPEED_STEPS_KMH
+AI_PILOT_SPEED_STEPS_KMH = [0, 60, 120, 150, 200, 250]
 
 [belief.association_over_time]
 # How fast an unobserved-moving contact's position uncertainty grows, metres/second, when `Contact.motion` is `"stopped"` or `None` ("never observed moving") -- user direction, 2026-10-30 (explore-notes.md, "E5 fold on a closing run"): "not observed moving -> not expected to move -> tiny growth".

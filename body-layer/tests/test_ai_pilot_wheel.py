@@ -1,22 +1,42 @@
 """Tests for `belief.ai_pilot_wheel` -- BL-16 mode 2 Stage P1 (`plans/
-flight-control/plan.md`, "Revised 2026-11-15"). `advance_parked_flight_
+flight-control/plan.md`, "Revised 2026-11-15") and Stage P2a/P2b
+("Revised 2026-11-16 -- Stage P2 ready to build"). `advance_parked_flight_
 state` is exercised against a real loopback `http.server` instance via a
 real `AircraftLayerClient`, same posture as `test_aircraft_client.py`'s
 own convention (and the project's stated "no mocked `urllib`" rule) --
-not a mocked client double."""
+not a mocked client double. The Stage P2 goal-channel functions below
+(`request_goal`/the three actions/`decide_ai_pilot_wheel`) are pure, so
+they are exercised directly against `AiPilotWheelGoal`/`ParkedFlightState`
+values, no server needed."""
 
 from __future__ import annotations
 
 import json
 import threading
 from collections.abc import Iterator
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 import pytest
 
 from aircraft_client import AircraftLayerClient
-from belief.ai_pilot_wheel import ParkedFlightState, advance_parked_flight_state
+from belief.ai_pilot_wheel import (
+    AI_PILOT_GOAL_SLICE_S,
+    AI_PILOT_SPEED_MAX_SENTINEL_KMH,
+    AiPilotWheelGoal,
+    ParkedFlightState,
+    advance_parked_flight_state,
+    clear_hvrt_direction,
+    decide_ai_pilot_wheel,
+    nearest_speed_step,
+    request_goal,
+    resolve_altitude_reference,
+    set_hvrt_direction,
+    set_parked_altitude,
+    set_parked_heading,
+    set_parked_speed,
+)
 
 
 def _make_handler(body: object) -> type[BaseHTTPRequestHandler]:
@@ -240,3 +260,270 @@ class TestAdvanceParkedFlightState:
 
         assert state.align_phase == "aligning"
         assert state.goal == "placeholder"
+
+
+class TestRequestGoal:
+    """`request_goal`'s own rotation rule (plan, "`AiPilotWheelGoal` --
+    the new co-moving state, and the rotation rule")."""
+
+    def test_a_first_target_queues_at_the_back(self) -> None:
+        goal = request_goal(
+            AiPilotWheelGoal(), "heading", 10.0, heading_target_deg=90.0
+        )
+        assert goal.heading_target_deg == 90.0
+        assert goal.pending_order == ("heading",)
+        assert goal.active_param is None
+        assert goal.goal_seq == 0
+
+    def test_a_second_target_queues_behind_the_first_fifo(self) -> None:
+        goal = request_goal(
+            AiPilotWheelGoal(), "heading", 10.0, heading_target_deg=90.0
+        )
+        goal = request_goal(goal, "speed", 10.0, speed_target_kmh=200.0)
+        assert goal.pending_order == ("heading", "speed")
+
+    def test_replacing_a_queued_targets_value_does_not_move_its_queue_position(
+        self,
+    ) -> None:
+        goal = request_goal(
+            AiPilotWheelGoal(), "heading", 10.0, heading_target_deg=90.0
+        )
+        goal = request_goal(goal, "speed", 10.0, speed_target_kmh=200.0)
+        goal = request_goal(goal, "heading", 20.0, heading_target_deg=180.0)
+        assert goal.heading_target_deg == 180.0
+        assert goal.pending_order == ("heading", "speed")
+        # Not sent immediately -- it is still waiting its turn, not active.
+        assert goal.goal_seq == 0
+
+    def test_replacing_the_active_parameters_value_preempts_immediately(
+        self,
+    ) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0, active_param="heading", active_since_sim=10.0
+        )
+        goal = request_goal(goal, "heading", 20.0, heading_target_deg=270.0)
+        assert goal.heading_target_deg == 270.0
+        assert goal.active_param == "heading"
+        assert goal.goal_seq == 1
+
+    def test_idempotent_requeue_is_a_no_op_on_the_queue(self) -> None:
+        goal = AiPilotWheelGoal(pending_order=("heading",))
+        # No target yet for `heading` despite it already being queued
+        # (e.g. it was promoted then demoted without clearing the queue
+        # entry -- defensive case, should never duplicate the entry).
+        goal = request_goal(goal, "heading", 10.0, heading_target_deg=45.0)
+        assert goal.pending_order == ("heading",)
+
+
+class TestSetParkedHeading:
+    def test_normalises_into_0_360(self) -> None:
+        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, 370.0)
+        assert goal.heading_target_deg == pytest.approx(10.0)
+
+    def test_negative_degrees_wrap_positive(self) -> None:
+        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, -10.0)
+        assert goal.heading_target_deg == pytest.approx(350.0)
+
+
+class TestNearestSpeedStep:
+    def test_snaps_to_the_nearest_real_step(self) -> None:
+        assert nearest_speed_step(140.0) == 150.0
+        assert nearest_speed_step(100.0) == 120.0
+
+    def test_at_or_above_the_top_step_snaps_to_the_max_sentinel(self) -> None:
+        assert nearest_speed_step(250.0) == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+        assert nearest_speed_step(999.0) == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
+
+class TestSetParkedSpeed:
+    def test_snaps_a_numeric_request(self) -> None:
+        goal, resolved = set_parked_speed(AiPilotWheelGoal(), 1.0, 140.0)
+        assert resolved == 150.0
+        assert goal.speed_target_kmh == 150.0
+
+    def test_the_literal_max_resolves_to_the_sentinel(self) -> None:
+        goal, resolved = set_parked_speed(AiPilotWheelGoal(), 1.0, "max")
+        assert resolved == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+        assert goal.speed_target_kmh == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
+
+class TestResolveAltitudeReference:
+    """The 700 m radar cap (plan, "The 700 m radar cap -- the defined
+    answer for a request above it")."""
+
+    def test_at_or_above_the_cap_is_always_barometric(self) -> None:
+        assert resolve_altitude_reference(900.0, "radar", "radar") == "barometric"
+        assert resolve_altitude_reference(700.0, None, "radar") == "barometric"
+
+    def test_below_the_cap_honours_an_explicit_request(self) -> None:
+        assert resolve_altitude_reference(300.0, "radar", "barometric") == "radar"
+        assert resolve_altitude_reference(300.0, "barometric", "radar") == "barometric"
+
+    def test_below_the_cap_with_no_request_keeps_the_current_reference(self) -> None:
+        assert resolve_altitude_reference(300.0, None, "radar") == "radar"
+        assert resolve_altitude_reference(300.0, None, "barometric") == "barometric"
+
+    def test_below_the_cap_with_nothing_known_defaults_to_barometric(self) -> None:
+        assert resolve_altitude_reference(300.0, None, None) == "barometric"
+
+
+class TestSetParkedAltitude:
+    def test_returns_the_achieved_reference_for_the_readback(self) -> None:
+        goal, achieved = set_parked_altitude(
+            AiPilotWheelGoal(), 1.0, 900.0, "radar", "radar"
+        )
+        assert achieved == "barometric"
+        assert goal.altitude_target_m == 900.0
+        assert goal.altitude_target_ref == "barometric"
+
+    def test_a_reachable_radar_request_is_honoured(self) -> None:
+        goal, achieved = set_parked_altitude(
+            AiPilotWheelGoal(), 1.0, 300.0, "radar", "barometric"
+        )
+        assert achieved == "radar"
+        assert goal.altitude_target_ref == "radar"
+
+
+class TestHvrtDirection:
+    def test_set_then_clear(self) -> None:
+        goal = set_hvrt_direction(AiPilotWheelGoal(), "left")
+        assert goal.hvrt_direction == "left"
+        goal = clear_hvrt_direction(goal)
+        assert goal.hvrt_direction is None
+
+    def test_redirecting_replaces_the_direction(self) -> None:
+        goal = set_hvrt_direction(AiPilotWheelGoal(), "left")
+        goal = set_hvrt_direction(goal, "right")
+        assert goal.hvrt_direction == "right"
+
+
+class TestDecideAiPilotWheel:
+    """The rotation mechanism (plan, "`AiPilotWheelGoal` -- the new
+    co-moving state, and the rotation rule"): promote/demote/preempt
+    sequences and the takeover-coexistence gate."""
+
+    def test_no_goal_at_all_is_a_no_op(self) -> None:
+        state = ParkedFlightState()
+        assert decide_ai_pilot_wheel(state, 10.0) is state
+
+    def test_promotes_the_front_of_the_queue_when_idle(self) -> None:
+        goal = AiPilotWheelGoal(heading_target_deg=90.0, pending_order=("heading",))
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, 10.0)
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+        assert result.goal.active_since_sim == 10.0
+        assert result.goal.pending_order == ()
+        assert result.goal.goal_seq == 1
+
+    def test_a_single_outstanding_goal_never_rotates(self) -> None:
+        """No slice limit applies when nothing else is waiting (plan:
+        "When only one parameter is outstanding, no slice limit
+        applies")."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            goal_seq=1,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, 0.0 + AI_PILOT_GOAL_SLICE_S + 100.0)
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+        assert result.goal.goal_seq == 1
+
+    def test_rotates_to_the_next_parameter_after_the_slice_elapses(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+            goal_seq=1,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, AI_PILOT_GOAL_SLICE_S)
+        assert result.goal is not None
+        assert result.goal.active_param == "speed"
+        assert result.goal.pending_order == ("heading",)
+        assert result.goal.active_since_sim == AI_PILOT_GOAL_SLICE_S
+        assert result.goal.goal_seq == 2
+        # Demoted, not dropped -- its own target is kept.
+        assert result.goal.heading_target_deg == 90.0
+
+    def test_does_not_rotate_before_the_slice_elapses(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+            goal_seq=1,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, AI_PILOT_GOAL_SLICE_S - 0.1)
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+        assert result.goal.goal_seq == 1
+
+    def test_never_promotes_while_a_takeover_correction_is_running(self) -> None:
+        goal = AiPilotWheelGoal(heading_target_deg=90.0, pending_order=("heading",))
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            takeover_stage="correcting_altitude",
+        )
+        result = decide_ai_pilot_wheel(state, 10.0)
+        assert result.goal is not None
+        assert result.goal.active_param is None
+        assert result.goal.pending_order == ("heading",)
+
+    def test_a_settled_parameter_clears_and_promotes_the_next_one(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+            goal_seq=1,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, 1.0, settled_param="heading")
+        assert result.goal is not None
+        assert result.goal.heading_target_deg is None
+        assert result.goal.active_param == "speed"
+        assert result.goal.pending_order == ()
+        assert result.goal.goal_seq == 2
+
+    def test_a_settled_parameter_with_nothing_else_queued_goes_idle(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            goal_seq=1,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, 1.0, settled_param="heading")
+        assert result.goal is not None
+        assert result.goal.active_param is None
+        assert result.goal.heading_target_deg is None
+        # No new message sent for going idle -- unchanged sequence.
+        assert result.goal.goal_seq == 1
+
+    def test_hvrt_timeout_clears_the_direction_even_during_a_takeover(self) -> None:
+        """Lua's own safety-timeout release must be observed regardless
+        of the takeover gate -- that gate only withholds *promotion*, not
+        reconciling a field Lua has already let go of."""
+        goal = AiPilotWheelGoal(hvrt_direction="left")
+        state = replace(
+            replace_goal(ParkedFlightState(), goal), takeover_stage="opening_menu"
+        )
+        result = decide_ai_pilot_wheel(state, 10.0, hvrt_released_timeout=True)
+        assert result.goal is not None
+        assert result.goal.hvrt_direction is None
+
+
+def replace_goal(state: ParkedFlightState, goal: AiPilotWheelGoal) -> ParkedFlightState:
+    """Small local helper -- `ParkedFlightState.goal` is replaced
+    wholesale like every other field here, and every test above needs
+    one starting from a bare `ParkedFlightState()`."""
+    return replace(state, goal=goal)
