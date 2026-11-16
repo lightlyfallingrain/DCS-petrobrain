@@ -54,9 +54,12 @@ directory?**
 4. **On conflict:** resolve by hand, preserving both sides' intent where the resolution is
    clear-cut; do not silently drop either side's work. If genuinely ambiguous, stop and describe it
    to the user rather than guessing.
-5. Run the affected subproject(s)' full verification suite (format, lint, type check, test — see
-   that subproject's CLAUDE.md) before finalizing, even if the branch passed its own checks before
-   merging — the merge itself can introduce breakage neither branch's own tests would catch.
+5. **Verify the merged tree — once, not twice.** If the merged tree is identical to the tree DoD
+   just tested (`git diff --stat <DoD-tested sha> HEAD` empty), DoD's full run stands; do not
+   re-run it (user, 2026-11-16: *"the merge does not need another full suite since it just ran"*).
+   If `main` moved since DoD, the merge itself can introduce breakage neither side's tests caught,
+   so run format/lint/type plus `.claude/scripts/fast-tests.sh <subproject>` over the files the
+   merge brought in from `main`, for each affected subproject.
 6. **Update the roadmap before pushing — and resolve the path before writing to it.** The merged
    branch's subproject roadmap is the source of truth for milestone status; root `ROADMAP.md`'s
    status table names every subproject and links its roadmap, so read which file that is from there

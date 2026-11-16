@@ -47,6 +47,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from support.mock_aircraft_layer import MockAircraftLayerServer
 from support.mock_flight_scenario import (
     Descend,
@@ -69,6 +70,9 @@ from belief.tools import describe_contact, get_contacts
 from body import ConsolePerceptionRunner, _run_crew_text_poll_loop
 from perception.estimation import RANGE_FRACTIONAL_SIGMA
 from perception.geometry import GeoPosition, horizontal_range_m, open_world_model
+
+#: Simulated flights, 12-34 s each: full suite (DoD) only, not the fast set (2026-11-16).
+pytestmark = pytest.mark.slow
 
 _THEATRE = "Syria"
 #: Generous but bounded -- a hard failure, not a skip, if the background
