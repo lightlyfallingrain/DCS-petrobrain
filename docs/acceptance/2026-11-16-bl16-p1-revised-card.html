@@ -1,0 +1,206 @@
+<title>Takeover &amp; Stabilisation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, one session, prize block marked in amber. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.note.good{border-color:var(--good);}
+.note.good .tag{color:var(--good);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+.session{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.5rem; color:var(--ink); margin:32px 0 4px; padding-top:18px; border-top:2px solid var(--amber-dim);}
+.session small{display:block; font-family:'Source Sans 3',sans-serif; font-weight:400; font-size:0.95rem; color:var(--ink-dim);}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+
+<div class="wrap">
+<div class="eyebrow">BL-16 · mode 2 · takeover revision · 2026-11-16</div>
+<h1>Takeover &amp; Stabilisation</h1>
+<div class="subhead">Replaces Batch A's Flight P1. Batch A watched the wrong signal (stick/pedal park) and never saw ED's AI take over on "Request Aircraft Control" — this card tests the fix: a correct takeover detection, a barometric altitude target that gets corrected if ED sets it wrong, and a command menu that stays open so Petrovich can watch it happen.</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH TO FLY</div>
+  <pre>git fetch origin
+git checkout main
+git pull --ff-only</pre>
+  <div class="subhead" style="font-size:0.9rem">This DoD pass merges the fix to <code class="i">main</code> automatically. <strong>Export.lua's version changed to <code class="i">2026-11-16</code></strong> — redeploy it on Windows (see <code class="i">aircraft-layer/WORKFLOW.md</code>) and restart the collector, or you'll get a version-mismatch warning. Restart body-layer too.</div>
+</div>
+
+<div class="note"><strong>Not testable here.</strong> No spoken goal works yet (heading/altitude/speed commands are Stage P2 onward). This card is only the takeover moment itself: detection, the altitude fix, and giving control back cleanly.</div>
+
+<div class="note good"><span class="tag">Read this before you fly</span> A climb of roughly 100&ndash;150&nbsp;m above where you parked, followed by a descent back to it, is the <strong>expected, accepted</strong> behaviour on one of the two correction paths (see block 4). It is not a bug &mdash; don't report it as a regression, just note which path produced it.</div>
+
+<div class="session">Session <small>Operator seat, air start, straight and level, current controls <strong>not</strong> parked at mission start. One flight covers everything below; park/unpark as many times as you like.</small></div>
+
+<section class="block">
+  <div class="block-num">1</div>
+  <h3>Takeover trigger</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">From the <strong>operator (CPG) seat</strong>, press <strong>"Request Aircraft Control"</strong> (key bindings category: <em>Petrovich AI Helper, Multicrew</em>). Do <strong>not</strong> use any "park/unpark" binding &mdash; it does nothing.</div>
+    <div class="k expect">Expect</div><div class="v">ED's AI takes over immediately. No altitude sink. The command (right) wheel menu opens on its own within a second or two.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t1-sink">Any sink at all right after takeover?</label>
+      <label class="chk"><input type="checkbox" data-k="t1-menu">Did the command menu open by itself, and roughly how long after takeover?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">2</div>
+  <h3>Menu keep-open</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">While the AI is flying and the menu is open, close it by hand.</div>
+    <div class="k expect">Expect</div><div class="v">It reopens on its own within about a second.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t2-reopen">Did it reopen, and about how long did that take?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">3 <span class="prize-tag">the prize</span></div>
+  <h3>Does the altitude actually converge to where you parked?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">From the Mac, poll <code class="i">curl http://&lt;windows-ip&gt;:7791/ai_pilot_wheel/latest</code> every few seconds through the takeover. Watch <code class="i">apw_alt_text</code>, <code class="i">apw_last_press</code>, and <code class="i">apw_correction_path</code>.</div>
+    <div class="k expect">Expect</div><div class="v">The held altitude eventually settles at the altitude you were flying when you pressed "Request Aircraft Control" &mdash; not wherever ED's AI happened to set it. <code class="i">apw_correction_path</code> ends as <code class="i">"none"</code>, <code class="i">"quick"</code>, or <code class="i">"hold"</code>.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t3-path">Which <code class="i">apw_correction_path</code> fired &mdash; none / quick / hold?</label>
+      <label class="chk"><input type="checkbox" data-k="t3-converge">Did the held altitude end up matching the altitude at the moment you pressed the binding? Roughly how long did convergence take?</label>
+      <label class="chk"><input type="checkbox" data-k="t3-arg">Do <code class="i">apw_arg852</code>/<code class="i">apw_arg952</code> behave as a mirror pair &mdash; 852 rising to ~1 as 952 falls to ~0 on takeover?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">4</div>
+  <h3>The accepted transient (if the path was "hold")</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Nothing extra &mdash; just watch the altimeter during the correction if block 3 showed <code class="i">apw_correction_path = "hold"</code>.</div>
+    <div class="k expect">Expect</div><div class="v"><strong>A climb of roughly 100&ndash;150 m above your parked altitude, then a descent back down to it.</strong> This is the accepted cost of working around ED's own bug (a wildly wrong initial barometric target) &mdash; not a defect.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t4-climb">Did a climb-then-descend happen, and roughly how far above the parked altitude did it go?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">5</div>
+  <h3>Unpark</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Take control back. Wait a few seconds. Park again (press "Request Aircraft Control" a second time).</div>
+    <div class="k expect">Expect</div><div class="v">On unpark: the command menu closes, nothing is left half-pressed. On the next park: the whole sequence restarts cleanly, with no leftover state from the first takeover.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="t5-unpark">Did the menu close and everything release cleanly on unpark?</label>
+      <label class="chk"><input type="checkbox" data-k="t5-reparked">Did the second takeover behave like a fresh one, with nothing carried over from the first?</label>
+    </div>
+  </div>
+</section>
+
+<h2>Edge cases, if you get the chance</h2>
+<div class="tbl"><table>
+  <tr><th>Case</th><th>What to watch for</th></tr>
+  <tr><td>High AGL at takeover</td><td>Above ~700 m AGL, the quick (no-transient) path should be skipped and the hold path (block 4) should run instead.</td></tr>
+  <tr><td>Telemetry check</td><td>Does <code class="i">apw_parked_active</code> ever read <code class="i">false</code> while the AI is obviously still flying? (A one-off anomaly was seen in Batch A and should be fixed by this revision &mdash; worth a specific "yes/no, and when" if you can catch it.)</td></tr>
+</table></div>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>Any sink at takeover &mdash; should be none.</li>
+    <li>Menu open/reopen timing.</li>
+    <li><strong>Which correction path fired, and whether the altitude actually converged to the parked value.</strong></li>
+    <li>If "hold": how far it climbed before coming back down.</li>
+    <li>Unpark/reparked cleanliness.</li>
+    <li>Whether <code class="i">apw_parked_active</code> ever disagreed with what the AI was visibly doing.</li>
+  </ol>
+  <p style="margin:12px 0 0; color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+try{
+const KEY='bl16-p1-revised-2026-11-16';
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{
+      const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+      s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+    }catch(e){}
+  });
+});
+}catch(e){}
+</script>
