@@ -158,3 +158,148 @@ re-review the plan/alignment documents' own prior findings beyond confirming the
 (Finding 1's transient-disclosure fix and Finding 2's status-push field are both present in
 `plan.md` as written) — those were plan-aligner's and the user's own closed loop, not re-litigated
 here.
+
+---
+
+## Re-review — fix round `306af5f0` (2026-11-16)
+
+Diffed `306af5f0` against this review's own tip (`a2282097`, i.e. the three commits reviewed
+above). The later merge of `main` (`fdbfe9b5`, raster-viewer/docs/tooling) carries nothing of this
+feature; not re-reviewed.
+
+### Required Fix 1 — quick path's second pulse re-check
+
+**Done as specified.** `update_ai_pilot_wheel_overlay`'s `correction_substage == "quick_read2"`
+branch (`Export.lua:2600-2614`) now re-reads the held altitude, compares it against
+`ai_pilot_takeover.handover_altitude_m` via `ai_pilot_correction_direction` (the same helper
+`ai_pilot_decide_correction` uses for the initial decision), and on an out-of-tolerance result sets
+`correction_path = "hold"` and calls `ai_pilot_begin_hold_phase`, the same shape `quick_read1`'s own
+refusal branch already used. Within tolerance, behaviour is unchanged (`stage = nil`,
+`correction_path` stays `"quick"`).
+
+New test `test_quick_path_falls_back_to_hold_when_pulse2_still_wrong` exercises exactly the gap the
+required fix named: both pulses complete (B → R → B) but the readback is still wrong. I mutated the
+fix out (reverted the branch to its pre-fix unconditional `stage = nil`) and re-ran that one test —
+it failed for the stated reason (`path` read back `"quick"` instead of `"hold"`) — then restored
+the file and confirmed `sha256` matched the pre-mutation value exactly (`de7cdbf4...`, `git status
+--porcelain` clean afterward). The counterfactual the implementer reported checks out; this is not
+a test that would pass either way.
+
+### Required Fix 2 — Co-moving Fields table
+
+**Substantially done, one residual gap.** The table (`plan.md:758-772`) now carries a row for every
+transition the "Amended 2026-11-16" quick path introduced — both `correction_path` values from
+`ai_pilot_decide_correction`, both `quick_read1` outcomes, and both `quick_read2` outcomes including
+this round's own new fallback — plus a row for the falling-edge (unpark) clear of both fields. I
+independently re-ran the plan's own grep
+(`grep -n "correction_substage\s*=\|correction_path\s*=" aircraft-layer/dcs-export/Export.lua`) and
+every site it names does have a matching row.
+
+The grep also turns up one site neither this round's note nor my own first review named: the
+**rising-edge reset** (`Export.lua:2503`, inside `run_ai_pilot_wheel`'s `if rising then` block) sets
+`ai_pilot_takeover.correction_path = nil` at the start of a new takeover cycle, and no row in the
+table documents it — the existing `apw.parked_active | rising edge` row only lists
+`takeover_stage`/`takeover_t` in its "Must hold true after" column. This line predates the fix round
+(`git blame` puts it at `d3bfe9df`, the original revision commit, same commit that introduced
+`correction_path` itself), so it isn't something this round broke; it's a one-site gap this round's
+own "ten write sites, all now covered" claim overstates slightly (by my count, excluding the two
+`==` comparisons the grep pattern also matches, there are 14 literal assignment/initialiser lines
+for these two fields, not 10 — the discrepancy is this one site plus how the grouped falling-edge
+pair is counted). Behaviour is correct and already covered by the state-machine trace in the first
+review; this is a documentation-completeness miss only, same category as the original finding, one
+site smaller. Not worth another Implementer round for a single table row — flagged below as an
+optional follow-up rather than reopening this fix.
+
+### Main-loop timing decision — 0.5 s centre-to-menu gap
+
+Matches the rehearsal probe's measured timing. `ai_pilot_takeover.menu_open_at_t` is set to
+`t + AI_PILOT_MENU_OPEN_DELAY_S` (0.5) when the blind centre tap fires, and the menu-open tap is
+gated on `t >= ai_pilot_takeover.menu_open_at_t` rather than firing same-frame. Checked the three
+points asked for:
+
+- **Cleared on unpark**: `run_ai_pilot_wheel`'s falling-edge branch sets
+  `ai_pilot_takeover.menu_open_at_t = nil` alongside the rest of the sequence state
+  (`Export.lua:2489`).
+- **No misbehaviour in the gap**: during `"opening_menu"` but before `menu_open_at_t`,
+  `ai_pilot_takeover.menu_open` is still `false`, so `update_ai_pilot_wheel_overlay`'s keep-open
+  check (gated on `menu_open`) cannot fire; `awaiting_correction_decision` isn't set until the
+  menu-open tap actually lands, so the one-shot correction decision cannot act on a menu that isn't
+  open yet. The `elseif` chain in `update_ai_pilot_wheel_overlay` has nothing else to catch a tick
+  mid-gap — it is a correct no-op.
+- **Constant placement**: `AI_PILOT_MENU_OPEN_DELAY_S` lives as a field on `ai_pilot_takeover`
+  rather than a new top-level local, consistent with the file's own 200-live-local ceiling (review's
+  prior Optional Refinement) — confirmed by `luac5.1 -p` passing and no new global leaking
+  (spot-checked the diff; nothing added a bare top-level `local`).
+
+All of `TestTakeoverSequence`'s pre-existing scripts were updated for the new gap (an extra
+`run_ai_pilot_wheel` call at the +1.0 s mark, every later timestamp shifted +0.5 s) rather than left
+to silently test the old same-frame behaviour; `test_menu_reopens_after_the_settle_window` is
+correctly left untouched since it drives the keep-open check directly.
+
+### Optional refactor — `ai_pilot_check_hold_convergence` calling `ai_pilot_begin_hold_phase`
+
+**Behaviour unchanged.** At the call site, `held` has just converged to within tolerance of
+`live_m` (that is what releases phase 1), so `ai_pilot_begin_hold_phase`'s own `dir1 =
+ai_pilot_correction_direction(held, live_m)` recomputes `live_m` on the same tick with no state
+change in between and resolves to `nil` by construction, falling straight through to the `dir2`
+check against `handover_altitude_m` — the same check, same outcome, the duplicated code performed.
+`test_hold_path_two_phases` and `test_hold_path_skips_phase1_when_already_at_live` both still pass
+and exercise this transition.
+
+### Attribution correction
+
+`implementation.md`'s "then go on to step 6's checks" misattribution is corrected in place (not a
+new paragraph pretending it was always right): the prior entry now says plainly the phrase was the
+main loop's dispatch-brief wording, not the plan's, confirmed absent from `plan.md` by grep, and
+points at the 2026-11-16 fix for the behaviour itself. Matches what actually happened.
+
+### Checks run (independent)
+
+**aircraft-layer/** (fresh `.venv`)
+- `luac5.1 -p aircraft-layer/dcs-export/Export.lua`: pass
+- `ruff format --check src tests`: pass (79 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside the subproject): pass, no issues (27 source files)
+- `pytest tests -q`: **766 passed** (matches `implementation.md`)
+- `pytest tests/test_ai_pilot_wheel_lua.py -v`: all 26 pass, including all 8
+  `TestTakeoverSequence` tests by name, against `luajit` (Lua-5.1-compatible; no bare `lua5.1` on
+  this Mac) — not skipped
+- Counterfactual on the new test: reverted the `quick_read2` fix, confirmed red, restored,
+  confirmed `sha256` match and clean `git status --porcelain`
+
+**body-layer/** (fresh `.venv`, plus `pyproj`/`numpy` for the world-model seam; source unchanged
+this round, confirmed via `git diff --stat a2282097 306af5f0 -- body-layer/` — empty)
+- `ruff format --check src tests`: pass (204 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside the subproject): pass, no issues (83 source files)
+- `PYTHONPATH=src:../world-model/src pytest tests -q`: **3284 passed, 4 xfailed** (matches
+  `implementation.md`)
+
+### Optional Refinements (new this round)
+
+- **One Co-moving Fields row still missing**: the rising-edge reset of `apw.correction_path` to
+  `nil` (`Export.lua:2503`) has no row in the table. Pre-existing (from `d3bfe9df`, not introduced
+  this round), behaviour is correct and already traced, and it's a single line to add — not worth
+  another Implementer dispatch. Add `| apw.correction_path | internal | rising edge | reset to nil
+  alongside apw.takeover_stage above |` (or fold it into the existing `apw.parked_active` rising-edge
+  row's "Must hold true after" column) whenever `plan.md` is next touched for this feature.
+
+### Verdict
+
+**APPROVED** — both required fixes are done and independently verified (behaviourally, not just by
+re-reading the diff): Required Fix 1 by mutation-testing its own test, Required Fix 2 by re-running
+its own grep and tracing the one site it still misses back to a pre-existing, non-regressing gap.
+The main-loop timing decision and the optional refactor both check out with no behavioural
+surprise. All checks pass in both subprojects, matching `implementation.md`'s reported numbers
+exactly. Nothing in this round broke what the first review already traced as correct.
+
+### Review Confidence
+
+Full read of `306af5f0`'s diff against all four changed files. Verified Required Fix 1 by
+mutation (reverted/confirmed red/restored/confirmed sha match), not just by reading the branch.
+Independently re-ran the Required Fix 2 grep rather than trusting the ten-sites count in
+`plan.md`'s own note, which is how the one residual gap (rising-edge reset) surfaced — logged as an
+optional follow-up rather than treated as a new blocker, since it predates this round and is
+documentation-only. Ran every check myself in a fresh venv rather than trusting reported numbers
+(all matched). Did not re-trace the full state machine from scratch — relied on the first review's
+own full trace for everything this round did not touch.
