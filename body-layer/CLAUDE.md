@@ -466,6 +466,14 @@ Belief — observation *consumption*:
   readback writes only when `EffectorDef.absolute_write` is true (confirmed only for
   `default_2_position_tumb`) — any other shape skips with a WARNING rather than risk a toggle/press
   landing the wrong way on no information.
+  **A completed row speaks its own `petrovich-says` cell** (`[[BL-B119]]`,
+  `plans/effector-says/plan.md`): written, or found already at its target (the self-check skip),
+  never on a failed condition, an unknown-readback skip or a write that will retry.
+  `advance` returns the lines on `EffectorRunState.spoken` (the engine never speaks itself) and
+  `body.py` drains them once per poll through `crew_console.drain_effector_speech`, so intercom/PTT
+  gating applies. The four observ/weapons handlers no longer return fixed readbacks — the
+  sequence files' text is the only source. A multi-row speaking sequence should read
+  `[[BL-B121]]` first.
   **A bad raw dump/curated file disables every sequence for that aircraft; a bad sequence file
   disables only itself** — neither is fatal (`logger.error` per finding, one stderr banner at
   startup, one spoken line — "System error, bad sequence file, see the logs..." — held until the
@@ -535,6 +543,20 @@ Belief — observation *consumption*:
   MISSION_START`, so tying it to that trigger would only add latency for no benefit. Fails loud
   (`failed_no_response`/`failed_timeout`, one spoken "unable, ..." line via `crew_console.
   drain_altimeter_qnh_failed`) rather than hanging if the knob never responds.
+- `src/belief/ai_pilot_wheel.py` (`[[BL-16]]` parked mode, `plans/flight-control/plan.md`) —
+  Petrovich flying through ED's AI-pilot wheel. `ParkedFlightState` (single construction site,
+  `advance_parked_flight_state`) mirrors `Export.lua`'s AI-wheel status each poll, including the
+  camera-derived `player_seat`; AI flying means stick stowed **and** the player in the operator
+  seat, so nothing presses from the pilot seat. **Stage P2** adds `AiPilotWheelGoal`: voice
+  heading/altitude/speed goals adjusted one parameter at a time with rotation
+  (`request_goal`, `decide_ai_pilot_wheel`), plus HVRT translate (`set_hvrt_direction`/
+  `clear_hvrt_direction`). What reaches the wire is decided in one place, `goal_param_for_wire`,
+  and sent to `POST /command/ai_pilot_goal` only on a `goal_seq` change
+  (`body._apply_ai_pilot_wheel_goal`). **Arbitration is latest-command-wins, nothing lost** (a
+  main-loop decision, `plans/flight-control/implementation.md` "Review-fix round, 2026-11-16"):
+  a translate pauses queued goals, "hold" resumes them, a new goal ends the translate. Unparking
+  drops the goal; nothing resumes on the next park. Known gap: a failed write is still marked sent
+  (`[[BL-B122]]`).
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

@@ -975,7 +975,16 @@ shape:
   ```
 
   `param: null` with every target `null` is the idle/all-settled message (used on unpark and once
-  every outstanding goal has settled). `hvrt_direction` travels in the same message rather than a
+  every outstanding goal has settled).
+
+  **SUPERSEDED 2026-11-16 (the "mode-exclusive by construction" claim in the next paragraph)** —
+  see `plans/flight-control/review-p2.md` (required fix 2) and `implementation.md`, "Review-fix
+  round, 2026-11-16". `HVR` satisfies both channels' readiness, so a goal and a translate could
+  both be outstanding and press the same button. Replaced by an explicit main-loop arbitration
+  rule: latest command wins, nothing lost — a translate pauses goals (`param` goes `null` on the
+  wire via `goal_param_for_wire`), "hold" resumes them, a new goal clears the translate.
+
+  `hvrt_direction` travels in the same message rather than a
   separate op — it is written by voice exactly like the other three fields and belongs to the same
   `ParkedFlightState`, and HVR/FLT-only goals and HVRT translate are mode-exclusive by construction
   (a wheel cannot be in `HVRT` and `FLT`/`HVR` at once), so there is no collision to arbitrate
