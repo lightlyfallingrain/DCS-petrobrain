@@ -1,0 +1,29 @@
+[project]
+name = "raster-chart-viewer"
+version = "0.1.0"
+description = "Serve each installed DCS terrain's RasterCharts as a pan/zoom tiled map on the LAN"
+requires-python = ">=3.11"
+dependencies = [
+    "pillow>=9.1",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff.lint.isort]
+# See world-model/pyproject.toml for why this is declared explicitly rather
+# than left to ruff's cwd-relative auto-detection: invoking `ruff check
+# raster-chart-viewer/src raster-chart-viewer/tests` from the repo root vs.
+# cwd raster-chart-viewer/ changes whether this local package is classified
+# as first-party or third-party, flipping I001 findings depending on
+# invocation cwd. Declaring it explicitly makes the classification
+# invocation-cwd-independent.
+known-first-party = [
+    "raster_chart_viewer",
+]
