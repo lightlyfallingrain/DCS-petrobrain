@@ -244,3 +244,36 @@ animation is trimmed to its endpoints; every other measured line is verbatim:
   zero-length press). That registered with the menu closed, but the open menu may need a real
   pulse (the probe's own `SHORT_PRESS_PULSE_S`, 0.15 s). Untested.
 - **P0-7:** speed held at 0 for 15 s in FLT, no automatic switch to HVR.
+
+## Explore, round 2 — the pilot's answers to the re-fly, verbatim
+
+> *"* This is easier when the overlay is open. Therefore Petrobrain must make certain that the
+> overlay remains open while AI controls flight. If Player closes it, Petrobrain must reopen it
+> immediately. This is acceptable tradeoff.*
+> *\* I'd prefer barometric alt, which means that after it's engaged the first thing to do is get
+> is to a correct reading. After that it's easy.*
+> *\* "Long presses take small steps." -> yes, but press and hold will have it keep incrementing
+> the change. Single long press, no hold -> increment a bit. Press and hold for some seconds ->
+> value keeps changing while hold lasts.*
+> *\* "No automatic hover." -> that was ED's AI bug, it prioritized climbing to alt and only
+> slowed down after reaching desired alt. Automatic hover transition works normally."*
+
+## What this settles, as read (not yet a plan)
+
+- **The command menu stays open for as long as the AI flies.** Petrovich opens it on takeover and
+  reopens it at once if the player closes it. The pilot accepts the visual cost. That makes the
+  AI's state readable all the time and removes the P0-1 limitation.
+- **Barometric is the reference, and the first job after takeover is to make its target
+  correct.** Takeover → centre press (radar → barometric, which also stops the sink) → read the
+  target → if it is wrong, drive it to current MSL → then carry on to the pilot's goals.
+- **Correcting the target is a press-and-hold, not repeated taps.** A 0.7 s hold moves ±4 m, but
+  holding longer keeps it changing for as long as the hold lasts. So a large error is a closed
+  loop: hold up or down, watch the readback, release on reaching the target. Stage P2's planned
+  "release when readback reaches target" already has this shape. The rate while held is not
+  measured.
+- **P0-7 was not a real limit.** The AI was busy climbing to the wild barometric target and slowed
+  only once it got there. FLT → HVR works normally.
+- **Open question carried forward:** P0-5 found that a centre press with the menu open did not
+  toggle the reference. The pilot says it should (ED bug, or our zero-length press). With the menu
+  now always open, the one centre press after takeover must happen *before* the menu is opened,
+  or that press needs testing with a real pulse.
