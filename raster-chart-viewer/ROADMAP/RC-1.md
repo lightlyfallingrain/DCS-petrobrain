@@ -1,9 +1,12 @@
 # RC-1 — Raster chart viewer: DCS RasterCharts as a pan/zoom map on the LAN
 
-- [~] **RC-1 — Serve each terrain module's RasterCharts as a standard tiled map, zoom and pan in
+- [x] **RC-1 — Serve each terrain module's RasterCharts as a standard tiled map, zoom and pan in
   a browser, from a server on the Windows DCS machine, readable from any device on the LAN. One
-  more standalone service, independent of every other one.** #status/in-progress #needs-flight
-  Filed 2026-11-16 by user direction. **Planning started 2026-11-16 on `feature/raster-chart-viewer`**; plan:
+  more standalone service, independent of every other one.** #status/done
+  **Accepted and closed 2026-11-16 by the user:** *"RC-1 accepted and done. Mark it closed."*
+  That acceptance cleared the Stage 7 live check (`#needs-flight`) and covers the page changes
+  merged as `87cbbb9b`. It was run with WSL Python rather than the Windows venv the README
+  describes. Low-risk security finding [[RC-B1]] stays open in the backlog. Filed 2026-11-16 by user direction. **Planning started 2026-11-16 on `feature/raster-chart-viewer`**; plan:
   `plans/raster-chart-viewer/plan.md`.
 
   **DoD-PASSED 2026-11-16 for Stages 1-6** (`plans/raster-chart-viewer/dod-check.md`, tip
