@@ -726,6 +726,16 @@ and "Explore, round 3". **This amends points 2 and 4 above; where they disagree,
   safety ceiling and the "minutes if linear" risk below is retired.
 - **Keep-open, measured:** a hand-closed menu reads closed for 3 frames and reads open again about
   17 ms after the toggle. Point 3's 1 s settle window is generous; keep it, it costs nothing visible.
+- **Expected transient, accepted by the pilot 2026-11-16** (*"BL-16 the workaround as planned is
+  acceptable. Go ahead with the plan."*), after plan-aligner's CONCERNS (`alignment.md`, "Plan
+  check — 2026-11-16"): when the wild barometric target appears, the fallback hold lets the AI climb
+  about 130 m before phase 1 stops it (probe: 920 → 1050 m), then phase 2 brings it back to the
+  handover altitude. This is the normal cost of the workaround, not a regression, and the usual
+  path, since the wild target is above the 700 m radar cap. Keep the start of phase 1 as early as
+  the sequence allows; that is the only lever.
+- **The status push says which correction path ran** (`quick` / `hold` / `none`), and the Flight P1
+  card asks the pilot to note it, so a flight where the quick path happened to work is not read as
+  the normal case.
 
 **Flight P1 (revised), test card, named branch**: from the operator seat, hand over with "Request
 Aircraft Control" (name the binding on the card — the original card's generic "park" wording is
