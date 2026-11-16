@@ -35,9 +35,15 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)
 # Candidate directories: every subproject's split ROADMAP/ plus todo/'s two
 # spaces. Enumerated from the tree, not from a list -- a new subproject's
 # ROADMAP/ is picked up with no edit here.
+#
+# `.claude/` is excluded because agent worktrees live at
+# `.claude/worktrees/agent-<id>/`, each a full checkout with its own copy of
+# every ROADMAP/. While one existed, every prefix was "found in more than one
+# directory" and minting refused (2026-11-16, minting AC-B12).
 candidate_dirs() {
     find . -type d \( -name ROADMAP -o -path './todo/todo' -o -path './todo/backlog' \) \
-        -not -path './.git/*' -not -path './*/.venv/*' 2>/dev/null | sed 's|^\./||'
+        -not -path './.git/*' -not -path './.claude/*' -not -path './*/.venv/*' 2>/dev/null \
+        | sed 's|^\./||'
 }
 
 if [ "${1:-}" = "--list" ]; then
