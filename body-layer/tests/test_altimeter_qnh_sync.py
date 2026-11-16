@@ -31,7 +31,9 @@ class _FakeAircraftClient:
     element's own `arg_lim` (`aircraft-layer/research/2026-11-16-
     mi24p-operator-altimeter-recon.md` section B)."""
 
-    def __init__(self, initial_arg: float, respond: Callable[[float, float], float]) -> None:
+    def __init__(
+        self, initial_arg: float, respond: Callable[[float, float], float]
+    ) -> None:
         self.arg_value = initial_arg
         self._respond = respond
         self.writes: list[float] = []

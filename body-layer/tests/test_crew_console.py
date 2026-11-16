@@ -33,6 +33,8 @@ from belief.crew_console import (
     _GREETING_TIMES_OF_DAY,
     _MAX_PENDING_POSITIONAL_REPLIES,
     _NOTHING_TO_STOP,
+    ALTIMETER_QNH_NO_RESPONSE_LINE,
+    ALTIMETER_QNH_TIMEOUT_LINE,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -8113,6 +8115,123 @@ class TestDrainSightLockTracking:
         console.drain_sight_lock_tracking(4.0, previously_seen=False, seen=False)
         console.drain_sight_lock_tracking(5.0, previously_seen=False, seen=True)
         assert output.getvalue() == "Tracking.\nTracking.\n"
+
+
+class TestDrainAltimeterQnhFailed:
+    """`CrewConsole.drain_altimeter_qnh_failed` (`[[BL-B118]]`, `plans/
+    bl16-qnh-mission-start/plan.md`, "The closed loop" step 4) -- mirrors
+    `drain_config_error`'s own gated-until-open, deferred-while-silenced
+    shape (D5/D6, `plans/effector-sequences/plan.md`), speaking one of two
+    fixed lines depending on `phase`."""
+
+    def _console(self) -> tuple[CrewConsole, object]:
+        import io
+
+        output = io.StringIO()
+        return CrewConsole(store=ContactStore(), output=output), output
+
+    def test_speaks_no_response_line_once_gate_is_open(self) -> None:
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_no_response"
+        )
+
+        assert output.getvalue() == ALTIMETER_QNH_NO_RESPONSE_LINE + "\n"
+        assert console.altimeter_qnh_failed_pending is False
+
+    def test_speaks_timeout_line_once_gate_is_open(self) -> None:
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+
+        assert output.getvalue() == ALTIMETER_QNH_TIMEOUT_LINE + "\n"
+        assert console.altimeter_qnh_failed_pending is False
+
+    def test_silent_when_not_pending(self) -> None:
+        console, output = self._console()
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+
+        assert output.getvalue() == ""
+
+    def test_held_while_intercom_gate_is_closed(self) -> None:
+        """Deferred, not dropped -- the flag stays set and a later call
+        with the gate open still speaks."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=False, phase="failed_timeout"
+        )
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_timeout"
+        )
+        assert output.getvalue() == ALTIMETER_QNH_TIMEOUT_LINE + "\n"
+
+    def test_held_while_silenced(self) -> None:
+        """D6: silenced defers, it does not lose the line."""
+        console, output = self._console()
+        console.silenced = True
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+        console.silenced = False
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue() == ALTIMETER_QNH_NO_RESPONSE_LINE + "\n"
+
+    def test_silent_when_phase_is_none(self) -> None:
+        """Defensive: pending with no phase to explain it (cannot happen
+        via the one real call site today, since a mission reset clears
+        both together) is treated as "nothing to say yet," not a crash
+        or a guessed line."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(1.0, intercom_open=True, phase=None)
+
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+    def test_re_armable_unlike_config_error_pending(self) -> None:
+        """The one behaviour that deliberately differs from
+        `config_error_pending`: this flag is not in `reset_for_new_
+        mission`'s preserved-field list, so a later mission's own sync
+        attempt can set it again after an earlier one was drained."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+        assert console.altimeter_qnh_failed_pending is False
+
+        console.reset_for_new_mission()
+        assert console.altimeter_qnh_failed_pending is False
+
+        console.altimeter_qnh_failed_pending = True
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue().splitlines() == [
+            ALTIMETER_QNH_TIMEOUT_LINE,
+            ALTIMETER_QNH_NO_RESPONSE_LINE,
+        ]
 
 
 class TestBrainCommandsAreRealDispatchTokens:

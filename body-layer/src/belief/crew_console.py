@@ -108,6 +108,7 @@ from typing import Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient
+from belief.altimeter_qnh_sync import AltimeterQnhSyncPhase
 from belief.attack_run import AttackRunState
 from belief.attack_run import decide as decide_attack_run
 from belief.attack_run import query as query_attack_run
@@ -1268,6 +1269,18 @@ CONFIG_ERROR_LINE: Final[str] = (
     "continue, but some functionality may not work."
 )
 
+#: `[[BL-B118]]` (`plans/bl16-qnh-mission-start/plan.md`, "The closed loop"
+#: step 4) -- the two fixed lines `drain_altimeter_qnh_failed` speaks once
+#: `belief.altimeter_qnh_sync.advance_altimeter_qnh_sync` terminates in a
+#: failed phase, held until the SPU-8 intercom gate reads open, same
+#: deferral `CONFIG_ERROR_LINE` already uses. "Unable, <because>" --
+#: this project's own convention for an action that is unavailable rather
+#: than misheard.
+ALTIMETER_QNH_NO_RESPONSE_LINE: Final[str] = (
+    "Unable, operator altimeter not responding."
+)
+ALTIMETER_QNH_TIMEOUT_LINE: Final[str] = "Unable, altimeter pressure not set."
+
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
 #: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
 #: way `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s `F10CommandQueue`
@@ -1777,6 +1790,17 @@ class CrewConsole:
     #: this class resets on a mission (re)start.
     config_error_pending: bool = field(default=False, repr=False)
 
+    #: `[[BL-B118]]` -- set by `body._run_crew_text_poll_loop`'s poll
+    #: block on a `running -> failed_*` phase transition of `runner.
+    #: altimeter_qnh_sync`; drained by `drain_altimeter_qnh_failed` the
+    #: first poll the SPU-8 intercom gate reads open. **Not** preserved
+    #: across a mission (re)start (unlike `config_error_pending` above):
+    #: this condition describes *this mission's* sync attempt, not the
+    #: process's own startup state, so it resets with everything else and
+    #: is re-armed fresh by the next mission's own attempt if that one
+    #: also fails.
+    altimeter_qnh_failed_pending: bool = field(default=False, repr=False)
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
@@ -1803,7 +1827,7 @@ class CrewConsole:
         `weapon_safety_transition`, `where_is_it_slots`, `_referent_memory`,
         `_pending_mentions`, `on_ground`, `sight_ready`,
         `enrichment`, `refused`, `_positional_reply_overflow_
-        warned`) resets to its declared
+        warned`, `altimeter_qnh_failed_pending`) resets to its declared
         default (`attack_run_weapon` among them, `[[BL-B67]]`'s own
         one-shot weapon slot) -- see `refused`'s own field docstring for
         why resetting it here is correct even though a mission (re)start
@@ -2053,6 +2077,43 @@ class CrewConsole:
             return
         self._print([CONFIG_ERROR_LINE], now_sim)
         self.config_error_pending = False
+
+    def drain_altimeter_qnh_failed(
+        self,
+        now_sim: float,
+        *,
+        intercom_open: bool,
+        phase: AltimeterQnhSyncPhase | None,
+    ) -> None:
+        """`[[BL-B118]]` (`plans/bl16-qnh-mission-start/plan.md`, "The
+        closed loop" step 4) -- mirrors `drain_config_error`'s shape
+        exactly: speaks one of two fixed lines the first poll `self.
+        altimeter_qnh_failed_pending and intercom_open and not self.
+        silenced`, held (not dropped) while either gate is closed.
+
+        `phase` is the sync run's own phase at drain time (the caller
+        reads `runner.altimeter_qnh_sync.phase`, this class holds no
+        reference to the run itself) -- `ALTIMETER_QNH_NO_RESPONSE_LINE`
+        for `"failed_no_response"`, `ALTIMETER_QNH_TIMEOUT_LINE` for
+        `"failed_timeout"`. `None` only if the flag is somehow pending
+        with no run left to explain it (cannot happen on the one call
+        site today, since a mission reset clears both together), treated
+        as "nothing to say yet" rather than guessing a line."""
+        if not self.altimeter_qnh_failed_pending:
+            return
+        if phase is None:
+            return
+        if not intercom_open:
+            return
+        if self.silenced:
+            return
+        line = (
+            ALTIMETER_QNH_NO_RESPONSE_LINE
+            if phase == "failed_no_response"
+            else ALTIMETER_QNH_TIMEOUT_LINE
+        )
+        self._print([line], now_sim)
+        self.altimeter_qnh_failed_pending = False
 
     def _speak_or_defer(
         self,

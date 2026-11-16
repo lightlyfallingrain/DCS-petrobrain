@@ -489,6 +489,99 @@ def test_check_for_new_mission_is_a_no_op_when_cache_is_empty() -> None:
     assert runner.last_mission_start_sequence == 1
 
 
+# --- `[[BL-B118]]`: `_maybe_start_altimeter_qnh_sync`, via `_check_for_ ----
+# --- new_mission`'s two adoption sites --------------------------------
+
+
+def test_check_for_new_mission_arms_qnh_sync_on_first_event_adopted() -> None:
+    """The first-event-adopted case (no reset, the process just started)
+    still adopts QNH, same as it adopts theatre -- `--world-model-dir`
+    alone has no other source for either."""
+    client = _FakeMissionStartClient()
+    client.event = {
+        "sequence": 1,
+        "theatre": None,
+        "qnh": 750.0,
+        "atmosphere_type": 0,
+        "received_wall_clock_s": 0.0,
+    }
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is False
+    assert runner.altimeter_qnh_sync is not None
+    assert runner.altimeter_qnh_sync.target_mmhg == 750.0
+
+
+def test_check_for_new_mission_arms_qnh_sync_on_genuine_reset() -> None:
+    client = _FakeMissionStartClient()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    runner.last_mission_start_sequence = 1  # already past the first poll
+
+    client.event = {
+        "sequence": 2,
+        "theatre": None,
+        "qnh": 723.0,
+        "atmosphere_type": None,
+        "received_wall_clock_s": 0.0,
+    }
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is True
+    assert runner.altimeter_qnh_sync is not None
+    assert runner.altimeter_qnh_sync.target_mmhg == 723.0
+
+
+def test_check_for_new_mission_clears_qnh_sync_when_qnh_missing() -> None:
+    """A mission (re)start whose event carries no `qnh` must drop any
+    previously-armed run back to `None` -- there is nothing to sync this
+    mission, and advancing a stale run against the new mission's belief
+    state would be wrong."""
+    client = _FakeMissionStartClient()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    runner.last_mission_start_sequence = 1
+
+    client.event = {"sequence": 2, "theatre": None, "received_wall_clock_s": 0.0}
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is True
+    assert runner.altimeter_qnh_sync is None
+
+
+def test_check_for_new_mission_clears_qnh_sync_when_qnh_non_numeric() -> None:
+    client = _FakeMissionStartClient()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    runner.last_mission_start_sequence = 1
+
+    client.event = {
+        "sequence": 2,
+        "theatre": None,
+        "qnh": "not a number",
+        "received_wall_clock_s": 0.0,
+    }
+    reset_happened = _check_for_new_mission(
+        runner, None, MissionMemory(), cast(AircraftLayerClient, client)
+    )
+
+    assert reset_happened is True
+    assert runner.altimeter_qnh_sync is None
+
+
 def test_reset_mission_state_resets_store_tasks_sources_and_mission_memory() -> None:
     runner = ConsolePerceptionRunner(
         aircraft_client=cast(AircraftLayerClient, object())
