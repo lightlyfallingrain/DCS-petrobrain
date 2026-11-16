@@ -64,7 +64,22 @@ re-fire (D1: "same poll's advance may execute it"), which may write
 once for the run that just finished and once more for the one that
 restarts. Any number of rows may be *skipped* in the same poll (D1's
 queueing and R12's self-check both rely on a whole already-satisfied
-sequence collapsing in one tick)."""
+sequence collapsing in one tick).
+
+**A row's own `petrovich-says` line is reported when the row completes
+(`[[BL-B119]]`) -- written successfully, or found already at its target
+value (R12's self-check skip counts as a completion too, pilot
+decision: the line confirms the state is as commanded either way).** A
+row skipped for a failed explicit condition, an unknown/no-readback
+effector, or a failed write awaiting retry says nothing. This module
+stays pure: `EffectorRunState.spoken` carries this call's own lines, in
+execution order (row order within a trigger, fire order across
+triggers) -- `advance` never calls speech itself; `body.py` drains
+`spoken` into `CrewConsole`'s own speech path once each. An empty
+`petrovich-says` cell reports nothing. `spoken` is replaced wholesale
+every call (including with `()` when nothing completed), the same
+`replace()`-only discipline as every other field here, so a mission
+reset drops it exactly like `assumed_writes`."""
 
 from __future__ import annotations
 
@@ -152,6 +167,22 @@ def _half_gap(values: Mapping[str, float]) -> float:
     return min(b - a for a, b in pairwise(distinct)) / 2.0
 
 
+def _speak_text(text: str) -> str:
+    """Sentence-cases a completed row's own `petrovich-says` cell
+    (`[[BL-B119]]`, plan: "the pilot wrote the words, the code only
+    normalises punctuation/case") -- matching the fixed phrasing it
+    replaces (`"Observ on."`, `"Weapons armed."`): capitalises the first
+    character and appends a period if the cell did not already end in
+    terminal punctuation. The cell is already quote/whitespace-stripped
+    by `effector_sequences._strip_petrovich_says` at parse time."""
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    if text[-1] not in ".!?":
+        text += "."
+    return text
+
+
 def _matches(effector_def: EffectorDef, raw: float, value_name: str) -> bool:
     """`True` iff the observed raw value `raw` is within half the
     smallest inter-value gap of the named value `value_name`'s own raw
@@ -200,13 +231,20 @@ class EffectorRunState:
     -- every successful write across every trigger, read by every
     running cursor's own row resolution (see the module docstring's
     "Assumed success" section). Dropped wholesale on mission reset (D11),
-    like every other field here."""
+    like every other field here.
+
+    `spoken` (`[[BL-B119]]`) is this call's own completed-row lines, in
+    execution order -- replaced wholesale every `advance` call (`()`
+    when nothing completed this poll), never accumulated across calls.
+    `body.py` is the only reader; see the module docstring's own
+    paragraph on it."""
 
     runs: Mapping[EffectorTrigger, _RunCursor] = field(default_factory=dict)
     pending: Mapping[EffectorTrigger, bool] = field(default_factory=dict)
     commanded_values: Mapping[str, str] = field(default_factory=dict)
     fire_order: tuple[EffectorTrigger, ...] = ()
     assumed_writes: Mapping[int, tuple[float, float]] = field(default_factory=dict)
+    spoken: tuple[str, ...] = ()
 
 
 def fire_trigger(
@@ -280,11 +318,17 @@ def advance(
     **No `readback` parameter** (Stage 4) -- each cursor's own one-shot
     `client.read_args(...)` call is this function's only source of
     cockpit state; see the module docstring's "Each run carries a
-    snapshot" section."""
+    snapshot" section.
+
+    **Returned state's own `spoken` is this call's completed-row lines
+    only** (`[[BL-B119]]`), not an accumulation across calls -- see the
+    module docstring's own paragraph and `EffectorRunState.spoken`'s
+    field docstring."""
     runs = dict(state.runs)
     pending = dict(state.pending)
     commanded_values = dict(state.commanded_values)
     assumed_writes = dict(state.assumed_writes)
+    spoken: list[str] = []
     failed_effectors: set[str] = set()
 
     order = [t for t in state.fire_order if t in runs]
@@ -385,6 +429,11 @@ def advance(
             # already at the value this row would write?
             self_raw = _effective_value(effector_def.arg, cursor, assumed_writes)
             if self_raw is not None and _matches(effector_def, self_raw, row.value):
+                # `[[BL-B119]]`: found already in position still counts
+                # as this row completing (pilot decision -- the line
+                # confirms the state is as commanded either way).
+                if row.petrovich_says:
+                    spoken.append(_speak_text(row.petrovich_says))
                 cursor = replace(cursor, row_index=cursor.row_index + 1)
                 continue
             if self_raw is None and not effector_def.absolute_write:
@@ -427,6 +476,9 @@ def advance(
 
             commanded_values[row.effector] = row.value
             assumed_writes[effector_def.arg] = (value, now_sim)
+            # `[[BL-B119]]`: the row completed by a successful write.
+            if row.petrovich_says:
+                spoken.append(_speak_text(row.petrovich_says))
             cursor = replace(
                 cursor,
                 row_index=cursor.row_index + 1,
@@ -457,4 +509,5 @@ def advance(
         commanded_values=commanded_values,
         fire_order=new_fire_order,
         assumed_writes=assumed_writes,
+        spoken=tuple(spoken),
     )
