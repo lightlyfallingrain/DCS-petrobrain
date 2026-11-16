@@ -107,6 +107,12 @@ for sub in */; do
     sub=${sub%/}
     [ -d "$sub/src" ] && [ -d "$sub/tests" ] || continue
     printf '%s\n' "$STAGED" | grep -q "^$sub/" || continue
+    # Docs-only for this subproject -> no code checks (user, 2026-11-16: skip code checks when only
+    # .md files are staged). Markdown under $sub/config/ is NOT docs: body-layer's effector
+    # sequences (config/sequences/**/*.md) are data the code parses and the tests validate.
+    printf '%s\n' "$STAGED" | grep "^$sub/" | grep -v -E '\.md$' | grep -q . \
+        || printf '%s\n' "$STAGED" | grep -q -E "^$sub/config/.*\.md$" \
+        || continue
 
     RUFF=$(resolve_tool "$sub" ruff)
     MYPY=$(resolve_tool "$sub" mypy)
