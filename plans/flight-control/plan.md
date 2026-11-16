@@ -113,7 +113,7 @@ used ("turn heading 3 1 5", "hold 200 m radar", "speed 2 2 0"):
 | "Speed &lt;value&gt;" | `set_speed` | FLT/HVR | nearest step; "max" is a legal value | |
 | "Slow down" / "Speed up" | `speed_step` | FLT/HVR | one step down/up | |
 | "Hover" | `set_speed` with value 0 | FLT/HVR | step 0 | causes the automatic FLT→HVR transition once DCS itself slows to hover |
-| "alt[itude] &lt;value&gt; [radar/barometric]" | `set_altitude` | FLT/HVR | centre-toggle reference if it differs, then hold to value | **at risk, added 2026-11-16**: P0-5 measured a centre press *with the menu open* not toggling the reference at all (menu closed, it did). Stage P1's own takeover toggle presses centre while closed, before the menu is ever opened, which sidesteps this — but by the time P2 is built the menu is permanently open (the "menu stays open" decision below), so *this row's* centre-toggle may not be reachable as written. Needs a probe with a real pulse (not same-frame) before P2 commits to it; until then, treat "radar" as possibly unreachable by voice |
+| "alt[itude] &lt;value&gt; [radar/barometric]" | `set_altitude` | FLT/HVR | centre-toggle reference if it differs (`SHORT_PULSE_S` real pulse, menu open), then hold to value | ~~at risk, added 2026-11-16: P0-5 measured a centre press *with the menu open* not toggling the reference at all... treat "radar" as possibly unreachable by voice~~ **Resolved 2026-11-16** by the takeover rehearsal probe's T4 row: a real `SHORT_PULSE_S` (0.15 s) pulse with the menu open *does* toggle the reference (B→R measured directly); P0-5's failure was the probe's own zero-length press, not a DCS limitation. Reachable by voice. **New, from the 700 m radar cap (pilot, explore round 3):** a target whose AGL-equivalent is ≥ `AI_PILOT_QUICK_PATH_MAX_AGL_M` (700) cannot hold on radar at all — see "Stage P2 ready to build" below, "The 700 m radar cap" |
 | "climb/descend &lt;m&gt;" | `altitude_step` | FLT/HVR | relative, current ± m | |
 | "hold alt[itude]" | `hold_altitude` | FLT/HVR | freezes the goal at the current read altitude | |
 | "left/right/forward/back" | `hvrt_translate` | **HVRT only** | Lua holds the press open until body-layer clears it — see Stage P2's HVRT sub-section | state-gated, not grammar-gated — see note below |
@@ -406,6 +406,15 @@ Minimal working version: the park signal takes over, holds altitude, does nothin
   sink and no speech. Unpark, confirm nothing untoward (no goal exists yet to drop).
 
 ### Stage P2 — heading, altitude, speed goals
+
+**SUPERSEDED 2026-11-16** — see "Revised 2026-11-16 — Stage P2 ready to build" below (after the
+takeover revision) for the production design: the concrete goal-channel wire shape, the
+interleaving mechanism (this section's own text names the *rule* but not the mechanism), the
+takeover-coexistence rule, the full readback table, and the audio-adapter work the plan-aligner's
+2026-11-15 amendment review flagged as missing. Kept below verbatim, per `docs/PROCESS.md`'s
+"Superseding a decision" — the vocabulary table above this section and the Co-moving Fields table
+earlier in this document are **not** superseded, only this section's own Lua/body-layer/
+audio-adapter bullets and the Flight P2 card text.
 
 - **Lua**: the nudge loop — given a goal (one of heading/altitude/speed), read current mode, cycle
   to FLT/HVR if needed (short-left, re-read, repeat — bounded by `MODE_READ_SETTLE_S` per attempt
@@ -841,12 +850,12 @@ its first production use).
 ### Downstream effects — what P2–P6 inherit
 
 - **P2**: the mode-cycle loop no longer needs to *open* the menu itself — Stage P1 guarantees it is
-  already open by the time any goal is spoken. But the "alt ... radar/barometric" vocabulary row
-  (table above, flagged in place) inherits a real open question: every reference toggle after
-  takeover would have to press centre with the menu open, which P0-5 measured as not working.
-  Needs a probe with a real `SHORT_PRESS_PULSE_S` pulse (not same-frame) before Stage P2 commits to
-  that row; until then, "radar" may be unreachable by voice. Not resolved here — P2 is not being
-  re-planned by this revision, only flagged for whoever plans it.
+  already open by the time any goal is spoken. ~~But the "alt ... radar/barometric" vocabulary row
+  (table above, flagged in place) inherits a real open question... Not resolved here — P2 is not
+  being re-planned by this revision, only flagged for whoever plans it.~~ **Resolved 2026-11-16**:
+  the takeover rehearsal probe's T4 row answers exactly this question (a real `SHORT_PULSE_S` pulse
+  with the menu open does toggle the reference) — see "Stage P2 ready to build" below, which is
+  this revision re-planning P2.
   Also: Stage P1's own correction loop (point 4), flown on a known 740 m error, is itself a live
   data point for dod-batch-a.md's existing MONITOR item (whether a 5 Hz tick is fast enough for
   "release on readback-within-tolerance") — Flight P1 answers this before P2 needs to ask it again.
@@ -874,8 +883,11 @@ its first production use).
 - **"The AI always starts on radar" stays an assumption**, not a universal fact — every sample so
   far agrees, but an unconditional blind centre press would wrongly flip a baro-starting AI back to
   radar if that case ever occurs. No case has been observed; not re-opened as a question.
-- **The menu-open centre-press failure (P0-5) blocks a real piece of future vocabulary** (P2's
-  "radar/barometric" row) — carried forward above, not solved here.
+- ~~The menu-open centre-press failure (P0-5) blocks a real piece of future vocabulary (P2's
+  "radar/barometric" row) — carried forward above, not solved here.~~ **Resolved 2026-11-16** by
+  the takeover rehearsal probe (T4: a real pulse toggles the reference with the menu open). The
+  residual risk P2 actually carries is the 700 m radar cap, not this one — see "Stage P2 ready to
+  build" below.
 - **Closing the menu on unpark is this revision's own call, not the pilot's explicit word** — low
   stakes, reversible, decided per the Escalation Rules rather than escalated.
 
@@ -893,6 +905,390 @@ P2/P3; U3 remains answered and governs Stage P2's mode-cycle-back, not built in 
 choices this revision makes on its own (blind centre-press ordering, snapshot-vs-live correction
 target, the 60 s safety ceiling, closing the menu on unpark) are each local and reversible per the
 Escalation Rules and are decided above rather than escalated.
+
+## Revised 2026-11-16 — Stage P2 ready to build
+
+**Re-cut by the Architect**, user direction 2026-11-16: *"next most important is voice commands for
+BL-16."* This replaces **Stage P2 only** (the old text is kept above, marked SUPERSEDED, per
+`docs/PROCESS.md`'s "Superseding a decision"). The vocabulary table ("Amended 2026-11-15"), the
+Co-moving Fields table, and the Architecture decision ("per-frame press timing lives in Export.lua,
+not body-layer") are **not** re-cut — this section builds the concrete mechanism those already-
+settled decisions only sketched. Scope stays the vocabulary the pilot specified 2026-11-15; nothing
+below reopens it.
+
+**Depends on `[[AC-B12]]`** (the `Export.lua` module split, `feature/ac-b12-export-modules`, still
+`[~]` in-progress as of this writing). This plan's own fields and functions land in that plan's
+`ai_pilot_wheel.lua` module. AC-B12's own "Affected Modules / Files" list already names every
+field/function Stage P1 added to that module (confirmed by reading it); it does not and cannot name
+this stage's own new fields (`ai_pilot_goal_*`, `ai_pilot_hvrt_direction`), which do not exist yet
+— those are additions the Implementer makes to the already-split `ai_pilot_wheel.lua`, checked
+against AC-B12's own stated target (**no module above ~60 top-level locals**, generous headroom
+against the 200 ceiling) with a `grep -cE '^local ' aircraft-layer/dcs-export/Petrobrain/
+ai_pilot_wheel.lua` before and after. **Do not start Stage P2 implementation before AC-B12
+merges** — `Export.lua` landed the takeover revision at exactly the 200-local ceiling
+(`.claude/agent-memory/implementer/project_export_lua_200_local_ceiling.md`), so there is no
+headroom in the monolith for this stage's new state until the split lands.
+
+### Stage P0-rad — the 700 m radar cap probe (prerequisite, before P2 can ship the reference row)
+
+One fact used below (the radar cap forces barometric above 700 m AGL-equivalent target) comes from
+the pilot's own observation (`2026-11-16-bl16-batch-a-feedback.md`, "Explore, round 3"), not a
+dedicated measurement — and the takeover rehearsal probe's T4 toggle (`SHORT_PULSE_S`, menu open)
+was run near the ground (AGL well under 700 m), never against a target *above* the cap while
+already on radar. Before Stage P2 ships the "alt ... radar" row as a two-way toggle, one short
+addition to the existing probe (or a manual check on the Flight P2 sortie, pilot's call) confirms:
+starting on radar below 700 m, commanding an altitude above 700 m, does the centre-pulse-then-hold
+sequence below actually refuse the radar leg and fall through to barometric as designed, or does it
+need a defined AGL read before attempting the pulse at all (the pulse itself has no AGL
+precondition in the design below — the **read**, not a precondition, decides, per the takeover
+revision's own "the read decides, not a precondition" rule, carried over rather than re-derived).
+Not a blocker to building the rest of Stage P2 — the heading/altitude(barometric only)/speed goal
+channel does not depend on this row at all — but it is a blocker to the "radar" half of the
+altitude vocabulary row shipping as more than an assumption.
+
+### The goal channel — wire shape
+
+No goal-message channel exists yet (confirmed: `grep -n "ai_pilot" body-layer/src/aircraft_client.py`
+finds only the P1 readback client, `get_ai_pilot_wheel_latest`; `write_sight_target`/
+`write_cockpit_switch` are the nearest precedent, both one-way `POST`s with no reply body). Stage
+P2 adds one new command, following that exact precedent rather than inventing a new transport
+shape:
+
+- **`AircraftLayerClient.write_ai_pilot_goal(...)` → `POST /command/ai_pilot_goal`**, forwarded
+  through the collector to `Export.lua`'s inbound command socket exactly as `sight_target`/
+  `cockpit_switch`/`watch_args` already are (`aircraft-layer/src/collector/command_sender.py` gains
+  one more `send_*` method; `commands.lua`'s dispatch table, built once AC-B12 lands, gains one more
+  entry: `ai_pilot_goal = ai_pilot_wheel.handle_ai_pilot_goal_command`). Raises
+  `AircraftLayerError` on failure, same posture as every existing write in that client.
+- **Body fields** (only the fields matching `param` are meaningful; the others are omitted/`null`,
+  and Lua ignores them — this is a **selector**, not three simultaneous targets, matching the
+  Architecture decision's "Lua... never decides which wheel button to press — only what value
+  Petrovich wants held" read literally: body-layer decides which *one* value is being held right
+  now):
+
+  ```
+  {"goal_seq": int, "param": "heading"|"altitude"|"speed"|null,
+   "heading_target_deg": float|null,
+   "altitude_target_m": float|null, "altitude_target_ref": "radar"|"barometric"|null,
+   "speed_target_kmh": float|null,
+   "hvrt_direction": "left"|"right"|"forward"|"back"|null}
+  ```
+
+  `param: null` with every target `null` is the idle/all-settled message (used on unpark and once
+  every outstanding goal has settled). `hvrt_direction` travels in the same message rather than a
+  separate op — it is written by voice exactly like the other three fields and belongs to the same
+  `ParkedFlightState`, and HVR/FLT-only goals and HVRT translate are mode-exclusive by construction
+  (a wheel cannot be in `HVRT` and `FLT`/`HVR` at once), so there is no collision to arbitrate
+  between `param` and `hvrt_direction` being set at the same time — only one of the two modes is
+  ever actually reachable, and Lua's own per-tick mode read decides which one it acts on.
+- **Sent only when the message's content actually changes** (a new/replaced target, a different
+  active `param`, or `hvrt_direction` changing) — mirroring `write_sight_target`'s existing
+  "re-sent only when the goal direction changes" posture, not resent every poll. Lua's own
+  per-frame loop (unchanged mechanism from Stage P1) runs continuously against whatever it last
+  received until a new message arrives or the readback settles on its own.
+- **Readback extension**: `GET /ai_pilot_wheel/latest` (`aircraft-layer/src/schema/
+  ai_pilot_wheel.py`'s `AiPilotWheelState`) gains `goal_progress: "idle"|"pressing"|
+  "cycling_mode"|"settled"|"mode_blocked"` and echoes `goal_seq`, following the exact field-naming
+  and `to_api_dict`/`apw_`-prefix convention the P1 schema already uses (`apw_goal_progress`,
+  `apw_goal_seq`). `ParkedFlightState` (body-layer) gains the mirror fields the same way
+  `advance_parked_flight_state` already mirrors `takeover_stage`/`correction_path` — read-only,
+  never written back by body-layer's own belief update.
+
+### `AiPilotWheelGoal` — the new co-moving state, and the rotation rule
+
+A new frozen dataclass, `belief/ai_pilot_wheel.py` (the module `ParkedFlightState.goal: Any | None`
+was already declared to hold, per that module's own docstring: "`goal`/`align_phase`/
+`pre_align_snapshot` are later stages' own fields... declared here now rather than being added
+piecemeal"):
+
+```
+AiPilotWheelGoal:
+    heading_target_deg: float | None
+    altitude_target_m: float | None
+    altitude_target_ref: Literal["radar", "barometric"] | None
+    speed_target_kmh: float | None
+    active_param: Literal["heading", "altitude", "speed"] | None
+    active_since_sim: float | None
+    pending_order: tuple[Literal["heading", "altitude", "speed"], ...]
+    goal_seq: int
+```
+
+**Rotation rule** — this is the concrete mechanism the old (superseded) P2 text named only as "step
+one parameter's worth of progress per poll and rotate," without saying how. Settled here as a local,
+reversible choice (flagged as **U4** below for the user to confirm or override, not blocking):
+
+- A newly-spoken goal for a parameter with **no** target yet queues at the back of `pending_order`
+  (FIFO by speaking order, matching the explore notes' own worked example, which names speed first,
+  heading second, altitude third — not any fixed alphabetic order).
+- A newly-spoken goal for a parameter that **already** has a target (including the active one)
+  replaces that target in place and does **not** change its queue position — "latest wins" (E-P4)
+  applies to the *value*, not to re-queuing. If it is the active parameter, the new target is
+  adopted immediately (Lua re-reads the error sign and corrects direction on its next tick, no
+  rotation needed).
+- `decide_ai_pilot_wheel` promotes the front of `pending_order` to `active_param` whenever
+  `active_param` is `None` (idle, or just settled) — and, **while more than one parameter is
+  outstanding**, also when `active_since_sim` exceeds `AI_PILOT_GOAL_SLICE_S` (new tunable, default
+  3.0 s): the current active parameter is demoted to the back of `pending_order` (not dropped — its
+  target is kept, it just waits its turn) and the next one is promoted. **When only one parameter is
+  outstanding, no slice limit applies** — it runs to settlement uninterrupted, since there is
+  nothing else waiting and no reason to pay the press-release/dead-time cost of rotating away from
+  nothing.
+- Promoting (or re-promoting, after a rotation) a parameter bumps `goal_seq` and sends a new
+  `ai_pilot_goal` message; demoting one does **not** by itself send anything — Lua already releases
+  any open press the instant it sees a different `param` in the next message it receives, per the
+  Co-moving Fields table below, which is this stage's own generalisation of the existing "a long
+  hold in progress ends immediately on a mode change" rule to "ends immediately on an active-param
+  change."
+
+**The repeated dead-time cost, named rather than hidden**: every time a parameter is demoted and
+later re-promoted, Lua's hold has to clear the measured ~0.5 s dead zone again before it resumes
+moving (`docs/acceptance/2026-11-16-bl16-batch-a-feedback.md`, "Takeover rehearsal probe," the
+held-press profile table). With all three parameters
+outstanding and a 3.0 s slice, each one pays that 0.5 s again roughly every 9 s of real time —
+about 17% of its own active time lost to re-acceleration. Given the existing 20 m / 5° tolerances
+are already loose "good enough" targets (not precision holds), this is accepted as the cost of
+"every parameter starts moving early" rather than strictly sequencing goals to completion one at a
+time. **U4** asks the user to confirm this trade is the one wanted.
+
+### Heading and altitude reuse Stage P1's own hold-and-poll loop; speed is a tap loop
+
+Not a new press mechanism for either of the two long-hold parameters: Stage P1's takeover
+correction already validated "hold open, re-read every 5 Hz tick, release the instant the readback
+crosses into tolerance" against a worse case (a 740 m error) than any P2 goal will ever present —
+the plan's own "Second-order effect" note already anticipated this reuse. Concretely:
+
+- **Altitude**: `set_parked_altitude(m, reference)` reuses the exact up/down hold-and-poll shape
+  from the revised Stage P1, retargeted at the spoken value instead of the handover snapshot, and
+  reusing the quick-path/two-phase-hold choice (AGL-eligibility, read-decides-not-precondition) when
+  a reference change is also needed (see "The 700 m radar cap" below).
+- **Heading**: the same hold-and-poll shape, left/right instead of up/down, closed on `course_text`
+  instead of `alt_text`, released within `AI_PILOT_HEADING_TOLERANCE_DEG` (5°, carried over from
+  mode 1's own D-c default, unchanged). No reference toggle involved.
+- **Speed**: not a hold at all — one short tap (nearest direction) per tick while the active
+  parameter is speed and `speed_text` has not yet reached the target step; `AI_PILOT_SPEED_STEPS_KMH`
+  decides "nearest." P0-4's measured ~0.007 s readback latency means a tap's effect is visible next
+  tick, so no slicing concern applies here — a speed goal that becomes active typically settles
+  within one or two ticks regardless of how long its slice is.
+
+### The 700 m radar cap — the defined answer for a request above it
+
+The pilot's own finding (explore round 3): the AI's radar reference physically cannot hold a target
+whose AGL-equivalent is ≥ `AI_PILOT_QUICK_PATH_MAX_AGL_M` (700 m) — a centre pulse toward radar is
+refused by DCS itself when the current target is that high, which is also why the wild barometric
+bug could never be worked around by a plain radar toggle (both measured instances were ~740 m
+above handover, comfortably over the cap). Stage P2's "alt ... radar" row needs a defined behaviour
+for this case, not a silent assumption:
+
+- **The readback always names the reference actually achieved, never the one requested** — this is
+  Decision 9's existing rule ("the readback says 'barometric' only when barometric is in use")
+  applied here, not a new rule. If the player says "altitude 900 radar" and the pulse is refused
+  (900 m is above the cap at any plausible AGL), Petrovich sets 900 m **barometric** and reads back
+  *"900 meters barometric"* — not "unable," not silence, not the word the player said if it is not
+  what actually happened. The attempt is made (read decides, not a precondition, per the takeover
+  revision's own rule), and the achieved reference is what gets spoken.
+- **An omitted reference on a target above the cap, while currently on radar**, is treated the same
+  way: the toggle to barometric happens automatically (needed regardless of what the player asked
+  for, since radar cannot hold that value), and the readback names barometric.
+- **No new user decision needed here** — this is Decision 9 and E-P3 ("readback names what the AI
+  will actually hold") applied to a case those decisions did not call out by name, not a new
+  tradeoff.
+
+### Coexisting with an in-progress takeover correction
+
+The brief's own question: a goal spoken while Stage P1's takeover correction (`takeover_stage` not
+yet `None`) is still running must not fight it. **Rule**: `decide_ai_pilot_wheel` never promotes a
+parameter to `active_param` (and never sends an `ai_pilot_goal` message) while
+`ParkedFlightState.takeover_stage is not None`. A spoken goal during this window still gets its
+immediate readback (per the Readbacks section below — the words were heard) and still queues into
+`pending_order` normally; it is simply not acted on until `takeover_stage` clears on its own. This
+needs no new field — `takeover_stage`'s existing P1 semantics ("`None` once resolved or while
+unparked") already say exactly when it is safe to start. The window is short in the ordinary case
+(P0-4: sub-frame readback latency; the correction itself is what takes time) and the player is
+very unlikely to speak a flight goal in the first second or two after parking, but the rule removes
+the race regardless of how unlikely.
+
+### Readbacks
+
+Extending Decision 10's shape (number first, no filler) to every P2 token. Spoken immediately on
+acceptance of the command (not on settlement — matches E-P3/E-P4: no narration of partial
+progress), using the value actually about to be pursued (the snapped speed step, the achieved
+altitude reference per the 700 m rule above):
+
+| token | readback |
+|---|---|
+| `level_flight` | *"level flight"* |
+| `turn_heading` (numeric) | *"heading 3 1 5"* |
+| `turn_heading` (compass point) | *"heading 3 1 5"* (spoken as the resolved numeric heading, not the compass word — the readback is what the AI will hold, a number, per E-P3) |
+| `turn_heading_relative` | *"20 left"* / *"20 right"* (Decision 10's own example, reused verbatim) |
+| `set_speed` | *"speed 2 0 0"* / *"speed max"* |
+| `speed_step` | *"speed 2 0 0"* (the resulting step, not "one up") |
+| `set_altitude` | *"300 meters"* / *"300 meters barometric"* (Decision 9/the 700 m rule above) |
+| `altitude_step` | the resulting target, same shape as `set_altitude` |
+| `hold_altitude` | *"holding 300 meters"* (names the frozen value, not just "holding") |
+| `hvrt_translate` | *"left"* / *"right"* / *"forward"* / *"back"* (one word, matching the spoken command — there is no numeric target to echo) |
+| `hvrt_hold` | *"holding"* |
+| `hvrt_step` | *"up"* / *"down"* (one word; no number — the step is fixed at 2 m and not spoken, matching `hvrt_translate`'s own posture) |
+
+**`mode_blocked` has no spoken line — derived, not a new decision.** E-P3/A4's existing posture is
+"no 'unable' for a goal not quite reached," and a parameter stuck mid mode-cycle (exhausted
+`MODE_CYCLE_MAX_ATTEMPTS`) is exactly that case: Petrovich keeps retrying silently next tick (the
+existing Co-moving Fields row: "the goal itself is **not** dropped — retried next poll"), with
+nothing said unless the player asks or it never resolves (out of this stage's scope — no
+"unable"-after-N-attempts mechanism is being built here, matching mode 1's A4 precedent of never
+narrating that way).
+
+### Co-moving Fields (Stage P2)
+
+Trigger fires: `active_param` and three nullable per-parameter targets, written externally (voice,
+each parameter independently) and internally (`decide_ai_pilot_wheel`'s rotation, Lua's own
+settlement/mode-block reports). `AiPilotWheelGoal` is new, so there is no construction site to grep
+yet — **the Implementer greps `AiPilotWheelGoal(` and every Lua write to the new
+`ai_pilot_goal_*`/`ai_pilot_hvrt_direction` locals after this stage lands**, same standing
+instruction as the existing tables in this document.
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `heading_target_deg`/`altitude_target_m`/`altitude_target_ref`/`speed_target_kmh` | external (voice, per parameter) | new spoken value for a parameter with no current target | queued at the back of `pending_order`; immediate readback; no `ai_pilot_goal` message sent unless it becomes active this same tick (nothing else outstanding) |
+| same fields | external (voice) | new spoken value for a parameter that already has a target | value replaces in place; queue position unchanged; if it is `active_param`, a new `ai_pilot_goal` message is sent immediately (preempt, not waiting for the slice) |
+| `active_param` | internal (`decide_ai_pilot_wheel`) | was `None`, `pending_order` non-empty | front of `pending_order` promoted; `active_since_sim = now_sim`; `goal_seq` + 1; message sent |
+| `active_param` | internal | `AI_PILOT_GOAL_SLICE_S` elapsed **and** `pending_order` non-empty (another parameter waiting) | current active demoted to back of `pending_order` (target kept); next one promoted; `goal_seq` + 1; message sent |
+| `active_param` | internal | `pending_order` empty (nothing else outstanding) while active | no slice limit; `active_param` unchanged |
+| `active_param` | internal (Lua's reported `goal_progress`) | the active parameter's readback settles | `active_param = None`; target cleared for that parameter; next poll's `decide_ai_pilot_wheel` promotes the next queued one (if any) |
+| Lua `ai_pilot_goal_param` (mirrors `AiPilotWheelGoal.active_param` on the wire) | external (body-layer message) | a different `param` arrives than the one Lua is currently pressing toward | any open press released immediately — same rule as the existing `apw.press`/mode-change row, generalised from "mode changes" to "active param changes" |
+| Lua `ai_pilot_goal_progress` | internal | mode-cycle needed before the active param's own press can start | `"cycling_mode"`; reverts to `"pressing"` once the needed mode is read |
+| Lua `ai_pilot_goal_progress` | internal | `MODE_CYCLE_MAX_ATTEMPTS` exhausted | `"mode_blocked"`; retried next tick (existing row, reused — the goal is never dropped) |
+| Lua `ai_pilot_goal_progress` | internal | readback within tolerance for the active param | `"settled"` |
+| `AiPilotWheelGoal.hvrt_direction` | external (voice: left/right/forward/back, `ai_mode == "HVRT"` only) | HVRT translate command | set; Lua opens the matching press the same frame it reads the change (existing row, reused verbatim from the "Amended 2026-11-15" table) |
+| `AiPilotWheelGoal.hvrt_direction` | external (voice: "Hold") | hold command | cleared to `None`; Lua releases the press the same frame (existing row, reused) |
+| `AiPilotWheelGoal.hvrt_direction` | internal (Lua, `HVRT_TRANSLATE_MAX_HOLD_S` elapsed) | safety timeout | Lua releases, reports `"released_timeout"`; body-layer clears its own copy next poll observing it (existing row, reused) |
+| every field above | external (unpark, `parked_active` falling edge) | falling edge | `active_param = None`; `pending_order = ()`; every target `None`; `hvrt_direction = None`; one idle `ai_pilot_goal` message sent; Lua's own `ai_pilot_goal_*` locals cleared the same frame (E-P10, nothing resumes on next park) |
+| `active_param`, `pending_order` | internal (`decide_ai_pilot_wheel`) | `ParkedFlightState.takeover_stage is not None` (a takeover correction still running) | no promotion happens even if `active_param is None` and `pending_order` is non-empty — see "Coexisting with an in-progress takeover correction" above |
+
+### The `/command-map` redraw, and the audio-adapter work plan-aligner flagged as missing
+
+`plans/flight-control/alignment.md`'s "Plan check — amendment (2026-11-15)" Finding 1 is still
+unfixed in `plan.md` as of this revision — the old (superseded) Stage P2 text names only
+`command_matcher.py`-level slot parsing, never `audio-adapter/src/vocabulary.py`'s `TOKENS`/
+`PHRASES` tables, which is what actually biases whisper's recognition (`audio-adapter/CLAUDE.md`'s
+rule, enforced by `test_vocabulary.py`'s prompt-coverage check). **Fixed here**: every new token in
+the "Amended 2026-11-15" vocabulary table (`level_flight`, `turn_heading`, `turn_heading_relative`,
+`set_speed`, `speed_step`, `set_altitude`, `altitude_step`, `hold_altitude`, `hvrt_translate`,
+`hvrt_hold`, `hvrt_step`) goes into `TOKENS` and gets at least one `PHRASES` entry, hand-synced
+against `crew_console.py`'s own dispatch (no automated cross-check exists, per that file's own
+docstring) — not optional polish, the mechanism `test_vocabulary.py` already exists to enforce.
+
+New slot parsers needed in `audio-adapter/src/vocabulary.py` (the old P2 text named these; restated
+here with the concrete shape each needs, mirroring `parse_bearing`'s pattern of anchored-word +
+digit/word-number scanning):
+
+- A numeric heading parser (`parse_heading_deg` or similar) — like `parse_bearing` but anchored on
+  "heading" with no 5°-multiple checksum (the AI wheel's own heading hold has no such constraint).
+- A compass-point parser (8/16-point → degrees), feeding the same numeric path so the readback
+  always speaks the resolved number (per the Readbacks table above).
+- A relative-turn parser: direction word (`left`/`right`) + a degree amount, computed once at
+  command time per the plan's existing "relative, not re-derived" note.
+- A speed-value parser: a number or the literal "max".
+- An altitude-value parser: a number + an optional trailing "radar"/"barometric" word.
+- A step-amount parser for `altitude_step` ("climb/descend &lt;m&gt;").
+- The bare HVRT direction words (`left`/`right`/`forward`/`back`/`hold`/`up`/`down`) — **no slot
+  parser needed**, these are whole-phrase tokens per the existing vocabulary-collision-check note
+  (state-gated at dispatch in `crew_console.py`, not grammar-gated), but they still need `TOKENS`/
+  `PHRASES` entries for the whisper bias, which is the part the old text's "no slot parser" framing
+  let fall through.
+
+`/command-map` redraw: unchanged from the existing note — it fires automatically on whichever merge
+lands these `vocabulary.py` changes, per the merge skill's own stale-check; no separate stage number
+needed.
+
+### Stages
+
+Split into two sub-stages rather than one, since the goal channel (heading/altitude/speed) and HVRT
+translate are mode-exclusive and independently testable — a HVRT regression must not block shipping
+the FLT/HVR goals, and vice versa.
+
+**P2a — heading, altitude, speed goals:**
+1. `AiPilotWheelGoal`, the rotation mechanism (`decide_ai_pilot_wheel`'s promotion/demotion logic),
+   `set_parked_heading`/`set_parked_altitude`/`set_parked_speed` actions.
+2. `write_ai_pilot_goal` on `AircraftLayerClient`; `ai_pilot_wheel.lua`'s `handle_ai_pilot_goal_
+   command` (AC-B12's module), the heading/altitude hold-and-poll loops (reusing P1's shape), the
+   speed tap loop, `goal_progress` reporting.
+3. `audio-adapter` vocabulary/slot-parser work above; `crew_console.py` dispatch for the six
+   FLT/HVR tokens, with the readback table.
+4. **Tests**: the rotation mechanism as a pure function (promote/demote/preempt sequences, the
+   takeover-coexistence gate); the Lua hold-and-poll loop against known overlay text shapes (same
+   pattern P1's own tests use); the new slot parsers; the 700 m-cap readback behaviour.
+5. **Flight P2a** (test card, named branch): park, speak a heading, then a speed, then an altitude
+   in quick succession; confirm all three start moving within the first slice window and converge
+   without one blocking another; confirm the mode cycles correctly to FLT/HVR as needed with no
+   player-visible stall; speak a goal immediately after parking (while the takeover correction may
+   still be running) and confirm it is heard (readback) but does not fight the correction; speak an
+   altitude above 700 m with "radar" and confirm the readback names barometric, not radar.
+
+**P2b — HVRT translate:**
+1. `hvrt_direction` field, Lua's held-press-until-cleared-or-timeout loop (`HVRT_TRANSLATE_MAX_
+   HOLD_S`), `hvrt_hold`/`hvrt_step` actions.
+2. `crew_console.py`'s state-gated dispatch (`ai_mode == "HVRT"` check) for the four bare-direction
+   tokens plus "hold"/"up"/"down".
+3. **Tests**: the state gate (dispatched only in HVRT, unmatched otherwise); the timeout path
+   reporting `"released_timeout"`.
+4. **Flight P2b**: from hover, cycle into HVRT, say "left", hold a few seconds, say "Hold"; confirm
+   translation only while held and an immediate stop on the word; separately confirm the timeout
+   mechanism exists via `goal_progress` without flying it to full duration (unchanged from the old
+   text's own Flight P2 description).
+
+### E-P traceability (unchanged)
+
+P2 still closes E-P3, E-P4 exactly as the superseded text's own traceability table states — this
+revision changes *how*, not *which* expectations P2 closes.
+
+### Risks & Unknowns (Stage P2)
+
+- **The goal-slice rotation (`AI_PILOT_GOAL_SLICE_S`) is this Architect pass's own mechanism, not
+  previously specified by the user at this level of detail** — flagged as **U4** below rather than
+  built silently; the old text's "step one parameter's worth of progress per poll and rotate" named
+  the intent but not a mechanism, and more than one reasonable mechanism exists (strict FIFO-to-
+  completion is the other obvious one, with no repeated dead-time cost but no early-start property).
+- **The 700 m radar cap probe (Stage P0-rad) is not yet flown** — the altitude vocabulary row's
+  "radar" half ships provisionally until it is.
+- **`AI_PILOT_HEADING_TOLERANCE_DEG` (5°) and `AI_PILOT_SPEED_STEPS_KMH`'s low end (120 km/h is the
+  lowest step actually observed so far, per Stage P0's status table — 0/60 are user-stated,
+  unmeasured) carry the same "not yet independently verified" flag the original Behaviour Constants
+  table already attached to them.** Unchanged by this revision.
+- **The dead-time cost of rotation (named above) has not been measured against a live three-goal
+  flight** — the ~17% figure is arithmetic from the measured press profile, not a flight
+  observation. If Flight P2a shows visibly slow convergence with all three goals outstanding, that
+  is the trigger to revisit `AI_PILOT_GOAL_SLICE_S` or the rotation mechanism itself, not an
+  assumption to carry forward unverified a second time (mirroring the project's own "verify state,
+  not the account of it" lesson).
+
+### Second-order effect (Stage P2)
+
+Confirms the goal-channel wire shape (a `POST` selecting one active parameter, read back via the
+existing `GET /ai_pilot_wheel/latest` feed) that Stage P3's `cbtm_align`/`cbtm_align_for_launch` and
+Stage P4's `recover_to_level` will extend rather than redesign — both are simpler than P2 (one-shot
+triggers, not continuously-held targets), so they inherit a proven message shape rather than
+inventing their own.
+
+### Behaviour constants (Stage P2)
+
+| Constant | Default | Where | Why |
+|---|---|---|---|
+| `AI_PILOT_GOAL_SLICE_S` | 3.0 | body-layer `tuning.py` (`belief.ai_pilot_wheel`) | new — the rotation fairness budget; see **U4** |
+| `AI_PILOT_HEADING_TOLERANCE_DEG` | 5.0 | body-layer `tuning.py` (`belief.ai_pilot_wheel`) | carried over from the original Behaviour Constants table, now actually declared (it was listed there but not yet in `tuning.py`/`ai_pilot_wheel.py` as of this revision — confirmed by grep) |
+| `AI_PILOT_SPEED_STEPS_KMH` | `(0, 60, 120, 150, 200, 250)` + MAX sentinel | body-layer `tuning.py` (sequence) | **corrected from the original table's `(0, 60, 120, 160, 200, 250)`** — Stage P0's re-fly measured `120 → 150 → 200 → 250 → MAX`, not 160; the low end (0/60) stays the user's own unmeasured figures, flagged in Risks above |
+
+### Decisions Requiring User Input (Stage P2)
+
+- **U4 — the goal-slice rotation mechanism.** When more than one of heading/altitude/speed is
+  outstanding at once, this plan rotates the active parameter every `AI_PILOT_GOAL_SLICE_S` (3.0 s
+  default) so each one "starts moving early," at the cost of repeatedly paying the ~0.5 s press
+  dead-time on every re-promotion (≈17% of active time, by arithmetic, not yet flown). The
+  alternative is strict FIFO-to-completion (finish the first-spoken goal, then the next), which has
+  no dead-time cost but means a goal spoken second does not move at all until the first settles.
+  **Recommend**: the slice/rotation design above — it matches the explore notes' own worked example
+  (interleaved partial progress across goals), and the 20 m/5° tolerances are already loose enough
+  that the dead-time cost is unlikely to be felt in the cockpit. Revisit only if Flight P2a shows
+  otherwise.
 
 ## Series — unparked mode (mode 1): later build, preserved unchanged
 
