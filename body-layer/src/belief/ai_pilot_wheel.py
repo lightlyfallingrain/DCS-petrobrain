@@ -25,7 +25,7 @@ park or unpark (E-P2 withdrawn, `alignment.md`)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import tuning
 from aircraft_client import AircraftLayerClient
@@ -93,6 +93,10 @@ class ParkedFlightState:
     raw_arg_952: float | None = None
     takeover_stage: str | None = None
     correction_path: str | None = None
+    #: The player's seat as `Export.lua` reads it from the camera
+    #: (`apw_seat`: `"pilot"`/`"operator"`), `None` until known this
+    #: mission or on any other value. Feeds `seat_change`.
+    player_seat: Literal["pilot", "operator"] | None = None
     # P2-P4's own fields -- see the module docstring's Co-moving Fields note.
     goal: Any | None = None
     align_phase: str = "none"
@@ -115,6 +119,27 @@ def _as_optional_float(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
+
+
+def _as_seat(value: object) -> Literal["pilot", "operator"] | None:
+    if value == "pilot":
+        return "pilot"
+    if value == "operator":
+        return "operator"
+    return None
+
+
+def seat_change(
+    previous: Literal["pilot", "operator"] | None,
+    current: Literal["pilot", "operator"] | None,
+) -> Literal["pilot", "operator"] | None:
+    """The seat the player just moved into, or `None`. Only a change
+    between two *known* seats counts: the first reading of a mission
+    (`None` -> a seat) is where the player starts, not a move, and a
+    reading going unknown is no move either."""
+    if previous is None or current is None or previous == current:
+        return None
+    return current
 
 
 def advance_parked_flight_state(
@@ -142,6 +167,11 @@ def advance_parked_flight_state(
         raw_arg_952=_as_optional_float(sample.get("apw_arg952")),
         takeover_stage=sample.get("apw_takeover_stage"),
         correction_path=sample.get("apw_correction_path"),
+        # An older `Export.lua` sends no `apw_seat`; keep what we had
+        # rather than read that as the seat going unknown.
+        player_seat=(
+            _as_seat(sample["apw_seat"]) if "apw_seat" in sample else state.player_seat
+        ),
         goal=state.goal,
         align_phase=state.align_phase,
         pre_align_snapshot=state.pre_align_snapshot,
