@@ -91,9 +91,16 @@
      server caps the folder itself** and drops the oldest tiles at startup: Windows clears `%TEMP%`
      only when Storage Sense is on or Disk Cleanup runs, never on reboot, so "the OS wipes it" does
      not hold on its own. The cap is a constant with a stated default.
-  5. **The one slow moment is the first fully-zoomed-out view**: its single tile reads all 1024
-     entries of a tier once. Seconds rather than minutes, by estimate, and cached after. How many
-     seconds depends on whether the zip stores entries or deflates them — the first check below.
+  5. **Inflate each zip entry once, and keep every mipmap it yields.** Every entry is deflated
+     (measured below), so even the smallest mipmap costs inflating the whole ~1.4 MB entry. The
+     mipmaps sit *after* the base image, so there is no shortcut to them. When the server inflates
+     an entry for any reason, it caches the small mipmaps of that tile too, not only the one it was
+     asked for. They add about a third of the base image and are tiny as JPEG. Without that, each
+     zoom level would inflate the whole tier again on its first view, about five times over.
+  6. **The one slow moment is the first fully-zoomed-out view of a tier**: its single tile needs
+     all 1024 entries of that tier, about 0.5 GB read and inflated. Estimated at seconds, not
+     measured, and cached after. If it feels slow, a background warm-up at server start can inflate
+     a tier once and keep only the small mipmaps.
 
   **Running it from WSL — follow aircraft-layer's precedent, not a native Linux process.**
   `aircraft-layer/WORKFLOW.md` already settled this for a LAN-facing server on the same machine:
@@ -129,7 +136,23 @@
   The last line counts entries by method. **`Stored`** means a mipmap is one seek away and the
   zoomed-out first load is fast. **`Defl:*`** means each read inflates the whole ~1.4 MB entry
   first: still workable, slower on that first load. The middle line gives the real raw and zipped
-  totals. The raw DDS for Syria is about 1.8 GB by header arithmetic (1280 × 1,398,256 bytes).
+  totals.
+
+  **Result, Syria, run by the user 2026-11-16:**
+
+  ```
+  1789767680         648198619  64%                            1280 files
+  0
+  1280
+  ```
+
+  - **All 1280 entries are deflated, none stored.** Hence step 5 above: inflate an entry once and
+    keep every mipmap it yields.
+  - **Raw total is 1,789,767,680 bytes, exactly 1280 × 1,398,256.** That is the size of one
+    1024×1024 DXT5 tile with its full mipmap chain. So every entry in the archive has the same
+    format, not only the five WM-M2 sampled.
+  - **The zip is 648 MB on disk, about 506 KB per entry.** Extracting everything would put 1.8 GB
+    of DDS on disk, which is the cost the on-demand design avoids.
 
   ## Constraints
 
