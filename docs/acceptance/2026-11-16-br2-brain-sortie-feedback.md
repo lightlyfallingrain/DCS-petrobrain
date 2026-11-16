@@ -197,3 +197,42 @@ briefing. No brain tool exposes either yet.
 So "friendlies and where they are" (round 2, question 2) is a **future need that depends on IFF**,
 `[[BL-B12]]` (deferred), not something Stage 5 can deliver. Until then a free-text answer must not
 call a seen unit friendly or enemy unless a source actually says so.
+
+## Goal-check questions answered — 2026-11-16, verbatim
+
+Goal-aligner's nine questions (`plans/brain-tool-calls/alignment.md`, "Goal check — 2026-11-16
+(Stage 5 free text, reprioritised)", on `feature/br2-free-text`), and the pilot's answers:
+
+> *"Q1 - never hidden units. briefing only units, as recommended.*
+> *Q2 - that would be usefull, yes.*
+> *Q3 - start over*
+> *Q4 - Not sure, needs flights to get a feel of it. Report groups. Near to far, air defense gets
+> emphasis. Up to 5km, not beyond that, and make it a configurable variable.*
+> *Q5 - yes. Dangerous units first, those that could engage us, after that near to far as I said in
+> Q4*
+> *Q6 - in that example I meant mission briefing target - but this is just an example, do not take
+> it as specs for building it*
+> *Q7 - "seen earlier"*
+> *Q8 - explore this with me*
+> *Q9 - as he finds them - but this is just an example, do not take it as specs for building it*
+>
+> *Do not build anything yet, this needs more exploring."*
+
+The questions, for reference: Q1 hidden/late-activation units as briefed threats; Q2 briefed
+friendlies before IFF; Q3 an answer cut off by an urgent callout; Q4 longest answer; Q5 "by
+danger" order; Q6 what "the target" is; Q7 wording for a unit seen earlier; Q8 whether the
+complete tool set still keeps weapons, sight and flying fixed-phrase only; Q9 route-scan reporting.
+
+**What this settles, as read (not yet a plan):**
+
+- **Briefed threats come from the briefing text only, never from hidden or late-activation
+  units.** Briefed friendlies, positioned, are useful even before IFF; a seen unit is still never
+  called friendly.
+- **An interrupted answer starts over** after the urgent callout.
+- **Lists report groups,** dangerous units first (those that could engage us, type and range from
+  the threat-levels table), then near to far, with air defence emphasised. **Range cut-off 5 km,
+  a configurable value** (a body-layer tunable). Length to be judged from flights.
+- **A unit not seen now is "seen earlier".**
+- **Q6 and Q9 are examples, not specs** (briefing target; contacts called as found).
+- **Q8 is open, to explore with the pilot.**
+- **Nothing is built until exploring is done.**
