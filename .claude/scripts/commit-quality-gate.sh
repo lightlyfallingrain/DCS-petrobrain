@@ -131,7 +131,14 @@ activate it before committing."
     run_in "$sub" "$sub ruff format" "$RUFF" format --check src tests
     run_in "$sub" "$sub ruff check"  "$RUFF" check src tests
     run_in "$sub" "$sub mypy"        "$MYPY" src
-    run_in "$sub" "$sub pytest"      "$PYTEST" tests -q
+    # Tests: smoke (collect everything) + the tests touching this commit's staged files, NOT the
+    # full suite. User direction 2026-11-16: "not every commit needs a test run, definetely not a
+    # complete test suite. Smoke test yes. Test on the files that were cahnged, yes." The full
+    # suite is the Definition of Done's job. PETROBRAIN_FULL_TESTS=1 forces it here. Selection
+    # logic lives in fast-tests.sh so the gate and the agents select the same way.
+    # shellcheck disable=SC2046
+    run "$sub tests (smoke + changed)" "$(dirname "$0")/fast-tests.sh" "$sub" \
+        $(printf '%s\n' "$STAGED" | grep "^$sub/")
 done
 
 # Lua syntax (parse-only, Lua 5.1 = the version DCS embeds) for staged aircraft-layer Lua files.

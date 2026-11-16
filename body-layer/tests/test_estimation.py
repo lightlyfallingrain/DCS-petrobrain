@@ -246,6 +246,7 @@ def _absolute_down_range_rms(n: int = 1200) -> float:
     return math.sqrt(statistics.fmean(x * x for x in errors_over_sigma))
 
 
+@pytest.mark.slow  # ~9.5 s ensemble: full suite (DoD) only, not the fast set (2026-11-16)
 def test_absolute_down_range_rms_matches_fractional_sigma(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

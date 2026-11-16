@@ -32,10 +32,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(TOOLS_DIR))
 
 from measure_expected_area_look import production_cell
+
+#: Statistical sweep, ~33 s in total: full suite (DoD) only, not the fast set (2026-11-16).
+pytestmark = pytest.mark.slow
 
 N = 300
 
