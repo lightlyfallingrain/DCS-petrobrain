@@ -77,6 +77,55 @@ Of the card's 14 cases, only the "what do you see" shape reached BR-2's tool loo
 unflown: where-is-it by name, "where are we" through the tool loop, place questions, marks,
 keep-an-eye-on, the three refusals.
 
-## Open for the explore conversation
+## Explore, 2026-11-16 — the pilot's answers
 
-To be settled with the pilot before any plan — see the conversation of 2026-11-16.
+**Found before asking.** The phrasebook already has `report left/right/ahead` (the `where` slot,
+`[[BL-B28]]`, `audio-adapter/src/vocabulary.py` `RELATIVE_WORDS`). The brain's command allowlist
+(`BRAIN_COMMANDS`, `body-layer/src/belief/tool_api.py`) has `report` with *"no place slot yet,
+Stage 4"*, single clock hours 8–4 and eight compass directions, but **no left/right/ahead**. So
+"what do you see on the left" had no command to become, against BR-2 plan D7's intent that most
+questions *are* commands.
+
+**Answers, verbatim:**
+
+> *"3 - the gap is ok and expected. "Stand by" acknowledges the command so I know the answer is
+> coming. That is good."*
+
+> *"4 - "hit" was mistranscribe, I forgot the actual word."*
+
+> *"2 - position and type/class."* — how a crewman tells contacts apart when he has to ask "which
+> one". (Not certainty words, not "last seen 32s ago".)
+
+> *"1 - short list of most important contacts. If there's nothing, say so. I already have the
+> commands like "describe left" and I'll likely use those. But those same things must be
+> actionable via brain. What the brain use cases actually are, are more complex questions and a
+> more free-flow-human-like text output. See below"*
+
+**The pilot's own examples of what the brain is for**, verbatim:
+
+> - *"Petrovich, where is our next waypoint" -> "heading x, y km"*
+> - *"Petrovich, scan along the route to waypoint 3" -> "scanning"*
+> - *"Petrovich, what lies between us and target area?" -> "Friendly units near village at 1
+>   o'clock, suspected enemy position beyond ridge 2 km not seen, lake at 4 km just before targeta
+>   area"*
+> - *"Petrovich, where are air defences?" -> "air defences, AAA at <where>, long range SAM at
+>   <where>, ..."*
+
+**What this settles, as read so far (not yet a plan):**
+
+- **Every phrasebook command must also be reachable through the brain**, including the
+  left/right/ahead report. The "which one" over right-side contacts for "on the left" is the
+  defect to fix on that side.
+- **A "which one" names each option by position and type**, in callout words, never `OP_*` codes,
+  certainty words or seconds-since-seen.
+- **"What do you see" answers are a short list of the most important contacts, or "nothing"** when
+  there is nothing.
+- **"Stand by" before a brain answer is right**, and the 2–6 s wait is acceptable.
+- **The brain's real job is the complex question and the free-flowing answer**: route, mission
+  intent, terrain and belief combined into one spoken sentence. That is BR-2 Stage 5 (`say`) and
+  beyond, and it moves the weight of the milestone away from template forms.
+
+**Found while asking about the examples:** body-layer already loads the mission route from
+mission-interpreter's compact artifact and tracks waypoint progress
+(`body-layer/src/belief/mission_phase.py`), and the artifact carries `expected_threats` from the
+briefing. No brain tool exposes either yet.
