@@ -50,7 +50,11 @@ import pytest
 
 _EXPORT_DIR = Path(__file__).resolve().parent.parent / "dcs-export"
 
-_LUA_FILES = sorted(_EXPORT_DIR.glob("*.lua"))
+#: `AC-B12` (`plans/ac-b12-export-modules/plan.md`, U2): the split
+#: `Export.lua` modules live one level down, in `dcs-export/Petrobrain/`
+#: -- `**/*.lua` picks them up alongside every top-level file (probes,
+#: Hook scripts, the loader) with no second glob.
+_LUA_FILES = sorted(_EXPORT_DIR.glob("**/*.lua"))
 
 #: Opens a Lua long comment. Long brackets with levels (`--[==[`) are not
 #: matched: nesting is legal with a different level, and no file here uses
