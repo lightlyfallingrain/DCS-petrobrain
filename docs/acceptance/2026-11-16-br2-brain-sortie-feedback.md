@@ -288,3 +288,11 @@ should work through the brain, and where a real crew draws the line.
   the brain's command allowlist by omission, not decision.
 - **There is no fixed line between brain and deterministic paths.** It is a speed-versus-
   flexibility balance, decided case by case.
+
+## Exploring closed — 2026-11-16
+
+> *"BR-2 exploration done, queue architecht after BL-16 merges."*
+
+Next: Architect re-plans BR-2 (Stage 5 free text first) on `feature/br2-free-text`, from this
+document and `plans/brain-tool-calls/alignment.md`'s 2026-11-16 goal check, **after
+`feature/bl16-takeover-fix` merges.** Plan only; nothing built until the plan is approved.

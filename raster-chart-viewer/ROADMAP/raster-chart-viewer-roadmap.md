@@ -20,7 +20,7 @@ Plan: `plans/raster-chart-viewer/plan.md`. Facts: `raster-chart-viewer/research/
 ## Milestones
 
 - [[RC-1]] — Raster chart viewer: DCS RasterCharts as a pan/zoom map on the LAN (first cut, all
-  installed terrains)
+  installed terrains) — **DONE** 2026-11-16
 
 ## Backlog
 

@@ -45,6 +45,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B9]] — three Hook scripts failed to load, and nothing downstream could tell
 - [[AC-B10]] — a dead Hook and an empty scene are indistinguishable downstream
 - [[AC-B11]] — unbounded `Content-Length` read on every `TelemetryAPIServer` POST handler
+- [[AC-B12]] — split Export.lua into loaded modules (Lua's 200-local ceiling), and read only what
+  Petrobrain needs; before BL-16 Stage P2
 
 ## Keeping this current
 
