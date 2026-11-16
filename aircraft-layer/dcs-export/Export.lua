@@ -210,7 +210,18 @@ creating/deleting the flag file.
 -- gains the goal channel (`handle_ai_pilot_goal_command`, already
 -- registered in `Petrobrain/commands.lua`) and HVRT translate, both
 -- merged to respect the "...16c" seat gate above.
-local EXPORT_SCRIPT_VERSION = "2026-11-16d"
+-- "...16e" (review-fix round, `plans/flight-control/review-p2.md`):
+-- `ai_pilot_goal_tick_hvrt`'s own mode-cycle gains the attempt bound/
+-- `"mode_blocked"` report `ai_pilot_goal_tick` already had, both ticks'
+-- bounds now retry after `MODE_BLOCKED_RETRY_S` instead of stalling
+-- forever, and `ai_pilot_goal_tick` refuses to press while `.hvrt_
+-- direction` is outstanding (a non-additive behavioural reshape: a
+-- message that previously could carry both `param` and `hvrt_direction`
+-- meaningfully now has body-layer null `param` whenever a translate is
+-- held, so a pre-fix collector/body-layer pair reading the post-fix
+-- wire would see the goal channel go silently idle during any translate
+-- rather than fighting it).
+local EXPORT_SCRIPT_VERSION = "2026-11-16e"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 

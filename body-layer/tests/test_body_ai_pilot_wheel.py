@@ -189,3 +189,84 @@ class TestApplyAiPilotWheelGoal:
 
         assert runner.parked_flight_state.goal is None
         assert client.ai_pilot_goal_calls == []
+
+
+class TestHvrtArbitration:
+    """Review fix (BL-16 Stage P2): the goal channel vs. HVRT translate
+    arbitration end to end through `_apply_ai_pilot_wheel_goal` -- the
+    required test sequence named in the review-fix round."""
+
+    def test_a_goal_active_then_left_stops_the_goal_and_runs_the_translate(
+        self,
+    ) -> None:
+        goal = AiPilotWheelGoal(
+            altitude_target_m=300.0,
+            altitude_target_ref="barometric",
+            active_param="altitude",
+            active_since_sim=0.0,
+            goal_seq=1,
+        )
+        runner, client = _runner(goal=goal)
+        runner.ai_pilot_goal_last_sent_seq = 1
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_hvrt_transition = "left"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        new_goal = runner.parked_flight_state.goal
+        assert new_goal is not None
+        # The goal keeps its target and queue position -- paused, not
+        # dropped (the main loop's own "nothing lost" rule).
+        assert new_goal.active_param == "altitude"
+        assert new_goal.altitude_target_m == 300.0
+        assert new_goal.hvrt_direction == "left"
+        assert len(client.ai_pilot_goal_calls) == 1
+        sent = client.ai_pilot_goal_calls[0]
+        # (goal_seq, param, heading, altitude, altitude_ref, speed, hvrt_direction)
+        assert sent[1] is None  # `param` nulled on the wire -- the goal presses stop
+        assert sent[6] == "left"  # the translate runs
+
+    def test_hold_resumes_the_goal(self) -> None:
+        goal = AiPilotWheelGoal(
+            altitude_target_m=300.0,
+            altitude_target_ref="barometric",
+            active_param="altitude",
+            active_since_sim=0.0,
+            goal_seq=2,
+            hvrt_direction="left",
+        )
+        runner, client = _runner(goal=goal)
+        runner.ai_pilot_goal_last_sent_seq = 2
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_hvrt_transition = "hold"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        new_goal = runner.parked_flight_state.goal
+        assert new_goal is not None
+        assert new_goal.hvrt_direction is None
+        assert new_goal.active_param == "altitude"
+        assert len(client.ai_pilot_goal_calls) == 1
+        sent = client.ai_pilot_goal_calls[0]
+        assert sent[1] == "altitude"  # the goal resumes on the wire
+        assert sent[6] is None
+
+    def test_a_translate_active_then_a_new_altitude_goal_releases_it(self) -> None:
+        goal = AiPilotWheelGoal(hvrt_direction="left", goal_seq=1)
+        runner, client = _runner(goal=goal)
+        runner.ai_pilot_goal_last_sent_seq = 1
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="altitude", altitude_m=300.0, altitude_ref="barometric"
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        new_goal = runner.parked_flight_state.goal
+        assert new_goal is not None
+        assert new_goal.hvrt_direction is None
+        assert new_goal.active_param == "altitude"
+        assert len(client.ai_pilot_goal_calls) == 1
+        sent = client.ai_pilot_goal_calls[0]
+        assert sent[1] == "altitude"  # the goal runs
+        assert sent[6] is None  # the translate is released on the wire

@@ -140,6 +140,7 @@ from belief.ai_pilot_wheel import (
     altitude_ref_from_letter,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
+    goal_param_for_wire,
     seat_change,
     set_hvrt_direction,
     set_parked_altitude,
@@ -3364,7 +3365,7 @@ def _apply_ai_pilot_wheel_goal(
         try:
             aircraft_client.write_ai_pilot_goal(
                 final_goal.goal_seq,
-                final_goal.active_param,
+                goal_param_for_wire(final_goal),
                 final_goal.heading_target_deg,
                 final_goal.altitude_target_m,
                 final_goal.altitude_target_ref,
@@ -3387,7 +3388,7 @@ def _apply_ai_pilot_wheel_goal(
         try:
             aircraft_client.write_ai_pilot_goal(
                 bumped_seq,
-                final_goal.active_param if final_goal is not None else None,
+                goal_param_for_wire(final_goal) if final_goal is not None else None,
                 final_goal.heading_target_deg if final_goal is not None else None,
                 final_goal.altitude_target_m if final_goal is not None else None,
                 final_goal.altitude_target_ref if final_goal is not None else None,

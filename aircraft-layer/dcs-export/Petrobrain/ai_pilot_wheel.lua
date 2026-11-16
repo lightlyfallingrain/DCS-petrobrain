@@ -158,6 +158,21 @@ local AI_PILOT_SPEED_TOP_STEP_KMH = 250.0
 -- 2026-11-15").
 local MODE_CYCLE_MAX_ATTEMPTS = 3
 
+-- How long a goal/HVRT mode-cycle stays reported `"mode_blocked"` before
+-- the attempt counter resets and pressing resumes on its own -- review
+-- fix (BL-16 Stage P2): the bound above existed to stop pressing
+-- forever, but nothing previously reset it short of a *different*
+-- `param` arriving (the multi-goal rotation incidentally did this by
+-- switching `active_param` back and forth) or the mode becoming ready on
+-- its own -- so a single outstanding goal stuck on an unreachable mode
+-- was retried never, after one spoken "unable, not ready," contradicting
+-- the plan's own "retried next poll"/"goal never dropped" language. A
+-- few seconds is long enough that a stuck wheel does not spam presses or
+-- speech, short enough that a transient miss (the one-hop case the bound
+-- itself exists for) recovers within one or two cooldowns rather than
+-- needing a second spoken command to unstick it.
+local MODE_BLOCKED_RETRY_S = 3.0
+
 -- Safety ceiling on an open HVRT translate press if the spoken "Hold" is
 -- lost (a network drop between audio-adapter and body-layer, a missed
 -- recognition) -- the normal stop is always the player's own "Hold",
@@ -284,16 +299,25 @@ local ai_pilot_takeover = {
 -- `"cycling_mode"`/`"settled"`/`"mode_blocked"`/`"released_timeout"`.
 -- `.mode_cycle_attempts`: this poll's own count toward `MODE_CYCLE_MAX_
 -- ATTEMPTS`, reset whenever `.param` changes or the needed mode is
--- reached. `.hold_cmd`: the heading/altitude direction (`AI_WHEEL_UP`/
--- `_DOWN`/`_LEFT`/`_RIGHT`) currently held open by the goal loop, or
--- `nil` -- distinct from `ai_pilot_takeover.correction_hold_cmd`, same
--- reason the two pending-release pairs are kept apart. `.toggling_
--- reference`: true while an altitude goal's own reference-change pulse
--- is in flight, so the tick does not re-issue a second pulse on top of
--- one already running. `.hvrt_direction`: mirrors body-layer's own
--- field, `nil`/`"left"`/`"right"`/`"forward"`/`"back"`. `.hvrt_hold_cmd`/
+-- reached. `.mode_blocked_since_t`: the model time the bound was first
+-- exhausted, `nil` outside a blocked episode -- `MODE_BLOCKED_RETRY_S`
+-- after this, the attempt counter resets and pressing resumes (review
+-- fix: `"mode_blocked"` must retry, not stall forever). `.hold_cmd`: the
+-- heading/altitude direction (`AI_WHEEL_UP`/`_DOWN`/`_LEFT`/`_RIGHT`)
+-- currently held open by the goal loop, or `nil` -- distinct from
+-- `ai_pilot_takeover.correction_hold_cmd`, same reason the two
+-- pending-release pairs are kept apart. `.toggling_reference`: true
+-- while an altitude goal's own reference-change pulse is in flight, so
+-- the tick does not re-issue a second pulse on top of one already
+-- running. `.hvrt_direction`: mirrors body-layer's own field,
+-- `nil`/`"left"`/`"right"`/`"forward"`/`"back"`. `.hvrt_hold_cmd`/
 -- `.hvrt_started_t`: the HVRT translate press currently held open (if
--- any) and when it opened, for the safety timeout.
+-- any) and when it opened, for the safety timeout. `.hvrt_mode_cycle_
+-- attempts`/`.hvrt_mode_blocked_since_t`: the HVRT channel's own copy of
+-- the two fields above -- review fix: `ai_pilot_goal_tick_hvrt`'s own
+-- mode-cycle (into `HVRT`) previously had no bound at all, so it is kept
+-- separate rather than sharing the FLT/HVR pair, since both ticks run
+-- every overlay tick and must count their own attempts independently.
 local ai_pilot_goal = {
     param = nil,
     heading_target_deg = nil,
@@ -303,8 +327,11 @@ local ai_pilot_goal = {
     goal_seq = 0,
     progress = "idle",
     mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
     hold_cmd = nil,
     toggling_reference = false,
+    hvrt_mode_cycle_attempts = 0,
+    hvrt_mode_blocked_since_t = nil,
     hvrt_direction = nil,
     hvrt_hold_cmd = nil,
     hvrt_started_t = nil,
@@ -842,18 +869,44 @@ end
 -- Stage P2a's own dispatcher, run once per overlay tick while a
 -- heading/altitude/speed goal is active (`ai_pilot_goal.param ~= nil`):
 -- cycles to an acceptable mode first (bounded by `MODE_CYCLE_MAX_
--- ATTEMPTS`, reported `"mode_blocked"` and retried next tick if
--- exhausted, never dropped), then dispatches to the one tick function
--- `.param` needs. No-op (idle) while nothing is outstanding.
+-- ATTEMPTS`, reported `"mode_blocked"` and retried after `MODE_BLOCKED_
+-- RETRY_S`, never dropped and never stalled forever -- review fix, see
+-- `MODE_BLOCKED_RETRY_S`'s own comment), then dispatches to the one tick
+-- function `.param` needs. No-op (idle) while nothing is outstanding,
+-- and no-op (paused, not dropped) while an HVRT translate direction is
+-- outstanding -- review fix: a heading/altitude/speed goal and an HVRT
+-- translate both being reachable from `HVR` meant this tick and
+-- `ai_pilot_goal_tick_hvrt` below could press in the same tick, on the
+-- *same* button code (`AI_WHEEL_LEFT`/3003 is both the mode-cycle press
+-- here and the HVRT-left translate hold there). Body-layer's own
+-- `goal_param_for_wire` already nulls `.param` on every message it sends
+-- while a translate is held, so `ai_pilot_goal.param` is normally `nil`
+-- by the time this runs; the explicit check below is the second,
+-- Lua-side half of "never both press in one tick" (plan's review fix),
+-- not the only one.
 local function ai_pilot_goal_tick(t)
     if ai_pilot_goal.param == nil then
+        return
+    end
+    if ai_pilot_goal.hvrt_direction ~= nil then
+        ai_pilot_goal_release_hold()
         return
     end
     if not ai_pilot_goal_mode_ready(ai_pilot_mode_text) then
         ai_pilot_goal_release_hold()
         if ai_pilot_goal.mode_cycle_attempts >= MODE_CYCLE_MAX_ATTEMPTS then
-            ai_pilot_goal.progress = "mode_blocked"
-            return
+            if ai_pilot_goal.mode_blocked_since_t == nil then
+                ai_pilot_goal.mode_blocked_since_t = t
+            end
+            if t - ai_pilot_goal.mode_blocked_since_t < MODE_BLOCKED_RETRY_S then
+                ai_pilot_goal.progress = "mode_blocked"
+                return
+            end
+            -- Cooldown elapsed: reset and fall through to try again this
+            -- same tick, rather than waiting for yet another tick to
+            -- spend the first renewed attempt.
+            ai_pilot_goal.mode_cycle_attempts = 0
+            ai_pilot_goal.mode_blocked_since_t = nil
         end
         ai_pilot_goal.progress = "cycling_mode"
         ai_pilot_tap30(AI_WHEEL_LEFT)
@@ -862,6 +915,7 @@ local function ai_pilot_goal_tick(t)
         return
     end
     ai_pilot_goal.mode_cycle_attempts = 0
+    ai_pilot_goal.mode_blocked_since_t = nil
     if ai_pilot_goal.param == "heading" then
         ai_pilot_goal_tick_heading(t)
     elseif ai_pilot_goal.param == "altitude" then
@@ -871,15 +925,31 @@ local function ai_pilot_goal_tick(t)
     end
 end
 
--- Stage P2b: HVRT translate's own tick, independent of `ai_pilot_goal_
--- tick` above (mode-exclusive by construction, plan's own note) --
+-- Stage P2b: HVRT translate's own tick -- the plan's original "mode-
+-- exclusive by construction" claim for this and `ai_pilot_goal_tick`
+-- above does not hold (see that function's own comment); the two are
+-- independent in the sense that neither queues or shares state with the
+-- other, not in the sense that they cannot both be asked to act at once.
 -- `.hvrt_direction` has no queueing/active-param state of its own, only
 -- a held press that opens, redirects or releases as the field changes,
 -- plus the safety timeout. **Only ever reached from `HVR` or already
 -- `HVRT`** -- body-layer's own hover precondition (crew_console's
 -- "unable, not ready" check) is what keeps this from ever being asked
 -- to cycle from `FLT`, where the known cycle graph could not reach
--- `HVRT` within `MODE_CYCLE_MAX_ATTEMPTS` at all.
+-- `HVRT` within `MODE_CYCLE_MAX_ATTEMPTS` at all. Its own mode-cycle
+-- (into `HVRT`) is bounded and retried the same way `ai_pilot_goal_
+-- tick`'s is (`.hvrt_mode_cycle_attempts`/`.hvrt_mode_blocked_since_t`, a
+-- separate pair so the two ticks never share one counter) -- review fix:
+-- previously unbounded, so a press that never registered tapped
+-- `AI_WHEEL_LEFT` forever with nothing reported and no voice escape,
+-- since `crew_console`'s own "Hold" cancel was gated on the same
+-- readiness check that gates the *start* (fixed on the body-layer side,
+-- `_handle_hvrt_hold`). **`HVR` is also the one aircraft mode the
+-- FLT/HVR goal channel's own `ai_pilot_goal_mode_ready` accepts** -- the
+-- two channels being simultaneously reachable from the same mode is
+-- `ai_pilot_goal_tick`'s own fix to make (the `.hvrt_direction` guard at
+-- its top), not this function's: HVRT always wins once a translate
+-- direction is set, so there is no reciprocal guard needed here.
 local function ai_pilot_goal_tick_hvrt(t)
     if ai_pilot_goal.hvrt_direction == nil then
         if ai_pilot_goal.hvrt_hold_cmd ~= nil then
@@ -889,15 +959,33 @@ local function ai_pilot_goal_tick_hvrt(t)
             ai_pilot_goal.hvrt_hold_cmd = nil
             ai_pilot_goal.hvrt_started_t = nil
         end
+        ai_pilot_goal.hvrt_mode_cycle_attempts = 0
+        ai_pilot_goal.hvrt_mode_blocked_since_t = nil
         return
     end
     if ai_pilot_mode_text ~= "HVRT" then
-        if ai_pilot_mode_text ~= nil then
-            ai_pilot_tap30(AI_WHEEL_LEFT)
-            ai_pilot_last_press = "goal_hvrt_mode_cycle"
+        if ai_pilot_mode_text == nil then
+            return
         end
+        if ai_pilot_goal.hvrt_mode_cycle_attempts >= MODE_CYCLE_MAX_ATTEMPTS then
+            if ai_pilot_goal.hvrt_mode_blocked_since_t == nil then
+                ai_pilot_goal.hvrt_mode_blocked_since_t = t
+            end
+            if t - ai_pilot_goal.hvrt_mode_blocked_since_t < MODE_BLOCKED_RETRY_S then
+                ai_pilot_goal.progress = "mode_blocked"
+                return
+            end
+            ai_pilot_goal.hvrt_mode_cycle_attempts = 0
+            ai_pilot_goal.hvrt_mode_blocked_since_t = nil
+        end
+        ai_pilot_goal.progress = "cycling_mode"
+        ai_pilot_tap30(AI_WHEEL_LEFT)
+        ai_pilot_goal.hvrt_mode_cycle_attempts = ai_pilot_goal.hvrt_mode_cycle_attempts + 1
+        ai_pilot_last_press = "goal_hvrt_mode_cycle"
         return
     end
+    ai_pilot_goal.hvrt_mode_cycle_attempts = 0
+    ai_pilot_goal.hvrt_mode_blocked_since_t = nil
     local wanted_cmd = ai_pilot_goal_hvrt_direction_cmd(ai_pilot_goal.hvrt_direction)
     if wanted_cmd ~= ai_pilot_goal.hvrt_hold_cmd then
         if ai_pilot_goal.hvrt_hold_cmd ~= nil then
@@ -1051,11 +1139,14 @@ local function run_ai_pilot_wheel(t)
         ai_pilot_goal.speed_target_kmh = nil
         ai_pilot_goal.progress = "idle"
         ai_pilot_goal.mode_cycle_attempts = 0
+        ai_pilot_goal.mode_blocked_since_t = nil
         ai_pilot_goal.hold_cmd = nil
         ai_pilot_goal.toggling_reference = false
         ai_pilot_goal.hvrt_direction = nil
         ai_pilot_goal.hvrt_hold_cmd = nil
         ai_pilot_goal.hvrt_started_t = nil
+        ai_pilot_goal.hvrt_mode_cycle_attempts = 0
+        ai_pilot_goal.hvrt_mode_blocked_since_t = nil
         return
     end
 
@@ -1244,6 +1335,7 @@ local function handle_ai_pilot_goal_command(data, t)
     if param ~= ai_pilot_goal.param then
         ai_pilot_goal_release_hold()
         ai_pilot_goal.mode_cycle_attempts = 0
+        ai_pilot_goal.mode_blocked_since_t = nil
         ai_pilot_goal.toggling_reference = false
     end
 
@@ -1360,11 +1452,14 @@ local function on_stop()
     ai_pilot_goal.speed_target_kmh = nil
     ai_pilot_goal.progress = "idle"
     ai_pilot_goal.mode_cycle_attempts = 0
+    ai_pilot_goal.mode_blocked_since_t = nil
     ai_pilot_goal.hold_cmd = nil
     ai_pilot_goal.toggling_reference = false
     ai_pilot_goal.hvrt_direction = nil
     ai_pilot_goal.hvrt_hold_cmd = nil
     ai_pilot_goal.hvrt_started_t = nil
+    ai_pilot_goal.hvrt_mode_cycle_attempts = 0
+    ai_pilot_goal.hvrt_mode_blocked_since_t = nil
     -- A new mission starts with no seat known: nothing is pressed until
     -- the camera has placed the player in the operator seat.
     ai_pilot_player_seat = nil

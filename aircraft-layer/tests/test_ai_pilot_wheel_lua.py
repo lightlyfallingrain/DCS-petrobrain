@@ -503,6 +503,7 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "AI_PILOT_HEADING_TOLERANCE_DEG",
     "AI_PILOT_SPEED_TOP_STEP_KMH",
     "MODE_CYCLE_MAX_ATTEMPTS",
+    "MODE_BLOCKED_RETRY_S",
     "HVRT_TRANSLATE_MAX_HOLD_S",
     # fix/ai-wheel-pilot-seat-gate -- `run_ai_pilot_wheel` now calls
     # `ai_pilot_update_seat`, which closes over these.
@@ -605,11 +606,14 @@ local ai_pilot_goal = {
     goal_seq = 0,
     progress = "idle",
     mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
     hold_cmd = nil,
     toggling_reference = false,
     hvrt_direction = nil,
     hvrt_hold_cmd = nil,
     hvrt_started_t = nil,
+    hvrt_mode_cycle_attempts = 0,
+    hvrt_mode_blocked_since_t = nil,
 }
 
 local ai_pilot_takeover = {
@@ -1539,6 +1543,7 @@ _GOAL_INTEGRATION_CONSTANTS = (
     "AI_PILOT_SPEED_TOP_STEP_KMH",
     "AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S",
     "MODE_CYCLE_MAX_ATTEMPTS",
+    "MODE_BLOCKED_RETRY_S",
     "HVRT_TRANSLATE_MAX_HOLD_S",
     "SHORT_PULSE_S",
     "AI_WHEEL_UP",
@@ -1586,11 +1591,14 @@ local ai_pilot_goal = {
     goal_seq = 0,
     progress = "idle",
     mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
     hold_cmd = nil,
     toggling_reference = false,
     hvrt_direction = nil,
     hvrt_hold_cmd = nil,
     hvrt_started_t = nil,
+    hvrt_mode_cycle_attempts = 0,
+    hvrt_mode_blocked_since_t = nil,
 }
 
 local press_log = {}
@@ -1677,10 +1685,17 @@ class TestAiPilotGoalTick:
         assert values["hold_cmd_after"] == "nil"
         assert values["progress_after"] == "settled"
 
-    def test_mode_cycles_before_pressing_then_blocks_after_the_bound(self) -> None:
+    def test_mode_cycles_before_pressing_then_blocks_then_retries_after_cooldown(
+        self,
+    ) -> None:
         """Mode stuck on `CBTM` (never reads back `FLT`/`HVR`) -- bounded
-        by `MODE_CYCLE_MAX_ATTEMPTS`, reported `"mode_blocked"`, the goal
-        itself never dropped."""
+        by `MODE_CYCLE_MAX_ATTEMPTS`, reported `"mode_blocked"`, and
+        retried after `MODE_BLOCKED_RETRY_S`, the goal itself never
+        dropped. **Review fix**: this is deliberately the single-
+        outstanding-goal case (only `speed` is ever requested, nothing
+        else to rotate through) -- the one the review found was retried
+        *never*, since nothing but a different `param` arriving or the
+        mode becoming ready on its own previously reset the counter."""
         script = """
         ai_pilot_mode_text = "CBTM"
         handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "speed", '
@@ -1700,6 +1715,16 @@ class TestAiPilotGoalTick:
         print("attempts_after=" .. tostring(ai_pilot_goal.mode_cycle_attempts))
         print("progress_after=" .. tostring(ai_pilot_goal.progress))
         print("press_count_after=" .. #press_log)
+        -- Still well short of the cooldown -- stays blocked, no tap.
+        ai_pilot_goal_tick(0.6 + MODE_BLOCKED_RETRY_S - 0.1)
+        print("progress_before_cooldown=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_before_cooldown=" .. #press_log)
+        -- Past `MODE_BLOCKED_RETRY_S` since the block was first reported:
+        -- the counter resets and a fresh attempt is spent this same tick.
+        ai_pilot_goal_tick(0.6 + MODE_BLOCKED_RETRY_S + 0.1)
+        print("attempts_retry=" .. tostring(ai_pilot_goal.mode_cycle_attempts))
+        print("progress_retry=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_retry=" .. #press_log)
         print("speed_target=" .. tostring(ai_pilot_goal.speed_target_kmh))
         """
         out = _run_goal_integration(script)
@@ -1713,6 +1738,13 @@ class TestAiPilotGoalTick:
         assert values["attempts_after"] == "3"
         assert values["progress_after"] == "mode_blocked"
         assert values["press_count_after"] == "6"  # no further tap issued
+        # Cooldown not yet elapsed: still blocked, still no tap.
+        assert values["progress_before_cooldown"] == "mode_blocked"
+        assert values["press_count_before_cooldown"] == "6"
+        # Cooldown elapsed: one renewed attempt, spent this same tick.
+        assert values["attempts_retry"] == "1"
+        assert values["progress_retry"] == "cycling_mode"
+        assert values["press_count_retry"] == "8"
         assert values["speed_target"] == "150"  # goal kept, never dropped
 
     def test_altitude_goal_toggles_reference_before_holding(self) -> None:
@@ -1768,6 +1800,43 @@ class TestAiPilotGoalTick:
         assert values["progress_1"] == "pressing"
         assert values["press_2"] == "3004:1,3004:0"  # no new press
         assert values["progress_2"] == "settled"
+
+    def test_an_outstanding_hvrt_direction_stops_this_tick_from_pressing(
+        self,
+    ) -> None:
+        """Review fix, second line of defence: even if a message carried
+        both `param` and `hvrt_direction` non-null at once (the exact
+        collision the review found possible before body-layer's own
+        `goal_param_for_wire` guard existed -- `HVR` is accepted by both
+        `ai_pilot_goal_mode_ready` and `_ai_pilot_hvrt_ready`),
+        `ai_pilot_goal_tick` must never press for the FLT/HVR channel
+        while a translate direction is outstanding. HVRT always wins:
+        once the mode actually reaches `HVRT`, the HVRT tick is the only
+        one that presses -- never both in the same tick."""
+        script = """
+        ai_pilot_mode_text = "HVR"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 900.0, '
+            .. '"altitude_target_ref": "barometric", "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("goal_press_log=" .. table.concat(press_log, ","))
+        print("goal_hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+
+        -- Mode crosses into HVRT -- the HVRT tick is the one that
+        -- presses; the FLT/HVR tick still presses nothing.
+        ai_pilot_mode_text = "HVRT"
+        ai_pilot_goal_tick(0.2)
+        ai_pilot_goal_tick_hvrt(0.2)
+        print("final_press_log=" .. table.concat(press_log, ","))
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["goal_press_log"] == ""
+        assert values["goal_hold_cmd"] == "nil"
+        assert values["final_press_log"] == "3003:1"  # the HVRT tick alone pressed
+        assert values["hvrt_hold_cmd"] == "3003"
 
 
 class TestHandleAiPilotGoalCommand:
@@ -1992,3 +2061,49 @@ class TestAiPilotGoalTickHvrt:
         # yet in HVRT this tick).
         assert values["press_log"] == "3003:1,3003:0"
         assert values["hvrt_hold_cmd"] == "nil"
+
+    def test_mode_cycle_into_hvrt_is_bounded_reports_blocked_then_retries(
+        self,
+    ) -> None:
+        """Required fix: `ai_pilot_goal_tick_hvrt`'s own mode-cycle
+        previously had no attempt bound, no `"mode_blocked"` report, and
+        no retry at all -- a press that never registered tapped
+        `AI_WHEEL_LEFT` forever, every tick, with nothing spoken and no
+        voice escape (the readiness-gated "Hold" cancel). Now bounded by
+        `MODE_CYCLE_MAX_ATTEMPTS`, reported, and retried after `MODE_
+        BLOCKED_RETRY_S` -- the exact same shape `ai_pilot_goal_tick`'s
+        own bound has, via a separate attempt counter."""
+        script = """
+        ai_pilot_mode_text = "FLT"  -- never reads back HVR/HVRT
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        ai_pilot_goal_tick_hvrt(0.2)
+        ai_pilot_goal_tick_hvrt(0.4)
+        print("attempts=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+        print("press_count=" .. #press_log)
+        ai_pilot_goal_tick_hvrt(0.6)
+        print("attempts_after=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_after=" .. #press_log)
+        print("direction_after=" .. tostring(ai_pilot_goal.hvrt_direction))
+        ai_pilot_goal_tick_hvrt(0.6 + MODE_BLOCKED_RETRY_S + 0.1)
+        print("attempts_retry=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress_retry=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_retry=" .. #press_log)
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["attempts"] == "3"
+        assert values["progress"] == "cycling_mode"
+        assert values["press_count"] == "6"
+        assert values["attempts_after"] == "3"
+        assert values["progress_after"] == "mode_blocked"
+        assert values["press_count_after"] == "6"  # no 4th tap
+        assert values["direction_after"] == "left"  # never dropped
+        assert values["attempts_retry"] == "1"
+        assert values["progress_retry"] == "cycling_mode"
+        assert values["press_count_retry"] == "8"  # one renewed attempt

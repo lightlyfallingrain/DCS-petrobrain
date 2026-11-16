@@ -31,6 +31,7 @@ from belief.ai_pilot_wheel import (
     altitude_ref_from_letter,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
+    goal_param_for_wire,
     nearest_speed_step,
     request_goal,
     resolve_altitude_reference,
@@ -344,6 +345,23 @@ class TestRequestGoal:
         goal = request_goal(goal, "heading", 10.0, heading_target_deg=45.0)
         assert goal.pending_order == ("heading",)
 
+    def test_a_new_goal_clears_an_outstanding_hvrt_translate(self) -> None:
+        """Review fix (BL-16 Stage P2 arbitration, main loop's own rule):
+        "speaking any new heading/altitude/speed goal clears an
+        outstanding translate direction... then the goal proceeds
+        normally" -- latest command wins, nothing lost."""
+        goal = AiPilotWheelGoal(hvrt_direction="left", goal_seq=1)
+        goal = request_goal(goal, "altitude", 10.0, altitude_target_m=300.0)
+        assert goal.hvrt_direction is None
+        assert goal.altitude_target_m == 300.0
+        assert goal.pending_order == ("altitude",)
+
+    def test_no_hvrt_direction_outstanding_is_unaffected(self) -> None:
+        goal = request_goal(
+            AiPilotWheelGoal(), "heading", 10.0, heading_target_deg=90.0
+        )
+        assert goal.hvrt_direction is None
+
 
 class TestSetParkedHeading:
     def test_normalises_into_0_360(self) -> None:
@@ -466,6 +484,51 @@ class TestHvrtDirection:
         goal = set_hvrt_direction(AiPilotWheelGoal(), "left")
         goal = set_hvrt_direction(goal, "right")
         assert goal.hvrt_direction == "right"
+
+    def test_an_actual_change_bumps_goal_seq(self) -> None:
+        """Review fix: a sticky field, not a one-shot trigger -- without
+        the bump, `body.py`'s own "send on `goal_seq` change" posture
+        would silently drop the command whenever the goal's `goal_seq`
+        had not already moved for some other reason (e.g. "Hold" after a
+        translate with nothing else outstanding)."""
+        goal = set_hvrt_direction(AiPilotWheelGoal(goal_seq=5), "left")
+        assert goal.goal_seq == 6
+        goal = set_hvrt_direction(goal, "right")
+        assert goal.goal_seq == 7
+        goal = clear_hvrt_direction(goal)
+        assert goal.goal_seq == 8
+
+    def test_no_change_does_not_bump_goal_seq(self) -> None:
+        goal = AiPilotWheelGoal(hvrt_direction="left", goal_seq=5)
+        assert set_hvrt_direction(goal, "left").goal_seq == 5
+        no_direction = AiPilotWheelGoal(goal_seq=5)
+        assert clear_hvrt_direction(no_direction).goal_seq == 5
+
+
+class TestGoalParamForWire:
+    """Review fix (BL-16 Stage P2): the `param` value actually sent on
+    the wire is `None` whenever an HVRT translate is outstanding, even
+    if `active_param` is still set internally -- the single place the
+    wire's own invariant (`param`/`hvrt_direction` never both meaningful
+    on one message) is enforced."""
+
+    def test_active_param_passes_through_with_no_hvrt_direction(self) -> None:
+        goal = AiPilotWheelGoal(active_param="altitude", altitude_target_m=300.0)
+        assert goal_param_for_wire(goal) == "altitude"
+
+    def test_hvrt_direction_nulls_the_param_even_though_active_param_is_kept(
+        self,
+    ) -> None:
+        goal = AiPilotWheelGoal(
+            active_param="altitude",
+            altitude_target_m=300.0,
+            hvrt_direction="left",
+        )
+        assert goal_param_for_wire(goal) is None
+        # The main loop's own rule: queued/active goals keep their
+        # targets and queue positions -- only the wire's own `param`
+        # field is nulled, never `active_param` itself.
+        assert goal.active_param == "altitude"
 
 
 class TestDecideAiPilotWheel:
@@ -591,6 +654,69 @@ class TestDecideAiPilotWheel:
         result = decide_ai_pilot_wheel(state, 10.0, hvrt_released_timeout=True)
         assert result.goal is not None
         assert result.goal.hvrt_direction is None
+
+    def test_an_outstanding_hvrt_translate_pauses_the_goal_channel(self) -> None:
+        """Review fix, main loop's own arbitration rule: a goal active,
+        then "left" -- the goal keeps its target and queue position
+        (nothing promoted/demoted/settled) while the translate is held,
+        even though the slice has long elapsed and Lua reports it
+        settled."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            goal_seq=1,
+            hvrt_direction="left",
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(
+            state,
+            AI_PILOT_GOAL_SLICE_S + 100.0,
+            settled_param="heading",
+        )
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+        assert result.goal.heading_target_deg == 90.0
+        assert result.goal.goal_seq == 1
+
+    def test_a_queued_second_goal_also_stays_queued_while_paused(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+            goal_seq=1,
+            hvrt_direction="left",
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, AI_PILOT_GOAL_SLICE_S + 100.0)
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+        assert result.goal.pending_order == ("speed",)
+        assert result.goal.goal_seq == 1
+
+    def test_the_goal_channel_resumes_once_the_translate_clears(self) -> None:
+        """ "Hold" (or the preempting-goal clear) must land before this
+        call for rotation to resume the same poll -- `body.py`'s own
+        call site applies the transition first, exactly as this test
+        does by handing in a goal whose `hvrt_direction` is already
+        `None`."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+            goal_seq=2,
+            hvrt_direction=None,
+        )
+        state = replace_goal(ParkedFlightState(), goal)
+        result = decide_ai_pilot_wheel(state, AI_PILOT_GOAL_SLICE_S)
+        assert result.goal is not None
+        assert result.goal.active_param == "speed"
+        assert result.goal.pending_order == ("heading",)
+        assert result.goal.goal_seq == 3
 
 
 def replace_goal(state: ParkedFlightState, goal: AiPilotWheelGoal) -> ParkedFlightState:

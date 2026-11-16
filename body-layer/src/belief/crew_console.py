@@ -4622,7 +4622,22 @@ class CrewConsole:
         return [f"{direction.capitalize()}."]
 
     def _handle_hvrt_hold(self) -> list[str]:
-        """ "Hold" -- clears an open HVRT translate press."""
+        """ "Hold" -- clears an open HVRT translate press.
+
+        **Unconditional whenever a translate direction is already
+        outstanding (review fix, BL-16 Stage P2)**: the cancel must never
+        be gated on the same readiness check that gates the *start*, or a
+        translate that gets stuck (the aircraft leaving hover while held
+        is the realistic trigger -- `ai_mode` then reads `"FLT"`, failing
+        `_ai_pilot_hvrt_ready`) becomes uncancellable by voice -- the only
+        recovery left would be unparking (E-P10) and re-parking. A bare
+        "Hold" with nothing outstanding still needs the hover precondition
+        (there is nothing to cancel, so the readiness check is what
+        explains why "Hold" alone does nothing here)."""
+        goal = self.parked_flight_state.goal
+        if goal is not None and goal.hvrt_direction is not None:
+            self.ai_pilot_hvrt_transition = "hold"
+            return ["Holding."]
         if not self._ai_pilot_hvrt_ready():
             return [render_unable("NOT_READY").text]
         self.ai_pilot_hvrt_transition = "hold"

@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from belief.ai_pilot_wheel import AiPilotGoalRequest, ParkedFlightState
+from belief.ai_pilot_wheel import (
+    AiPilotGoalRequest,
+    AiPilotWheelGoal,
+    ParkedFlightState,
+)
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 
@@ -265,6 +269,28 @@ class TestHvrtHold:
         console = _console(ai_mode="CBTM")
         lines = console.handle_command("hvrt_hold", now_sim=0.0)
         assert lines == ["Unable, not ready."]
+
+    def test_cancels_unconditionally_when_a_translate_is_already_outstanding(
+        self,
+    ) -> None:
+        """Review fix (BL-16 Stage P2): "Hold" must cancel an outstanding
+        translate even when the aircraft has left hover -- the realistic
+        trigger (`ai_mode` reverting to `"FLT"`) fails the same readiness
+        check that gates the *start*. Before this fix the only recovery
+        left was unparking (E-P10) and re-parking."""
+        console = _console(ai_mode="FLT", goal=AiPilotWheelGoal(hvrt_direction="left"))
+        lines = console.handle_command("hvrt_hold", now_sim=0.0)
+        assert lines == ["Holding."]
+        assert console.ai_pilot_hvrt_transition == "hold"
+
+    def test_still_unable_when_nothing_outstanding_and_not_in_hover(self) -> None:
+        """A bare "Hold" with nothing to cancel still needs the hover
+        precondition -- there is nothing outstanding, so the readiness
+        check is what explains why "Hold" alone does nothing here."""
+        console = _console(ai_mode="FLT", goal=None)
+        lines = console.handle_command("hvrt_hold", now_sim=0.0)
+        assert lines == ["Unable, not ready."]
+        assert console.ai_pilot_hvrt_transition is None
 
 
 class TestHvrtStep:

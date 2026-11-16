@@ -142,11 +142,18 @@ class AiPilotWheelGoal:
     at a time, with the rest queued in `pending_order`, FIFO by speaking
     order. `hvrt_direction` (Stage P2b) travels in the same message
     rather than a separate op -- it is written by voice exactly like the
-    other three fields and belongs to the same goal, and FLT/HVR-only
-    goals and HVRT translate are mode-exclusive by construction (a wheel
-    cannot be in `HVRT` and `FLT`/`HVR` at once), so there is no
-    collision to arbitrate between `active_param` and `hvrt_direction`
-    being set at the same time.
+    other three fields and belongs to the same goal.
+
+    **`active_param` and `hvrt_direction` can be simultaneously set on
+    this dataclass** -- the plan's original "mode-exclusive by
+    construction" claim (a wheel cannot be in `HVRT` and `FLT`/`HVR` at
+    once) does not hold: `HVR` is accepted by both `ai_pilot_goal_mode_
+    ready` (the FLT/HVR goal channel) and `_ai_pilot_hvrt_ready` (HVRT),
+    so both are reachable from one aircraft mode (review fix, BL-16
+    Stage P2). `active_param` keeps its value while `hvrt_direction` is
+    outstanding -- paused, not dropped, per the main loop's own
+    arbitration rule -- and `goal_param_for_wire` is the one place that
+    decides what gets sent to Lua, never these two fields directly.
 
     `active_param`/`active_since_sim`/`pending_order`/`goal_seq` are
     **internal** fields, written only by `decide_ai_pilot_wheel` (and the
@@ -406,7 +413,19 @@ def request_goal(
     This function never promotes, demotes, or clears `active_param`/
     `pending_order` itself beyond the append above -- `decide_ai_pilot_
     wheel` is the one place that happens, so the two never duplicate the
-    same decision."""
+    same decision.
+
+    **Review fix (BL-16 Stage P2): clears an outstanding HVRT translate
+    direction, if any.** "Speaking any new heading/altitude/speed goal
+    clears an outstanding translate direction... then the goal proceeds
+    normally" (main loop's own arbitration rule, see `goal_param_for_
+    wire`'s docstring for the companion half) -- "latest wins, nothing
+    lost" means a spoken flight goal always takes the wheel back from an
+    HVRT translate, never the other way around. All three actions
+    (`set_parked_heading`/`_altitude`/`_speed`) route through this one
+    function, so this is the single place that rule needs to live."""
+    if goal.hvrt_direction is not None:
+        goal = clear_hvrt_direction(goal)
     had_target = _has_target(goal, param)
     new_goal = _with_target(
         goal,
@@ -578,16 +597,68 @@ def set_hvrt_direction(
     with them by construction, never arbitrated against `active_param`).
     Dispatched only while `ai_mode in ("HVR", "HVRT")` -- the hover
     precondition is the caller's gate (`crew_console`'s own "unable, not
-    ready" check), not this action's."""
-    return replace(goal, hvrt_direction=direction)
+    ready" check), not this action's.
+
+    **Bumps `goal_seq` on an actual change** (review fix, same reasoning
+    as `request_goal`'s own preempt case): this is a sticky field, not a
+    one-shot trigger like `hvrt_step`, so Lua only ever learns of a new
+    or redirected translate direction by a fresh message arriving --
+    without the bump, `body.py`'s own "send on `goal_seq` change" posture
+    would silently drop the command whenever the goal's `goal_seq` had
+    not already moved for some other reason. A no-op (no bump) when the
+    direction is unchanged, so a repeated or no-op call never forces a
+    spurious wire send."""
+    if goal.hvrt_direction == direction:
+        return goal
+    return replace(goal, hvrt_direction=direction, goal_seq=goal.goal_seq + 1)
 
 
 def clear_hvrt_direction(goal: AiPilotWheelGoal) -> AiPilotWheelGoal:
     """Action: the spoken "Hold" -- clears an open HVRT translate press.
     Also what `decide_ai_pilot_wheel` applies below when Lua reports its
     own safety-timeout release, so body-layer's copy never outlives the
-    press Lua already let go of."""
-    return replace(goal, hvrt_direction=None)
+    press Lua already let go of; and what `request_goal` applies when a
+    new heading/altitude/speed goal preempts an outstanding translate
+    (review fix, see that function's own docstring).
+
+    **Bumps `goal_seq` on an actual change**, same reasoning as `set_
+    hvrt_direction` above: "Hold" (or a preempting goal) must reach Lua
+    as a fresh message so the paused FLT/HVR channel actually resumes
+    pressing (`goal_param_for_wire` stops nulling `param` once `hvrt_
+    direction` is `None` again) -- without the bump, the last message
+    Lua saw would still read `param: null`, and the channel would stay
+    silently paused forever. A no-op when there was nothing to clear."""
+    if goal.hvrt_direction is None:
+        return goal
+    return replace(goal, hvrt_direction=None, goal_seq=goal.goal_seq + 1)
+
+
+def goal_param_for_wire(goal: AiPilotWheelGoal) -> AiPilotWheelParam | None:
+    """The `param` value actually sent to `Export.lua` on the wire --
+    `None` whenever an HVRT translate direction is outstanding, even if
+    `active_param` itself is still set internally. Review fix (BL-16
+    Stage P2): the plan's "mode-exclusive by construction" reasoning for
+    `active_param`/`hvrt_direction` coexisting on one message was wrong
+    -- `HVR` is a mode both `ai_pilot_goal_mode_ready` (FLT/HVR channel)
+    and `_ai_pilot_hvrt_ready` (HVRT channel) accept, so without this,
+    a message could carry both fields non-`None` at once, and `Export.
+    lua`'s two per-tick loops would press against the same physical
+    button codes in the same tick (`AI_WHEEL_LEFT`/3003 is both the
+    mode-cycle press and the HVRT-left translate hold).
+
+    **This is the one function that decides what Lua is told to press**
+    -- it never touches `active_param`/`pending_order` themselves, which
+    keep their values untouched while paused (the main loop's own
+    arbitration rule: "queued and active goals keep their targets and
+    queue positions"), only what a given wire message's own `param`
+    field says. `body.py`'s `_apply_ai_pilot_wheel_goal` is this
+    function's one call site (both the main send and the `hvrt_step`
+    send), so the wire's own invariant -- `param` and `hvrt_direction`
+    never both meaningful on one message -- holds by construction rather
+    than by each call site re-deriving it."""
+    if goal.hvrt_direction is not None:
+        return None
+    return goal.active_param
 
 
 def decide_ai_pilot_wheel(
@@ -616,7 +687,18 @@ def decide_ai_pilot_wheel(
     until the takeover resolves.
 
     A no-op (returns `state` unchanged) when there is no goal at all, or
-    the goal has nothing outstanding and nothing to settle."""
+    the goal has nothing outstanding and nothing to settle.
+
+    **Never promotes, demotes, settles or rotates anything while an HVRT
+    translate direction is outstanding either** (review fix, main loop's
+    own arbitration rule: "setting an HVRT translate direction pauses
+    the heading/altitude/speed goal channel... queued and active goals
+    keep their targets and queue positions"). The `hvrt_released_
+    timeout` reconciliation above runs first regardless, since that is
+    how a stuck translate's own safety release unpauses this channel
+    again on the very same call -- once `clear_hvrt_direction` has run,
+    the pause check below sees `hvrt_direction is None` and the normal
+    rotation resumes immediately, with no extra poll of lag."""
     goal = state.goal
     if goal is None:
         return state
@@ -625,6 +707,9 @@ def decide_ai_pilot_wheel(
         goal = clear_hvrt_direction(goal)
 
     if state.takeover_stage is not None:
+        return replace(state, goal=goal)
+
+    if goal.hvrt_direction is not None:
         return replace(state, goal=goal)
 
     if settled_param is not None and goal.active_param == settled_param:
