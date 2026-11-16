@@ -63,4 +63,20 @@
   text," and nothing short of running the destination's parser against the exact string catches
   the gap. (`[[BL-B100]]`, found by DoD, 2026-10-25.)
 
+- **A bare single-word command is exactly the shape most likely to fuzzy-collide with an
+  existing verb, and the collision can predate the new word by months.** Adding HVRT's bare
+  direction words (`left`/`right`/`forward`/`back`/`hold`/`up`/`down`, BL-16 Stage P2b) surfaced
+  that a lone "right" already scored `difflib.SequenceMatcher(None, "right",
+  "sight").ratio() == 0.8` — above `VERB_FLOOR` — and fuzzy-anchored onto `_POINT_VERBS`,
+  resolving as `point`'s own `relative` slot before the generic phrase table (where
+  `hvrt_translate_right` lives) was ever reached. The collision existed from the moment "sight"
+  became a verb anchor; it only became visible once something needed a bare "right" to resolve to
+  anything else. Fixed by checking the new bare single-word commands as an exact, whole-transcript
+  match ahead of every fuzzy branch, rather than narrowing `_POINT_VERBS`' own tolerance (which
+  would have risked regressing its calibrated "look"/"sight" matching). General shape: before
+  adding any bare (unanchored) single-word token to this vocabulary, check it against every
+  existing verb anchor with the matcher's own ratio function, not just against other bare words —
+  a word's own fuzzy radius doesn't care whether the words on each side were designed together
+  (`plans/flight-control/implementation.md`, Stage P2a/P2b Notable Discoveries, 2026-11-16).
+
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.

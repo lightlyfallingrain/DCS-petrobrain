@@ -122,4 +122,35 @@
 
 - **A plan's own illustrative code snippet is a sketch of the mechanism, not a literal spec for order-sensitive behaviour — when the plan says "the order must not change," trace the real file's actual order, don't transcribe the example.** `ac-b12-export-modules`'s plan sketched `LuaExportAfterNextFrame`'s post-split composition with the ownship and world-objects sends grouped as one call, ahead of the watched-args/payload/Petrovich pushes. The real pre-split file's order was different — ownship → watched_args → payload → world_objects → Petrovich — and load-bearing: a failed world-objects send could null the shared `client`, and following the snippet literally would have let that failure retroactively suppress watched-args/payload pushes that, in the original, had already gone out before world_objects was ever polled. The implementer caught it by re-reading the real file's call order rather than coding to the plan's own example, and split the illustrated single call into two (`send_ownship` + `send_world_objects`) to preserve it. The plan's own disclaimer ("illustrative only... the order must not change") is the tell: an example given alongside an order-preservation requirement is not itself authoritative over that order (`plans/ac-b12-export-modules/plan.md` "Load mechanism", `implementation.md` "Notable Discoveries").
 
+- **"Two states are mutually exclusive by construction" is a claim about the precondition sets
+  that reach each state, and has to be checked against both sets directly — a plan that
+  reasons from the state names (`HVRT` can't also be `FLT`/`HVR`) can still be wrong if the
+  *gates* that admit each caller accept an overlapping input.** BL-16 Stage P2's plan argued a
+  heading/altitude/speed goal and an HVRT translate "cannot collide" because a wheel can't be in
+  `HVRT` and `FLT`/`HVR` at once — true of the wheel's own mode, but `ai_pilot_goal_mode_ready`
+  (the FLT/HVR goal channel's own readiness gate) and `_ai_pilot_hvrt_ready` (HVRT's) both accept
+  `HVR`, so a player hovering with an active altitude goal who then says "left" gets both an
+  `active_param` and an `hvrt_direction` set on the same message, pressing the same button codes
+  in the same tick. Caught only by Reviewer reading the two gate functions side by side, not by
+  re-deriving the state machine from its name. General shape: when a plan asserts exclusivity
+  between two code paths from the *state names* involved, verify it by reading each path's own
+  entry guard, not by trusting that the states themselves sound disjoint
+  (`plans/flight-control/review-p2.md`, Required Fix 2).
+
+- **A mutator that changes a field but forgets to bump the same object's own "has this changed"
+  sequence number is invisible to every test that only checks the field, because the field is
+  right — only the gate that decides whether to send it is wrong.** `set_hvrt_direction`/
+  `clear_hvrt_direction` (BL-16 Stage P2) each wrote `AiPilotWheelGoal.hvrt_direction` correctly
+  but did not bump `goal_seq`, the field `body.py`'s own wire-send guard
+  (`final_goal.goal_seq != last_sent_seq`) actually gates on. The practical effect: saying "Hold"
+  to cancel a translate would clear the belief-side field exactly as intended, and
+  `Export.lua` would never learn about it — the goal channel reads as fixed in every unit test of
+  `clear_hvrt_direction` alone, because none of them exercise the send gate, and only breaks at
+  the `_apply_ai_pilot_wheel_goal` integration level. Found and fixed by the implementer while
+  building an unrelated required fix, not by the original review. General shape: whenever a
+  "send only on change" gate rides a single sequence/dirty field shared across several setters,
+  every setter that changes state the gate is supposed to notice needs its own test at the
+  integration level (does a message actually get sent), not just a unit test of the field it set
+  (`plans/flight-control/review-p2.md`'s re-review, Fix 2).
+
 - **A docstring claiming a tunable bound applies "unconditionally"/"regardless of X" is a per-branch claim, and per-key `lo`/`hi` bounds cannot verify it — this has now recurred three times under three different shapes.** X-T26 (`belief/decay.py`'s bare `assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S`) and its recurrence on `9k113-narrow-search`/`BL-B85` (`SIGHT_STALL_COOLDOWN_S` reproducing the same import-time crash from one in-bounds key) were both *module-level assertions coupling two existing tunables*. `BL-B118`'s instance is the same failure in a cheaper-to-miss shape: two *new* constants in the same commit, where `ALTIMETER_QNH_MAX_STEP`'s own docstring said it "bounds any single write regardless of a bad gain estimate," but the clamp was wired into only one branch of an if/else — the no-gain-yet branch wrote `ALTIMETER_QNH_CALIBRATION_STEP` unclamped, and the two constants' declared `lo`/`hi` ranges (not just their defaults) could invert the intended ordering. All three instances were invisible to every test that ran at code defaults, and all three were caught by Reviewer, never earlier. Three occurrences in two months is a process signal, not a code-quality one: a plan that introduces (or extends) a tunable whose prose states a cross-branch or cross-key ordering should be required, at Architect or Implementer time, to either wire a `tuning._check_*_coupling` function or an inline clamp that makes the claim true by construction — not rediscovered by Reviewer reading every branch by hand each time (`plans/configurable-constants/plan.md`, `plans/9k113-narrow-search/`, `plans/bl16-qnh-mission-start/review.md`).
