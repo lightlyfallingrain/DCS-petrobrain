@@ -1,0 +1,227 @@
+<title>Altimeter QNH Sync</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/*
+  Color: --bg/--panel/--panel2/--line (cockpit panel neutrals) + --amber (instrument accent,
+  matches the BL-16 card family) + --record (teal, the "write this down" rail) + --good/--danger.
+  Type: Barlow Condensed (display/labels) + Source Sans 3 (body) + JetBrains Mono (readouts/commands).
+  Layout: one narrow column; a hand-drawn altimeter-window SVG stands in for the hero; two
+  session blocks (ground, air), each do/expect/record, a prize block on the pilot-seat question.
+*/
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.8rem,6vw,2.5rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.1rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.82rem; overflow-x:auto; margin:10px 0 0; color:var(--ink); white-space:pre-wrap; word-break:break-word;}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.hero{display:flex; gap:18px; align-items:center; margin:18px 0 6px;}
+.hero svg{flex:none; width:92px; height:92px;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.note.good{border-color:var(--good);}
+.note.good .tag{color:var(--good);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+.session{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.5rem; color:var(--ink); margin:32px 0 4px; padding-top:18px; border-top:2px solid var(--amber-dim);}
+.session small{display:block; font-family:'Source Sans 3',sans-serif; font-weight:400; font-size:0.95rem; color:var(--ink-dim);}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.25rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+.gauge-num{font-family:'JetBrains Mono',monospace;}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+
+<div class="wrap">
+<div class="eyebrow">BL-16 · BL-B118 · operator altimeter QNH sync · 2026-11-16</div>
+<div class="hero">
+  <svg viewBox="0 0 100 100" role="img" aria-label="Barometric pressure window, 670 to 790 millimetres of mercury">
+    <circle cx="50" cy="50" r="46" fill="none" stroke="var(--line)" stroke-width="2"/>
+    <circle cx="50" cy="50" r="38" fill="var(--panel2)" stroke="var(--amber-dim)" stroke-width="1.5"/>
+    <rect x="30" y="42" width="40" height="16" rx="2" fill="var(--mono-bg)" stroke="var(--amber)" stroke-width="1.5"/>
+    <text x="50" y="53" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--amber)">762</text>
+    <line x1="50" y1="50" x2="68" y2="26" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="50" y1="50" x2="30" y2="68" stroke="var(--ink-dim)" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="50" cy="50" r="2.5" fill="var(--ink)"/>
+  </svg>
+  <div>
+    <h1>Altimeter QNH Sync</h1>
+    <div class="subhead">Petrovich sets the operator altimeter's pressure window to the mission's QNH at mission start, so the AI's barometric hold flies against a correct reference instead of whatever the mission left on the knob.</div>
+  </div>
+</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH TO FLY</div>
+  <pre>git fetch origin
+git checkout main
+git pull --ff-only</pre>
+  <div class="subhead" style="font-size:0.9rem">This DoD pass merges the fix to <code class="i">main</code> automatically. <strong>Redeploy the mission-start Hook script</strong> — see the box below — and <strong>restart DCS itself</strong>, not just the mission.</div>
+</div>
+
+<div class="note warn"><span class="tag">Redeploy first</span> Copy <code class="i">aircraft-layer/dcs-export/petrobrain-mission-start-hook.lua</code> to <code class="i">Saved Games\DCS\Scripts\Hooks\petrobrain-mission-start-hook.lua</code>, then <strong>restart DCS</strong> (this Hook loads once into the GUI Lua state at application startup — a mission restart alone won't pick it up). <code class="i">Export.lua</code> itself is unchanged by this feature — no redeploy needed there, and no version-mismatch warning will fire either way, because there is no staleness check for Hook scripts. If the sync never arms and nothing is logged, a stale Hook is the first thing to suspect, not a code defect.</div>
+
+<div class="note"><strong>Not testable here.</strong> Whether the mechanism actually reaches the real cockpit instrument at all — the device's gain, and whether it honours a write from the <em>pilot</em> seat — is exactly what no fixture could answer; this card is that first live answer.</div>
+
+<div class="session">Session 1 — Ground start <small>Know the mission's briefed QNH before you start (kneeboard, briefing, or mission editor weather page) so you have something to check against.</small></div>
+
+<section class="block">
+  <div class="block-num">1</div>
+  <h3>Does the window move on its own?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Start the mission on the ground (parked is fine — engines don't need to be running). Watch the operator's barometric pressure window in the centre console for about 15 seconds. Don't touch the knob yourself.</div>
+    <div class="k expect">Expect</div><div class="v">The window steps itself toward the mission's briefed QNH, settling within about 15 seconds, with no input from you.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="g1-moved">Did the window visibly move on its own, and did it settle?</label>
+      <label class="chk"><input type="checkbox" data-k="g1-value">What value did it settle at, versus the briefed QNH?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">2</div>
+  <h3>Cross-check: the body-layer log</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Watch the body-layer terminal around mission start for a line starting <code class="i">mission-start altimeter QNH sync armed: qnh=...</code>.</div>
+    <div class="k expect">Expect</div><div class="v">Logged within a second of mission start, with <code class="i">qnh</code> matching the briefed value and a <code class="i">target_mmhg</code> reading.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="g2-logged">Did the line appear, and with what qnh/target_mmhg values?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>Precise check (optional)</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">From the Mac/WSL, once settled: <code class="i">curl -s -X POST http://&lt;windows-ip&gt;:7791/query/read_args -H 'Content-Type: application/json' -d '{"args":[834]}'</code>. Pressure = 670 + 120 × the returned value.</div>
+    <div class="k expect">Expect</div><div class="v">Within 0.3 mmHg of the briefed QNH.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="g3-precise">Computed pressure vs. briefed QNH?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">4</div>
+  <h3>What does Petrovich say?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Listen through the whole settling window.</div>
+    <div class="k expect">Expect</div><div class="v"><strong>Silence</strong> — success is designed to be quiet, matching every other mission-start housekeeping step. Only a failure speaks: <em>"Unable, operator altimeter not responding"</em> (the knob never moved) or <em>"Unable, altimeter pressure not set"</em> (it moved but never converged).</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="g4-spoke">Silent, or which "unable" line — and which seat were you in?</label>
+    </div>
+  </div>
+</section>
+
+<div class="session">Session 2 — Air start <small>Straight and level, any seat. This session also checks the interaction with the takeover fix.</small></div>
+
+<section class="block">
+  <div class="block-num">5</div>
+  <h3>Same settle check, airborne</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Repeat blocks 1–4 above for an air start.</div>
+    <div class="k expect">Expect</div><div class="v">Same behaviour — the sync doesn't care whether the aircraft is on the ground or already flying.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="a5-same">Same settle/log/silence pattern as the ground start?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">6 <span class="prize-tag">the prize</span></div>
+  <h3>Does "Request Aircraft Control" still misbehave?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Once the altimeter has settled (or ~15 s have passed), from the <strong>operator seat</strong>, press <strong>"Request Aircraft Control"</strong> — the same binding the takeover-fix cards used.</div>
+    <div class="k expect">Expect</div><div class="v">The AI's barometric target should now be sane on the <em>first</em> toggle — not the wild <code class="i">+740 m</code> target the earlier takeover probes measured. If the altimeter is set right, the takeover fix's own correction loop should find nothing to correct.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="a6-sane">Was the AI's held altitude sane from the first toggle, with no correction needed?</label>
+      <label class="chk"><input type="checkbox" data-k="a6-seat">Which seat did the <em>sync itself</em> run from — does the knob respond the same from the pilot seat as from the operator seat? (This is the single biggest open question the whole feature exists to answer.)</label>
+    </div>
+  </div>
+</section>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>Did the window move on its own, both ground and air start, and settle near the briefed QNH?</li>
+    <li>Did the log line appear with the right qnh/target_mmhg each time?</li>
+    <li><strong>Did the knob respond the same way regardless of which seat the human player was in?</strong> If not, which seat failed.</li>
+    <li>Silent on success, or which "unable" line — and does the log explain why.</li>
+    <li>Did "Request Aircraft Control" produce a sane altitude without the correction loop having to do anything?</li>
+  </ol>
+  <p style="margin:12px 0 0; color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+try{
+const KEY='bl16-qnh-mission-start-2026-11-16';
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{
+      const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+      s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+    }catch(e){}
+  });
+});
+}catch(e){}
+</script>

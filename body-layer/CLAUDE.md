@@ -520,6 +520,17 @@ Belief — observation *consumption*:
   classification is dropped rather than guessed from the stale previous-mission sample;
   `TAKEOFF` suppression ends the same poll either way. `mission-start-in-air.md` ships
   (`97bad8fd`); nothing ships for `mission-start` yet.
+- `src/belief/altimeter_qnh_sync.py` (`[[BL-B118]]`, `plans/bl16-qnh-mission-start/plan.md`) —
+  the operator (copilot) altimeter QNH sync: a self-calibrating secant loop on device 42/cmd
+  3001/arg 834, armed by `body._maybe_start_altimeter_qnh_sync` at the same two moments
+  `_maybe_switch_theatre` adopts a mission's theatre, since QNH is the same kind of mission fact.
+  **Deliberately not an effector-sequence trigger** — the registry's row grammar is a fixed menu
+  of named `values` per switch (a discrete write with an implicit self-check), with no row type
+  for driving a continuous arg to an externally-computed numeric target via an unknown-gain
+  relative command, closed-loop; this needs no ownship sample either, unlike `EffectorTrigger.
+  MISSION_START`, so tying it to that trigger would only add latency for no benefit. Fails loud
+  (`failed_no_response`/`failed_timeout`, one spoken "unable, ..." line via `crew_console.
+  drain_altimeter_qnh_failed`) rather than hanging if the knob never responds.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

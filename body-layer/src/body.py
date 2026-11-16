@@ -134,6 +134,11 @@ from typing import Final, Literal, TextIO, cast
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.ai_pilot_wheel import ParkedFlightState, advance_parked_flight_state
+from belief.altimeter_qnh_sync import (
+    AltimeterQnhSyncState,
+    advance_altimeter_qnh_sync,
+    start_altimeter_qnh_sync,
+)
 from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
@@ -687,6 +692,21 @@ class ConsolePerceptionRunner:
     #: Wall-clock time has neither problem.
     mission_start_resolving_since_wall: float | None = None
 
+    #: `[[BL-B118]]` (`plans/bl16-qnh-mission-start/plan.md`) -- the
+    #: current mission's operator-altimeter QNH closed-loop run, or
+    #: `None` when there is nothing to sync (no `qnh` this mission, or
+    #: not yet armed). Set by `_maybe_start_altimeter_qnh_sync`, called
+    #: alongside `_maybe_switch_theatre` at both of `_check_for_new_
+    #: mission`'s adoption sites -- QNH is the same kind of mission fact,
+    #: learned at the same two moments, and (unlike `EffectorTrigger.
+    #: MISSION_START`) needs no trusted ownship sample to act on.
+    #: **Not** in `reset_for_new_mission`'s preserved-field list below --
+    #: it resets to `None` on every mission (re)start like `last_
+    #: mission_start_sequence`, and `_maybe_start_altimeter_qnh_sync`
+    #: reassigns it explicitly afterward on both adoption sites, same
+    #: pattern.
+    altimeter_qnh_sync: AltimeterQnhSyncState | None = None
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1). Re-invokes `__init__` on this same object, passing
@@ -706,7 +726,7 @@ class ConsolePerceptionRunner:
         `_last_look_direction`, `last_mission_start_sequence`,
         `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
         `mission_start_fresh_sample_baseline_t_sim`,
-        `mission_start_resolving_since_wall`) resets to its
+        `mission_start_resolving_since_wall`, `altimeter_qnh_sync`) resets to its
         declared default (D11: a mission (re)start drops every
         running/pending effector-sequence run with nothing carried over;
         the three mission-start-trigger fields reset to `False`/`False`/
@@ -3021,6 +3041,50 @@ def _enter_refusal_mode(
         crew_console.refused = True
 
 
+def _maybe_start_altimeter_qnh_sync(
+    runner: ConsolePerceptionRunner,
+    event_qnh: object,
+    event_atmosphere_type: object,
+) -> None:
+    """`[[BL-B118]]` (`plans/bl16-qnh-mission-start/plan.md`) -- called
+    alongside `_maybe_switch_theatre` at both of `_check_for_new_mission`'s
+    adoption sites (the first-event-adopted case and a genuine reset): QNH
+    is the same kind of mission fact, learned at the same two moments, and
+    (unlike `EffectorTrigger.MISSION_START`) needs no trusted ownship
+    sample to act on, so there is no reason to wait for one.
+
+    A valid numeric `qnh` arms a fresh closed-loop run
+    (`start_altimeter_qnh_sync`), replacing whatever run this runner
+    already held -- `runner.altimeter_qnh_sync` is **not** in
+    `ConsolePerceptionRunner.reset_for_new_mission`'s preserved-field
+    list, so a genuine reset has already cleared it back to `None` by the
+    time this runs; the first-event-adopted call site has no prior reset
+    at all, so this is simply the first assignment. Missing or
+    non-numeric `qnh` clears it to `None` instead -- there is nothing to
+    sync this mission, and advancing a stale run against a new mission's
+    belief state would be wrong.
+
+    `event_atmosphere_type` plays no part in the loop itself -- logged
+    alongside the resolved target purely for the record (the plan's
+    "Dynamic weather" risk, handled 2026-11-16: no special-casing, the
+    static `qnh` is used either way; this log line is what a
+    dynamic-weather flight's wrong-reading report would cite as
+    evidence)."""
+    if isinstance(event_qnh, bool) or not isinstance(event_qnh, (int, float)):
+        runner.altimeter_qnh_sync = None
+        return
+    runner.altimeter_qnh_sync = start_altimeter_qnh_sync(
+        float(event_qnh), now_wall=time.monotonic()
+    )
+    logger.info(
+        "mission-start altimeter QNH sync armed: qnh=%r atmosphere_type=%r "
+        "target_mmhg=%r",
+        event_qnh,
+        event_atmosphere_type,
+        runner.altimeter_qnh_sync.target_mmhg,
+    )
+
+
 def _maybe_switch_theatre(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole | None,
@@ -3285,6 +3349,12 @@ def _check_for_new_mission(
             trace_sink=trace_sink,
             forest_occlusion=forest_occlusion,
         )
+        # `[[BL-B118]]` -- same reasoning as the theatre adoption just
+        # above: QNH is the live mission's own fact too, learned at this
+        # same first-event-adopted moment.
+        _maybe_start_altimeter_qnh_sync(
+            runner, event.get("qnh"), event.get("atmosphere_type")
+        )
         return False
     if sequence == runner.last_mission_start_sequence:
         return False
@@ -3311,6 +3381,15 @@ def _check_for_new_mission(
         world_model_dir,
         trace_sink=trace_sink,
         forest_occlusion=forest_occlusion,
+    )
+    # `[[BL-B118]]` -- same reasoning as the theatre switch just above:
+    # QNH is the live mission's own fact too, learned at this same
+    # genuine-reset moment. `_reset_mission_state` has already cleared
+    # `runner.altimeter_qnh_sync` back to `None` (not in `reset_for_new_
+    # mission`'s preserved-field list); this call arms this mission's
+    # own run.
+    _maybe_start_altimeter_qnh_sync(
+        runner, event.get("qnh"), event.get("atmosphere_type")
     )
     # Assigned explicitly after the reset, same pattern as `runner.
     # last_mission_start_sequence` just below -- `reset_for_new_mission`'s
@@ -4139,6 +4218,28 @@ def _run_crew_text_poll_loop(
                             expected_area_log_base=expected_area_log_base,
                         )
                     )
+                # `[[BL-B118]]` -- one call per poll, unconditional on
+                # whether a mission (re)start fired this poll (the common
+                # case is "no," every poll of an already-running
+                # mission). A true no-op while no run is armed (`runner.
+                # altimeter_qnh_sync is None`) or the armed run has
+                # already reached a terminal phase (`advance_altimeter_
+                # qnh_sync`'s own inert-once-terminal contract). No
+                # ownship sample is needed, so this runs regardless of
+                # whether `runner.last_ownship_state` exists yet --
+                # unlike `EffectorTrigger.MISSION_START`, there is no
+                # reason to wait for one.
+                if runner.altimeter_qnh_sync is not None:
+                    previous_qnh_sync_phase = runner.altimeter_qnh_sync.phase
+                    runner.altimeter_qnh_sync = advance_altimeter_qnh_sync(
+                        runner.altimeter_qnh_sync, aircraft_client, time.monotonic()
+                    )
+                    if (
+                        previous_qnh_sync_phase == "running"
+                        and runner.altimeter_qnh_sync.phase
+                        in ("failed_no_response", "failed_timeout")
+                    ):
+                        crew_console.altimeter_qnh_failed_pending = True
                 # `plans/atgm-run-sight-tracking/plan.md` -- captured
                 # *before* `run_once` advances `runner.sight_head` for
                 # this poll, the same "diff across `run_once`" shape
@@ -4622,6 +4723,13 @@ def _run_crew_text_poll_loop(
                             effector_sequences_by_key,
                             effector_registry_entries,
                         )
+                        # `[[BL-B119]]`: whatever `advance_effectors` just
+                        # reported as completed this poll (own rows
+                        # written, or found already in position) -- the
+                        # engine itself never speaks, this is the drain.
+                        crew_console.drain_effector_speech(
+                            runner.last_t_sim, runner.effector_state.spoken
+                        )
                         # The "Guidance unit ready" edge, after the
                         # engine has had a chance to run this poll (plan's
                         # own poll-block ordering) -- unaffected either
@@ -4659,9 +4767,15 @@ def _run_crew_text_poll_loop(
                         # once per process lifetime in the common case
                         # (no bad file), not on every poll of every sortie
                         # (performance review, `plans/effector-sequences/
-                        # performance-stage1-2.md`).
+                        # performance-stage1-2.md`). `[[BL-B118]]` shares
+                        # this same fetch for `altimeter_qnh_failed_
+                        # pending` -- one `GET /spu8/state` serves both
+                        # one-shot flags rather than each fetching its own.
                         intercom_open = False
-                        if crew_console.config_error_pending:
+                        if (
+                            crew_console.config_error_pending
+                            or crew_console.altimeter_qnh_failed_pending
+                        ):
                             spu8_latest = aircraft_client.get_spu8_state_latest()
                             intercom_open = (
                                 spu8_latest is not None
@@ -4669,6 +4783,15 @@ def _run_crew_text_poll_loop(
                             )
                         crew_console.drain_config_error(
                             runner.last_t_sim, intercom_open=intercom_open
+                        )
+                        crew_console.drain_altimeter_qnh_failed(
+                            runner.last_t_sim,
+                            intercom_open=intercom_open,
+                            phase=(
+                                runner.altimeter_qnh_sync.phase
+                                if runner.altimeter_qnh_sync is not None
+                                else None
+                            ),
                         )
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,

@@ -966,3 +966,214 @@ def test_trigger_with_no_loaded_sequence_fires_into_nothing() -> None:
 
 def test_mission_reset_drops_assumed_writes() -> None:
     assert EffectorRunState().assumed_writes == {}
+
+
+def test_mission_reset_drops_spoken_too() -> None:
+    """`[[BL-B119]]`: `spoken` is a field on `EffectorRunState`, so the
+    `field(default_factory=EffectorRunState)` mission reset drops it
+    exactly like `assumed_writes` -- no reset-specific code needed."""
+    assert EffectorRunState().spoken == ()
+
+
+# --- BL-B119: a completed row speaks its own `petrovich-says` line ----------
+
+
+def test_bl_b119_written_row_reports_its_line_once() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == [(7, 3002, 1.0)]
+    assert state.spoken == ("Observ on.",)
+
+
+def test_bl_b119_self_check_skip_still_reports_its_line() -> None:
+    """Pilot decision (Q1, 2026-11-16): found already at the target value
+    still speaks -- a confirmation the commanded state holds, not only a
+    confirmation a write just happened."""
+    client = _FakeAircraftClient()
+    client.read_values = {886: 1.0}
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ("Observ on.",)
+
+
+def test_bl_b119_empty_petrovich_says_cell_reports_nothing() -> None:
+    """`_SEQUENCES`' own `observ-on` row carries an empty `petrovich_says`
+    (the fixture default throughout this file) -- the row still writes,
+    but reports no line."""
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), _SEQUENCES, _REGISTRY)
+
+    assert client.writes == [(7, 3002, 1.0)]
+    assert state.spoken == ()
+
+
+def test_bl_b119_failed_explicit_condition_reports_nothing() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {885: 0.0, 886: 0.0}  # sight_power off -> condition false
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=Condition(effector="sight_power", op="=", value="on"),
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ()
+
+
+def test_bl_b119_non_absolute_unknown_readback_reports_nothing() -> None:
+    """A non-absolute shape's unknown-readback skip (R12's fail-safe,
+    same fixture as `test_e2_non_absolute_unknown_readback_skips_with_
+    warning`) reports nothing, even though its own `petrovich_says` cell
+    is non-empty -- the row never completes."""
+    client = _FakeAircraftClient()
+    client.fail_reads = True
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="covered_button",
+                    value="pressed",
+                    petrovich_says="button pressed",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+    state = advance(
+        state,
+        EFFECTOR_CONDITION_READBACK_WAIT_S + 1.0,
+        _client(client),
+        sequences,
+        _REGISTRY,
+    )
+
+    assert client.writes == []
+    assert state.spoken == ()
+
+
+def test_bl_b119_failed_write_reports_nothing_until_it_succeeds() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}
+    client.fail_device_cmds.add((7, 3002))
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+    assert client.writes == []
+    assert state.spoken == ()
+
+    client.fail_device_cmds.clear()
+    state = advance(
+        state, EFFECTOR_SEQUENCE_STEP_DELAY_S, _client(client), sequences, _REGISTRY
+    )
+    assert client.writes == [(7, 3002, 1.0)]
+    assert state.spoken == ("Observ on.",)
+
+
+def test_bl_b119_two_triggers_in_one_poll_report_in_fire_order() -> None:
+    client = _FakeAircraftClient()
+    # Both effectors already at their own row's target -- a same-poll
+    # self-check-skip "completion" for each, no write ordering to settle.
+    client.read_values = {886: 1.0, 673: 1.0}
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        ),
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.WEAPONS_ARM.value): _sequence(
+            EffectorTrigger.WEAPONS_ARM,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="weapon_safety",
+                    value="armed",
+                    petrovich_says="weapons armed",
+                    comment="",
+                ),
+            ),
+        ),
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.WEAPONS_ARM, now_sim=0.0)
+    state = fire_trigger(state, EffectorTrigger.OBSERV_ON, now_sim=0.0)
+    assert state.fire_order == (EffectorTrigger.WEAPONS_ARM, EffectorTrigger.OBSERV_ON)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ("Weapons armed.", "Observ on.")

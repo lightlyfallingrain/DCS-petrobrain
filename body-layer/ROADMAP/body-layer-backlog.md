@@ -155,6 +155,10 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B115]] — kneeboard read-back: consult mission memory for the local map page (sector entry, phase change); split from `[[BL-B112]]`
 - [[BL-B116]] — body resource arbitration: eyes/hands/mouth as declared resources; finish the look, pilot first, queue ≤~5 s else "stand by", "unable" only in attack run (concept in `PETROBRAIN_RUNTIME.md`)
 - [[BL-B117]] — BL-16 sub-item: AI wheel's parked flag and overlay fields not reset on `LuaExportStop` (lands in AC-B12's AI-wheel module, beside AC-B13)
+- [[BL-B118]] — BL-16 sub-item: set the operator altimeter's pressure to the mission's QNH at mission start, a self-calibrating closed loop on device 42's baro knob (DoD-PASSED, merged `10c32d91`, `#needs-flight`, `plans/bl16-qnh-mission-start/plan.md`)
+- [[BL-B120]] — `altimeter_qnh_sync`'s QNH clamp stays bounded for NaN/±Infinity only by accident of `min`/`max` argument order, not a designed `math.isfinite` guard — low probability/impact, found in `[[BL-B118]]`'s security deep analysis
+- [[BL-B119]] — effector sequence rows speak their `petrovich-says`; hard-coded observ/weapons readbacks removed (DoD-PASSED, merged `18f73b09`, `#needs-flight`)
+- [[BL-B121]] — same-poll pending-restart may speak a speaking sequence row's line twice; not reachable by any sequence shipped today, closes before a multi-row speaking sequence lands
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

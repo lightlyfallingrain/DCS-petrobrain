@@ -11,7 +11,8 @@ to run on its own background thread (`collector/__main__.py`).
 Wire format, one JSON object per datagram (matches `schema.mission_start.
 MissionStartEvent.from_dict`):
 
-    {"sequence": <int>, "theatre": "<string>"|null}
+    {"sequence": <int>, "theatre": "<string>"|null,
+     "qnh": <number>|null, "atmosphere_type": <int>|null}
 
 A malformed or unparseable datagram is dropped and logged at debug level,
 never crashes the receive loop -- same defensive posture as
