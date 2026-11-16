@@ -276,4 +276,92 @@ animation is trimmed to its endpoints; every other measured line is verbatim:
 - **Open question carried forward:** P0-5 found that a centre press with the menu open did not
   toggle the reference. The pilot says it should (ED bug, or our zero-length press). With the menu
   now always open, the one centre press after takeover must happen *before* the menu is opened,
-  or that press needs testing with a real pulse.
+  or that press needs testing with a real pulse. **Answered by the takeover probe below: a real
+  0.15 s pulse toggles it. The failure was our zero-length press, not ED.**
+
+## Takeover rehearsal probe — 2026-11-16
+
+`Export.probe-ai-pilot-takeover.lua` on `fix/bl16-p0-probe-menu-open` (`5a3a15e9`), uploaded by the
+pilot as `aircraft_layer_probe_ai_pilot_takeover.log`, verbatim apart from the banner lines:
+
+```
+15:38:52   t=5.0: arg852=0 arg952=1
+15:39:04   t=17.1: arg852=0.90205132961273 arg952=0.097948655486107
+15:39:04   t=17.1: takeover (arg 852 >= 0.9)
+T1: takeover -- centre press (menu closed), then open menu
+15:39:04   on takeover: mode=nil course=nil alt=nil alt_ref=nil speed=nil  agl=159.44555664062 msl=924.67248535156  arg852=0.90503454208374 arg952=0.094965443015099
+15:39:05   +0.50s centre tap (menu closed)  msl=924.43096923828
+15:39:05   +1.01s menu toggle (opening)
+15:39:06   +2.01s read: mode=FLT course=81 alt=1662 alt_ref=B speed=150  actual msl=919.79803466797
+15:39:06   baro target error: +742 m (target 1662, actual 920)
+T2: correct the baro target to actual MSL (closed-loop hold)
+15:39:06   start: target=1662 actual=920 error=+742 m
+15:39:06   holding DOWN
+15:39:20   released after 13.96s: reached tolerance
+15:39:20   target while held: 0.0s:1662 0.5s:1662 1.0s:1654 1.5s:1646 2.0s:1640 2.5s:1632 3.0s:1606 3.5s:1582 4.0s:1556 4.5s:1530 5.0s:1506 5.5s:1480 6.0s:1456 6.5s:1430 7.0s:1406 7.5s:1380 8.0s:1354 8.5s:1330 9.0s:1304 9.5s:1280 10.0s:1254 10.5s:1230 11.1s:1204 11.6s:1180 12.1s:1154 12.6s:1130 13.1s:1104 13.6s:1078
+15:39:20   mean rate while held: 43.3 m/s
+15:39:21   after release: mode=FLT course=81 alt=1058 alt_ref=B speed=150  actual msl=1050.1588134766
+15:39:41   20s trace (actual msl / target): 0s:1050/1058 2s:1058/1058 4s:1049/1058 6s:1047/1058 8s:1048/1058 10s:1049/1058 12s:1058/1058 14s:1060/1058 16s:1058/1058 18s:1059/1058
+T3: hold rate -- UP 5s, then DOWN 5s
+15:39:46   UP held 5.00s: 0.01s:1058 0.26s:1058 0.51s:1058 0.76s:1062 1.02s:1066 1.27s:1070 1.52s:1074 1.78s:1078 2.03s:1080 2.28s:1084 2.53s:1090 2.79s:1102 3.04s:1116 3.29s:1128 3.55s:1140 3.80s:1154 4.06s:1166 4.31s:1178 4.56s:1192 4.82s:1204
+15:39:47   after release: mode=FLT course=81 alt=1214 alt_ref=B speed=150
+15:39:52   DOWN held 5.00s: 0.01s:1214 0.26s:1214 0.51s:1214 0.77s:1210 1.02s:1206 1.27s:1202 1.52s:1198 1.77s:1194 2.03s:1192 2.28s:1188 2.53s:1182 2.78s:1170 3.03s:1156 3.29s:1144 3.54s:1132 3.79s:1118 4.05s:1106 4.30s:1094 4.55s:1082 4.80s:1068
+15:39:53   after release: mode=FLT course=81 alt=1058 alt_ref=B speed=150
+T2: correct the baro target to actual MSL (closed-loop hold)
+15:39:53   start: target=1058 actual=1092 error=-34 m
+15:39:53   holding UP
+15:39:55   released after 1.90s: reached tolerance
+15:39:55   target while held: 0.0s:1058 0.5s:1058 1.0s:1066 1.5s:1074
+15:39:55   mean rate while held: 11.6 m/s
+15:39:56   after release: mode=FLT course=81 alt=1080 alt_ref=B speed=150  actual msl=1089.4204101562
+15:40:16   20s trace (actual msl / target): 0s:1089/1080 2s:1076/1080 4s:1073/1080 6s:1074/1080 8s:1081/1080 10s:1084/1080 12s:1081/1080 14s:1081/1080 16s:1081/1080 18s:1080/1080
+T4: centre press, menu OPEN, 0.15s pulse
+15:40:16   before: mode=FLT course=81 alt=1080 alt_ref=B speed=150
+15:40:17   after pulse: mode=FLT course=81 alt=328 alt_ref=R speed=150
+15:40:17   RESULT: open-menu centre pulse DID toggle ALT REF
+15:40:17   restoring baro: close menu, centre tap, reopen
+15:40:20   after restore: mode=FLT course=81 alt=1080 alt_ref=B speed=150
+T2: correct the baro target to actual MSL (closed-loop hold)
+15:40:20   start: target=1080 actual=1084 error=-4 m
+15:40:20   within tolerance -- no hold needed
+15:40:40   20s trace (actual msl / target): 0s:1084/1080 2s:1082/1080 4s:1082/1080 6s:1081/1080 8s:1081/1080 10s:1080/1080 12s:1080/1080 14s:1080/1080 16s:1080/1080 18s:1080/1080
+T5: keep-open -- close the menu by hand; the probe reopens it
+15:40:53   reopen #1: closed seen for 3 frames (0.011s), toggling open
+15:40:53   reopen #1: reads open 0.006s after the toggle (0.017s after close)
+15:40:54   reopen #2: closed seen for 3 frames (0.011s), toggling open
+15:40:54   reopen #2: reads open 0.005s after the toggle (0.016s after close)
+15:40:57   reopen #3: closed seen for 3 frames (0.012s), toggling open
+15:40:57   reopen #3: reads open 0.005s after the toggle (0.017s after close)
+15:41:00   reopen #4: closed seen for 3 frames (0.012s), toggling open
+15:41:00 *** t=133.1: control taken back -- held press released, probe idle ***
+```
+
+### What it shows — not yet explored
+
+- **The sequence works end to end.** Takeover on 852 → centre tap at +0.5 s (menu closed) → menu
+  open → wild target found → corrected by a held press → the AI then holds within about ±10 m of
+  its target for 20 s (both T2 traces).
+- **The wild barometric target reproduced, and the same size:** +742 m (1662 against 920). The
+  first re-fly had 1658 against 921, about +737. Ground elevation was about 765 m both times
+  (MSL − AGL). *Possibly* the bad target scales with terrain height; two samples at one place
+  cannot say.
+- **The correction took 14 s, and the AI climbed meanwhile.** Actual MSL went 920 → 1050 while
+  the target came down, so the AI ended up holding about 1058, some 140 m above the altitude it
+  was handed. "Correct" here meant "match wherever the aircraft is when the loop finishes".
+- **A held press has a profile, the same up and down (T3):**
+
+  | while held | change per 0.25 s | rate |
+  |---|---|---|
+  | 0 – 0.5 s | none | dead time |
+  | 0.5 – 2.3 s | 4 m | about 16 m/s |
+  | after about 2.5 s | 12 – 14 m | about 50 m/s |
+
+  After release the value moved on by about one more step (1204 → 1214 at the fast rate), so a
+  release at "within 20 m" lands close; both corrections finished inside tolerance.
+- **The open-menu centre press works with a real 0.15 s pulse (T4):** B → R, and the radar target
+  it set (328 m) is close to the AGL at the time. So P0-5's failure was our same-frame press.
+  BL-16's later voice "radar/barometric" toggle is reachable.
+- **Toggling back R → B in flight gave a *correct* barometric target** (1080 against 1084). The
+  wild value has so far appeared only on the first toggle after takeover.
+- **Keep-open works:** each hand-close was seen in 3 frames and the menu read open again about
+  17 ms after it closed. The fourth close coincided with the pilot taking control back.
