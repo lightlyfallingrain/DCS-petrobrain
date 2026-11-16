@@ -23,7 +23,13 @@ mystery") -- diagnostic only, so a recurrence of either open question
 one) is directly visible on the wire rather than re-inferred from a
 probe. All four are optional on the wire (missing -> `None`), so a line
 pushed by an older `Export.lua` that does not yet send them still parses
-cleanly."""
+cleanly.
+
+`seat`/`cam_fwd_m` are additive too (fix/ai-wheel-pilot-seat-gate): the
+seat `Export.lua` placed the player in from the camera (`"pilot"`/
+`"operator"`/`None` not known yet) and the raw forward camera offset
+behind it -- diagnostic, so a live flight shows whether the seat gate
+reads what the cockpit shows. Optional on the wire like the four above."""
 
 from __future__ import annotations
 
@@ -55,6 +61,8 @@ class AiPilotWheelState:
     arg_952: float | None
     takeover_stage: str | None
     correction_path: str | None
+    seat: str | None
+    cam_fwd_m: float | None
 
     @staticmethod
     def from_dict(
@@ -85,6 +93,7 @@ class AiPilotWheelState:
             "apw_last_press",
             "apw_takeover_stage",
             "apw_correction_path",
+            "apw_seat",
         ):
             raw = data.get(field)
             if raw is None:
@@ -98,7 +107,7 @@ class AiPilotWheelState:
                 )
 
         optional_numbers: dict[str, float | None] = {}
-        for field in ("apw_arg852", "apw_arg952"):
+        for field in ("apw_arg852", "apw_arg952", "apw_cam_fwd_m"):
             raw_number = data.get(field)
             if raw_number is None:
                 optional_numbers[field] = None
@@ -126,6 +135,8 @@ class AiPilotWheelState:
             arg_952=optional_numbers["apw_arg952"],
             takeover_stage=optional_strings["apw_takeover_stage"],
             correction_path=optional_strings["apw_correction_path"],
+            seat=optional_strings["apw_seat"],
+            cam_fwd_m=optional_numbers["apw_cam_fwd_m"],
         )
 
     @staticmethod
@@ -156,4 +167,6 @@ class AiPilotWheelState:
             "apw_arg952": self.arg_952,
             "apw_takeover_stage": self.takeover_stage,
             "apw_correction_path": self.correction_path,
+            "apw_seat": self.seat,
+            "apw_cam_fwd_m": self.cam_fwd_m,
         }
