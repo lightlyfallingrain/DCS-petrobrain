@@ -136,3 +136,88 @@ test and the full Lua-backed test suite (139 tests across the 7 affected files, 
 rather than skipped) are the mechanical proof for exactly that claim, and the one normalized handler
 I diffed in full (`handle_sight_target_command`) showed zero logic drift. Did not perform the live
 check flight (Stage 8) — that is the user's own acceptance step per the plan, not the Reviewer's.
+
+---
+
+## Re-review (fix commit `c304dcc5`, diffed against `f32e3248`)
+
+Worktree addressing: this worktree's `c7a5c8f0` was a strict ancestor of the stated tip
+`15bdb1d9` with a clean tree, so fast-forwarded (`git merge --ff-only`) rather than needing a
+snapshot. `15bdb1d9` (an implementer-memory-only commit after `c304dcc5`) carries no code change.
+
+**Required fix — confirmed done.** `commands.lua`'s `local handlers = {}` table build
+(`aircraft-layer/dcs-export/Petrobrain/commands.lua:75-86`) is now three `if <module> ~= nil then
+... end` guards around `petrovich`/`effectors`/`sight`'s entries, the same posture as the loader's
+own `call_if`. `grep` for every `petrovich.`/`effectors.`/`sight.` reference in the file
+(lines 77, 80-82, 85, 117) confirms no unguarded access remains outside those three blocks — the
+`effectors.admit_read(...)` call at line 117 the review named explicitly is now
+`effectors ~= nil and effectors.admit_read(...)`, short-circuiting before the index. A module
+failing to load now simply contributes no entries to `handlers`, which `poll_command_socket`
+already treats as an unknown op (logged, dropped, never fatal) — matching the plan's own stated
+isolation goal.
+
+`tests/test_commands_lua.py` is genuine, not decorative:
+- It extracts the *real* `handlers` table build (`_extract_handlers_block`, sliced by literal
+  start/end markers since it's not a function) and the *real* `poll_command_socket`
+  (`_extract_lua_function`) straight out of `commands.lua`, runs them in `luajit` against a fake
+  `command_socket`/fake `petrovich`/`effectors`/`sight` doubles — the same `_extract_lua_function`
+  technique `test_ai_pilot_wheel_lua.py` already uses, not a new mechanism.
+- `test_other_ops_still_dispatch_when_effectors_missing` asserts the actual required-fix property:
+  with `effectors` left as an undefined global (the exact shape `load_module` leaves a failed
+  load in), `petrovich`/`sight`'s ops still dispatch and all three `effectors`-owned ops (including
+  `read_args`, which also calls `admit_read`) are silently dropped rather than crashing the poll.
+- `test_mutation_unguarded_table_build_crashes_instead` is a genuine counterfactual: it runs the
+  **pre-fix literal shape** (`local handlers = { cockpit_switch = effectors.handle_... }` with
+  `effectors` undefined) through the same interpreter and asserts a non-zero exit with `"nil"` in
+  stderr — i.e., it independently reproduces the exact crash the fix removes, not just a passing
+  assertion with nothing load-bearing behind it. I re-ran this one directly to confirm it demonstrates
+  the real Lua error rather than an artifact of the harness:
+
+  ```
+  $ luajit t.lua   # local handlers = { cockpit_switch = effectors.handle_cockpit_switch_command }
+  luajit: t.lua:1: attempt to index global 'effectors' (a nil value)
+  ```
+
+  Matches the test's own assertions (`returncode != 0`, `"nil"` in stderr).
+- `test_every_op_dispatches_when_every_module_present` pins the unchanged-when-nothing-missing
+  case, including the modified `elseif op == "read_args"` guard line, dispatch order unchanged.
+
+**Main-loop decision — version bump, confirmed consistent.** `EXPORT_SCRIPT_VERSION` and
+`EXPECTED_EXPORT_VERSION` both moved `"2026-11-16"` → `"2026-11-16b"` in the same commit
+(`Export.lua`, `collector/server.py`), each with a dated history line explaining why ("...16b")
+rather than just restating U1. `test_export_lua_constants_parity.py::
+test_export_script_version_matches_collector_expectation` reads both sides by name and passes —
+confirmed by running it, not just reading the assertion. This isn't a required fix (the Reviewer's
+prior "Optional Refinements" note on this point was explicit that U1's own decision stands); it's
+recorded here only to confirm the bump was done cleanly and the parity test still holds.
+
+**`implementation.md`'s "Comments pruned" correction — verified accurate.** It now says one of the
+four removed ordering-note mentions was in `push_payload_state` (moved to `telemetry.lua`, not
+`sight.lua`), and that the two real `sight.lua` occurrences (`push_slew_trace`, `run_sight_servo`)
+had their whole ordering note removed rather than just the two named mentions. `grep` confirms
+`push_payload_state` lives in `telemetry.lua` (not `sight.lua`), and both `push_slew_trace` and
+`run_sight_servo` exist in `sight.lua` as named — matching the corrected claim.
+
+**Mechanical checks, run in this worktree (fresh `.venv`, no prior one existed):**
+
+```
+luac5.1 -p  — Export.lua + all 8 Petrobrain/*.lua files individually: all pass
+ruff format --check src tests   — 80 files already formatted
+ruff check src tests            — All checks passed!
+cd aircraft-layer && .venv/bin/mypy src   — Success: no issues found in 27 source files
+pytest tests -q                 — 795 passed in 73.46s   (792 + the 3 new test_commands_lua.py tests)
+pytest tests -v | grep -E " (SKIPPED|FAILED|ERROR)\b"   — no matches
+pytest tests/test_commands_lua.py -v   — all 3 PASSED explicitly (confirms luajit was found and
+  used, not skipped for lack of a Lua interpreter on PATH)
+```
+
+No new scope drift, no leftover debug code, no new dependency. The fix is narrowly targeted at the
+required issue plus the two accompanying main-loop/doc items named in the task, nothing more.
+
+### Verdict (re-review)
+APPROVED
+
+### Review Confidence (re-review)
+Full read of the fix diff (`commands.lua`, `Export.lua`, `collector/server.py`,
+`test_commands_lua.py`, `implementation.md`'s changed sections) plus independent reproduction of
+the counterfactual's Lua error and a full mechanical-check run, not a re-read of the whole feature.
