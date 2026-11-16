@@ -233,3 +233,174 @@ line, confirmed `test_unpark_before_the_next_tick_clears_the_pending_
 nudge` failed for the stated reason (`pending_after_unpark` read back
 `"true"`), restored the line, confirmed the file's checksum matched the
 pre-mutation value exactly (not just "tests pass again").
+
+---
+
+## Revision 2026-11-16 — takeover and stabilisation (replaces Batch A's Stage P1)
+
+Implements `plans/flight-control/plan.md`, "Revised 2026-11-16 — takeover after the Batch A
+flights" → "Revised Stage P1 — takeover and stabilisation" and its "Amended 2026-11-16"
+sub-section, in full. Worktree started at `993be9a5` (after a mid-task tip correction from
+58330556 to 993be9a5 — docs-only `main` merge; `git merge --ff-only` from a clean, ancestor HEAD,
+no conflict).
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Export.lua` — the whole takeover/correction state machine, replacing
+  Batch A's one-shot nudge outright (plan point 8):
+  - **Detection (point 1)**: `ai_pilot_park_rising(prev_parked, stick_park_arg)` dropped its
+    `pedals_park_arg` parameter — arg 952 is no longer read for detection (it is arg 852's own
+    mirror, not a second park sensor), kept only as a diagnostic value on the status push.
+  - **Handover snapshot (amendment point 1)**: on the rising edge, `LoGetAltitudeAboveSeaLevel()`
+    is read and stored as `ai_pilot_takeover.handover_altitude_m` in the same frame — this, not
+    the first post-open read, is the correction goal throughout.
+  - **Toggle + open (points 2/3)**: `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` (0.5 s) after the rising
+    edge, a same-frame blind centre tap (menu closed) then an immediate menu-open tap, both via
+    one shared `ai_pilot_tap30(cmd)` helper (see "Local-count ceiling" below for why one helper,
+    not two). The command menu's keep-open/reopen check (`MODE_READ_SETTLE_S` = 1.0 s settle
+    window on an all-`nil` overlay read) runs every 5 Hz tick for as long as the belief
+    `ai_pilot_takeover.menu_open` is true, independent of the takeover sequence's own stage.
+  - **Correction decision (amendment point 5)**: `ai_pilot_decide_correction`, run once the first
+    post-open overlay read lands. `"none"` if the held altitude is already within
+    `AI_PILOT_ALT_TOLERANCE_M` of the handover snapshot. Otherwise: **quick path** (eligibility
+    `ai_pilot_quick_path_eligible(agl_m)`, `AI_PILOT_QUICK_PATH_MAX_AGL_M` = 700.0 m) issues a
+    `SHORT_PULSE_S` (0.15 s) centre pulse, reads the reference one tick later
+    (`ai_pilot_takeover.correction_substage == "quick_read1"`); if it now reads `"R"`, a second
+    pulse (`"quick_read2"`) and the takeover resolves without ever opening a hold (trusted per the
+    plan's own "then go on to step 6's checks" — no further tolerance check after the second
+    pulse). If it still reads `"B"` after the first pulse, falls back to the **two-phase hold**
+    (`ai_pilot_begin_hold_phase`): phase 1 chases the aircraft's own live altitude (re-read every
+    tick via `ai_pilot_actual_altitude_m` against whichever reference is currently displayed) to
+    stop the climb, phase 2 (entered once phase 1 releases or is skipped) chases the fixed
+    handover snapshot. Either phase is skipped outright if already within tolerance.
+    `ai_pilot_check_hold_convergence` releases the instant the held value reads within tolerance
+    of that phase's own target.
+  - **Press shapes**: `ai_pilot_correction_direction(held_m, target_m)` (pure, replaces
+    `ai_pilot_should_nudge_altitude` outright per plan point 8) returns `AI_WHEEL_UP`/`AI_WHEEL_
+    DOWN`/`nil`; `ai_pilot_open_hold(cmd, t)` opens a hold in the decided direction and arms
+    `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` (60 s) as a safety ceiling on the same shared
+    per-frame deadline slot (`ai_wheel_pending_release_t`/`ai_wheel_pending_cmd`) the quick-path
+    pulses also use — one slot is enough since at most one timed press is ever open at a time.
+    Never a generic `press(direction, duration)` entry point (point 9/E-P6): `ai_pilot_open_hold`'s
+    `cmd` is restricted to the two altitude directions by its one caller, and no path can reach
+    `AI_WHEEL_LEFT`/`AI_WHEEL_RIGHT` (removed, see below) or `WHEEL_RIGHT`.
+  - **Unpark (point 6)**: `run_ai_pilot_wheel`'s unpark branch releases any open press the same
+    frame, closes the command menu if this sequence opened it, and drops every takeover field
+    (`ai_pilot_takeover` table reset wholesale) — nothing resumes on the next park.
+  - **Status push (point 7)**: `push_ai_pilot_wheel_state` gained `apw_arg852`/`apw_arg952`
+    (raw diagnostic park-arg readings) and `apw_takeover_stage`/`apw_correction_path`.
+  - `EXPORT_SCRIPT_VERSION` bumped `"2026-11-15b"` → `"2026-11-16"` — non-additive (`apw_
+    last_press`'s own vocabulary changed; a collector built against the old shape would
+    misinterpret it), per this file's own version-bump convention, not just because fields were
+    added.
+- `aircraft-layer/src/collector/server.py` — `EXPECTED_EXPORT_VERSION` bumped to match, same
+  commit.
+- `aircraft-layer/src/schema/ai_pilot_wheel.py` — `AiPilotWheelState` gained `arg_852`/`arg_952`
+  (`float | None`, validated as number-or-null) and `takeover_stage`/`correction_path`
+  (`str | None`); all four optional on the wire (missing → `None`), so an older `Export.lua`'s
+  line still parses.
+- `body-layer/src/belief/ai_pilot_wheel.py` — `ParkedFlightState` gained `raw_arg_852`/
+  `raw_arg_952`/`takeover_stage`/`correction_path` as read-only diagnostic mirrors (plan point 7:
+  "and any body-layer consumer that mirrors the wire"); `advance_parked_flight_state` parses them
+  via a new `_as_optional_float` (JSON numbers, not numeric strings — `bool` excluded explicitly
+  since `isinstance(True, int)` is true in Python). Pruned the module's own stale comment
+  reference to `AI_PILOT_NUDGE_EPSILON_M` (renamed in `Export.lua`) while touching this file, per
+  "Prune the comment you are standing next to."
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py` — rewritten. Removed: the pedals-alone-triggers
+  rising-edge test (952 is no longer read for detection) and every test of
+  `ai_pilot_should_nudge_altitude`/the old one-shot-nudge integration scenario (both gone from
+  production, per plan point 8). Added: `ai_pilot_correction_direction`/`ai_pilot_quick_path_
+  eligible` pure-function tests, and a `TestTakeoverSequence` class exercising the full state
+  machine end to end against the `GetDevice` mock (detect → toggle → open → each of the three
+  correction paths → unpark), mirroring the takeover rehearsal probe's own steps but against
+  production code.
+- `aircraft-layer/tests/test_ai_pilot_wheel_api.py` — `AiPilotWheelState` construction sites and
+  expected `to_api_dict()`/endpoint-response dicts extended with the four new fields; added a
+  parse-error test for a non-number `apw_arg852`.
+- `body-layer/tests/test_ai_pilot_wheel.py` — added a test confirming the four new fields parse
+  through when present and default to `None` when absent from an older-shaped line, plus a
+  `bool`-is-not-a-number regression test for `_as_optional_float`.
+
+### Tests Added
+
+- `TestAiPilotCorrectionDirection` (4 tests) — within tolerance → `nil`; above tolerance, held
+  above/below target → `AI_WHEEL_DOWN`/`AI_WHEEL_UP`; a missing reading on either side → `nil`.
+- `TestAiPilotQuickPathEligible` (3 tests) — below/at-or-above `AI_PILOT_QUICK_PATH_MAX_AGL_M`;
+  unreadable AGL.
+- `TestAiPilotParkRising` — updated for the dropped `pedals_park_arg` parameter; a `nil` reading
+  is not parked (the old pedals-alone test removed, since pedals alone can no longer trigger
+  anything).
+- `TestTakeoverSequence` (7 tests): detect→toggle→open resolving to `"none"`; the two-phase hold
+  end to end (phase 1 against live altitude, phase 2 against the handover snapshot, both via
+  convergence-driven release); phase 1 skipped when already within tolerance of live altitude
+  (still needing phase 2); the quick path succeeding (two pulses, never opens `AI_WHEEL_UP`/
+  `DOWN`); the quick path falling back to the hold when the first pulse is refused; the menu
+  keep-open reopening only after the settle window elapses, not on the first stale tick;
+  unpark releasing an open hold, closing the menu, and dropping all state immediately, with a
+  stale post-unpark read confirmed to no-op.
+- `test_to_api_dict_carries_every_field`/`test_serves_the_latest_sample` (aircraft-layer) and
+  `test_the_takeover_diagnostic_fields_are_parsed_through`/`test_a_boolean_arg_value_is_never_
+  treated_as_a_number` (body-layer) — the four new fields round-trip correctly and a malformed
+  `bool` on `apw_arg852` is never silently read back as `1.0`/`0.0`.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p aircraft-layer/dcs-export/Export.lua`: pass
+- `ruff format --check src tests`: pass (79 files)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `aircraft-layer/`): pass, 27 source files
+- `pytest tests -q`: pass, 765 passed
+
+**body-layer/**
+- `ruff format --check src tests`: pass (204 files)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `body-layer/`): pass, 83 source files
+- `pytest tests -q`: pass, 3284 passed, 4 xfailed (pre-existing, unrelated)
+
+### Notable Discoveries
+
+- **`Export.lua`'s main chunk hit Lua 5.1's hard 200-live-local ceiling** (`luac5.1 -p`: "main
+  function has more than 200 local variables") once this revision's dozen-odd new takeover/
+  correction fields were added as separate module-level locals (the file was already at 193 top-
+  level locals before this change). Resolved by: (1) grouping the new takeover/correction state
+  into **one** table local, `ai_pilot_takeover` — a deliberate, flagged departure from this file's
+  own documented "individual locals, no `apw` table" convention (every field initialised in one
+  place, so there is no forward-reference/hoisting risk, the concern that convention was guarding
+  against); (2) merging `ai_pilot_open_hold_up`/`ai_pilot_open_hold_down` into one `ai_pilot_
+  open_hold(cmd, t)` and `ai_pilot_toggle_reference_blind`/`ai_pilot_toggle_menu` into one
+  `ai_pilot_tap30(cmd)`, both restricted-use, not the forbidden generic `press(direction,
+  duration)` shape; (3) inlining the two-call-site centre-pulse press instead of its own function;
+  (4) removing the now-genuinely-dead `LONG_PRESS_HOLD_S` constant (its one user, the old one-shot
+  nudge function, was removed by this same revision) and the unused, reserved-for-a-later-stage
+  `AI_WHEEL_LEFT`/`AI_WHEEL_RIGHT` declarations (a later stage that needs heading left/right
+  declares them when it does). Final count: exactly 200. **This is a real constraint on every
+  future stage of this plan (P2–P6)** — any new module-level local in `Export.lua` from here on
+  should budget against it, not assume headroom.
+- **Three of the new Lua constants** (`AI_PILOT_REFERENCE_TOGGLE_DELAY_S`, `MODE_READ_SETTLE_S`,
+  `SHORT_PULSE_S`, `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S`, `AI_PILOT_QUICK_PATH_MAX_AGL_M` —
+  five, not three) are behaviour-affecting by the root `CLAUDE.md` test (a different value changes
+  what Petrovich does: whether/when he presses, which correction path he takes) but have no
+  tuning mechanism available in `Export.lua`. Declared as ordinary named locals with explanatory
+  comments, per root `CLAUDE.md`'s own instruction for outside body-layer; flagged here rather
+  than improvising a second loader.
+- **A floating-point exact-equality trap in my own Lua integration tests**, not production code:
+  `0.8 + 0.15` does not reliably equal the literal `0.95` in Lua's double-precision arithmetic, so
+  a test driving the per-frame deadline-release check with `run_ai_pilot_wheel(0.95)` sometimes
+  missed the release by one ULP. Fixed by calling one tick later (`0.96`) rather than on the exact
+  nominal deadline — realistic anyway, since production is driven by DCS's own frame clock, never
+  landing exactly on a computed deadline.
+- **One Implementer decision not explicitly in the plan**: whether the quick path's second pulse
+  (`"quick_read2"`) re-verifies tolerance before resolving. The plan's own wording ("then go on to
+  step 6's checks") was read as "nothing further to check here," matching the probe's own measured
+  evidence that a second baro switch recalculates a correct target — implemented with no
+  tolerance re-check after the second pulse. If a live flight shows this to be wrong, the fix is
+  localized to the `"quick_read2"` branch of `update_ai_pilot_wheel_overlay`.
+- **Phase 1's hold-release comparison reuses `ai_pilot_actual_altitude_m`** (compare held against
+  whichever reference the overlay currently displays) rather than hard-coding MSL, even though the
+  reference is expected to stay `"B"` throughout a hold (the quick path, the only path that ever
+  touches the reference, always resolves back to `"B"` before falling through to a hold). Not
+  defended by an assertion that the reference is `"B"` — if it is ever something else mid-hold,
+  phase 2's comparison against the handover snapshot (always MSL) would silently mix units. No
+  case has been observed; flagged as the same posture as the plan's own "the AI always starts on
+  radar" residual risk, not re-opened as a question.
