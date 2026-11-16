@@ -299,3 +299,7 @@ document and `plans/brain-tool-calls/alignment.md`'s 2026-11-16 goal check, **af
 
 **Re-ordered the same day:** *"schedule AC-B12 before BR-2"*. BR-2's re-plan now waits for
 `[[AC-B12]]` (splitting Export.lua into modules) as well: BL-16 takeover fix → AC-B12 → BR-2.
+
+**Dequeued later the same day:** *"dequeue BR-2"*. BR-2's re-plan is **no longer queued** after
+AC-B12 or anything else; it starts only on the user's word. Exploring stays closed and its results
+stand (this document, and the goal check on `feature/br2-free-text`).
