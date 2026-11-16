@@ -47,6 +47,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B11]] — unbounded `Content-Length` read on every `TelemetryAPIServer` POST handler
 - [[AC-B12]] — split Export.lua into loaded modules (Lua's 200-local ceiling), and read only what
   Petrobrain needs; before BL-16 Stage P2
+- [[AC-B13]] — `LuaExportStop` does not release an open AI-pilot-wheel press (low/low; fold into
+  AC-B12)
 
 ## Keeping this current
 
