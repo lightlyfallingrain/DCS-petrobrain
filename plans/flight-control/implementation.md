@@ -492,3 +492,457 @@ file's `sha256` matched the pre-mutation value exactly before running the full s
   the prior `implementation.md` entry. Corrected in that entry rather than left standing, per the
   task's own instruction, so nothing downstream cites the plan for a sentence the plan never
   contained.
+
+---
+
+### Implementation Summary — Stage P2a/P2b (2026-11-16)
+
+Built BL-16 mode 2's goal channel (Stage P2a: heading/altitude/speed goals, the rotation mechanism)
+and HVRT translate (Stage P2b: translate hold/redirect/clear/timeout, the 2 m step) end to end
+across all three subprojects — body-layer actions/rotation/dispatch, the aircraft-layer wire
+(`POST /command/ai_pilot_goal`) and `Export.lua`'s per-tick press loop, and the audio-adapter
+vocabulary/slot parsers that reach `crew_console.handle_command`. Seven commits, one per logical
+layer, on `worktree-agent-a4c6aa4bfde4b4705r2`.
+
+### Files Changed
+
+**body-layer — the goal-channel core (`belief/ai_pilot_wheel.py`)**
+- `AiPilotWheelGoal` (new dataclass): `heading_target_deg`/`altitude_target_m`/
+  `altitude_target_ref`/`speed_target_kmh`/`active_param`/`active_since_sim`/`pending_order`/
+  `goal_seq`/`hvrt_direction`.
+- `request_goal`/`_with_target`/`_has_target`/`_target_field` — the queue-vs-preempt rule
+  (queue at the back with no target yet; replace in place, bumping `goal_seq` only if active).
+- `set_parked_heading`/`set_parked_altitude`/`set_parked_speed`/`set_hvrt_direction`/
+  `clear_hvrt_direction` — the five actions; `set_parked_altitude` returns the achieved
+  reference (`resolve_altitude_reference`, the 700 m radar cap) for the readback.
+- `nearest_speed_step`/`step_speed`/`altitude_ref_from_letter` — small pure helpers the
+  readback and `crew_console` handlers both need.
+- `decide_ai_pilot_wheel` — the one "when": promotes the queue front when idle, rotates the
+  active parameter after `AI_PILOT_GOAL_SLICE_S`, clears a settled parameter, reconciles an
+  HVRT safety-timeout release, and never promotes while `takeover_stage is not None`.
+- `ParkedFlightState` gains `goal: AiPilotWheelGoal | None` (was `Any`) and `lua_goal_progress`/
+  `lua_goal_seq` (read-only mirrors of `Export.lua`'s own goal-tick report).
+- New tunables: `AI_PILOT_GOAL_SLICE_S` (3.0), `AI_PILOT_HEADING_TOLERANCE_DEG` (5.0),
+  `AI_PILOT_SPEED_STEPS_KMH` (corrected to the measured 120/150/200/250, dropping the unmeasured
+  160), `AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M` (700.0, a third duplication of the same physical
+  limit — see that constant's own comment). `AI_PILOT_SPEED_MAX_SENTINEL_KMH` is a plain
+  protocol constant, not a tunable (root `CLAUDE.md`'s own test: a different value would not
+  change what Petrovich does).
+
+**aircraft-layer — the wire and Export.lua**
+- `src/collector/command_sender.py` — `CommandSender.send_ai_pilot_goal` (plain `json.dumps`,
+  not `_format_fixed_point`: no near-zero-exponent risk on this channel).
+- `src/api/server.py` — `POST /command/ai_pilot_goal` (shape validation, bounds on every
+  numeric field, closed vocabularies for `param`/`altitude_target_ref`/`hvrt_direction`/
+  `hvrt_step`).
+- `src/schema/ai_pilot_wheel.py` — `AiPilotWheelState` gains `goal_progress`/`goal_seq`
+  (defaulted, so the one pre-existing construction site in the test file did not need updating
+  for the dataclass itself; its `to_api_dict` assertion did, additively).
+- `dcs-export/Petrobrain/ai_pilot_wheel.lua` — `handle_ai_pilot_goal_command`; the per-5 Hz-tick
+  dispatcher (`ai_pilot_goal_tick`, mode-cycle-then-press bounded by `MODE_CYCLE_MAX_ATTEMPTS`);
+  dedicated heading (`AI_WHEEL_LEFT`/`_RIGHT`, long hold)/altitude (reuses `ai_pilot_correction_
+  direction`, plus its own reference-toggle pulse) hold-and-poll loops on a **separate**
+  pending-release pair from the takeover correction's own; a speed tap loop (short, inner-ring,
+  same buttons as altitude's long-hold outer ring); the HVRT translate hold/redirect/clear/
+  timeout loop (`ai_pilot_goal_tick_hvrt`); `hvrt_step`'s one-shot tap, deduplicated by comparing
+  the incoming `goal_seq` against the stored one. `on_stop`/the unpark branch release and reset
+  the new state proactively (same `AC-B13` gap class, closed before it recurs).
+- `dcs-export/Petrobrain/commands.lua` — registers `ai_pilot_goal`, guarded on `ai_pilot_wheel ~=
+  nil` like every other handler-owning module.
+- Local count: 37 → 60 (`grep -cE '^local ' ai_pilot_wheel.lua`, before/after) — at AC-B12's own
+  "~60" target, not over it, 30% of the 200 hard ceiling.
+
+**body-layer — crew_console dispatch and the body.py glue**
+- `belief/crew_console.py` — handlers for `level_flight`/`turn_heading`/`turn_heading_relative`/
+  `set_speed`/`speed_step`/`set_altitude`/`altitude_step`/`hold_altitude`/`level_off` and
+  `hvrt_translate_left`/`_right`/`_forward`/`_back`/`hvrt_hold`/`hvrt_step_up`/`_down`; each sets
+  one of four new one-shot transition fields (`ai_pilot_goal_transition`/`ai_pilot_level_flight_
+  transition`/`ai_pilot_hvrt_transition`/`ai_pilot_hvrt_step_transition`) for `body.py` to apply,
+  matching `observ_transition`'s own division of labour. `parked_flight_state` is a new
+  read-only state param, refreshed every poll. `drain_ai_pilot_wheel_speech` speaks "Unable, not
+  ready." once per exhausted mode-cycle attempt (edge-triggered on `lua_goal_progress ==
+  "mode_blocked"`). New `render_unable("NOT_READY")` reason (`belief/speech.py`), the pilot's own
+  exact words.
+- `src/body.py` — `_apply_ai_pilot_wheel_goal`: applies the four transitions to `ParkedFlightState.
+  goal`, runs `decide_ai_pilot_wheel` (deriving `settled_param`/`hvrt_released_timeout` from
+  `lua_goal_progress`), and sends `write_ai_pilot_goal` on a `goal_seq` change — the same
+  "send on change" posture `write_sight_target`'s call site already has. `hvrt_step` always sends
+  with a freshly-bumped `goal_seq` (its own one-shot-trigger contract). Unparking drops the goal
+  and the send cursor (E-P10). New `ConsolePerceptionRunner.ai_pilot_goal_last_sent_seq` field.
+- `src/aircraft_client.py` — `write_ai_pilot_goal` (raise-on-failure, mirrors `write_sight_
+  target`); `hvrt_step` param added in the same commit `command_sender.py` gained it.
+
+**audio-adapter — the voice vocabulary**
+- `src/vocabulary.py` — 16 new tokens, all voice-only (no F10 menu involvement in BL-16 at all).
+  New slot parsers: `parse_heading_deg` (digit-by-digit or an 8-point compass word via
+  `SECTOR_WORD_DEGREES`, no 5° checksum — the AI wheel's own hold has none), `parse_turn_
+  relative`, `parse_speed_value` ("max" or digits, **immediate-token-only** so "speed up" can
+  never misresolve as a numeric request), `parse_speed_step_direction`, `parse_altitude_value`
+  (optional trailing `radar`/`barometric`), `parse_altitude_step`. `_read_digits_after`
+  generalises `parse_bearing`'s own digit-concatenation convention to any anchor word.
+- `src/command_matcher.py` — one verb-anchored branch per new slotted token, ordered before the
+  generic phrase table like every existing one. `_HVRT_BARE_WORD_TOKENS` + an exact
+  single-word check, ahead of every fuzzy branch (see Notable Discoveries).
+
+### Tests Added
+
+- `body-layer/tests/test_ai_pilot_wheel.py` — `TestRequestGoal`/`TestSetParkedHeading`/
+  `TestNearestSpeedStep`/`TestSetParkedSpeed`/`TestStepSpeed`/`TestResolveAltitudeReference`/
+  `TestSetParkedAltitude`/`TestHvrtDirection`/`TestDecideAiPilotWheel`/`TestAltitudeRefFromLetter`/
+  `TestAiPilotGoalRequest`/`TestAiPilotWheelGoalChannelFields` (the latter in
+  `aircraft-layer/tests/test_ai_pilot_wheel_api.py`) — every pure function and the rotation
+  mechanism's promote/demote/preempt/settle/takeover-gate sequences.
+- `aircraft-layer/tests/test_ai_pilot_goal.py` — `send_ai_pilot_goal` wire format (incl.
+  `hvrt_step`) and the `POST /command/ai_pilot_goal` endpoint's validation/bounds/503/500 paths.
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py` — new `TestAiPilotGoalModeReady`/
+  `TestAiPilotGoalHeadingDirection`/`TestAiPilotGoalAltitudeRefMismatch`/
+  `TestAiPilotGoalSpeedTapDirection`/`TestAiPilotGoalHvrtDirectionCmd` (pure decisions) and
+  `TestAiPilotGoalTick`/`TestHandleAiPilotGoalCommand`/`TestHandleAiPilotGoalCommandHvrtStep`/
+  `TestAiPilotGoalTickHvrt` (integration, against a real Lua interpreter) — mode-cycle-then-press,
+  the `mode_blocked` bound, the altitude reference toggle, speed taps, HVRT hold/redirect/
+  timeout, and `hvrt_step`'s one-shot-per-`goal_seq` behaviour. Extended the existing
+  `TestOnStop` with the new goal/HVRT release paths.
+- `body-layer/tests/test_crew_console_ai_pilot_wheel.py` (new file) — every handler's readback
+  and transition value, the "unable, not ready" precondition paths, and the reset-at-top-of-
+  dispatch convention.
+- `body-layer/tests/test_body_ai_pilot_wheel.py` (new file) — `_apply_ai_pilot_wheel_goal`'s own
+  composition: transition application, the settle/rotate/send sequence, `hvrt_step`'s bumped
+  `goal_seq`, the unpark reset, and the no-ownship-sample-yet no-op.
+- `audio-adapter/tests/test_bl16_stage_p2_vocabulary.py` (new file) — every new slot parser and
+  `match_transcript` branch, plus the HVRT bare-word collision fix.
+- `body-layer/tests/test_speech.py` — `render_unable("NOT_READY")`.
+
+### Checks
+
+**body-layer/**
+- `ruff format --check src tests`: pass (206 files already formatted)
+- `ruff check src tests`: pass except one **pre-existing, unrelated** `I001` finding in
+  `tests/test_bl_b104_association_scenarios.py` (confirmed via `git log` — last touched
+  `951a32e1`, not this round; not in this round's diff)
+- `mypy src` (from inside `body-layer/`): pass, no issues (83 source files)
+- `.claude/scripts/fast-tests.sh body-layer`: **2532 passed, 4 xfailed** (4 xfailed pre-existing)
+
+**aircraft-layer/**
+- `ruff format --check src tests`: pass (81 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `aircraft-layer/`): pass, no issues (27 source files)
+- `luac5.1 -p` on every `dcs-export/*.lua` and `dcs-export/Petrobrain/*.lua`: pass
+- `.claude/scripts/fast-tests.sh aircraft-layer`: **380 passed**
+
+**audio-adapter/**
+- `ruff format --check src tests`: pass (32 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `audio-adapter/`): pass, no issues (16 source files)
+- `PYTHONPATH=src pytest tests -q` (full suite, not just fast-tests): **438 passed, 2 skipped**
+  (the 2 skips are the pre-existing live-Piper/whisper-binary env-var gates)
+
+### Notable Discoveries
+
+- **Two internal plan inconsistencies, resolved rather than escalated (both local, reversible —
+  Escalation Rules):**
+  1. The vocabulary table names one token (`hvrt_translate`/`hvrt_step`) for several bare
+     direction words, but the generic phrase match carries no information beyond the matched
+     *token* once several phrases share one, and the plan's own "no slot parser needed" rules out
+     adding one. Implemented as one enumerated token per word instead
+     (`hvrt_translate_left`/`_right`/`_forward`/`_back`, `hvrt_step_up`/`_down`), the same shape
+     `_RELATIVE_SCAN_TOKENS` already uses for bare direction words. Player-facing behaviour (the
+     readback table) is unchanged; only the internal token space differs from the plan's literal
+     wording.
+  2. The "Amended 2026-11-15" vocabulary note says HVRT dispatch is gated on `ai_mode ==
+     "HVRT"` exactly, treating anything else as unmatched; the later, more specific 2026-11-16
+     decision says a bare direction word reaches from *hover* (`HVR`) too, cycling into HVRT
+     automatically, and answers "unable, not ready" only outside hover entirely — which requires
+     the command to be *heard and answered*, not silently dropped. Implemented the later decision
+     (gate on `ai_mode in ("HVR", "HVRT")`, inside the handler, always returning a line) as
+     authoritative over the earlier note, per this project's "a later decision supersedes an
+     earlier one on the same topic" convention.
+- **A real, measured matcher collision, found and fixed while wiring HVRT's bare words**: a bare
+  "right" fuzzy-anchors onto `_POINT_VERBS`
+  (`difflib.SequenceMatcher(None, "right", "sight").ratio() == 0.8`, above `VERB_FLOOR`) and
+  resolves as `point`'s own `relative` slot (`RELATIVE_WORDS` already contains "left"/"right")
+  before the generic phrase table — where `hvrt_translate_right` lives — is ever reached. Fixed
+  by checking HVRT's seven bare single-word commands as an **exact**, whole-transcript match
+  before any fuzzy branch runs, rather than narrowing `_POINT_VERBS`' own tolerance (which risked
+  regressing its calibrated "look"/"sight" matching for an unrelated reason). This collision
+  predates this round — any bare "right" said for an unrelated reason would already have
+  misresolved to `point` — but was never surfaced because no existing token previously needed a
+  bare "left"/"right" to resolve to anything else.
+- **`hvrt_step` (the 2 m HVRT altitude tap) is named in Stage P2b's own task list
+  ("`hvrt_hold`/`hvrt_step` actions") but absent from the plan's "wire shape" section**, which
+  enumerates only `goal_seq`/`param`/`heading_target_deg`/`altitude_target_m`/`altitude_target_
+  ref`/`speed_target_kmh`/`hvrt_direction`. Implemented as a one-shot field added to the existing
+  `ai_pilot_goal` message (the smallest consistent extension) rather than a new op — acted on
+  exactly once per distinct `goal_seq`, which `body.py`'s own call site is responsible for
+  bumping on every send that carries one. Flagged for review rather than silently built as if the
+  wire shape had always included it.
+- **`level_off`'s own readback is not in the plan's Readbacks table at all** (the table lists
+  `level_flight`/`turn_heading`/`turn_heading_relative`/`set_speed`/`speed_step`/`set_altitude`/
+  `altitude_step`/`hold_altitude`/`hvrt_translate`/`hvrt_hold`/`hvrt_step`, but not `level_off`,
+  even though the vocabulary table lists the token itself). Chose to reuse `turn_heading`'s own
+  readback shape (the resolved heading, digit by digit: "Heading 1 2 0.") since `level_off`'s
+  action *is* a heading goal (freeze at current) — a judgement call, not a plan requirement.
+- **`held_speed` cannot currently distinguish "unknown" from "AI already at MAX"** — `_parse_
+  float` (`advance_parked_flight_state`) returns `None` for the literal overlay string `"MAX"`,
+  so `speed_step("down")` spoken while already at MAX currently reads as "unable, not ready"
+  rather than stepping down from MAX. Documented on `step_speed`'s own docstring as a known gap,
+  not fixed in this stage — the parse-time fix belongs with whichever stage first needs `held_
+  speed` to tell the two apart for its own reasons.
+- **Stage P0-rad (the 700 m radar cap probe) was not flown this round**, per the task's own
+  instruction not to block on it — the "alt ... radar" row's quick-path behaviour in `Export.lua`
+  (reusing the takeover correction's own measured pulse mechanism) is built as designed but
+  remains provisional until that probe (or Flight P2a) confirms it against a target actually
+  above the cap while already on radar.
+- **Three constants now exist for the same 700 m radar-cap physical limit**: `Export.lua`'s own
+  `AI_PILOT_QUICK_PATH_MAX_AGL_M`, body-layer's `AI_PILOT_ALTITUDE_TOLERANCE_M`-style duplication
+  precedent, and the new `AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M` (needed in body-layer because the
+  readback must resolve the achieved reference at acceptance time, before any live AGL read could
+  arrive). Flagged in both constants' own doc comments; not unified in this stage.
+- **Flights P2a and P2b are the pilot's own** — nothing in this round claims live DCS behaviour;
+  every check above is static (format/lint/type) or runs against a real Lua interpreter/loopback
+  HTTP server, never a live DCS session.
+
+### Merge: origin/main (seat gate) into feature/bl16-p2-voice-goals, 2026-11-16
+
+`fix/ai-wheel-pilot-seat-gate` (main, `53104a49`/`964daf7f`) landed the operator-seat gate on
+`ai_pilot_wheel.lua`'s *takeover* correction while this branch's own Stage P2a/P2b commits (goal
+channel, HVRT translate) were in flight against the pre-gate file — both sides touched
+`run_ai_pilot_wheel`'s park/unpark branch and `push_ai_pilot_wheel_state`. Merged `a55f7e97` with
+`git merge --no-ff`, resolving by hand rather than taking either side whole.
+
+**How the seat gate reaches the goal/HVRT loops, by construction, not by a second check:**
+`run_ai_pilot_wheel` now computes `ai_pilot_parked_active` from
+`in_operator_seat and stick_park or nil` (main's own change) — leaving the operator seat forces
+`now_parked = false` exactly as a real unpark would, regardless of arg 852. Every P2a/P2b
+per-tick loop (`ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt`) is called only from
+`update_ai_pilot_wheel_overlay`, which itself returns immediately `if not ai_pilot_parked_active`
+— a guard Stage P1 already had and Stage P2a/P2b never needed to touch. So the seat gate covers
+the goal channel and HVRT translate **without either tick function reading the seat itself**: the
+one existing `ai_pilot_parked_active` check is the only gate either loop has ever had, and it is
+now seat-aware for free.
+
+**What the merge *did* need to add by hand, in `run_ai_pilot_wheel`'s "not now_parked" branch**:
+the goal/HVRT release code (release any open `ai_wheel_goal_pending_cmd` hold and
+`ai_pilot_goal.hvrt_hold_cmd` press, reset `ai_pilot_goal.*` to idle) runs **unconditionally**,
+same as the takeover correction's own release — only the menu-close tap is gated on
+`in_operator_seat` (main's own rule: a tap while in the pilot seat would land on the pilot's own
+wheel). A held goal/HVRT press is a device-30 release, not a wheel-menu navigation, so there is no
+"wrong wheel" risk in releasing it from either seat.
+
+**Added**, since the coordinator's merge instruction asked for direct coverage rather than relying
+on the above argument alone:
+`test_ai_pilot_wheel_lua.py::TestSeatGate::test_goal_hold_releases_without_new_press_on_switch_to_pilot_seat`
+— opens a heading-goal hold, switches `camera_fwd` to the pilot eye point mid-hold, and asserts the
+held press releases, `ai_pilot_goal.progress` drops to `"idle"`, no menu tap fires, and nothing
+presses again while the seat stays pilot. Verified red-then-green: reverting `run_ai_pilot_wheel`'s
+`in_operator_seat and stick_park or nil` back to plain `stick_park` fails this test (and the three
+pre-existing `TestSeatGate` tests) for the expected reason; restored byte-for-byte (checksum
+matched before/after) and the suite is green again.
+
+**`EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` bumped `"2026-11-16c"` → `"2026-11-16d"`**
+(this branch had not touched the version string; main's seat-gate fix owned `"...16c"`) — this
+merge's own functional change (goal channel + HVRT now merged against the seat gate) is otherwise
+invisible to the version-match staleness check. `test_export_lua_constants_parity.py` keeps the
+two in sync.
+
+**`body-layer/config/defaults.toml` regenerated**, not hand-merged, via
+`tools/generate_defaults.py --write` — both branches' tunables (this branch's pre-existing
+`AI_PILOT_HEADING_TOLERANCE_DEG` etc., main's new `[belief.altimeter_qnh_sync]` block) render
+correctly from the already-clean-merged `.py` sources with no further action.
+
+**Resolution shape for the other conflicted files** was mechanical once the above was understood:
+`aircraft-layer/src/schema/ai_pilot_wheel.py` and both `aircraft-layer/tests/test_ai_pilot_wheel_*`
+files each had two independent, non-overlapping field/test additions (this branch's
+`goal_progress`/`goal_seq`, main's `seat`/`cam_fwd_m`) landing at the same insertion points —
+combined by keeping both, with `seat`/`cam_fwd_m` ordered before the defaulted `goal_progress`/
+`goal_seq` fields on `AiPilotWheelState` (a frozen, non-`kw_only` dataclass requires every
+no-default field before any defaulted one; all construction call sites already use keyword args,
+so no behavioural effect). `body-layer/src/body.py` and `body-layer/src/belief/crew_console.py`
+each had one import-block conflict (this branch's `belief.ai_pilot_wheel` import vs. main's new
+`belief.altimeter_qnh_sync` import) — kept both.
+
+---
+
+## Review-fix round, 2026-11-16 (`plans/flight-control/review-p2.md`, NEEDS REVISION)
+
+All three required fixes.
+
+### Required fix 1 — HVRT mode-cycle bound
+
+`ai_pilot_goal_tick_hvrt`'s own mode-cycle (into `HVRT`) had no attempt bound, no `"mode_blocked"`
+report, and no voice escape (`crew_console._handle_hvrt_hold` gated the cancel on the same
+readiness check that gates the start). Gave it the identical bound/report shape `ai_pilot_goal_
+tick`'s own mode-cycle already had, via a **separate** attempt counter
+(`ai_pilot_goal.hvrt_mode_cycle_attempts`/`.hvrt_mode_blocked_since_t`) so the two ticks never share
+one — and made `_handle_hvrt_hold` unconditional whenever a translate direction is already
+outstanding, regardless of `ai_mode`.
+
+### Required fix 2 — goal channel vs. HVRT arbitration
+
+The plan's "mode-exclusive by construction" reasoning was wrong (`HVR` is accepted by both `ai_
+pilot_goal_mode_ready` and `_ai_pilot_hvrt_ready`), so a goal and a translate could be
+simultaneously outstanding and press the same button codes in the same tick. **The main loop's own
+rule, a judgement call made on the pilot's behalf** (reversible, local — the dispatch brief's own
+framing, not the plan's):
+
+- Latest command wins, nothing lost.
+- Setting an HVRT translate direction pauses the heading/altitude/speed goal channel — queued and
+  active goals keep their targets and queue positions.
+- "Hold" lets the paused goals resume through the normal rotation.
+- Speaking any new heading/altitude/speed goal clears an outstanding translate direction (releasing
+  its held press), then the goal proceeds normally.
+- The two ticks never both press in one tick, enforced on both sides.
+
+Implementation: `belief/ai_pilot_wheel.py` gains `goal_param_for_wire(goal)` — the single function
+that decides what `param` value actually reaches the wire (`None` whenever `hvrt_direction is not
+None`, even though `active_param` itself is left untouched); `body.py`'s two `write_ai_pilot_goal`
+call sites route through it instead of reading `final_goal.active_param` directly. `request_goal`
+now clears an outstanding `hvrt_direction` itself (the one function every heading/altitude/speed
+action routes through, so the "speaking a new goal clears the translate" rule lives in one place).
+`set_hvrt_direction`/`clear_hvrt_direction` now bump `goal_seq` on an actual change — a gap beyond
+what the review named, found while implementing this fix: neither bumped before, so "Hold"
+(clearing a translate with nothing else having changed `goal_seq` that poll) would never actually
+reach `Export.lua` as a fresh message, and the goal channel would stay silently paused forever.
+`decide_ai_pilot_wheel` gains an early-return while `goal.hvrt_direction is not None` (after the
+timeout-reconciliation and takeover-stage checks, before any settle/promote/rotate logic) — nothing
+is promoted, demoted or settled while a translate is held. On the Lua side, `ai_pilot_goal_tick`
+gains a second, defensive guard at its own top (`if ai_pilot_goal.hvrt_direction ~= nil then
+ai_pilot_goal_release_hold(); return end`) — belt-and-suspenders, since `goal_param_for_wire`
+already nulls `.param` on the wire whenever a translate is held, but the task explicitly asked for
+enforcement on both sides, and a guard here is cheap insurance against any future call site that
+forgets the wire-level invariant.
+
+### Required fix 3 — `mode_blocked` must retry, not stall forever
+
+Once `mode_cycle_attempts`/`hvrt_mode_cycle_attempts` hit `MODE_CYCLE_MAX_ATTEMPTS`, nothing reset
+them short of a *different* `param` arriving or the mode becoming ready on its own — the
+multi-goal rotation case incidentally reset the counter by switching `active_param`, masking the
+bug in exactly the case the plan worried about dead-time cost for; the ordinary single-goal case
+was retried never, after one spoken "unable, not ready."
+
+New Lua constant `MODE_BLOCKED_RETRY_S = 3.0` (`ai_pilot_wheel.lua`, a plain top-level local, not a
+tunable mechanism entry — **this would want body-layer's `tuning.py` bounds/`defaults.toml` if a
+Lua-side tuning loader existed; outside body-layer that loader does not exist yet, so this stays an
+ordinary constant, flagged here rather than improvising a second mechanism**, per root `CLAUDE.md`'s
+"Behaviour-affecting constants are tunable" section). Shared by both `ai_pilot_goal_tick` and
+`ai_pilot_goal_tick_hvrt`'s own bounds via two separate `*_mode_blocked_since_t` timestamp fields:
+the first tick that exhausts the bound records when, reports `"mode_blocked"` and presses nothing;
+every subsequent tick re-checks the elapsed time, and once `MODE_BLOCKED_RETRY_S` has passed, resets
+the attempt counter and falls straight through to a fresh press attempt the same tick (not waiting
+for a further tick to spend the first renewed attempt). Reset on `param`/`hvrt_direction`-change,
+unpark, and `on_stop`, mirroring the existing `mode_cycle_attempts` reset sites exactly (grepped
+`mode_cycle_attempts = 0` across the file and added the new fields at each site found).
+`drain_ai_pilot_wheel_speech`'s existing edge-trigger (`_ai_pilot_mode_blocked_spoken`, reset
+whenever `lua_goal_progress != "mode_blocked"`) needed no change — the retry naturally flips
+`goal_progress` back to `"cycling_mode"` between exhausted episodes, so "spoken once per exhausted
+attempt" already falls out of the existing mechanism once Lua actually produces more than one
+episode.
+
+**Both channels share one wire-level `apw_goal_progress`/Lua `ai_pilot_goal.progress` field** (a
+pre-existing design, not changed here) — `ai_pilot_goal_tick` and `ai_pilot_goal_tick_hvrt` never
+both write it in the same tick in correct operation, because exactly one of them is active at a
+time (fix 2's own mutual-exclusion): the FLT/HVR tick returns before touching `.progress` whenever
+a translate is outstanding, and the HVRT tick's own "nothing outstanding" branch never touches it
+either. So `drain_ai_pilot_wheel_speech`'s existing "unable, not ready" line already covers HVRT's
+own `mode_blocked` with no HVRT-specific body-layer code needed.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua` — `MODE_BLOCKED_RETRY_S`; `ai_pilot_
+  goal.mode_blocked_since_t`/`.hvrt_mode_cycle_attempts`/`.hvrt_mode_blocked_since_t` (new fields,
+  reset at every existing `mode_cycle_attempts = 0`/full-reset site); `ai_pilot_goal_tick`'s
+  `hvrt_direction` pause guard and retry-after-cooldown logic; `ai_pilot_goal_tick_hvrt`'s own
+  bound/retry, mirroring `ai_pilot_goal_tick`'s shape; pruned the stale "mode-exclusive by
+  construction" claim from both functions' own comments (the code they described changed under
+  them this round).
+- `aircraft-layer/dcs-export/Export.lua` / `aircraft-layer/src/collector/server.py` —
+  `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` bumped `"2026-11-16d"` → `"2026-11-16e"`: a
+  non-additive behavioural reshape (a message that previously could carry both `param` and `hvrt_
+  direction` meaningfully now has body-layer null `param` whenever a translate is held).
+- `body-layer/src/belief/ai_pilot_wheel.py` — `goal_param_for_wire` (new); `request_goal` clears an
+  outstanding `hvrt_direction`; `set_hvrt_direction`/`clear_hvrt_direction` bump `goal_seq` on an
+  actual change (no-op otherwise); `decide_ai_pilot_wheel`'s own HVRT-pause early return; pruned the
+  stale "mode-exclusive by construction" claim from `AiPilotWheelGoal`'s own docstring, replaced
+  with an accurate account of the fix.
+- `body-layer/src/belief/crew_console.py` — `_handle_hvrt_hold` cancels unconditionally whenever a
+  translate direction is already outstanding on `self.parked_flight_state.goal`, falling back to
+  the existing readiness-gated path only when there is nothing to cancel.
+- `body-layer/src/body.py` — both `write_ai_pilot_goal` call sites route the `param` argument
+  through `goal_param_for_wire` instead of reading `final_goal.active_param` directly.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`:
+  - `test_mode_cycles_before_pressing_then_blocks_then_retries_after_cooldown` (rewrite of `test_
+    mode_cycles_before_pressing_then_blocks_after_the_bound`, which asserted the bug) — the
+    single-outstanding-goal case the review named explicitly: ticks past the bound, confirms still
+    blocked short of `MODE_BLOCKED_RETRY_S`, then confirms one renewed press attempt once the
+    cooldown elapses, goal target kept throughout.
+  - `test_mode_cycle_into_hvrt_is_bounded_reports_blocked_then_retries` — the same shape for `ai_
+    pilot_goal_tick_hvrt`'s own, previously-unbounded mode-cycle.
+  - `test_an_outstanding_hvrt_direction_stops_this_tick_from_pressing` — a message carrying both
+    `param` and `hvrt_direction` non-null (the exact collision the review found possible); confirms
+    `ai_pilot_goal_tick` presses nothing and the HVRT tick is the only one that presses once the
+    mode actually reaches `HVRT` — the required "two ticks never press on the same tick" Lua test.
+- `body-layer/tests/test_ai_pilot_wheel.py`:
+  - `TestRequestGoal.test_a_new_goal_clears_an_outstanding_hvrt_translate` / `test_no_hvrt_
+    direction_outstanding_is_unaffected`.
+  - `TestHvrtDirection.test_an_actual_change_bumps_goal_seq` / `test_no_change_does_not_bump_goal_
+    seq`.
+  - `TestGoalParamForWire` (new class) — `active_param` passes through with no translate; nulled
+    while one is outstanding, with `active_param` itself left untouched.
+  - `TestDecideAiPilotWheel.test_an_outstanding_hvrt_translate_pauses_the_goal_channel` / `test_a_
+    queued_second_goal_also_stays_queued_while_paused` / `test_the_goal_channel_resumes_once_the_
+    translate_clears`.
+- `body-layer/tests/test_crew_console_ai_pilot_wheel.py`:
+  - `TestHvrtHold.test_cancels_unconditionally_when_a_translate_is_already_outstanding` / `test_
+    still_unable_when_nothing_outstanding_and_not_in_hover`.
+- `body-layer/tests/test_body_ai_pilot_wheel.py` — `TestHvrtArbitration` (new class), the exact
+  three-step sequence named in the task: a goal active then "left" (goal presses stop on the wire,
+  the translate runs); "Hold" (the goal resumes on the wire); a translate active then a new
+  altitude goal (the translate is released on the wire, the goal runs).
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p` on `Export.lua` and every `dcs-export/Petrobrain/*.lua`: pass
+- `luac5.1 -l -p ai_pilot_wheel.lua` `GETGLOBAL` scan: clean (stdlib/DCS APIs only, no bare
+  reference to a project-defined name)
+- Local count: `grep -cE '^local ' ai_pilot_wheel.lua` → 69 (was 68), one new top-level local
+  (`MODE_BLOCKED_RETRY_S`) — the new per-tick/per-channel bookkeeping lives as table fields, not
+  new locals, same reasoning the file's own table-grouping comments already state
+- `ruff format --check src tests`: pass (81 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `aircraft-layer/`): pass, no issues (27 source files)
+- `pytest tests -q -m "not slow"` (full subproject suite, not just fast-tests): **881 passed**
+  (confirmed by running the whole suite, not a `-k` filter, after the version-string bump to catch
+  any stray reference to the old string)
+
+**body-layer/**
+- `ruff format --check src tests`: pass (208 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `body-layer/`): pass, no issues (84 source files)
+- `pytest tests -q -m "not slow" -n auto` (full subproject suite): **3401 passed, 4 xfailed**
+- `.claude/scripts/fast-tests.sh body-layer` / `.claude/scripts/fast-tests.sh aircraft-layer`: both
+  pass (2588 passed/4 xfailed; 711 passed) — run first, before the full-suite confirmation above
+
+`test_tuning_defaults_toml.py`: pass — no new body-layer tuning constant this round, `defaults.toml`
+unchanged.
+
+### Notable Discoveries
+
+- **The `set_hvrt_direction`/`clear_hvrt_direction` goal_seq gap** (described under Required fix 2
+  above) was not named in the review but was necessary for the review's own required behaviour to
+  work at all: without it, "Hold" and a redirected translate would silently never reach `Export.
+  lua`, since `body.py`'s own "send on `goal_seq` change" posture is the *only* thing that triggers
+  a wire send.
+- **The plan's "mode-exclusive by construction" claim appears in three places** (`plan.md`'s own
+  wire-shape note, `AiPilotWheelGoal`'s docstring, and `ai_pilot_wheel.lua`'s `ai_pilot_goal_tick_
+  hvrt` comment) — the two code-adjacent copies were corrected in place (root `CLAUDE.md`'s "prune
+  the comment you are standing next to," triggered because the code they described changed this
+  round). `plan.md`'s own prose was left as the historical record of the wrong reasoning, per `docs/
+  PROCESS.md`'s "superseding a decision" — not this round's file to edit, and the main-loop
+  arbitration rule above is the record of what actually supersedes it.
+- **`MODE_BLOCKED_RETRY_S` is a judgement call, not a pilot-specified figure** — "a few seconds" per
+  the task; 3.0 s was chosen to match the existing `AI_PILOT_GOAL_SLICE_S` default's order of
+  magnitude, not measured against a live flight. Flagged for the same reason `HVRT_TRANSLATE_MAX_
+  HOLD_S` (15.0 s) was flagged when it was first added.

@@ -105,6 +105,11 @@ _AI_PILOT_WHEEL_CONSTANTS = (
     "AI_PILOT_QUICK_PATH_MAX_AGL_M",
     "AI_WHEEL_UP",
     "AI_WHEEL_DOWN",
+    # Stage P2a/P2b's own pure decisions close over these too.
+    "AI_WHEEL_LEFT",
+    "AI_WHEEL_RIGHT",
+    "AI_PILOT_HEADING_TOLERANCE_DEG",
+    "AI_PILOT_SPEED_TOP_STEP_KMH",
 )
 
 
@@ -349,6 +354,132 @@ class TestAiPilotAltitudeTextParsing:
         assert out.strip().split("\n") == ["100", "150", "nil"]
 
 
+class TestAiPilotGoalModeReady:
+    """Stage P2a's own pure decisions (`plans/flight-control/plan.md`,
+    "Stage P2 ready to build")."""
+
+    def _ready(self, mode_text: str) -> bool:
+        tail = f"print(tostring(ai_pilot_goal_mode_ready({mode_text})))"
+        return _run_lua(["ai_pilot_goal_mode_ready"], tail).strip() == "true"
+
+    def test_flt_and_hvr_are_both_ready(self) -> None:
+        assert self._ready('"FLT"') is True
+        assert self._ready('"HVR"') is True
+
+    def test_cbtm_hvrt_and_unknown_are_not_ready(self) -> None:
+        assert self._ready('"CBTM"') is False
+        assert self._ready('"HVRT"') is False
+        assert self._ready("nil") is False
+
+
+class TestAiPilotGoalHeadingDirection:
+    def _direction(self, held: str, target: str) -> str | None:
+        tail = f"""
+        local dir = ai_pilot_goal_heading_direction({held}, {target})
+        print(tostring(dir))
+        """
+        out = _run_lua(["ai_pilot_goal_heading_direction"], tail).strip()
+        return None if out == "nil" else out
+
+    def test_within_tolerance_needs_no_correction(self) -> None:
+        assert self._direction("90.0", "92.0") is None
+
+    def test_shortest_path_turns_right(self) -> None:
+        assert self._direction("10.0", "20.0") == "3002"  # AI_WHEEL_RIGHT
+
+    def test_shortest_path_turns_left(self) -> None:
+        assert self._direction("20.0", "10.0") == "3003"  # AI_WHEEL_LEFT
+
+    def test_wraps_across_north_the_short_way(self) -> None:
+        # 350 -> 10 is a 20 deg turn right through north, not a 340 deg
+        # turn left the long way around.
+        assert self._direction("350.0", "10.0") == "3002"  # AI_WHEEL_RIGHT
+        assert self._direction("10.0", "350.0") == "3003"  # AI_WHEEL_LEFT
+
+    def test_a_missing_reading_never_counts_as_needing_correction(self) -> None:
+        assert self._direction("nil", "90.0") is None
+        assert self._direction("90.0", "nil") is None
+
+
+class TestAiPilotGoalAltitudeRefMismatch:
+    def _mismatch(self, ref: str, current: str) -> bool:
+        tail = f"print(tostring(ai_pilot_goal_altitude_ref_mismatch({ref}, {current})))"
+        return (
+            _run_lua(
+                ["ai_pilot_goal_ref_letter", "ai_pilot_goal_altitude_ref_mismatch"],
+                tail,
+            ).strip()
+            == "true"
+        )
+
+    def test_radar_wanted_but_currently_barometric_is_a_mismatch(self) -> None:
+        assert self._mismatch('"radar"', '"B"') is True
+
+    def test_barometric_wanted_but_currently_radar_is_a_mismatch(self) -> None:
+        assert self._mismatch('"barometric"', '"R"') is True
+
+    def test_matching_reference_is_not_a_mismatch(self) -> None:
+        assert self._mismatch('"radar"', '"R"') is False
+        assert self._mismatch('"barometric"', '"B"') is False
+
+    def test_a_missing_goal_reference_is_never_a_mismatch(self) -> None:
+        assert self._mismatch("nil", '"R"') is False
+
+    def test_an_unreadable_current_reference_is_never_a_mismatch(self) -> None:
+        assert self._mismatch('"radar"', "nil") is False
+
+
+class TestAiPilotGoalSpeedTapDirection:
+    def _direction(self, speed_text: str, target: str) -> str | None:
+        tail = f"""
+        local dir = ai_pilot_goal_speed_tap_direction({speed_text}, {target})
+        print(tostring(dir))
+        """
+        out = _run_lua(["ai_pilot_goal_speed_tap_direction"], tail).strip()
+        return None if out == "nil" else out
+
+    def test_already_at_the_target_step_needs_no_tap(self) -> None:
+        assert self._direction('"150"', "150.0") is None
+
+    def test_below_target_taps_up(self) -> None:
+        assert self._direction('"120"', "150.0") == "3004"  # AI_WHEEL_UP
+
+    def test_above_target_taps_down(self) -> None:
+        assert self._direction('"200"', "150.0") == "3005"  # AI_WHEEL_DOWN
+
+    def test_a_target_above_the_top_step_aims_for_max(self) -> None:
+        assert self._direction('"200"', "1000000.0") == "3004"  # AI_WHEEL_UP
+
+    def test_already_at_max_and_wanting_max_needs_no_tap(self) -> None:
+        assert self._direction('"MAX"', "1000000.0") is None
+
+    def test_at_max_but_wanting_a_real_step_taps_down(self) -> None:
+        assert self._direction('"MAX"', "150.0") == "3005"  # AI_WHEEL_DOWN
+
+    def test_an_unreadable_speed_text_never_counts_as_needing_a_tap(self) -> None:
+        assert self._direction("nil", "150.0") is None
+
+    def test_a_missing_target_never_counts_as_needing_a_tap(self) -> None:
+        assert self._direction('"150"', "nil") is None
+
+
+class TestAiPilotGoalHvrtDirectionCmd:
+    def _cmd(self, direction: str) -> str | None:
+        tail = f"print(tostring(ai_pilot_goal_hvrt_direction_cmd({direction})))"
+        out = _run_lua(["ai_pilot_goal_hvrt_direction_cmd"], tail).strip()
+        return None if out == "nil" else out
+
+    def test_every_direction_maps_to_its_own_ring_button(self) -> None:
+        assert self._cmd('"left"') == "3003"  # AI_WHEEL_LEFT
+        assert self._cmd('"right"') == "3002"  # AI_WHEEL_RIGHT
+        assert self._cmd('"forward"') == "3004"  # AI_WHEEL_UP
+        assert self._cmd('"back"') == "3005"  # AI_WHEEL_DOWN
+
+    def test_an_unrecognised_direction_is_nil(self) -> None:
+        assert self._cmd('"up"') is None
+        assert self._cmd("nil") is None
+
+
 #: `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` close over several
 #: more module-level constants than the pure functions above (the press
 #: shapes and the device-30 command ids), extracted the same way.
@@ -364,6 +495,18 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "ARG_PEDALS_PARK",
     "AI_WHEEL_UP",
     "AI_WHEEL_DOWN",
+    # Stage P2a/P2b's own additions -- `update_ai_pilot_wheel_overlay`
+    # now transitively calls the goal/HVRT tick chain, which closes over
+    # all of these.
+    "AI_WHEEL_LEFT",
+    "AI_WHEEL_RIGHT",
+    "AI_PILOT_HEADING_TOLERANCE_DEG",
+    "AI_PILOT_SPEED_TOP_STEP_KMH",
+    "MODE_CYCLE_MAX_ATTEMPTS",
+    "MODE_BLOCKED_RETRY_S",
+    "HVRT_TRANSLATE_MAX_HOLD_S",
+    # fix/ai-wheel-pilot-seat-gate -- `run_ai_pilot_wheel` now calls
+    # `ai_pilot_update_seat`, which closes over these.
     "SEAT_BOUNDARY_FWD_M",
     "SEAT_CAMERA_MIN_FWD_M",
     "SEAT_CAMERA_MAX_FWD_M",
@@ -447,6 +590,32 @@ local ai_pilot_last_press = nil
 local ai_wheel_pending_release_t = nil
 local ai_wheel_pending_cmd = nil
 
+-- Stage P2a/P2b's own pending-release pair and co-moving state --
+-- mirrors production's own initial values (`ai_pilot_wheel.lua`'s own
+-- declarations), needed here because `update_ai_pilot_wheel_overlay`
+-- now transitively calls the goal/HVRT tick chain which reads and
+-- writes both.
+local ai_wheel_goal_pending_release_t = nil
+local ai_wheel_goal_pending_cmd = nil
+local ai_pilot_goal = {
+    param = nil,
+    heading_target_deg = nil,
+    altitude_target_m = nil,
+    altitude_target_ref = nil,
+    speed_target_kmh = nil,
+    goal_seq = 0,
+    progress = "idle",
+    mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
+    hold_cmd = nil,
+    toggling_reference = false,
+    hvrt_direction = nil,
+    hvrt_hold_cmd = nil,
+    hvrt_started_t = nil,
+    hvrt_mode_cycle_attempts = 0,
+    hvrt_mode_blocked_since_t = nil,
+}
+
 local ai_pilot_takeover = {
     stage = nil,
     t = nil,
@@ -522,14 +691,29 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_quick_path_eligible"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_parse_altitude_text"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_actual_altitude_m"),
+            # Stage P2a/P2b's own pure decisions, in the same relative
+            # order as the real file (Lua has no hoisting).
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_mode_ready"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_heading_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_ref_letter"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_altitude_ref_mismatch"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_speed_tap_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_hvrt_direction_cmd"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_park_rising"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_seat_from_camera"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_update_seat"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_tap30"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_open_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_release_hold"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_open_hold"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_begin_hold_phase"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_decide_correction"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_check_hold_convergence"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_heading"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_altitude"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_hvrt"),
             (_AI_PILOT_WHEEL_LUA, "run_ai_pilot_wheel"),
             (_AI_PILOT_WHEEL_LUA, "update_ai_pilot_wheel_overlay"),
         )
@@ -1052,6 +1236,57 @@ class TestSeatGate:
         assert values["stage"] == "nil"
         assert values["later_presses"] == "0"
 
+    def test_goal_hold_releases_without_new_press_on_switch_to_pilot_seat(
+        self,
+    ) -> None:
+        """Same rule, for the goal channel (Stage P2a/P2b merge, not the
+        takeover correction above): a heading-goal hold open while flying
+        from the operator seat, then the player moves to the pilot seat --
+        the held press releases, the goal state drops to idle, and nothing
+        presses again while the seat stays pilot."""
+        script = """
+        msl_value = 900.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        print("parked_before=" .. tostring(ai_pilot_parked_active))
+
+        -- Simulate an open heading-goal hold directly, the same shape
+        -- `ai_pilot_goal_open_hold` leaves it in.
+        ai_wheel_goal_pending_cmd = 3002  -- AI_WHEEL_RIGHT
+        ai_wheel_goal_pending_release_t = 999.0
+        ai_pilot_goal.param = "heading"
+        ai_pilot_goal.heading_target_deg = 90.0
+        ai_pilot_goal.progress = "pressing"
+        ai_pilot_goal.hold_cmd = 3002
+        local before = #press_log
+
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        run_ai_pilot_wheel(0.1)
+        local released = {}
+        for i = before + 1, #press_log do table.insert(released, press_log[i]) end
+        print("released_presses=" .. table.concat(released, ","))
+        print("parked_after=" .. tostring(ai_pilot_parked_active))
+        print("goal_progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("goal_hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("menu_open_after=" .. tostring(ai_pilot_takeover.menu_open))
+
+        local n = #press_log
+        for i = 2, 30 do run_ai_pilot_wheel(i * 0.1) end
+        print("later_presses=" .. (#press_log - n))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["parked_before"] == "true"
+        assert values["released_presses"] == "3002:0"
+        assert values["parked_after"] == "false"
+        assert values["goal_progress_after"] == "idle"
+        assert values["goal_hold_cmd_after"] == "nil"
+        assert values["menu_open_after"] == "false"
+        assert values["later_presses"] == "0"
+
     def test_entering_operator_seat_with_stick_still_stowed_presses_nothing(
         self,
     ) -> None:
@@ -1109,14 +1344,21 @@ class TestSeatGate:
         assert values["stage"] == "toggling_reference"
 
 
-def _run_on_stop(pending_cmd: str) -> dict[str, str]:
+def _run_on_stop(
+    pending_cmd: str,
+    goal_hold_cmd: str = "nil",
+    hvrt_hold_cmd: str = "nil",
+) -> dict[str, str]:
     """`AC-B13`'s own test (plan Stage 6): runs the real, extracted
     `on_stop` against a minimal `GetDevice` mock for device 30's
     `performClickableAction`, with `ai_wheel_pending_cmd` preset to
     `pending_cmd` (an `AI_WHEEL_UP`/`AI_WHEEL_DOWN` command id as a Lua
     literal, or `"nil"` for no open press) and `ai_pilot_takeover`
-    populated as a hold in progress would leave it. Returns every
-    printed `key=value` line as a dict."""
+    populated as a hold in progress would leave it. `goal_hold_cmd`/
+    `hvrt_hold_cmd` (Stage P2a/P2b's own addition to this fix, same
+    proactive-close-the-gap reasoning as `AC-B13` itself) are the
+    equivalent presets for `ai_pilot_goal.hold_cmd`/`.hvrt_hold_cmd`.
+    Returns every printed `key=value` line as a dict."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
@@ -1153,6 +1395,23 @@ local ai_pilot_takeover = {{
     raw_arg952 = 0.05,
     AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
 }}
+local ai_wheel_goal_pending_release_t = 42.0
+local ai_wheel_goal_pending_cmd = {goal_hold_cmd}
+local ai_pilot_goal = {{
+    param = "altitude",
+    heading_target_deg = nil,
+    altitude_target_m = 300.0,
+    altitude_target_ref = "barometric",
+    speed_target_kmh = nil,
+    goal_seq = 5,
+    progress = "pressing",
+    mode_cycle_attempts = 0,
+    hold_cmd = {goal_hold_cmd},
+    toggling_reference = false,
+    hvrt_direction = "left",
+    hvrt_hold_cmd = {hvrt_hold_cmd},
+    hvrt_started_t = 2.0,
+}}
 """
     lines = [preamble]
     lines.extend(
@@ -1180,7 +1439,16 @@ local ai_pilot_takeover = {{
         'print("correction_phase=" .. tostring(ai_pilot_takeover.correction_phase))\n'
         'print("correction_hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))\n'
         'print("raw_arg852=" .. tostring(ai_pilot_takeover.raw_arg852))\n'
-        'print("raw_arg952=" .. tostring(ai_pilot_takeover.raw_arg952))'
+        'print("raw_arg952=" .. tostring(ai_pilot_takeover.raw_arg952))\n'
+        'print("goal_pending_release_t=" .. tostring(ai_wheel_goal_pending_release_t))\n'
+        'print("goal_pending_cmd=" .. tostring(ai_wheel_goal_pending_cmd))\n'
+        'print("goal_param=" .. tostring(ai_pilot_goal.param))\n'
+        'print("goal_altitude_target_m=" .. tostring(ai_pilot_goal.altitude_target_m))\n'
+        'print("goal_progress=" .. tostring(ai_pilot_goal.progress))\n'
+        'print("goal_hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))\n'
+        'print("goal_hvrt_direction=" .. tostring(ai_pilot_goal.hvrt_direction))\n'
+        'print("goal_hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))\n'
+        'print("goal_hvrt_started_t=" .. tostring(ai_pilot_goal.hvrt_started_t))'
     )
     script = "\n".join(lines)
 
@@ -1223,6 +1491,35 @@ class TestOnStop:
         assert values["correction_hold_cmd"] == "nil"
         assert values["raw_arg852"] == "nil"
         assert values["raw_arg952"] == "nil"
+        # Stage P2a/P2b's own co-moving state -- always cleared, even
+        # with no goal hold or HVRT press open this call (the default
+        # `goal_hold_cmd`/`hvrt_hold_cmd` of `"nil"`).
+        assert values["goal_pending_release_t"] == "nil"
+        assert values["goal_pending_cmd"] == "nil"
+        assert values["goal_param"] == "nil"
+        assert values["goal_altitude_target_m"] == "nil"
+        assert values["goal_progress"] == "idle"
+        assert values["goal_hold_cmd"] == "nil"
+        assert values["goal_hvrt_direction"] == "nil"
+        assert values["goal_hvrt_hold_cmd"] == "nil"
+        assert values["goal_hvrt_started_t"] == "nil"
+
+    def test_open_goal_hold_and_hvrt_press_are_both_released(self) -> None:
+        """Stage P2a/P2b's own addition to the `AC-B13` fix, applied
+        proactively: an open altitude/heading goal hold and an open HVRT
+        translate press are each released exactly once, same as the
+        takeover correction's own open press."""
+        values = _run_on_stop(
+            "nil", goal_hold_cmd="3005", hvrt_hold_cmd="3003"
+        )  # AI_WHEEL_DOWN, AI_WHEEL_LEFT
+        assert values["press_log"] == "3005:0,3003:0"
+        assert values["goal_pending_release_t"] == "nil"
+        assert values["goal_pending_cmd"] == "nil"
+        assert values["goal_hold_cmd"] == "nil"
+        assert values["goal_hvrt_hold_cmd"] == "nil"
+        assert values["goal_hvrt_started_t"] == "nil"
+        assert values["goal_hvrt_direction"] == "nil"
+        assert values["goal_progress"] == "idle"
 
     def test_no_open_press_releases_nothing_but_still_clears_state(self) -> None:
         """No stale press to release (`ai_wheel_pending_cmd` already
@@ -1232,3 +1529,581 @@ class TestOnStop:
         assert values["press_log"] == ""
         assert values["stage"] == "nil"
         assert values["correction_hold_cmd"] == "nil"
+
+
+#: Stage P2a/P2b's own integration harness -- a fresh, self-contained
+#: `GetDevice`/overlay mock (not `_run_ai_pilot_wheel_integration`'s own,
+#: which is built around the takeover correction's `GetDevice(0)`/MSL/AGL
+#: stubs this stage does not need): the goal/HVRT tick chain and
+#: `handle_ai_pilot_goal_command` only ever touch device 30 and the
+#: already-parsed overlay text locals.
+_GOAL_INTEGRATION_CONSTANTS = (
+    "AI_PILOT_ALT_TOLERANCE_M",
+    "AI_PILOT_HEADING_TOLERANCE_DEG",
+    "AI_PILOT_SPEED_TOP_STEP_KMH",
+    "AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S",
+    "MODE_CYCLE_MAX_ATTEMPTS",
+    "MODE_BLOCKED_RETRY_S",
+    "HVRT_TRANSLATE_MAX_HOLD_S",
+    "SHORT_PULSE_S",
+    "AI_WHEEL_UP",
+    "AI_WHEEL_DOWN",
+    "AI_WHEEL_LEFT",
+    "AI_WHEEL_RIGHT",
+)
+
+
+def _run_goal_integration(script_body: str) -> str:
+    """Runs the real goal/HVRT tick chain plus `handle_ai_pilot_goal_
+    command` together against a minimal device-30 press-log mock, in one
+    Lua process so `ai_pilot_goal`/the overlay text locals persist across
+    calls exactly as they do across real ticks."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    constants = (
+        "\n".join(
+            _extract_lua_constant(_AI_PILOT_WHEEL_LUA, name)
+            for name in _GOAL_INTEGRATION_CONSTANTS
+        )
+        + "\n"
+        + _extract_lua_constant(_CORE_LUA, "WHEEL_CENTER_BUTTON")
+    )
+
+    preamble = """
+local ai_pilot_mode_text = nil
+local ai_pilot_course_text = nil
+local ai_pilot_alt_text = nil
+local ai_pilot_alt_add_text = nil
+local ai_pilot_speed_text = nil
+local ai_pilot_last_press = nil
+local ai_wheel_pending_release_t = nil
+local ai_wheel_pending_cmd = nil
+local ai_wheel_goal_pending_release_t = nil
+local ai_wheel_goal_pending_cmd = nil
+local ai_pilot_goal = {
+    param = nil,
+    heading_target_deg = nil,
+    altitude_target_m = nil,
+    altitude_target_ref = nil,
+    speed_target_kmh = nil,
+    goal_seq = 0,
+    progress = "idle",
+    mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
+    hold_cmd = nil,
+    toggling_reference = false,
+    hvrt_direction = nil,
+    hvrt_hold_cmd = nil,
+    hvrt_started_t = nil,
+    hvrt_mode_cycle_attempts = 0,
+    hvrt_mode_blocked_since_t = nil,
+}
+
+local press_log = {}
+
+local function GetDevice(id)
+    if id == 30 then
+        return {
+            performClickableAction = function(self, cmd, value)
+                table.insert(press_log, cmd .. ":" .. tostring(value))
+            end,
+        }
+    end
+    return nil
+end
+"""
+    functions = "\n".join(
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_CORE_LUA, "extract_json_string_field"),
+            (_CORE_LUA, "extract_json_number_field"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_correction_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_parse_altitude_text"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_mode_ready"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_heading_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_ref_letter"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_altitude_ref_mismatch"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_speed_tap_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_hvrt_direction_cmd"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_tap30"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_open_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_release_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_heading"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_altitude"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_hvrt"),
+            (_AI_PILOT_WHEEL_LUA, "handle_ai_pilot_goal_command"),
+        )
+    )
+    script = constants + "\n" + preamble + "\n" + functions + "\n" + script_body
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    return result.stdout
+
+
+class TestAiPilotGoalTick:
+    """Stage P2a: the per-tick dispatcher (`ai_pilot_goal_tick`) --
+    mode-cycle-then-press, and the `"mode_blocked"` bound."""
+
+    def test_heading_goal_holds_then_settles(self) -> None:
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_course_text = "10"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "heading", '
+            .. '"heading_target_deg": 90.0, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+
+        -- Readback crosses into tolerance -- the hold releases.
+        ai_pilot_course_text = "91"
+        ai_pilot_goal_tick(0.2)
+        print("hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd"] == "3002"  # AI_WHEEL_RIGHT (10 -> 90)
+        assert values["progress"] == "pressing"
+        assert values["hold_cmd_after"] == "nil"
+        assert values["progress_after"] == "settled"
+
+    def test_mode_cycles_before_pressing_then_blocks_then_retries_after_cooldown(
+        self,
+    ) -> None:
+        """Mode stuck on `CBTM` (never reads back `FLT`/`HVR`) -- bounded
+        by `MODE_CYCLE_MAX_ATTEMPTS`, reported `"mode_blocked"`, and
+        retried after `MODE_BLOCKED_RETRY_S`, the goal itself never
+        dropped. **Review fix**: this is deliberately the single-
+        outstanding-goal case (only `speed` is ever requested, nothing
+        else to rotate through) -- the one the review found was retried
+        *never*, since nothing but a different `param` arriving or the
+        mode becoming ready on its own previously reset the counter."""
+        script = """
+        ai_pilot_mode_text = "CBTM"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "speed", '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": 150.0, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        ai_pilot_goal_tick(0.2)
+        ai_pilot_goal_tick(0.4)
+        print("attempts=" .. tostring(ai_pilot_goal.mode_cycle_attempts))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+        print("press_count=" .. #press_log)
+        -- A 4th tick: the bound is checked *before* a new attempt is
+        -- spent, so this is the tick that actually reports
+        -- `"mode_blocked"`, with no 4th press issued.
+        ai_pilot_goal_tick(0.6)
+        print("attempts_after=" .. tostring(ai_pilot_goal.mode_cycle_attempts))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_after=" .. #press_log)
+        -- Still well short of the cooldown -- stays blocked, no tap.
+        ai_pilot_goal_tick(0.6 + MODE_BLOCKED_RETRY_S - 0.1)
+        print("progress_before_cooldown=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_before_cooldown=" .. #press_log)
+        -- Past `MODE_BLOCKED_RETRY_S` since the block was first reported:
+        -- the counter resets and a fresh attempt is spent this same tick.
+        ai_pilot_goal_tick(0.6 + MODE_BLOCKED_RETRY_S + 0.1)
+        print("attempts_retry=" .. tostring(ai_pilot_goal.mode_cycle_attempts))
+        print("progress_retry=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_retry=" .. #press_log)
+        print("speed_target=" .. tostring(ai_pilot_goal.speed_target_kmh))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        # 3 ticks, 3 mode-cycle taps (press+release each -- `ai_pilot_
+        # tap30`), still trying.
+        assert values["attempts"] == "3"
+        assert values["progress"] == "cycling_mode"
+        assert values["press_count"] == "6"
+        # 4th tick: bound reached, reported, no 4th tap.
+        assert values["attempts_after"] == "3"
+        assert values["progress_after"] == "mode_blocked"
+        assert values["press_count_after"] == "6"  # no further tap issued
+        # Cooldown not yet elapsed: still blocked, still no tap.
+        assert values["progress_before_cooldown"] == "mode_blocked"
+        assert values["press_count_before_cooldown"] == "6"
+        # Cooldown elapsed: one renewed attempt, spent this same tick.
+        assert values["attempts_retry"] == "1"
+        assert values["progress_retry"] == "cycling_mode"
+        assert values["press_count_retry"] == "8"
+        assert values["speed_target"] == "150"  # goal kept, never dropped
+
+    def test_altitude_goal_toggles_reference_before_holding(self) -> None:
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "500"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 900.0, '
+            .. '"altitude_target_ref": "barometric", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("toggling=" .. tostring(ai_pilot_goal.toggling_reference))
+        print("press_1=" .. table.concat(press_log, ","))
+
+        -- Reference has switched to B -- the pulse's own release already
+        -- happened via `run_ai_pilot_wheel`'s own deadline check in
+        -- production; this test drives the tick directly, so it sets
+        -- the overlay forward by hand and re-ticks.
+        ai_pilot_alt_add_text = "B"
+        ai_pilot_alt_text = "500"
+        ai_pilot_goal_tick(0.3)
+        print("toggling_after=" .. tostring(ai_pilot_goal.toggling_reference))
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["toggling"] == "true"
+        assert values["press_1"] == "3015:1"  # WHEEL_CENTER_BUTTON pressed
+        assert values["toggling_after"] == "false"
+        assert values["hold_cmd"] == "3004"  # AI_WHEEL_UP (500 -> 900)
+
+    def test_speed_goal_taps_once_per_tick_until_settled(self) -> None:
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_speed_text = "120"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "speed", '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": 150.0, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("press_1=" .. table.concat(press_log, ","))
+        print("progress_1=" .. tostring(ai_pilot_goal.progress))
+
+        ai_pilot_speed_text = "150"
+        ai_pilot_goal_tick(0.2)
+        print("press_2=" .. table.concat(press_log, ","))
+        print("progress_2=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_1"] == "3004:1,3004:0"  # one short tap, UP
+        assert values["progress_1"] == "pressing"
+        assert values["press_2"] == "3004:1,3004:0"  # no new press
+        assert values["progress_2"] == "settled"
+
+    def test_an_outstanding_hvrt_direction_stops_this_tick_from_pressing(
+        self,
+    ) -> None:
+        """Review fix, second line of defence: even if a message carried
+        both `param` and `hvrt_direction` non-null at once (the exact
+        collision the review found possible before body-layer's own
+        `goal_param_for_wire` guard existed -- `HVR` is accepted by both
+        `ai_pilot_goal_mode_ready` and `_ai_pilot_hvrt_ready`),
+        `ai_pilot_goal_tick` must never press for the FLT/HVR channel
+        while a translate direction is outstanding. HVRT always wins:
+        once the mode actually reaches `HVRT`, the HVRT tick is the only
+        one that presses -- never both in the same tick."""
+        script = """
+        ai_pilot_mode_text = "HVR"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 900.0, '
+            .. '"altitude_target_ref": "barometric", "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("goal_press_log=" .. table.concat(press_log, ","))
+        print("goal_hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+
+        -- Mode crosses into HVRT -- the HVRT tick is the one that
+        -- presses; the FLT/HVR tick still presses nothing.
+        ai_pilot_mode_text = "HVRT"
+        ai_pilot_goal_tick(0.2)
+        ai_pilot_goal_tick_hvrt(0.2)
+        print("final_press_log=" .. table.concat(press_log, ","))
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["goal_press_log"] == ""
+        assert values["goal_hold_cmd"] == "nil"
+        assert values["final_press_log"] == "3003:1"  # the HVRT tick alone pressed
+        assert values["hvrt_hold_cmd"] == "3003"
+
+
+class TestHandleAiPilotGoalCommand:
+    def test_a_different_param_releases_any_open_hold(self) -> None:
+        """`heading_target_deg` is deliberately sent **non-null** in the
+        second message too, simulating a still-queued heading goal
+        riding alongside the newly-active speed one (plan: "only the
+        fields matching `param` are meaningful" -- the wire can
+        legitimately carry a non-active target). The hold still
+        releases (an active-param change, not a value change), and the
+        stale heading field is simply never read while
+        `.param == "speed"` -- harmless, not acted on."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_course_text = "10"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "heading", '
+            .. '"heading_target_deg": 90.0, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_before=" .. tostring(ai_pilot_goal.hold_cmd))
+
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": "speed", '
+            .. '"heading_target_deg": 90.0, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": 150.0, '
+            .. '"hvrt_direction": null}', 0.2)
+        print("hold_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("param_after=" .. tostring(ai_pilot_goal.param))
+        print("heading_target_after=" .. tostring(ai_pilot_goal.heading_target_deg))
+
+        -- A tick now must act on speed only -- never re-open a heading
+        -- hold just because the stale field is still non-null.
+        ai_pilot_speed_text = "120"
+        ai_pilot_goal_tick(0.4)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_before"] == "3002"  # AI_WHEEL_RIGHT
+        assert values["hold_after"] == "nil"
+        assert values["param_after"] == "speed"
+        assert values["heading_target_after"] == "90"
+        # A speed tap (UP), never a heading hold (3002/3003).
+        assert values["press_log"] == "3002:1,3002:0,3004:1,3004:0"
+
+    def test_the_idle_message_clears_progress(self) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "heading", '
+            .. '"heading_target_deg": 90.0, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.2)
+        print("param=" .. tostring(ai_pilot_goal.param))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["param"] == "nil"
+        assert values["progress"] == "idle"
+
+
+class TestHandleAiPilotGoalCommandHvrtStep:
+    """`hvrt_step`'s own one-shot-trigger behaviour -- acted on exactly
+    once per distinct `goal_seq`, never sticky state."""
+
+    def test_taps_once_on_a_fresh_goal_seq(self) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.0)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3004:1,3004:0"  # AI_WHEEL_UP, one tap
+
+    def test_a_re_delivered_message_with_the_same_goal_seq_does_not_tap_again(
+        self,
+    ) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.2)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3004:1,3004:0"  # only the first call tapped
+
+    def test_a_new_goal_seq_taps_again(self) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "down"}', 0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "down"}', 0.2)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3005:1,3005:0,3005:1,3005:0"
+
+
+class TestAiPilotGoalTickHvrt:
+    """Stage P2b: HVRT translate's own hold/redirect/hold-clear/timeout."""
+
+    def test_opens_the_press_once_in_hvrt_mode(self) -> None:
+        script = """
+        ai_pilot_mode_text = "HVRT"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hvrt_hold_cmd"] == "3003"  # AI_WHEEL_LEFT
+        assert values["press_log"] == "3003:1"
+
+    def test_redirecting_releases_the_old_press_and_opens_the_new_one(self) -> None:
+        script = """
+        ai_pilot_mode_text = "HVRT"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "right"}', 0.5)
+        ai_pilot_goal_tick_hvrt(0.5)
+        print("press_log=" .. table.concat(press_log, ","))
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3003:1,3003:0,3002:1"
+        assert values["hvrt_hold_cmd"] == "3002"  # AI_WHEEL_RIGHT
+
+    def test_the_spoken_hold_releases_immediately(self) -> None:
+        script = """
+        ai_pilot_mode_text = "HVRT"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 1.0)
+        ai_pilot_goal_tick_hvrt(1.0)
+        print("press_log=" .. table.concat(press_log, ","))
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3003:1,3003:0"
+        assert values["hvrt_hold_cmd"] == "nil"
+
+    def test_the_safety_timeout_releases_and_reports(self) -> None:
+        script = """
+        ai_pilot_mode_text = "HVRT"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "forward"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        -- Still held well short of the timeout.
+        ai_pilot_goal_tick_hvrt(10.0)
+        print("hold_cmd_mid=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        -- Past HVRT_TRANSLATE_MAX_HOLD_S (15 s).
+        ai_pilot_goal_tick_hvrt(15.1)
+        print("hold_cmd_after=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        print("direction_after=" .. tostring(ai_pilot_goal.hvrt_direction))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd_mid"] == "3004"  # AI_WHEEL_UP, still held
+        assert values["hold_cmd_after"] == "nil"
+        assert values["direction_after"] == "nil"
+        assert values["progress_after"] == "released_timeout"
+        assert values["press_log"] == "3004:1,3004:0"
+
+    def test_mode_cycles_toward_hvrt_from_hvr_before_opening_the_press(self) -> None:
+        """`"right"` (`AI_WHEEL_RIGHT`, 3002) is deliberately the
+        direction under test, not `"left"` -- the mode cycle itself
+        always presses `AI_WHEEL_LEFT` (3003), so a `"left"` translate
+        would make the mode-cycle tap and the eventual real press
+        indistinguishable on the wire."""
+        script = """
+        ai_pilot_mode_text = "HVR"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "right"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        print("press_log=" .. table.concat(press_log, ","))
+        print("hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        # A mode-cycle short-left tap, never the HVRT press itself (not
+        # yet in HVRT this tick).
+        assert values["press_log"] == "3003:1,3003:0"
+        assert values["hvrt_hold_cmd"] == "nil"
+
+    def test_mode_cycle_into_hvrt_is_bounded_reports_blocked_then_retries(
+        self,
+    ) -> None:
+        """Required fix: `ai_pilot_goal_tick_hvrt`'s own mode-cycle
+        previously had no attempt bound, no `"mode_blocked"` report, and
+        no retry at all -- a press that never registered tapped
+        `AI_WHEEL_LEFT` forever, every tick, with nothing spoken and no
+        voice escape (the readiness-gated "Hold" cancel). Now bounded by
+        `MODE_CYCLE_MAX_ATTEMPTS`, reported, and retried after `MODE_
+        BLOCKED_RETRY_S` -- the exact same shape `ai_pilot_goal_tick`'s
+        own bound has, via a separate attempt counter."""
+        script = """
+        ai_pilot_mode_text = "FLT"  -- never reads back HVR/HVRT
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": "left"}', 0.0)
+        ai_pilot_goal_tick_hvrt(0.0)
+        ai_pilot_goal_tick_hvrt(0.2)
+        ai_pilot_goal_tick_hvrt(0.4)
+        print("attempts=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+        print("press_count=" .. #press_log)
+        ai_pilot_goal_tick_hvrt(0.6)
+        print("attempts_after=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_after=" .. #press_log)
+        print("direction_after=" .. tostring(ai_pilot_goal.hvrt_direction))
+        ai_pilot_goal_tick_hvrt(0.6 + MODE_BLOCKED_RETRY_S + 0.1)
+        print("attempts_retry=" .. tostring(ai_pilot_goal.hvrt_mode_cycle_attempts))
+        print("progress_retry=" .. tostring(ai_pilot_goal.progress))
+        print("press_count_retry=" .. #press_log)
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["attempts"] == "3"
+        assert values["progress"] == "cycling_mode"
+        assert values["press_count"] == "6"
+        assert values["attempts_after"] == "3"
+        assert values["progress_after"] == "mode_blocked"
+        assert values["press_count_after"] == "6"  # no 4th tap
+        assert values["direction_after"] == "left"  # never dropped
+        assert values["attempts_retry"] == "1"
+        assert values["progress_retry"] == "cycling_mode"
+        assert values["press_count_retry"] == "8"  # one renewed attempt

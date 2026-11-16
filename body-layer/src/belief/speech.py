@@ -509,6 +509,12 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     "NO_PLACE": "Unable, don't know that place.",
     "CANNOT_ANSWER": "Unable, don't know.",
     "FIXED_COMMAND_ONLY": "Unable, fixed command only.",
+    # BL-16 mode 2 Stage P2a/P2b (`plans/flight-control/plan.md`, "Stage
+    # P2 ready to build", "Decisions Requiring User Input"), pilot's own
+    # words: the exhausted mode-cycle bound ("mode_blocked", heading/
+    # altitude/speed) and the HVRT-translate hover precondition both
+    # answer this exact phrase.
+    "NOT_READY": "Unable, not ready.",
 }
 
 

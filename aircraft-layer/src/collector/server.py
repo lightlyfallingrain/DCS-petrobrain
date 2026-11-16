@@ -150,7 +150,16 @@ logger = logging.getLogger(__name__)
 #: a correctly split one.
 #: "...16c" (fix/ai-wheel-pilot-seat-gate): the AI-wheel seat gate,
 #: plus `apw_seat`/`apw_cam_fwd_m` on the AI-pilot-wheel line.
-EXPECTED_EXPORT_VERSION = "2026-11-16c"
+#: "...16d" (BL-16 Stage P2a/P2b merge): the goal channel and HVRT
+#: translate, adding `apw_goal_progress`/`apw_goal_seq` to the
+#: AI-pilot-wheel line -- see `Export.lua`'s own matching comment.
+#: "...16e" (review-fix round, `plans/flight-control/review-p2.md`): the
+#: HVRT mode-cycle bound/retry and the goal-channel-vs-HVRT arbitration
+#: fix -- no new wire field, but `"param"` can now read `null` on a
+#: message that also carries a non-null `"hvrt_direction"` where a
+#: pre-fix pairing could see both meaningful at once -- see `Export.
+#: lua`'s own matching comment.
+EXPECTED_EXPORT_VERSION = "2026-11-16e"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it

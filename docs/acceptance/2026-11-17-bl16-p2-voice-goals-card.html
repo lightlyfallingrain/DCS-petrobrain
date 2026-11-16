@@ -1,0 +1,282 @@
+<title>Voice Goals &amp; HVRT</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column of glanceable blocks, branch first, one session, prize block marked in amber. Same family as the P1/QNH cards. */
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08; --focus:#e8a93a;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+    --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4; --focus:#a8661a;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1; --line:#d8cba8;
+  --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+  --amber:#a8661a; --amber-dim:#8a531a;
+  --record:#1f7d76; --record-dim:#bfe6e2;
+  --danger:#a8382a; --good:#4c7a34;
+  --mono-bg:#efe8d4; --focus:#a8661a;
+  color-scheme:light;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif; font-size:16px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:24px 56px;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; color:var(--amber);}
+h2{font-size:1.15rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.08em; margin:28px 0 8px;}
+.eyebrow{font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+.subhead{color:var(--ink-dim); margin-top:8px;}
+code,pre{font-family:'JetBrains Mono', monospace;}
+pre{background:var(--mono-bg); border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:0.84rem; overflow-x:auto; margin:10px 0 0; color:var(--ink);}
+code.i{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+.branch-box{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:16px 18px; margin:18px 0;}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber);}
+.note{background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:12px 0; color:var(--ink-dim);}
+.note strong{color:var(--ink);}
+.note.warn{border-color:var(--danger);}
+.note.warn .tag{color:var(--danger);}
+.note.good{border-color:var(--good);}
+.note.good .tag{color:var(--good);}
+.tag{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.85rem;}
+.session{font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.5rem; color:var(--ink); margin:32px 0 4px; padding-top:18px; border-top:2px solid var(--amber-dim);}
+.session small{display:block; font-family:'Source Sans 3',sans-serif; font-weight:400; font-size:0.95rem; color:var(--ink-dim);}
+section.block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin:14px 0;}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber); font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;}
+.block h3{font-size:1.3rem; margin-top:4px;}
+.prize-tag{display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber); padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;}
+.part{display:grid; grid-template-columns:5.2rem 1fr; gap:4px 12px; margin-top:12px;}
+.part > *{min-width:0;}
+.part .k{font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; font-size:0.9rem; padding-top:2px;}
+.k.do{color:var(--amber);} .k.expect{color:var(--good);} .k.record{color:var(--record);}
+.v.record{border-left:3px solid var(--record); padding-left:10px;}
+ul,ol{margin:4px 0; padding-left:1.2rem;}
+li{margin:3px 0;}
+label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer; margin:6px 0;}
+label.chk input{width:20px; height:20px; margin-top:2px; accent-color:var(--amber); flex:none;}
+input:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+table{border-collapse:collapse; width:100%; font-size:0.92rem;}
+.tbl{overflow-x:auto;}
+th,td{text-align:left; border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top;}
+th{font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:600;}
+td:first-child{font-family:'JetBrains Mono',monospace; color:var(--amber); white-space:nowrap;}
+.bring{background:var(--panel); border:1px solid var(--record-dim); border-radius:8px; padding:16px 20px;}
+.bring li{margin:6px 0;}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+
+<div class="wrap">
+<div class="eyebrow">BL-16 · mode 2 · Stage P2a/P2b · 2026-11-17</div>
+<h1>Voice Goals &amp; HVRT</h1>
+<div class="subhead">Petrobrain now takes spoken heading, altitude and speed goals while parked, rotating between them one at a time, and flies a hover translate on command. This card tests the vocabulary end to end: the readbacks, the rotation, what happens when a mode won't cycle, and one rule the main loop decided on your behalf rather than something you asked for in these words &mdash; what a translate does to an outstanding goal, and back.</div>
+
+<div class="branch-box">
+  <div class="label">BRANCH TO FLY</div>
+  <pre>git fetch origin
+git checkout main
+git pull --ff-only</pre>
+  <div class="subhead" style="font-size:0.9rem"><strong>Export version is now <code class="i">2026-11-16e</code></strong> &mdash; copy the whole <code class="i">aircraft-layer/dcs-export/Petrobrain\</code> folder <strong>and</strong> <code class="i">Export.lua</code> to <code class="i">Saved Games\DCS\Scripts\</code> (see <code class="i">aircraft-layer/WORKFLOW.md</code>), or you'll fly against the old vocabulary with no spoken warning beyond the collector's own version-mismatch log line. <strong>Restart the collector, body-layer, and audio-adapter</strong> &mdash; all three.</div>
+</div>
+
+<div class="note"><strong>Not testable here.</strong> Stage P1's takeover/stabilisation was flown separately on its own card (2026-11-16) and isn't repeated. Stage P3 (align, align for launch, break turns) and Stage P4 (automatic recovery) aren't built yet &mdash; don't expect them. Mode 1 (unparked, raw-axis flying) also isn't built.</div>
+
+<div class="note warn"><span class="tag">If a goal seems to do nothing</span> A known, narrow gap (<code class="i">[[BL-B122]]</code>, filed at this DoD pass): if the LAN write to the aircraft hiccups once, that one goal can silently stop being retried. It's not a flight-control bug &mdash; just repeat the command or say a different value for the same parameter and it recovers. Worth a note if you see it, not a bug report by itself.</div>
+
+<div class="session">Session 1 &mdash; P2a, the goal channel <small>Operator seat, parked (press "Request Aircraft Control" if not already). Air start, straight and level.</small></div>
+
+<section class="block">
+  <div class="block-num">1</div>
+  <h3>One goal, one readback</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Say <strong>"Heading 3 1 5"</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">Immediate readback: <em>"Heading 3 1 5."</em> The aircraft turns toward 315&deg; and the AI wheel presses left/right to get there, settling within about 5&deg;.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s1-readback">Did the readback match exactly, spoken digit by digit?</label>
+      <label class="chk"><input type="checkbox" data-k="s1-converge">Did heading actually settle near 315&deg;, and about how long did it take?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">2 <span class="prize-tag">the prize</span></div>
+  <h3>Three goals at once &mdash; does rotation actually work?</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">In quick succession say <strong>"Speed 2 0 0"</strong>, then <strong>"Heading 0 9 0"</strong>, then <strong>"Altitude 3 0 0"</strong> &mdash; all three within a few seconds of each other.</div>
+    <div class="k expect">Expect</div><div class="v">Three immediate readbacks, one per command, in order spoken. All three start converging within the first few seconds (rotation gives each one a ~3 s slice before switching to the next), not strictly one-at-a-time-to-completion. No mode gets visibly stuck or stalls silently.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s2-readbacks">All three readbacks correct and in order?</label>
+      <label class="chk"><input type="checkbox" data-k="s2-rotation">Did you see the AI visibly working more than one parameter over the next ~10&ndash;15 s, rather than finishing one before starting the next?</label>
+      <label class="chk"><input type="checkbox" data-k="s2-stall">Any visible stall, or one parameter that never seemed to get its turn?</label>
+      <label class="chk"><input type="checkbox" data-k="s2-converge">Did all three eventually settle near their targets?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>"Unable, not ready" and the retry</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Try to provoke a mode-cycle miss if you can (easiest: speak a goal right as the aircraft is already mid-cycle between modes from block 2). If nothing gets stuck naturally, note that and move on &mdash; this is hard to force on demand.</div>
+    <div class="k expect">Expect</div><div class="v">If the wheel can't reach the mode a goal needs within 3 presses, you hear <em>"Unable, not ready."</em> once, then &mdash; about 3 seconds later &mdash; the AI tries again on its own, with no further mention unless it fails again.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s3-heard">Did you hear "Unable, not ready" at any point, and did the goal keep trying afterward rather than giving up?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">4</div>
+  <h3>Speaking right after parking</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Unpark, wait a couple of seconds, then press "Request Aircraft Control" again and immediately say <strong>"Speed max"</strong> &mdash; as fast as you can after parking.</div>
+    <div class="k expect">Expect</div><div class="v">The readback ("Speed max.") is heard right away &mdash; he heard you &mdash; but the goal doesn't fight the takeover's own stabilisation; it only actually starts once that settles, a second or two later.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s4-heard">Readback heard immediately even that early?</label>
+      <label class="chk"><input type="checkbox" data-k="s4-nofight">Any visible fighting between the takeover correction and the new goal, or did it wait its turn cleanly?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">5</div>
+  <h3>Altitude above the radar cap</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">While on radar altitude reference, say <strong>"Altitude 9 0 0 radar"</strong> (or any value you know is above ~700 m AGL).</div>
+    <div class="k expect">Expect</div><div class="v">The readback says <em>"900 meters barometric"</em> &mdash; never "radar" &mdash; because radar physically can't hold a target that high. The AI actually switches to barometric to get there.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s5-barometric">Readback said barometric, not radar?</label>
+      <label class="chk"><input type="checkbox" data-k="s5-switch">Did the reference actually switch (watch the altimeter mode), not just the words?</label>
+    </div>
+  </div>
+</section>
+
+<div class="session">Session 2 &mdash; P2b, HVRT translate <small>From the operator seat. Get to a hover first: say "Speed 0" and wait for the AI to slow and transition from forward flight to hover (HVR).</small></div>
+
+<section class="block">
+  <div class="block-num">6</div>
+  <h3>Automatic switch into HVRT</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Once in a stable hover, say <strong>"Left"</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">Readback <em>"Left."</em> The wheel cycles itself into HVRT (you'll see/hear the mode-cycle presses), then starts translating left and keeps translating as long as nothing else is said.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s6-cycle">Did it cycle into HVRT on its own, with no separate "HVRT" command needed?</label>
+      <label class="chk"><input type="checkbox" data-k="s6-translate">Did it actually translate left, continuously, until told otherwise?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">7</div>
+  <h3>Hold always cancels</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">While translating left from block 6, say <strong>"Hold"</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">Readback <em>"Holding."</em> Translation stops immediately.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s7-stop">Did it stop right on "Hold," with no overshoot or delay you'd notice?</label>
+    </div>
+  </div>
+  <div class="part" style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">
+    <div class="k do">Do</div><div class="v"><strong>Harder case:</strong> start a translate again ("Right"), then deliberately let the aircraft drift out of hover (push it forward a touch, or just let airspeed build) so the mode leaves HVR/HVRT on its own, then say "Hold".</div>
+    <div class="k expect">Expect</div><div class="v">"Hold" still works and still says "Holding" &mdash; this is the specific review fix: cancelling a stuck translate must never be gated behind the same hover check that gates starting one, or there'd be no way to stop it short of unparking.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s7-hard">Did "Hold" still cancel even after leaving hover, or did you get stuck?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">8</div>
+  <h3>Up / down</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">From a hover (cycle into HVRT if needed, e.g. by saying "Left" then "Hold" first), say <strong>"Up"</strong>, then a moment later <strong>"Down"</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">Readbacks <em>"Up."</em> / <em>"Down."</em> &mdash; each a short 2 m tap, not a held climb/descent like the FLT/HVR altitude goal.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s8-tap">Did each one read as a small discrete step rather than a continuous climb?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">9 <span class="prize-tag">confirm or overrule</span></div>
+  <h3>The arbitration rule: a translate pauses your goals, a new goal clears the translate</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">Say <strong>"Heading 1 8 0"</strong> while still in forward flight/hover with nothing else outstanding. Once it's actively turning, say <strong>"Left"</strong> (an HVRT translate &mdash; cycle into HVRT if not already there). Then say <strong>"Hold"</strong>. Then, while still translating (say "Left" again if "Hold" stopped it), say <strong>"Heading 0 0 0"</strong>.</div>
+    <div class="k expect">Expect</div><div class="v">Starting the translate <strong>pauses</strong> the heading goal &mdash; it keeps its target, it just stops moving while the translate runs. "Hold" lets the heading goal <strong>resume</strong> moving toward 180&deg;. Speaking the new heading goal (000) <strong>clears</strong> the translate (releases the held press) and the heading goal takes over.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s9-pause">Did the heading goal visibly stop progressing while the translate was active?</label>
+      <label class="chk"><input type="checkbox" data-k="s9-resume">Did it resume once you said "Hold"?</label>
+      <label class="chk"><input type="checkbox" data-k="s9-clear">Did speaking the new heading goal stop the translate and take over cleanly?</label>
+      <label class="chk"><input type="checkbox" data-k="s9-verdict">Is this the behaviour you want, or would you rather something else happen when a translate and a goal collide?</label>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-num">10</div>
+  <h3>Seat gate</h3>
+  <div class="part">
+    <div class="k do">Do</div><div class="v">With a goal still active (heading, altitude, or speed &mdash; anything mid-flight), switch to the <strong>pilot</strong> seat.</div>
+    <div class="k expect">Expect</div><div class="v">Every press stops the instant you leave the operator seat. Nothing keeps nudging the wheel from the pilot's seat.</div>
+    <div class="k record">Record</div><div class="v record">
+      <label class="chk"><input type="checkbox" data-k="s10-stop">Did everything stop pressing the moment you left the operator seat?</label>
+    </div>
+  </div>
+</section>
+
+<h2>Edge cases, if you get the chance</h2>
+<div class="tbl"><table>
+  <tr><th>Case</th><th>What to watch for</th></tr>
+  <tr><td>Repeat a goal</td><td>Say the same heading twice in a row &mdash; should not restart or stutter, it's a no-op on the wire.</td></tr>
+  <tr><td>"Level flight"</td><td>Freezes heading/altitude/speed at whatever is currently held, in one word &mdash; try it after some manual flying.</td></tr>
+  <tr><td>Back to the operator seat</td><td>After the seat-gate test (block 10), return to the operator seat &mdash; does a stale goal resume on its own, or does it need a fresh command? (Expected: nothing resumes on its own, per E-P10.)</td></tr>
+</table></div>
+
+<h2>Bring back</h2>
+<div class="bring">
+  <ol>
+    <li>Did readbacks match what you actually said/heard back, every time?</li>
+    <li><strong>Did three simultaneous goals actually interleave, or did one block the others?</strong></li>
+    <li>Any "Unable, not ready" moments, and did the retry actually happen ~3 s later?</li>
+    <li>HVRT: auto-cycle-in, continuous translate, and "Hold" cancelling even outside hover.</li>
+    <li><strong>Your verdict on the arbitration rule (block 9) &mdash; keep it, or change it?</strong></li>
+    <li>Seat gate: clean stop, and whether a goal silently resumed on return.</li>
+  </ol>
+  <p style="margin:12px 0 0; color:var(--ink-dim)">Anything that surprises you is worth more than anything on this list.</p>
+</div>
+</div>
+
+<script>
+try{
+const KEY='bl16-p2-voice-goals-2026-11-17';
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{
+    try{
+      const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+      s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+    }catch(e){}
+  });
+});
+}catch(e){}
+</script>

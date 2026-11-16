@@ -29,7 +29,18 @@ cleanly.
 seat `Export.lua` placed the player in from the camera (`"pilot"`/
 `"operator"`/`None` not known yet) and the raw forward camera offset
 behind it -- diagnostic, so a live flight shows whether the seat gate
-reads what the cockpit shows. Optional on the wire like the four above."""
+reads what the cockpit shows. Optional on the wire like the four above.
+
+`goal_progress`/`goal_seq` are Stage P2's own additions (`plans/
+flight-control/plan.md`, "Stage P2 ready to build", "The goal channel --
+wire shape"): `goal_progress` is `Export.lua`'s own report of where the
+goal-channel loop is -- `"idle"`/`"pressing"`/`"cycling_mode"`/
+`"settled"`/`"mode_blocked"`/`"released_timeout"` -- and `goal_seq`
+echoes the sequence number of the goal message it is reporting against,
+so `belief.ai_pilot_wheel`'s own poll can tell which goal a `"settled"`/
+`"mode_blocked"` report belongs to rather than assuming it is the latest
+one sent. Both optional on the wire, same "an older Export.lua still
+parses cleanly" reasoning as the takeover-revision fields above."""
 
 from __future__ import annotations
 
@@ -63,6 +74,8 @@ class AiPilotWheelState:
     correction_path: str | None
     seat: str | None
     cam_fwd_m: float | None
+    goal_progress: str | None = None
+    goal_seq: int | None = None
 
     @staticmethod
     def from_dict(
@@ -94,6 +107,7 @@ class AiPilotWheelState:
             "apw_takeover_stage",
             "apw_correction_path",
             "apw_seat",
+            "apw_goal_progress",
         ):
             raw = data.get(field)
             if raw is None:
@@ -121,6 +135,17 @@ class AiPilotWheelState:
             else:
                 optional_numbers[field] = float(raw_number)
 
+        raw_goal_seq = data.get("apw_goal_seq")
+        if raw_goal_seq is None:
+            goal_seq: int | None = None
+        elif isinstance(raw_goal_seq, bool) or not isinstance(raw_goal_seq, int):
+            raise AiPilotWheelParseError(
+                "field 'apw_goal_seq' must be a whole number or null, got "
+                f"{type(raw_goal_seq).__name__}"
+            )
+        else:
+            goal_seq = raw_goal_seq
+
         return AiPilotWheelState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -137,6 +162,8 @@ class AiPilotWheelState:
             correction_path=optional_strings["apw_correction_path"],
             seat=optional_strings["apw_seat"],
             cam_fwd_m=optional_numbers["apw_cam_fwd_m"],
+            goal_progress=optional_strings["apw_goal_progress"],
+            goal_seq=goal_seq,
         )
 
     @staticmethod
@@ -169,4 +196,6 @@ class AiPilotWheelState:
             "apw_correction_path": self.correction_path,
             "apw_seat": self.seat,
             "apw_cam_fwd_m": self.cam_fwd_m,
+            "apw_goal_progress": self.goal_progress,
+            "apw_goal_seq": self.goal_seq,
         }
