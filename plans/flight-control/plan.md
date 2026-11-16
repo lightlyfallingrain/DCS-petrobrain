@@ -689,6 +689,44 @@ settling from whatever it was doing at the moment of takeover.
 notes above. The correction loop is its own dedicated up/down pair, never a parameterised
 combinator, for the same E-P6 reason.
 
+#### Amended 2026-11-16 — after the takeover rehearsal probe (main loop, pilot's answers)
+
+Source: `docs/acceptance/2026-11-16-bl16-batch-a-feedback.md`, sections "Takeover rehearsal probe"
+and "Explore, round 3". **This amends points 2 and 4 above; where they disagree, this wins.**
+
+- **The correction goal is the handover altitude** (pilot, Q1: *"handolver alt"*): actual MSL
+  **at the moment arg 852 crosses the threshold** (point 1), not at the first post-open read.
+  Snapshot it in the same frame as detection.
+- **Point 4 becomes two phases, per the pilot's own workaround** (*"hold down until current
+  altitude at that moment is reached. That sends the value to DCS AI and stops the climb. Then
+  continue adjusting the altitude value to what it was at handover moment"*):
+  1. **Stop the drift:** hold toward the aircraft's *current* MSL, re-read live every tick, and
+     release within `AI_PILOT_ALT_TOLERANCE_M` of it. *Inferred from the probe and the pilot's
+     words: the AI applies a held value only on release* — during the probe's single 14 s hold
+     the aircraft kept climbing 920 → 1050 m toward the old target. One continuous hold straight to
+     the handover altitude would let it keep climbing the whole time.
+  2. **Return to handover:** then hold toward the handover snapshot, release within tolerance.
+  Skip phase 1 when the target already reads within tolerance of current MSL, and skip both
+  when it is within tolerance of the handover altitude.
+- **Quick path, tried first when it can work** (pilot, Q2: *"If AGL is < 700m, yes do that to
+  fix it"*): centre pulse (barometric → radar), read; if the reference now reads `R`, centre pulse
+  again (radar → barometric) and read. In the probe a second barometric switch gave a correct
+  target (1080 against 1084). **The radar reference is capped at 700 m AGL** (pilot): a target
+  above that forces barometric, so the first pulse is refused. *The wild target measured +740 m
+  above handover twice, which is above 700 m AGL at any height,* so the read decides, not a
+  precondition: **if the reference still reads `B` after the first pulse, fall back to the
+  two-phase hold.** Attempt the quick path only when the aircraft's own AGL is below 700 m.
+- **Centre presses with the menu open use a real pulse, `SHORT_PULSE_S` 0.15 s,** not a same-frame
+  press/release. Measured: the 0.15 s pulse toggled B → R with the menu open. **This corrects
+  point 2's premise and P0-5's reading**: the open-menu failure was our zero-length press, not ED.
+  Point 2's first press stays blind and menu-closed (it works, and nothing is readable yet).
+- **Held-press profile, measured both ways:** nothing for the first 0.5 s, about 16 m/s until about
+  2.5 s, then about 50 m/s; the value moves about one more step after release. A 742 m error closed
+  in 14 s. `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` 60 s is comfortably above that, so it stays a
+  safety ceiling and the "minutes if linear" risk below is retired.
+- **Keep-open, measured:** a hand-closed menu reads closed for 3 frames and reads open again about
+  17 ms after the toggle. Point 3's 1 s settle window is generous; keep it, it costs nothing visible.
+
 **Flight P1 (revised), test card, named branch**: from the operator seat, hand over with "Request
 Aircraft Control" (name the binding on the card — the original card's generic "park" wording is
 what produced Batch A's own confusion). Confirm: no sink; the command menu opens on its own within
