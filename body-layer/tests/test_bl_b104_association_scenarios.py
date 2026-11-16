@@ -22,6 +22,7 @@ informative here)."""
 from __future__ import annotations
 
 import pytest
+
 from belief.contacts import ContactStore
 from perception.estimation import (
     look_sigma_m,
