@@ -238,6 +238,17 @@
   function that references one more upvalue needs the same move, not a straightforward edit —
   there is essentially zero headroom left (`plans/9k113-hands-off-switch/implementation.md`,
   independently reproduced in `review.md`).
+- **`Export.lua`'s *whole file* (not one closure) is at Lua 5.1's separate 200-local-per-function
+  ceiling, since a chunk's top level counts as one function** — a second, distinct limit from the
+  60-upvalue-per-closure one above. Confirmed live by `luac5.1 -p` ("main function has more than
+  200 local variables") while adding BL-16's takeover/correction state. Grouping new state into one
+  table local (rather than individual module-level locals, which this file otherwise prefers — see
+  `feedback_export_lua_new_helper_can_make_an_earlier_function_stale`) and deleting genuinely-dead
+  constants bought exactly enough headroom to land at 200 with zero left; the next feature that adds
+  any more top-level locals will hit this immediately. The real fix is splitting `Export.lua` into
+  several `dofile`-loaded modules (each its own chunk, its own 200-local budget) — scheduled as
+  `aircraft-layer/ROADMAP/AC-B12.md`, before BL-16's next stage (BL-16 implementation, review-fix
+  round, 2026-11-16).
 - **One observation of a sight/mark mismatch cannot separate a scale error from a boresight
   error.** Both shift a reading in the same direction for a single depression angle; only a second,
   different depression angle (or a direct, no-feedback-loop measurement) disambiguates them. This

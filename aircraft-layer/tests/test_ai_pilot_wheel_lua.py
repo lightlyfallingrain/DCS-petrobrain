@@ -1,26 +1,25 @@
-"""BL-16 mode 2, Stage P1 (`plans/flight-control/plan.md`) -- the pure Lua
-functions `run_ai_pilot_wheel` is built from, run against a real Lua
-interpreter and checked against the overlay's known text shapes, not just
-read:
+"""BL-16 mode 2, Stage P1 takeover/stabilisation revision (`plans/
+flight-control/plan.md`, "Revised 2026-11-16") -- the pure Lua functions
+`run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` are built from, run
+against a real Lua interpreter and checked against the overlay's known
+text shapes, not just read:
 
 - `parse_helperai_overlay_fields` -- the flattening parser against the
   overlay readback research note's own observed text
   (`aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md`
   section 3: `mode_text`/`course_text`/`alt_text`/`alt_add_text`/
   `speed_text`, the `R`/`B` altitude-reference suffix).
-- `ai_pilot_park_rising` -- the park signal's rising-edge detection
-  (arg 852/952 >= threshold).
-- `ai_pilot_should_nudge_altitude`/`ai_pilot_parse_altitude_text`/
-  `ai_pilot_actual_altitude_m` -- the park-sink nudge's "equal" decision.
-- `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` together, against a
-  `GetDevice` mock (`TestNudgeDrivenFromCachedParse`) -- the perf fix
-  (`plans/flight-control/perf-batch-a.md`) that moves the overlay parse
-  and the altitude-nudge decision off the per-frame path and onto the
-  5 Hz tick: the rising edge only arms `ai_pilot_pending_nudge`, the
-  press itself happens only once `update_ai_pilot_wheel_overlay` runs
-  against that tick's parsed fields, and unparking before that tick
-  clears the armed flag so a stale parse can never fire a nudge for a
-  park that already ended (E-P10).
+- `ai_pilot_park_rising` -- the park signal's rising-edge detection on
+  arg 852 **alone** (952 dropped from detection, this revision's point 1
+  -- it is 852's own mirror, not a second park sensor).
+- `ai_pilot_correction_direction`/`ai_pilot_quick_path_eligible` -- the
+  correction loop's own pure decisions (replacing the old one-shot
+  `ai_pilot_should_nudge_altitude`, removed outright per the plan).
+- `ai_pilot_parse_altitude_text`/`ai_pilot_actual_altitude_m` -- read-back
+  parsing, unchanged from the original Stage P1 build.
+- The full takeover sequence end to end (`TestTakeoverSequence`), against
+  a `GetDevice` mock -- detection -> blind reference toggle -> menu open
+  -> the three correction paths (`none`/`quick`/`hold`) -> unpark.
 
 Same extraction technique as `test_sight_servo_lua.py`'s own
 `_extract_lua_function` (duplicated rather than imported across test
@@ -81,20 +80,26 @@ def _extract_lua_function(name: str) -> str:
 
 def _extract_lua_constant(name: str) -> str:
     """Slice one `local {name} = <value>` line out of `Export.lua` --
-    `ai_pilot_should_nudge_altitude`/`ai_pilot_park_rising` close over
-    module-level constants (`AI_PILOT_NUDGE_EPSILON_M`, `AI_PILOT_PARK_
-    THRESHOLD`) declared outside the function body itself, so extracting
-    the function alone is not enough; this pulls the real value rather
-    than hand-copying it, so the two cannot silently drift."""
+    the correction functions close over several module-level constants
+    declared outside their own bodies, so extracting the function alone
+    is not enough; this pulls the real value rather than hand-copying it,
+    so the two cannot silently drift."""
     text = _EXPORT_LUA.read_text(encoding="utf-8")
     match = re.search(rf"^local {name} = (.+)$", text, re.MULTILINE)
     assert match is not None, f"{name} not found in Export.lua"
     return f"local {name} = {match.group(1)}"
 
 
-#: Constants `ai_pilot_should_nudge_altitude`/`ai_pilot_park_rising`
-#: close over -- extracted, not duplicated, see `_extract_lua_constant`.
-_AI_PILOT_WHEEL_CONSTANTS = ("AI_PILOT_NUDGE_EPSILON_M", "AI_PILOT_PARK_THRESHOLD")
+#: Constants `ai_pilot_correction_direction`/`ai_pilot_quick_path_eligible`/
+#: `ai_pilot_park_rising` close over -- extracted, not duplicated, see
+#: `_extract_lua_constant`.
+_AI_PILOT_WHEEL_CONSTANTS = (
+    "AI_PILOT_ALT_TOLERANCE_M",
+    "AI_PILOT_PARK_THRESHOLD",
+    "AI_PILOT_QUICK_PATH_MAX_AGL_M",
+    "AI_WHEEL_UP",
+    "AI_WHEEL_DOWN",
+)
 
 
 def _run_lua(functions: list[str], script_tail: str) -> str:
@@ -239,9 +244,9 @@ class TestParseHelperaiOverlayFields:
 
 
 class TestAiPilotParkRising:
-    def _rising(self, prev_parked: bool, stick: str, pedals: str) -> tuple[bool, bool]:
+    def _rising(self, prev_parked: bool, stick: str) -> tuple[bool, bool]:
         tail = f"""
-        local now, rising = ai_pilot_park_rising({str(prev_parked).lower()}, {stick}, {pedals})
+        local now, rising = ai_pilot_park_rising({str(prev_parked).lower()}, {stick})
         print(tostring(now) .. "," .. tostring(rising))
         """
         out = _run_lua(["ai_pilot_park_rising"], tail)
@@ -249,62 +254,73 @@ class TestAiPilotParkRising:
         return now_s == "true", rising_s == "true"
 
     def test_unparked_to_unparked_is_no_edge(self) -> None:
-        now, rising = self._rising(False, "0.0", "0.0")
+        now, rising = self._rising(False, "0.0")
         assert now is False
         assert rising is False
 
     def test_crossing_the_threshold_is_a_rising_edge(self) -> None:
-        now, rising = self._rising(False, "0.95", "0.0")
+        now, rising = self._rising(False, "0.95")
         assert now is True
         assert rising is True
 
     def test_already_parked_is_not_a_second_rising_edge(self) -> None:
-        now, rising = self._rising(True, "0.95", "0.95")
+        now, rising = self._rising(True, "0.95")
         assert now is True
         assert rising is False
 
-    def test_pedals_alone_above_threshold_also_reads_parked(self) -> None:
-        """Either arg is enough (OR) -- the two animate off one lever."""
-        now, rising = self._rising(False, "0.0", "0.95")
-        assert now is True
-        assert rising is True
-
-    def test_nil_readings_are_not_parked(self) -> None:
-        now, rising = self._rising(False, "nil", "nil")
+    def test_nil_reading_is_not_parked(self) -> None:
+        now, rising = self._rising(False, "nil")
         assert now is False
         assert rising is False
 
 
-class TestAiPilotAltitudeNudge:
-    def test_equal_altitudes_trigger_a_nudge(self) -> None:
-        tail = """
-        print(tostring(ai_pilot_should_nudge_altitude(196, 196.0)))
-        """
-        out = _run_lua(["ai_pilot_should_nudge_altitude"], tail)
-        assert out.strip() == "true"
+class TestAiPilotCorrectionDirection:
+    """Replaces `ai_pilot_should_nudge_altitude` (removed outright per
+    the plan's point 8 -- this revision's correction loop needs a
+    direction, not a boolean)."""
 
-    def test_within_tolerance_still_counts_as_equal(self) -> None:
-        tail = """
-        print(tostring(ai_pilot_should_nudge_altitude(196, 200.0)))
+    def _direction(self, held: str, target: str) -> str | None:
+        tail = f"""
+        local dir = ai_pilot_correction_direction({held}, {target})
+        print(tostring(dir))
         """
-        out = _run_lua(["ai_pilot_should_nudge_altitude"], tail)
-        assert out.strip() == "true"
+        out = _run_lua(["ai_pilot_correction_direction"], tail).strip()
+        return None if out == "nil" else out
 
-    def test_a_real_difference_does_not_nudge(self) -> None:
-        tail = """
-        print(tostring(ai_pilot_should_nudge_altitude(196, 260.0)))
+    def test_within_tolerance_needs_no_correction(self) -> None:
+        assert self._direction("196", "200.0") is None
+
+    def test_held_above_target_presses_down(self) -> None:
+        assert self._direction("1650", "900.0") == "3005"  # AI_WHEEL_DOWN
+
+    def test_held_below_target_presses_up(self) -> None:
+        assert self._direction("500", "900.0") == "3004"  # AI_WHEEL_UP
+
+    def test_a_missing_reading_never_counts_as_needing_correction(self) -> None:
+        assert self._direction("nil", "196.0") is None
+        assert self._direction("196", "nil") is None
+
+
+class TestAiPilotQuickPathEligible:
+    def _eligible(self, agl: str) -> bool:
+        tail = f"""
+        print(tostring(ai_pilot_quick_path_eligible({agl})))
         """
-        out = _run_lua(["ai_pilot_should_nudge_altitude"], tail)
-        assert out.strip() == "false"
+        out = _run_lua(["ai_pilot_quick_path_eligible"], tail)
+        return out.strip() == "true"
 
-    def test_a_missing_reading_never_counts_as_equal(self) -> None:
-        tail = """
-        print(tostring(ai_pilot_should_nudge_altitude(nil, 196.0)))
-        print(tostring(ai_pilot_should_nudge_altitude(196, nil)))
-        """
-        out = _run_lua(["ai_pilot_should_nudge_altitude"], tail)
-        assert out.strip().split("\n") == ["false", "false"]
+    def test_below_the_cap_is_eligible(self) -> None:
+        assert self._eligible("500.0") is True
 
+    def test_at_or_above_the_cap_is_not_eligible(self) -> None:
+        assert self._eligible("700.0") is False
+        assert self._eligible("900.0") is False
+
+    def test_unreadable_agl_is_not_eligible(self) -> None:
+        assert self._eligible("nil") is False
+
+
+class TestAiPilotAltitudeTextParsing:
     def test_parse_altitude_text(self) -> None:
         tail = """
         print(tostring(ai_pilot_parse_altitude_text("196")))
@@ -326,43 +342,63 @@ class TestAiPilotAltitudeNudge:
 
 #: `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay` close over several
 #: more module-level constants than the pure functions above (the press
-#: shape and the device-30 command), extracted the same way.
+#: shapes and the device-30 command ids), extracted the same way.
 _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "AI_PILOT_PARK_THRESHOLD",
-    "AI_PILOT_NUDGE_EPSILON_M",
-    "LONG_PRESS_HOLD_S",
+    "AI_PILOT_ALT_TOLERANCE_M",
+    "AI_PILOT_REFERENCE_TOGGLE_DELAY_S",
+    "MODE_READ_SETTLE_S",
+    "SHORT_PULSE_S",
+    "AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S",
+    "AI_PILOT_QUICK_PATH_MAX_AGL_M",
     "ARG_STICK_PARK",
     "ARG_PEDALS_PARK",
     "AI_WHEEL_UP",
+    "AI_WHEEL_DOWN",
+    "WHEEL_CENTER_BUTTON",
+    "WHEEL_MENU_BUTTON",
 )
 
-#: `_ALT_196_R_RAW` -- `alt_text`/`alt_add_text` "196"/"R", the same
-#: overlay shape `TestParseHelperaiOverlayFields.test_flt_mode_overlay`
-#: observes live, trimmed to only the two leaves the nudge decision reads.
-_ALT_196_R_RAW = (
-    "-----------------------------------------\n"
-    "alt_text\n"
-    "196\n"
-    "children are {\n"
-    "}\n"
-    "-----------------------------------------\n"
-    "alt_add_text\n"
-    "R\n"
-    "children are {\n"
-    "}\n"
-)
+
+def _overlay_raw(
+    alt_text: str | None, alt_add_text: str | None, mode_text: str = "FLT"
+) -> str:
+    """Builds a `list_indication` dump carrying only the leaves the
+    takeover sequence reads -- same shape as the live overlay (research
+    note section 3), trimmed to what each scenario needs. `None` omits
+    that leaf entirely (absent, not an empty value), matching how the
+    real overlay drops a field it is not currently showing."""
+    parts = []
+    if mode_text is not None:
+        parts.append(
+            f"-----------------------------------------\nmode_text\n{mode_text}\nchildren are {{\n}}\n"
+        )
+    if alt_text is not None:
+        parts.append(
+            f"-----------------------------------------\nalt_text\n{alt_text}\nchildren are {{\n}}\n"
+        )
+    if alt_add_text is not None:
+        parts.append(
+            f"-----------------------------------------\nalt_add_text\n{alt_add_text}\nchildren are {{\n}}\n"
+        )
+    return "".join(parts)
+
+
+_EMPTY_RAW = ""
 
 
 def _run_ai_pilot_wheel_integration(script_body: str) -> str:
-    """Runs the real `run_ai_pilot_wheel`/`update_ai_pilot_wheel_overlay`
-    together against a minimal `GetDevice` mock (device 0's park args,
-    device 30's `performClickableAction` press log) and stubbed altitude
-    readings, in one Lua process so module-level state
-    (`ai_pilot_parked_active`, `ai_pilot_pending_nudge`, the overlay text
-    fields, ...) persists across calls exactly as it does across real
-    per-frame calls and 5 Hz ticks. `script_body` is the test-specific
-    sequence of mock-state writes/calls/`print`s, appended after the
-    shared preamble and the two real functions' extracted bodies."""
+    """Runs the real takeover-sequence functions together against a
+    minimal `GetDevice` mock (device 0's park arg, device 30's
+    `performClickableAction` press log) and stubbed altitude readings, in
+    one Lua process so module-level state (`ai_pilot_parked_active`,
+    `ai_pilot_takeover`, the overlay text fields, ...) persists across
+    calls exactly as it does across real per-frame calls and 5 Hz ticks.
+    `script_body` is the test-specific sequence of mock-state writes/
+    calls/`print`s, appended after the shared preamble and the real
+    functions' extracted bodies. The `ai_pilot_takeover` table mirrors
+    production's own (see its module-docstring comment in `Export.lua`
+    for why it is one table, not a dozen locals)."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
@@ -380,7 +416,23 @@ local ai_pilot_speed_text = nil
 local ai_pilot_last_press = nil
 local ai_wheel_pending_release_t = nil
 local ai_wheel_pending_cmd = nil
-local ai_pilot_pending_nudge = false
+
+local ai_pilot_takeover = {
+    stage = nil,
+    t = nil,
+    handover_altitude_m = nil,
+    menu_open = false,
+    menu_open_at_t = nil,
+    menu_closed_since_t = nil,
+    awaiting_correction_decision = false,
+    correction_path = nil,
+    correction_substage = nil,
+    correction_phase = nil,
+    correction_hold_cmd = nil,
+    raw_arg852 = nil,
+    raw_arg952 = nil,
+    AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
+}
 
 local stick_park_value = 0.0
 local pedals_park_value = 0.0
@@ -420,11 +472,16 @@ end
         for name in (
             "safe_call",
             "parse_helperai_overlay_fields",
-            "ai_pilot_should_nudge_altitude",
+            "ai_pilot_correction_direction",
+            "ai_pilot_quick_path_eligible",
             "ai_pilot_parse_altitude_text",
             "ai_pilot_actual_altitude_m",
             "ai_pilot_park_rising",
-            "ai_pilot_press_altitude_up_long_hold",
+            "ai_pilot_tap30",
+            "ai_pilot_open_hold",
+            "ai_pilot_begin_hold_phase",
+            "ai_pilot_decide_correction",
+            "ai_pilot_check_hold_convergence",
             "run_ai_pilot_wheel",
             "update_ai_pilot_wheel_overlay",
         )
@@ -446,75 +503,351 @@ end
     return result.stdout
 
 
-class TestNudgeDrivenFromCachedParse:
-    """Perf fix (`plans/flight-control/perf-batch-a.md`): the rising edge
-    only arms `ai_pilot_pending_nudge`; the actual press only happens once
-    `update_ai_pilot_wheel_overlay` runs against a 5 Hz tick's parsed
-    fields, never on the rising frame itself."""
+class TestTakeoverSequence:
+    """End to end against the real state machine: detect -> 0.5 s blind
+    reference toggle -> open menu -> one of the three correction paths
+    -> (eventually) resolved, plus unpark. Mirrors the takeover rehearsal
+    probe's own steps (`Export.probe-ai-pilot-takeover.lua`) but against
+    production code, not the probe."""
 
-    def test_nudge_fires_only_once_the_cached_parse_resolves_it(self) -> None:
-        raw_literal = json.dumps(_ALT_196_R_RAW)
+    def test_detect_toggle_open_then_none_needed(self) -> None:
+        """Handover altitude already matches the AI's held altitude --
+        no correction path runs."""
+        raw = _overlay_raw(alt_text="900", alt_add_text="B")
         script = f"""
-        stick_park_value = 0.0
-        run_ai_pilot_wheel(0.0)
-
-        -- Rising edge: pending-nudge armed, but no overlay has been
-        -- parsed yet this park, so no press can have happened.
+        -- Rising edge at t=0, handover snapshot = 900.
+        msl_value = 900.0
         stick_park_value = 0.95
-        run_ai_pilot_wheel(0.2)
-        print("presses_at_rising=" .. #press_log)
-        print("pending_at_rising=" .. tostring(ai_pilot_pending_nudge))
+        run_ai_pilot_wheel(0.0)
+        print("stage_at_rise=" .. tostring(ai_pilot_takeover.stage))
+        print("handover=" .. tostring(ai_pilot_takeover.handover_altitude_m))
+        print("presses_at_rise=" .. #press_log)
 
-        -- A further per-frame call with no 5 Hz tick in between: still
-        -- no overlay parse, still no press.
-        run_ai_pilot_wheel(0.21)
-        print("presses_before_tick=" .. #press_log)
+        -- Before the 0.5s delay: nothing happens yet.
+        run_ai_pilot_wheel(0.3)
+        print("presses_before_delay=" .. #press_log)
 
-        -- The 5 Hz tick: the cached parse (equal altitude) resolves the
-        -- armed nudge into exactly one press.
-        agl_value = 196.0
-        update_ai_pilot_wheel_overlay({raw_literal}, 0.21)
-        print("presses_after_tick=" .. #press_log)
-        print("pending_after_tick=" .. tostring(ai_pilot_pending_nudge))
+        -- Delay elapses: blind reference toggle only -- the menu-open tap
+        -- is gapped AI_PILOT_MENU_OPEN_DELAY_S later, not the same frame
+        -- (main-loop timing decision, 2026-11-16 review-fix round --
+        -- matches the gap the rehearsal probe actually flew).
+        run_ai_pilot_wheel(0.5)
+        print("stage_after_toggle=" .. tostring(ai_pilot_takeover.stage))
+        print("presses_after_toggle=" .. #press_log)
 
-        -- A second tick with the same (now-settled) parse must not
-        -- press again -- the flag was consumed, not re-armed.
-        update_ai_pilot_wheel_overlay({raw_literal}, 0.22)
-        print("presses_after_second_tick=" .. #press_log)
+        -- Still within the gap: nothing further happens yet.
+        run_ai_pilot_wheel(0.9)
+        print("presses_within_gap=" .. #press_log)
+
+        -- Gap elapses: menu-open tap issued.
+        run_ai_pilot_wheel(1.0)
+        print("stage_after_delay=" .. tostring(ai_pilot_takeover.stage))
+        print("menu_open=" .. tostring(ai_pilot_takeover.menu_open))
+        print("presses_after_delay=" .. #press_log)
+        print("awaiting=" .. tostring(ai_pilot_takeover.awaiting_correction_decision))
+
+        -- First post-open read: held (900) already matches handover (900).
+        update_ai_pilot_wheel_overlay({json.dumps(raw)}, 1.1)
+        print("correction_path=" .. tostring(ai_pilot_takeover.correction_path))
+        print("stage_after_decision=" .. tostring(ai_pilot_takeover.stage))
+        print("presses_after_decision=" .. #press_log)
         """
         out = _run_ai_pilot_wheel_integration(script)
         values = dict(line.split("=", 1) for line in out.strip().splitlines())
-        assert values["presses_at_rising"] == "0"
-        assert values["pending_at_rising"] == "true"
-        assert values["presses_before_tick"] == "0"
-        assert values["presses_after_tick"] == "1"
-        assert values["pending_after_tick"] == "false"
-        assert values["presses_after_second_tick"] == "1"
+        assert values["stage_at_rise"] == "toggling_reference"
+        assert values["handover"] == "900"
+        assert values["presses_at_rise"] == "0"
+        assert values["presses_before_delay"] == "0"
+        assert values["stage_after_toggle"] == "opening_menu"
+        assert values["presses_after_toggle"] == "2"  # blind centre tap (press+release)
+        assert values["presses_within_gap"] == "2"
+        assert values["stage_after_delay"] == "correcting_altitude"
+        assert values["menu_open"] == "true"
+        # blind centre tap (press+release) + menu-open tap (press+release)
+        assert values["presses_after_delay"] == "4"
+        assert values["awaiting"] == "true"
+        assert values["correction_path"] == "none"
+        assert values["stage_after_decision"] == "nil"
+        assert values["presses_after_decision"] == "4"
 
-    def test_unpark_before_the_next_tick_clears_the_pending_nudge(self) -> None:
-        """E-P10: unpark drops AI-pilot-wheel state, including a still-
-        armed nudge, the same frame -- a cached parse that arrives at the
-        next 5 Hz tick for a park that already ended must never press."""
-        raw_literal = json.dumps(_ALT_196_R_RAW)
+    def test_hold_path_two_phases(self) -> None:
+        """AGL too high for the quick path -- the two-phase hold chases
+        live altitude first (stopping the drift), then the handover
+        snapshot."""
+        script = f"""
+        msl_value = 920.0
+        agl_value = 750.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)   -- handover snapshot = 920
+        msl_value = 1000.0        -- aircraft climbed during the sequence
+        run_ai_pilot_wheel(0.5)   -- blind toggle
+        run_ai_pilot_wheel(1.0)   -- menu open, gapped 0.5 s after the toggle
+
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.1)
+        print("path=" .. tostring(ai_pilot_takeover.correction_path))
+        print("phase_1=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd_1=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+
+        -- Phase 1 converges toward live (1000): held reads 1010.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 1.3)
+        print("phase_2=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd_2=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+
+        -- Phase 2 converges toward handover (920): held reads 925.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="925", alt_add_text="B"))}, 1.5)
+        print("stage_done=" .. tostring(ai_pilot_takeover.stage))
+        print("phase_done=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("path_done=" .. tostring(ai_pilot_takeover.correction_path))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["path"] == "hold"
+        assert values["phase_1"] == "phase1"
+        assert values["hold_cmd_1"] == "3005"  # AI_WHEEL_DOWN (1650 > 1000)
+        assert values["phase_2"] == "phase2"
+        assert values["hold_cmd_2"] == "3005"  # AI_WHEEL_DOWN (1010 > 920)
+        assert values["stage_done"] == "nil"
+        assert values["phase_done"] == "nil"
+        assert values["path_done"] == "hold"
+        presses = values["press_log"].split(",")
+        # centre tap(1,0), menu tap(1,0), phase1 DOWN:1, phase1 DOWN:0 (release),
+        # phase2 DOWN:1, phase2 DOWN:0 (release).
+        assert presses.count("3005:1") == 2
+        assert presses.count("3005:0") == 2
+
+    def test_hold_path_skips_phase1_when_already_at_live(self) -> None:
+        """Skip the phase that is already within tolerance (plan: "skip
+        phases that are already within tolerance") -- held is already
+        close to the aircraft's *live* altitude (so phase 1 has nothing
+        to do) but still far from the handover snapshot, so the loop
+        opens phase 2 directly rather than opening and immediately
+        releasing a no-op phase 1 hold."""
+        script = f"""
+        msl_value = 700.0
+        agl_value = 750.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)   -- handover = 700
+        msl_value = 1000.0       -- aircraft climbed during the sequence
+        run_ai_pilot_wheel(0.5)  -- toggle
+        run_ai_pilot_wheel(1.0)  -- menu open, gapped 0.5 s after the toggle
+
+        -- held (1010) is within tolerance of live (1000) but far from
+        -- the handover snapshot (700).
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 1.1)
+        print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["phase"] == "phase2"
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (1010 > 700)
+
+    def test_quick_path_success(self) -> None:
+        """AGL below the cap: two pulses, resolves without ever entering
+        a hold."""
+        script = f"""
+        msl_value = 1084.0
+        agl_value = 500.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)    -- handover = 1084
+        run_ai_pilot_wheel(0.5)    -- toggle
+        run_ai_pilot_wheel(1.0)    -- menu open, gapped 0.5 s after the toggle
+
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
+        print("path_after_decision=" .. tostring(ai_pilot_takeover.correction_path))
+        print("substage_after_decision=" .. tostring(ai_pilot_takeover.correction_substage))
+
+        -- Pulse 1's release (0.15s later), then the next tick's read: the
+        -- reference flipped to R.
+        run_ai_pilot_wheel(1.26)
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="500", alt_add_text="R"))}, 1.3)
+        print("substage_after_read1=" .. tostring(ai_pilot_takeover.correction_substage))
+
+        -- Pulse 2's release, then the final read: back on B, corrected.
+        run_ai_pilot_wheel(1.46)
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1080", alt_add_text="B"))}, 1.5)
+        print("stage_done=" .. tostring(ai_pilot_takeover.stage))
+        print("path_done=" .. tostring(ai_pilot_takeover.correction_path))
+        print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["path_after_decision"] == "quick"
+        assert values["substage_after_decision"] == "quick_read1"
+        assert values["substage_after_read1"] == "quick_read2"
+        assert values["stage_done"] == "nil"
+        assert values["path_done"] == "quick"
+        assert values["hold_cmd"] == "nil"
+        # Never opens AI_WHEEL_UP/DOWN -- only centre pulses (3015).
+        presses = values["press_log"].split(",")
+        assert all(
+            not p.startswith("3004") and not p.startswith("3005") for p in presses
+        )
+        assert presses.count("3015:1") == 3  # blind toggle + 2 pulses
+        assert presses.count("3015:0") == 3
+
+    def test_quick_path_falls_back_to_hold_when_still_baro(self) -> None:
+        """If the first pulse is refused (radar capped at 700 m AGL, or
+        any other reason) the reference still reads B -- fall back to
+        the two-phase hold rather than retry the pulse."""
+        script = f"""
+        msl_value = 1084.0
+        agl_value = 500.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
+
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
+        run_ai_pilot_wheel(1.26)
+        -- Pulse 1 refused: still reads B.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.3)
+        print("path=" .. tostring(ai_pilot_takeover.correction_path))
+        print("substage=" .. tostring(ai_pilot_takeover.correction_substage))
+        print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["path"] == "hold"
+        assert values["substage"] == "nil"
+        assert values["phase"] == "phase1"
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (1824 > live 1084)
+
+    def test_quick_path_falls_back_to_hold_when_pulse2_still_wrong(self) -> None:
+        """Both pulses complete (reference flips to R then back to B) but
+        the readback is still outside tolerance of the handover snapshot
+        -- the second toggle is not trusted blindly (review fix,
+        2026-11-16: the plan never said it could be, and the first
+        toggle's own measured error is not known to be absent on the
+        second). Falls back to the two-phase hold, the same shape the
+        first pulse's own refusal uses -- never resolves to `"none"` on
+        an unchecked target, and never retries a third pulse."""
+        script = f"""
+        msl_value = 1084.0
+        agl_value = 500.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
+
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
+        run_ai_pilot_wheel(1.26)
+        -- Pulse 1 succeeds: reference flips to R.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="500", alt_add_text="R"))}, 1.3)
+        run_ai_pilot_wheel(1.46)
+
+        -- Aircraft's own altitude moved on while the pulses ran.
+        msl_value = 1100.0
+
+        -- Pulse 2 completes, back on B -- but still wrong.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.5)
+        print("path=" .. tostring(ai_pilot_takeover.correction_path))
+        print("substage=" .. tostring(ai_pilot_takeover.correction_substage))
+        print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["path"] == "hold"
+        assert values["substage"] == "nil"
+        assert values["phase"] == "phase1"
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (1824 > live 1100)
+        presses = values["press_log"].split(",")
+        # blind toggle + 2 pulses, never a third -- then the hold opens.
+        assert presses.count("3015:1") == 3
+        assert presses.count("3015:0") == 3
+        assert presses.count("3005:1") == 1
+
+    def test_menu_reopens_after_the_settle_window(self) -> None:
+        """Keep-open: a hand-closed menu (overlay reads all-`nil`) is
+        reopened once it has read closed for longer than `MODE_READ_
+        SETTLE_S` -- not on the first stale-looking tick (which would
+        flap it shut again)."""
         script = f"""
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)
-        print("pending_after_rise=" .. tostring(ai_pilot_pending_nudge))
+        ai_pilot_takeover.menu_open = true
+        local before = #press_log
+
+        -- First all-nil tick: starts the settle timer, no press yet.
+        update_ai_pilot_wheel_overlay({json.dumps(_EMPTY_RAW)}, 1.0)
+        print("presses_first_closed=" .. (#press_log - before))
+
+        -- Still within the settle window.
+        update_ai_pilot_wheel_overlay({json.dumps(_EMPTY_RAW)}, 1.5)
+        print("presses_within_settle=" .. (#press_log - before))
+
+        -- Past the settle window: reopen tap issued.
+        update_ai_pilot_wheel_overlay({json.dumps(_EMPTY_RAW)}, 2.1)
+        print("presses_after_settle=" .. (#press_log - before))
+        print("menu_open=" .. tostring(ai_pilot_takeover.menu_open))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["presses_first_closed"] == "0"
+        assert values["presses_within_settle"] == "0"
+        assert values["presses_after_settle"] == "2"  # one tap: press + release
+        assert values["menu_open"] == "true"
+
+    def test_unpark_releases_and_drops_all_state_mid_hold(self) -> None:
+        """E-P10: unpark releases any open press immediately, closes the
+        menu if this sequence opened it, and drops every takeover field
+        -- nothing resumes on the next park. Mirrors the original Stage
+        P1 test's own E-P10 coverage, now against a hold in progress."""
+        script = f"""
+        msl_value = 920.0
+        agl_value = 750.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.1)
+        print("holding=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        local before = #press_log
 
         stick_park_value = 0.0
-        run_ai_pilot_wheel(0.1)
-        print("pending_after_unpark=" .. tostring(ai_pilot_pending_nudge))
+        run_ai_pilot_wheel(1.2)
+        local unpark_presses = {{}}
+        for i = before + 1, #press_log do
+            table.insert(unpark_presses, press_log[i])
+        end
+        print("unpark_presses=" .. table.concat(unpark_presses, ","))
         print("parked_after_unpark=" .. tostring(ai_pilot_parked_active))
+        print("stage_after_unpark=" .. tostring(ai_pilot_takeover.stage))
+        print("hold_cmd_after_unpark=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        print("menu_open_after_unpark=" .. tostring(ai_pilot_takeover.menu_open))
+        local after_unpark = #press_log
 
-        -- A stale parse arriving at the next tick must no-op: not
-        -- parked any more, regardless of what it would have decided.
-        agl_value = 196.0
-        update_ai_pilot_wheel_overlay({raw_literal}, 0.2)
-        print("presses_after_stale_tick=" .. #press_log)
+        -- A stale read arriving after unpark must no-op.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.3)
+        print("presses_after_stale_tick=" .. (#press_log - after_unpark))
         """
         out = _run_ai_pilot_wheel_integration(script)
         values = dict(line.split("=", 1) for line in out.strip().splitlines())
-        assert values["pending_after_rise"] == "true"
-        assert values["pending_after_unpark"] == "false"
+        assert values["holding"] == "3005"  # AI_WHEEL_DOWN
+        # The open hold is released first (same frame unpark is noticed),
+        # then the menu (opened by this sequence) is closed.
+        assert values["unpark_presses"] == "3005:0,3001:1,3001:0"
         assert values["parked_after_unpark"] == "false"
+        assert values["stage_after_unpark"] == "nil"
+        assert values["hold_cmd_after_unpark"] == "nil"
+        assert values["menu_open_after_unpark"] == "false"
         assert values["presses_after_stale_tick"] == "0"

@@ -86,6 +86,72 @@ class TestAdvanceParkedFlightState:
         assert state.held_altitude_ref == "R"
         assert state.held_speed == pytest.approx(60.0)
         assert state.last_press == "altitude_nudge_up"
+        # `server_with_sample`'s own body predates the "Revised
+        # 2026-11-16" diagnostic fields -- absent, not an error, same
+        # "missing is None" posture every optional field here already has.
+        assert state.raw_arg_852 is None
+        assert state.raw_arg_952 is None
+        assert state.takeover_stage is None
+        assert state.correction_path is None
+
+    def test_the_takeover_diagnostic_fields_are_parsed_through(self) -> None:
+        body: dict[str, Any] = {
+            "t": 123.5,
+            "received_wall_clock_s": 1000.0,
+            "apw_parked_active": True,
+            "apw_mode_text": "FLT",
+            "apw_course_text": "71",
+            "apw_alt_text": "1080",
+            "apw_alt_add_text": "B",
+            "apw_speed_text": "60",
+            "apw_last_press": "correction_hold_phase2",
+            "apw_arg852": 0.97,
+            "apw_arg952": 0.03,
+            "apw_takeover_stage": "correcting_altitude",
+            "apw_correction_path": "hold",
+        }
+        httpd = HTTPServer(("127.0.0.1", 0), _make_handler(body))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = AircraftLayerClient(
+                base_url=f"http://127.0.0.1:{httpd.server_port}"
+            )
+            state = advance_parked_flight_state(ParkedFlightState(), client)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+        assert state.raw_arg_852 == pytest.approx(0.97)
+        assert state.raw_arg_952 == pytest.approx(0.03)
+        assert state.takeover_stage == "correcting_altitude"
+        assert state.correction_path == "hold"
+
+    def test_a_boolean_arg_value_is_never_treated_as_a_number(self) -> None:
+        """`isinstance(True, int)` is true in Python -- `_as_optional_
+        float` must exclude `bool` explicitly or a malformed `true`/
+        `false` on the wire would silently read back as `1.0`/`0.0`."""
+        body: dict[str, Any] = {
+            "t": 1.0,
+            "received_wall_clock_s": 2.0,
+            "apw_parked_active": True,
+            "apw_arg852": True,
+        }
+        httpd = HTTPServer(("127.0.0.1", 0), _make_handler(body))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = AircraftLayerClient(
+                base_url=f"http://127.0.0.1:{httpd.server_port}"
+            )
+            state = advance_parked_flight_state(ParkedFlightState(), client)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+        assert state.raw_arg_852 is None
 
     def test_no_sample_yet_leaves_state_unchanged(self, server_with_null: str) -> None:
         client = AircraftLayerClient(base_url=server_with_null)

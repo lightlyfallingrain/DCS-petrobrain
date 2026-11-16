@@ -801,3 +801,89 @@ gate holds too.
   safety ceiling in case a spoken "Hold" is lost. Is 15 s the right order of magnitude for how long
   you'd expect to hold a hover translate in ordinary use, or should it be longer/shorter/tunable
   from the start?
+
+## Plan check — 2026-11-16 (Stage P1 takeover revision)
+
+**Verdict:** CONCERNS
+
+Checked `plans/flight-control/plan.md`'s "Revised 2026-11-16 — takeover after the Batch A
+flights" (the replacement Stage P1, as amended "after the takeover rehearsal probe") against the
+unchanged goal check above (E-P1, E-P6, E-P10 are the rows this stage closes) and against the
+pilot's own words in `docs/acceptance/2026-11-16-bl16-batch-a-feedback.md`. P-ICS and P0 are
+unaffected and not re-checked.
+
+| expectation | stage | status |
+|---|---|---|
+| E-P1 (park is the handover, holds what it was doing) | revised Stage P1 | met — altitude snapshotted at the rising edge of arg 852 alone, corrected in two phases to that value; no sink in the measured 0.5 s window before the fix lands |
+| E-P6 (never presses `HDG LOS`) | revised Stage P1 | met — no left/right press of any kind in the takeover sequence; only centre, `WHEEL_MENU_BUTTON`, and altitude up/down |
+| E-P10 (unpark gives it back at once, nothing resumes) | revised Stage P1 | met — Co-moving Fields table's falling-edge row: open press released same frame, `takeover_stage` cleared, menu closed if opened, nothing carried to the next park |
+| No sink, ends at the handover altitude (not wherever correction finishes) | revised Stage P1, phase 2 | met — phase 2 explicitly targets the fixed handover snapshot, not the live value phase 1 converges toward |
+| Two-phase correction follows the pilot's workaround | revised Stage P1, Amended §2 | met — phase 1 ("hold down until current altitude... is reached") and phase 2 ("continue adjusting... to what it was at handover") map directly to the pilot's own verbatim words |
+| Quick path honours the 700 m AGL radar cap | revised Stage P1, Amended §3 | met — attempted only below 700 m AGL, and the read (not the precondition) decides success, falling back to the two-phase hold when the pulse is refused |
+| Menu stays open while the AI flies, reopens at once | revised Stage P1, point 3 + Co-moving Fields | met — reopens when belief disagrees with an all-nil read for more than `MODE_READ_SETTLE_S` |
+| Nothing in the sequence surprises the pilot (no harder climb/dive than the bug itself, nothing after control is handed back) | revised Stage P1 | **contradicted** — see Finding 1 |
+
+### Findings
+
+1. **The fallback correction's own transient — the aircraft climbing well past the handover
+   altitude before coming back down to it — is nowhere disclosed as expected behaviour, and the
+   plan's own evidence is that this fallback is the likely common case, not a rare one.** Lens:
+   the non-obvious case / would the pilot notice and use this.
+   - Assumption: the two-phase design (Amended §2) is presented as *the fix* for "one continuous
+     hold straight to the handover altitude would let it keep climbing the whole time" — read as if
+     phase 1 removes the climb rather than bounding it.
+   - In the sim, per the rehearsal probe's own numbers (quoted in the plan): phase 1's stopping
+     rule is "hold toward the aircraft's *current* MSL, re-read live every tick" — a moving
+     goalpost that only stops decreasing once it meets wherever the aircraft itself now is. The
+     probe's T2 run shows exactly this: holding DOWN from a 1662 m target while actual climbed
+     920 → 1050 m, releasing when the two met near 1058/1050 — **138 m above the 920 m handover
+     value**, not at it. Phase 2 then has to come back down from there. The mechanism bounds the
+     climb (it would be worse under a single fixed-target hold, which the plan's own prose argues),
+     but it does not eliminate it, and the measured number is not small.
+   - Whether this is the common case, not an edge case: the quick path (no transient at all, an
+     instant reference-adopt) is only tried below 700 m AGL, and even then only succeeds if the
+     *target's* AGL-equivalent is also under 700 m. The plan's own text states the wild target
+     measured so far is "+740 m above handover twice, which is above 700 m AGL at any height" —
+     meaning the two measured instances of the actual ED bug this stage exists to fix would *both*
+     have refused the quick path and fallen to the two-phase hold with its climb. The transient is
+     not a corner case this design mostly avoids; it is what happens on the bug it is built around.
+   - The pilot would see: the aircraft he just parked climbs a hundred-plus metres above where he
+     left it — in the opposite direction from the ED sink the fix exists to stop — before settling
+     back down. The task brief's own worry ("climbing or diving harder than the bug itself would")
+     describes exactly this: ED's bug sinks the aircraft; the fix's own fallback path visibly
+     climbs it, by a comparable or larger margin, as a side effect of curing the sink.
+   - Grounded in: the plan's own Amended §2 text and the rehearsal-probe numbers it quotes; the
+     task brief's explicit instruction to check for exactly this.
+   - Mitigated, not erased, by: the pilot designed this exact two-phase workaround himself,
+     verbatim, having presumably watched the climb happen during his own manual testing that same
+     day — this is not an invented mechanism the pilot has never seen. What is missing is not the
+     mechanism but its disclosure as a *known, accepted* transient on the record this plan leaves
+     for Flight P1 and beyond, in the style this plan already uses elsewhere (P0's "known
+     limitation to state on the test card," P5's terrain-avoidance gap, the "AI always starts on
+     radar" assumption flagged in Risks rather than silently carried).
+   - Suggests: one line in "Risks & Unknowns (Stage P1 revision)" naming the measured transient
+     (≈130–140 m climb-then-descend on the fallback path) as expected, not a defect, and one line
+     on the revised "Flight P1" test card telling the pilot what to expect so a repeat of this
+     climb is read as confirmation, not a regression report. See **Q1**.
+
+2. **Flight P1's test card does not ask the pilot to distinguish which correction path actually
+   ran.** Lens: the non-obvious case (minor, not blocking).
+   - The card says to watch `apw_alt_text`/`apw_last_press` and "note how long convergence
+     actually takes," but two different mechanisms can produce that convergence — the quick
+     double-pulse (no transient) and the two-phase hold (the climb in Finding 1) — and the card
+     does not ask which one fired. Without that, a flight where the quick path happens to succeed
+     (AGL low enough and the wild-target bug happens not to recur that sortie) would look identical
+     on the card to one where it didn't, and the fallback's own behaviour would go unverified by
+     omission rather than by a reported pass.
+   - Suggests: add the reference-toggle sequence (`apw_alt_ref` before/after) to what the card asks
+     the pilot to watch, so a flight log shows which path ran.
+
+### Questions for the user
+
+- **Q1** — The fallback correction (used whenever the quick path is refused — which, per the
+  measured wild-target bug, is both times it has been seen so far) makes the aircraft climb to
+  roughly where the correction happens to catch up with the runaway target — about 130–140 m above
+  the handover altitude in the measured case — before the second phase brings it back down. Is a
+  transient of that size acceptable as the normal cost of fixing the sink, or does it need a
+  tighter bound (e.g. cap how far phase 1 is allowed to let the aircraft climb before switching to
+  a more aggressive correction), given it is the common path, not a rare fallback?
