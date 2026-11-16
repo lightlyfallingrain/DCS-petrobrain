@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
+import pytest
 from fixtures.fake_terrain_trees import (
     build_caucasus_style_terrain,
     build_single_zip_terrain,
@@ -9,7 +11,12 @@ from fixtures.fake_terrain_trees import (
     tile_entry_name,
 )
 
-from raster_chart_viewer.discovery import discover_terrains, read_tile_bytes
+from raster_chart_viewer import discovery
+from raster_chart_viewer.discovery import (
+    batch_tile_reader,
+    discover_terrains,
+    read_tile_bytes,
+)
 from raster_chart_viewer.tilename import TileKey
 
 
@@ -117,3 +124,38 @@ def test_terrain_with_no_rastercharts_dir_is_absent(tmp_path: Path) -> None:
 
 def test_missing_mods_terrains_dir_returns_empty(tmp_path: Path) -> None:
     assert discover_terrains(tmp_path) == {}
+
+
+def test_batch_tile_reader_opens_one_zip_once_across_many_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Performance review Finding 1 (RC-1, 2026-11-16): `read_tile_bytes`
+    opening a fresh `ZipFile` per entry measured 4.1x slower than reusing
+    one handle across a batch from the same zip. This proves the fix by
+    watching the real `zipfile.ZipFile` construction count, not by
+    trusting `BatchZipReader`'s own book-keeping -- a deliberately bad
+    variant (no monkeypatch, i.e. calling `read_tile_bytes` once per
+    entry instead) would show `open_count == len(entries)` here, so the
+    probe can tell the difference."""
+    entries = full_sheet_entries(32, "aa", 0, _placeholder)
+    build_single_zip_terrain(tmp_path, "Syria", entries)
+    terrains = discover_terrains(tmp_path)
+    locations = list(terrains["Syria"].tiers[32].values())
+    assert len(locations) == 64  # all 64 entries share the one root zip
+
+    open_count = 0
+    real_zip_file = zipfile.ZipFile
+
+    def counting_zip_file(*args: object, **kwargs: object) -> zipfile.ZipFile:
+        nonlocal open_count
+        open_count += 1
+        return real_zip_file(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(discovery.zipfile, "ZipFile", counting_zip_file)
+
+    with batch_tile_reader() as reader:
+        results = {location: reader(location) for location in locations}
+
+    assert open_count == 1
+    for location, data in results.items():
+        assert data == entries[location.entry_name]  # still reads correctly

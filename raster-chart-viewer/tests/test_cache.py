@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import threading
+import zipfile
 from pathlib import Path
 
 import pytest
 from fixtures.synthetic_dds import build_multi_mip_dds
 from PIL import Image
 
+from raster_chart_viewer import discovery
 from raster_chart_viewer.cache import (
     CACHE_MAX_BYTES,
     SMALL_MIP_MIN,
@@ -192,6 +194,50 @@ def test_middle_zoom_never_uses_small_mip_cache_as_ingredient(tmp_path: Path) ->
     assert reader.open_count == first_open_count
 
 
+def test_compose_view_tile_opens_its_zip_once_across_many_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Performance review Finding 1: within one `compose_view_tile`
+    call, consecutive entries sharing the same zip must not reopen it
+    once per entry. The `_CountingReader` tests above always inject
+    `read_bytes`, so they exercise entry-level dedup but never the real
+    zip -- this test leaves `read_bytes` at its production default
+    (`None`, now a call-scoped `discovery.BatchZipReader`) against a
+    real on-disk zip, and watches the real `zipfile.ZipFile`
+    construction count rather than trusting the reader's own
+    book-keeping."""
+    grid, tiles, _locations = _full_8x8_grid(tmp_path / "terrain")
+    data = build_multi_mip_dds(1024, 11)
+    zip_path = tmp_path / "terrain" / "fake.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for location in tiles.values():
+            zf.writestr(location.entry_name, data)
+    cache = TileCache(tmp_path / "cache")
+
+    open_count = 0
+    real_zip_file = zipfile.ZipFile
+
+    def counting_zip_file(*args: object, **kwargs: object) -> zipfile.ZipFile:
+        nonlocal open_count
+        open_count += 1
+        return real_zip_file(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(discovery.zipfile, "ZipFile", counting_zip_file)
+
+    # k = SMALL_MIP_MIN -- the most zoomed-out small-mip tier, one view
+    # tile covering the whole 8x8 sheet, so this one call touches all 64
+    # entries (same level used by test_small_mip_request_after_any_
+    # inflate_opens_nothing above).
+    small_mip_level = grid.max_level - SMALL_MIP_MIN
+    jpeg_bytes = compose_view_tile(
+        cache, "Syria", "32m", grid, tiles, level=small_mip_level, vx=0, vy=0
+    )
+
+    assert len(jpeg_bytes) > 0  # the composition itself still worked
+    assert open_count == 1  # one open for all 64 entries this call touched
+
+
 def test_small_mip_put_rejects_mip_below_min(tmp_path: Path) -> None:
     cache = TileCache(tmp_path / "cache")
     key = TileKey(scale_m=32, sheet="aa", level=0, x=0, z=0)
@@ -223,6 +269,42 @@ def test_cache_eviction_removes_oldest_file_first(tmp_path: Path) -> None:
 
 def test_default_cache_cap_matches_plan() -> None:
     assert CACHE_MAX_BYTES == 1_000_000_000
+
+
+def test_eviction_sweep_descends_to_low_water_mark_not_just_under_cap(
+    tmp_path: Path,
+) -> None:
+    """Performance review Finding 2: a sweep that stops the instant the
+    total drops back under the cap pays its full rglob+stat+sort scan on
+    every single write once the cache is steady-state-full, since the
+    very next write crosses straight back over. Sweeping down to a
+    margin below the cap instead means several writes can land before
+    the next sweep is needed. Equal-size files make the result exact, so
+    this distinguishes the fix from the old "stop at/under the cap"
+    behaviour rather than merely tolerating either."""
+    cache_dir = tmp_path / "cache"
+    cache = TileCache(cache_dir, max_bytes=10_000)
+
+    for i in range(10):
+        cache.put_composed_tile("Syria", "32m", 0, i, 0, b"x" * 1000)
+    assert cache._total_bytes == 10_000  # exactly at the cap, no sweep yet
+
+    # One more write crosses the cap and triggers a sweep.
+    cache.put_composed_tile("Syria", "32m", 0, 10, 0, b"x" * 1000)
+
+    actual_total = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file())
+    assert cache._total_bytes == actual_total
+    assert actual_total <= 10_000
+    # The distinguishing claim: the pre-fix "stop at/under the cap"
+    # behaviour would evict exactly one 1000-byte file here (11,000 ->
+    # 10,000, already <= the 10,000 cap) and stop -- this fixed version
+    # must keep going past that point, down to the 90% low-water mark,
+    # which costs a second eviction (11,000 -> 10,000 -> 9,000). Asserted
+    # via the fraction itself rather than importing the private constant,
+    # so this fails if the margin is ever widened or narrowed without
+    # updating this test's own expectation.
+    low_water_mark = int(10_000 * 0.9)
+    assert actual_total == low_water_mark == 9_000
 
 
 def test_concurrent_writes_under_a_forcing_cap_never_raise_and_respect_cap(

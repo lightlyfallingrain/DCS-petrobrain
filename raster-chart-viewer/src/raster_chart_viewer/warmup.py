@@ -36,7 +36,7 @@ class WarmupScheduler:
         self,
         cache: TileCache,
         *,
-        read_bytes: discovery.ReadTileBytes = discovery.read_tile_bytes,
+        read_bytes: discovery.ReadTileBytes | None = None,
     ) -> None:
         self._cache = cache
         self._read_bytes = read_bytes
@@ -70,6 +70,26 @@ class WarmupScheduler:
         tier_label: str,
         tiles: dict[TileKey, TileLocation],
     ) -> None:
+        """Dispatches to `_run_warm_up` with whichever reader this pass
+        should use. Left at its default (`None`), a warm-up pass opens
+        one `discovery.BatchZipReader` scoped to itself, so a whole tier
+        -- thousands of entries, almost always sharing one zip -- opens
+        that zip once instead of once per entry (performance review
+        Finding 1, RC-1, 2026-11-16). A caller-supplied `self._read_bytes`
+        (tests) is used exactly as given, per entry, unwrapped."""
+        if self._read_bytes is not None:
+            self._run_warm_up(terrain, tier_label, tiles, self._read_bytes)
+            return
+        with discovery.batch_tile_reader() as reader:
+            self._run_warm_up(terrain, tier_label, tiles, reader)
+
+    def _run_warm_up(
+        self,
+        terrain: str,
+        tier_label: str,
+        tiles: dict[TileKey, TileLocation],
+        read_bytes: discovery.ReadTileBytes,
+    ) -> None:
         logger.info(
             "warm-up started: %s/%s (%d entries)", terrain, tier_label, len(tiles)
         )
@@ -87,7 +107,7 @@ class WarmupScheduler:
                     tier_label,
                     key,
                     location,
-                    self._read_bytes,
+                    read_bytes,
                 )
             except Exception:
                 # A warm-up failure on one entry must not abort the rest

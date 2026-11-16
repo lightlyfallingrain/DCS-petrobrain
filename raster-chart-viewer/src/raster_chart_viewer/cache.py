@@ -48,6 +48,19 @@ SMALL_MIP_MIN = 3
 #: mechanism does not exist outside `body-layer` (root `CLAUDE.md`).
 CACHE_MAX_BYTES = 1_000_000_000
 
+#: Fraction of `CACHE_MAX_BYTES` a sweep evicts down to, rather than
+#: stopping the instant the total drops back under the cap. Without
+#: this, once the cache is actually at its cap, every single write
+#: thereafter crosses straight back over on its own and pays the full
+#: `rglob`+`stat`+`sort` scan again to evict exactly one file (measured
+#: ~280ms at ~24.6k files -- performance review Finding 2, RC-1,
+#: 2026-11-16). Sweeping to a margin below the cap instead amortizes that
+#: scan over the many writes that follow. 90%: enough headroom that an
+#: ordinary panning/warm-up session doesn't re-trigger a sweep every few
+#: writes, without giving up much of the 1GB budget (10%, ~100MB). Same
+#: non-tuning reasoning as `CACHE_MAX_BYTES` above -- a plain constant.
+_CACHE_LOW_WATER_MARK_FRACTION = 0.9
+
 #: Total mip levels in a full chain down to 1x1px -- 11 for the 1024px
 #: base every measured RasterCharts tile uses (research note section C).
 TOTAL_MIPS = int(math.log2(TILE_BASE_SIZE_PX)) + 1
@@ -191,9 +204,12 @@ class TileCache:
         call too, so no concurrent writer/evictor can make a file vanish
         between that stat and this method's own `unlink()` below; the
         `try/except` remains only for ordinary filesystem failures (not a
-        concurrent-eviction race, which the lock now rules out)."""
+        concurrent-eviction race, which the lock now rules out). Sweeps
+        down to `_CACHE_LOW_WATER_MARK_FRACTION` of the cap, not merely
+        back under it -- see that constant's own comment for why."""
         if self._total_bytes <= self._max_bytes:
             return
+        low_water_mark = int(self._max_bytes * _CACHE_LOW_WATER_MARK_FRACTION)
         entries: list[tuple[float, int, Path]] = []
         for candidate in self._cache_dir.rglob("*"):
             if not candidate.is_file():
@@ -205,7 +221,7 @@ class TileCache:
             entries.append((stat.st_mtime, stat.st_size, candidate))
         entries.sort(key=lambda entry: entry[0])
         for _mtime, size, stale_path in entries:
-            if self._total_bytes <= self._max_bytes:
+            if self._total_bytes <= low_water_mark:
                 break
             try:
                 stale_path.unlink()
@@ -247,15 +263,48 @@ def compose_view_tile(
     vx: int,
     vy: int,
     *,
-    read_bytes: discovery.ReadTileBytes = discovery.read_tile_bytes,
+    read_bytes: discovery.ReadTileBytes | None = None,
 ) -> bytes:
     """Compose one OpenSeadragon view tile into JPEG bytes, serving the
     composed-tile cache first. `read_bytes` is injectable so tests can
-    count zip opens without monkeypatching `discovery` itself."""
+    count zip opens without monkeypatching `discovery` itself; left at
+    its default (`None`), this call opens a fresh `discovery.
+    BatchZipReader` scoped to itself, so its own entry loop below reuses
+    one `ZipFile` handle per distinct zip across however many entries
+    this one view tile needs (performance review Finding 1, RC-1,
+    2026-11-16) -- 4 of 5 terrains have exactly one zip per tier, so a
+    middle-zoom or full-tier-overview request that touches many entries
+    no longer reopens it once per entry."""
     cached = cache.get_composed_tile(terrain, tier_label, level, vx, vy)
     if cached is not None:
         return cached
 
+    if read_bytes is not None:
+        return _compose_view_tile_uncached(
+            cache, terrain, tier_label, grid, tiles, level, vx, vy, read_bytes
+        )
+    with discovery.batch_tile_reader() as reader:
+        return _compose_view_tile_uncached(
+            cache, terrain, tier_label, grid, tiles, level, vx, vy, reader
+        )
+
+
+def _compose_view_tile_uncached(
+    cache: TileCache,
+    terrain: str,
+    tier_label: str,
+    grid: MosaicGrid,
+    tiles: dict[TileKey, TileLocation],
+    level: int,
+    vx: int,
+    vy: int,
+    read_bytes: discovery.ReadTileBytes,
+) -> bytes:
+    """The actual composition loop, factored out of `compose_view_tile`
+    so the caller can decide once, up front, whether `read_bytes` is a
+    caller-supplied reader (used exactly as given) or the production
+    default (a fresh call-scoped `BatchZipReader`) -- this function
+    itself does not care which."""
     k = grid.max_level - level
     mip = min(k, MAX_MIP_LEVEL)
     block = 2**k

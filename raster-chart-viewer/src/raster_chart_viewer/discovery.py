@@ -20,6 +20,8 @@ import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 from raster_chart_viewer.tilename import TileKey, parse_tile_name
 
@@ -72,21 +74,75 @@ class TerrainIndex:
         return None
 
 
-#: The shape `cache.compose_view_tile` expects for its injectable
-#: `read_bytes` parameter -- the production default is `read_tile_bytes`
-#: itself; tests inject a counting wrapper of the same shape instead of
-#: monkeypatching this module.
+#: The shape `cache.compose_view_tile` and `warmup.WarmupScheduler` each
+#: expect for their injectable `read_bytes` parameter. Left at its
+#: default (`None` on both), production uses a fresh `BatchZipReader`
+#: per call/pass (below); tests inject a counting wrapper of this same
+#: single-entry shape instead of monkeypatching this module.
 ReadTileBytes = Callable[[TileLocation], bytes]
 
 
 def read_tile_bytes(location: TileLocation) -> bytes:
-    """Read one tile's raw (inflated) DDS bytes from its zip. Opening a
-    fresh `ZipFile` per read costs re-parsing that zip's central
-    directory, which is negligible next to the ~1.4MB inflate itself
-    (research note section F timing) -- not worth holding file handles
-    open across requests for a service this size."""
+    """Read one tile's raw (inflated) DDS bytes from its own fresh
+    `ZipFile`. The reopen cost is genuinely negligible next to the
+    ~1.4MB inflate itself for a single read (research note section F
+    timing) -- **but not for a multi-entry call**: reopening the same
+    zip once per entry measured 4.1x slower than reusing one handle
+    across a 100-entry batch, since `ZipFile()` re-parses that zip's
+    central directory every time (performance review, RC-1,
+    2026-11-16). `compose_view_tile`'s own entry loop and a warm-up
+    pass use `batch_tile_reader()` instead for exactly that reason; call
+    this function directly only for a genuine one-off read."""
     with zipfile.ZipFile(location.zip_path) as zf:
         return zf.read(location.entry_name)
+
+
+class BatchZipReader:
+    """A `ReadTileBytes`-shaped callable that reuses one open `ZipFile`
+    per distinct zip path across however many entries are read through
+    it, instead of `read_tile_bytes`'s fresh-open-per-call cost. Confined
+    to one call on one thread by construction -- `compose_view_tile`
+    and a warm-up pass each create a fresh instance for their own
+    call/pass and close it (via `with batch_tile_reader() as
+    read_bytes: ...`) when that call/pass finishes. Never hold one open
+    across requests or share it across threads -- that per-call
+    isolation is the specific hazard `read_tile_bytes`'s own fresh-open-
+    per-call design correctly avoids, and this reader must not
+    reintroduce it by outliving its one call."""
+
+    def __init__(self) -> None:
+        self._open: dict[Path, zipfile.ZipFile] = {}
+
+    def __call__(self, location: TileLocation) -> bytes:
+        zf = self._open.get(location.zip_path)
+        if zf is None:
+            zf = zipfile.ZipFile(location.zip_path)
+            self._open[location.zip_path] = zf
+        return zf.read(location.entry_name)
+
+    def close(self) -> None:
+        for zf in self._open.values():
+            zf.close()
+        self._open.clear()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+
+def batch_tile_reader() -> BatchZipReader:
+    """Open a fresh, call-scoped reader: `with batch_tile_reader() as
+    read_bytes: ...`, used for exactly one `compose_view_tile` call or
+    one warm-up pass. See `BatchZipReader`'s own docstring for the
+    confinement this relies on for safety."""
+    return BatchZipReader()
 
 
 def _candidate_zip_paths(rastercharts_dir: Path) -> list[Path]:

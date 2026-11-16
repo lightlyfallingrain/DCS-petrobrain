@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import threading
 import time
+import zipfile
 from pathlib import Path
 
+import pytest
 from fixtures.synthetic_dds import build_multi_mip_dds
 
+from raster_chart_viewer import discovery
 from raster_chart_viewer.cache import SMALL_MIP_MIN, TOTAL_MIPS, TileCache
 from raster_chart_viewer.discovery import TileLocation
 from raster_chart_viewer.tilename import TileKey
@@ -117,6 +120,41 @@ def test_warmed_tile_request_does_not_reopen_the_entry(tmp_path: Path) -> None:
     smallest_mip = cache.get_small_mip("Syria", "32m", key, TOTAL_MIPS - 1)
     assert smallest_mip is not None
     assert reader.open_count == 1  # reading from cache opened nothing new
+
+
+def test_warmup_pass_opens_its_zip_once_across_many_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Performance review Finding 1: a warm-up pass walks a whole tier's
+    worth of entries -- thousands for a real terrain -- almost always
+    sharing one zip. The `_CountingReader`-based tests above always
+    inject `read_bytes`, so they never exercise the real zip; this test
+    leaves `read_bytes` at the production default (`None`, now a
+    pass-scoped `discovery.BatchZipReader`) against a real on-disk zip
+    and watches the real `zipfile.ZipFile` construction count."""
+    tiles = _tiles(tmp_path, 8)
+    data = build_multi_mip_dds(1024, 11)
+    zip_path = tmp_path / "fake.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for location in tiles.values():
+            zf.writestr(location.entry_name, data)
+    cache = TileCache(tmp_path / "cache")
+
+    open_count = 0
+    real_zip_file = zipfile.ZipFile
+
+    def counting_zip_file(*args: object, **kwargs: object) -> zipfile.ZipFile:
+        nonlocal open_count
+        open_count += 1
+        return real_zip_file(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(discovery.zipfile, "ZipFile", counting_zip_file)
+
+    scheduler = WarmupScheduler(cache)  # no read_bytes override
+    scheduler.touch("Syria", "32m", tiles)
+    _wait_for_warmup_done(cache, "Syria", "32m", tiles)
+
+    assert open_count == 1  # one open for all 8 entries this pass touched
 
 
 def test_touch_is_a_noop_after_the_first_call(tmp_path: Path) -> None:
