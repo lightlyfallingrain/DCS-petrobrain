@@ -111,4 +111,4 @@ pickers; pinch/scroll to zoom, drag to pan.
   pausing or closing the mission (or not having one running at all) makes no difference.
 
 Record the result (which terrains/tiers looked right, which didn't, and the warm-up timing) on
-`mission-interpreter/ROADMAP/MI-B4.md`.
+`raster-chart-viewer/ROADMAP/RC-1.md`.

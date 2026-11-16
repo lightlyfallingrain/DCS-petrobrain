@@ -4,9 +4,10 @@ Subproject instructions for the raster chart viewer. Augments the root `CLAUDE.m
 first for overall Petrobrain architecture; this file adds stack/testing/structure specifics that
 apply only within `raster-chart-viewer/`.
 
-See `mission-interpreter/ROADMAP/MI-B4.md` for this feature's roadmap entry (this subproject has no
-`ROADMAP/` of its own -- user direction, 2026-11-16: *"this should really be it's own small
-service, not under MI. I just did not want to create another roadmap folder for it."*) and
+Roadmap: `raster-chart-viewer/ROADMAP/` (index `raster-chart-viewer-roadmap.md`, ID prefix `RC-`;
+`ROADMAP.md` here is the usual pointer). The first milestone, [[RC-1]], was the mission-interpreter
+backlog item MI-B4 until 2026-11-16, when the user made this a subproject in its own right
+(*"Let's treat it as a proper sub module of Petrobrain."*). See also
 `plans/raster-chart-viewer/plan.md` for the plan this subproject was built from. See `README.md`
 for run instructions, including the Stage 7 Windows live check.
 
