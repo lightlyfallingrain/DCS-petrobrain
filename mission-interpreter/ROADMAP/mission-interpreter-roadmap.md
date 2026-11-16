@@ -56,6 +56,8 @@ sibling follows.
 - [[MI-B2]] — a malformed `.miz` escapes as `RecursionError`/`TypeError` rather than `MizParseError`
 - [[MI-B3]] — world enrichment is one serialized HTTP call per item, and the real item count has
   never been measured
+- [[MI-B4]] — Raster chart viewer: DCS RasterCharts as a pan/zoom map on the LAN (user request
+  2026-11-16; a standalone LAN service, not mission-understanding work)
 
 `MI-6` was the last planned Mission Interpreter stage per the parent plan's own stage list. The
 two sections below are orientation narrative rather than entries, and are kept here verbatim: the
