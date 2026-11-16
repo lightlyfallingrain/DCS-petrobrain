@@ -1,34 +1,27 @@
 ---
-name: bl16-quick-path-fabricated-plan-quote
-description: an implementer's inline comment quoted "the plan's own" wording to justify skipping a tolerance re-check, but the quoted phrase does not exist anywhere in plan.md or its history -- grep any quoted plan citation before trusting the decision it supports
+name: bl16-quick-path-misattributed-brief-quote
+description: an implementer justified skipping a tolerance re-check by quoting "the plan's own" wording; the phrase was not in plan.md but in the main loop's dispatch brief -- trace a quoted citation to its real source (plan, brief, or nowhere) before judging it
 metadata:
   type: project
 ---
 
 Reviewing BL-16's "Revised 2026-11-16" takeover revision (`d3bfe9df`, `plans/flight-control/
 review-takeover.md`): the quick correction path's second centre pulse (radar -> barometric)
-resolves the whole takeover with no re-check that the resulting target is within tolerance of the
-handover altitude. The implementer's comment and `implementation.md` both justify this as "trusted
-per the plan's own 'then go on to step 6's checks'".
+resolved the whole takeover with no re-check that the resulting target was within tolerance of the
+handover altitude. The implementer's comment and `implementation.md` justified this as "trusted per
+the plan's own 'then go on to step 6's checks'".
 
-**That phrase does not exist in `plan.md`, anywhere, in the current file or in its git history**
-(`git log --all -p -S"step 6's checks" -- plans/flight-control/plan.md` returns nothing; a plain
-grep of the current file finds only the implementer's own two uses of the phrase and one unrelated
-`step 6a` reference in a different section). The plan is actually silent on whether the second
-pulse needs a tolerance check — this was the implementer's own unilateral decision, dressed up as
-a plan requirement it is not.
+**That phrase is not in `plan.md`**, current or history (`git log --all -p -S"step 6's checks"`
+finds nothing). The review first recorded this as a fabricated citation. **Corrected by the main
+loop the same day: the phrase came from the main loop's own dispatch brief to the implementer**
+("If the reference reads R, pulse again → read. Then go on to step 6's checks."), which was
+ambiguous. The implementer quoted the brief and attributed it to the plan. So: a misattribution plus
+a loosely worded brief, not an invented quote. The required fix stands either way — the plan is
+silent, the second-pulse target is evidenced by one sample, and an unchecked wrong target leaves
+the aircraft with nothing correcting it.
 
-The decision itself may still be defensible (the probe measured the second toggle correct once;
-the first toggle's own wild-target bug is well documented), but the citation supporting it was
-fabricated, and the actual risk — a wrong second-pulse target leaves the aircraft with nothing
-further correcting it, which is the exact failure this stage exists to prevent — was real enough
-to make this a required fix.
-
-**How to apply**: whenever a diff or its implementation log attributes a design choice to "the
-plan's own" wording with a quoted phrase, grep the plan file (and, if the phrase isn't found, its
-full history with `git log --all -p -S"<phrase>"`) before accepting the citation as evidence the
-choice was reviewed or sanctioned upstream. A quote that doesn't resolve means the decision was
-made by the implementer alone and needs the same scrutiny as any other unflagged judgement call —
-more, since the false citation would otherwise make it look like it already got that scrutiny.
-Related but distinct from [[bugfix-comments-citing-nonexistent-plan-md]] (citing a *file* that
-doesn't exist) — this is citing *text* that doesn't exist inside a file that does.
+**How to apply**: when a diff or its log attributes a choice to "the plan's own" wording, grep the
+plan (and its history). If the phrase is not there, check the dispatching brief before calling it
+fabricated — a brief can introduce wording the plan never had. Either way, the decision lacks the
+plan's sanction and needs full scrutiny. Related but distinct from
+[[bugfix-comments-citing-nonexistent-plan-md]] (citing a *file* that does not exist).
