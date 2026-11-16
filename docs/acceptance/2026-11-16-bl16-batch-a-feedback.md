@@ -365,3 +365,37 @@ T5: keep-open -- close the menu by hand; the probe reopens it
   wild value has so far appeared only on the first toggle after takeover.
 - **Keep-open works:** each hand-close was seen in 3 frames and the menu read open again about
   17 ms after it closed. The fourth close coincided with the pilot taking control back.
+
+## Explore, round 3 — the pilot's answers to the takeover probe, verbatim
+
+> *"I found out that AI overlay has maximum radar alt of 700 m. Any value above that
+> automatically switches to barometric. That is probably why the incorrect marometric setting
+> would not let change to radar alt, because the alt was above 700 m AGL. When the desired alt
+> (baro) is set to no more that 700 m AGL level, then center press swithces to radar alt.*
+>
+> *Q1 - handolver alt. The barometric initial bug is there sometimes, but I'm not sure why and
+> when it happens. Workaround: hold down until current altitude at that moment is reached. That
+> sends the value to DCS AI and stops the climb. Then continue adjusting the altitude value to
+> what it was at handover moment. That way we get back to the correct altitude.*
+>
+> *Q2 - Yes, but with the caveat of my observation I wrote on the first line. -> If AGL is < 700m,
+> yes do that to fix it.*
+>
+> *Q3 - merge."*
+
+## What this settles, as read (not yet a plan)
+
+- **The goal after takeover is the handover altitude** — actual MSL at the moment of takeover.
+- **Radar reference is capped at 700 m AGL.** A target above that forces barometric, and a centre
+  press cannot switch to radar. That explains why the wild barometric target could not be toggled
+  away by hand.
+- **The correction has two phases, per the pilot:** hold toward the *current* altitude and release
+  there — *"That sends the value to DCS AI and stops the climb"* — then hold again toward the
+  handover altitude. *Inference consistent with the probe: the AI applies a held value only on
+  release. During the 14 s T2 hold the aircraft kept climbing toward the old target.*
+- **The quick path (centre → radar → centre → barometric) is used only below 700 m AGL.** *Read
+  carefully:* the limit is on the radar *target*, and the wild target was about 740 m above the
+  handover altitude, so with that error a switch to radar would be refused at any height. The
+  robust form is to try the toggle, read whether the reference actually became R, and fall back
+  to the two-phase hold if it did not.
+- **The probes merge to `main`** (pilot: *"merge"*).
