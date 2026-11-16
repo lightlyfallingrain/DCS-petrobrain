@@ -121,7 +121,14 @@
   **First partial flight 2026-11-16 — still `#needs-flight`.** One utterance reached the tool loop
   ("what do you see on the left": asked "which one" over two contacts on the right, reading tool
   summaries aloud with raw `OP_*` codes); two more went to BR-1's decider by launch default.
-  Captured, not yet explored: `docs/acceptance/2026-11-16-br2-brain-sortie-feedback.md`.
+  Captured and explored: `docs/acceptance/2026-11-16-br2-brain-sortie-feedback.md`.
+
+  **Reprioritised 2026-11-16 by the user: Stage 5 (`say`, free text) comes first.** *"Brain must be
+  able to use the same tools (to get information or act on what I said), but the primary role os
+  free-text and complex questions or complex commands. To answer/act brain needs access to the
+  complete tool set, that is why it's needed. Prioritize Stage 5 free-text."* Phrasebook-shaped
+  questions become basic-function tests. The plan's stage order and Stage 5's gate need a re-plan
+  against the feedback doc's explore notes before any build.
 
   **Inspect-and-adapt.** This batch does not change what the next milestone should be — Stage 4
   was always the next planned increment and is unaffected — but it does invalidate one downstream
