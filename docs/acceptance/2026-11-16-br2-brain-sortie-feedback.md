@@ -188,3 +188,12 @@ briefing. No brain tool exposes either yet.
   it is the next one, or the clock sector covering a later leg.
 - **Threat lists sort by danger.** Every position is clock + distance, plus a landmark where one
   helps ("11 o'clock, south of the village").
+
+**Correction, same day — friend or foe is not known yet:**
+
+> *"IFF is not build yet, we don't yet know the difference between friendly and enemy unit. Will
+> later."*
+
+So "friendlies and where they are" (round 2, question 2) is a **future need that depends on IFF**,
+`[[BL-B12]]` (deferred), not something Stage 5 can deliver. Until then a free-text answer must not
+call a seen unit friendly or enemy unless a source actually says so.
