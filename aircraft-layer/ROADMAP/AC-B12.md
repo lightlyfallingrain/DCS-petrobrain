@@ -1,8 +1,13 @@
 # AC-B12 — Split Export.lua into loaded modules, and read only what Petrobrain needs
 
-- [ ] **AC-B12 — Split `Export.lua` into several files loaded with `dofile`, and extend "read by
-  need" to every feed, before BL-16's next stage.** #status/open Filed 2026-11-16 by user
-  direction.
+- [x] **AC-B12 Part 1 — split `Export.lua` into several files loaded with `dofile` — DoD-PASSED
+  2026-11-16 on `feature/ac-b12-export-modules` (tip `590eebb1`), merge sha filled in by the merge
+  step.** #status/done #needs-flight Filed 2026-11-16 by user direction. Architect plan:
+  `plans/ac-b12-export-modules/plan.md`. **Branch to fly: `main`, after this DoD's merge.**
+
+  **Part 2 ("read only what is needed") is not built here** — explicitly out of this plan's scope,
+  staged to follow per feed. Re-filed below as its own open item so this entry's `[x]` reflects
+  Part 1 alone.
 
   **Why now.** Lua 5.1, which DCS runs, allows at most 200 active locals per function, and a file's
   top level counts as one function. `aircraft-layer/dcs-export/Export.lua` is one 2,832-line file
@@ -62,3 +67,37 @@
   **Also carries `[[AC-B13]]`** (filed 2026-11-16): release any open AI-pilot-wheel press and clear
   the takeover state on `LuaExportStop`. A small behaviour fix, the one exception to Part 1's "no
   behaviour change"; it lands in the AI-pilot-wheel module's own stop hook.
+
+  ## DoD, 2026-11-16
+
+  Reviewer APPROVED (round 2, after one required fix — `commands.lua`'s dispatch table now guards
+  each handler-owning module on non-`nil` instead of taking all five ops down if one module fails
+  to load). Performance Reviewer: APPROVED — MONITOR (cross-module helper calls move from upvalue
+  to global lookup, ~100-300 ns/frame; two to three orders of magnitude below this file's own
+  accepted per-frame closure-allocation pattern, no credible risk in this project phase). Security:
+  APPROVED (one low/low finding — generic helper names now live as bare globals in the Export Lua
+  state — presented to the user as a Risk Communication item, decided **option A, no change,
+  nothing filed**: self-inflicted only, requires the user's own future action — chaining a second
+  Export-side add-on into the same Lua state — to become reachable at all).
+
+  `aircraft-layer`: `luac5.1 -p` clean on all 9 Lua files (loader + 8 modules); `ruff format`/
+  `ruff check`/`mypy --strict` clean; `pytest` 795 passed, 0 skipped, 0 failed (confirmed the
+  139 Lua-interpreter-backed tests across the 7 affected files ran, not skipped). Full report:
+  `plans/ac-b12-export-modules/dod.md`.
+
+  **Acceptance boundary.** The split's one real risk — a multi-file deploy going half-stale, or a
+  load-order surprise live in DCS — cannot be retired on a dev machine. The version-handshake logic
+  itself was run for real (loopback socket standing in for Export.lua, against the actual collector
+  code) and both the match and mismatch paths fire correctly; AC-B13's `on_stop` fix has a passing
+  Lua unit test. What only a live session can confirm: every feed still reporting after a real
+  `Petrobrain\` folder deploy, a clean `dcs.log`, and — the prize — that a mission restart
+  mid-correction-hold releases the AI-wheel press rather than leaving it stuck. Card published:
+  https://claude.ai/artifact/5Q1za4baC6VNYaRoScNuyc
+  (`docs/acceptance/2026-11-16-ac-b12-export-modules-sortie.md`). **Branch to fly: `main`.**
+
+  **Milestone-completion question.** Yes — this unblocks `BL-16` Stage P2 (altitude/heading/speed
+  goals), which was going to add state to a file already at the hard 200-local ceiling with zero
+  headroom; P2's new state now has a home in the `ai_pilot_wheel` module. It also gives Part 2
+  ("read only what is needed," below) a natural per-feed home once a feed lives in its own module —
+  still not built, still a plan-time decision per feed, not promised for any particular next
+  milestone.

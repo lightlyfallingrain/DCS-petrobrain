@@ -23,7 +23,9 @@ from pathlib import Path
 
 import pytest
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+_PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
+_CORE_LUA = _PETROBRAIN_DIR / "core.lua"
+_EFFECTORS_LUA = _PETROBRAIN_DIR / "effectors.lua"
 
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
@@ -36,6 +38,14 @@ def _lua_executable() -> str | None:
     return None
 
 
+#: `AC-B12` (`plans/ac-b12-export-modules/plan.md`): every function this
+#: test file extracts moved into `effectors.lua`, except
+#: `extract_json_id_field`, which is one of `core.lua`'s shared helpers.
+_FUNCTION_HOME = {
+    "extract_json_id_field": _CORE_LUA,
+}
+
+
 def _extract_lua_function(name: str) -> str:
     """Same slicing technique as `test_sight_servo_lua.py`'s own helper,
     **widened to also track `do`** (a bare `do...end` block, or the `do`
@@ -46,9 +56,10 @@ def _extract_lua_function(name: str) -> str:
     under-counts (it would treat the loop's own closing `end` as the
     function's, truncating mid-body). `elseif`/`\\bif\\b` cannot collide:
     a word-boundary `\\b` match on `if` never fires inside `elseif`."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    path = _FUNCTION_HOME.get(name, _EFFECTORS_LUA)
+    text = path.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
-    assert start_match is not None, f"{name} not found in Export.lua"
+    assert start_match is not None, f"{name} not found in {path.name}"
     token_re = re.compile(r"\b(function|if|do|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
@@ -65,8 +76,8 @@ def _extract_lua_function(name: str) -> str:
 #: declared *outside* their own function body (`MAX_WATCHED_ARGS`,
 #: `MAX_WATCHED_ARG_NUMBER`, `MAX_READS_PER_FRAME`) -- `_extract_lua_
 #: function` only slices the named function itself, so a standalone
-#: script must declare the same names (same values as `Export.lua`'s own,
-#: so a drift there would not be caught by this constant, only by
+#: script must declare the same names (same values as `effectors.lua`'s
+#: own, so a drift there would not be caught by this constant, only by
 #: `tests/test_export_lua_constants_parity.py`'s own byte-for-byte grep).
 _MODULE_CONSTANTS_PREAMBLE = (
     "local MAX_WATCHED_ARGS = 64\n"
@@ -76,12 +87,13 @@ _MODULE_CONSTANTS_PREAMBLE = (
 
 
 def _run_lua_lines(func_names: list[str], body: str) -> list[str]:
-    """Extracts each of `func_names` from `Export.lua`, defines them
-    (preceded by `_MODULE_CONSTANTS_PREAMBLE`, since two of them close
-    over module-level constants declared outside their own body) alongside
-    `body` (arbitrary Lua statements that `print` their own results, one
-    per line), and returns stdout split into lines. Skips cleanly without
-    a Lua interpreter on `PATH`."""
+    """Extracts each of `func_names` (from `effectors.lua`, or `core.lua`
+    per `_FUNCTION_HOME`), defines them (preceded by `_MODULE_CONSTANTS_
+    PREAMBLE`, since two of them close over module-level constants
+    declared outside their own body) alongside `body` (arbitrary Lua
+    statements that `print` their own results, one per line), and returns
+    stdout split into lines. Skips cleanly without a Lua interpreter on
+    `PATH`."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")

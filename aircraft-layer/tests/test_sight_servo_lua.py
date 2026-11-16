@@ -39,7 +39,9 @@ from pathlib import Path
 
 import pytest
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+_PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
+_CORE_LUA = _PETROBRAIN_DIR / "core.lua"
+_SIGHT_LUA = _PETROBRAIN_DIR / "sight.lua"
 
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
@@ -52,8 +54,8 @@ def _lua_executable() -> str | None:
     return None
 
 
-def _extract_lua_function(name: str) -> str:
-    """Slice `local function {name}(...) ... end` out of `Export.lua` --
+def _extract_lua_function(path: Path, name: str) -> str:
+    """Slice `local function {name}(...) ... end` out of `path` --
     identical technique to `test_exponent_float_fix.py`'s own helper
     (duplicated rather than imported across test modules, same reasoning
     that module gives: it is small, self-contained, and importing across
@@ -71,9 +73,9 @@ def _extract_lua_function(name: str) -> str:
     of silently overshooting). Lua's `--[[ ]]` block comments are not
     handled -- this file's only one is the header above line 107, well
     before any `local function` this helper is asked to extract."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
-    assert start_match is not None, f"{name} not found in Export.lua"
+    assert start_match is not None, f"{name} not found in {path.name}"
     token_re = re.compile(r"--[^\n]*|\b(function|if|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
@@ -90,7 +92,8 @@ def _extract_lua_function(name: str) -> str:
 
 
 def _run_lua(func_names: list[str], calls: list[str]) -> list[float]:
-    """Extracts each of `func_names` from `Export.lua`, defines them in
+    """Extracts each of `func_names` from `sight.lua` (all of this
+    helper's callers extract sight-only functions), defines them in
     one script alongside `calls` (each a Lua expression producing one
     number), and returns the printed results as floats. Skips cleanly
     without a Lua interpreter on `PATH`."""
@@ -98,7 +101,7 @@ def _run_lua(func_names: list[str], calls: list[str]) -> list[float]:
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
 
-    lines = [_extract_lua_function(name) for name in func_names]
+    lines = [_extract_lua_function(_SIGHT_LUA, name) for name in func_names]
     lines.append("local out = {}")
     for call in calls:
         lines.append(f"table.insert(out, string.format('%.10f', {call}))")
@@ -592,12 +595,12 @@ end
 """
     lines = [preamble]
     lines.extend(
-        _extract_lua_function(name)
-        for name in (
-            "safe_call",
-            "sight_point_quiet",
-            "sight_observ_transition",
-            "run_sight_servo",
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_SIGHT_LUA, "sight_point_quiet"),
+            (_SIGHT_LUA, "sight_observ_transition"),
+            (_SIGHT_LUA, "run_sight_servo"),
         )
     )
     lines.append("local out = {}")
@@ -889,18 +892,18 @@ end
 """
     lines = [preamble]
     lines.extend(
-        _extract_lua_function(name)
-        for name in (
-            "safe_call",
-            "sight_point_quiet",
-            "sight_rate_limit_step",
-            "sight_world_to_body",
-            "sight_mark_to_body_deg",
-            "sight_observ_transition",
-            "sight_clip_to_field_body_deg",
-            "sight_mark_is_clipped",
-            "run_sight_servo",
-            "sight_servo_tick",
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_SIGHT_LUA, "sight_point_quiet"),
+            (_SIGHT_LUA, "sight_rate_limit_step"),
+            (_SIGHT_LUA, "sight_world_to_body"),
+            (_SIGHT_LUA, "sight_mark_to_body_deg"),
+            (_SIGHT_LUA, "sight_observ_transition"),
+            (_SIGHT_LUA, "sight_clip_to_field_body_deg"),
+            (_SIGHT_LUA, "sight_mark_is_clipped"),
+            (_SIGHT_LUA, "run_sight_servo"),
+            (_SIGHT_LUA, "sight_servo_tick"),
         )
     )
     if hands_off:
@@ -1274,7 +1277,11 @@ end
 """
     lines = [preamble]
     lines.extend(
-        _extract_lua_function(name) for name in ("safe_call", "sight_point_quiet")
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_SIGHT_LUA, "sight_point_quiet"),
+        )
     )
     if hands_off:
         lines.append("SIGHT_HANDS_OFF = true")

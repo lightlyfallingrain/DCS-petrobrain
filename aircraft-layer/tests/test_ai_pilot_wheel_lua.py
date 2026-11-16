@@ -38,7 +38,9 @@ from pathlib import Path
 
 import pytest
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+_PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
+_CORE_LUA = _PETROBRAIN_DIR / "core.lua"
+_AI_PILOT_WHEEL_LUA = _PETROBRAIN_DIR / "ai_pilot_wheel.lua"
 
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
@@ -51,8 +53,8 @@ def _lua_executable() -> str | None:
     return None
 
 
-def _extract_lua_function(name: str) -> str:
-    """Slice `local function {name}(...) ... end` out of `Export.lua` --
+def _extract_lua_function(path: Path, name: str) -> str:
+    """Slice `local function {name}(...) ... end` out of `path` --
     `function`/`if`/`for`/`while`/`end` as block openers/closer (`parse_
     helperai_overlay_fields` nests a `local function` with its own
     `while` loop, so `for`/`while` must count the same way
@@ -60,9 +62,9 @@ def _extract_lua_function(name: str) -> str:
     `--` line comments skipped while counting (`test_sight_servo_lua.
     py`'s own refinement -- a bare word match on these keywords also
     fires inside ordinary prose in a comment)."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
-    assert start_match is not None, f"{name} not found in Export.lua"
+    assert start_match is not None, f"{name} not found in {path.name}"
     token_re = re.compile(r"--[^\n]*|\b(function|if|for|while|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
@@ -78,15 +80,15 @@ def _extract_lua_function(name: str) -> str:
     raise AssertionError(f"unbalanced function body while extracting {name}")
 
 
-def _extract_lua_constant(name: str) -> str:
-    """Slice one `local {name} = <value>` line out of `Export.lua` --
-    the correction functions close over several module-level constants
+def _extract_lua_constant(path: Path, name: str) -> str:
+    """Slice one `local {name} = <value>` line out of `path` -- the
+    correction functions close over several module-level constants
     declared outside their own bodies, so extracting the function alone
     is not enough; this pulls the real value rather than hand-copying it,
     so the two cannot silently drift."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     match = re.search(rf"^local {name} = (.+)$", text, re.MULTILINE)
-    assert match is not None, f"{name} not found in Export.lua"
+    assert match is not None, f"{name} not found in {path.name}"
     return f"local {name} = {match.group(1)}"
 
 
@@ -107,9 +109,12 @@ def _run_lua(functions: list[str], script_tail: str) -> str:
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
     constants = "\n".join(
-        _extract_lua_constant(name) for name in _AI_PILOT_WHEEL_CONSTANTS
+        _extract_lua_constant(_AI_PILOT_WHEEL_LUA, name)
+        for name in _AI_PILOT_WHEEL_CONSTANTS
     )
-    body = "\n".join(_extract_lua_function(name) for name in functions)
+    body = "\n".join(
+        _extract_lua_function(_AI_PILOT_WHEEL_LUA, name) for name in functions
+    )
     script = constants + "\n" + body + "\n" + script_tail
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".lua", delete=False, encoding="utf-8"
@@ -355,6 +360,13 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "ARG_PEDALS_PARK",
     "AI_WHEEL_UP",
     "AI_WHEEL_DOWN",
+)
+
+#: `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON` are owned by `core.lua`, not
+#: `ai_pilot_wheel.lua` (shared with `petrovich.lua`, same physical
+#: device -- see `core.lua`'s own header comment), so they are extracted
+#: from a different path than `_AI_PILOT_WHEEL_INTEGRATION_CONSTANTS`.
+_CORE_INTEGRATION_CONSTANTS = (
     "WHEEL_CENTER_BUTTON",
     "WHEEL_MENU_BUTTON",
 )
@@ -397,14 +409,22 @@ def _run_ai_pilot_wheel_integration(script_body: str) -> str:
     `script_body` is the test-specific sequence of mock-state writes/
     calls/`print`s, appended after the shared preamble and the real
     functions' extracted bodies. The `ai_pilot_takeover` table mirrors
-    production's own (see its module-docstring comment in `Export.lua`
-    for why it is one table, not a dozen locals)."""
+    production's own (see its module-docstring comment in
+    `ai_pilot_wheel.lua` for why it is one table, not a dozen locals)."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
 
-    constants = "\n".join(
-        _extract_lua_constant(name) for name in _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS
+    constants = (
+        "\n".join(
+            _extract_lua_constant(_AI_PILOT_WHEEL_LUA, name)
+            for name in _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS
+        )
+        + "\n"
+        + "\n".join(
+            _extract_lua_constant(_CORE_LUA, name)
+            for name in _CORE_INTEGRATION_CONSTANTS
+        )
     )
     preamble = """
 local ai_pilot_parked_active = false
@@ -468,22 +488,22 @@ local function LoGetAltitudeAboveSeaLevel()
 end
 """
     functions = "\n".join(
-        _extract_lua_function(name)
-        for name in (
-            "safe_call",
-            "parse_helperai_overlay_fields",
-            "ai_pilot_correction_direction",
-            "ai_pilot_quick_path_eligible",
-            "ai_pilot_parse_altitude_text",
-            "ai_pilot_actual_altitude_m",
-            "ai_pilot_park_rising",
-            "ai_pilot_tap30",
-            "ai_pilot_open_hold",
-            "ai_pilot_begin_hold_phase",
-            "ai_pilot_decide_correction",
-            "ai_pilot_check_hold_convergence",
-            "run_ai_pilot_wheel",
-            "update_ai_pilot_wheel_overlay",
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_AI_PILOT_WHEEL_LUA, "parse_helperai_overlay_fields"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_correction_direction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_quick_path_eligible"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_parse_altitude_text"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_actual_altitude_m"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_park_rising"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_tap30"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_open_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_begin_hold_phase"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_decide_correction"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_check_hold_convergence"),
+            (_AI_PILOT_WHEEL_LUA, "run_ai_pilot_wheel"),
+            (_AI_PILOT_WHEEL_LUA, "update_ai_pilot_wheel_overlay"),
         )
     )
     script = constants + "\n" + preamble + "\n" + functions + "\n" + script_body
@@ -851,3 +871,128 @@ class TestTakeoverSequence:
         assert values["hold_cmd_after_unpark"] == "nil"
         assert values["menu_open_after_unpark"] == "false"
         assert values["presses_after_stale_tick"] == "0"
+
+
+def _run_on_stop(pending_cmd: str) -> dict[str, str]:
+    """`AC-B13`'s own test (plan Stage 6): runs the real, extracted
+    `on_stop` against a minimal `GetDevice` mock for device 30's
+    `performClickableAction`, with `ai_wheel_pending_cmd` preset to
+    `pending_cmd` (an `AI_WHEEL_UP`/`AI_WHEEL_DOWN` command id as a Lua
+    literal, or `"nil"` for no open press) and `ai_pilot_takeover`
+    populated as a hold in progress would leave it. Returns every
+    printed `key=value` line as a dict."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    preamble = f"""
+local press_log = {{}}
+
+local function GetDevice(id)
+    if id == 30 then
+        return {{
+            performClickableAction = function(self, cmd, value)
+                table.insert(press_log, cmd .. ":" .. tostring(value))
+            end,
+        }}
+    end
+    return nil
+end
+
+local ai_wheel_pending_release_t = 42.0
+local ai_wheel_pending_cmd = {pending_cmd}
+local ai_pilot_takeover = {{
+    stage = "correcting_altitude",
+    t = 1.0,
+    handover_altitude_m = 900.0,
+    menu_open = true,
+    menu_open_at_t = 1.5,
+    menu_closed_since_t = nil,
+    awaiting_correction_decision = false,
+    correction_path = "hold",
+    correction_substage = nil,
+    correction_phase = "phase1",
+    correction_hold_cmd = {pending_cmd},
+    raw_arg852 = 0.95,
+    raw_arg952 = 0.05,
+    AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
+}}
+"""
+    lines = [preamble]
+    lines.extend(
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_AI_PILOT_WHEEL_LUA, "on_stop"),
+        )
+    )
+    lines.append("on_stop()")
+    lines.append(
+        'print("press_log=" .. table.concat(press_log, ","))\n'
+        'print("pending_release_t=" .. tostring(ai_wheel_pending_release_t))\n'
+        'print("pending_cmd=" .. tostring(ai_wheel_pending_cmd))\n'
+        'print("stage=" .. tostring(ai_pilot_takeover.stage))\n'
+        'print("t=" .. tostring(ai_pilot_takeover.t))\n'
+        'print("handover_altitude_m=" .. tostring(ai_pilot_takeover.handover_altitude_m))\n'
+        'print("menu_open=" .. tostring(ai_pilot_takeover.menu_open))\n'
+        'print("menu_open_at_t=" .. tostring(ai_pilot_takeover.menu_open_at_t))\n'
+        'print("menu_closed_since_t=" .. tostring(ai_pilot_takeover.menu_closed_since_t))\n'
+        'print("awaiting_correction_decision=" .. '
+        "tostring(ai_pilot_takeover.awaiting_correction_decision))\n"
+        'print("correction_path=" .. tostring(ai_pilot_takeover.correction_path))\n'
+        'print("correction_substage=" .. tostring(ai_pilot_takeover.correction_substage))\n'
+        'print("correction_phase=" .. tostring(ai_pilot_takeover.correction_phase))\n'
+        'print("correction_hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))\n'
+        'print("raw_arg852=" .. tostring(ai_pilot_takeover.raw_arg852))\n'
+        'print("raw_arg952=" .. tostring(ai_pilot_takeover.raw_arg952))'
+    )
+    script = "\n".join(lines)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    return dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+
+
+class TestOnStop:
+    """`AC-B13` (`aircraft-layer/ROADMAP/AC-B13.md`): `LuaExportStop` never
+    released an open AI-pilot-wheel press or cleared the takeover state --
+    this module's own `on_stop` (new with the `AC-B12` split, there is no
+    "move" for it) is the fix."""
+
+    def test_open_hold_press_is_released_and_every_field_cleared(self) -> None:
+        values = _run_on_stop("3005")  # AI_WHEEL_DOWN
+        assert values["press_log"] == "3005:0"
+        assert values["pending_release_t"] == "nil"
+        assert values["pending_cmd"] == "nil"
+        assert values["stage"] == "nil"
+        assert values["t"] == "nil"
+        assert values["handover_altitude_m"] == "nil"
+        assert values["menu_open"] == "false"
+        assert values["menu_open_at_t"] == "nil"
+        assert values["menu_closed_since_t"] == "nil"
+        assert values["awaiting_correction_decision"] == "false"
+        assert values["correction_path"] == "nil"
+        assert values["correction_substage"] == "nil"
+        assert values["correction_phase"] == "nil"
+        assert values["correction_hold_cmd"] == "nil"
+        assert values["raw_arg852"] == "nil"
+        assert values["raw_arg952"] == "nil"
+
+    def test_no_open_press_releases_nothing_but_still_clears_state(self) -> None:
+        """No stale press to release (`ai_wheel_pending_cmd` already
+        `nil`) -- no spurious release call, but every takeover field is
+        still cleared."""
+        values = _run_on_stop("nil")
+        assert values["press_log"] == ""
+        assert values["stage"] == "nil"
+        assert values["correction_hold_cmd"] == "nil"
