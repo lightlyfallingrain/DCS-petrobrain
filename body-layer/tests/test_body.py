@@ -2755,6 +2755,33 @@ def test_poll_transcripts_dispatches_a_matched_command_through_handle_transcript
     assert client.poll_count == 1
 
 
+def test_poll_transcripts_logs_each_utterance_to_the_normal_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every incoming player utterance gets one INFO line on body's own
+    logger, the one `_configure_logger_for_main` makes visible by default,
+    whether or not `--speech-log` is set."""
+    console = CrewConsole(store=ContactStore())
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan left",
+                "confidence": 0.873,
+                "token": "scan_left",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+            }
+        ]
+    )
+    with caplog.at_level(logging.INFO, logger=body_module.__name__):
+        _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    messages = [
+        r.getMessage() for r in caplog.records if r.name == body_module.__name__
+    ]
+    assert '-> "scan left", confidence 0.87' in messages
+
+
 def test_poll_transcripts_addressed_no_match_falls_through_to_the_brain() -> None:
     """A `token=None, verb_anchored=False` transcript (not a command
     attempt at all) must reach the ordinary typed-text path, exactly like
