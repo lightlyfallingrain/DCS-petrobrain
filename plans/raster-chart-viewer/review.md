@@ -340,3 +340,149 @@ fixed version byte-for-byte, and confirmed 5/5 clean passes. The port change was
 grepping the bare number repo-wide, not just `DEFAULT_PORT`. Did not re-run the Stage 7 Windows live
 check or exercise the OpenSeadragon viewer in a browser — unchanged from the original review, and
 still the user's own acceptance step, untouched by this commit.
+
+## Review of performance fixes
+
+Reviewed commits `32df4b38` ("raster-chart-viewer: fix the two NOW performance findings (RC-1)")
+and `6a653545` (implementer memory file) against `performance-review.md` Findings 1-2 and
+`implementation.md`'s "Performance review fixes" section, diffed against `1c21296b`. Worktree
+started at `22d9fb45`, a strict ancestor of the named tip `9b7115d8`, tree clean; fast-forwarded
+with `git merge --ff-only 9b7115d8...`.
+
+### Fix 1 — `BatchZipReader` / `batch_tile_reader()`
+
+**Confined to one call on one thread: yes, by construction.** `compose_view_tile` and
+`WarmupScheduler._warm_up` each open a fresh `BatchZipReader` only when `read_bytes` is left at its
+new `None` default, via `with discovery.batch_tile_reader() as reader:` scoped to exactly that one
+call or that one warm-up pass. Nothing stores a `BatchZipReader` instance on `self` anywhere, and
+nothing passes one across a thread boundary — each background warm-up thread (`threading.Thread`
+started per `(terrain, tier)` in `WarmupScheduler.touch`) creates and discards its own, and each
+HTTP request thread does the same inside `server.py`'s `_handle_tile`. This is exactly the shape
+the original thread-safety fix requires and does not reopen that hazard: a `BatchZipReader`'s
+`dict[Path, ZipFile]` is private, instantiated inside the `with`, and never escapes it.
+
+**Handles close deterministically, including on exceptions: yes.** `close()` is called from
+`__exit__`, which Python's `with` statement runs unconditionally — on a normal return from
+`_compose_view_tile_uncached`/`_run_warm_up` and on any exception propagating out of either. Traced
+the call sites: both `compose_view_tile`'s `None`-branch and `WarmupScheduler._warm_up`'s `None`-
+branch wrap the actual work in the `with` block, so a `zipfile.BadZipFile`, an `OSError` from a
+vanished zip, or any other exception from inside the loop still reaches `close()` before
+propagating. `close()` itself iterates and closes every handle it opened, independent of how many
+were opened before the exception — no partial-leak path found.
+
+**The `None`-sentinel default cannot quietly fall back to the slow path: confirmed by mutation, not
+just by reading.** Reverted only the two production call sites (`compose_view_tile`'s and
+`WarmupScheduler._warm_up`'s `None`-branch) back to calling `discovery.read_tile_bytes` directly,
+byte-for-byte captured and restored via `sha256sum` afterward, while leaving `BatchZipReader` itself
+untouched. Reran the three new zip-open-count tests:
+- `test_compose_view_tile_opens_its_zip_once_across_many_entries` — `assert 64 == 1` fails (every
+  one of the 64 entries reopened the zip).
+- `test_warmup_pass_opens_its_zip_once_across_many_entries` — `assert 8 == 1` fails, same reason.
+- `test_batch_tile_reader_opens_one_zip_once_across_many_entries` — still passes, correctly, since
+  this test exercises `BatchZipReader` directly and that class was not touched by the mutation.
+
+This is the right pair of outcomes: the two tests that exist specifically to catch a production
+default silently *not* using the batching reader fail for exactly the stated reason, and the test
+of the reader's own mechanism is unaffected — confirming the three tests are each pinning a
+different, correct thing rather than all three merely re-testing the same code path. Restored both
+files; `sha256sum` matched the pre-mutation hashes exactly, and `git status --porcelain` was clean
+afterward. Full suite re-run clean at 55/55 following the restore.
+
+**Lazy per-call caching vs. grouping up front: a sound choice, correctly reasoned.** The
+implementer's own note in `implementation.md` is accurate: `compose_view_tile`'s existing loop
+decides per-entry, mid-loop, whether a read is even needed (the small-mip cache-hit check short-
+circuits some entries), so pre-grouping by `zip_path` would need either a prepass duplicating that
+cache check or a two-pass restructure. A `dict[Path, ZipFile]` populated lazily on first use
+achieves the identical "one open per zip per call" result with a one-line call-site change and zero
+changes to the loop body — correctly scoped to the actual defect (reopening) rather than a larger
+refactor the fix didn't need. The re-measured 2.34x (vs. the review's own 4.1x) is plausible as WSL-
+bridge variance, as the performance review itself anticipated, and does not change the verdict:
+real data, same direction, more than 2x.
+
+### Fix 2 — low-water mark in `_enforce_cap_locked`
+
+**Correct under the lock: yes.** `_enforce_cap_locked` is only ever called from inside `_write`'s
+`with self._lock:` block or from `__init__` (before any other thread holds a reference), per the
+existing, previously-reviewed invariant — unchanged by this commit. The new stopping condition
+(`self._total_bytes <= low_water_mark`, replacing `<= self._max_bytes`) is evaluated against the
+same `self._total_bytes` the lock already protects, inside the same held lock, so there is no new
+window for a concurrent reader/writer to observe an inconsistent total mid-sweep.
+
+**Vanished-file tolerance kept: yes.** The `try/except OSError` around both `.stat()` and
+`.unlink()` from the prior thread-safety fix is untouched by this diff — confirmed by reading the
+full method: only the stopping-condition line and the `low_water_mark` computation changed; the
+stat-collection loop, the sort, and the eviction loop's exception handling are byte-identical to the
+reviewed, already-approved version.
+
+**The cap is still respected: yes.** `low_water_mark = int(self._max_bytes *
+_CACHE_LOW_WATER_MARK_FRACTION)` with the fraction fixed at `0.9` is always strictly less than
+`self._max_bytes`, so a sweep that completes always leaves the cache at or below the cap — if
+anything, further below it than before. The early-return guard (`if self._total_bytes <=
+self._max_bytes: return`) is unchanged, so a sweep is still only triggered when the cap is actually
+exceeded; this fix changes how far it descends once triggered, not whether or when it triggers.
+
+**The new test pins the right thing.** `test_eviction_sweep_descends_to_low_water_mark_not_just_
+under_cap` uses ten equal 1000-byte files exactly at a 10,000-byte cap, then one more write to force
+a sweep, and asserts the *exact* post-sweep total (9,000), which is the one assertion that
+distinguishes "stop at/under the cap" from "stop at the low-water mark" — an "at or under 10,000"
+assertion would pass under both the old and new behaviour and prove nothing. Confirmed by mutation:
+reverted only the stopping condition back to `self._total_bytes <= self._max_bytes` (the computation
+of `low_water_mark` left in place but unused, restored byte-for-byte via `sha256sum` after), reran,
+got `assert 10000 == 9000` — fails for the stated reason, not a different one. The existing
+concurrency test (`test_concurrent_writes_under_a_forcing_cap_never_raise_and_respect_cap`) still
+passes 5/5 on individual reruns, confirming the low-water-mark change doesn't interact with the
+locking it exercises.
+
+### Thread-safety regression check
+
+Ran `test_concurrent_writes_under_a_forcing_cap_never_raise_and_respect_cap` five times
+individually (not just once inside the full suite): 5/5 clean passes. Neither fix touches
+`self._lock`'s acquisition, scope, or the `_write`/`_enforce_cap_locked` call relationship the prior
+thread-safety fix established — Fix 1 is entirely inside `discovery.py` plus a call-site dispatch
+change, and Fix 2 only changes a comparison value inside the already-locked method. No regression
+found.
+
+### Checks run (from inside `raster-chart-viewer/`, fresh venv created per task instructions —
+none existed in this worktree)
+
+- `ruff format --check src tests`: pass (19 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (strict, run with cwd inside the subproject): pass, 9 source files, no issues
+- `pytest tests -q`: pass, 55/55
+
+### Scope check
+
+Confirmed, per the task brief and `implementation.md`'s own statement: Finding 3 (warm-up racing
+its own triggering request) was correctly left untouched — it is MONITOR, not NOW, in the
+performance review's own verdict. `RC-B1` (tile-URL integer bound) was correctly left untouched —
+no `server.py` changes appear anywhere in this diff. No scope drift.
+
+The implementer-memory commit (`6a653545`) records the `None`-sentinel-default pattern accurately
+and matches what the diff actually does — no discrepancy between the memory file's account and the
+code.
+
+### Verdict
+
+**APPROVED**
+
+Both NOW findings from the performance review are correctly and minimally fixed, each confined to
+its own module with no architectural change. Both new mechanisms were verified by mutation against
+the production default path (not just read), both mutations failed for the exact stated reason, and
+both files were restored byte-identical afterward. The prior thread-safety fix is unaffected and
+re-confirmed with 5/5 clean concurrency-test runs. Checks pass cleanly (ruff format/check, mypy
+strict, pytest 55/55). No scope drift — both out-of-scope items (Finding 3, RC-B1) were correctly
+left untouched.
+
+### Review Confidence
+
+Full read of both commits' diffs (`discovery.py`, `cache.py`, `warmup.py`, both test files, the
+implementer-memory file, `implementation.md`'s new section). Ran the full check suite from a
+freshly created venv — 55/55 passing. Both new performance-fix tests and the low-water-mark test
+were independently re-verified by mutation (not re-read): the two zip-batching tests were shown red
+against a call-site-only revert to `read_tile_bytes` (64==1 and 8==1 failures) while
+`BatchZipReader` itself was left untouched and its own direct test stayed green, distinguishing
+what each test actually pins; the low-water-mark test was shown red against a reverted stopping
+condition (10000==9000 failure). All mutated files were restored and confirmed byte-identical via
+`sha256sum` before continuing. The existing concurrency regression test was rerun 5/5 individually,
+not just once inside the suite. Did not touch the OpenSeadragon viewer, a browser, or the Windows
+Stage 7 live check — unchanged from both prior reviews, and still the user's own acceptance step.
