@@ -197,6 +197,19 @@ _CONDITION_RE = re.compile(r"^(\S+)\s*(!=|=)\s*(\S+)$")
 _SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 
 
+def _strip_petrovich_says(raw: str) -> str:
+    """Strips surrounding whitespace, then one matching pair of quote
+    characters, from a `petrovich-says` cell (`[[BL-B119]]`) -- the
+    pilot writes these cells quoted (`"observ on"`) so the markdown
+    table reads cleanly; the quoting itself is not part of what
+    `belief.effector_engine` speaks. Case/punctuation normalisation
+    happens there, not here -- this is parse-time cell cleanup only."""
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        text = text[1:-1].strip()
+    return text
+
+
 @dataclass(frozen=True, slots=True)
 class Condition:
     """One row's gate, evaluated against the observed cockpit readback
@@ -370,6 +383,7 @@ def _parse_data_table(
             )
             continue
         condition_s, effector_s, value_s, says_s, comment_s = cells
+        says_s = _strip_petrovich_says(says_s)
 
         wait_match = _WAIT_ROW_RE.match(condition_s)
         if wait_match is not None:
