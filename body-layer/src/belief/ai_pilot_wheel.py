@@ -1,11 +1,14 @@
 """BL-16 mode 2 -- Petrovich drives ED's own AI pilot through the
 HELPER_AI wheel while the stick is parked (`plans/flight-control/plan.md`,
-"Revised 2026-11-15"). Batch A (Stages P-ICS/P0/P1) only: `ParkedFlightState`
-carries the activation/overlay-readback fields Stage P1 reads and writes;
-`goal`/`align_phase`/`pre_align_snapshot` are later stages' own fields
-(P2-P4) and are declared here now rather than being added piecemeal, per
-the plan's own Co-moving Fields note -- "`ParkedFlightState`/`apw` still
-have no construction sites to grep against as of this plan revision; the
+"Revised 2026-11-15"/"Revised 2026-11-16"). Batch A (Stages P-ICS/P0/P1)
+only: `ParkedFlightState` carries the activation/overlay-readback fields
+Stage P1 reads and writes, plus the takeover revision's own diagnostic
+mirrors (`raw_arg_852`/`raw_arg_952`/`takeover_stage`/`correction_path`,
+additive -- see `advance_parked_flight_state`); `goal`/`align_phase`/
+`pre_align_snapshot` are later stages' own fields (P2-P4) and are
+declared here now rather than being added piecemeal, per the plan's own
+Co-moving Fields note -- "`ParkedFlightState`/`apw` still have no
+construction sites to grep against as of this plan revision; the
 Implementer's grep still applies once Stage P1 lands the type." Grepping
 `ParkedFlightState(` after this stage lands finds exactly the one
 construction site this module's own `advance_parked_flight_state` uses
@@ -32,13 +35,16 @@ from aircraft_client import AircraftLayerClient
 #: 2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5: "within 20m is
 #: good enough"). Declared now, per the plan's own Stage P1 instruction,
 #: even though no goal-message channel exists yet to carry it to
-#: `Export.lua` -- Stage P1's own park-sink nudge ("the read current
-#: altitude equals the AI's held altitude") uses the same number as a
-#: plain Lua local (`AI_PILOT_NUDGE_EPSILON_M`, `Export.lua`), not this
-#: tunable, because the Architecture decision keeps all per-frame press
-#: timing in Lua until Stage P2 wires a goal channel through -- the two
-#: are duplicated, not read from one source, until that channel exists.
-#: Revisit then so there is one source of truth for this number.
+#: `Export.lua` -- the takeover/correction loop's own closed-loop
+#: release point ("the read current altitude equals the AI's held
+#: altitude") uses the same number as a plain Lua local
+#: (`AI_PILOT_ALT_TOLERANCE_M`, `Export.lua`, renamed from
+#: `AI_PILOT_NUDGE_EPSILON_M` by the "Revised 2026-11-16" takeover
+#: revision), not this tunable, because the Architecture decision keeps
+#: all per-frame press timing in Lua until Stage P2 wires a goal channel
+#: through -- the two are duplicated, not read from one source, until
+#: that channel exists. Revisit then so there is one source of truth for
+#: this number.
 AI_PILOT_ALTITUDE_TOLERANCE_M: Final[float] = tuning.real(
     "belief.ai_pilot_wheel.AI_PILOT_ALTITUDE_TOLERANCE_M",
     20.0,
@@ -62,6 +68,16 @@ class ParkedFlightState:
     only, never written directly), `last_press` (`Export.lua`'s own
     description of the last press it issued).
 
+    "Revised 2026-11-16" diagnostic mirrors, additive: `raw_arg_852`/
+    `raw_arg_952` (the raw park-signal args, so a recurrence of "The P1
+    telemetry mystery" -- plan's own name for it -- is directly visible
+    from belief state, not only from the wire), `takeover_stage`
+    (`Export.lua`'s own takeover sub-state, `None` once resolved or while
+    unparked), `correction_path` (which correction path the last takeover
+    used -- `"quick"`/`"hold"`/`"none"`/`None`). Read-only mirrors, same
+    posture as the Stage P1 fields above; nothing in this stage decides
+    from them.
+
     Later-stage fields, declared now per the plan's own note above but not
     read or written by Stage P1: `goal`/`align_phase`/`pre_align_snapshot`
     are `None`/`"none"` until Stage P2/P3 give them a writer."""
@@ -73,6 +89,10 @@ class ParkedFlightState:
     held_altitude_ref: str | None = None
     held_speed: float | None = None
     last_press: str | None = None
+    raw_arg_852: float | None = None
+    raw_arg_952: float | None = None
+    takeover_stage: str | None = None
+    correction_path: str | None = None
     # P2-P4's own fields -- see the module docstring's Co-moving Fields note.
     goal: Any | None = None
     align_phase: str = "none"
@@ -86,6 +106,15 @@ def _parse_float(value: object) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _as_optional_float(value: object) -> float | None:
+    """Unlike `_parse_float` above, `apw_arg852`/`apw_arg952` arrive as
+    JSON numbers, not numeric strings -- `bool` is excluded explicitly
+    since `isinstance(True, int)` is true in Python."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def advance_parked_flight_state(
@@ -109,6 +138,10 @@ def advance_parked_flight_state(
         held_altitude_ref=sample.get("apw_alt_add_text"),
         held_speed=_parse_float(sample.get("apw_speed_text")),
         last_press=sample.get("apw_last_press"),
+        raw_arg_852=_as_optional_float(sample.get("apw_arg852")),
+        raw_arg_952=_as_optional_float(sample.get("apw_arg952")),
+        takeover_stage=sample.get("apw_takeover_stage"),
+        correction_path=sample.get("apw_correction_path"),
         goal=state.goal,
         align_phase=state.align_phase,
         pre_align_snapshot=state.pre_align_snapshot,
