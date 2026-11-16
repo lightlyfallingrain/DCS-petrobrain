@@ -32,7 +32,8 @@ only its run instructions were written (`README.md`).
   (`ThreadingHTTPServer`, mirrors `aircraft-layer`'s `TelemetryAPIServer` shape): `GET /terrains`,
   `GET /terrains/<t>/tiers`, `GET /terrains/<t>/tiers/<tier>` (grid metadata for the viewer's
   `TileSource` -- see "Notable Discoveries"), `GET /tile/<terrain>/<tier>/<level>/<x>/<y>.jpg`,
-  static file serving (path-traversal-guarded). Port 7800.
+  static file serving (path-traversal-guarded). Port 7800 (corrected to 7801 2026-11-16 -- see
+  `plan.md`'s "Port and firewall" section).
 - `raster-chart-viewer/src/raster_chart_viewer/__main__.py` -- CLI entry point.
 - `raster-chart-viewer/src/raster_chart_viewer/warmup.py` -- `WarmupScheduler`, one background
   thread per `(terrain, tier)` started on first touch, skipping entries whose small mips are

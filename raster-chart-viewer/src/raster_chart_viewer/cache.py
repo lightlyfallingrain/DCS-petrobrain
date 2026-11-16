@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import math
+import threading
 from pathlib import Path
 
 from PIL import Image
@@ -74,14 +75,24 @@ class TileCache:
     """Owns the on-disk cache directory: composed-tile JPEGs plus small-
     mip PNGs, one shared size cap. Safe to construct against an existing
     cache directory from a previous run -- `__init__` sweeps it down to
-    the cap immediately, in case the cap was lowered since."""
+    the cap immediately, in case the cap was lowered since.
+
+    **Thread-safe**: `ThreadingHTTPServer`'s request threads and the
+    background `warmup.WarmupScheduler` thread share one `TileCache`
+    instance, so every operation that touches `_total_bytes` or the
+    cache directory's contents -- including reads, which can otherwise
+    race a concurrent eviction -- holds `self._lock` (reviewer fix,
+    2026-11-16: a direct concurrency stress test crashed `_enforce_cap`
+    reliably without it)."""
 
     def __init__(self, cache_dir: Path, max_bytes: int = CACHE_MAX_BYTES) -> None:
         self._cache_dir = cache_dir
         self._max_bytes = max_bytes
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._total_bytes = self._measure_total()
-        self._enforce_cap()
+        with self._lock:
+            self._enforce_cap_locked()
 
     def _measure_total(self) -> int:
         return sum(f.stat().st_size for f in self._cache_dir.rglob("*") if f.is_file())
@@ -106,7 +117,8 @@ class TileCache:
         self, terrain: str, tier_label: str, level: int, vx: int, vy: int
     ) -> bytes | None:
         path = self._composed_tile_path(terrain, tier_label, level, vx, vy)
-        return path.read_bytes() if path.is_file() else None
+        with self._lock:
+            return path.read_bytes() if path.is_file() else None
 
     def put_composed_tile(
         self,
@@ -122,7 +134,8 @@ class TileCache:
     def has_small_mip(
         self, terrain: str, tier_label: str, key: TileKey, mip: int
     ) -> bool:
-        return self._small_mip_path(terrain, tier_label, key, mip).is_file()
+        with self._lock:
+            return self._small_mip_path(terrain, tier_label, key, mip).is_file()
 
     def has_all_small_mips(self, terrain: str, tier_label: str, key: TileKey) -> bool:
         """True if every small mip (`>= SMALL_MIP_MIN`) of this entry is
@@ -138,9 +151,10 @@ class TileCache:
         self, terrain: str, tier_label: str, key: TileKey, mip: int
     ) -> Image.Image | None:
         path = self._small_mip_path(terrain, tier_label, key, mip)
-        if not path.is_file():
-            return None
-        return Image.open(path).convert("RGBA")
+        with self._lock:
+            if not path.is_file():
+                return None
+            return Image.open(path).convert("RGBA")
 
     def put_small_mip(
         self,
@@ -160,25 +174,40 @@ class TileCache:
         self._write(self._small_mip_path(terrain, tier_label, key, mip), buf.getvalue())
 
     def _write(self, path: Path, data: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        existing_size = path.stat().st_size if path.is_file() else 0
-        path.write_bytes(data)
-        self._total_bytes += len(data) - existing_size
-        if self._total_bytes > self._max_bytes:
-            self._enforce_cap()
+        """Acquires `self._lock` itself -- callers (`put_composed_tile`,
+        `put_small_mip`) must not already hold it, since `Lock` is not
+        reentrant."""
+        with self._lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            existing_size = path.stat().st_size if path.is_file() else 0
+            path.write_bytes(data)
+            self._total_bytes += len(data) - existing_size
+            if self._total_bytes > self._max_bytes:
+                self._enforce_cap_locked()
 
-    def _enforce_cap(self) -> None:
+    def _enforce_cap_locked(self) -> None:
+        """Assumes `self._lock` is already held. Stats every file once,
+        up front, before sorting -- `__init__` holds the lock across this
+        call too, so no concurrent writer/evictor can make a file vanish
+        between that stat and this method's own `unlink()` below; the
+        `try/except` remains only for ordinary filesystem failures (not a
+        concurrent-eviction race, which the lock now rules out)."""
         if self._total_bytes <= self._max_bytes:
             return
-        files = sorted(
-            (f for f in self._cache_dir.rglob("*") if f.is_file()),
-            key=lambda f: f.stat().st_mtime,
-        )
-        for stale_path in files:
+        entries: list[tuple[float, int, Path]] = []
+        for candidate in self._cache_dir.rglob("*"):
+            if not candidate.is_file():
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            entries.append((stat.st_mtime, stat.st_size, candidate))
+        entries.sort(key=lambda entry: entry[0])
+        for _mtime, size, stale_path in entries:
             if self._total_bytes <= self._max_bytes:
                 break
             try:
-                size = stale_path.stat().st_size
                 stale_path.unlink()
             except OSError:
                 continue

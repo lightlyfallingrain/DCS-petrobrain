@@ -38,8 +38,10 @@ for the file-layout/naming/sheet-mosaic facts this service is built against.
 - **Cache: composed-tile JPEGs plus small-mip PNGs only, one shared 1GB cap** -- see `cache.py`'s
   module docstring for the full shape and why the plan's first ("every mip of every inflated
   entry") design was superseded.
-- **Port 7800** -- one past the aircraft-layer family (7790-7799), grepped repo-wide before
-  choosing; see `server.py`'s own `DEFAULT_PORT` comment.
+- **Port 7801** -- 7800 was the plan's original choice but collides with audio-adapter's Piper TTS
+  server on the same Windows box, missed by a `DEFAULT_PORT`-only grep since Piper's port lives in
+  a bare URL string (`audio-adapter/src/tts_engine.py` `DEFAULT_PIPER_URL`); see `server.py`'s own
+  `DEFAULT_PORT` comment for the corrected grep.
 - **OpenSeadragon, vendored**: version **4.1.1** (released 2024-04-01, well over a few months old
   as the plan required). Fetched from the official npm package `openseadragon@4.1.1`
   (`https://registry.npmjs.org/openseadragon/-/openseadragon-4.1.1.tgz`) via `npm pack` -- the

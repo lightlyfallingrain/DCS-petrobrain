@@ -212,6 +212,14 @@ the repo. Firewall rule, same shape as aircraft-layer's:
 netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=allow protocol=TCP localport=7800
 ```
 
+**Correction, 2026-11-16 (implementer, required fix):** 7800 is in fact taken — audio-adapter's
+Piper TTS server runs on `127.0.0.1:7800` on the same Windows box (`audio-adapter/src/tts_engine.py`
+`DEFAULT_PIPER_URL`), missed by the grep above because that grep searched for the `DEFAULT_PORT`
+constant name and Piper's port lives in a bare URL string instead. Changed to **7801**, re-grepped
+for 7801–7809 repo-wide with no hits. The firewall rule and every other mention of 7800 in this
+subproject were updated to 7801; this paragraph is left in place rather than rewritten so the
+original (wrong) reasoning stays visible.
+
 ### Implementation Plan
 
 1. **Discovery + filename parsing + mosaic grid math** (`tilename.py`, `discovery.py`, `mosaic.py`).

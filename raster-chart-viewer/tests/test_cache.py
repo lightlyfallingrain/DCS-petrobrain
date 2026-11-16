@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -222,3 +223,45 @@ def test_cache_eviction_removes_oldest_file_first(tmp_path: Path) -> None:
 
 def test_default_cache_cap_matches_plan() -> None:
     assert CACHE_MAX_BYTES == 1_000_000_000
+
+
+def test_concurrent_writes_under_a_forcing_cap_never_raise_and_respect_cap(
+    tmp_path: Path,
+) -> None:
+    """Reviewer-reproduced defect: `ThreadingHTTPServer`'s request threads
+    and `warmup.WarmupScheduler`'s background thread write into one
+    shared `TileCache`. Before the lock, concurrent `put_composed_tile`
+    calls under a cap small enough to force constant eviction reliably
+    raised `FileNotFoundError` out of `_enforce_cap` (one thread's
+    `unlink()` removing a file another thread's `sorted(...,
+    key=...stat()...)` was still calling `.stat()` on) -- 31/3200 writes
+    failed this way across 3 runs per the review. This pins both: no
+    exception escapes, and the cache ends at or under its cap with the
+    tracked total matching the real on-disk size (the lost-update race
+    on `_total_bytes` the review also flagged)."""
+    cache_dir = tmp_path / "cache"
+    max_bytes = 20_000
+    cache = TileCache(cache_dir, max_bytes=max_bytes)
+
+    errors: list[BaseException] = []
+    errors_lock = threading.Lock()
+
+    def worker(thread_id: int) -> None:
+        try:
+            for i in range(100):
+                data = bytes([thread_id % 256]) * 200
+                cache.put_composed_tile("Syria", "32m", 0, thread_id, i, data)
+        except BaseException as exc:  # noqa: BLE001 -- the test wants to see any escape
+            with errors_lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(32)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    actual_total = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file())
+    assert actual_total <= max_bytes
+    assert cache._total_bytes == actual_total

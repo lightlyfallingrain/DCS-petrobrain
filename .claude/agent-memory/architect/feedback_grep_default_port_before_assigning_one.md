@@ -24,3 +24,12 @@ an assumption, not a guarantee, and it means "pick a number that looks free" is 
 and choose a number not already in that list. State the grep result in the plan so a reviewer can
 verify the choice without re-running it. Do not propose retiring/renumbering an existing collision
 as part of an unrelated feature plan — that is its own, separate piece of work.
+
+**2026-11-16, same feature, found by the main loop after the plan shipped:** the `DEFAULT_PORT`-only
+grep above missed audio-adapter's Piper TTS server, which also runs on port 7800 on the same
+Windows box (`audio-adapter/src/tts_engine.py` `DEFAULT_PIPER_URL = "http://127.0.0.1:7800"`) —
+because Piper's port is embedded in a bare URL string, never assigned to a `DEFAULT_PORT`-named
+constant. **Grep the bare number too** (e.g. `grep -rn "7800"`), not only the constant name — a
+port can be hiding in a URL literal, a firewall-rule example, or a doc string with no `DEFAULT_PORT`
+anywhere near it. raster-chart-viewer's port was corrected to 7801 (see
+`plans/raster-chart-viewer/plan.md`'s "Port and firewall" section for the correction note).

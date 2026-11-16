@@ -63,7 +63,7 @@ Windows Firewall blocks inbound connections to a Python process by default. On t
 machine (PowerShell or `cmd`, as Administrator):
 
 ```
-netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=allow protocol=TCP localport=7800
+netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=allow protocol=TCP localport=7801
 ```
 
 Scope this to your LAN profile, not Public, if prompted.
@@ -82,13 +82,13 @@ cd /mnt/c/Users/<you>/DCS-petrobrain/raster-chart-viewer/src
 
 (Substitute your real DCS install path -- Windows-style, backslashes and all, since this runs as
 a Windows process.) Add `-v` for DEBUG logging. `--cache-dir`/`--cache-cap-bytes`/`--host`/`--port`
-override the defaults (`%TEMP%\raster-chart-viewer-cache`, 1GB, `0.0.0.0`, `7800`) -- see
+override the defaults (`%TEMP%\raster-chart-viewer-cache`, 1GB, `0.0.0.0`, `7801`) -- see
 `python -m raster_chart_viewer --help`.
 
 ### 4. Open it from any device on the LAN
 
 ```
-http://<windows-box-lan-ip>:7800/
+http://<windows-box-lan-ip>:7801/
 ```
 
 A phone, tablet, or second screen -- anything on the same LAN. Pick a terrain and tier from the

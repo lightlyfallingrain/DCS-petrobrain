@@ -59,11 +59,16 @@ logger = logging.getLogger(__name__)
 #: server.py`'s own `DEFAULT_HOST`.
 DEFAULT_HOST = "0.0.0.0"
 
-#: One past the aircraft-layer family (7790-7799, 7794 retired), unused
-#: anywhere else in the repo -- grepped `DEFAULT_PORT` repo-wide before
-#: choosing (plan, "Port and firewall"; `.claude/agent-memory/architect/
-#: feedback_grep_default_port_before_assigning_one.md`).
-DEFAULT_PORT = 7800
+#: 7800 was the first choice but collides with audio-adapter's Piper TTS
+#: server (`audio-adapter/src/tts_engine.py` `DEFAULT_PIPER_URL`,
+#: `audio-adapter/RUN.md`), which runs on the same Windows box -- missed
+#: by the original `DEFAULT_PORT`-only grep because Piper's port is a
+#: bare URL string, not a `DEFAULT_PORT` constant (reviewer fix,
+#: 2026-11-16; `.claude/agent-memory/architect/
+#: feedback_grep_default_port_before_assigning_one.md`). **7801**: one
+#: past the aircraft-layer family (7790-7799, 7794 retired) *and* past
+#: Piper, re-grepped for 7801-7809 repo-wide with no hits.
+DEFAULT_PORT = 7801
 
 _TERRAINS_PATH = "/terrains"
 _TIERS_RE = re.compile(r"^/terrains/(?P<terrain>[^/]+)/tiers$")
