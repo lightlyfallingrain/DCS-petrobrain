@@ -1,9 +1,14 @@
 # MI-B4 — Raster chart viewer: DCS RasterCharts as a pan/zoom map on the LAN
 
-- [ ] **MI-B4 — Serve each terrain module's RasterCharts as a standard tiled map, zoom and pan in
+- [~] **MI-B4 — Serve each terrain module's RasterCharts as a standard tiled map, zoom and pan in
   a browser, from a server on the Windows DCS machine, readable from any device on the LAN. One
-  more standalone service, independent of every other one.** #status/open Filed 2026-11-16 by
-  user direction.
+  more standalone service, independent of every other one.** #status/in-progress Filed 2026-11-16
+  by user direction. **Planning started 2026-11-16 on `feature/raster-chart-viewer`**; plan:
+  `plans/raster-chart-viewer/plan.md`.
+
+  **Scope set 2026-11-16 (user):** *"All terrains except Caucasus follow the same structure, as far
+  as I know. Therefore, the same code should work on all terrains, except Caucasus which needs a
+  special case. Do this so that any terrain folder that is on disk can be opened."*
 
   **The request, in the user's words:**
 
