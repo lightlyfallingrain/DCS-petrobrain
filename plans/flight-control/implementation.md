@@ -266,9 +266,9 @@ no conflict).
     `ai_pilot_quick_path_eligible(agl_m)`, `AI_PILOT_QUICK_PATH_MAX_AGL_M` = 700.0 m) issues a
     `SHORT_PULSE_S` (0.15 s) centre pulse, reads the reference one tick later
     (`ai_pilot_takeover.correction_substage == "quick_read1"`); if it now reads `"R"`, a second
-    pulse (`"quick_read2"`) and the takeover resolves without ever opening a hold (trusted per the
-    plan's own "then go on to step 6's checks" — no further tolerance check after the second
-    pulse). If it still reads `"B"` after the first pulse, falls back to the **two-phase hold**
+    pulse (`"quick_read2"`). **Superseded by the 2026-11-16 review fix below**: the second pulse's
+    resolution is re-checked against tolerance rather than trusted outright. If it still reads
+    `"B"` after the first pulse, falls back to the **two-phase hold**
     (`ai_pilot_begin_hold_phase`): phase 1 chases the aircraft's own live altitude (re-read every
     tick via `ai_pilot_actual_altitude_m` against whichever reference is currently displayed) to
     stop the climb, phase 2 (entered once phase 1 releases or is skipped) chases the fixed
@@ -391,11 +391,13 @@ no conflict).
   nominal deadline — realistic anyway, since production is driven by DCS's own frame clock, never
   landing exactly on a computed deadline.
 - **One Implementer decision not explicitly in the plan**: whether the quick path's second pulse
-  (`"quick_read2"`) re-verifies tolerance before resolving. The plan's own wording ("then go on to
-  step 6's checks") was read as "nothing further to check here," matching the probe's own measured
-  evidence that a second baro switch recalculates a correct target — implemented with no
-  tolerance re-check after the second pulse. If a live flight shows this to be wrong, the fix is
-  localized to the `"quick_read2"` branch of `update_ai_pilot_wheel_overlay`.
+  (`"quick_read2"`) re-verifies tolerance before resolving. The phrase "then go on to step 6's
+  checks" cited in an earlier version of this note as the plan's own wording was in fact from the
+  main loop's dispatch brief, not `plan.md` — grepped and not found there; the plan is silent on
+  this point. Implemented at the time with no tolerance re-check, matching the probe's own measured
+  evidence that a second baro switch recalculates a correct target. **Fixed in the 2026-11-16
+  review round** (below): the second pulse now re-checks tolerance and falls through to the
+  two-phase hold if still wrong, the same shape the first pulse's own refusal already used.
 - **Phase 1's hold-release comparison reuses `ai_pilot_actual_altitude_m`** (compare held against
   whichever reference the overlay currently displays) rather than hard-coding MSL, even though the
   reference is expected to stay `"B"` throughout a hold (the quick path, the only path that ever
@@ -404,3 +406,89 @@ no conflict).
   phase 2's comparison against the handover snapshot (always MSL) would silently mix units. No
   case has been observed; flagged as the same posture as the plan's own "the AI always starts on
   radar" residual risk, not re-opened as a question.
+
+---
+
+## Review-fix round, 2026-11-16 (`plans/flight-control/review-takeover.md`, NEEDS REVISION)
+
+Both required fixes, plus the main loop's own timing decision (not a review requirement).
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Export.lua`:
+  - **Required fix 1**: `update_ai_pilot_wheel_overlay`'s `correction_substage == "quick_read2"`
+    branch now re-checks the held altitude against `ai_pilot_takeover.handover_altitude_m` within
+    `AI_PILOT_ALT_TOLERANCE_M` before resolving. Within tolerance → unchanged (`stage = nil`,
+    `correction_path` stays `"quick"`). Outside tolerance → `correction_path = "hold"`, falls
+    through to `ai_pilot_begin_hold_phase`, the same shape `quick_read1`'s own refusal already
+    used. A missing reading is treated as "nothing to correct" (`ai_pilot_correction_direction`'s
+    own stated convention, already used by `ai_pilot_decide_correction`'s first check), not a new
+    rule invented for this branch.
+  - **Main-loop timing decision (not a review requirement)**: restored the ~0.5 s gap the rehearsal
+    probe actually flew between the blind centre tap and the menu-open tap (centre at +0.5 s, menu
+    at +1.0 s after takeover), replacing the same-frame fall-through. New constant
+    `AI_PILOT_MENU_OPEN_DELAY_S` (0.5) lives as a field on the existing `ai_pilot_takeover` table,
+    not a new top-level local — the file is already at Lua 5.1's 200-live-local ceiling with zero
+    headroom (review, Optional Refinements), and a table field costs no main-chunk local. New state
+    field `ai_pilot_takeover.menu_open_at_t` (the deadline), cleared on unpark alongside the other
+    sequence fields.
+  - **Optional refinement, applied** (trivial, no local cost): `ai_pilot_check_hold_convergence`'s
+    phase1→phase2 transition now calls `ai_pilot_begin_hold_phase(t, held)` instead of duplicating
+    its dir2-computation/open-hold/`last_press` logic — `held` is within tolerance of live altitude
+    at that point, so `begin_hold_phase`'s own `dir1` resolves to `nil` and it falls straight to
+    phase 2 (or resolves), the same outcome the duplicated code produced. Verified by reading both
+    paths side by side, not by a behavioural test (review found no difference between the two
+    copies; this changes nothing about what either path does, only removes the second copy).
+- `plans/flight-control/plan.md` — **Required fix 2**: the Co-moving Fields table extended with
+  `correction_substage`'s transitions and every `correction_path` write (the review's own grep
+  re-run, ten write sites, all now covered — see the table's own note for the exact command and
+  count).
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`:
+  - `TestTakeoverSequence`'s existing scripts updated for the new menu-open gap: every scenario
+    that drove the sequence past "opening_menu" now issues a second `run_ai_pilot_wheel` call at
+    the menu-open deadline (+1.0 s from takeover) before checking `menu_open`/`stage`/press counts,
+    and every subsequent relative timestamp in those scripts shifted by the same 0.5 s so ordering
+    relative to the sequence (not to the wall clock) is unchanged. `test_menu_reopens_after_the_
+    settle_window` is untouched — it drives the keep-open check directly, bypassing the takeover
+    sequence's own stage machine, so the gap does not reach it.
+  - New `test_quick_path_falls_back_to_hold_when_pulse2_still_wrong` — the second pulse resolves
+    but the readback is still outside tolerance of the handover snapshot; asserts `correction_path
+    == "hold"`, a phase1 hold opens (never a `quick_read2`-resolves-to-`"none"` false positive),
+    and no third pulse is ever issued.
+
+### Tests Added
+
+- `test_quick_path_falls_back_to_hold_when_pulse2_still_wrong` (`test_ai_pilot_wheel_lua.py`) — the
+  fallback this round's required fix 1 adds, mirrored on `test_quick_path_falls_back_to_hold_when_
+  still_baro`'s own shape for the first pulse's refusal.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p aircraft-layer/dcs-export/Export.lua`: pass
+- `ruff format --check src tests`: pass (79 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `aircraft-layer/`): pass, no issues (27 source files)
+- `pytest tests -q`: **766 passed** (765 + 1 new test; `TestTakeoverSequence`'s 8 tests, including
+  the new one, confirmed by name in unfiltered `-v` output, not a `-k` run)
+
+**body-layer/**
+- `ruff format --check src tests`: pass (204 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from inside `body-layer/`): pass, no issues (83 source files)
+- `PYTHONPATH=src:../world-model/src pytest tests -q`: **3284 passed, 4 xfailed** (pre-existing,
+  matches the prior round — no body-layer source change this round)
+
+A counterfactual was run on required fix 1's own new test before trusting it: reverted the
+`quick_read2` tolerance check to its pre-fix shape (unconditional `stage = nil`), re-ran
+`test_quick_path_falls_back_to_hold_when_pulse2_still_wrong` alone, confirmed it failed for the
+stated reason (`path` read back `"quick"` instead of `"hold"`), restored the fix, confirmed the
+file's `sha256` matched the pre-mutation value exactly before running the full suite again.
+
+### Notable Discoveries
+
+- **The review's cited plan quote ("then go on to step 6's checks") does not exist in `plan.md`
+  and never did** — it was the main loop's own dispatch-brief wording, misattributed to the plan in
+  the prior `implementation.md` entry. Corrected in that entry rather than left standing, per the
+  task's own instruction, so nothing downstream cites the plan for a sentence the plan never
+  contained.

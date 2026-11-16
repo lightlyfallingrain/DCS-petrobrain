@@ -422,6 +422,7 @@ local ai_pilot_takeover = {
     t = nil,
     handover_altitude_m = nil,
     menu_open = false,
+    menu_open_at_t = nil,
     menu_closed_since_t = nil,
     awaiting_correction_decision = false,
     correction_path = nil,
@@ -430,6 +431,7 @@ local ai_pilot_takeover = {
     correction_hold_cmd = nil,
     raw_arg852 = nil,
     raw_arg952 = nil,
+    AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
 }
 
 local stick_park_value = 0.0
@@ -525,15 +527,27 @@ class TestTakeoverSequence:
         run_ai_pilot_wheel(0.3)
         print("presses_before_delay=" .. #press_log)
 
-        -- Delay elapses: blind reference toggle, then menu open, same frame.
+        -- Delay elapses: blind reference toggle only -- the menu-open tap
+        -- is gapped AI_PILOT_MENU_OPEN_DELAY_S later, not the same frame
+        -- (main-loop timing decision, 2026-11-16 review-fix round --
+        -- matches the gap the rehearsal probe actually flew).
         run_ai_pilot_wheel(0.5)
+        print("stage_after_toggle=" .. tostring(ai_pilot_takeover.stage))
+        print("presses_after_toggle=" .. #press_log)
+
+        -- Still within the gap: nothing further happens yet.
+        run_ai_pilot_wheel(0.9)
+        print("presses_within_gap=" .. #press_log)
+
+        -- Gap elapses: menu-open tap issued.
+        run_ai_pilot_wheel(1.0)
         print("stage_after_delay=" .. tostring(ai_pilot_takeover.stage))
         print("menu_open=" .. tostring(ai_pilot_takeover.menu_open))
         print("presses_after_delay=" .. #press_log)
         print("awaiting=" .. tostring(ai_pilot_takeover.awaiting_correction_decision))
 
         -- First post-open read: held (900) already matches handover (900).
-        update_ai_pilot_wheel_overlay({json.dumps(raw)}, 0.6)
+        update_ai_pilot_wheel_overlay({json.dumps(raw)}, 1.1)
         print("correction_path=" .. tostring(ai_pilot_takeover.correction_path))
         print("stage_after_decision=" .. tostring(ai_pilot_takeover.stage))
         print("presses_after_decision=" .. #press_log)
@@ -544,6 +558,9 @@ class TestTakeoverSequence:
         assert values["handover"] == "900"
         assert values["presses_at_rise"] == "0"
         assert values["presses_before_delay"] == "0"
+        assert values["stage_after_toggle"] == "opening_menu"
+        assert values["presses_after_toggle"] == "2"  # blind centre tap (press+release)
+        assert values["presses_within_gap"] == "2"
         assert values["stage_after_delay"] == "correcting_altitude"
         assert values["menu_open"] == "true"
         # blind centre tap (press+release) + menu-open tap (press+release)
@@ -563,23 +580,24 @@ class TestTakeoverSequence:
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)   -- handover snapshot = 920
         msl_value = 1000.0        -- aircraft climbed during the sequence
-        run_ai_pilot_wheel(0.5)   -- blind toggle + menu open
+        run_ai_pilot_wheel(0.5)   -- blind toggle
+        run_ai_pilot_wheel(1.0)   -- menu open, gapped 0.5 s after the toggle
 
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 0.6)
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.1)
         print("path=" .. tostring(ai_pilot_takeover.correction_path))
         print("phase_1=" .. tostring(ai_pilot_takeover.correction_phase))
         print("hold_cmd_1=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
 
         -- Phase 1 converges toward live (1000): held reads 1010.
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 0.8)
+            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 1.3)
         print("phase_2=" .. tostring(ai_pilot_takeover.correction_phase))
         print("hold_cmd_2=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
 
         -- Phase 2 converges toward handover (920): held reads 925.
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="925", alt_add_text="B"))}, 1.0)
+            {json.dumps(_overlay_raw(alt_text="925", alt_add_text="B"))}, 1.5)
         print("stage_done=" .. tostring(ai_pilot_takeover.stage))
         print("phase_done=" .. tostring(ai_pilot_takeover.correction_phase))
         print("path_done=" .. tostring(ai_pilot_takeover.correction_path))
@@ -614,12 +632,13 @@ class TestTakeoverSequence:
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)   -- handover = 700
         msl_value = 1000.0       -- aircraft climbed during the sequence
-        run_ai_pilot_wheel(0.5)  -- toggle + menu open
+        run_ai_pilot_wheel(0.5)  -- toggle
+        run_ai_pilot_wheel(1.0)  -- menu open, gapped 0.5 s after the toggle
 
         -- held (1010) is within tolerance of live (1000) but far from
         -- the handover snapshot (700).
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 0.6)
+            {json.dumps(_overlay_raw(alt_text="1010", alt_add_text="B"))}, 1.1)
         print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
         print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
         """
@@ -636,24 +655,25 @@ class TestTakeoverSequence:
         agl_value = 500.0
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)    -- handover = 1084
-        run_ai_pilot_wheel(0.5)    -- toggle + menu open
+        run_ai_pilot_wheel(0.5)    -- toggle
+        run_ai_pilot_wheel(1.0)    -- menu open, gapped 0.5 s after the toggle
 
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 0.6)
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
         print("path_after_decision=" .. tostring(ai_pilot_takeover.correction_path))
         print("substage_after_decision=" .. tostring(ai_pilot_takeover.correction_substage))
 
         -- Pulse 1's release (0.15s later), then the next tick's read: the
         -- reference flipped to R.
-        run_ai_pilot_wheel(0.76)
+        run_ai_pilot_wheel(1.26)
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="500", alt_add_text="R"))}, 0.8)
+            {json.dumps(_overlay_raw(alt_text="500", alt_add_text="R"))}, 1.3)
         print("substage_after_read1=" .. tostring(ai_pilot_takeover.correction_substage))
 
         -- Pulse 2's release, then the final read: back on B, corrected.
-        run_ai_pilot_wheel(0.96)
+        run_ai_pilot_wheel(1.46)
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1080", alt_add_text="B"))}, 1.0)
+            {json.dumps(_overlay_raw(alt_text="1080", alt_add_text="B"))}, 1.5)
         print("stage_done=" .. tostring(ai_pilot_takeover.stage))
         print("path_done=" .. tostring(ai_pilot_takeover.correction_path))
         print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
@@ -685,13 +705,14 @@ class TestTakeoverSequence:
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)
         run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
 
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 0.6)
-        run_ai_pilot_wheel(0.76)
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
+        run_ai_pilot_wheel(1.26)
         -- Pulse 1 refused: still reads B.
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 0.8)
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.3)
         print("path=" .. tostring(ai_pilot_takeover.correction_path))
         print("substage=" .. tostring(ai_pilot_takeover.correction_substage))
         print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
@@ -703,6 +724,55 @@ class TestTakeoverSequence:
         assert values["substage"] == "nil"
         assert values["phase"] == "phase1"
         assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (1824 > live 1084)
+
+    def test_quick_path_falls_back_to_hold_when_pulse2_still_wrong(self) -> None:
+        """Both pulses complete (reference flips to R then back to B) but
+        the readback is still outside tolerance of the handover snapshot
+        -- the second toggle is not trusted blindly (review fix,
+        2026-11-16: the plan never said it could be, and the first
+        toggle's own measured error is not known to be absent on the
+        second). Falls back to the two-phase hold, the same shape the
+        first pulse's own refusal uses -- never resolves to `"none"` on
+        an unchecked target, and never retries a third pulse."""
+        script = f"""
+        msl_value = 1084.0
+        agl_value = 500.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
+
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.1)
+        run_ai_pilot_wheel(1.26)
+        -- Pulse 1 succeeds: reference flips to R.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="500", alt_add_text="R"))}, 1.3)
+        run_ai_pilot_wheel(1.46)
+
+        -- Aircraft's own altitude moved on while the pulses ran.
+        msl_value = 1100.0
+
+        -- Pulse 2 completes, back on B -- but still wrong.
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1824", alt_add_text="B"))}, 1.5)
+        print("path=" .. tostring(ai_pilot_takeover.correction_path))
+        print("substage=" .. tostring(ai_pilot_takeover.correction_substage))
+        print("phase=" .. tostring(ai_pilot_takeover.correction_phase))
+        print("hold_cmd=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["path"] == "hold"
+        assert values["substage"] == "nil"
+        assert values["phase"] == "phase1"
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (1824 > live 1100)
+        presses = values["press_log"].split(",")
+        # blind toggle + 2 pulses, never a third -- then the hold opens.
+        assert presses.count("3015:1") == 3
+        assert presses.count("3015:0") == 3
+        assert presses.count("3005:1") == 1
 
     def test_menu_reopens_after_the_settle_window(self) -> None:
         """Keep-open: a hand-closed menu (overlay reads all-`nil`) is
@@ -746,13 +816,14 @@ class TestTakeoverSequence:
         stick_park_value = 0.95
         run_ai_pilot_wheel(0.0)
         run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 0.6)
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.1)
         print("holding=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
         local before = #press_log
 
         stick_park_value = 0.0
-        run_ai_pilot_wheel(0.7)
+        run_ai_pilot_wheel(1.2)
         local unpark_presses = {{}}
         for i = before + 1, #press_log do
             table.insert(unpark_presses, press_log[i])
@@ -766,7 +837,7 @@ class TestTakeoverSequence:
 
         -- A stale read arriving after unpark must no-op.
         update_ai_pilot_wheel_overlay(
-            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 0.8)
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.3)
         print("presses_after_stale_tick=" .. (#press_log - after_unpark))
         """
         out = _run_ai_pilot_wheel_integration(script)

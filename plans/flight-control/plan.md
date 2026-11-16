@@ -765,8 +765,21 @@ AI-pilot-wheel's `foo` state," not a literal Lua field).
 | `apw.takeover_stage` | internal | correction converges, or `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` elapses | open press released; stage → `nil` |
 | `apw.menu_open` | internal | belief disagrees with a `nil`-everywhere read for > `MODE_READ_SETTLE_S` | `WHEEL_MENU_BUTTON` pressed again; belief flips to match what is about to be true, not re-read before trusting it |
 | `apw.altitude_correction_{cmd,target_m,deadline_t}` | internal | opened (point 4 above) | held press open in the resolved direction; cleared on convergence, on `apw.parked_active` going false, or on deadline |
+| `apw.correction_path` | internal | first post-open read lands, already within tolerance | `"none"`; `apw.takeover_stage = nil` |
+| `apw.correction_path` | internal | first post-open read lands, correction needed, AGL below `AI_PILOT_QUICK_PATH_MAX_AGL_M` | `"quick"`; `apw.correction_substage = "quick_read1"`; `SHORT_PULSE_S` centre pulse issued |
+| `apw.correction_path` | internal | first post-open read lands, correction needed, AGL at/above the cap (or AGL unreadable) | `"hold"`; two-phase hold begins |
+| `apw.correction_substage` | internal | `quick_read1`: reference now reads `"R"` | `apw.correction_substage = "quick_read2"`; second `SHORT_PULSE_S` pulse issued |
+| `apw.correction_substage` | internal | `quick_read1`: reference still reads `"B"` (switch refused) | `apw.correction_substage = nil`; `apw.correction_path = "hold"`; falls into the two-phase hold |
+| `apw.correction_substage` | internal | `quick_read2` resolves, held altitude now within tolerance of the handover snapshot | `apw.correction_substage = nil`; `apw.takeover_stage = nil` (`apw.correction_path` stays `"quick"`) |
+| `apw.correction_substage` | internal | `quick_read2` resolves, held altitude still outside tolerance (review fix, 2026-11-16 — the first toggle's own measured error is not known to be absent on the second) | `apw.correction_substage = nil`; `apw.correction_path = "hold"`; falls into the two-phase hold, same shape as `quick_read1`'s own refusal |
+| `apw.correction_path`/`apw.correction_substage` | external | falling edge (unpark) | both cleared to `nil`, alongside `apw.takeover_stage` above |
 
 **Implementer's grep, once this stage lands:** `grep -n "takeover_stage\s*=" aircraft-layer/dcs-export/Export.lua` and the same for every other field above — confirm every write site matches a row here, and extend the table with any that does not (the existing table's own note on this: `BL-B71`'s fourth construction site, found only by grep).
+
+**Re-run, 2026-11-16 (review fix round):** `grep -n "correction_substage\s*=\|correction_path\s*="
+aircraft-layer/dcs-export/Export.lua` — ten write sites (two table-literal initialisers at
+`Export.lua:2140-2141`, eight assignments), all now accounted for by the rows above, including the
+new `quick_read2`-still-wrong site this round added. No field above this point is missing a row.
 
 ### Stage P0 — status (all seven rows answered)
 

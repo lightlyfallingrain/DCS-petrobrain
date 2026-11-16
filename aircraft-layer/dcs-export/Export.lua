@@ -2129,12 +2129,21 @@ local ai_wheel_pending_cmd = nil
 -- too. `.raw_arg852`/`.raw_arg952`: raw diagnostic readings of both park
 -- args, refreshed every frame -- the telemetry mystery's own fix (plan,
 -- "The P1 telemetry mystery"), carried on the wire so a recurrence is
--- directly visible, not re-inferred from a probe.
+-- directly visible, not re-inferred from a probe. `.menu_open_at_t`: the
+-- model time the menu-open tap is due, set when the blind centre tap
+-- fires -- `AI_PILOT_MENU_OPEN_DELAY_S` after it, matching the gap the
+-- rehearsal probe actually flew (centre at +0.5 s, menu at +1.0 s after
+-- takeover), rather than the same frame. `.AI_PILOT_MENU_OPEN_DELAY_S`
+-- is the one constant here, not per-sequence state -- kept as a field on
+-- this table rather than a new top-level local, since the file is
+-- already at Lua 5.1's 200-live-local ceiling (see this table's own
+-- comment above) and a table field costs no main-chunk local.
 local ai_pilot_takeover = {
     stage = nil,
     t = nil,
     handover_altitude_m = nil,
     menu_open = false,
+    menu_open_at_t = nil,
     menu_closed_since_t = nil,
     awaiting_correction_decision = false,
     correction_path = nil,
@@ -2143,6 +2152,7 @@ local ai_pilot_takeover = {
     correction_hold_cmd = nil,
     raw_arg852 = nil,
     raw_arg952 = nil,
+    AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
 }
 
 -- Flattens one `list_indication(HELPERAI_DEVICE_ID)` raw dump into a flat
@@ -2405,17 +2415,12 @@ local function ai_pilot_check_hold_convergence(t)
         ai_pilot_takeover.stage = nil
         return
     end
-    -- phase1 released: fall into phase 2 (or resolve) against the
-    -- just-converged held value.
-    local dir2 = ai_pilot_correction_direction(held, ai_pilot_takeover.handover_altitude_m)
-    if dir2 == nil then
-        ai_pilot_takeover.correction_phase = nil
-        ai_pilot_takeover.stage = nil
-        return
-    end
-    ai_pilot_takeover.correction_phase = "phase2"
-    ai_pilot_open_hold(dir2, t)
-    ai_pilot_last_press = "correction_hold_phase2"
+    -- phase1 released: `held` is now within tolerance of live altitude,
+    -- so re-running the initial decision naturally skips phase1 (its own
+    -- `dir1` resolves to `nil`) and opens phase2 (or resolves) against
+    -- the handover snapshot -- same call the hold path's own first entry
+    -- uses, rather than a second copy of phase2's open/resolve logic.
+    ai_pilot_begin_hold_phase(t, held)
 end
 
 -- Per-frame AI-pilot-wheel loop, called every frame (not gated by the
@@ -2481,6 +2486,7 @@ local function run_ai_pilot_wheel(t)
         ai_pilot_takeover.stage = nil
         ai_pilot_takeover.t = nil
         ai_pilot_takeover.handover_altitude_m = nil
+        ai_pilot_takeover.menu_open_at_t = nil
         ai_pilot_takeover.menu_closed_since_t = nil
         ai_pilot_takeover.awaiting_correction_decision = false
         ai_pilot_takeover.correction_path = nil
@@ -2502,9 +2508,15 @@ local function run_ai_pilot_wheel(t)
         ai_pilot_tap30(WHEEL_CENTER_BUTTON)
         ai_pilot_last_press = "reference_toggle"
         ai_pilot_takeover.stage = "opening_menu"
+        -- Matches the sequence actually flown in the rehearsal probe
+        -- (centre at +0.5 s, menu-open at +1.0 s after takeover) rather
+        -- than the same frame -- main-loop decision, not a plan or
+        -- review requirement.
+        ai_pilot_takeover.menu_open_at_t = t + ai_pilot_takeover.AI_PILOT_MENU_OPEN_DELAY_S
     end
 
-    if ai_pilot_takeover.stage == "opening_menu" then
+    if ai_pilot_takeover.stage == "opening_menu"
+        and t >= ai_pilot_takeover.menu_open_at_t then
         ai_pilot_tap30(WHEEL_MENU_BUTTON)
         ai_pilot_takeover.menu_open = true
         ai_pilot_takeover.menu_closed_since_t = nil
@@ -2586,11 +2598,20 @@ local function update_ai_pilot_wheel_overlay(raw, t)
             ai_pilot_begin_hold_phase(t, ai_pilot_parse_altitude_text(ai_pilot_alt_text))
         end
     elseif ai_pilot_takeover.correction_substage == "quick_read2" then
-        -- Diagnostic only (plan: "then go on to step 6's checks") -- the
-        -- second baro switch is trusted to have recalculated a correct
-        -- target, per the probe's own measurement; no further check.
+        -- Re-check tolerance rather than trust the second switch blindly
+        -- (review: the plan is silent here, and the one measured sample
+        -- of a correct second-toggle target does not establish the bug
+        -- is absent on it -- the first toggle demonstrably has it, twice).
+        -- Falls through to the same two-phase hold the first pulse's own
+        -- refusal uses, so a bad target is never resolved as "none".
         ai_pilot_takeover.correction_substage = nil
-        ai_pilot_takeover.stage = nil
+        local held = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
+        if ai_pilot_correction_direction(held, ai_pilot_takeover.handover_altitude_m) == nil then
+            ai_pilot_takeover.stage = nil
+        else
+            ai_pilot_takeover.correction_path = "hold"
+            ai_pilot_begin_hold_phase(t, held)
+        end
     elseif ai_pilot_takeover.correction_hold_cmd ~= nil then
         ai_pilot_check_hold_convergence(t)
     end
