@@ -17,7 +17,7 @@ found, indexing is identical for every terrain.
 from __future__ import annotations
 
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +70,13 @@ class TerrainIndex:
             if tier_label(scale) == label:
                 return self.tiers[scale]
         return None
+
+
+#: The shape `cache.compose_view_tile` expects for its injectable
+#: `read_bytes` parameter -- the production default is `read_tile_bytes`
+#: itself; tests inject a counting wrapper of the same shape instead of
+#: monkeypatching this module.
+ReadTileBytes = Callable[[TileLocation], bytes]
 
 
 def read_tile_bytes(location: TileLocation) -> bytes:
