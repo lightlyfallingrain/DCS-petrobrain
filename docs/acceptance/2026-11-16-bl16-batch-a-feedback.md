@@ -399,3 +399,61 @@ T5: keep-open -- close the menu by hand; the probe reopens it
   robust form is to try the toggle, read whether the reference actually became R, and fall back
   to the two-phase hold if it did not.
 - **The probes merge to `main`** (pilot: *"merge"*).
+
+## The barometric bug — the pilot's theory, verbatim (after the takeover fix merged, `b1b96738`)
+
+> *"I may have figured out the AI barometric alt bug.*
+> *AI takes the barometric alt from the copilot's altimeter, I think. If the pressure setting there
+> is incorrect, the barometric alt value is wildly off.*
+> *This means that when mission starts, Petrovich must set altimeter pressure setting to the actual
+> pressure value from weather or briefing.*
+> *Mi-24 copilot effectors: 'Baro Pressure Knob - CCW' decreases pressure setting and same but 'CW'
+> increases. Press and hold until desired value."*
+
+### What is already known — checked 2026-11-16, not yet a plan
+
+- **The numbers fit the theory.** Both wild targets were about +740 m (1662 vs 920; 1658 vs 921),
+  with ground about 765 m below both times. A pressure setting off by about 88 hPa shifts a
+  barometric altimeter by about 740 m (~8.4 m per hPa near sea level) — roughly the QNH/QFE gap for
+  a field at that elevation. *Consistent with: the copilot's altimeter set to the wrong reference;
+  the AI adopting its reading as "current altitude" and then flying to that number on true
+  altitude.* Two samples from one mission; not proven.
+- **The effector exists in the generated reference** (`body-layer/config/sequences/mi-24p/
+  switch-reference.md`, "Device 42 -- BAROALT_O"): `ALTIMETER-KNOB-OP-PTR`, "Operator Baro
+  Pressure Knob", operator seat, `default_axis`, command 3001, arg 788, "0 to 1 continuous (gain
+  0.6)". The pilot's own altimeter is device 41 (`ALTIMETER-KNOB-PTR`, arg 18). **How a write
+  turns the knob (step per write, or rate while held) is not measured,** and the CW/CCW key
+  bindings the pilot names are input commands, not yet mapped to clickable actions.
+- **No readback of the pressure setting is known.** Arg 788 is the knob's own rotation, not
+  necessarily the value in the altimeter's pressure window. A closed-loop "hold until the desired
+  value" needs a gauge arg (or other readout) for the window. **Unknown; needs a probe.**
+- **The mission's pressure has a proven route.** `aircraft-layer/dcs-export/petrobrain-mission-
+  start-hook.lua` already reads `env.mission.theatre` through `net.dostring_in("scripting", ...)`
+  at each mission start; the same route can read the mission weather's QNH (`.miz` stores
+  `weather.qnh` in mmHg). The field name is standard in `.miz` files but not yet read live here.
+- **The trigger exists.** The effector-sequence engine already has `mission-start` and
+  `mission-start-in-air` triggers with sequence files (`body-layer/config/sequences/mi-24p/
+  mission-start.md` sets two switches today). A "hold until the window reads X" step is not a row
+  type the engine has.
+- **The takeover fix stays as the safety net** either way: if the altimeter is set right, the
+  wild target should stop appearing and the correction finds nothing to correct.
+
+### Explore — the pilot's answers, verbatim
+
+> *"the altitude thing:*
+> *1 use QNH for copilot*
+> *2 set at mission start, both ground start and air start*
+> *3 moves steadily*
+>
+> *ok for asking windows session"*
+
+Settled, as read (not yet a plan):
+
+- **Petrovich sets the copilot's (operator's) altimeter to the mission's QNH,** so it reads altitude
+  above sea level, consistent with what the AI's barometric hold flies.
+- **At mission start, both ground and air starts.** The existing `mission-start` trigger fires on
+  both.
+- **The knob moves the setting steadily while held** (no speed-up like the AI wheel's holds), so a
+  closed-loop hold-until-value is straightforward once the window can be read.
+- **Next: the Windows session looks up the operator altimeter's readout args and knob behaviour in
+  the Mi-24P cockpit files,** before a probe or a plan.
