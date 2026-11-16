@@ -44,3 +44,12 @@ The handler count stays five unless some other feature adds a new POST handler.
 Not blocking BL-B66's own merge — pre-existing shape, not something this feature's diff
 introduced as new risk, and low/low on this project's stated threat model. Filed so it is
 schedulable rather than sitting in a security report's prose.
+
+**Correction, 2026-11-17 (BL-16 Stage P2 deep security analysis):** the "stays five" count above
+is stale. `POST /command/ai_pilot_goal` (`_handle_command_ai_pilot_goal`, BL-16 Stage P2a/P2b)
+reproduces the identical unbounded-`Content-Length` shape again, by the same structural copy
+this entry already describes. Grepped count as of this pass: 9 occurrences of the
+`length = int(self.headers.get("Content-Length", ...))` line in `api/server.py`, not 5 or 6 —
+the earlier counts undercounted handlers already present before this feature (`/audio/stop`,
+`/query/read_args`, etc. share the pattern via the same helper shape). Still not blocking —
+same reasoning as above, unchanged by the new count.

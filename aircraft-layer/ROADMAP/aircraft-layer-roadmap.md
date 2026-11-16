@@ -49,6 +49,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Petrobrain needs; before BL-16 Stage P2
 - [[AC-B13]] — `LuaExportStop` does not release an open AI-pilot-wheel press (low/low; fold into
   AC-B12)
+- [[AC-B14]] — `handle_ai_pilot_goal_command` skips the Lua-side enum/bound check its siblings
+  have (low/low; `cockpit_switch` precedent already accepts a broader version of this exposure)
 
 ## Keeping this current
 
