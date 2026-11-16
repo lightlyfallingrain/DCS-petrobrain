@@ -24,4 +24,5 @@ Plan: `plans/raster-chart-viewer/plan.md`. Facts: `raster-chart-viewer/research/
 
 ## Backlog
 
-None yet.
+- [[RC-B1]] — Unbounded `level`/`vx`/`vy` digit length crashes a single request with an uncaught
+  exception (Security deep analysis, 2026-11-16; low-risk, not a blocker)
