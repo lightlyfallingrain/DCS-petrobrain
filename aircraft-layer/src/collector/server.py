@@ -134,7 +134,13 @@ logger = logging.getLogger(__name__)
 #: Bumped again the same day, "...15b" (Stage P1) for the new per-frame
 #: AI-pilot-wheel status line (wire key `"apw_parked_active"`) --
 #: additive only, same reasoning.
-EXPECTED_EXPORT_VERSION = "2026-11-15b"
+#: Bumped again 2026-11-16 (`plans/flight-control/plan.md`, "Revised
+#: 2026-11-16" takeover/stabilisation revision) for the AI-pilot-wheel
+#: line's four new fields (`"apw_arg852"`/`"apw_arg952"`/`"apw_takeover_
+#: stage"`/`"apw_correction_path"`) **and** a non-additive reshape of
+#: `"apw_last_press"`'s own vocabulary -- see `Export.lua`'s own matching
+#: comment on `EXPORT_SCRIPT_VERSION`.
+EXPECTED_EXPORT_VERSION = "2026-11-16"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it

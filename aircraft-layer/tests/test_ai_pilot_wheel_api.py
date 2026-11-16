@@ -1,6 +1,7 @@
 """The AI-pilot wheel's own per-frame status feed (`plans/flight-control/
-plan.md`, "Revised 2026-11-15", BL-16 mode 2, Stage P1): schema, cache,
-line routing, and the `GET /ai_pilot_wheel/latest` endpoint.
+plan.md`, "Revised 2026-11-15"/"Revised 2026-11-16", BL-16 mode 2, Stage
+P1): schema, cache, line routing, and the `GET /ai_pilot_wheel/latest`
+endpoint.
 
 Mirrors `test_sight_servo_api.py`'s `TestCollectorRouting`/
 `TestSightServoLatestEndpoint` structure -- same "not an error"
@@ -31,7 +32,9 @@ from schema import AiPilotWheelParseError, AiPilotWheelState
 _LINE = (
     '{"t":1.5,"apw_parked_active":true,"apw_mode_text":"ALT",'
     '"apw_course_text":"090","apw_alt_text":"500 R","apw_alt_add_text":"MAX",'
-    '"apw_speed_text":"120","apw_last_press":"altitude_nudge_up"}'
+    '"apw_speed_text":"120","apw_last_press":"altitude_nudge_up",'
+    '"apw_arg852":0.95,"apw_arg952":0.05,'
+    '"apw_takeover_stage":"correcting_altitude","apw_correction_path":"hold"}'
 )
 
 
@@ -47,6 +50,10 @@ class TestAiPilotWheelState:
         assert sample.alt_add_text == "MAX"
         assert sample.speed_text == "120"
         assert sample.last_press == "altitude_nudge_up"
+        assert sample.arg_852 == pytest.approx(0.95)
+        assert sample.arg_952 == pytest.approx(0.05)
+        assert sample.takeover_stage == "correcting_altitude"
+        assert sample.correction_path == "hold"
 
     def test_null_optional_fields_parse_as_none(self) -> None:
         # Unparked, or the overlay box not currently populated this
@@ -66,6 +73,20 @@ class TestAiPilotWheelState:
         assert sample.alt_add_text is None
         assert sample.speed_text is None
         assert sample.last_press is None
+        # Not present at all on this line (an older `Export.lua`'s own
+        # shape, before the "Revised 2026-11-16" diagnostic fields
+        # existed) -- missing is None, same as explicit null.
+        assert sample.arg_852 is None
+        assert sample.arg_952 is None
+        assert sample.takeover_stage is None
+        assert sample.correction_path is None
+
+    def test_non_number_apw_arg852_is_a_parse_error(self) -> None:
+        with pytest.raises(AiPilotWheelParseError):
+            AiPilotWheelState.from_json_line(
+                '{"t":1.5,"apw_parked_active":true,"apw_arg852":"not-a-number"}',
+                received_wall_clock_s=99.0,
+            )
 
     def test_missing_t_is_a_parse_error(self) -> None:
         with pytest.raises(AiPilotWheelParseError):
@@ -101,6 +122,10 @@ class TestAiPilotWheelState:
             alt_add_text="MAX",
             speed_text="120",
             last_press="altitude_nudge_up",
+            arg_852=0.95,
+            arg_952=0.05,
+            takeover_stage="correcting_altitude",
+            correction_path="hold",
         )
         assert sample.to_api_dict() == {
             "t": pytest.approx(1.5),
@@ -112,6 +137,10 @@ class TestAiPilotWheelState:
             "apw_alt_add_text": "MAX",
             "apw_speed_text": "120",
             "apw_last_press": "altitude_nudge_up",
+            "apw_arg852": pytest.approx(0.95),
+            "apw_arg952": pytest.approx(0.05),
+            "apw_takeover_stage": "correcting_altitude",
+            "apw_correction_path": "hold",
         }
 
 
@@ -224,4 +253,8 @@ class TestAiPilotWheelLatestEndpoint:
             "apw_alt_add_text": "MAX",
             "apw_speed_text": "120",
             "apw_last_press": "altitude_nudge_up",
+            "apw_arg852": pytest.approx(0.95),
+            "apw_arg952": pytest.approx(0.05),
+            "apw_takeover_stage": "correcting_altitude",
+            "apw_correction_path": "hold",
         }

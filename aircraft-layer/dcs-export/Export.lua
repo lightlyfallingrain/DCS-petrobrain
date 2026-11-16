@@ -194,7 +194,20 @@ local socket = require("socket.core")
 -- Bumped again the same day, "...15b" (Stage P1) for the new per-frame
 -- AI-pilot-wheel status line (wire key "apw_parked_active") -- additive
 -- only, same reasoning.
-local EXPORT_SCRIPT_VERSION = "2026-11-15b"
+--
+-- Bumped again 2026-11-16 (`plans/flight-control/plan.md`, "Revised
+-- 2026-11-16" -- the takeover/stabilisation revision) for the AI-pilot-
+-- wheel line's four new fields (`apw_arg852`/`apw_arg952`/`apw_
+-- takeover_stage`/`apw_correction_path`, additive) **and** a non-
+-- additive behavioural reshape of the detection/correction logic itself
+-- (952 dropped from park detection; the one-shot altitude nudge replaced
+-- by the quick-pulse/two-phase-hold correction loop; `apw_last_press`'s
+-- own vocabulary changed) -- a collector/body-layer pair built against
+-- the prior shape would read `apw_last_press` values that no longer mean
+-- what they used to, so this bump is load-bearing, not cosmetic. Update
+-- `aircraft-layer/src/collector/server.py`'s `EXPECTED_EXPORT_VERSION`
+-- in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-11-16"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -1977,51 +1990,87 @@ local function push_sight_servo_state(t)
     end
 end
 
--- BL-16 mode 2 (`plans/flight-control/plan.md`, "Revised 2026-11-15" --
--- Stage P1): driving ED's own AI pilot through the HELPER_AI wheel
--- (device 30) while the stick is parked. Up/Down/Left/Right are the
--- SAME physical ring buttons/command ids Petrovich's own search wheel
--- already uses (WHEEL_MENU_BUTTON/WHEEL_CENTER_BUTTON above) -- while
--- parked, this device's wheel shows ED's AI-pilot overlay instead of the
--- search page (confirmed per aircraft-layer/research/2026-11-14-
--- mi24p-ai-pilot-wheel-layout.md), not a second device. A short press
--- (<0.5 s) reaches the inner-ring option, a long press/hold reaches the
--- outer-ring option -- that research note's "Operating model" section 5.
+-- BL-16 mode 2 (`plans/flight-control/plan.md`, "Revised 2026-11-16" --
+-- takeover and stabilisation): driving ED's own AI pilot through the
+-- HELPER_AI wheel (device 30) while the stick is parked. Up/Down/Left/
+-- Right are the SAME physical ring buttons/command ids Petrovich's own
+-- search wheel already uses (WHEEL_MENU_BUTTON/WHEEL_CENTER_BUTTON
+-- above) -- while parked, this device's wheel shows ED's AI-pilot
+-- overlay instead of the search page (confirmed per aircraft-layer/
+-- research/2026-11-14-mi24p-ai-pilot-wheel-layout.md), not a second
+-- device. A short press (<0.5 s) reaches the inner-ring option, a long
+-- press/hold reaches the outer-ring option -- that research note's
+-- "Operating model" section 5. Left/Right (3003/3002) are not declared
+-- here -- unused by Stage P1's takeover/correction sequence (the only
+-- held presses are the altitude pair below), and Lua 5.1's 200-live-
+-- local ceiling in this chunk (see `ai_pilot_takeover`'s own comment)
+-- leaves no room for a reservation nothing yet calls; a later stage that
+-- needs heading left/right declares them when it does.
 local AI_WHEEL_UP = 3004
 local AI_WHEEL_DOWN = 3005
-local AI_WHEEL_LEFT = 3003
-local AI_WHEEL_RIGHT = 3002
 
--- Confirmed > 0.5 s live for Petrovich's own search wheel
--- (WHEEL_LONG_PRESS_S above, same DLL-level long-press constant per the
--- recon); margin kept for this wheel too pending Stage P0-2's direct
--- confirmation on the AI-pilot wheel itself. Would want the X-T26
--- configurable-constants mechanism (root CLAUDE.md's "Behaviour-affecting
--- constants are tunable"), noted not improvised, same as the 9K113 servo
--- block above -- this file has no loader for it yet.
-local LONG_PRESS_HOLD_S = 0.7
-
--- Stick-park animation readback (`plans/flight-control/plan.md` Stage
--- P1) -- args 852 (cyclic stow) and 952 (pedals stow), a 0..1 lag
--- element settling in ~0.2 s (`$S/HelperAI/HelperAI.lua:46`). ~1 means
--- parked -- the cheapest observable, confirmed for mode 1's own S0-12
--- probe (aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md
--- section 1), reused here rather than re-probed. Either arg reading
--- parked is enough (OR): the two animate together off one lever.
+-- Stick-park animation readback (`plans/flight-control/plan.md`,
+-- "Revised 2026-11-16") -- arg 852 (cyclic stow) alone. 952 (pedals
+-- stow) is **not** a second park sensor: measured live, 852 + 952 = 1.00
+-- at every sample through the handover animation (settling at
+-- 852 = 1 / 952 = 0) -- it is 852's exact mirror, so an OR across both
+-- reads "parked" whenever the AI is simply not flying, never the real
+-- rising edge the takeover sequence needs. Kept as a diagnostic value on
+-- the status push only (`ai_pilot_takeover.raw_arg952` below).
 local ARG_STICK_PARK = 852
 local ARG_PEDALS_PARK = 952
 local AI_PILOT_PARK_THRESHOLD = 0.9
 
--- Tolerance for "the read current altitude equals the AI's held
--- altitude" (the park-sink nudge, P0-6/the user's write-up): below this
--- the two readings are the same reading. Mirrors body-layer's
--- `AI_PILOT_ALTITUDE_TOLERANCE_M` tunable (`belief/ai_pilot_wheel.py`,
--- default 20) -- duplicated here, not read over the wire, because Stage
--- P1 sends no goal message yet (the Architecture decision's per-frame
--- press timing stays entirely in this file until Stage P2 wires a goal
--- channel through); revisit once that channel exists so there is one
--- source of truth for this number.
-local AI_PILOT_NUDGE_EPSILON_M = 20.0
+-- "Good enough" tolerance for the altitude-correction loop below: how
+-- close the AI's held altitude (`alt_text`) must read to a target before
+-- the loop treats it as reached. Renamed from `AI_PILOT_NUDGE_EPSILON_M`
+-- (same value) now that the same number governs three decisions instead
+-- of one (the pre-correction "is anything wrong" check, and both hold
+-- phases' own release point). Mirrors body-layer's `AI_PILOT_ALTITUDE_
+-- TOLERANCE_M` tunable (`belief/ai_pilot_wheel.py`, default 20) --
+-- duplicated here, not read over the wire, because Stage P1 sends no
+-- goal message yet (the Architecture decision's per-frame press timing
+-- stays entirely in this file until Stage P2 wires a goal channel
+-- through); revisit once that channel exists so there is one source of
+-- truth for this number.
+local AI_PILOT_ALT_TOLERANCE_M = 20.0
+
+-- Delay from the park-rising edge to the blind reference-toggle press
+-- (pilot, verbatim: "I'd put a half second delay there").
+local AI_PILOT_REFERENCE_TOGGLE_DELAY_S = 0.5
+
+-- How long the overlay must read every field `nil` before the menu is
+-- believed closed and re-opened -- the toggle is a single press that
+-- closes an open menu just as readily as it opens a closed one, so
+-- reacting to one stale-looking tick would flap it shut again. ~1 s AI
+-- lag is the user's own recon estimate (research note section 7);
+-- measured live, a hand-closed menu reads closed for 3 frames and reads
+-- open again ~17 ms after the re-toggle, so this is generous margin, not
+-- a tight bound.
+local MODE_READ_SETTLE_S = 1.0
+
+-- A real press/release pulse (not a same-frame tap) for a centre press
+-- issued while the command menu is open -- measured live (P0-5 re-fly):
+-- a same-frame press/release does not toggle ALT REF with the menu open,
+-- a 0.15 s pulse does. The blind, menu-closed toggle at takeover (below)
+-- stays a same-frame tap; only an open-menu centre press needs this.
+local SHORT_PULSE_S = 0.15
+
+-- Safety ceiling on the altitude-correction hold, not an expected
+-- outcome: the loop's own readback-driven release is always the normal
+-- path, and (unlike a spoken "Hold") this loop has no network dependency
+-- to lose. Architect default, **not measured** -- a 742 m error closed
+-- in 14 s during the takeover rehearsal probe, comfortably below this;
+-- flag raised if a live flight shows it firing on an ordinary-sized
+-- error.
+local AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S = 60.0
+
+-- ED's radar altitude reference is capped at 700 m AGL (pilot) -- a held
+-- target above that forces barometric, so a centre pulse attempting to
+-- switch away from baro is refused above this height. Not a judgement
+-- call: a measured DCS-internal limit, gating only whether the quick
+-- correction path (below) is attempted at all.
+local AI_PILOT_QUICK_PATH_MAX_AGL_M = 700.0
 
 local ai_pilot_parked_active = false
 local ai_pilot_mode_text = nil
@@ -2032,17 +2081,69 @@ local ai_pilot_speed_text = nil
 local ai_pilot_last_press = nil
 -- A separate pending-release slot from `pending_release_t`/
 -- `WHEEL_CENTER_BUTTON` above -- that one belongs to Petrovich's own
--- search wheel and may be open at the same time as this one.
+-- search wheel and may be open at the same time as this one. Shared by
+-- every timed press this sequence issues (the open-menu centre pulse and
+-- both altitude-hold directions): at most one is ever open at a time, so
+-- one slot is enough, and unpark's own release (below) does not need to
+-- know which kind it is.
 local ai_wheel_pending_release_t = nil
 local ai_wheel_pending_cmd = nil
--- Set on the park-rising edge (per-frame, cheap), resolved at the next
--- 5 Hz tick from that tick's freshly-parsed overlay fields -- the perf
--- fix (`plans/flight-control/perf-batch-a.md`) that moves the
--- `list_indication` read/parse off the per-frame path. Cleared by
--- `update_ai_pilot_wheel_overlay` once resolved, or immediately on
--- unpark (`run_ai_pilot_wheel`'s own branch) so a nudge never fires for
--- a park that already ended.
-local ai_pilot_pending_nudge = false
+
+-- Takeover sub-sequence state (plan's own "Co-moving Fields" table,
+-- Stage P1 revision), grouped into **one** table rather than one local
+-- per field -- a deliberate, flagged departure from this file's own
+-- "individual locals, no `apw` table" convention (plan, "One naming
+-- departure..."): `Export.lua`'s main chunk hit Lua 5.1's hard 200-live-
+-- local ceiling (`luac5.1 -p`: "main function has more than 200 local
+-- variables") once this revision's dozen-odd new fields were added as
+-- separate locals. Every field is initialised here, in one place, so
+-- there is no forward-reference/hoisting risk (the concern the original
+-- convention was guarding against) -- nothing reads a field before this
+-- table exists. `.stage`: `nil` while unparked or once the sequence has
+-- resolved, else `"toggling_reference"` -> `"opening_menu"` ->
+-- `"correcting_altitude"`. `.t`: the rising-edge model time, for the
+-- 0.5 s reference-toggle delay. `.handover_altitude_m`: the handover
+-- goal, actual MSL snapshotted in the same frame arg 852 crosses the
+-- threshold (pilot, Q1 -- "handolver alt"), fixed for the life of one
+-- takeover. `.menu_open`: our own belief about whether the command menu
+-- is open -- written only by the toggle presses below, never re-read
+-- before being trusted (the table's own "belief flips to match what is
+-- about to be true" rule). `.menu_closed_since_t`: set the first tick
+-- the overlay reads every field `nil` while `.menu_open` is true,
+-- cleared the moment a real field reads back -- drives the `MODE_READ_
+-- SETTLE_S` reopen check. `.awaiting_correction_decision`: true from the
+-- menu-open press until the first tick the overlay reads back
+-- populated -- the one-shot "decide what correction (if any) is needed"
+-- step waits for this. `.correction_path`: diagnostic + decision record
+-- of which correction path this takeover used -- `"quick"`/`"hold"`/
+-- `"none"`, `nil` before a decision is reached -- carried on the status
+-- push so a flight where the quick path happened to work is not read as
+-- the normal case. `.correction_substage`: the quick path's own sub-step
+-- (`"quick_read1"`/`"quick_read2"`), `nil` outside it. `.correction_
+-- phase`: the two-phase hold's own sub-step (`"phase1"`/`"phase2"`),
+-- `nil` outside a hold. `.correction_hold_cmd`: the command (`AI_WHEEL_
+-- UP`/`AI_WHEEL_DOWN`) currently held open by the correction loop, or
+-- `nil` if none -- distinct from `ai_wheel_pending_cmd` above (which
+-- this also sets): this one is only ever a hold, so the safety-ceiling
+-- release at its deadline knows to clear the correction's own state
+-- too. `.raw_arg852`/`.raw_arg952`: raw diagnostic readings of both park
+-- args, refreshed every frame -- the telemetry mystery's own fix (plan,
+-- "The P1 telemetry mystery"), carried on the wire so a recurrence is
+-- directly visible, not re-inferred from a probe.
+local ai_pilot_takeover = {
+    stage = nil,
+    t = nil,
+    handover_altitude_m = nil,
+    menu_open = false,
+    menu_closed_since_t = nil,
+    awaiting_correction_decision = false,
+    correction_path = nil,
+    correction_substage = nil,
+    correction_phase = nil,
+    correction_hold_cmd = nil,
+    raw_arg852 = nil,
+    raw_arg952 = nil,
+}
 
 -- Flattens one `list_indication(HELPERAI_DEVICE_ID)` raw dump into a flat
 -- `{name: value}` table of every populated (non-child-only) node --
@@ -2105,14 +2206,30 @@ local function parse_helperai_overlay_fields(raw)
     return fields
 end
 
--- Pure decision (P1 test: "altitude-nudge-if-equal logic as a pure
--- function"): `nil` either side means nothing to compare, so no nudge --
--- a missing reading is never treated as "equal".
-local function ai_pilot_should_nudge_altitude(held_altitude_m, actual_altitude_m)
-    if held_altitude_m == nil or actual_altitude_m == nil then
-        return false
+-- Pure decision (P1 test): which direction (if any) the correction loop
+-- should hold to move `held_m` toward `target_m` -- `nil` means "already
+-- within tolerance, or nothing to compare" (a missing reading on either
+-- side is never treated as "needs correction"). The AI climbs toward a
+-- high target, so a held value *above* the target means press DOWN to
+-- lower it; below means press UP.
+local function ai_pilot_correction_direction(held_m, target_m)
+    if held_m == nil or target_m == nil then
+        return nil
     end
-    return math.abs(held_altitude_m - actual_altitude_m) < AI_PILOT_NUDGE_EPSILON_M
+    if math.abs(held_m - target_m) <= AI_PILOT_ALT_TOLERANCE_M then
+        return nil
+    end
+    if held_m > target_m then
+        return AI_WHEEL_DOWN
+    end
+    return AI_WHEEL_UP
+end
+
+-- Pure decision (P1 test): the quick correction path (a menu-open centre
+-- pulse) is only attempted below `AI_PILOT_QUICK_PATH_MAX_AGL_M` -- an
+-- unreadable AGL is never treated as eligible.
+local function ai_pilot_quick_path_eligible(agl_m)
+    return agl_m ~= nil and agl_m < AI_PILOT_QUICK_PATH_MAX_AGL_M
 end
 
 -- The AI's currently-held altitude, read off `alt_text` (purely numeric,
@@ -2139,46 +2256,197 @@ local function ai_pilot_actual_altitude_m(alt_add_text, alt_agl_m, alt_msl_m)
     return nil
 end
 
--- Park rising-edge detection (arg 852/952 >= threshold) -- pure decision,
--- P1 test: "park-rising detection". Returns `(now_parked, rising)`.
-local function ai_pilot_park_rising(prev_parked, stick_park_arg, pedals_park_arg)
-    local now_parked = (stick_park_arg ~= nil and stick_park_arg >= AI_PILOT_PARK_THRESHOLD)
-        or (pedals_park_arg ~= nil and pedals_park_arg >= AI_PILOT_PARK_THRESHOLD)
+-- Park rising-edge detection on arg 852 **alone** (plan, "Revised
+-- 2026-11-16", point 1 -- 952 dropped, see `ARG_PEDALS_PARK`'s own
+-- comment above) -- pure decision, P1 test: "park-rising detection".
+-- Returns `(now_parked, rising)`.
+local function ai_pilot_park_rising(prev_parked, stick_park_arg)
+    local now_parked = stick_park_arg ~= nil and stick_park_arg >= AI_PILOT_PARK_THRESHOLD
     return now_parked, (now_parked and not prev_parked)
 end
 
--- Opens `cmd` now and schedules its own release `LONG_PRESS_HOLD_S`
--- later (the per-frame release-deadline check in `run_ai_pilot_wheel`
--- below) -- the long-hold press shape P1's altitude nudge needs. **No
--- generic `press(direction, duration)` entry point** (plan's own
--- Implementer note, E-P6): this is the one press shape Stage P1 issues,
--- hard-coded to `AI_WHEEL_UP`, never parameterised by direction.
-local function ai_pilot_press_altitude_up_long_hold(t)
+-- Same-frame press/release of either toggle button this sequence uses
+-- (`WHEEL_CENTER_BUTTON` blind, menu closed -- proven live, P0 re-fly --
+-- or `WHEEL_MENU_BUTTON` to open/re-open/close the command menu, a true
+-- toggle on the DCS side). One shared helper rather than two near-
+-- identical ones, to stay under Lua 5.1's 200-live-local ceiling (see
+-- `ai_pilot_takeover`'s own comment) -- **not** the forbidden generic
+-- `press(direction, duration)` shape (plan's own Implementer note,
+-- E-P6): both buttons it is ever called with are fixed, pre-existing
+-- wheel-menu constants, never one of the four directional ring buttons,
+-- and there is no duration parameter.
+local function ai_pilot_tap30(cmd)
     safe_call(function()
-        GetDevice(30):performClickableAction(AI_WHEEL_UP, 1)
+        GetDevice(30):performClickableAction(cmd, 1)
     end)
-    ai_wheel_pending_cmd = AI_WHEEL_UP
-    ai_wheel_pending_release_t = t + LONG_PRESS_HOLD_S
+    safe_call(function()
+        GetDevice(30):performClickableAction(cmd, 0)
+    end)
+end
+
+-- Opens the altitude-correction hold -- **not** a generic `press(
+-- direction, duration)` entry point (plan's own Implementer note,
+-- E-P6): `cmd` is restricted to `AI_WHEEL_UP`/`AI_WHEEL_DOWN` by its one
+-- caller (`ai_pilot_correction_direction`'s own return type), the
+-- correction loop is the only thing that ever calls this, and nothing
+-- here accepts a duration -- the deadline armed below is always the
+-- same fixed safety ceiling. Dedicated to altitude correction, not a
+-- cross-action combinator; kept as one function rather than an up/down
+-- pair to stay under Lua 5.1's 200-live-local ceiling (see `ai_pilot_
+-- takeover`'s own comment above). The loop's own readback check
+-- (`ai_pilot_check_hold_convergence` below) releases early on
+-- convergence and clears the deadline itself; this only arms it.
+local function ai_pilot_open_hold(cmd, t)
+    safe_call(function()
+        GetDevice(30):performClickableAction(cmd, 1)
+    end)
+    ai_pilot_takeover.correction_hold_cmd = cmd
+    ai_wheel_pending_cmd = cmd
+    ai_wheel_pending_release_t = t + AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S
+end
+
+-- Begins the two-phase hold (plan, "Revised 2026-11-16" amendment,
+-- point 4): phase 1 chases the aircraft's own *live* altitude (whichever
+-- reference `alt_add_text` currently shows -- compares like with like,
+-- same reasoning as the original Stage P1 nudge) to stop the climb;
+-- phase 2, entered only once phase 1 is released or skipped, chases the
+-- fixed handover snapshot. Either phase is skipped outright if `held` is
+-- already within tolerance of its own target -- "skip phases that are
+-- already within tolerance" (plan). Falls through to `"none"` (nothing
+-- to correct, takeover resolved) if neither phase is needed, or if
+-- `held` could not be read at all.
+local function ai_pilot_begin_hold_phase(t, held)
+    if held == nil then
+        ai_pilot_takeover.correction_phase = nil
+        ai_pilot_takeover.stage = nil
+        return
+    end
+    local live_m = ai_pilot_actual_altitude_m(
+        ai_pilot_alt_add_text,
+        safe_call(LoGetAltitudeAboveGroundLevel),
+        safe_call(LoGetAltitudeAboveSeaLevel))
+    local dir1 = ai_pilot_correction_direction(held, live_m)
+    if dir1 ~= nil then
+        ai_pilot_takeover.correction_phase = "phase1"
+        ai_pilot_open_hold(dir1, t)
+        ai_pilot_last_press = "correction_hold_phase1"
+        return
+    end
+    local dir2 = ai_pilot_correction_direction(held, ai_pilot_takeover.handover_altitude_m)
+    if dir2 == nil then
+        ai_pilot_takeover.correction_phase = nil
+        ai_pilot_takeover.stage = nil
+        return
+    end
+    ai_pilot_takeover.correction_phase = "phase2"
+    ai_pilot_open_hold(dir2, t)
+    ai_pilot_last_press = "correction_hold_phase2"
+end
+
+-- The one-shot decision, taken once the menu's first post-open read
+-- lands: is anything wrong, and if so, which correction path. Plan,
+-- "Revised 2026-11-16" amendment, point 5 -- quick path only below
+-- `AI_PILOT_QUICK_PATH_MAX_AGL_M`, the two-phase hold otherwise.
+local function ai_pilot_decide_correction(t)
+    local held = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
+    if ai_pilot_correction_direction(held, ai_pilot_takeover.handover_altitude_m) == nil then
+        ai_pilot_takeover.correction_path = "none"
+        ai_pilot_takeover.stage = nil
+        return
+    end
+    if ai_pilot_quick_path_eligible(safe_call(LoGetAltitudeAboveGroundLevel)) then
+        ai_pilot_takeover.correction_path = "quick"
+        ai_pilot_takeover.correction_substage = "quick_read1"
+        -- `SHORT_PULSE_S` centre pulse, menu open -- the quick path's own
+        -- press shape, released by the generic per-frame deadline check
+        -- in `run_ai_pilot_wheel` below.
+        safe_call(function()
+            GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 1)
+        end)
+        ai_wheel_pending_cmd = WHEEL_CENTER_BUTTON
+        ai_wheel_pending_release_t = t + SHORT_PULSE_S
+        ai_pilot_last_press = "correction_quick_pulse1"
+    else
+        ai_pilot_takeover.correction_path = "hold"
+        ai_pilot_begin_hold_phase(t, held)
+    end
+end
+
+-- Per-5-Hz-tick readback check while a hold is open (plan point 4/
+-- amendment): releases the instant the held value reads within
+-- tolerance of this phase's own target, then either advances to phase 2
+-- or resolves the takeover. An unreadable tick changes nothing -- the
+-- safety ceiling (`run_ai_pilot_wheel`'s own deadline check) still
+-- governs if readings never recover.
+local function ai_pilot_check_hold_convergence(t)
+    local held = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
+    local target_m
+    if ai_pilot_takeover.correction_phase == "phase1" then
+        target_m = ai_pilot_actual_altitude_m(
+            ai_pilot_alt_add_text,
+            safe_call(LoGetAltitudeAboveGroundLevel),
+            safe_call(LoGetAltitudeAboveSeaLevel))
+    else
+        target_m = ai_pilot_takeover.handover_altitude_m
+    end
+    if held == nil or target_m == nil or math.abs(held - target_m) > AI_PILOT_ALT_TOLERANCE_M then
+        return
+    end
+
+    safe_call(function()
+        GetDevice(30):performClickableAction(ai_pilot_takeover.correction_hold_cmd, 0)
+    end)
+    ai_pilot_takeover.correction_hold_cmd = nil
+    ai_wheel_pending_release_t = nil
+    ai_wheel_pending_cmd = nil
+
+    if ai_pilot_takeover.correction_phase == "phase2" then
+        ai_pilot_takeover.correction_phase = nil
+        ai_pilot_takeover.stage = nil
+        return
+    end
+    -- phase1 released: fall into phase 2 (or resolve) against the
+    -- just-converged held value.
+    local dir2 = ai_pilot_correction_direction(held, ai_pilot_takeover.handover_altitude_m)
+    if dir2 == nil then
+        ai_pilot_takeover.correction_phase = nil
+        ai_pilot_takeover.stage = nil
+        return
+    end
+    ai_pilot_takeover.correction_phase = "phase2"
+    ai_pilot_open_hold(dir2, t)
+    ai_pilot_last_press = "correction_hold_phase2"
 end
 
 -- Per-frame AI-pilot-wheel loop, called every frame (not gated by the
--- 5 Hz export throttle) beside `sight_servo_tick` -- Stage P1: proves
--- activation and the park-sink fix only, no goal yet. Keeps only what is
--- genuinely per-frame (perf fix, `plans/flight-control/perf-batch-a.md`):
--- the open-press release deadline and park-signal edge detection. The
--- overlay parse and the altitude-nudge decision itself are deferred to
--- `update_ai_pilot_wheel_overlay`, run from the 5 Hz export tick -- on a
--- rising edge this just arms `ai_pilot_pending_nudge` for that tick to
--- resolve. E-P10: unpark releases any open press and drops all
--- AI-pilot-wheel state, including a still-pending nudge, immediately,
--- the same frame -- nothing resumes on the next park.
+-- 5 Hz export throttle) beside `sight_servo_tick` -- the takeover
+-- sequence's own time-driven steps (the rising-edge snapshot, the
+-- 0.5 s-delayed blind reference toggle, the menu-open press right after
+-- it) live here because they do not need a fresh overlay read; the
+-- overlay-dependent steps (the correction decision, the keep-open check,
+-- hold convergence) live in `update_ai_pilot_wheel_overlay` below, run
+-- from the 5 Hz export tick. The shared press-release deadline (pulses
+-- and the hold's own safety ceiling) is also checked here, every frame,
+-- same reasoning as `sight_servo_tick`'s per-frame correction. E-P10:
+-- unpark releases any open press, closes the menu if this sequence
+-- opened it, and drops every takeover-sequence field immediately, the
+-- same frame -- nothing resumes on the next park.
 local function run_ai_pilot_wheel(t)
     if ai_wheel_pending_release_t ~= nil and t >= ai_wheel_pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(ai_wheel_pending_cmd, 0)
         end)
+        local was_hold = ai_wheel_pending_cmd == AI_WHEEL_UP or ai_wheel_pending_cmd == AI_WHEEL_DOWN
         ai_wheel_pending_release_t = nil
         ai_wheel_pending_cmd = nil
+        if was_hold then
+            -- Safety-ceiling timeout, not convergence: give up on this
+            -- hold rather than leave `ai_pilot_takeover.correction_hold_cmd`
+            -- pointing at a command that is no longer pressed.
+            ai_pilot_takeover.correction_hold_cmd = nil
+            ai_pilot_takeover.correction_phase = nil
+            ai_pilot_takeover.stage = nil
+        end
     end
 
     local stick_park = safe_call(function()
@@ -2187,17 +2455,13 @@ local function run_ai_pilot_wheel(t)
     local pedals_park = safe_call(function()
         return GetDevice(0):get_argument_value(ARG_PEDALS_PARK)
     end)
-    local now_parked, rising = ai_pilot_park_rising(
-        ai_pilot_parked_active, stick_park, pedals_park)
+    ai_pilot_takeover.raw_arg852 = stick_park
+    ai_pilot_takeover.raw_arg952 = pedals_park
+
+    local now_parked, rising = ai_pilot_park_rising(ai_pilot_parked_active, stick_park)
     ai_pilot_parked_active = now_parked
 
     if not now_parked then
-        ai_pilot_mode_text = nil
-        ai_pilot_course_text = nil
-        ai_pilot_alt_text = nil
-        ai_pilot_alt_add_text = nil
-        ai_pilot_speed_text = nil
-        ai_pilot_pending_nudge = false
         if ai_wheel_pending_release_t ~= nil then
             safe_call(function()
                 GetDevice(30):performClickableAction(ai_wheel_pending_cmd, 0)
@@ -2205,31 +2469,71 @@ local function run_ai_pilot_wheel(t)
             ai_wheel_pending_release_t = nil
             ai_wheel_pending_cmd = nil
         end
+        if ai_pilot_takeover.menu_open then
+            ai_pilot_tap30(WHEEL_MENU_BUTTON)
+            ai_pilot_takeover.menu_open = false
+        end
+        ai_pilot_mode_text = nil
+        ai_pilot_course_text = nil
+        ai_pilot_alt_text = nil
+        ai_pilot_alt_add_text = nil
+        ai_pilot_speed_text = nil
+        ai_pilot_takeover.stage = nil
+        ai_pilot_takeover.t = nil
+        ai_pilot_takeover.handover_altitude_m = nil
+        ai_pilot_takeover.menu_closed_since_t = nil
+        ai_pilot_takeover.awaiting_correction_decision = false
+        ai_pilot_takeover.correction_path = nil
+        ai_pilot_takeover.correction_substage = nil
+        ai_pilot_takeover.correction_phase = nil
+        ai_pilot_takeover.correction_hold_cmd = nil
         return
     end
 
     if rising then
-        ai_pilot_pending_nudge = true
+        ai_pilot_takeover.handover_altitude_m = safe_call(LoGetAltitudeAboveSeaLevel)
+        ai_pilot_takeover.stage = "toggling_reference"
+        ai_pilot_takeover.t = t
+        ai_pilot_takeover.correction_path = nil
+    end
+
+    if ai_pilot_takeover.stage == "toggling_reference"
+        and t >= ai_pilot_takeover.t + AI_PILOT_REFERENCE_TOGGLE_DELAY_S then
+        ai_pilot_tap30(WHEEL_CENTER_BUTTON)
+        ai_pilot_last_press = "reference_toggle"
+        ai_pilot_takeover.stage = "opening_menu"
+    end
+
+    if ai_pilot_takeover.stage == "opening_menu" then
+        ai_pilot_tap30(WHEEL_MENU_BUTTON)
+        ai_pilot_takeover.menu_open = true
+        ai_pilot_takeover.menu_closed_since_t = nil
+        ai_pilot_takeover.stage = "correcting_altitude"
+        ai_pilot_takeover.awaiting_correction_decision = true
     end
 end
 
--- Resolves the overlay parse and, if armed, the one-shot altitude nudge
--- -- run from the 5 Hz export tick rather than every frame (perf fix,
--- `plans/flight-control/perf-batch-a.md`), since nothing in the result
--- was read per-frame in the first place: `apw_*` status pushes at 5 Hz
--- already, and the nudge only ever fires once, on the park-rising edge.
--- `raw` is the one `list_indication(HELPERAI_DEVICE_ID)` dump this
--- tick's export already read -- shared with `encode_petrovich_
--- indication_line`'s own consumer further down `LuaExportAfterNextFrame`,
--- not a second device read. **Device 6 is one call per 5 Hz tick now,
--- shared by both consumers; a future per-frame addition that needs its
--- content must feed off that same tick-local read, not reintroduce its
--- own per-frame `list_indication(6)` call** -- this is exactly the
--- pattern Stage P2's readback-release check (plan's own Stage P2
--- section) should default to as well, unless a live test there shows a
--- 5 Hz comparison is not fast enough for that goal's tolerance.
+-- Resolves everything that needs this tick's freshly-parsed overlay:
+-- the keep-open check (independent of the takeover sequence, active
+-- whenever we believe the menu is open), the one-shot correction
+-- decision once the menu's first post-open read lands, the quick path's
+-- two-pulse sub-sequence, and a hold's own convergence check -- run from
+-- the 5 Hz export tick rather than every frame (perf fix, `plans/
+-- flight-control/perf-batch-a.md`), since `list_indication` itself only
+-- updates at that cadence. `raw` is the one `list_indication(HELPERAI_
+-- DEVICE_ID)` dump this tick's export already read -- shared with
+-- `encode_petrovich_indication_line`'s own consumer further down
+-- `LuaExportAfterNextFrame`, not a second device read. **Device 6 is one
+-- call per 5 Hz tick now, shared by both consumers; a future per-frame
+-- addition that needs its content must feed off that same tick-local
+-- read, not reintroduce its own per-frame `list_indication(6)` call.**
 -- No-op while unparked (fields already cleared by `run_ai_pilot_wheel`'s
--- own unpark branch) or before this tick's dump exists.
+-- own unpark branch) or before this tick's dump exists. The four
+-- branches below (`ai_pilot_takeover.awaiting_correction_decision`, `quick_
+-- read1`, `quick_read2`, an open hold) are mutually exclusive by
+-- construction -- `elseif`, not independent `if`s -- so a tick never
+-- both decides *and* reacts to the decision it just made against a
+-- stale read.
 local function update_ai_pilot_wheel_overlay(raw, t)
     if not ai_pilot_parked_active or raw == nil then
         return
@@ -2242,26 +2546,65 @@ local function update_ai_pilot_wheel_overlay(raw, t)
     ai_pilot_alt_add_text = fields.alt_add_text
     ai_pilot_speed_text = fields.speed_text
 
-    if ai_pilot_pending_nudge then
-        ai_pilot_pending_nudge = false
-        if ai_wheel_pending_release_t == nil then
-            local held_altitude = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
-            local alt_agl = safe_call(LoGetAltitudeAboveGroundLevel)
-            local alt_msl = safe_call(LoGetAltitudeAboveSeaLevel)
-            local actual_altitude = ai_pilot_actual_altitude_m(
-                ai_pilot_alt_add_text, alt_agl, alt_msl)
-            if ai_pilot_should_nudge_altitude(held_altitude, actual_altitude) then
-                ai_pilot_press_altitude_up_long_hold(t)
-                ai_pilot_last_press = "altitude_nudge_up"
+    local fields_all_nil = ai_pilot_mode_text == nil and ai_pilot_course_text == nil
+        and ai_pilot_alt_text == nil and ai_pilot_alt_add_text == nil
+        and ai_pilot_speed_text == nil
+
+    if ai_pilot_takeover.menu_open then
+        if fields_all_nil then
+            if ai_pilot_takeover.menu_closed_since_t == nil then
+                ai_pilot_takeover.menu_closed_since_t = t
+            elseif t - ai_pilot_takeover.menu_closed_since_t > MODE_READ_SETTLE_S then
+                ai_pilot_tap30(WHEEL_MENU_BUTTON)
+                ai_pilot_takeover.menu_closed_since_t = nil
             end
+        else
+            ai_pilot_takeover.menu_closed_since_t = nil
         end
+    end
+
+    if ai_pilot_takeover.awaiting_correction_decision then
+        if not fields_all_nil then
+            ai_pilot_takeover.awaiting_correction_decision = false
+            ai_pilot_decide_correction(t)
+        end
+    elseif ai_pilot_takeover.correction_substage == "quick_read1" then
+        ai_pilot_takeover.correction_substage = nil
+        if ai_pilot_alt_add_text == "R" then
+            ai_pilot_takeover.correction_substage = "quick_read2"
+            -- Second pulse, same `SHORT_PULSE_S` shape as the first.
+            safe_call(function()
+                GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 1)
+            end)
+            ai_wheel_pending_cmd = WHEEL_CENTER_BUTTON
+            ai_wheel_pending_release_t = t + SHORT_PULSE_S
+            ai_pilot_last_press = "correction_quick_pulse2"
+        else
+            -- Still B: the radar switch was refused (>= 700 m AGL, or
+            -- any other reason) -- fall back to the two-phase hold.
+            ai_pilot_takeover.correction_path = "hold"
+            ai_pilot_begin_hold_phase(t, ai_pilot_parse_altitude_text(ai_pilot_alt_text))
+        end
+    elseif ai_pilot_takeover.correction_substage == "quick_read2" then
+        -- Diagnostic only (plan: "then go on to step 6's checks") -- the
+        -- second baro switch is trusted to have recalculated a correct
+        -- target, per the probe's own measurement; no further check.
+        ai_pilot_takeover.correction_substage = nil
+        ai_pilot_takeover.stage = nil
+    elseif ai_pilot_takeover.correction_hold_cmd ~= nil then
+        ai_pilot_check_hold_convergence(t)
     end
 end
 
 -- Sends `run_ai_pilot_wheel`'s own status at 5 Hz, same cadence as the
 -- telemetry line -- mirrors `push_sight_servo_state` immediately above.
 -- Wire key `"apw_parked_active"` doubles as the collector's route key,
--- same pattern as `"servo_mode"`/`"net1"`/`"ptt"`.
+-- same pattern as `"servo_mode"`/`"net1"`/`"ptt"`. `apw_arg852`/
+-- `apw_arg952`/`apw_takeover_stage`/`apw_correction_path` are additive
+-- (plan, "Revised 2026-11-16", point 7/"The P1 telemetry mystery") --
+-- the raw park args and the correction path are diagnostic, so a
+-- recurrence of either open question is directly visible on the wire
+-- rather than re-inferred from a probe.
 local function push_ai_pilot_wheel_state(t)
     if client == nil then
         return
@@ -2279,7 +2622,11 @@ local function push_ai_pilot_wheel_state(t)
         .. ',"apw_alt_text":' .. text_or_null(ai_pilot_alt_text)
         .. ',"apw_alt_add_text":' .. text_or_null(ai_pilot_alt_add_text)
         .. ',"apw_speed_text":' .. text_or_null(ai_pilot_speed_text)
-        .. ',"apw_last_press":' .. text_or_null(ai_pilot_last_press) .. '}\n')
+        .. ',"apw_last_press":' .. text_or_null(ai_pilot_last_press)
+        .. ',"apw_arg852":' .. fmt_num_or_null(ai_pilot_takeover.raw_arg852)
+        .. ',"apw_arg952":' .. fmt_num_or_null(ai_pilot_takeover.raw_arg952)
+        .. ',"apw_takeover_stage":' .. text_or_null(ai_pilot_takeover.stage)
+        .. ',"apw_correction_path":' .. text_or_null(ai_pilot_takeover.correction_path) .. '}\n')
     if not ok then
         debug_log("ai-pilot-wheel send failed: " .. tostring(err))
         client:close()

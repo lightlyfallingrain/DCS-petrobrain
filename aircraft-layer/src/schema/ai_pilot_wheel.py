@@ -1,5 +1,6 @@
 """ED's AI-pilot wheel (HELPER_AI, device 30) status, mode 2's own per-frame
-feed -- `plans/flight-control/plan.md`, "Revised 2026-11-15", Stage P1.
+feed -- `plans/flight-control/plan.md`, "Revised 2026-11-15"/"Revised
+2026-11-16" (Stage P1, then its takeover/stabilisation revision).
 `Export.lua`'s `run_ai_pilot_wheel` status, pushed at 5 Hz (the same
 cadence as the telemetry/sight-servo lines), wire key
 `"apw_parked_active"` (doubles as the collector's route key, same pattern
@@ -12,8 +13,17 @@ rule every other schema here follows: `mode_text`/`course_text`/
 fields`), passed through verbatim -- `None` whenever that field is not
 currently populated (unparked, or that overlay box empty this frame).
 `last_press` is `Export.lua`'s own description of the last press it
-issued (e.g. `"altitude_nudge_up"`), `None` if it has issued none yet
-this activation."""
+issued (e.g. `"correction_hold_phase1"`), `None` if it has issued none
+yet this activation.
+
+`arg_852`/`arg_952`/`takeover_stage`/`correction_path` are additive
+(the "Revised 2026-11-16" takeover revision, point 7 -- "The P1 telemetry
+mystery") -- diagnostic only, so a recurrence of either open question
+(952 disagreeing with 852, or a correction path other than the expected
+one) is directly visible on the wire rather than re-inferred from a
+probe. All four are optional on the wire (missing -> `None`), so a line
+pushed by an older `Export.lua` that does not yet send them still parses
+cleanly."""
 
 from __future__ import annotations
 
@@ -41,6 +51,10 @@ class AiPilotWheelState:
     alt_add_text: str | None
     speed_text: str | None
     last_press: str | None
+    arg_852: float | None
+    arg_952: float | None
+    takeover_stage: str | None
+    correction_path: str | None
 
     @staticmethod
     def from_dict(
@@ -69,6 +83,8 @@ class AiPilotWheelState:
             "apw_alt_add_text",
             "apw_speed_text",
             "apw_last_press",
+            "apw_takeover_stage",
+            "apw_correction_path",
         ):
             raw = data.get(field)
             if raw is None:
@@ -81,6 +97,21 @@ class AiPilotWheelState:
                     f"{type(raw).__name__}"
                 )
 
+        optional_numbers: dict[str, float | None] = {}
+        for field in ("apw_arg852", "apw_arg952"):
+            raw_number = data.get(field)
+            if raw_number is None:
+                optional_numbers[field] = None
+            elif isinstance(raw_number, bool) or not isinstance(
+                raw_number, (int, float)
+            ):
+                raise AiPilotWheelParseError(
+                    f"field {field!r} must be a number or null, got "
+                    f"{type(raw_number).__name__}"
+                )
+            else:
+                optional_numbers[field] = float(raw_number)
+
         return AiPilotWheelState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -91,6 +122,10 @@ class AiPilotWheelState:
             alt_add_text=optional_strings["apw_alt_add_text"],
             speed_text=optional_strings["apw_speed_text"],
             last_press=optional_strings["apw_last_press"],
+            arg_852=optional_numbers["apw_arg852"],
+            arg_952=optional_numbers["apw_arg952"],
+            takeover_stage=optional_strings["apw_takeover_stage"],
+            correction_path=optional_strings["apw_correction_path"],
         )
 
     @staticmethod
@@ -117,4 +152,8 @@ class AiPilotWheelState:
             "apw_alt_add_text": self.alt_add_text,
             "apw_speed_text": self.speed_text,
             "apw_last_press": self.last_press,
+            "apw_arg852": self.arg_852,
+            "apw_arg952": self.arg_952,
+            "apw_takeover_stage": self.takeover_stage,
+            "apw_correction_path": self.correction_path,
         }
