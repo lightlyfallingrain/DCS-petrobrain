@@ -199,3 +199,144 @@ environment) or the Windows-side Stage 7 live check — those remain the user's 
 as the plan itself states. Thread-safety finding is based on direct reproduction against `cache.py`
 in isolation (not inferred from reading alone) and against real DCS data in-process (not over HTTP,
 since outbound network tool calls were not available in this environment).
+
+## Re-review (fix 1 + port)
+
+Re-reviewed commit `e7fbebc7..a80611ed` (`a80611ed4598c50df6a971e1be88d508b90fd23b`,
+"raster-chart-viewer: TileCache thread safety + port 7801 (reviewer + port fix)") against Required
+Fix 1 above and the port correction. Worktree started at `origin/main` (`f72ae5b3`), a strict
+ancestor of the named tip, tree clean; fast-forwarded with `git merge --ff-only a80611ed...`.
+
+### 1. Does the lock cover every shared mutation and every read that depends on it?
+
+Yes. `TileCache.__init__` now creates `self._lock = threading.Lock()` before the first
+`_enforce_cap_locked()` call (held explicitly via `with self._lock:`, not through `_write`). Every
+public method that touches `_total_bytes` or inspects the cache directory now acquires the lock
+before doing so: `get_composed_tile`, `has_small_mip`, `get_small_mip` (reads); `_write` (the sole
+writer, used by both `put_composed_tile` and `put_small_mip`) and `_enforce_cap_locked` (mutators).
+`_measure_total()` in `__init__` runs before any other thread can hold a reference to this
+`TileCache` instance, so it does not need the lock. No method that touches `_total_bytes` or the
+cache directory is left unlocked.
+
+### 2. Can anything deadlock? (`Lock` is non-reentrant, `_enforce_cap_locked` split added)
+
+No reentrant-acquire path exists. `_enforce_cap_locked` is documented as "assumes `self._lock` is
+already held" and never acquires the lock itself; its two call sites (`__init__`, inside the `with
+self._lock:` block, and `_write`, which calls it from inside its own `with self._lock:` block) both
+already hold it, and neither calls back into any locking public method. `_write`'s own docstring
+states the non-reentrancy constraint explicitly for future callers. `WarmupScheduler` holds its own
+separate lock (`warmup.py`) only around its `_started` set, released before it ever calls into
+`TileCache`/`read_and_populate_small_mips`, so there is no cross-lock-ordering hazard between the
+two classes either. Traced every call site; found none that nests.
+
+### 3. Does eviction tolerate a file that vanishes before it is stat'ed or unlinked?
+
+Yes, and the mechanism now does two independent things correctly. First, because `_enforce_cap_locked`
+holds `self._lock` for its entire sweep, no other thread going through this `TileCache` can unlink a
+file out from under it anymore — the original race is closed by construction, not just papered
+over. Second, the remaining `try/except OSError` around both the `.stat()` (new) and `.unlink()`
+(pre-existing) calls is retained for causes the lock cannot rule out (e.g. something external to
+this process touching the cache directory), and the stat-before-sort restructuring means a file
+that fails its stat is simply skipped (`continue`) rather than only being caught at `unlink()` time
+as before — closing the specific gap the original review named (the `sorted(..., key=lambda f:
+f.stat()...)` call site had no `try/except` at all pre-fix).
+
+### 4. Is the new concurrency test meaningful? Independently re-verified, not just read.
+
+Re-ran the mutation the implementer describes, myself, rather than trusting the commit message:
+checked out the pre-fix `cache.py` (`git show e7fbebc7:...cache.py`) into the working tree in place
+of the fixed version, and ran `test_concurrent_writes_under_a_forcing_cap_never_raise_and_respect_cap`
+three times. All three runs failed with `errors == []` false — 31 extra items, first one
+`FileNotFoundError(2, 'No such file or directory')` — matching the implementer's claimed repro
+exactly (31/3200 writes, same exception). Restored the fixed `cache.py` (diffed byte-for-byte
+against the committed version to confirm the restore was exact and `git status` was clean
+afterward) and re-ran the same test five times: five clean passes. This is a real regression test,
+not a decorative one — it fails for the stated reason against the code it is meant to guard, and
+passes against the fix.
+
+### 5. Does holding the lock during PNG decode in `get_small_mip` matter for responsiveness?
+
+Correctness-wise, no — the lock must be held across `Image.open(path).convert("RGBA")` because
+`Image.open` is lazy; forcing the read with anything less than `.convert()` (or an explicit
+`.load()`) while the lock is held would reopen the same vanish-mid-read hazard Required Fix 1
+closed for the directory-sweep case. So the scope is not overcautious; it's the minimum needed for
+safety given Pillow's lazy-open semantics.
+
+Throughput-wise, this is a real, not hypothetical, narrowing versus pre-fix: before this commit,
+concurrent small-mip decodes across different request threads (and the warm-up thread) could at
+least partially overlap, since CPython's C-level image codecs can release the GIL during decode;
+now every decode serializes behind one process-wide lock, and `compose_view_tile`'s block loop can
+call `get_small_mip` up to `block * block` times in a single request (up to 4096 for the largest
+measured grid, Afghanistan). **Not a required fix** — these are ≤128px PNGs (`SMALL_MIP_MIN = 3`),
+decode is on the order of sub-millisecond to low-single-digit milliseconds each, this is a
+single-user LAN hobby tool with no Petrovich dependency (`raster-chart-viewer/CLAUDE.md`: "No
+Petrovich behaviour depends on this"), and the composed-tile cache means a repeat of the same view
+tile skips this path entirely. Worth knowing if a future session profiles a laggy pan under
+concurrent OpenSeadragon tile requests: narrowing to copy raw bytes under the lock and decode/
+convert outside it would restore the pre-fix overlap without reopening the hazard, since the bytes
+would already be safely in memory before the lock is released. Recorded as optional, not a
+blocker, and not worth a change without an actual complaint from the Stage 7 live check.
+
+### 6. Port 7800 -> 7801
+
+Confirmed every operative mention changed and nothing else collides. Grepped the bare numbers
+`7800` and `7801` repo-wide (not just `DEFAULT_PORT`, per the architect memory file's own lesson
+about Piper hiding in a bare URL string):
+
+- **`7801` appears only inside `raster-chart-viewer/`** (`server.py`'s `DEFAULT_PORT`, `README.md`
+  x3, `CLAUDE.md`) plus this feature's own plan/memory documentation — no collision anywhere else
+  in the repo.
+- **Every remaining `7800` inside `raster-chart-viewer/` is a deliberately-preserved historical
+  record, not a live reference**: `plans/raster-chart-viewer/plan.md`'s "Port and firewall"
+  section keeps the original (wrong) reasoning and firewall-rule example verbatim, with an explicit
+  "Correction, 2026-11-16" paragraph directly underneath — exactly the "supersession is marked, not
+  deleted" convention (`docs/PROCESS.md`), and the commit message says this was intentional.
+  `plans/raster-chart-viewer/implementation.md`'s one `7800` mention is inline-annotated
+  "(corrected to 7801 2026-11-16 — see `plan.md`'s...)" at the point of mention. Neither is
+  something a user or a future session would read to find the *current* port.
+- **One pre-existing document was not touched and is mildly stale**: `docs/handoff/
+  2026-11-16-raster-chart-viewer-windows-build.md`, written before Stages 1-6 existed ("Status:
+  Planned and approved. Nothing implemented yet."), lists "Port 7800" under "Decided — do not
+  reopen." This predates the port collision being found and predates this fix commit entirely (it
+  was not in this commit's diff, and not in the prior review's scope either). Not a required fix:
+  it is a dated, point-in-time handoff memo describing the state of a decision at the time it was
+  written, in the same spirit as the deliberately-preserved plan.md correction — not a document
+  anyone would consult today to learn the server's current port (README.md and CLAUDE.md are).
+  Flagging it only so it isn't mistaken for an operative reference later.
+- All other `7800`/`7801` hits in the repo are unrelated: audio-adapter's own Piper port (the thing
+  this fix moved away from) and aircraft-layer's own port family, neither touched by or relevant to
+  this change.
+
+### Checks run (from inside `raster-chart-viewer/`, fresh venv created per task instructions)
+
+- `ruff format --check src tests`: pass (19 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (strict, run with cwd inside the subproject): pass, 9 source files, no issues
+- `pytest tests -q`: pass, 51/51 (50 from the original review plus the one new concurrency test)
+
+### Verdict
+
+**APPROVED**
+
+Required Fix 1 is correctly and minimally implemented: the lock covers every shared mutation and
+every state-dependent read, no reentrant-acquire path exists, the stat-before-sort restructuring
+closes the exact race the original review traced to the line number, and the new regression test
+is independently confirmed red against the pre-fix code and green against the fix (not merely read
+and trusted). The port correction is complete and consistent across every operative file; the
+remaining `7800` mentions are deliberately-preserved historical corrections, not live references,
+with one pre-existing, out-of-scope handoff document flagged as mildly stale but not misleading
+enough to require touching now. One optional refinement noted (lock scope during `get_small_mip`'s
+PNG decode) — not a blocker, and explicitly not worth acting on without a real complaint from the
+Stage 7 live check.
+
+### Review Confidence
+
+Full read of the fix commit's diff (`cache.py`, `server.py`, `README.md`, `CLAUDE.md`,
+`test_cache.py`, both plan documents, the architect memory file). Ran the full check suite
+(format/lint/mypy strict/pytest) from a freshly created venv — 51/51 passing. The concurrency claim
+was independently re-verified by mutation, not re-read: swapped in the pre-fix `cache.py`, confirmed
+the new test fails for the stated reason (31/3200, `FileNotFoundError`) across 3 runs, restored the
+fixed version byte-for-byte, and confirmed 5/5 clean passes. The port change was verified by
+grepping the bare number repo-wide, not just `DEFAULT_PORT`. Did not re-run the Stage 7 Windows live
+check or exercise the OpenSeadragon viewer in a browser — unchanged from the original review, and
+still the user's own acceptance step, untouched by this commit.
