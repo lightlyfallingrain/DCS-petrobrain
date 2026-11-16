@@ -78,6 +78,25 @@ def test_tiers_unknown_terrain_404(running_server: RasterChartViewerServer) -> N
     assert "error" in json.loads(body)
 
 
+def test_tier_info_returns_grid_metadata(
+    running_server: RasterChartViewerServer,
+) -> None:
+    status, body, _ct = _get(running_server, "/terrains/Syria/tiers/32m")
+    assert status == 200
+    info = json.loads(body)
+    assert info == {
+        "tiles_wide": 8,
+        "tiles_tall": 8,
+        "max_level": 3,
+        "tile_size_px": 1024,
+    }
+
+
+def test_tier_info_unknown_tier_404(running_server: RasterChartViewerServer) -> None:
+    status, _body, _ct = _get(running_server, "/terrains/Syria/tiers/999m")
+    assert status == 404
+
+
 def test_tile_request_returns_valid_jpeg(
     running_server: RasterChartViewerServer,
 ) -> None:

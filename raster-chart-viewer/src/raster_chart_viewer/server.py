@@ -13,6 +13,12 @@ closing over whatever state this server needs.
   order `discovery.TerrainIndex.tier_labels` gives (scaled tiers
   ascending by metres-per-pixel, "unscaled" last); `404` for an unknown
   terrain.
+- `GET /terrains/<terrain>/tiers/<tier>` -> `{"tiles_wide", "tiles_tall",
+  "max_level", "tile_size_px"}` -- the grid metadata the viewer page
+  needs to configure OpenSeadragon's custom `TileSource` for this
+  (terrain, tier) (plan Stage 5, "custom TileSource"; not named in the
+  plan's own endpoint list, which predates writing the client against
+  it). `404` for an unknown terrain or tier.
 - `GET /tile/<terrain>/<tier>/<level>/<x>/<y>.jpg` -> the composed JPEG
   for that OpenSeadragon view tile (`cache.compose_view_tile`); `404` for
   an unknown terrain/tier or a `level` outside `[0, grid.max_level]`.
@@ -38,7 +44,7 @@ from urllib.parse import urlparse
 
 from raster_chart_viewer.cache import TileCache, compose_view_tile
 from raster_chart_viewer.discovery import TerrainIndex, tier_label
-from raster_chart_viewer.mosaic import MosaicGrid
+from raster_chart_viewer.mosaic import TILE_SIZE_PX, MosaicGrid
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ DEFAULT_PORT = 7800
 
 _TERRAINS_PATH = "/terrains"
 _TIERS_RE = re.compile(r"^/terrains/(?P<terrain>[^/]+)/tiers$")
+_TIER_INFO_RE = re.compile(r"^/terrains/(?P<terrain>[^/]+)/tiers/(?P<tier>[^/]+)$")
 _TILE_RE = re.compile(
     r"^/tile/(?P<terrain>[^/]+)/(?P<tier>[^/]+)/(?P<level>\d+)/"
     r"(?P<vx>\d+)/(?P<vy>\d+)\.jpg$"
@@ -108,6 +115,13 @@ def _make_handler(
                 self._handle_tiers(tiers_match.group("terrain"))
                 return
 
+            tier_info_match = _TIER_INFO_RE.match(path)
+            if tier_info_match is not None:
+                self._handle_tier_info(
+                    tier_info_match.group("terrain"), tier_info_match.group("tier")
+                )
+                return
+
             tile_match = _TILE_RE.match(path)
             if tile_match is not None:
                 self._handle_tile(tile_match)
@@ -121,6 +135,26 @@ def _make_handler(
                 self._respond_json(404, {"error": f"unknown terrain: {terrain}"})
                 return
             self._respond_json(200, {"tiers": index.tier_labels()})
+
+        def _handle_tier_info(self, terrain: str, tier: str) -> None:
+            """Grid metadata the viewer page needs to configure
+            OpenSeadragon's custom `TileSource` for this (terrain, tier)."""
+            index = terrains.get(terrain)
+            grid = grids.get((terrain, tier))
+            if index is None or grid is None or index.tiles_for_label(tier) is None:
+                self._respond_json(
+                    404, {"error": f"unknown tier {tier!r} for terrain {terrain!r}"}
+                )
+                return
+            self._respond_json(
+                200,
+                {
+                    "tiles_wide": grid.tiles_wide,
+                    "tiles_tall": grid.tiles_tall,
+                    "max_level": grid.max_level,
+                    "tile_size_px": TILE_SIZE_PX,
+                },
+            )
 
         def _handle_tile(self, match: re.Match[str]) -> None:
             terrain = match.group("terrain")
