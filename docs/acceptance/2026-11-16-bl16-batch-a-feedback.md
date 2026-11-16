@@ -153,4 +153,127 @@ verbatim:
   the P1 flight's telemetry read not-parked while the AI flew. **Unexplained.** One hypothesis,
   unverified: 852 reaches 0.9 only briefly at takeover and drops back, which a rising-edge probe
   would catch and a level check later would not. In production that would also clear the armed
-  nudge on the next frame, before the 5 Hz tick could fire it.
+  nudge on the next frame, before the 5 Hz tick could fire it. **Refuted the same day:** the
+  probe's own abort check read 852 every frame and never fired, so 852 stayed high (and the
+  re-fly below measures it directly).
+
+## Flight P0 re-flown with the fixed probe — 2026-11-16
+
+Pilot's answers before the re-fly, verbatim: *"Q1 - yes, AI reacted. Q2 - I think the probe issued
+alt change, that stopped the sink. Q3 - I use the same binding always."* Probe fixed on
+`fix/bl16-p0-probe-menu-open` (`aebcfd79`): menu held open for P0-2..P0-7, P0-6 tests the
+pilot's centre-press fix, args 852/952 logged.
+
+The log, uploaded by the pilot (second session onward; a first session at 15:10 stopped 7 s
+after its centre press, before P0-6 finished). The run of arg readings during the handover
+animation is trimmed to its endpoints; every other measured line is verbatim:
+
+```
+15:11:22   t=5.0: arg852=0.00 arg952=1.00
+15:11:30   t=12.8: arg852=0.04 arg952=0.96
+           ... 852 rises and 952 falls in lockstep, 852 + 952 = 1.00 at every sample ...
+15:11:30   t=13.2: arg852=0.90 arg952=0.10
+15:11:30   t=13.2: park signal rising (arg 852) -- starting the sequence
+15:11:30 P0-6: park-sink fix -- centre press 0.5s after takeover, menu closed
+15:11:30   on takeover: overlay=mode=nil course=nil alt=nil alt_ref=nil speed=nil  actual_agl=155.09912109375 actual_msl=920.53997802734  arg852=0.91 arg952=0.09
+15:11:31   centre press issued at +0.50s (menu closed)
+15:11:50   20s altitude trace (AGL/MSL m): 0s:155/921 1s:155/921 2s:155/921 3s:158/924 4s:162/927 5s:166/931 6s:170/936 7s:176/942 8s:184/949 9s:192/957 10s:201/966 11s:211/976 12s:221/986 13s:231/997 14s:242/1008 15s:254/1019 16s:265/1030 17s:276/1041 18s:288/1053 19s:299/1064
+15:11:50   20s park-arg trace: 0s:arg852=0.91 arg952=0.09 | 1s..19s: arg852=1.00 arg952=0.00
+15:11:51 P0-1: overlay content, wheel closed vs open (ends OPEN)
+15:11:51   as found (closed): mode=nil course=nil alt=nil alt_ref=nil speed=nil
+15:11:52   after one toggle (open): mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:11:53   after second toggle (closed): mode=nil course=nil alt=nil alt_ref=nil speed=nil
+15:11:54   after third toggle (open, held for P0-2..P0-7): mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:11:54 P0-2: one 0.7s held press per outer position, in FLT
+15:11:54   [1] UP (altitude+) -- before: mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:11:56       after:  mode=FLT course=95 alt=1662 alt_ref=B speed=120
+15:11:56   [2] DOWN (altitude-) -- before: mode=FLT course=95 alt=1662 alt_ref=B speed=120
+15:11:58       after:  mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:11:58   [3] LEFT, long (heading CCW) -- before: mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:12:00       after:  mode=FLT course=93 alt=1658 alt_ref=B speed=120
+15:12:00   [4] RIGHT, long (heading CW) -- before: mode=FLT course=93 alt=1658 alt_ref=B speed=120
+15:12:01       after:  mode=FLT course=95 alt=1658 alt_ref=B speed=120
+15:12:01 P0-3: speed tap sequence (short UP), reading speed_text
+15:12:01   starting speed_text: 120
+15:12:02   tap 1: speed_text = 150
+15:12:04   tap 2: speed_text = 200
+15:12:05   tap 3: speed_text = 250
+15:12:06   tap 4: speed_text = MAX
+15:12:07   tap 5: speed_text = MAX
+15:12:07   speed_text stopped changing -- taking this as MAX
+15:12:07 P0-4: press-release-to-readback latency
+15:12:07   release -> readback change: 0.007s (before=MAX after=250)
+15:12:07 P0-5: centre press x2 (ALT REF radar/baro toggle), menu open
+15:12:07   before:        mode=FLT course=95 alt=1658 alt_ref=B speed=250
+15:12:08   after press 1: mode=FLT course=95 alt=1658 alt_ref=B speed=250
+15:12:09   after press 2: mode=FLT course=95 alt=1658 alt_ref=B speed=250
+15:12:09 P0-7: FLT -> HVR speed criterion (tap speed to 0, watch mode_text)
+15:12:29   speed at 0 for 15s with no automatic mode flip observed
+15:12:29 closing the command menu (left open since P0-1)
+15:12:30   after close: mode=nil course=nil alt=nil alt_ref=nil speed=nil
+15:12:30 SEQUENCE COMPLETE
+```
+
+### What it shows — not yet explored
+
+- **Arg 952 is not "pedals park"; it is the mirror of arg 852.** At rest (AI not flying) 852 = 0
+  and 952 = 1. At "Request Aircraft Control" both animate over about 0.4 s, summing to 1.00 at
+  every sample, and settle at 852 = 1, 952 = 0. **Production Batch A treats 952 ≥ 0.9 as
+  "parked"**, so it reads "parked" whenever the AI is *not* flying, has a not-parked gap mid-
+  animation, and reads parked again once 852 passes 0.9. **Arg 852 alone is the handover signal.**
+  This also corrects BL-16's earlier note that "Request Aircraft Control" does not move 852: it
+  does. Why the P1 telemetry read not-parked at all stays unexplained.
+- **P0-6, the fix: the sink stopped, but the AI then climbed.** Flat for 2 s after the press, then
+  +144 m in 17 s, about 11 m/s at the end, still climbing. The overlay read 20 s later:
+  **`alt=1658 alt_ref=B`, against an actual 921 m MSL at the press.** The centre press did flip
+  radar → barometric, but the barometric target it set was about 740 m too high. This is the
+  pilot's own *"sometimes it has set something way incorrect"*, on the first try. **Pilot, same
+  day:** *"this is what I mean with my earlier comment that the barometric alt setting may get a
+  wildly incorrect initial value. That too is ED bug."* So both the sink and the wild barometric
+  target are ED bugs to work around, not ours to fix.
+- **P0-1 confirmed:** readback only with the menu open; toggling is repeatable.
+- **P0-2:** a 0.7 s hold reads as long on every outer position: altitude ±4 m, course ±2°.
+  Small steps, so long holds cannot correct a target that is hundreds of metres off.
+- **P0-3:** short UP in FLT steps speed 120 → 150 → 200 → 250 → MAX. ("120" was where the AI
+  started; whether it is also a step below 150 is not shown.)
+- **P0-4:** release → readback change in 0.007 s, i.e. the next frame.
+- **P0-5: with the menu open, a centre press does not toggle ALT REF** (B before, B after each of
+  two presses). With the menu closed (P0-6) it did. **Pilot, same day:** *"it should. If it did not
+  that is ED bug"* — a centre press with the menu open is meant to toggle the reference. **One
+  cause on our side is not ruled out:** the probe presses and releases centre in the same frame (a
+  zero-length press). That registered with the menu closed, but the open menu may need a real
+  pulse (the probe's own `SHORT_PRESS_PULSE_S`, 0.15 s). Untested.
+- **P0-7:** speed held at 0 for 15 s in FLT, no automatic switch to HVR.
+
+## Explore, round 2 — the pilot's answers to the re-fly, verbatim
+
+> *"* This is easier when the overlay is open. Therefore Petrobrain must make certain that the
+> overlay remains open while AI controls flight. If Player closes it, Petrobrain must reopen it
+> immediately. This is acceptable tradeoff.*
+> *\* I'd prefer barometric alt, which means that after it's engaged the first thing to do is get
+> is to a correct reading. After that it's easy.*
+> *\* "Long presses take small steps." -> yes, but press and hold will have it keep incrementing
+> the change. Single long press, no hold -> increment a bit. Press and hold for some seconds ->
+> value keeps changing while hold lasts.*
+> *\* "No automatic hover." -> that was ED's AI bug, it prioritized climbing to alt and only
+> slowed down after reaching desired alt. Automatic hover transition works normally."*
+
+## What this settles, as read (not yet a plan)
+
+- **The command menu stays open for as long as the AI flies.** Petrovich opens it on takeover and
+  reopens it at once if the player closes it. The pilot accepts the visual cost. That makes the
+  AI's state readable all the time and removes the P0-1 limitation.
+- **Barometric is the reference, and the first job after takeover is to make its target
+  correct.** Takeover → centre press (radar → barometric, which also stops the sink) → read the
+  target → if it is wrong, drive it to current MSL → then carry on to the pilot's goals.
+- **Correcting the target is a press-and-hold, not repeated taps.** A 0.7 s hold moves ±4 m, but
+  holding longer keeps it changing for as long as the hold lasts. So a large error is a closed
+  loop: hold up or down, watch the readback, release on reaching the target. Stage P2's planned
+  "release when readback reaches target" already has this shape. The rate while held is not
+  measured.
+- **P0-7 was not a real limit.** The AI was busy climbing to the wild barometric target and slowed
+  only once it got there. FLT → HVR works normally.
+- **Open question carried forward:** P0-5 found that a centre press with the menu open did not
+  toggle the reference. The pilot says it should (ED bug, or our zero-length press). With the menu
+  now always open, the one centre press after takeover must happen *before* the menu is opened,
+  or that press needs testing with a real pulse.
