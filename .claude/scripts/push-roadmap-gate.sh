@@ -20,7 +20,10 @@ input=$(cat)
 # i.e. main's clean tree, and passed silently on every worktree commit. Found by the 2026-11-14
 # integrity audit (Tier 1 #1), reproduced with the real payload. $CLAUDE_PROJECT_DIR is still
 # the right thing for locating sibling scripts.
-_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
+# The payload's cwd is the SESSION's directory; `cd <worktree> && git commit` runs git elsewhere.
+# hook-git-dir.py applies the command's own `cd`/`git -C` (2026-11-16: the main loop's worktree
+# commits were passing this gate unchecked). Falls back to the payload cwd, then pwd.
+_cwd=$(printf '%s' "$input" | python3 "$(dirname "$0")/hook-git-dir.py" 2>/dev/null); [ -n "$_cwd" ] || _cwd=$(pwd)
 REPO=$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
