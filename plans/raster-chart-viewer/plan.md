@@ -138,30 +138,38 @@ just descriptive:
 - At `k=0` (full res) this degenerates to: one native tile, one mip (the base image), one output
   tile — the simplest and most common case stays a single read + single decode.
 
-### Cache: two kinds of entry, one cap
+### Cache: served tiles plus small mips only — amended 2026-11-16 (user-approved)
 
-- **Ingredient cache** — `<terrain>/<tier>/<sheet><level>_x<X>_z<Z>/mip<N>.png`, written the first
-  time any request causes that zip entry to be inflated, for **every** mip it yields in one write
-  (the inflate-once policy MI-B4 Stage 5 asks for — a 1.4 MB deflated entry is never opened twice).
-  Lossless PNG, not JPEG, so repeated recomposition never compounds lossy artifacts.
+**Superseded first version:** an ingredient cache holding *every* mip of every inflated entry as
+PNG, under a 2 GB cap, so that no entry was ever inflated twice. Rejected in review: mip 0 as PNG
+costs about as much as the raw DDS, so browsing a large terrain would rebuild the extracted
+gigabytes MI-B4 exists to avoid, and the warm-up below already contradicted "never inflated twice".
+The user approved the replacement below.
+
 - **Composed-tile cache** — `<terrain>/<tier>/<ℓ>/<vx>_<vy>.jpg`, the literal HTTP response bytes,
-  written once per distinct view tile ever requested.
-- **One shared cap, one constant with a stated default**: `CACHE_MAX_BYTES = 2_000_000_000` (2 GB)
-  — comfortably covers a fully-warmed ingredient cache for the largest terrain (Afghanistan, 3072
-  entries; "about a third of the base image" per entry across all mips, per MI-B4 Stage 5, is on
-  the order of a few hundred MB) plus composed tiles for ordinary browsing, while staying a trivial
-  slice of disk. Swept LRU-by-mtime at startup and whenever a write pushes the folder over the cap.
-  Not behaviour-affecting in the project's tuning sense (it changes nothing Petrovich does), so it
-  stays a plain constant with a comment, not routed through `body-layer`'s tuning mechanism, which
-  does not exist outside `body-layer` anyway.
+  written once per distinct view tile requested. At full zoom (`k = 0`) the view tile *is* the
+  base image, encoded straight to JPEG; no separate copy is kept.
+- **Small-mip cache** — `<terrain>/<tier>/<sheet><level>_x<X>_z<Z>/mip<N>.png` for
+  `N ≥ SMALL_MIP_MIN` only (`SMALL_MIP_MIN = 3`: 128 px and smaller). Written whenever an entry is
+  inflated for any reason, and by the warm-up. On the order of tens of KB per entry, so about
+  100 MB for Afghanistan's 3072, by estimate.
+- **Middle zooms (`1 ≤ k < SMALL_MIP_MIN`) re-inflate.** A view tile there needs at most
+  `4^(SMALL_MIP_MIN-1)` = 16 entries, a fraction of a second on native Windows I/O, and the result
+  lands in the composed-tile cache. Repeated inflation of the same entry at different middle zooms
+  is accepted.
+- **One shared cap**: `CACHE_MAX_BYTES = 1_000_000_000` (1 GB), swept LRU-by-mtime at startup and
+  whenever a write pushes the folder over the cap. Not behaviour-affecting in the project's tuning
+  sense, so a plain constant with a comment — `body-layer`'s tuning mechanism does not exist outside
+  `body-layer`.
 
 ### Mitigating the slow first fully-zoomed-out view
 
-Chosen mitigation: **a background warm-up thread at server startup**, one per discovered
-`(terrain, tier)`, that inflates every entry once and writes only its two or three smallest mips to
-the ingredient cache (tens of KB total even for Afghanistan's 3072 entries — the expensive part,
-inflating the ~1.4 MB deflated entry, is paid once regardless of which mip is kept). The server
-starts accepting requests immediately; warm-up fills in behind it. If a real visitor's first
+Chosen mitigation: **a background warm-up per `(terrain, tier)`, started the first time that
+terrain/tier is opened** (its first tile or tier-listing request), not for every terrain at server
+start — warming all five installed terrains would inflate about 12,500 entries on every launch
+for terrains the user may never open. It inflates each entry once and keeps only its small mips
+(`N ≥ SMALL_MIP_MIN`), skipping entries whose small mips are already cached, so a restart re-warms
+nothing it already has. The server keeps accepting requests while it runs. If a real visitor's first
 zoomed-out request beats warm-up for that tier, it simply pays the cost once itself (same as
 today, just not guaranteed pre-paid) — no new request/response protocol, no polling, no change to
 `server.py`'s handler shape. Rejected: doing this synchronously in the request path risks a
@@ -214,9 +222,11 @@ netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=all
    of a synthetic multi-mip fixture matches an independently-computed downsample of the base image
    (MAD-style tolerance, same check the research note used on real data).
 3. **Cache + tile composition**, wiring 1+2 together with no real zip needed yet (fake trees +
-   synthetic DDS). Acceptance: a counter on the fake zip's "open entry" call proves each entry is
-   read at most once across several overlapping requests at different zoom levels; writing past
-   the configured cap evicts the oldest file first.
+   synthetic DDS). Acceptance: a counter on the fake zip's "open entry" call proves a repeated
+   request for the same view tile opens no entry (served from the composed-tile cache), and a
+   request at `k ≥ SMALL_MIP_MIN` after any inflate of the entries it covers opens none either;
+   no mip below `SMALL_MIP_MIN` is ever written to disk as an ingredient; writing past the
+   configured cap evicts the oldest file first.
 4. **HTTP server** (`server.py`, `__main__.py`): tile endpoint, terrain/tier listing, static
    serving. Acceptance: a real server instance on an OS-assigned port (mirrors
    `aircraft-layer/tests/test_api.py`) answers a tile request against a fake terrain tree with
@@ -226,9 +236,12 @@ netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=all
    opened locally against the Stage 4 test server (or a quick local run), the page pans and zooms a
    fake-tree mosaic without console errors — a one-time manual browser check, not an automated test
    (consistent with this project's js-light posture).
-6. **Background warm-up** (`warmup.py`). Acceptance: against a fake tree, warm-up completes without
-   error and logs per-terrain/tier completion; a request issued after warm-up for the smallest mip
-   of a warmed tile does not re-open the fake zip (same counter technique as Stage 3).
+6. **Background warm-up** (`warmup.py`), started on the first request touching a
+   `(terrain, tier)`, at most once per process per tier. Acceptance: against a fake tree, warm-up
+   completes without error and logs per-terrain/tier completion; it never starts for a tier nobody
+   opened; a second warm-up after restart skips entries whose small mips are cached; a request
+   issued after warm-up for the smallest mip of a warmed tile does not re-open the fake zip (same
+   counter technique as Stage 3).
 7. **Live check, Windows machine, from WSL bash** — closes the loop this plan cannot close from a
    fixture:
    - One-time setup: create a Windows-side Python venv (`python.exe -m venv raster-chart-viewer\.venv-win`),
@@ -259,7 +272,22 @@ netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=all
   gets the same vendored behaviour; the Implementer should record the exact version and its BSD-3
   `LICENSE` file path in `raster-chart-viewer/CLAUDE.md`.
 
-### Decisions Requiring User Input
+### Decisions Requiring User Input — all answered 2026-11-16
+
+The user's answers, verbatim:
+
+> *"1 - Windows python.exe launched from WSL ok.
+> 2 - ok. I dont' play Marianas, but let's support it.
+> 3 - build it tool first, I'll manually test how it looks.
+> Cache suggestion approved."*
+
+- **U1 → (a)**: Windows-side venv with Pillow, launched from WSL bash.
+- **U2 → expose as an "unscaled" tier.**
+- **U3 → build it all first**; the user checks how each terrain looks by hand. A terrain that
+  renders scrambled becomes a follow-up, not a blocker.
+- **Cache amendment approved** (section "Cache" above).
+
+The questions as they were put:
 
 - **U1: Where the service process runs.** Two options: (a) a Windows-side Python venv with Pillow
   installed, launched via WSL bash running `python.exe` (follows `aircraft-layer/WORKFLOW.md`'s
