@@ -256,6 +256,16 @@ window.
 
 ### Decisions Requiring User Input
 
+**QNH, not QFE — confirmed by the pilot after the QFE evidence was put to him (main loop, recorded
+2026-11-16 in answer to plan-aligner's Finding 1).** The QFE hint/checklist evidence in the recon
+note's section E was presented to the pilot on 2026-11-16, together with the reasoning for QNH: the
+probe showed the AI flies barometric targets as altitude above sea level (it held "1080 B" at 1080 m
+MSL after correction), so the copilot altimeter must read MSL, i.e. QNH; with QFE it would read
+height above the field (~155 m here) and the AI would head for 155 m MSL, below the 765 m terrain.
+The pilot's reply after that: *"Skip the probe, just build setting QNH."* So QNH stands, and this
+was a recorded decision, not an oversight. If the first flight shows a wild target persisting with
+QNH set, QFE is the first alternative to try.
+
 - **U1: does Petrovich say anything on success, or stay silent?** Recommend: silent — this is
   background avionics housekeeping before the pilot starts moving, matching the existing
   `mission-start.md` sequence rows, most of which have an empty `petrovich-says` cell. A short
