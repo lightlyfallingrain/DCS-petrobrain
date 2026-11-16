@@ -67,12 +67,12 @@ raster-chart-viewer/
                                 found, so sparse/partial coverage is structural, not an error path
     ddsmip.py                — mip-offset formula above + Image.frombytes(..., "bcn", 3) decode
                                 of one specific mip from one entry's already-inflated bytes
-    cache.py                 — disk cache: per-tile-mip "ingredient" entries (written once per
-                                inflate) and per-request composed-tile entries, one shared
-                                size cap, LRU-by-mtime eviction
-    warmup.py                — background thread, started at server startup: for each discovered
-                                (terrain, tier), inflate every entry once but keep only its two or
-                                three smallest mips
+    cache.py                 — disk cache: composed-tile JPEGs plus small-mip PNGs
+                                (N >= SMALL_MIP_MIN only), one shared size cap, LRU-by-mtime
+                                eviction (section "Cache" below, amended 2026-11-16)
+    warmup.py                — background thread per (terrain, tier), started on the first
+                                request touching it: inflate every entry once, keep only its small
+                                mips, skip entries already cached
     server.py                — ThreadingHTTPServer: GET /terrains, GET /terrains/<t>/tiers,
                                 GET /tile/<terrain>/<tier>/<level>/<x>/<y>.jpg, static file serving
   static/
@@ -264,7 +264,7 @@ netsh advfirewall firewall add rule name="raster-chart-viewer" dir=in action=all
   timed Syria's 1024-entry 32m tier (16.1 s over the slower WSL bridge). Afghanistan is 3× the
   entries; native Windows I/O in Stage 7 should beat the WSL-bridge number, but by how much is
   unmeasured. Low risk: warm-up is background and one-time per tier, and the composed-tile and
-  ingredient caches persist across restarts.
+  small-mip caches persist across restarts.
 - **No index file for either `.sup5` or the zip itself** (research note §D) — discovery always
   costs a full directory/zip-namelist walk; cheap at the sizes measured (largest is 83 zips for
   Caucasus) but would need rethinking if a future terrain's RasterCharts were far larger.
