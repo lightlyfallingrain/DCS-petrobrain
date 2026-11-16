@@ -89,6 +89,14 @@ class EffectorTrigger(Enum):
     #: bounded-fallback comment has the full account of why that case
     #: cannot be classified from the stale sample it has instead.
     MISSION_START_IN_AIR = "mission-start-in-air"
+    #: Added 2026-11-16 (user: "Add effector sequence triggers for when
+    #: Player changes to pilot seat / copilot seat"). Fired from `body.py`
+    #: on a change of the player's seat as `Export.lua` reads it from the
+    #: camera (`belief.ai_pilot_wheel.seat_change`) -- a change between two
+    #: known seats only, never the first reading of a mission, and never
+    #: while a mission (re)start is still resolving.
+    SEAT_PILOT = "seat-pilot"
+    SEAT_COPILOT = "seat-copilot"
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +180,24 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
             "paused."
         ),
         cardinality="once",
+    ),
+    EffectorTrigger.SEAT_PILOT: TriggerInfo(
+        description=(
+            "The player moves from the copilot seat to the pilot seat. "
+            "Read from where the cockpit camera sits, so it fires on the "
+            "seat change itself, not on any switch. Never on the seat the "
+            "mission starts in, and not while a mission (re)start is still "
+            "resolving."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.SEAT_COPILOT: TriggerInfo(
+        description=(
+            "The player moves from the pilot seat to the copilot "
+            "(operator) seat. Same reading and the same exclusions as "
+            "seat-pilot."
+        ),
+        cardinality="every_time",
     ),
 }
 

@@ -140,6 +140,7 @@ from belief.ai_pilot_wheel import (
     altitude_ref_from_letter,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
+    seat_change,
     set_hvrt_direction,
     set_parked_altitude,
     set_parked_heading,
@@ -4612,6 +4613,7 @@ def _run_crew_text_poll_loop(
                         # immediately above; a separate aircraft-layer
                         # read (`GET /ai_pilot_wheel/latest`), not derived
                         # from `readback_args`.
+                        previous_seat = runner.parked_flight_state.player_seat
                         try:
                             runner.parked_flight_state = advance_parked_flight_state(
                                 runner.parked_flight_state, aircraft_client
@@ -4775,6 +4777,24 @@ def _run_crew_text_poll_loop(
                             runner.effector_state = fire_effector_trigger(
                                 runner.effector_state,
                                 EffectorTrigger.TAKEOFF,
+                                runner.last_t_sim,
+                            )
+                        # Seat-change triggers (user, 2026-11-16). Same
+                        # suppression as `TAKEOFF`: while a mission
+                        # (re)start resolves, the AI-wheel feed may still
+                        # hold the previous mission's seat, so a change
+                        # seen then only re-baselines `player_seat` --
+                        # the move a fresh mission "starts in" is never a
+                        # seat change.
+                        moved_to = seat_change(
+                            previous_seat, runner.parked_flight_state.player_seat
+                        )
+                        if moved_to is not None and not mission_start_resolving:
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.SEAT_PILOT
+                                if moved_to == "pilot"
+                                else EffectorTrigger.SEAT_COPILOT,
                                 runner.last_t_sim,
                             )
                         # `plans/attack-run/plan.md` Stage 5 -- apply

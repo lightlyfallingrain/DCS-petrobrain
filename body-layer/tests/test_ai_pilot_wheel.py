@@ -16,7 +16,7 @@ import threading
 from collections.abc import Iterator
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -34,6 +34,7 @@ from belief.ai_pilot_wheel import (
     nearest_speed_step,
     request_goal,
     resolve_altitude_reference,
+    seat_change,
     set_hvrt_direction,
     set_parked_altitude,
     set_parked_heading,
@@ -597,3 +598,50 @@ def replace_goal(state: ParkedFlightState, goal: AiPilotWheelGoal) -> ParkedFlig
     wholesale like every other field here, and every test above needs
     one starting from a bare `ParkedFlightState()`."""
     return replace(state, goal=goal)
+
+
+def _advance_with(body: dict[str, Any], state: ParkedFlightState) -> ParkedFlightState:
+    for base_url in _server(body):
+        return advance_parked_flight_state(
+            state, AircraftLayerClient(base_url=base_url)
+        )
+    raise AssertionError("unreachable")
+
+
+class TestPlayerSeat:
+    """Seat-change triggers (user, 2026-11-16): `apw_seat` mirrored into
+    `player_seat`, and `seat_change` deciding what counts as a move."""
+
+    _BASE: ClassVar[dict[str, Any]] = {
+        "t": 1.0,
+        "received_wall_clock_s": 1.0,
+        "apw_parked_active": False,
+    }
+
+    def test_seat_is_mirrored(self) -> None:
+        state = _advance_with(
+            {**self._BASE, "apw_seat": "operator"}, ParkedFlightState()
+        )
+        assert state.player_seat == "operator"
+
+    def test_an_unknown_seat_value_reads_none(self) -> None:
+        state = _advance_with(
+            {**self._BASE, "apw_seat": "gunner"}, ParkedFlightState(player_seat="pilot")
+        )
+        assert state.player_seat is None
+
+    def test_an_older_export_without_the_field_keeps_the_seat(self) -> None:
+        state = _advance_with(dict(self._BASE), ParkedFlightState(player_seat="pilot"))
+        assert state.player_seat == "pilot"
+
+    def test_a_move_between_known_seats_is_a_change(self) -> None:
+        assert seat_change("pilot", "operator") == "operator"
+        assert seat_change("operator", "pilot") == "pilot"
+
+    def test_the_first_reading_of_a_mission_is_not_a_change(self) -> None:
+        assert seat_change(None, "pilot") is None
+        assert seat_change(None, "operator") is None
+
+    def test_no_change_and_going_unknown_are_not_changes(self) -> None:
+        assert seat_change("pilot", "pilot") is None
+        assert seat_change("operator", None) is None

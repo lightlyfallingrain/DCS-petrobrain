@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
@@ -8540,3 +8541,153 @@ class TestResolveExpectedAreaChecks:
         assert runner.expected_area_log_sink is None
 
         body_module._resolve_expected_area_checks(runner, ownship)  # does not raise
+
+
+# -- Seat-change triggers (user, 2026-11-16: "Add effector sequence
+# triggers for when Player changes to pilot seat / copilot seat") --
+# through the real poll loop. Synthetic one-row sequences, same two
+# switches as the mission-start section above: `SEAT_COPILOT` writes
+# `observ`, `SEAT_PILOT` writes `weapon_safety`. -------------------------
+
+
+def _effector_config_with_seat_sequences() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    sequences, registry = _fixture_effector_config()
+    merged = dict(sequences)
+    for trigger, effector, value, arg in (
+        (EffectorTrigger.SEAT_COPILOT, "observ", "on", 886),
+        (EffectorTrigger.SEAT_PILOT, "weapon_safety", "armed", 673),
+    ):
+        merged[(AIRCRAFT, PETROVICH_ROLE, trigger.value)] = SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=trigger.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector=effector,
+                    value=value,
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path(f"fake-{trigger.value}.md"),
+            read_args=frozenset({arg}),
+        )
+    return merged, registry
+
+
+_SEAT_COPILOT_WRITE = (7, 3002, 1.0)  # observ on
+_SEAT_PILOT_WRITE = (6, 3020, 1.0)  # weapon_safety armed
+
+
+def _seat_sample(seat: str | None) -> dict[str, Any]:
+    return {
+        "t": 1.0,
+        "received_wall_clock_s": 1.0,
+        "apw_parked_active": False,
+        "apw_seat": seat,
+    }
+
+
+def _wait_for(predicate: Callable[[], bool], timeout_s: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return predicate()
+
+
+def _start_seat_poll_loop(
+    tmp_path: Path,
+) -> tuple[
+    FakeConsoleAircraftClient,
+    ConsolePerceptionRunner,
+    threading.Event,
+    threading.Thread,
+]:
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # grounded: no takeoff edge
+    telemetry["dcs_model_time_s"] = 50.0
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.raw_args = _MISSION_START_RAW_ARGS
+    aircraft_client.ai_pilot_wheel_state = _seat_sample("pilot")
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    sequences, registry = _effector_config_with_seat_sequences()
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={"effector_sequences": sequences, "effector_registry": registry},
+    )
+    poll_thread.start()
+    assert _wait_for(lambda: runner.parked_flight_state.player_seat == "pilot")
+    return aircraft_client, runner, stop_event, poll_thread
+
+
+def test_seat_changes_fire_seat_copilot_then_seat_pilot(tmp_path: Path) -> None:
+    """Starting in the pilot seat fires nothing; moving to the copilot
+    seat fires `SEAT_COPILOT`; moving back fires `SEAT_PILOT`."""
+    aircraft_client, _runner, stop_event, poll_thread = _start_seat_poll_loop(tmp_path)
+    try:
+        time.sleep(0.05)
+        assert aircraft_client.cockpit_switch_writes == [], (
+            "the starting seat is not a seat change"
+        )
+        aircraft_client.ai_pilot_wheel_state = _seat_sample("operator")
+        assert _wait_for(
+            lambda: _SEAT_COPILOT_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        aircraft_client.ai_pilot_wheel_state = _seat_sample("pilot")
+        assert _wait_for(
+            lambda: _SEAT_PILOT_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [
+        _SEAT_COPILOT_WRITE,
+        _SEAT_PILOT_WRITE,
+    ]
+
+
+def test_a_seat_read_across_a_mission_restart_fires_nothing(tmp_path: Path) -> None:
+    """A mission (re)start resets the seat belief, and while it resolves the
+    feed may still carry the old mission's seat (`"operator"`) before the
+    new one's (`"pilot"`) -- that is where the new mission starts, not a
+    seat change, so neither seat trigger fires."""
+    aircraft_client, runner, stop_event, poll_thread = _start_seat_poll_loop(tmp_path)
+    try:
+        aircraft_client.ai_pilot_wheel_state = _seat_sample("operator")
+        assert _wait_for(
+            lambda: _SEAT_COPILOT_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        writes_before = list(aircraft_client.cockpit_switch_writes)
+        # Restart: the feed still holds the old mission's "operator", the
+        # model clock has not moved yet (stale sample).
+        aircraft_client.mission_start_sequence = 2
+        assert _wait_for(lambda: runner.last_mission_start_sequence == 2)
+        aircraft_client.ai_pilot_wheel_state = _seat_sample("pilot")
+        # Now the fresh mission's first sample arrives.
+        aircraft_client._telemetry["dcs_model_time_s"] = 0.5
+        assert _wait_for(lambda: runner.pending_mission_start_fire is False)
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == writes_before
