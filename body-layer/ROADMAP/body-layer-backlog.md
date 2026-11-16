@@ -156,6 +156,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B116]] — body resource arbitration: eyes/hands/mouth as declared resources; finish the look, pilot first, queue ≤~5 s else "stand by", "unable" only in attack run (concept in `PETROBRAIN_RUNTIME.md`)
 - [[BL-B117]] — BL-16 sub-item: AI wheel's parked flag and overlay fields not reset on `LuaExportStop` (lands in AC-B12's AI-wheel module, beside AC-B13)
 - [[BL-B119]] — effector sequence rows speak their `petrovich-says`; hard-coded observ/weapons readbacks removed
+- [[BL-B121]] — same-poll pending-restart may speak a speaking sequence row's line twice; not reachable by any sequence shipped today, closes before a multi-row speaking sequence lands
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
