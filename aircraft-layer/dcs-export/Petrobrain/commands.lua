@@ -2,7 +2,8 @@
 Petrobrain / commands -- the inbound UDP command listener only.
 `AC-B12` (`plans/ac-b12-export-modules/plan.md`): the one module that
 must load LAST, after every handler-owning module (`petrovich`,
-`effectors`, `sight`) -- its dispatch table below is built once, directly
+`effectors`, `sight`, and -- Stage P2, `plans/flight-control/plan.md` --
+`ai_pilot_wheel`) -- its dispatch table below is built once, directly
 from those modules' own returned tables, read as bare globals set by the
 loader's `load_module` (see `core.lua`'s header comment for the
 mechanism). No self-registering registry: simpler, and the one load-
@@ -63,11 +64,11 @@ end
 -- every dependency explicit and visible here. Each handler is now in
 -- the uniform `(data, t)` shape (`AC-B12`'s normalization, see each
 -- handler's own comment at its new home) so this table needs no per-op
--- adapter closures. `petrovich`/`effectors`/`sight` are read as bare
--- globals -- each module's own identity table, set by the loader's
--- `load_module` when it loaded (see `core.lua`'s header comment) --
--- `commands.lua` loads LAST specifically so all three already exist
--- here. Each owning module is guarded non-`nil` before its own entries
+-- adapter closures. `petrovich`/`effectors`/`sight`/`ai_pilot_wheel` are
+-- read as bare globals -- each module's own identity table, set by the
+-- loader's `load_module` when it loaded (see `core.lua`'s header
+-- comment) -- `commands.lua` loads LAST specifically so all four already
+-- exist here. Each owning module is guarded non-`nil` before its own entries
 -- are added -- a module that failed to load simply contributes no ops
 -- to this table, which `poll_command_socket` below already treats the
 -- same as an unknown op (logged, ignored, never fatal), rather than
@@ -83,6 +84,9 @@ if effectors ~= nil then
 end
 if sight ~= nil then
     handlers.sight_target = sight.handle_sight_target_command
+end
+if ai_pilot_wheel ~= nil then
+    handlers.ai_pilot_goal = ai_pilot_wheel.handle_ai_pilot_goal_command
 end
 
 -- Drains every command datagram currently waiting on command_socket
