@@ -437,7 +437,23 @@ the hard ceiling with zero headroom. It also gives AC-B12 Part 2 ("read only wha
 natural home per feed: once feeds live in separate modules, gating a given feed's send behind a
 body-layer "subscribed" flag is a change local to that one module, not a file-wide one.
 
-### Decisions Requiring User Input
+### Decisions Requiring User Input — answered 2026-11-16
+
+The user's answers, verbatim:
+
+> *"1 - detect by Export.lua version. I copy all the necessary files over with a script anyway, so
+> if Export.lua matches, assume the others do as well.*
+> *2 - subfolder"*
+
+- **U1 → the existing `Export.lua` version check is the whole check.** No per-module stamps, no new
+  runtime code. The user deploys with a script that copies every file, so a matching `Export.lua`
+  version is taken to mean the modules match too. `WORKFLOW.md` describes the deploy as copying the
+  loader and the whole `Scripts\Petrobrain\` folder together; a delete-first step is optional, not
+  required.
+- **U2 → subfolder:** modules live in `aircraft-layer/dcs-export/Petrobrain/`, mirroring the
+  deployed `Scripts\Petrobrain\`. Widen the two `*.lua` globs as described below.
+
+The options as they were put:
 
 - **U1: how to catch a half-updated `Scripts\Petrobrain\` folder.** Two options considered:
   (a) **recommended** — a procedural fix only: WORKFLOW.md's deploy step becomes "delete the whole
