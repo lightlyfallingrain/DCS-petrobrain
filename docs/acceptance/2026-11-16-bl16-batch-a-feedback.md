@@ -102,3 +102,55 @@ explored, then planned": nothing here is a decided fix. Card flown:
   press assumes the AI always starts on radar, as the pilot saw.*
 - **Then carry on to whatever the pilot has asked for** (Stage P2's goals), from that stable state.
 - **The `t` field is fine** — a fairly new mission. No second problem there.
+
+## Flight P0 — the probe log, 2026-11-16
+
+`Export.probe-ai-pilot-wheel.lua`, uploaded by the pilot as `aircraft_layer_probe_ai_pilot_wheel.log`,
+verbatim:
+
+```
+13:44:55 BL-16 MODE 2 STAGE P0 PROBE -- AI-PILOT WHEEL
+13:45:03   waiting 5s to settle, then waiting for you to park
+13:45:27   t=23.8: park signal rising -- starting the sequence
+13:45:27 P0-6: park-sink measurement
+13:45:27   on park: overlay=mode=nil course=nil alt=nil alt_ref=nil speed=nil  actual_agl=189.63543701172 actual_msl=954.65881347656
+13:45:27   held altitude already differs from actual -- no nudge issued
+13:45:47   20s altitude trace (AGL): 0s:190m 1s:193m 2s:188m 3s:178m 4s:165m 5s:150m 6s:134m 7s:119m 8s:109m 9s:102m 10s:96m 11s:91m 12s:87m 13s:83m 14s:81m 15s:79m 16s:77m 17s:75m 18s:74m 19s:73m
+13:45:47   nudge issued: false
+13:45:48 P0-1: overlay content, wheel closed vs open
+13:45:48   as found: mode=nil course=nil alt=nil alt_ref=nil speed=nil
+13:45:49   after one ShowMenu toggle: mode=FLT course=88 alt=176 alt_ref=R speed=150
+13:45:50   after second ShowMenu toggle (back to start): mode=nil course=nil alt=nil alt_ref=nil speed=nil
+13:45:50 P0-2: one 0.7s held press per outer position, in FLT
+13:45:50 P0-2: mode is nil, cycling toward FLT (attempt 1..3)
+13:45:50 P0-2: WARNING: could not reach mode FLT after 3 attempts (now nil)
+13:45:50   [1] UP / [2] DOWN / [3] LEFT long / [4] RIGHT long -- before and after: all nil
+13:45:57 P0-3: speed tap sequence -- could not reach FLT; starting speed_text nil; taps 1-2 nil; "taking this as MAX"
+13:45:59 P0-4: no readback change observed within 5s of release
+13:46:04 P0-5: centre press -- before nil, after nil
+13:46:05 P0-7: could not reach FLT; stopped at the tap safety cap without reaching speed 0
+13:46:19 SEQUENCE COMPLETE
+```
+
+(Repeated banner and separator lines trimmed; every measured line kept.)
+
+### What it shows — checked against the probe source, not yet explored
+
+- **P0-6, the sink, measured:** 190 m AGL → 73 m in 20 s, still descending at the end. Steepest
+  about 16 m/s (5 s → 6 s). No nudge, because the overlay read empty on park.
+- **P0-1 answered: `list_indication(6)` carries the AI readback only with the command menu open.**
+  Closed: every field nil. One ShowMenu toggle: `mode=FLT course=88 alt=176 alt_ref=R speed=150`.
+  Toggled back: nil again. The plan treats "only with the overlay open" as a cosmetic limitation,
+  not a redesign — but it does mean **Export.lua cannot see the AI's state, or detect its takeover,
+  without opening the menu.**
+- **The overlay held `alt=176 R` while the aircraft was about 73 m AGL and still sinking**, which
+  fits the pilot's account of ED's bug: the held altitude is displayed but not applied.
+- **P0-2 to P0-7 produced no data.** The probe closed the menu again after P0-1, so every
+  later read was nil and every "cycle toward FLT" failed. Its presses were issued with the menu
+  closed. Whether they did anything to the AI is not in the log.
+- **Park detection disagrees between the two flights.** The probe watches arg 852 (stick park)
+  ≥ 0.9, and it rose at t=23.8. Production Batch A watches 852 *or* 952 at the same threshold, yet
+  the P1 flight's telemetry read not-parked while the AI flew. **Unexplained.** One hypothesis,
+  unverified: 852 reaches 0.9 only briefly at takeover and drops back, which a rising-edge probe
+  would catch and a level check later would not. In production that would also clear the armed
+  nudge on the next frame, before the 5 Hz tick could fire it.
