@@ -1,8 +1,9 @@
 # AC-B12 — Split Export.lua into loaded modules, and read only what Petrobrain needs
 
-- [ ] **AC-B12 — Split `Export.lua` into several files loaded with `dofile`, and extend "read by
-  need" to every feed, before BL-16's next stage.** #status/open Filed 2026-11-16 by user
-  direction.
+- [~] **AC-B12 — Split `Export.lua` into several files loaded with `dofile`, and extend "read by
+  need" to every feed, before BL-16's next stage.** #status/in-progress Filed 2026-11-16 by user
+  direction. Architect plan on `feature/ac-b12-export-modules`:
+  `plans/ac-b12-export-modules/plan.md`.
 
   **Why now.** Lua 5.1, which DCS runs, allows at most 200 active locals per function, and a file's
   top level counts as one function. `aircraft-layer/dcs-export/Export.lua` is one 2,832-line file
