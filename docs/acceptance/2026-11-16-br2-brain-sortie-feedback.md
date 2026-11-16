@@ -129,3 +129,62 @@ questions *are* commands.
 mission-interpreter's compact artifact and tracks waypoint progress
 (`body-layer/src/belief/mission_phase.py`), and the artifact carries `expected_threats` from the
 briefing. No brain tool exposes either yet.
+
+## Explore, round 2 — direction and the examples, verbatim
+
+**Direction — the brain's primary role is free text and complex questions/commands:**
+
+> *"this is correct and key feature. The deterministic tools already exist and I can use them.
+> Brain must be able to use the same tools (to get information or act on what I said), but the
+> primary role os free-text and complex questions or complex commands. To answer/act brain needs
+> access to the complete tool set, that is why it's needed. Prioritize Stage 5 free-text. These
+> "Petrovich, what is on left" should be treated more as examples in testing basic
+> functionality."*
+
+**Briefed (expected) units:**
+
+> *"1 - expected units (via briefing (or reports by other units if ever implemented)) are
+> important. That's how you get an advance waring and can either avoid or cautiously advance."*
+
+**"Between us and the target area":**
+
+> *"2 - that's an example, don't have to build that exact case. However, I'd except take straight
+> line from current position to target and a corridor about 2 km wide on either side. Report units
+> within that corridor and known units taht could engage us from outside that corridor. I'd need to
+> know if there are friendlies and where so I don't mistake them for enemy. Big terrain only,
+> villages yes, roads no."*
+
+**Next waypoint:**
+
+> *"3 - compass heading, like 315 degrees."*
+
+**"Scan along the route to waypoint 3":**
+
+> *"4 - That would utilize the existing scan tools. Say, we're en route to WP3, then it's ahead and
+> scan would be fairly normal scan ahead up to WP3 distance and report what you see. On the other
+> hand, we could be en route to WP2 and WP3 could be 20 turn right at WP2 and then 5 km straigh.
+> Then scan for WP3 would mean scan between WP2 and WP3. Again using existing scan tools, that'd be
+> scan 12, 1, 2 o'clock or something like that."*
+
+**"Where are the air defences":**
+
+> *"5 - by danger. <where> = e.g. 11 o'clock, south of village. Always o'clock and distanve, but
+> landmark reference is good additional info."*
+
+**What this settles, as read (not yet a plan):**
+
+- **BR-2's priority changes: Stage 5 free-text (`say`) first.** The template forms (D7 1–4) and
+  the phrasebook-equivalent questions ("what's on the left") become basic-function tests, not the
+  milestone's point. The brain needs the **complete** tool set, both to learn and to act.
+- **Briefed units are first-class knowledge**, spoken as briefed/expected and kept distinct from
+  seen. They are the advance warning. Reports from other units would be the same kind of source,
+  if ever built.
+- **Friendlies and their positions are needed knowledge**, to avoid mistaking them for enemy.
+- **Corridor questions:** straight line from ownship to the target, about 2 km either side. Units
+  inside it, plus known units outside it that could engage. Big terrain and villages; no roads. An
+  example of the reasoning wanted, not a case to build specifically.
+- **Headings to a waypoint are compass degrees** ("315").
+- **Route scans compose the existing scan tools** from route geometry: ahead to the waypoint when
+  it is the next one, or the clock sector covering a later leg.
+- **Threat lists sort by danger.** Every position is clock + distance, plus a landmark where one
+  helps ("11 o'clock, south of the village").
