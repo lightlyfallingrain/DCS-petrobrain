@@ -22,7 +22,9 @@ from pathlib import Path
 
 import pytest
 
-_EXPORT_LUA = Path(__file__).resolve().parent.parent / "dcs-export" / "Export.lua"
+_PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
+_CORE_LUA = _PETROBRAIN_DIR / "core.lua"
+_TELEMETRY_LUA = _PETROBRAIN_DIR / "telemetry.lua"
 
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
@@ -42,7 +44,7 @@ def _lua_executable() -> str | None:
     return None
 
 
-def _extract_lua_function(name: str) -> str:
+def _extract_lua_function(path: Path, name: str) -> str:
     """Slice `local function {name}(...) ... end` out of `Export.lua` --
     same technique as `test_sight_servo_lua.py`'s own helper, **widened to
     also count `for`/`while`** as block openers (not just `function`/
@@ -52,9 +54,9 @@ def _extract_lua_function(name: str) -> str:
     opener set would stop at the `for` loop's own closing `end` rather
     than the function's. `repeat`/`until` blocks are not in this file's
     style and are not handled."""
-    text = _EXPORT_LUA.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     start_match = re.search(rf"local function {name}\(", text)
-    assert start_match is not None, f"{name} not found in Export.lua"
+    assert start_match is not None, f"{name} not found in {path.name}"
     token_re = re.compile(r"\b(function|if|for|while|end)\b")
     depth = 1
     for token_match in token_re.finditer(text, start_match.end()):
@@ -107,8 +109,11 @@ local function debug_log(msg) end
 """
     lines = [preamble]
     lines.extend(
-        _extract_lua_function(name)
-        for name in ("json_escape_string", "push_payload_state")
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "json_escape_string"),
+            (_TELEMETRY_LUA, "push_payload_state"),
+        )
     )
     lines.append("local out = {}")
     for frame in frames:

@@ -31,7 +31,10 @@ from pathlib import Path
 import pytest
 
 _EXPORT_DIR = Path(__file__).resolve().parent.parent / "dcs-export"
-_LUA_FILES = sorted(_EXPORT_DIR.glob("*.lua"))
+#: `AC-B12` (`plans/ac-b12-export-modules/plan.md`, U2): widened to cover
+#: the split modules under `dcs-export/Petrobrain/` too -- see
+#: `test_dcs_export_lua_syntax.py`'s identical change.
+_LUA_FILES = sorted(_EXPORT_DIR.glob("**/*.lua"))
 
 #: `local function name(` and `local name =` / `local a, b =` at any indent.
 _LOCAL_DECL_RE = re.compile(
