@@ -190,15 +190,20 @@ creating/deleting the flag file.
 -- `aircraft-layer/src/collector/server.py`'s `EXPECTED_EXPORT_VERSION`
 -- in the same commit.
 --
--- `AC-B12` (2026-11-16, `plans/ac-b12-export-modules/plan.md`, U1):
--- **not bumped for this change** -- the module split (and AC-B13's stop-
--- hook fix) changes neither the wire format nor any field's meaning, so
--- there is nothing here for a collector to misread. The version check
--- below is now the *whole* deployment-staleness check for the multi-file
--- deploy too -- no per-module version stamps. The user's own words: "I
--- copy all the necessary files over with a script anyway, so if
--- Export.lua matches, I assume the others do as well."
-local EXPORT_SCRIPT_VERSION = "2026-11-16"
+-- `AC-B12` (2026-11-16, `plans/ac-b12-export-modules/plan.md`, U1): the
+-- module split (and AC-B13's stop-hook fix) changes neither the wire
+-- format nor any field's meaning, so there is nothing *wire-level* for a
+-- collector to misread. Bumped anyway, "...16b" (main-loop decision, not
+-- the plan's own U1 reasoning): U1 made this version string the *whole*
+-- deployment-staleness check for the multi-file deploy too -- no
+-- per-module version stamps -- which only catches a half-updated
+-- `Scripts\Petrobrain\` folder if the string actually changes whenever
+-- the deployed file set does. Before this bump, a deploy that missed
+-- the split entirely still reported the identical "2026-11-16" string as
+-- a correctly split one, so the version-match live-check step could not
+-- tell the two apart. Update `aircraft-layer/src/collector/server.py`'s
+-- `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-11-16b"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 

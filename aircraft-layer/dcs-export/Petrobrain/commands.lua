@@ -8,6 +8,15 @@ loader's `load_module` (see `core.lua`'s header comment for the
 mechanism). No self-registering registry: simpler, and the one load-
 order constraint this creates is explicit and visible in this one file,
 not implicit in registration timing.
+
+Review fix (AC-B12 review, 2026-11-16): each table entry below is guarded
+on its owning module being non-`nil`, the same posture the loader's own
+`call_if` uses. Before this guard, indexing `petrovich`/`effectors`/
+`sight` directly inside the table constructor raised a Lua error at this
+file's own top level the moment any one of them was `nil` -- which
+`load_module`'s `pcall` then caught as *this* module failing to load, so
+one handler-owning module failing to load took every op down with it,
+including the ops owned by modules that loaded fine.
 --]]
 
 local M = {}
@@ -58,14 +67,23 @@ end
 -- globals -- each module's own identity table, set by the loader's
 -- `load_module` when it loaded (see `core.lua`'s header comment) --
 -- `commands.lua` loads LAST specifically so all three already exist
--- here.
-local handlers = {
-    petrovich_search = petrovich.handle_petrovich_search_command,
-    cockpit_switch = effectors.handle_cockpit_switch_command,
-    sight_target = sight.handle_sight_target_command,
-    watch_args = effectors.handle_watch_args_command,
-    read_args = effectors.handle_read_args_command,
-}
+-- here. Each owning module is guarded non-`nil` before its own entries
+-- are added -- a module that failed to load simply contributes no ops
+-- to this table, which `poll_command_socket` below already treats the
+-- same as an unknown op (logged, ignored, never fatal), rather than
+-- raising a Lua error here that would take every other op down too.
+local handlers = {}
+if petrovich ~= nil then
+    handlers.petrovich_search = petrovich.handle_petrovich_search_command
+end
+if effectors ~= nil then
+    handlers.cockpit_switch = effectors.handle_cockpit_switch_command
+    handlers.watch_args = effectors.handle_watch_args_command
+    handlers.read_args = effectors.handle_read_args_command
+end
+if sight ~= nil then
+    handlers.sight_target = sight.handle_sight_target_command
+end
 
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
@@ -90,7 +108,13 @@ local function poll_command_socket(t)
         if handler == nil then
             debug_log("ignoring command with unknown op: " .. tostring(op))
         elseif op == "read_args" then
-            if effectors.admit_read(reads_this_frame) then
+            -- `handler` above is already `nil` whenever `effectors`
+            -- failed to load (its entries never entered `handlers`), so
+            -- this branch is only reached with `effectors` non-`nil` --
+            -- guarded explicitly anyway, the same posture as every
+            -- other cross-module call in this file, so this line never
+            -- depends on that invariant holding elsewhere.
+            if effectors ~= nil and effectors.admit_read(reads_this_frame) then
                 reads_this_frame = reads_this_frame + 1
                 handler(data, t)
             else

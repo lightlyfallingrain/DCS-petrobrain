@@ -187,9 +187,55 @@ AI-pilot-wheel press and clear the takeover state in the stop hook). Mapped to t
   Resolved by splitting `telemetry`'s entry point into `send_ownship` + `send_world_objects` and
   calling them in the file's real original order (see "Decisions" above) — the plan's own disclaimer
   ("Illustrative only... the order must not change") governs here.
-- **Comments pruned**: 4 "must stay below `safe_call`/`fmt_num_or_null`" ordering notes in
-  `sight.lua` (on `push_slew_trace` and `run_sight_servo`) had their mentions of `safe_call`/
-  `fmt_num_or_null` removed — those names are now bare globals with no file-order sensitivity at
-  all, so the claim "must stay below" them is false post-split. The rest of each comment (ordering
-  relative to genuinely still-local same-file constants/functions) was kept, since that constraint
-  is still real.
+- **Comments pruned**: 4 "must stay below `safe_call`/`fmt_num_or_null`" ordering notes, not all in
+  `sight.lua` as first logged here — corrected per the review (`plans/ac-b12-export-modules/
+  review.md`, "Optional Refinements"): one of the 4 was in `push_payload_state`, which moved to
+  `telemetry.lua`, not `sight.lua`. Of the two actual `sight.lua` occurrences (`push_slew_trace`,
+  `run_sight_servo`), the **entire** ordering note was removed, not just the `safe_call`/
+  `fmt_num_or_null` mentions — including the part naming the still-same-file locals (`SLEW_DEBUG`,
+  `ASP17_FIELD_*`, `MARK_*`, `sight_mark_is_clipped`) that `push_slew_trace` must still stay below.
+  The review traced the actual ordering in the file and confirmed it is still correct (every one of
+  those locals is declared above where `push_slew_trace` now sits), and
+  `test_dcs_export_lua_local_order.py` mechanically re-proves this on every run, so no correctness
+  was at risk — this was a log-accuracy error, not a code defect. The specific dated incident the
+  removed `sight.lua` comment referenced (`push_ptt_state`/`push_slew_trace` called `nil` because
+  they sat above their declarations, 2026-09-23/2026-10-21) remains documented in
+  `aircraft-layer/CLAUDE.md`'s "no hoisting" section, unchanged by this diff, so nothing durable was
+  actually lost.
+
+### Review Fixes (post-review, `plans/ac-b12-export-modules/review.md`)
+
+1. **Required fix — guarded `commands.lua`'s dispatch table on each owning module being
+   non-`nil`.** Before this fix, `local handlers = {...}` indexed `petrovich`/`effectors`/`sight`
+   directly at module-load time; any one of those three being `nil` (a failed load) raised a Lua
+   error building the table, which `load_module`'s own `pcall` then caught as *`commands`* failing
+   to load — taking all five command ops dark, including the ops owned by the two modules that
+   loaded fine. Rewrote the table as three `if <module> ~= nil then ... end` guards, the same
+   posture the loader's own `call_if` already uses, so a missing module now simply contributes no
+   entries — `poll_command_socket` already treats an op with no handler as unknown (logged,
+   ignored, never fatal), so no new branch was needed there. Also guarded the
+   `effectors.admit_read(...)` call inside the `read_args` branch the review named explicitly,
+   even though by construction `handler` is already `nil` (and that branch unreached) whenever
+   `effectors` is missing — explicit rather than relying on that invariant holding elsewhere. Added
+   `aircraft-layer/tests/test_commands_lua.py`: extracts the real guarded table-construction block
+   and the real `poll_command_socket` out of `commands.lua`, runs them against a fake
+   `command_socket` with `effectors` left undefined (simulating a failed load), and asserts
+   `petrovich`/`sight`'s own ops still dispatch while every `effectors`-owned op (including
+   `read_args`) is silently ignored rather than crashing the poll; a second test confirms dispatch
+   is unchanged with every module present. Counterfactual-verified: reverting to the unguarded
+   table-literal form made the new tests fail (one by the extractor's own marker no longer being
+   found, the other by the harness's `returncode == 0` assertion), then restored by `shasum`
+   before/after (`b24012d7...` both times).
+2. **Main-loop decision — bumped `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` together,
+   "2026-11-16" → "2026-11-16b".** Not a reversal of U1's reasoning (the module split still changes
+   no wire field), but U1 made this version string the *whole* deployment-staleness check for the
+   new multi-file deploy, which only works if the string changes whenever the deployed file set
+   does — unbumped, a deploy that missed the split entirely would have reported the identical
+   string as a correctly split one, and AC-B13 also changes behaviour. Dated history lines added to
+   both files' version-bump comment blocks, matching the existing convention.
+   `test_export_lua_constants_parity.py::test_export_script_version_matches_collector_expectation`
+   still passes (both sides read the new string).
+3. **Documentation accuracy** — corrected the "Comments pruned" bullet in this file's own "Notable
+   Discoveries" above (see that bullet; it now states the `telemetry.lua`/`push_payload_state` home
+   of one of the four, and that the two real `sight.lua` occurrences had their whole ordering note
+   removed, not just the `safe_call`/`fmt_num_or_null` mentions).
