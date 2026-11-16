@@ -77,6 +77,7 @@ def _make_handler(
     read_args_response: object | None = None,
     read_args_status: int = 200,
     probe_points_calls: list[tuple[int, list[list[int]]]] | None = None,
+    ai_pilot_goal_calls: list[dict[str, object]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     if triggered_searches is None:
         triggered_searches = []
@@ -84,6 +85,8 @@ def _make_handler(
         watch_args_calls = []
     if probe_points_calls is None:
         probe_points_calls = []
+    if ai_pilot_goal_calls is None:
+        ai_pilot_goal_calls = []
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -136,6 +139,11 @@ def _make_handler(
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 body = json.loads(self.rfile.read(length))
                 probe_points_calls.append((body["seq"], body["points"]))
+                self._respond(200, {"ok": True})
+            elif self.path == "/command/ai_pilot_goal":
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = json.loads(self.rfile.read(length))
+                ai_pilot_goal_calls.append(body)
                 self._respond(200, {"ok": True})
             else:
                 self._respond(404, {"error": "not found"})
@@ -340,6 +348,50 @@ def test_set_watch_args_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.set_watch_args("abc", [886])
+
+
+@pytest.fixture
+def server_url_with_ai_pilot_goal_calls() -> Iterator[
+    tuple[str, list[dict[str, object]]]
+]:
+    calls: list[dict[str, object]] = []
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(ai_pilot_goal_calls=calls))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}", calls
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_write_ai_pilot_goal_posts_to_command_endpoint(
+    server_url_with_ai_pilot_goal_calls: tuple[str, list[dict[str, object]]],
+) -> None:
+    url, calls = server_url_with_ai_pilot_goal_calls
+    client = AircraftLayerClient(base_url=url)
+
+    client.write_ai_pilot_goal(1, "heading", 90.0, None, None, None, None)
+
+    assert calls == [
+        {
+            "goal_seq": 1,
+            "param": "heading",
+            "heading_target_deg": 90.0,
+            "altitude_target_m": None,
+            "altitude_target_ref": None,
+            "speed_target_kmh": None,
+            "hvrt_direction": None,
+        }
+    ]
+
+
+def test_write_ai_pilot_goal_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.write_ai_pilot_goal(1, "heading", 90.0, None, None, None, None)
 
 
 @contextlib.contextmanager

@@ -163,7 +163,12 @@ Stage P1) is this seam's `GET /ai_pilot_wheel/latest` counterpart to
 `get_sight_servo_latest` -- same "not an error" empty-cache posture.
 `Export.lua`'s own per-frame AI-pilot-wheel status (parked state, the
 flattened overlay readback, the last press issued); `belief.ai_pilot_
-wheel.advance_parked_flight_state` is the one caller."""
+wheel.advance_parked_flight_state` is the one caller.
+
+`write_ai_pilot_goal` (Stage P2a/P2b, "Stage P2 ready to build") is this
+seam's write side for the goal channel -- `POST /command/ai_pilot_goal`,
+following `write_sight_target`'s exact raise-on-failure, pure-pass-through
+posture."""
 
 from __future__ import annotations
 
@@ -472,6 +477,40 @@ class AircraftLayerClient:
                 f"got {type(result).__name__}"
             )
         return result
+
+    def write_ai_pilot_goal(
+        self,
+        goal_seq: int,
+        param: Literal["heading", "altitude", "speed"] | None,
+        heading_target_deg: float | None,
+        altitude_target_m: float | None,
+        altitude_target_ref: Literal["radar", "barometric"] | None,
+        speed_target_kmh: float | None,
+        hvrt_direction: Literal["left", "right", "forward", "back"] | None,
+    ) -> None:
+        """`POST /command/ai_pilot_goal` -> sends BL-16 mode 2's goal
+        channel message (`plans/flight-control/plan.md`, "Stage P2 ready
+        to build", "The goal channel -- wire shape") to `Export.lua`'s
+        per-frame nudge loop (`aircraft-layer/src/collector/command_
+        sender.py`'s `CommandSender.send_ai_pilot_goal`). Raises
+        `AircraftLayerError` on any failure, mirroring `write_sight_
+        target`/`write_cockpit_switch` -- see the module docstring for
+        why. `belief.ai_pilot_wheel`'s own `decide_ai_pilot_wheel` is
+        what decides *when* to call this (on a `goal_seq` change); this
+        client is a pure pass-through, same division of labour every
+        other `write_*` method here already has."""
+        self._post_json(
+            "/command/ai_pilot_goal",
+            {
+                "goal_seq": goal_seq,
+                "param": param,
+                "heading_target_deg": heading_target_deg,
+                "altitude_target_m": altitude_target_m,
+                "altitude_target_ref": altitude_target_ref,
+                "speed_target_kmh": speed_target_kmh,
+                "hvrt_direction": hvrt_direction,
+            },
+        )
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         """`POST /command/look_direction` -> pushes the currently-commanded

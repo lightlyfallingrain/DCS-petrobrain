@@ -234,12 +234,33 @@ the body/brain process, on either Windows or Mac (compute topology note in
   write side: this layer carries the raw values and decides nothing (see
   `schema.payload`'s own module docstring).
 - `GET /ai_pilot_wheel/latest` -> the most recent `AiPilotWheelState`
-  (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1) as JSON, or
-  JSON `null` on the same "not an error" basis as every other `/latest`
-  endpoint. `Export.lua`'s own per-frame `run_ai_pilot_wheel` status --
-  whether the stick is parked, the flattened AI-pilot overlay readback
-  (mode/course/altitude/speed text), and the last press issued. Read-only,
-  no write side yet (Stage P2 adds the goal channel).
+  (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1, extended Stage
+  P2a/P2b with `goal_progress`/`goal_seq`) as JSON, or JSON `null` on the
+  same "not an error" basis as every other `/latest` endpoint.
+  `Export.lua`'s own per-frame `run_ai_pilot_wheel` status -- whether the
+  stick is parked, the flattened AI-pilot overlay readback (mode/course/
+  altitude/speed text), the last press issued, and (Stage P2) which goal
+  the per-frame loop is pursuing and how it is going.
+- `POST /command/ai_pilot_goal` -> the aircraft layer's seventh
+  inbound/write path (`plans/flight-control/plan.md`, "Stage P2 ready to
+  build", BL-16 mode 2's goal channel). Body `{"goal_seq": int, "param":
+  "heading"|"altitude"|"speed"|null, "heading_target_deg": number|null,
+  "altitude_target_m": number|null, "altitude_target_ref":
+  "radar"|"barometric"|null, "speed_target_kmh": number|null,
+  "hvrt_direction": "left"|"right"|"forward"|"back"|null}`; forwards to
+  `collector.command_sender.CommandSender.send_ai_pilot_goal`, which
+  fires the JSON command at `Export.lua`'s inbound UDP listener (the same
+  listener `/command/cockpit_switch`/`/command/sight_target` already
+  target), and responds `200 {"ok": true}` on the same "attempted the
+  call" contract as those two. `400 {"error": ...}` on a missing/
+  out-of-range `goal_seq`, an invalid `param`/`altitude_target_ref`/
+  `hvrt_direction`, an out-of-range optional numeric field, or a non-JSON
+  body -- shape validation only, same division of labour as
+  `/command/sight_target`. `503 {"error": "ai_pilot_goal channel not
+  configured"}` if this server was built without a `command_sender`; a
+  send failure propagates as `500 {"error": ...}`, same posture as
+  `/command/cockpit_switch` (a dropped goal update is a real behavioral
+  gap, not an opaque display string to swallow).
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -327,6 +348,7 @@ _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
 _COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
 _QUERY_READ_ARGS_PATH = "/query/read_args"
 _COMMAND_SIGHT_TARGET_PATH = "/command/sight_target"
+_COMMAND_AI_PILOT_GOAL_PATH = "/command/ai_pilot_goal"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
 
@@ -388,6 +410,35 @@ _SIGHT_TARGET_TSIM_BOUND = 86400.0
 #: `Export.lua`'s own `[%w_]{1,16}` bound on the wire (`plans/
 #: effector-sequences/plan.md` Stage 4, S4.5).
 _WATCH_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+
+#: `/command/ai_pilot_goal`'s own bounds (`plans/flight-control/plan.md`,
+#: "Stage P2 ready to build", BL-16 mode 2) -- shape validation only,
+#: same division of labour as `/command/sight_target`'s own clamps: real
+#: cockpit limits are enforced by `Export.lua`/DCS itself, these are
+#: generous sanity bounds against a malformed or hostile body on the LAN.
+_AI_PILOT_GOAL_SEQ_MAX = 2**31 - 1
+_AI_PILOT_GOAL_HEADING_MIN_DEG = 0.0
+_AI_PILOT_GOAL_HEADING_MAX_DEG = 360.0
+#: Metres, either reference -- generous past any altitude this airframe
+#: will ever fly (a few km AGL/MSL at most), well short of overflow.
+_AI_PILOT_GOAL_ALTITUDE_MIN_M = -500.0
+_AI_PILOT_GOAL_ALTITUDE_MAX_M = 20_000.0
+#: km/h IAS -- generous headroom above body-layer's own `AI_PILOT_SPEED_
+#: MAX_SENTINEL_KMH` (1,000,000, `belief/ai_pilot_wheel.py`), a protocol
+#: sentinel duplicated across the seam like every other cross-subproject
+#: constant in this codebase (module independence) -- this bound exists
+#: only to reject a wildly malformed value, not to police body-layer's
+#: own choice of sentinel.
+_AI_PILOT_GOAL_SPEED_MIN_KMH = 0.0
+_AI_PILOT_GOAL_SPEED_MAX_KMH = 2_000_000.0
+_AI_PILOT_GOAL_VALID_PARAMS: tuple[str, ...] = ("heading", "altitude", "speed")
+_AI_PILOT_GOAL_VALID_ALTITUDE_REFS: tuple[str, ...] = ("radar", "barometric")
+_AI_PILOT_GOAL_VALID_HVRT_DIRECTIONS: tuple[str, ...] = (
+    "left",
+    "right",
+    "forward",
+    "back",
+)
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -646,6 +697,9 @@ def _make_handler(
                 return
             if path == _COMMAND_SIGHT_TARGET_PATH:
                 self._handle_command_sight_target()
+                return
+            if path == _COMMAND_AI_PILOT_GOAL_PATH:
+                self._handle_command_ai_pilot_goal()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -1100,6 +1154,165 @@ def _make_handler(
                     goal_rate_az_deg_s,
                     goal_rate_el_deg_s,
                     t_sim,
+                )
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_ai_pilot_goal(self) -> None:
+            """`POST /command/ai_pilot_goal` -- BL-16 mode 2's goal
+            channel (`plans/flight-control/plan.md`, "Stage P2 ready to
+            build", "The goal channel -- wire shape"). Shape validation
+            only, mirroring `/command/sight_target`'s own division of
+            labour: every field finite/in-range where present, `param`/
+            `altitude_target_ref`/`hvrt_direction` checked against their
+            own closed vocabularies, `null` accepted for every optional
+            field (the "only the fields matching `param` are meaningful"
+            selector design). Reuses `command_sender`, the same instance
+            every other `/command/*` endpoint on this listener forwards
+            through."""
+            if command_sender is None:
+                self._respond_json(
+                    503, {"error": "ai_pilot_goal channel not configured"}
+                )
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            goal_seq_raw = data.get("goal_seq")
+            if (
+                isinstance(goal_seq_raw, bool)
+                or not isinstance(goal_seq_raw, int)
+                or not (0 <= goal_seq_raw <= _AI_PILOT_GOAL_SEQ_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'goal_seq' must be a whole number in "
+                            f"[0, {_AI_PILOT_GOAL_SEQ_MAX}], got {goal_seq_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            param = data.get("param")
+            if param is not None and param not in _AI_PILOT_GOAL_VALID_PARAMS:
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            f"'param' must be one of {_AI_PILOT_GOAL_VALID_PARAMS} "
+                            f"or null, got {param!r}"
+                        )
+                    },
+                )
+                return
+
+            def _optional_bounded_field(
+                field: str, lo: float, hi: float
+            ) -> tuple[float | None, bool]:
+                """`(value, ok)` -- `ok=False` means a 400 was already
+                sent and the caller must return immediately. `None` is a
+                legal value (the field was simply not supplied this
+                message)."""
+                value = data.get(field)
+                if value is None:
+                    return None, True
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < lo
+                    or value > hi
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                f"{field!r} must be a finite number in "
+                                f"[{lo}, {hi}] or null, got {value!r}"
+                            )
+                        },
+                    )
+                    return None, False
+                return float(value), True
+
+            heading_target_deg, ok = _optional_bounded_field(
+                "heading_target_deg",
+                _AI_PILOT_GOAL_HEADING_MIN_DEG,
+                _AI_PILOT_GOAL_HEADING_MAX_DEG,
+            )
+            if not ok:
+                return
+            altitude_target_m, ok = _optional_bounded_field(
+                "altitude_target_m",
+                _AI_PILOT_GOAL_ALTITUDE_MIN_M,
+                _AI_PILOT_GOAL_ALTITUDE_MAX_M,
+            )
+            if not ok:
+                return
+            speed_target_kmh, ok = _optional_bounded_field(
+                "speed_target_kmh",
+                _AI_PILOT_GOAL_SPEED_MIN_KMH,
+                _AI_PILOT_GOAL_SPEED_MAX_KMH,
+            )
+            if not ok:
+                return
+
+            altitude_target_ref = data.get("altitude_target_ref")
+            if (
+                altitude_target_ref is not None
+                and altitude_target_ref not in _AI_PILOT_GOAL_VALID_ALTITUDE_REFS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'altitude_target_ref' must be one of "
+                            f"{_AI_PILOT_GOAL_VALID_ALTITUDE_REFS} or null, got "
+                            f"{altitude_target_ref!r}"
+                        )
+                    },
+                )
+                return
+
+            hvrt_direction = data.get("hvrt_direction")
+            if (
+                hvrt_direction is not None
+                and hvrt_direction not in _AI_PILOT_GOAL_VALID_HVRT_DIRECTIONS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'hvrt_direction' must be one of "
+                            f"{_AI_PILOT_GOAL_VALID_HVRT_DIRECTIONS} or null, got "
+                            f"{hvrt_direction!r}"
+                        )
+                    },
+                )
+                return
+
+            try:
+                command_sender.send_ai_pilot_goal(
+                    goal_seq_raw,
+                    param,
+                    heading_target_deg,
+                    altitude_target_m,
+                    altitude_target_ref,
+                    speed_target_kmh,
+                    hvrt_direction,
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})

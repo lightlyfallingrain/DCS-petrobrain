@@ -126,6 +126,8 @@ class TestAiPilotWheelState:
             arg_952=0.05,
             takeover_stage="correcting_altitude",
             correction_path="hold",
+            goal_progress="pressing",
+            goal_seq=3,
         )
         assert sample.to_api_dict() == {
             "t": pytest.approx(1.5),
@@ -141,7 +143,42 @@ class TestAiPilotWheelState:
             "apw_arg952": pytest.approx(0.05),
             "apw_takeover_stage": "correcting_altitude",
             "apw_correction_path": "hold",
+            "apw_goal_progress": "pressing",
+            "apw_goal_seq": 3,
         }
+
+
+class TestAiPilotWheelGoalChannelFields:
+    """Stage P2's own additions (`plans/flight-control/plan.md`, "Stage
+    P2 ready to build", "The goal channel -- wire shape")."""
+
+    def test_parses_goal_progress_and_goal_seq(self) -> None:
+        line = (
+            '{"t":1.5,"apw_parked_active":true,"apw_goal_progress":"pressing",'
+            '"apw_goal_seq":7}'
+        )
+        sample = AiPilotWheelState.from_json_line(line, received_wall_clock_s=99.0)
+        assert sample.goal_progress == "pressing"
+        assert sample.goal_seq == 7
+
+    def test_absent_goal_fields_parse_as_none(self) -> None:
+        sample = AiPilotWheelState.from_json_line(_LINE, received_wall_clock_s=99.0)
+        assert sample.goal_progress is None
+        assert sample.goal_seq is None
+
+    def test_non_whole_number_goal_seq_is_a_parse_error(self) -> None:
+        with pytest.raises(AiPilotWheelParseError):
+            AiPilotWheelState.from_json_line(
+                '{"t":1.5,"apw_parked_active":true,"apw_goal_seq":1.5}',
+                received_wall_clock_s=99.0,
+            )
+
+    def test_non_string_goal_progress_is_a_parse_error(self) -> None:
+        with pytest.raises(AiPilotWheelParseError):
+            AiPilotWheelState.from_json_line(
+                '{"t":1.5,"apw_parked_active":true,"apw_goal_progress":1}',
+                received_wall_clock_s=99.0,
+            )
 
 
 class TestAiPilotWheelCache:
@@ -257,4 +294,9 @@ class TestAiPilotWheelLatestEndpoint:
             "apw_arg952": pytest.approx(0.05),
             "apw_takeover_stage": "correcting_altitude",
             "apw_correction_path": "hold",
+            # `_LINE` predates the Stage P2 goal-channel fields -- absent
+            # on the wire, not an error, same "missing is None" posture
+            # every other optional field here already has.
+            "apw_goal_progress": None,
+            "apw_goal_seq": None,
         }

@@ -230,6 +230,82 @@ class CommandSender:
                 f"goal_el_deg={goal_el_deg!r} t_sim={t_sim!r}: {exc}"
             ) from exc
 
+    def send_ai_pilot_goal(
+        self,
+        goal_seq: int,
+        param: Literal["heading", "altitude", "speed"] | None,
+        heading_target_deg: float | None,
+        altitude_target_m: float | None,
+        altitude_target_ref: Literal["radar", "barometric"] | None,
+        speed_target_kmh: float | None,
+        hvrt_direction: Literal["left", "right", "forward", "back"] | None,
+    ) -> None:
+        """Send `{"op": "ai_pilot_goal", "goal_seq": ..., "param": ...,
+        "heading_target_deg": ..., "altitude_target_m": ...,
+        "altitude_target_ref": ..., "speed_target_kmh": ...,
+        "hvrt_direction": ...}` to `Export.lua`'s command listener -- the
+        goal channel (`plans/flight-control/plan.md`, "Stage P2 ready to
+        build", "The goal channel -- wire shape"), BL-16 mode 2's third
+        write op on the same `POST /command/*` family. Same
+        `CommandSendError` posture as `send_sight_target`/`send_cockpit_
+        switch`: a dropped goal update is a real behavioral gap (Lua
+        keeps pressing toward a stale target, or stops pressing toward
+        the wrong one), not an opaque display string to swallow.
+
+        **Only the fields matching `param` are meaningful** -- `param`
+        is a *selector*, not three simultaneous targets (the plan's own
+        reading of the Architecture decision: Lua never decides which
+        wheel button to press, only what value Petrovich wants held
+        right now). `param: None` with every target `None` is the idle/
+        all-settled message. `hvrt_direction` travels in the same
+        message rather than a separate op, per the plan.
+
+        Plain `json.dumps`, unlike `send_cockpit_switch`/`send_sight_
+        target`'s hand-formatted `_format_fixed_point`: every value on
+        this channel (a compass heading, a metre altitude, a km/h speed)
+        is a real-world magnitude with no near-zero-fraction case, so the
+        exponent-notation risk that forced hand-formatting on the 9K113
+        channel (small angles/rates near zero) does not apply here --
+        same posture as `send_watch_args`/`send_command` below, and
+        `json.dumps(None)` is the simplest, correct way to put `null` on
+        the wire for the unused fields.
+
+        **No validation happens here** -- same division of labour as
+        `send_cockpit_switch`'s own docstring: `api.server`'s `POST
+        /command/ai_pilot_goal` handler validates shape before this
+        method is ever called, and `Export.lua`'s own dispatch
+        (`handle_ai_pilot_goal_command`) validates a third time."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {
+                "op": "ai_pilot_goal",
+                "goal_seq": goal_seq,
+                "param": param,
+                "heading_target_deg": heading_target_deg,
+                "altitude_target_m": altitude_target_m,
+                "altitude_target_ref": altitude_target_ref,
+                "speed_target_kmh": speed_target_kmh,
+                "hvrt_direction": hvrt_direction,
+            }
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "ai-pilot-goal command send failed: goal_seq=%r param=%r",
+                goal_seq,
+                param,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send ai_pilot_goal goal_seq={goal_seq!r} "
+                f"param={param!r}: {exc}"
+            ) from exc
+
     def send_watch_args(self, watch_id: str, args: list[int]) -> None:
         """Send `{"op": "watch_args", "watch_id": watch_id, "args": args}`
         to `Export.lua`'s command listener -- the continuous watched-args
