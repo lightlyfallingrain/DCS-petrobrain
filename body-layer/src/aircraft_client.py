@@ -278,7 +278,9 @@ class AircraftLayerClient:
         """`GET /mission_start/latest` -> the most recent
         `MissionStartEvent` as a dict (see `aircraft-layer/src/schema/
         mission_start.py`'s `MissionStartEvent.to_dict`, i.e.
-        `{"sequence", "theatre", "received_wall_clock_s"}`), or `None` if
+        `{"sequence", "qnh", "atmosphere_type", "theatre",
+        "received_wall_clock_s"}` -- `qnh`/`atmosphere_type` added by
+        `[[BL-B118]]`), or `None` if
         no `onSimulationStart` has fired yet this collector process's
         lifetime -- same "not an error" posture as `get_line_of_sight_
         latest` (`plans/bl15-mission-start/plan.md`)."""

@@ -33,6 +33,8 @@ from belief.crew_console import (
     _GREETING_TIMES_OF_DAY,
     _MAX_PENDING_POSITIONAL_REPLIES,
     _NOTHING_TO_STOP,
+    ALTIMETER_QNH_NO_RESPONSE_LINE,
+    ALTIMETER_QNH_TIMEOUT_LINE,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -1912,13 +1914,13 @@ def test_non_look_command_on_ground_dispatches_normally() -> None:
     the ground they dispatch exactly as if airborne (they only read
     existing belief or register a non-perception task). `sight_ready`
     set so this exercises the on-ground path, not `BL-B66` Stage 3's
-    separate readiness gate (see `test_observ_on_signals_the_poll_loop_
-    and_speaks` for that one)."""
+    separate readiness gate (see `test_observ_on_signals_the_poll_loop`
+    for that one). **Returns `[]`** (`[[BL-B119]]`), same as off-ground."""
     console = CrewConsole(store=ContactStore())
     console.on_ground = True
     console.sight_ready = True
 
-    assert console.handle_command("observ_on", now_sim=0.0) == ["Observ on."]
+    assert console.handle_command("observ_on", now_sim=0.0) == []
 
 
 def test_refusal_mode_wins_over_on_ground_for_a_look_command() -> None:
@@ -3604,13 +3606,20 @@ def test_dispatched_command_tokens_all_return_something(
     loop's own dispatch order, not a wiring gap, the reason a later token
     returns `[]`. 100s apart is far longer than any line this class speaks
     takes, so every call here sees a clear channel, exactly as a real
-    sortie's well-spaced commands would."""
+    sortie's well-spaced commands would.
+
+    `sight_ready` set (`[[BL-B119]]`) so `observ_on` takes its own
+    accepted path (`[]`, per `NO_RETURN_VALUE_COMMAND_TOKENS`'s own
+    comment) rather than its "Unable, guidance unit not ready." refusal
+    -- that refusal is real and unaffected by this flag, just not what
+    this completeness sweep is checking."""
     tasks = TaskStore()
     console = CrewConsole(
         store=ContactStore(),
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.sight_ready = True
     for index, token in enumerate(sorted(DISPATCHED_COMMAND_TOKENS)):
         lines = console.handle_command(token, now_sim=index * 100.0)
         if token in NO_RETURN_VALUE_COMMAND_TOKENS:
@@ -6117,17 +6126,19 @@ def test_where_is_it_with_an_engaged_run_reuses_the_live_state(
     assert answer[0].endswith("obstructed.")
 
 
-def test_observ_on_signals_the_poll_loop_and_speaks() -> None:
+def test_observ_on_signals_the_poll_loop() -> None:
     """`BL-B64` Stage 2, direction §6 -- the same one-shot-signal shape
     `attack_run_transition` uses, since `OpticState.home_phase` lives on
     `logger.ConsolePerceptionRunner`, not here. `sight_ready` set so this
     exercises the accepted path, not `BL-B66` Stage 3's readiness gate
     (see `test_observ_on_refused_when_guidance_unit_not_ready` for that
-    one)."""
+    one). **Returns `[]`** (`[[BL-B119]]`) -- "Observ on." is now the
+    `observ-on` sequence file's own line, spoken by the engine when its
+    row completes, not by this handler."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.sight_ready = True
     lines = console.handle_command("observ_on", now_sim=0.0)
-    assert lines == ["Observ on."]
+    assert lines == []
     assert console.observ_transition == "on"
 
 
@@ -6146,20 +6157,21 @@ def test_observ_on_refused_when_guidance_unit_not_ready() -> None:
 
 def test_observ_off_needs_no_readiness() -> None:
     """Plan §3: "OBSERV OFF needs no gating and no sequence" -- unlike
-    OBSERV ON, it dispatches regardless of `sight_ready`."""
+    OBSERV ON, it dispatches regardless of `sight_ready`. **Returns `[]`**
+    (`[[BL-B119]]`) -- see `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     assert console.sight_ready is False
 
     lines = console.handle_command("observ_off", now_sim=0.0)
 
-    assert lines == ["Observ off."]
+    assert lines == []
     assert console.observ_transition == "off"
 
 
-def test_observ_off_signals_the_poll_loop_and_speaks() -> None:
+def test_observ_off_signals_the_poll_loop() -> None:
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     lines = console.handle_command("observ_off", now_sim=0.0)
-    assert lines == ["Observ off."]
+    assert lines == []
     assert console.observ_transition == "off"
 
 
@@ -6273,7 +6285,8 @@ def test_point_during_attack_run_is_refused() -> None:
 def test_point_observ_off_asks_then_yes_queues_the_deferred_look() -> None:
     """OBSERV off -> "Need observ, confirm?" -> "yes" -> `_handle_observ_
     on` runs exactly once and, since `sight_ready` holds, queues a
-    `PendingPointRequest` with the original slots."""
+    `PendingPointRequest` with the original slots. **Returns `[]`**
+    (`[[BL-B119]]`) -- see `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.on_ground = False
     console.sight_ready = True
@@ -6293,7 +6306,7 @@ def test_point_observ_off_asks_then_yes_queues_the_deferred_look() -> None:
         ambiguous=False,
         now_sim=1.0,
     )
-    assert affirm_lines == ["Observ on."]
+    assert affirm_lines == []
     assert console.observ_transition == "on"
     assert console.pending_point_request is not None
     assert console.pending_point_request.slots == {"clock": 2}
@@ -6324,7 +6337,8 @@ def test_point_observ_off_saying_observ_on_also_counts_as_yes() -> None:
     """`classify_yes_no`'s own rule 2 ("a resolved command token is never
     an answer") would otherwise swallow this -- `"observ on"` resolves to
     the real `observ_on` token, scoped exception for this one pending-
-    confirmation kind only."""
+    confirmation kind only. **Returns `[]`** (`[[BL-B119]]`) -- see
+    `test_observ_on_signals_the_poll_loop`."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
     console.on_ground = False
     console.sight_ready = True
@@ -6340,7 +6354,7 @@ def test_point_observ_off_saying_observ_on_also_counts_as_yes() -> None:
         ambiguous=False,
         now_sim=1.0,
     )
-    assert lines == ["Observ on."]
+    assert lines == []
     assert console.pending_point_request is not None
     assert console._pending_confirmation is None
 
@@ -8113,6 +8127,123 @@ class TestDrainSightLockTracking:
         console.drain_sight_lock_tracking(4.0, previously_seen=False, seen=False)
         console.drain_sight_lock_tracking(5.0, previously_seen=False, seen=True)
         assert output.getvalue() == "Tracking.\nTracking.\n"
+
+
+class TestDrainAltimeterQnhFailed:
+    """`CrewConsole.drain_altimeter_qnh_failed` (`[[BL-B118]]`, `plans/
+    bl16-qnh-mission-start/plan.md`, "The closed loop" step 4) -- mirrors
+    `drain_config_error`'s own gated-until-open, deferred-while-silenced
+    shape (D5/D6, `plans/effector-sequences/plan.md`), speaking one of two
+    fixed lines depending on `phase`."""
+
+    def _console(self) -> tuple[CrewConsole, object]:
+        import io
+
+        output = io.StringIO()
+        return CrewConsole(store=ContactStore(), output=output), output
+
+    def test_speaks_no_response_line_once_gate_is_open(self) -> None:
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_no_response"
+        )
+
+        assert output.getvalue() == ALTIMETER_QNH_NO_RESPONSE_LINE + "\n"
+        assert console.altimeter_qnh_failed_pending is False
+
+    def test_speaks_timeout_line_once_gate_is_open(self) -> None:
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+
+        assert output.getvalue() == ALTIMETER_QNH_TIMEOUT_LINE + "\n"
+        assert console.altimeter_qnh_failed_pending is False
+
+    def test_silent_when_not_pending(self) -> None:
+        console, output = self._console()
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+
+        assert output.getvalue() == ""
+
+    def test_held_while_intercom_gate_is_closed(self) -> None:
+        """Deferred, not dropped -- the flag stays set and a later call
+        with the gate open still speaks."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=False, phase="failed_timeout"
+        )
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_timeout"
+        )
+        assert output.getvalue() == ALTIMETER_QNH_TIMEOUT_LINE + "\n"
+
+    def test_held_while_silenced(self) -> None:
+        """D6: silenced defers, it does not lose the line."""
+        console, output = self._console()
+        console.silenced = True
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+        console.silenced = False
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue() == ALTIMETER_QNH_NO_RESPONSE_LINE + "\n"
+
+    def test_silent_when_phase_is_none(self) -> None:
+        """Defensive: pending with no phase to explain it (cannot happen
+        via the one real call site today, since a mission reset clears
+        both together) is treated as "nothing to say yet," not a crash
+        or a guessed line."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+
+        console.drain_altimeter_qnh_failed(1.0, intercom_open=True, phase=None)
+
+        assert output.getvalue() == ""
+        assert console.altimeter_qnh_failed_pending is True
+
+    def test_re_armable_unlike_config_error_pending(self) -> None:
+        """The one behaviour that deliberately differs from
+        `config_error_pending`: this flag is not in `reset_for_new_
+        mission`'s preserved-field list, so a later mission's own sync
+        attempt can set it again after an earlier one was drained."""
+        console, output = self._console()
+        console.altimeter_qnh_failed_pending = True
+        console.drain_altimeter_qnh_failed(
+            1.0, intercom_open=True, phase="failed_timeout"
+        )
+        assert console.altimeter_qnh_failed_pending is False
+
+        console.reset_for_new_mission()
+        assert console.altimeter_qnh_failed_pending is False
+
+        console.altimeter_qnh_failed_pending = True
+        console.drain_altimeter_qnh_failed(
+            2.0, intercom_open=True, phase="failed_no_response"
+        )
+        assert output.getvalue().splitlines() == [
+            ALTIMETER_QNH_TIMEOUT_LINE,
+            ALTIMETER_QNH_NO_RESPONSE_LINE,
+        ]
 
 
 class TestBrainCommandsAreRealDispatchTokens:

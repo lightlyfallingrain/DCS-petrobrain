@@ -95,7 +95,16 @@ dir="$1"
 # renumbered, including for items that are done or rejected -- an ID that
 # silently comes to mean a different item is worse than no ID, because a commit
 # message citing the old meaning now reads as evidence for the new one.
-max=$( { ls "$dir" 2>/dev/null; git ls-files "$dir" 2>/dev/null | xargs -n1 basename 2>/dev/null; } \
+#
+# Also every local and remote branch's copy of the directory (2026-11-16): the
+# tree alone cannot see an ID minted on an unmerged feature branch, and twice in
+# one day a branch minted an ID another live branch already held (BL-B118 offered
+# while the QNH branch had it; BL-B119 filed twice). A branch's ID counts as taken
+# until that branch is deleted.
+max=$( { ls "$dir" 2>/dev/null; git ls-files "$dir" 2>/dev/null | xargs -n1 basename 2>/dev/null;
+         for ref in $(git for-each-ref --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
+             git ls-tree --name-only "$ref" -- "$dir/" 2>/dev/null | xargs -n1 basename 2>/dev/null
+         done; } \
     | grep -oE "^${prefix}[0-9]+" | sort -V | tail -1 )
 
 if [ -z "$max" ]; then

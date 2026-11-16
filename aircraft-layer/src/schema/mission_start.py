@@ -11,7 +11,8 @@ queue, so there is no per-poll Lua-side timer here.
 Wire format, one JSON object per datagram, no newline needed (datagram
 framing already provides it):
 
-    {"sequence": <int>, "theatre": "<string>"|null}
+    {"sequence": <int>, "theatre": "<string>"|null,
+     "qnh": <number>|null, "atmosphere_type": <int>|null}
 
 `sequence` increments once per `onSimulationStart` firing within one DCS
 process's lifetime (Hook-state-local counter, starting at 1) -- body-layer
@@ -37,7 +38,17 @@ model-time value.
 (BL-15) will want a `mission_filename` field; this module does not add it
 speculatively, but nothing about the wire shape or `from_dict`'s structure
 needs to change to add one later -- an additional optional key, parsed the
-same way `theatre` is."""
+same way `theatre` is.
+
+**`qnh`/`atmosphere_type` added by `[[BL-B118]]`** (`plans/
+bl16-qnh-mission-start/plan.md`), parsed/emitted the same best-effort,
+`null`-on-failure way as `theatre`: `qnh` is the mission's QNH in mmHg
+(`env.mission.weather.qnh`), the target body-layer's operator-altimeter
+sync loop drives the cockpit toward. `atmosphere_type` (`env.mission.
+weather.atmosphere_type`) rides beside it purely for the record -- a
+dynamic-weather mission's `qnh` may not be meaningful (the recon note's
+own caveat), and this field is what a later wrong-reading report would
+cite; no code here special-cases its value."""
 
 from __future__ import annotations
 
@@ -60,6 +71,12 @@ class MissionStartEvent:
     sequence: int
     theatre: str | None
     received_wall_clock_s: float
+    #: `[[BL-B118]]` -- mission QNH, mmHg (`env.mission.weather.qnh`),
+    #: `None` on absence/unreadable, same as `theatre`.
+    qnh: float | None = None
+    #: `[[BL-B118]]` -- `env.mission.weather.atmosphere_type`, carried for
+    #: the record only (see module docstring); `None` on absence/unreadable.
+    atmosphere_type: int | None = None
 
     @staticmethod
     def from_dict(
@@ -77,15 +94,36 @@ class MissionStartEvent:
                 f"field 'theatre' must be a string or null, got {theatre!r}"
             )
 
+        qnh = data.get("qnh")
+        if qnh is not None and (
+            isinstance(qnh, bool) or not isinstance(qnh, (int, float))
+        ):
+            raise MissionStartParseError(
+                f"field 'qnh' must be a number or null, got {qnh!r}"
+            )
+
+        atmosphere_type = data.get("atmosphere_type")
+        if atmosphere_type is not None and (
+            isinstance(atmosphere_type, bool) or not isinstance(atmosphere_type, int)
+        ):
+            raise MissionStartParseError(
+                f"field 'atmosphere_type' must be an integer or null, got "
+                f"{atmosphere_type!r}"
+            )
+
         return MissionStartEvent(
             sequence=sequence,
             theatre=theatre,
             received_wall_clock_s=received_wall_clock_s,
+            qnh=float(qnh) if qnh is not None else None,
+            atmosphere_type=atmosphere_type,
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "sequence": self.sequence,
+            "qnh": self.qnh,
+            "atmosphere_type": self.atmosphere_type,
             "theatre": self.theatre,
             "received_wall_clock_s": self.received_wall_clock_s,
         }

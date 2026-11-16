@@ -35,6 +35,47 @@ AI_PILOT_HEADING_TOLERANCE_DEG = 5.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_SPEED_STEPS_KMH
 AI_PILOT_SPEED_STEPS_KMH = [0, 60, 120, 150, 200, 250]
 
+[belief.altimeter_qnh_sync]
+# The nominal first probe step sent when no gain estimate exists yet (iteration 0, or a degenerate estimate) -- the knob's gain is unmeasured, so this is a guess, not a calibrated value.
+# status: uncalibrated | range: 0.01 .. 0.2
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_CALIBRATION_STEP
+ALTIMETER_QNH_CALIBRATION_STEP = 0.05
+
+# Overall wall-clock bound, independent of iteration count -- a dead collector or a run stuck re-skipping transient read/write failures cannot hang this forever.
+# status: agreed-guess | range: 5.0 .. 60.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_MAX_DURATION_S
+ALTIMETER_QNH_MAX_DURATION_S = 15.0
+
+# Enough iterations for the worst-case 120 mmHg window span at the calibration step size.
+# status: agreed-guess | range: 5.0 .. 60.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_MAX_ITERATIONS
+ALTIMETER_QNH_MAX_ITERATIONS = 20
+
+# Bounds any single write regardless of a bad gain estimate -- the real safety net against a runaway delta.
+# status: uncalibrated | range: 0.05 .. 1.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_MAX_STEP
+ALTIMETER_QNH_MAX_STEP = 0.3
+
+# arg834 units; must be well under `ALTIMETER_QNH_CALIBRATION_STEP` so a genuine (small) response is never mistaken for none.
+# status: uncalibrated | range: 0.0005 .. 0.02
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_NO_RESPONSE_EPSILON
+ALTIMETER_QNH_NO_RESPONSE_EPSILON = 0.002
+
+# One noisy read must not trip a hard failure -- two consecutive non-responses required.
+# status: agreed-guess | range: 1.0 .. 5.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_NO_RESPONSE_STRIKES
+ALTIMETER_QNH_NO_RESPONSE_STRIKES = 2
+
+# Time between a write and the next read -- the device's own settle time is unmeasured, so this is a guess; too short risks reading a write still in flight (miscomputing gain), too long just slows convergence.
+# status: uncalibrated | range: 0.05 .. 2.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_SETTLE_S
+ALTIMETER_QNH_SETTLE_S = 0.3
+
+# "Well under 1 mmHg (~11 m)" per the pilot's own brief; 0.3 mmHg is about 3 m.
+# status: agreed-guess | range: 0.1 .. 1.0
+# source: belief/altimeter_qnh_sync.py:ALTIMETER_QNH_TOLERANCE_MMHG
+ALTIMETER_QNH_TOLERANCE_MMHG = 0.3
+
 [belief.association_over_time]
 # How fast an unobserved-moving contact's position uncertainty grows, metres/second, when `Contact.motion` is `"stopped"` or `None` ("never observed moving") -- user direction, 2026-10-30 (explore-notes.md, "E5 fold on a closing run"): "not observed moving -> not expected to move -> tiny growth".
 # status: judgement | range: 0.0 .. 1.0

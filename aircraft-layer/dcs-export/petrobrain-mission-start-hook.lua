@@ -31,11 +31,21 @@ failure.
 
 **Wire format (this script -> collector), UDP, one JSON object per
 datagram** (matches `aircraft-layer/src/schema/mission_start.py`):
-    {"sequence": <int>, "theatre": "<string>"|null}
+    {"sequence": <int>, "theatre": "<string>"|null,
+     "qnh": <number>|null, "atmosphere_type": <int>|null}
 
 Reuses DCS's own shipped JSON encoder (`Scripts\JSON.lua`) and LuaSocket's
 `package.path`/`cpath` extension, same approach as every other Hook script
 in this directory.
+
+**`qnh`/`atmosphere_type` added by `BL-B118`** (`plans/
+bl16-qnh-mission-start/plan.md`) -- read the same best-effort,
+`net.dostring_in` way as `theatre`, mirroring `resolveTheatre()` exactly.
+`qnh` (`env.mission.weather.qnh`, mmHg) is what body-layer's operator-
+altimeter sync loop drives the cockpit toward; `atmosphere_type`
+(`env.mission.weather.atmosphere_type`) rides beside it purely for the
+record, in case a dynamic-weather mission's `qnh` turns out not to be
+meaningful -- neither field is special-cased here.
 --]]
 
 log.write("PetrobrainMissionStart", log.INFO, "Loading - Petrobrain mission start")
@@ -87,11 +97,37 @@ local function resolveTheatre()
     return nil
 end
 
-local function sendMissionStart(seq, theatre)
+--: `BL-B118` -- best-effort read of the live mission's QNH (mmHg),
+--: mirroring `resolveTheatre()` exactly. Returns `nil` (never raises) on
+--: any failure or non-number result.
+local function resolveQnh()
+    local ok, result = dostring("scripting", "return env.mission.weather.qnh")
+    if ok and type(result) == "number" then
+        return result
+    end
+    return nil
+end
+
+--: `BL-B118` -- same shape as `resolveQnh()`, for `env.mission.
+--: weather.atmosphere_type`, carried for the record only.
+local function resolveAtmosphereType()
+    local ok, result = dostring("scripting", "return env.mission.weather.atmosphere_type")
+    if ok and type(result) == "number" then
+        return result
+    end
+    return nil
+end
+
+local function sendMissionStart(seq, theatre, qnh, atmosphereType)
     if sendSocket == nil then
         sendSocket = socket.udp()
     end
-    local payload = JSON:encode({ sequence = seq, theatre = theatre })
+    local payload = JSON:encode({
+        sequence = seq,
+        theatre = theatre,
+        qnh = qnh,
+        atmosphere_type = atmosphereType,
+    })
     local ok, err = sendSocket:sendto(payload, MISSION_START_HOST, MISSION_START_PORT)
     if not ok then
         logi("send failed for sequence=" .. tostring(seq) .. ": " .. tostring(err))
@@ -102,11 +138,19 @@ function petrobrainMissionStart.onSimulationStart()
     sequence = sequence + 1
     local theatreOk, theatre = pcall(resolveTheatre)
     local resolvedTheatre = theatreOk and theatre or nil
+    local qnhOk, qnh = pcall(resolveQnh)
+    local resolvedQnh = qnhOk and qnh or nil
+    local atmosphereOk, atmosphereType = pcall(resolveAtmosphereType)
+    local resolvedAtmosphereType = atmosphereOk and atmosphereType or nil
     logi(
         "onSimulationStart sequence=" .. tostring(sequence)
             .. " theatre=" .. tostring(resolvedTheatre)
+            .. " qnh=" .. tostring(resolvedQnh)
+            .. " atmosphere_type=" .. tostring(resolvedAtmosphereType)
     )
-    local ok, err = pcall(sendMissionStart, sequence, resolvedTheatre)
+    local ok, err = pcall(
+        sendMissionStart, sequence, resolvedTheatre, resolvedQnh, resolvedAtmosphereType
+    )
     if not ok then
         logi("sendMissionStart failed: " .. tostring(err))
     end

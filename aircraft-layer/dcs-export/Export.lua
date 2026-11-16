@@ -203,7 +203,14 @@ creating/deleting the flag file.
 -- a correctly split one, so the version-match live-check step could not
 -- tell the two apart. Update `aircraft-layer/src/collector/server.py`'s
 -- `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-11-16b"
+-- "...16c" (fix/ai-wheel-pilot-seat-gate): `Petrobrain/ai_pilot_wheel.lua`
+-- now gates the AI wheel on the player's seat and adds `apw_seat`/
+-- `apw_cam_fwd_m` to its status line.
+-- "...16d" (BL-16 Stage P2a/P2b merge): `Petrobrain/ai_pilot_wheel.lua`
+-- gains the goal channel (`handle_ai_pilot_goal_command`, already
+-- registered in `Petrobrain/commands.lua`) and HVRT translate, both
+-- merged to respect the "...16c" seat gate above.
+local EXPORT_SCRIPT_VERSION = "2026-11-16d"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 

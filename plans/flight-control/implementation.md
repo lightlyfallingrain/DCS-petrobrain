@@ -700,3 +700,62 @@ layer, on `worktree-agent-a4c6aa4bfde4b4705r2`.
 - **Flights P2a and P2b are the pilot's own** — nothing in this round claims live DCS behaviour;
   every check above is static (format/lint/type) or runs against a real Lua interpreter/loopback
   HTTP server, never a live DCS session.
+
+### Merge: origin/main (seat gate) into feature/bl16-p2-voice-goals, 2026-11-16
+
+`fix/ai-wheel-pilot-seat-gate` (main, `53104a49`/`964daf7f`) landed the operator-seat gate on
+`ai_pilot_wheel.lua`'s *takeover* correction while this branch's own Stage P2a/P2b commits (goal
+channel, HVRT translate) were in flight against the pre-gate file — both sides touched
+`run_ai_pilot_wheel`'s park/unpark branch and `push_ai_pilot_wheel_state`. Merged `a55f7e97` with
+`git merge --no-ff`, resolving by hand rather than taking either side whole.
+
+**How the seat gate reaches the goal/HVRT loops, by construction, not by a second check:**
+`run_ai_pilot_wheel` now computes `ai_pilot_parked_active` from
+`in_operator_seat and stick_park or nil` (main's own change) — leaving the operator seat forces
+`now_parked = false` exactly as a real unpark would, regardless of arg 852. Every P2a/P2b
+per-tick loop (`ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt`) is called only from
+`update_ai_pilot_wheel_overlay`, which itself returns immediately `if not ai_pilot_parked_active`
+— a guard Stage P1 already had and Stage P2a/P2b never needed to touch. So the seat gate covers
+the goal channel and HVRT translate **without either tick function reading the seat itself**: the
+one existing `ai_pilot_parked_active` check is the only gate either loop has ever had, and it is
+now seat-aware for free.
+
+**What the merge *did* need to add by hand, in `run_ai_pilot_wheel`'s "not now_parked" branch**:
+the goal/HVRT release code (release any open `ai_wheel_goal_pending_cmd` hold and
+`ai_pilot_goal.hvrt_hold_cmd` press, reset `ai_pilot_goal.*` to idle) runs **unconditionally**,
+same as the takeover correction's own release — only the menu-close tap is gated on
+`in_operator_seat` (main's own rule: a tap while in the pilot seat would land on the pilot's own
+wheel). A held goal/HVRT press is a device-30 release, not a wheel-menu navigation, so there is no
+"wrong wheel" risk in releasing it from either seat.
+
+**Added**, since the coordinator's merge instruction asked for direct coverage rather than relying
+on the above argument alone:
+`test_ai_pilot_wheel_lua.py::TestSeatGate::test_goal_hold_releases_without_new_press_on_switch_to_pilot_seat`
+— opens a heading-goal hold, switches `camera_fwd` to the pilot eye point mid-hold, and asserts the
+held press releases, `ai_pilot_goal.progress` drops to `"idle"`, no menu tap fires, and nothing
+presses again while the seat stays pilot. Verified red-then-green: reverting `run_ai_pilot_wheel`'s
+`in_operator_seat and stick_park or nil` back to plain `stick_park` fails this test (and the three
+pre-existing `TestSeatGate` tests) for the expected reason; restored byte-for-byte (checksum
+matched before/after) and the suite is green again.
+
+**`EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` bumped `"2026-11-16c"` → `"2026-11-16d"`**
+(this branch had not touched the version string; main's seat-gate fix owned `"...16c"`) — this
+merge's own functional change (goal channel + HVRT now merged against the seat gate) is otherwise
+invisible to the version-match staleness check. `test_export_lua_constants_parity.py` keeps the
+two in sync.
+
+**`body-layer/config/defaults.toml` regenerated**, not hand-merged, via
+`tools/generate_defaults.py --write` — both branches' tunables (this branch's pre-existing
+`AI_PILOT_HEADING_TOLERANCE_DEG` etc., main's new `[belief.altimeter_qnh_sync]` block) render
+correctly from the already-clean-merged `.py` sources with no further action.
+
+**Resolution shape for the other conflicted files** was mechanical once the above was understood:
+`aircraft-layer/src/schema/ai_pilot_wheel.py` and both `aircraft-layer/tests/test_ai_pilot_wheel_*`
+files each had two independent, non-overlapping field/test additions (this branch's
+`goal_progress`/`goal_seq`, main's `seat`/`cam_fwd_m`) landing at the same insertion points —
+combined by keeping both, with `seat`/`cam_fwd_m` ordered before the defaulted `goal_progress`/
+`goal_seq` fields on `AiPilotWheelState` (a frozen, non-`kw_only` dataclass requires every
+no-default field before any defaulted one; all construction call sites already use keyword args,
+so no behavioural effect). `body-layer/src/body.py` and `body-layer/src/belief/crew_console.py`
+each had one import-block conflict (this branch's `belief.ai_pilot_wheel` import vs. main's new
+`belief.altimeter_qnh_sync` import) — kept both.

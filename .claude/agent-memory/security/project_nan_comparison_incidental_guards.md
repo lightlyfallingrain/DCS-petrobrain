@@ -27,3 +27,15 @@ or a second call site), check explicitly whether a NaN/non-finite mean is handle
 (an `math.isfinite` guard) or only by accident (a comparison that happens to be False for NaN
 followed by a further false branch). The two existing clamps in this file demonstrate both
 outcomes side by side, so they're a fast first place to look.
+
+**Second instance, a different module, same shape**: `body-layer/src/belief/
+altimeter_qnh_sync.py`'s `_clamp(value, lo, hi) = max(lo, min(hi, value))` (`[[BL-B118]]` security
+deep analysis, 2026-11-16, filed as `[[BL-B120]]`, not blocking). Verified directly in a Python
+interpreter: `_clamp(nan, 670, 790)` resolves to `790.0` (bounded, not NaN-propagating) purely
+because `min(hi, value)` puts `hi` first — `min(a, b)` keeps `a` unless `b < a`, and every
+comparison with NaN is `False`, so `min(790, nan)` returns `790`. `+inf`/`-inf` both clamp
+correctly too, for the ordinary reason (a real comparison, not an accident). **The general lesson:
+any `max(lo, min(hi, x))`-shaped clamp in this codebase is worth testing directly against
+`float('nan')` rather than assumed safe from the formula alone** — the same expression written as
+`min(lo, max(hi, x))` would NaN-propagate instead, and nothing about reading the formula tells you
+which one you have without running it.

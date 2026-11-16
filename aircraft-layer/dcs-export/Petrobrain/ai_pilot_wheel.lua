@@ -60,6 +60,27 @@ local ARG_STICK_PARK = 852
 local ARG_PEDALS_PARK = 952
 local AI_PILOT_PARK_THRESHOLD = 0.9
 
+-- Which seat the player occupies, from the camera (fix/ai-wheel-pilot-
+-- seat-gate, `docs/acceptance/2026-11-16-ai-wheel-pilot-seat-feedback.md`).
+-- Arg 852 is the **operator's** stick stow (`mainpanel_init.lua`
+-- `StickStowingOp`): it reads stowed whenever no human flies from the
+-- operator seat -- ED's AI flying it, *or* the player sitting in the
+-- pilot seat. User: "AI never flies when player is in pilot seat", so
+-- "AI flying" = 852 stowed AND the player is in the operator seat.
+-- `Export.lua` cannot observe the seat-change key bindings, only their
+-- effect: the camera moves to that seat's eye point. `Mods/aircraft/
+-- Mi-24P/Views.lua`: pilot eye x = 3.15 m, operator x = 4.65 m (model
+-- axes, forward), head travel x -0.1..+0.5 m -- pilot 3.05..3.65,
+-- operator 4.55..5.15, so 4.1 m splits them with >= 0.45 m margin. A
+-- camera outside the cockpit envelope (external, map, possibly the
+-- 9K113 sight view) yields no reading and the last known seat holds.
+-- **Unverified live** (projection origin, sight-view camera):
+-- `apw_seat`/`apw_cam_fwd_m` on the status push exist to settle it.
+local SEAT_BOUNDARY_FWD_M = 4.1
+local SEAT_CAMERA_MIN_FWD_M = 2.0
+local SEAT_CAMERA_MAX_FWD_M = 7.0
+local SEAT_CAMERA_MAX_OFFAXIS_M = 1.5
+
 -- "Good enough" tolerance for the altitude-correction loop below: how
 -- close the AI's held altitude (`alt_text`) must read to a target before
 -- the loop treats it as reached. Renamed from `AI_PILOT_NUDGE_EPSILON_M`
@@ -144,7 +165,20 @@ local MODE_CYCLE_MAX_ATTEMPTS = 3
 -- flag, Q-P2) -- revisit if a sortie shows it firing in ordinary use.
 local HVRT_TRANSLATE_MAX_HOLD_S = 15.0
 
+-- True only while ED's AI is believed to be flying: 852 stowed AND the
+-- player in the operator seat (see `SEAT_BOUNDARY_FWD_M`). Wire name
+-- `apw_parked_active` kept for compatibility. Every per-tick press loop
+-- in this file -- the takeover correction, the P2a goal dispatcher, and
+-- P2b's HVRT translate -- reads only this flag (never arg 852 alone) to
+-- decide whether to press anything at all, so the seat gate covers all
+-- three mechanisms by construction, not by each one re-checking the
+-- camera itself.
 local ai_pilot_parked_active = false
+-- `"pilot"`/`"operator"`/`nil` (not known yet) -- the last seat the
+-- camera placed the player in; `ai_pilot_cam_fwd_m` is the raw forward
+-- offset behind it, diagnostic only (status push).
+local ai_pilot_player_seat = nil
+local ai_pilot_cam_fwd_m = nil
 local ai_pilot_mode_text = nil
 local ai_pilot_course_text = nil
 local ai_pilot_alt_text = nil
@@ -493,6 +527,59 @@ end
 local function ai_pilot_park_rising(prev_parked, stick_park_arg)
     local now_parked = stick_park_arg ~= nil and stick_park_arg >= AI_PILOT_PARK_THRESHOLD
     return now_parked, (now_parked and not prev_parked)
+end
+
+-- Pure decision: which seat the camera is in. `cam_p`/`own_p` are world
+-- points ({x, y, z}; DCS x north, y up, z east), `heading_rad` true
+-- heading, `pitch_rad` nose-up pitch. Projects the camera offset onto
+-- the airframe's forward axis (bank does not move that axis, so it is
+-- not needed). Returns `(seat, fwd_m)` -- `seat` is `nil` when any input
+-- is missing or the camera is outside the cockpit envelope.
+local function ai_pilot_seat_from_camera(cam_p, own_p, heading_rad, pitch_rad)
+    if type(cam_p) ~= "table" or type(own_p) ~= "table" or type(heading_rad) ~= "number" then
+        return nil, nil
+    end
+    if type(cam_p.x) ~= "number" or type(cam_p.y) ~= "number" or type(cam_p.z) ~= "number"
+        or type(own_p.x) ~= "number" or type(own_p.y) ~= "number" or type(own_p.z) ~= "number" then
+        return nil, nil
+    end
+    if type(pitch_rad) ~= "number" then
+        pitch_rad = 0.0
+    end
+    local dx, dy, dz = cam_p.x - own_p.x, cam_p.y - own_p.y, cam_p.z - own_p.z
+    local cp = math.cos(pitch_rad)
+    local fwd = dx * cp * math.cos(heading_rad) + dy * math.sin(pitch_rad) + dz * cp * math.sin(heading_rad)
+    local offaxis_sq = dx * dx + dy * dy + dz * dz - fwd * fwd
+    if fwd < SEAT_CAMERA_MIN_FWD_M or fwd > SEAT_CAMERA_MAX_FWD_M
+        or offaxis_sq > SEAT_CAMERA_MAX_OFFAXIS_M * SEAT_CAMERA_MAX_OFFAXIS_M then
+        return nil, fwd
+    end
+    if fwd >= SEAT_BOUNDARY_FWD_M then
+        return "operator", fwd
+    end
+    return "pilot", fwd
+end
+
+-- Reads camera + ownship and refreshes `ai_pilot_player_seat` (kept
+-- when this frame gives no reading). Every frame, so a seat switch is
+-- seen before arg 852's stow animation can produce a false edge.
+local function ai_pilot_update_seat()
+    local cam = safe_call(LoGetCameraPosition)
+    local self_data = safe_call(LoGetSelfData)
+    local cam_p = type(cam) == "table" and cam.p or nil
+    local own_p = nil
+    local heading = nil
+    if type(self_data) == "table" then
+        local pos = self_data.Position
+        own_p = type(pos) == "table" and (pos.p or pos) or nil
+        heading = self_data.Heading
+    end
+    local pitch = safe_call(LoGetADIPitchBankYaw)
+    local seat, fwd = ai_pilot_seat_from_camera(cam_p, own_p, heading, pitch)
+    ai_pilot_cam_fwd_m = fwd
+    if seat ~= nil then
+        ai_pilot_player_seat = seat
+    end
 end
 
 -- Same-frame press/release of either toggle button this sequence uses
@@ -897,7 +984,13 @@ local function run_ai_pilot_wheel(t)
     ai_pilot_takeover.raw_arg852 = stick_park
     ai_pilot_takeover.raw_arg952 = pedals_park
 
-    local now_parked, rising = ai_pilot_park_rising(ai_pilot_parked_active, stick_park)
+    -- Seat gate: the stow arg counts only while the player is in the
+    -- operator seat -- in the pilot seat 852 reads stowed with nobody
+    -- but the player flying (`SEAT_BOUNDARY_FWD_M`'s comment).
+    ai_pilot_update_seat()
+    local in_operator_seat = ai_pilot_player_seat == "operator"
+    local now_parked, rising = ai_pilot_park_rising(
+        ai_pilot_parked_active, in_operator_seat and stick_park or nil)
     ai_pilot_parked_active = now_parked
 
     if not now_parked then
@@ -910,7 +1003,12 @@ local function run_ai_pilot_wheel(t)
         end
         -- Stage P2's own release, same frame -- any open goal hold or
         -- HVRT translate press, before the menu closes (E-P10: "nothing
-        -- resumes on the next park").
+        -- resumes on the next park"). Unconditional, regardless of seat
+        -- (fix/ai-wheel-pilot-seat-gate's own rule: leaving the seat
+        -- releases held presses with no menu tap -- a held press is a
+        -- physical cockpit-device action, not a wheel-menu navigation,
+        -- so there is no "wrong wheel" risk in releasing it from either
+        -- seat).
         if ai_wheel_goal_pending_release_t ~= nil then
             safe_call(function()
                 GetDevice(30):performClickableAction(ai_wheel_goal_pending_cmd, 0)
@@ -923,10 +1021,14 @@ local function run_ai_pilot_wheel(t)
                 GetDevice(30):performClickableAction(ai_pilot_goal.hvrt_hold_cmd, 0)
             end)
         end
-        if ai_pilot_takeover.menu_open then
+        -- Close the menu only if the player is still in the operator
+        -- seat (took the controls back). Leaving the seat ends AI flight
+        -- on DCS's side; a menu tap then would land on the pilot seat's
+        -- own wheel -- exactly the press this gate exists to prevent.
+        if ai_pilot_takeover.menu_open and in_operator_seat then
             ai_pilot_tap30(WHEEL_MENU_BUTTON)
-            ai_pilot_takeover.menu_open = false
         end
+        ai_pilot_takeover.menu_open = false
         ai_pilot_mode_text = nil
         ai_pilot_course_text = nil
         ai_pilot_alt_text = nil
@@ -1193,7 +1295,9 @@ local function push_ai_pilot_wheel_state(t)
         .. ',"apw_takeover_stage":' .. text_or_null(ai_pilot_takeover.stage)
         .. ',"apw_correction_path":' .. text_or_null(ai_pilot_takeover.correction_path)
         .. ',"apw_goal_progress":' .. text_or_null(ai_pilot_goal.progress)
-        .. ',"apw_goal_seq":' .. fmt_num_or_null(ai_pilot_goal.goal_seq) .. '}\n')
+        .. ',"apw_goal_seq":' .. fmt_num_or_null(ai_pilot_goal.goal_seq)
+        .. ',"apw_seat":' .. text_or_null(ai_pilot_player_seat)
+        .. ',"apw_cam_fwd_m":' .. fmt_num_or_null(ai_pilot_cam_fwd_m) .. '}\n')
     if not ok then
         debug_log("ai-pilot-wheel send failed: " .. tostring(err))
         client:close()
@@ -1261,6 +1365,10 @@ local function on_stop()
     ai_pilot_goal.hvrt_direction = nil
     ai_pilot_goal.hvrt_hold_cmd = nil
     ai_pilot_goal.hvrt_started_t = nil
+    -- A new mission starts with no seat known: nothing is pressed until
+    -- the camera has placed the player in the operator seat.
+    ai_pilot_player_seat = nil
+    ai_pilot_cam_fwd_m = nil
 end
 
 M.run_ai_pilot_wheel = run_ai_pilot_wheel

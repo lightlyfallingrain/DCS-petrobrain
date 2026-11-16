@@ -117,6 +117,28 @@ def test_good_file_loads(tmp_path: Path) -> None:
     assert seq.read_args == frozenset({773, 886})
 
 
+def test_petrovich_says_quotes_are_stripped(tmp_path: Path) -> None:
+    """`[[BL-B119]]`: a quoted `petrovich-says` cell loses its quotes
+    (and any surrounding whitespace); the raw unquoted text is left
+    exactly as the pilot wrote it -- case/punctuation normalisation is
+    `belief.effector_engine`'s job, not this parser's."""
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER
+        + "\n"
+        + _DATA_HEADER
+        + '| | observ | on | "observ on" | OBSERV |\n',
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert errors == []
+    key = ("Mi-24P", "copilot", "takeoff")
+    row = sequences[key].rows[0]
+    assert isinstance(row, SwitchRow)
+    assert row.petrovich_says == "observ on"
+
+
 def test_wait_row_parses(tmp_path: Path) -> None:
     _write(
         tmp_path / "mi-24p" / "t.md",

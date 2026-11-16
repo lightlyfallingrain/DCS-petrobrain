@@ -96,6 +96,10 @@ def _extract_lua_constant(path: Path, name: str) -> str:
 #: `ai_pilot_park_rising` close over -- extracted, not duplicated, see
 #: `_extract_lua_constant`.
 _AI_PILOT_WHEEL_CONSTANTS = (
+    "SEAT_BOUNDARY_FWD_M",
+    "SEAT_CAMERA_MIN_FWD_M",
+    "SEAT_CAMERA_MAX_FWD_M",
+    "SEAT_CAMERA_MAX_OFFAXIS_M",
     "AI_PILOT_ALT_TOLERANCE_M",
     "AI_PILOT_PARK_THRESHOLD",
     "AI_PILOT_QUICK_PATH_MAX_AGL_M",
@@ -500,6 +504,12 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "AI_PILOT_SPEED_TOP_STEP_KMH",
     "MODE_CYCLE_MAX_ATTEMPTS",
     "HVRT_TRANSLATE_MAX_HOLD_S",
+    # fix/ai-wheel-pilot-seat-gate -- `run_ai_pilot_wheel` now calls
+    # `ai_pilot_update_seat`, which closes over these.
+    "SEAT_BOUNDARY_FWD_M",
+    "SEAT_CAMERA_MIN_FWD_M",
+    "SEAT_CAMERA_MAX_FWD_M",
+    "SEAT_CAMERA_MAX_OFFAXIS_M",
 )
 
 #: `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON` are owned by `core.lua`, not
@@ -568,6 +578,8 @@ def _run_ai_pilot_wheel_integration(script_body: str) -> str:
     )
     preamble = """
 local ai_pilot_parked_active = false
+local ai_pilot_player_seat = nil
+local ai_pilot_cam_fwd_m = nil
 local ai_pilot_mode_text = nil
 local ai_pilot_course_text = nil
 local ai_pilot_alt_text = nil
@@ -649,6 +661,22 @@ end
 local function LoGetAltitudeAboveSeaLevel()
     return msl_value
 end
+
+-- Seat mocks: ownship at the origin heading north (+x), level; the
+-- camera defaults to the operator's eye point (`Views.lua` x = 4.65), so
+-- every takeover scenario runs with the player in the copilot seat
+-- unless a test moves `camera_fwd`. `camera_fwd = nil` = no camera.
+local camera_fwd = 4.65
+local function LoGetCameraPosition()
+    if camera_fwd == nil then return nil end
+    return {p = {x = camera_fwd, y = 0.5, z = 0.0}}
+end
+local function LoGetSelfData()
+    return {Position = {x = 0.0, y = 0.0, z = 0.0}, Heading = 0.0}
+end
+local function LoGetADIPitchBankYaw()
+    return 0.0, 0.0, 0.0
+end
 """
     functions = "\n".join(
         _extract_lua_function(path, name)
@@ -668,6 +696,8 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_speed_tap_direction"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_hvrt_direction_cmd"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_park_rising"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_seat_from_camera"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_update_seat"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_tap30"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_open_hold"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_release_hold"),
@@ -1049,6 +1079,265 @@ class TestTakeoverSequence:
         assert values["hold_cmd_after_unpark"] == "nil"
         assert values["menu_open_after_unpark"] == "false"
         assert values["presses_after_stale_tick"] == "0"
+
+
+class TestSeatFromCamera:
+    """fix/ai-wheel-pilot-seat-gate: which seat the camera is in, from
+    `Views.lua`'s eye points (pilot x = 3.15, operator x = 4.65)."""
+
+    def _seat(self, cam: str, own: str, heading: str, pitch: str = "0.0") -> str:
+        tail = f"""
+        local seat, fwd = ai_pilot_seat_from_camera({cam}, {own}, {heading}, {pitch})
+        print(tostring(seat) .. "|" .. (fwd and string.format("%.2f", fwd) or "nil"))
+        """
+        return _run_lua(["ai_pilot_seat_from_camera"], tail).strip()
+
+    def test_pilot_and_operator_eye_points_heading_north(self) -> None:
+        own = "{x = 100, y = 50, z = 200}"
+        assert (
+            self._seat("{x = 103.15, y = 50.57, z = 200}", own, "0.0") == "pilot|3.15"
+        )
+        assert (
+            self._seat("{x = 104.65, y = 49.95, z = 200}", own, "0.0")
+            == "operator|4.65"
+        )
+
+    def test_projection_follows_heading_east(self) -> None:
+        """Heading pi/2 (east, +z): the operator eye sits 4.65 m along +z."""
+        own = "{x = 0, y = 0, z = 0}"
+        assert self._seat("{x = 0, y = 0, z = 4.65}", own, "math.pi / 2").startswith(
+            "operator"
+        )
+        assert self._seat("{x = 0, y = 0, z = 3.15}", own, "math.pi / 2").startswith(
+            "pilot"
+        )
+
+    def test_projection_follows_pitch(self) -> None:
+        """20 deg nose-up: the operator eye is up and forward along the tilted axis."""
+        own = "{x = 0, y = 0, z = 0}"
+        cam = "{x = 4.65 * math.cos(math.rad(20)), y = 4.65 * math.sin(math.rad(20)), z = 0}"
+        assert self._seat(cam, own, "0.0", "math.rad(20)") == "operator|4.65"
+
+    def test_head_travel_limits_stay_on_their_side(self) -> None:
+        """6DOF x travel -0.1..+0.5: pilot leaning fully forward (3.65)
+        and operator leaning fully back (4.55) still read their own seat."""
+        own = "{x = 0, y = 0, z = 0}"
+        assert self._seat("{x = 3.65, y = 0.57, z = 0}", own, "0.0").startswith("pilot")
+        assert self._seat("{x = 4.55, y = 0, z = 0}", own, "0.0").startswith("operator")
+
+    def test_external_camera_is_no_reading(self) -> None:
+        own = "{x = 0, y = 0, z = 0}"
+        assert self._seat("{x = -20, y = 5, z = 0}", own, "0.0").startswith("nil|")
+        assert self._seat("{x = 4.65, y = 0, z = 6}", own, "0.0").startswith("nil|")
+
+    def test_missing_inputs_are_no_reading(self) -> None:
+        own = "{x = 0, y = 0, z = 0}"
+        assert self._seat("nil", own, "0.0") == "nil|nil"
+        assert self._seat("{x = 4.65, y = 0, z = 0}", own, "nil") == "nil|nil"
+
+
+class TestSeatGate:
+    """The user's bug, 2026-11-16: in the pilot seat arg 852 reads stowed
+    (copilot controls parked) with the AI not flying, and the takeover
+    sequence pressed centre and toggled the overlay forever. "Petrobrain
+    must not operate AI wheel when AI is not flying."""
+
+    def test_pilot_seat_with_stowed_stick_never_presses(self) -> None:
+        script = f"""
+        camera_fwd = 3.15
+        msl_value = 900.0
+        agl_value = 300.0
+        stick_park_value = 1.0
+        local t = 0.0
+        while t < 10.0 do
+            run_ai_pilot_wheel(t)
+            if math.floor(t * 5 + 0.5) == t * 5 then
+                update_ai_pilot_wheel_overlay({json.dumps(_EMPTY_RAW)}, t)
+            end
+            t = t + 0.1
+        end
+        print("presses=" .. #press_log)
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        print("seat=" .. tostring(ai_pilot_player_seat))
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["presses"] == "0"
+        assert values["parked"] == "false"
+        assert values["seat"] == "pilot"
+        assert values["stage"] == "nil"
+
+    def test_no_seat_known_yet_never_presses(self) -> None:
+        """Camera unreadable from the start (no seat known): not flying."""
+        script = """
+        camera_fwd = nil
+        stick_park_value = 1.0
+        msl_value = 900.0
+        for i = 0, 20 do run_ai_pilot_wheel(i * 0.1) end
+        print("presses=" .. #press_log)
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["presses"] == "0"
+        assert values["parked"] == "false"
+
+    def test_switch_to_pilot_seat_mid_hold_releases_without_menu_tap(self) -> None:
+        """AI flying from the operator seat, a hold open, then the player
+        moves to the pilot seat (852 stays stowed): the held press is
+        released, but no menu tap -- it would land on the pilot seat's own
+        wheel -- and the takeover state is dropped."""
+        script = f"""
+        msl_value = 920.0
+        agl_value = 750.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        run_ai_pilot_wheel(0.5)
+        run_ai_pilot_wheel(1.0)
+        update_ai_pilot_wheel_overlay(
+            {json.dumps(_overlay_raw(alt_text="1650", alt_add_text="B"))}, 1.1)
+        print("holding=" .. tostring(ai_pilot_takeover.correction_hold_cmd))
+        local before = #press_log
+
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        run_ai_pilot_wheel(1.2)
+        local after = {{}}
+        for i = before + 1, #press_log do table.insert(after, press_log[i]) end
+        print("switch_presses=" .. table.concat(after, ","))
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        print("menu_open=" .. tostring(ai_pilot_takeover.menu_open))
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+
+        local n = #press_log
+        for i = 13, 60 do
+            run_ai_pilot_wheel(i * 0.1)
+            update_ai_pilot_wheel_overlay({json.dumps(_EMPTY_RAW)}, i * 0.1)
+        end
+        print("later_presses=" .. (#press_log - n))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["holding"] == "3005"
+        assert values["switch_presses"] == "3005:0"
+        assert values["parked"] == "false"
+        assert values["menu_open"] == "false"
+        assert values["stage"] == "nil"
+        assert values["later_presses"] == "0"
+
+    def test_goal_hold_releases_without_new_press_on_switch_to_pilot_seat(
+        self,
+    ) -> None:
+        """Same rule, for the goal channel (Stage P2a/P2b merge, not the
+        takeover correction above): a heading-goal hold open while flying
+        from the operator seat, then the player moves to the pilot seat --
+        the held press releases, the goal state drops to idle, and nothing
+        presses again while the seat stays pilot."""
+        script = """
+        msl_value = 900.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        print("parked_before=" .. tostring(ai_pilot_parked_active))
+
+        -- Simulate an open heading-goal hold directly, the same shape
+        -- `ai_pilot_goal_open_hold` leaves it in.
+        ai_wheel_goal_pending_cmd = 3002  -- AI_WHEEL_RIGHT
+        ai_wheel_goal_pending_release_t = 999.0
+        ai_pilot_goal.param = "heading"
+        ai_pilot_goal.heading_target_deg = 90.0
+        ai_pilot_goal.progress = "pressing"
+        ai_pilot_goal.hold_cmd = 3002
+        local before = #press_log
+
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        run_ai_pilot_wheel(0.1)
+        local released = {}
+        for i = before + 1, #press_log do table.insert(released, press_log[i]) end
+        print("released_presses=" .. table.concat(released, ","))
+        print("parked_after=" .. tostring(ai_pilot_parked_active))
+        print("goal_progress_after=" .. tostring(ai_pilot_goal.progress))
+        print("goal_hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("menu_open_after=" .. tostring(ai_pilot_takeover.menu_open))
+
+        local n = #press_log
+        for i = 2, 30 do run_ai_pilot_wheel(i * 0.1) end
+        print("later_presses=" .. (#press_log - n))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["parked_before"] == "true"
+        assert values["released_presses"] == "3002:0"
+        assert values["parked_after"] == "false"
+        assert values["goal_progress_after"] == "idle"
+        assert values["goal_hold_cmd_after"] == "nil"
+        assert values["menu_open_after"] == "false"
+        assert values["later_presses"] == "0"
+
+    def test_entering_operator_seat_with_stick_still_stowed_presses_nothing(
+        self,
+    ) -> None:
+        """Pilot -> operator switch: the camera reaches the operator seat
+        while arg 852 still reads stowed for a moment (the player retakes
+        the copilot stick; un-stow lag). That brief false rising edge must
+        be absorbed by the 0.5 s reference-toggle delay -- no press, and
+        the takeover dropped once 852 falls."""
+        script = """
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        msl_value = 900.0
+        agl_value = 300.0
+        run_ai_pilot_wheel(0.0)          -- pilot seat, stowed: not flying
+        camera_fwd = 4.65                -- seat switch
+        run_ai_pilot_wheel(0.1)          -- false rising edge
+        print("stage_at_edge=" .. tostring(ai_pilot_takeover.stage))
+        stick_park_value = 0.5           -- un-stow under way
+        run_ai_pilot_wheel(0.2)
+        stick_park_value = 0.0
+        for i = 3, 30 do run_ai_pilot_wheel(i * 0.1) end
+        print("presses=" .. #press_log)
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["stage_at_edge"] == "toggling_reference"
+        assert values["presses"] == "0"
+        assert values["stage"] == "nil"
+        assert values["parked"] == "false"
+
+    def test_external_view_keeps_the_operator_seat(self) -> None:
+        """Camera leaves the cockpit (F2 / map) while the AI flies: the
+        last known seat holds, the takeover is not dropped."""
+        script = """
+        msl_value = 900.0
+        agl_value = 300.0
+        stick_park_value = 0.95
+        run_ai_pilot_wheel(0.0)
+        camera_fwd = -25.0
+        run_ai_pilot_wheel(0.1)
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        print("seat=" .. tostring(ai_pilot_player_seat))
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["parked"] == "true"
+        assert values["seat"] == "operator"
+        assert values["stage"] == "toggling_reference"
 
 
 def _run_on_stop(
