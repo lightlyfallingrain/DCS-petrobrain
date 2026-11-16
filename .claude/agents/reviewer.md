@@ -143,7 +143,7 @@ In addition to project-specific checks, always verify:
 - Is there unnecessary abstraction or duplication?
 - Is there anything likely to cause a performance or correctness regression?
 - Are new files staged with `git add`?
-- For each subproject touched (derive the list from the diff, not from memory), do that subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) pass?
+- For each subproject touched (derive the list from the diff, not from memory), do that subproject's own `ruff format --check`, `ruff check`, `mypy src` and **`.claude/scripts/fast-tests.sh <subproject>`** (smoke plus the tests touching the branch's changes, foreground) pass? The full suite is DoD's (root `CLAUDE.md`, "Verification")
 - Is any leftover debug code or TODO comments present?
 
 ---
