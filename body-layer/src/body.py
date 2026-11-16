@@ -133,7 +133,18 @@ from typing import Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
-from belief.ai_pilot_wheel import ParkedFlightState, advance_parked_flight_state
+from belief.ai_pilot_wheel import (
+    AiPilotWheelGoal,
+    ParkedFlightState,
+    advance_parked_flight_state,
+    altitude_ref_from_letter,
+    clear_hvrt_direction,
+    decide_ai_pilot_wheel,
+    set_hvrt_direction,
+    set_parked_altitude,
+    set_parked_heading,
+    set_parked_speed,
+)
 from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
@@ -496,12 +507,27 @@ class ConsolePerceptionRunner:
     guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
 
     #: BL-16 mode 2 (`plans/flight-control/plan.md`, "Revised 2026-11-15",
-    #: Stage P1) -- Petrovich's belief about ED's AI-pilot wheel while the
-    #: stick is parked. Same "replace wholesale, never mutate" shape as
+    #: Stage P1, extended Stage P2a/P2b "Stage P2 ready to build") --
+    #: Petrovich's belief about ED's AI-pilot wheel while the stick is
+    #: parked. Same "replace wholesale, never mutate" shape as
     #: `guidance_unit_state` above; advanced every poll a real ownship
     #: state exists (`advance_parked_flight_state`, `belief.ai_pilot_
-    #: wheel`), no voice token yet -- activation is automatic (E-P1).
+    #: wheel`). Stage P1's own activation is automatic (E-P1); Stage P2
+    #: adds the goal channel, driven by `crew_console`'s one-shot
+    #: transition fields (`ai_pilot_goal_transition`/`ai_pilot_level_
+    #: flight_transition`/`ai_pilot_hvrt_transition`/`ai_pilot_hvrt_
+    #: step_transition`).
     parked_flight_state: ParkedFlightState = field(default_factory=ParkedFlightState)
+
+    #: Stage P2a/P2b's own "send on change" cursor for the goal channel
+    #: (`write_ai_pilot_goal`) -- the same `watch_args_last_sent_sim`
+    #: shape just below, scoped to `ParkedFlightState.goal.goal_seq`
+    #: instead of a sim-time resend timer: a message is sent only when
+    #: the local `goal_seq` differs from the last one actually posted,
+    #: never every poll. `None` before the first send or right after a
+    #: mission reset, same "ordinary init field" reasoning `watch_args_
+    #: last_sent_sim`'s own docstring gives.
+    ai_pilot_goal_last_sent_seq: int | None = None
 
     #: The effector-sequence engine's own run state (`belief.
     #: effector_engine.EffectorRunState`, `plans/effector-sequences/
@@ -3167,6 +3193,156 @@ def _maybe_switch_theatre(
     logger.info("mission theatre switched to %r (%s)", event_theatre, candidate_db)
 
 
+def _apply_ai_pilot_wheel_goal(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: AircraftLayerClient,
+) -> None:
+    """BL-16 mode 2 Stage P2a/P2b (`plans/flight-control/plan.md`,
+    "Stage P2 ready to build") -- applies `crew_console`'s one-shot
+    transition fields to `runner.parked_flight_state.goal`, runs the
+    rotation mechanism (`decide_ai_pilot_wheel`), and sends `Export.lua`
+    a fresh `ai_pilot_goal` message whenever the resulting `goal_seq`
+    has moved since the last one actually posted (`runner.ai_pilot_goal_
+    last_sent_seq`) -- the same "send on change" posture `write_sight_
+    target`'s own call site note describes. Called once per poll, right
+    after `advance_parked_flight_state` has refreshed `runner.parked_
+    flight_state` this poll, before `crew_console.drain_ai_pilot_wheel_
+    speech` (which reads the same state this leaves behind).
+
+    **E-P10 (unpark drops everything, nothing resumes on the next
+    park)**: while not parked, `goal` is forced back to `None` and the
+    send cursor cleared, so a park that follows starts from a clean
+    goal exactly as the Lua side already does on its own unpark
+    branch."""
+    if not runner.parked_flight_state.parked_active:
+        if runner.parked_flight_state.goal is not None:
+            runner.parked_flight_state = replace(runner.parked_flight_state, goal=None)
+        runner.ai_pilot_goal_last_sent_seq = None
+        return
+    if runner.last_t_sim is None:
+        # No ownship sample yet this session -- nothing this function
+        # does needs a sim-time stamp badly enough to guess one; wait
+        # for the next poll, same as every other `last_t_sim`-gated
+        # block in this loop.
+        return
+    now_sim = runner.last_t_sim
+
+    state = runner.parked_flight_state
+    goal = state.goal if state.goal is not None else AiPilotWheelGoal()
+
+    if crew_console.ai_pilot_level_flight_transition:
+        if state.held_heading is not None:
+            goal = set_parked_heading(goal, now_sim, state.held_heading)
+        if state.held_altitude is not None:
+            current_ref = altitude_ref_from_letter(state.held_altitude_ref)
+            goal, _ = set_parked_altitude(
+                goal,
+                now_sim,
+                state.held_altitude,
+                current_ref,
+                current_ref,
+            )
+        if state.held_speed is not None:
+            goal, _ = set_parked_speed(goal, now_sim, state.held_speed)
+        crew_console.ai_pilot_level_flight_transition = False
+
+    request = crew_console.ai_pilot_goal_transition
+    if request is not None:
+        if request.param == "heading" and request.heading_deg is not None:
+            goal = set_parked_heading(goal, now_sim, request.heading_deg)
+        elif request.param == "altitude" and request.altitude_m is not None:
+            goal, _ = set_parked_altitude(
+                goal,
+                now_sim,
+                request.altitude_m,
+                request.altitude_ref,
+                request.altitude_ref,
+            )
+        elif request.param == "speed" and request.speed_kmh is not None:
+            goal, _ = set_parked_speed(goal, now_sim, request.speed_kmh)
+        crew_console.ai_pilot_goal_transition = None
+
+    hvrt_request = crew_console.ai_pilot_hvrt_transition
+    if hvrt_request is not None:
+        goal = (
+            clear_hvrt_direction(goal)
+            if hvrt_request == "hold"
+            else set_hvrt_direction(goal, hvrt_request)
+        )
+        crew_console.ai_pilot_hvrt_transition = None
+
+    runner.parked_flight_state = replace(runner.parked_flight_state, goal=goal)
+
+    # The rotation mechanism reads `Export.lua`'s own goal_progress
+    # report to know when the active parameter has settled, or when an
+    # open HVRT press has released on its own safety timeout -- both
+    # are Lua-reported facts, never decided here.
+    lua_progress = runner.parked_flight_state.lua_goal_progress
+    settled_param = (
+        goal.active_param
+        if lua_progress == "settled" and goal.active_param is not None
+        else None
+    )
+    runner.parked_flight_state = decide_ai_pilot_wheel(
+        runner.parked_flight_state,
+        now_sim,
+        settled_param=settled_param,
+        hvrt_released_timeout=(lua_progress == "released_timeout"),
+    )
+
+    final_goal = runner.parked_flight_state.goal
+    if (
+        final_goal is not None
+        and final_goal.goal_seq != runner.ai_pilot_goal_last_sent_seq
+    ):
+        try:
+            aircraft_client.write_ai_pilot_goal(
+                final_goal.goal_seq,
+                final_goal.active_param,
+                final_goal.heading_target_deg,
+                final_goal.altitude_target_m,
+                final_goal.altitude_target_ref,
+                final_goal.speed_target_kmh,
+                final_goal.hvrt_direction,
+            )
+        except AircraftLayerError:
+            logger.warning("ai-pilot-goal write failed (continuing)", exc_info=True)
+        runner.ai_pilot_goal_last_sent_seq = final_goal.goal_seq
+
+    # `hvrt_step` (Stage P2b's own addition to the wire, not the plan's
+    # "wire shape" section -- see `AircraftLayerClient.write_ai_pilot_
+    # goal`'s docstring) is a one-shot trigger: always its own send with
+    # a freshly-bumped `goal_seq`, even when nothing else in the message
+    # changed, since `Export.lua` acts on it exactly once per distinct
+    # `goal_seq`.
+    step = crew_console.ai_pilot_hvrt_step_transition
+    if step is not None:
+        bumped_seq = (final_goal.goal_seq if final_goal is not None else 0) + 1
+        try:
+            aircraft_client.write_ai_pilot_goal(
+                bumped_seq,
+                final_goal.active_param if final_goal is not None else None,
+                final_goal.heading_target_deg if final_goal is not None else None,
+                final_goal.altitude_target_m if final_goal is not None else None,
+                final_goal.altitude_target_ref if final_goal is not None else None,
+                final_goal.speed_target_kmh if final_goal is not None else None,
+                final_goal.hvrt_direction if final_goal is not None else None,
+                step,
+            )
+        except AircraftLayerError:
+            logger.warning(
+                "ai-pilot-goal hvrt_step write failed (continuing)", exc_info=True
+            )
+        if final_goal is not None:
+            runner.parked_flight_state = replace(
+                runner.parked_flight_state,
+                goal=replace(final_goal, goal_seq=bumped_seq),
+            )
+        runner.ai_pilot_goal_last_sent_seq = bumped_seq
+        crew_console.ai_pilot_hvrt_step_transition = None
+
+
 def _check_for_new_mission(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole | None,
@@ -4343,6 +4519,11 @@ def _run_crew_text_poll_loop(
                             logger.debug(
                                 "ai-pilot-wheel readback failed", exc_info=True
                             )
+                        crew_console.parked_flight_state = runner.parked_flight_state
+                        _apply_ai_pilot_wheel_goal(
+                            runner, crew_console, aircraft_client
+                        )
+                        crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
                         )

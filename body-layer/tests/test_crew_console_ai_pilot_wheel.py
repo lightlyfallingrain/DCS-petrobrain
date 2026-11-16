@@ -306,3 +306,37 @@ class TestTransitionsResetEachDispatch:
         assert console.ai_pilot_hvrt_transition is not None
         console.handle_command("radio_check", now_sim=0.1)
         assert console.ai_pilot_hvrt_transition is None
+
+
+class TestDrainAiPilotWheelSpeech:
+    """`"mode_blocked"`'s own spoken line -- edge-triggered, once per
+    exhausted attempt."""
+
+    def test_speaks_once_when_mode_blocked_first_appears(self) -> None:
+        console = _console(lua_goal_progress="mode_blocked")
+        lines = console.drain_ai_pilot_wheel_speech(now_sim=0.0)
+        assert lines == ["Unable, not ready."]
+
+    def test_does_not_repeat_while_still_blocked(self) -> None:
+        console = _console(lua_goal_progress="mode_blocked")
+        console.drain_ai_pilot_wheel_speech(now_sim=0.0)
+        lines = console.drain_ai_pilot_wheel_speech(now_sim=0.2)
+        assert lines == []
+
+    def test_speaks_again_after_a_fresh_exhaustion(self) -> None:
+        console = _console(lua_goal_progress="mode_blocked")
+        console.drain_ai_pilot_wheel_speech(now_sim=0.0)
+        console.parked_flight_state = replace(
+            console.parked_flight_state, lua_goal_progress="pressing"
+        )
+        console.drain_ai_pilot_wheel_speech(now_sim=0.2)
+        console.parked_flight_state = replace(
+            console.parked_flight_state, lua_goal_progress="mode_blocked"
+        )
+        lines = console.drain_ai_pilot_wheel_speech(now_sim=0.4)
+        assert lines == ["Unable, not ready."]
+
+    def test_silent_outside_mode_blocked(self) -> None:
+        console = _console(lua_goal_progress="pressing")
+        lines = console.drain_ai_pilot_wheel_speech(now_sim=0.0)
+        assert lines == []

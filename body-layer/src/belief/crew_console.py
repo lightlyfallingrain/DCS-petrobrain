@@ -1837,6 +1837,15 @@ class CrewConsole:
         default_factory=ParkedFlightState, repr=False
     )
 
+    #: `drain_ai_pilot_wheel_speech`'s own edge-trigger bookkeeping --
+    #: `True` once "Unable, not ready." has been spoken for the current
+    #: exhausted mode-cycle attempt, reset the instant `Export.lua`'s own
+    #: `goal_progress` reports anything other than `"mode_blocked"` (a
+    #: new attempt, or the goal resolved/changed) -- so a goal that stays
+    #: blocked across many polls is announced once, per the pilot's own
+    #: answer ("spoken once per exhausted attempt"), not every poll.
+    _ai_pilot_mode_blocked_spoken: bool = field(default=False, repr=False)
+
     #: `plans/9k113-scan-procedure/plan-stage2.md`'s "State" section -- a
     #: `look <where>` queued while OBSERV was off, confirmed on, and now
     #: waiting for `sight_ready`/`sight_phase_is_sighting` both to hold.
@@ -4525,6 +4534,27 @@ class CrewConsole:
             return [render_unable("NOT_READY").text]
         self.ai_pilot_hvrt_step_transition = direction
         return [f"{direction.capitalize()}."]
+
+    def drain_ai_pilot_wheel_speech(self, now_sim: float) -> list[str]:
+        """BL-16 mode 2 Stage P2a -- `"mode_blocked"`'s own spoken line
+        (plan, "Decisions Requiring User Input (Stage P2) -- answered
+        2026-11-16": *"'unable, not ready' when mode not reachable ->
+        yes, that is good"*), edge-triggered on `Export.lua`'s own
+        `goal_progress` report so an attempt that stays blocked across
+        many polls is announced once, not every poll. Called once per
+        poll from `body.py`'s poll loop, after `advance_parked_flight_
+        state`/`decide_ai_pilot_wheel` have run this poll, same spot
+        `drain_events` is called from."""
+        progress = self.parked_flight_state.lua_goal_progress
+        if progress != "mode_blocked":
+            self._ai_pilot_mode_blocked_spoken = False
+            return []
+        if self._ai_pilot_mode_blocked_spoken:
+            return []
+        self._ai_pilot_mode_blocked_spoken = True
+        lines = [render_unable("NOT_READY").text]
+        self._print(lines, now_sim)
+        return lines
 
     def drain_attack_run(
         self,
