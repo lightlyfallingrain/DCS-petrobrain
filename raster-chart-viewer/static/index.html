@@ -28,6 +28,20 @@
     color: #e8e8e8;
     border: 1px solid #3a3a3a;
   }
+  #tier-buttons { display: flex; gap: 4px; }
+  #tier-buttons button {
+    font-size: 14px;
+    padding: 4px 10px;
+    background: #1b1b1b;
+    color: #e8e8e8;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #tier-buttons button.active {
+    background: #3d5a80;
+    border-color: #5b7fb0;
+  }
   #status { font-size: 13px; color: #999; margin-left: auto; }
   #viewer {
     position: absolute;
@@ -42,8 +56,8 @@
 <div id="toolbar">
   <label for="terrain-select">Terrain</label>
   <select id="terrain-select"></select>
-  <label for="tier-select">Tier</label>
-  <select id="tier-select"></select>
+  <span>Tier</span>
+  <div id="tier-buttons"></div>
   <span id="status"></span>
 </div>
 <div id="viewer"></div>
@@ -53,16 +67,29 @@
 "use strict";
 
 var terrainSelect = document.getElementById("terrain-select");
-var tierSelect = document.getElementById("tier-select");
+var tierButtons = document.getElementById("tier-buttons");
 var statusEl = document.getElementById("status");
+
+// Width of the first view of a terrain, as a fraction of the chart's
+// width, centred on the chart's midpoint. A fully zoomed-out first view
+// would ask the server to compose the whole chart before showing anything.
+var INITIAL_VIEW_FRACTION = 0.2;
 
 var viewer = OpenSeadragon({
   id: "viewer",
   prefixUrl: "openseadragon/images/",
   showNavigator: true,
   visibilityRatio: 1.0,
-  constrainDuringPan: true
+  constrainDuringPan: true,
+  // Load only the zoom level being looked at, not every coarser level
+  // below it as a blurry placeholder: the coarsest levels are the ones
+  // that cover the whole chart and are the slowest to compose.
+  immediateRender: true
 });
+
+// The tier currently open: {terrain, tier, info}. Used to carry the view
+// across a tier switch.
+var current = null;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -100,10 +127,63 @@ function buildTileSource(terrain, tier, info) {
   };
 }
 
-function openTier(terrain, tier) {
+// Viewport coordinates <-> chart fractions. OpenSeadragon's viewport
+// units are the declared canvas width, and that canvas is padded out to a
+// power-of-two square (buildTileSource), so a viewport position means
+// different chart ground in two tiers. A fraction of the real chart
+// extent (tiles_wide x tiles_tall tiles) is what carries over.
+function sideOf(info) {
+  return Math.pow(2, info.max_level) * info.tile_size_px;
+}
+function chartWidthVp(info) {
+  return (info.tiles_wide * info.tile_size_px) / sideOf(info);
+}
+function chartHeightVp(info) {
+  return (info.tiles_tall * info.tile_size_px) / sideOf(info);
+}
+
+// The current view as chart fractions: centre (fx, fy) and width fw.
+// The view's aspect ratio comes from the screen, so it needs no saving.
+function currentViewFractions() {
+  var b = viewer.viewport.getBounds(true);
+  var info = current.info;
+  return {
+    fx: (b.x + b.width / 2) / chartWidthVp(info),
+    fy: (b.y + b.height / 2) / chartHeightVp(info),
+    fw: b.width / chartWidthVp(info)
+  };
+}
+
+function applyViewFractions(view, info) {
+  var vp = viewer.viewport;
+  var aspect = vp.getBounds(true).height / vp.getBounds(true).width;
+  var w = view.fw * chartWidthVp(info);
+  var h = w * aspect;
+  var cx = view.fx * chartWidthVp(info);
+  var cy = view.fy * chartHeightVp(info);
+  vp.fitBounds(new OpenSeadragon.Rect(cx - w / 2, cy - h / 2, w, h), true);
+}
+
+function setActiveTierButton(tier) {
+  Array.prototype.forEach.call(tierButtons.children, function (btn) {
+    btn.classList.toggle("active", btn.dataset.tier === tier);
+  });
+}
+
+// keepView: carry the current location and zoom over (a tier switch on
+// the same terrain). Otherwise start at INITIAL_VIEW_FRACTION, centred.
+function openTier(terrain, tier, keepView) {
+  var view = keepView && current && current.terrain === terrain
+    ? currentViewFractions()
+    : {fx: 0.5, fy: 0.5, fw: INITIAL_VIEW_FRACTION};
+  setActiveTierButton(tier);
   setStatus("loading " + terrain + " / " + tier + " ...");
   fetchJson("terrains/" + encodeURIComponent(terrain) + "/tiers/" + encodeURIComponent(tier))
     .then(function (info) {
+      viewer.addOnceHandler("open", function () {
+        applyViewFractions(view, info);
+      });
+      current = {terrain: terrain, tier: tier, info: info};
       viewer.open(buildTileSource(terrain, tier, info));
       setStatus(terrain + " / " + tier);
     })
@@ -114,24 +194,30 @@ function openTier(terrain, tier) {
 
 function populateTiers(terrain) {
   fetchJson("terrains/" + encodeURIComponent(terrain) + "/tiers").then(function (data) {
-    tierSelect.innerHTML = "";
+    tierButtons.innerHTML = "";
     data.tiers.forEach(function (tier) {
-      var option = document.createElement("option");
-      option.value = tier;
-      option.textContent = tier;
-      tierSelect.appendChild(option);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = tier;
+      btn.dataset.tier = tier;
+      btn.addEventListener("click", function () {
+        if (current && current.terrain === terrain && current.tier === tier) {
+          return;
+        }
+        openTier(terrain, tier, true);
+      });
+      tierButtons.appendChild(btn);
     });
     if (data.tiers.length > 0) {
-      openTier(terrain, data.tiers[0]);
+      openTier(terrain, data.tiers[0], false);
     }
+  }).catch(function (err) {
+    setStatus("error: " + err.message);
   });
 }
 
 terrainSelect.addEventListener("change", function () {
   populateTiers(terrainSelect.value);
-});
-tierSelect.addEventListener("change", function () {
-  openTier(terrainSelect.value, tierSelect.value);
 });
 
 fetchJson("terrains").then(function (data) {
