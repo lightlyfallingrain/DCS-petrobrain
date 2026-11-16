@@ -112,3 +112,43 @@ wire dict `MissionStartEvent.to_dict()` produces over a real `TelemetryAPIServer
   they described before this change (checked `reset_for_new_mission`'s two docstrings, `_check_for_
   new_mission`'s, `_maybe_switch_theatre`'s), so nothing was cut -- only the two wire-shape docstring
   examples above needed a fix, and those were additions (the new fields), not prunes.
+
+### Review fix round (Reviewer -> Implementer loop, `plans/bl16-qnh-mission-start/review.md`)
+
+**Required fix applied.** `advance_altimeter_qnh_sync`'s `else` branch (the calibration-step probe
+taken on iteration 0 and whenever the gain estimate is degenerate) now clamps its write to
+`+-ALTIMETER_QNH_MAX_STEP`, the same way the gain-based branch already did --
+`body-layer/src/belief/altimeter_qnh_sync.py:293-298`. This makes `ALTIMETER_QNH_MAX_STEP`'s own
+docstring claim ("bounds any single write regardless of a bad gain estimate") true for every legal
+pair of the two constants' declared bounds, not just their defaults. No `#:` comment changed (the
+`MAX_STEP` docstring was already correct in wording, just not enforced for this branch), so
+`config/defaults.toml` was regenerated and confirmed byte-identical -- no drift to read.
+
+**Test added**: `test_calibration_step_is_clamped_to_max_step_even_when_configured_larger`
+(`body-layer/tests/test_altimeter_qnh_sync.py`) -- `monkeypatch.setattr`s
+`ALTIMETER_QNH_CALIBRATION_STEP`/`ALTIMETER_QNH_MAX_STEP` directly on the owning module (the
+established in-process pattern for this shape of test, matching `test_groups.py`/
+`test_relative_distance_scenarios.py`, not the heavier `PETROBRAIN_TUNING`-subprocess pattern
+`test_tuning.py` uses for testing the loader itself) to `0.2`/`0.05` -- a legal pair per each
+constant's own `lo`/`hi` bounds that inverts the defaults' ordering -- then drives one poll from a
+fresh `start_altimeter_qnh_sync` state (guaranteed to take the `else` branch, since
+`prev_delta_sent` is `None`) and asserts the write stays within `0.05`. Counterfactual run: reverted
+the clamp, confirmed this test fails with the unclamped `0.2` write (`assert False` on
+`abs(delta) <= 0.05`), restored the file, confirmed the restored file's checksum
+(`d1affd34cf4c12623cdc771692f6894afa8f9840`) matches the pre-break version exactly.
+
+**Optional fix also applied**: `body-layer/ROADMAP/BL-B118.md`'s stale closing line ("Not yet
+implemented or flown") changed to "Implemented (Stages 1-3); not yet flown." with `#needs-flight`,
+matching the review's own observation that Stages 1-3 are built. The `drain_altimeter_qnh_failed`
+clarity suggestion was skipped, per the review's own "optional" framing and this task's explicit
+instruction.
+
+**Checks (this round, body-layer only -- aircraft-layer untouched)**:
+- `ruff format --check src tests`: pass (206 files already formatted)
+- `ruff check src tests`: pass (all checks passed -- the pre-existing unrelated `I001` finding the
+  review noted in `test_bl_b104_association_scenarios.py` is gone; it was fixed on `main` by the
+  `fix/ruff-import-order-slow-marker` merge this branch picked up via the required fast-forward)
+- `mypy src`: pass (no issues, 84 source files)
+- `.claude/scripts/fast-tests.sh body-layer`: pass (2414 passed, 4 xfailed)
+- `tests/test_altimeter_qnh_sync.py` by name, verbose: all 13 pass, including the new test by its
+  exact name

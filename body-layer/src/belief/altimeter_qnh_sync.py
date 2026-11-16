@@ -291,7 +291,11 @@ def advance_altimeter_qnh_sync(
             ALTIMETER_QNH_MAX_STEP,
         )
     else:
-        delta = _sign(error_mmhg) * ALTIMETER_QNH_CALIBRATION_STEP
+        delta = _clamp(
+            _sign(error_mmhg) * ALTIMETER_QNH_CALIBRATION_STEP,
+            -ALTIMETER_QNH_MAX_STEP,
+            ALTIMETER_QNH_MAX_STEP,
+        )
 
     try:
         aircraft_client.write_cockpit_switch(_DEVICE, _CMD, delta)

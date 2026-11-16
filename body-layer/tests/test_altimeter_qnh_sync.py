@@ -8,6 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
+import pytest
+
+import belief.altimeter_qnh_sync as altimeter_qnh_sync_module
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.altimeter_qnh_sync import (
     ALTIMETER_QNH_MAX_DURATION_S,
@@ -297,3 +300,29 @@ def test_succeeded_state_is_inert() -> None:
 
     assert state.phase == "succeeded"
     assert fake.read_calls == reads_at_success
+
+
+def test_calibration_step_is_clamped_to_max_step_even_when_configured_larger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ALTIMETER_QNH_CALIBRATION_STEP`'s declared range (0.01-0.2) and
+    `ALTIMETER_QNH_MAX_STEP`'s (0.05-1.0) do not themselves enforce
+    `CALIBRATION_STEP <= MAX_STEP` -- a legal `config/tuning.toml`
+    override can invert the pair. The first step of every run (taken
+    while `prev_delta_sent` is still `None`, so no gain estimate exists)
+    must still obey `MAX_STEP` regardless -- the gap the review found in
+    the `else` branch of the delta computation."""
+    monkeypatch.setattr(
+        altimeter_qnh_sync_module, "ALTIMETER_QNH_CALIBRATION_STEP", 0.2
+    )
+    monkeypatch.setattr(altimeter_qnh_sync_module, "ALTIMETER_QNH_MAX_STEP", 0.05)
+
+    fake = _FakeAircraftClient(initial_arg=0.0, respond=_ignores_writes)
+    state = start_altimeter_qnh_sync(790.0, now_wall=0.0)
+    assert state.prev_delta_sent is None  # confirms the no-gain branch will run
+
+    state = advance_altimeter_qnh_sync(state, _client(fake), ALTIMETER_QNH_SETTLE_S)
+
+    assert state.phase == "running"
+    assert fake.writes, "expected the first (no-gain) step to write"
+    assert all(abs(delta) <= 0.05 for delta in fake.writes)
