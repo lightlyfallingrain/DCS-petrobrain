@@ -227,7 +227,10 @@ animation is trimmed to its endpoints; every other measured line is verbatim:
   +144 m in 17 s, about 11 m/s at the end, still climbing. The overlay read 20 s later:
   **`alt=1658 alt_ref=B`, against an actual 921 m MSL at the press.** The centre press did flip
   radar → barometric, but the barometric target it set was about 740 m too high. This is the
-  pilot's own *"sometimes it has set something way incorrect"*, on the first try.
+  pilot's own *"sometimes it has set something way incorrect"*, on the first try. **Pilot, same
+  day:** *"this is what I mean with my earlier comment that the barometric alt setting may get a
+  wildly incorrect initial value. That too is ED bug."* So both the sink and the wild barometric
+  target are ED bugs to work around, not ours to fix.
 - **P0-1 confirmed:** readback only with the menu open; toggling is repeatable.
 - **P0-2:** a 0.7 s hold reads as long on every outer position: altitude ±4 m, course ±2°.
   Small steps, so long holds cannot correct a target that is hundreds of metres off.
