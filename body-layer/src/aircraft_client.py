@@ -487,6 +487,7 @@ class AircraftLayerClient:
         altitude_target_ref: Literal["radar", "barometric"] | None,
         speed_target_kmh: float | None,
         hvrt_direction: Literal["left", "right", "forward", "back"] | None,
+        hvrt_step: Literal["up", "down"] | None = None,
     ) -> None:
         """`POST /command/ai_pilot_goal` -> sends BL-16 mode 2's goal
         channel message (`plans/flight-control/plan.md`, "Stage P2 ready
@@ -498,7 +499,14 @@ class AircraftLayerClient:
         why. `belief.ai_pilot_wheel`'s own `decide_ai_pilot_wheel` is
         what decides *when* to call this (on a `goal_seq` change); this
         client is a pure pass-through, same division of labour every
-        other `write_*` method here already has."""
+        other `write_*` method here already has.
+
+        `hvrt_step` is a one-shot trigger (Stage P2b's own task list,
+        not the plan's "wire shape" section -- see `CommandSender.send_
+        ai_pilot_goal`'s own docstring), so `body.py`'s own call site
+        must bump `goal_seq` on every call that carries one, even if
+        nothing else changed -- `Export.lua` acts on it exactly once per
+        distinct `goal_seq`."""
         self._post_json(
             "/command/ai_pilot_goal",
             {
@@ -509,6 +517,7 @@ class AircraftLayerClient:
                 "altitude_target_ref": altitude_target_ref,
                 "speed_target_kmh": speed_target_kmh,
                 "hvrt_direction": hvrt_direction,
+                "hvrt_step": hvrt_step,
             },
         )
 

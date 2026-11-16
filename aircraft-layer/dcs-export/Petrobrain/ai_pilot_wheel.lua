@@ -1118,6 +1118,26 @@ local function handle_ai_pilot_goal_command(data, t)
     local altitude_target_ref = extract_json_string_field(data, "altitude_target_ref")
     local speed_target_kmh = extract_json_number_field(data, "speed_target_kmh")
     local hvrt_direction = extract_json_string_field(data, "hvrt_direction")
+    -- `hvrt_step` is a **one-shot trigger**, not sticky state like every
+    -- other field here (Stage P2b's own task list, not in the plan's
+    -- "wire shape" section -- see `CommandSender.send_ai_pilot_goal`'s
+    -- own docstring for why this field exists at all). Acted on exactly
+    -- once per distinct `goal_seq` -- checked against the *old*
+    -- `ai_pilot_goal.goal_seq` below, before it is overwritten, so a
+    -- re-delivered or otherwise-unchanged message never taps twice.
+    local hvrt_step = extract_json_string_field(data, "hvrt_step")
+    if hvrt_step ~= nil and goal_seq ~= ai_pilot_goal.goal_seq then
+        local step_cmd = nil
+        if hvrt_step == "up" then
+            step_cmd = AI_WHEEL_UP
+        elseif hvrt_step == "down" then
+            step_cmd = AI_WHEEL_DOWN
+        end
+        if step_cmd ~= nil then
+            ai_pilot_tap30(step_cmd)
+            ai_pilot_last_press = "goal_hvrt_step"
+        end
+    end
 
     if param ~= ai_pilot_goal.param then
         ai_pilot_goal_release_hold()

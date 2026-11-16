@@ -247,15 +247,20 @@ the body/brain process, on either Windows or Mac (compute topology note in
   "heading"|"altitude"|"speed"|null, "heading_target_deg": number|null,
   "altitude_target_m": number|null, "altitude_target_ref":
   "radar"|"barometric"|null, "speed_target_kmh": number|null,
-  "hvrt_direction": "left"|"right"|"forward"|"back"|null}`; forwards to
-  `collector.command_sender.CommandSender.send_ai_pilot_goal`, which
-  fires the JSON command at `Export.lua`'s inbound UDP listener (the same
-  listener `/command/cockpit_switch`/`/command/sight_target` already
-  target), and responds `200 {"ok": true}` on the same "attempted the
-  call" contract as those two. `400 {"error": ...}` on a missing/
-  out-of-range `goal_seq`, an invalid `param`/`altitude_target_ref`/
-  `hvrt_direction`, an out-of-range optional numeric field, or a non-JSON
-  body -- shape validation only, same division of labour as
+  "hvrt_direction": "left"|"right"|"forward"|"back"|null, "hvrt_step":
+  "up"|"down"|null}`; forwards to `collector.command_sender.
+  CommandSender.send_ai_pilot_goal`, which fires the JSON command at
+  `Export.lua`'s inbound UDP listener (the same listener
+  `/command/cockpit_switch`/`/command/sight_target` already target), and
+  responds `200 {"ok": true}` on the same "attempted the call" contract
+  as those two. `hvrt_step` is a one-shot trigger (not named in the
+  plan's own "wire shape" section, added for Stage P2b's own task list --
+  see `send_ai_pilot_goal`'s docstring), acted on by `Export.lua` once
+  per distinct `goal_seq`, same as every other field on this message.
+  `400 {"error": ...}` on a missing/ out-of-range `goal_seq`, an invalid
+  `param`/`altitude_target_ref`/`hvrt_direction`/`hvrt_step`, an
+  out-of-range optional numeric field, or a non-JSON body -- shape
+  validation only, same division of labour as
   `/command/sight_target`. `503 {"error": "ai_pilot_goal channel not
   configured"}` if this server was built without a `command_sender`; a
   send failure propagates as `500 {"error": ...}`, same posture as
@@ -439,6 +444,10 @@ _AI_PILOT_GOAL_VALID_HVRT_DIRECTIONS: tuple[str, ...] = (
     "forward",
     "back",
 )
+#: `hvrt_step`'s own closed vocabulary -- the one-shot altitude-tap
+#: trigger (Stage P2b's own task list, not named in the plan's "wire
+#: shape" section -- see `CommandSender.send_ai_pilot_goal`'s docstring).
+_AI_PILOT_GOAL_VALID_HVRT_STEPS: tuple[str, ...] = ("up", "down")
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -1304,6 +1313,23 @@ def _make_handler(
                 )
                 return
 
+            hvrt_step = data.get("hvrt_step")
+            if (
+                hvrt_step is not None
+                and hvrt_step not in _AI_PILOT_GOAL_VALID_HVRT_STEPS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'hvrt_step' must be one of "
+                            f"{_AI_PILOT_GOAL_VALID_HVRT_STEPS} or null, got "
+                            f"{hvrt_step!r}"
+                        )
+                    },
+                )
+                return
+
             try:
                 command_sender.send_ai_pilot_goal(
                     goal_seq_raw,
@@ -1313,6 +1339,7 @@ def _make_handler(
                     altitude_target_ref,
                     speed_target_kmh,
                     hvrt_direction,
+                    hvrt_step,
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})

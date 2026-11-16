@@ -239,18 +239,20 @@ class CommandSender:
         altitude_target_ref: Literal["radar", "barometric"] | None,
         speed_target_kmh: float | None,
         hvrt_direction: Literal["left", "right", "forward", "back"] | None,
+        hvrt_step: Literal["up", "down"] | None = None,
     ) -> None:
         """Send `{"op": "ai_pilot_goal", "goal_seq": ..., "param": ...,
         "heading_target_deg": ..., "altitude_target_m": ...,
         "altitude_target_ref": ..., "speed_target_kmh": ...,
-        "hvrt_direction": ...}` to `Export.lua`'s command listener -- the
-        goal channel (`plans/flight-control/plan.md`, "Stage P2 ready to
-        build", "The goal channel -- wire shape"), BL-16 mode 2's third
-        write op on the same `POST /command/*` family. Same
-        `CommandSendError` posture as `send_sight_target`/`send_cockpit_
-        switch`: a dropped goal update is a real behavioral gap (Lua
-        keeps pressing toward a stale target, or stops pressing toward
-        the wrong one), not an opaque display string to swallow.
+        "hvrt_direction": ..., "hvrt_step": ...}` to `Export.lua`'s
+        command listener -- the goal channel (`plans/flight-control/
+        plan.md`, "Stage P2 ready to build", "The goal channel -- wire
+        shape"), BL-16 mode 2's third write op on the same `POST
+        /command/*` family. Same `CommandSendError` posture as `send_
+        sight_target`/`send_cockpit_switch`: a dropped goal update is a
+        real behavioral gap (Lua keeps pressing toward a stale target,
+        or stops pressing toward the wrong one), not an opaque display
+        string to swallow.
 
         **Only the fields matching `param` are meaningful** -- `param`
         is a *selector*, not three simultaneous targets (the plan's own
@@ -259,6 +261,18 @@ class CommandSender:
         right now). `param: None` with every target `None` is the idle/
         all-settled message. `hvrt_direction` travels in the same
         message rather than a separate op, per the plan.
+
+        **`hvrt_step` is a one-shot trigger, not sticky state** -- the
+        plan's own Stage P2b task list names `hvrt_step` as an action
+        but its "wire shape" section never enumerated this field; added
+        here as the smallest consistent extension (same message,
+        one-shot-by-construction via `goal_seq` already changing on
+        every call this layer makes) rather than inventing a second op.
+        `Export.lua`'s own `handle_ai_pilot_goal_command` acts on it
+        exactly once per distinct `goal_seq` it has not already seen --
+        the caller (`body.py`) is responsible for bumping `goal_seq` on
+        every call that carries a non-`None` `hvrt_step`, even when
+        nothing else in the message changed.
 
         Plain `json.dumps`, unlike `send_cockpit_switch`/`send_sight_
         target`'s hand-formatted `_format_fixed_point`: every value on
@@ -290,6 +304,7 @@ class CommandSender:
                 "altitude_target_ref": altitude_target_ref,
                 "speed_target_kmh": speed_target_kmh,
                 "hvrt_direction": hvrt_direction,
+                "hvrt_step": hvrt_step,
             }
         ).encode("utf-8")
         try:

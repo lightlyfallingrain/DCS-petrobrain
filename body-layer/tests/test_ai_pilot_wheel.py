@@ -24,6 +24,7 @@ from aircraft_client import AircraftLayerClient
 from belief.ai_pilot_wheel import (
     AI_PILOT_GOAL_SLICE_S,
     AI_PILOT_SPEED_MAX_SENTINEL_KMH,
+    AiPilotGoalRequest,
     AiPilotWheelGoal,
     ParkedFlightState,
     advance_parked_flight_state,
@@ -36,6 +37,7 @@ from belief.ai_pilot_wheel import (
     set_parked_altitude,
     set_parked_heading,
     set_parked_speed,
+    step_speed,
 )
 
 
@@ -345,6 +347,37 @@ class TestSetParkedSpeed:
         goal, resolved = set_parked_speed(AiPilotWheelGoal(), 1.0, "max")
         assert resolved == AI_PILOT_SPEED_MAX_SENTINEL_KMH
         assert goal.speed_target_kmh == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
+
+class TestStepSpeed:
+    def test_steps_up_one_rung(self) -> None:
+        assert step_speed(120.0, "up") == 150.0
+
+    def test_steps_down_one_rung(self) -> None:
+        assert step_speed(150.0, "down") == 120.0
+
+    def test_cannot_step_above_the_max_sentinel(self) -> None:
+        assert step_speed(AI_PILOT_SPEED_MAX_SENTINEL_KMH, "up") == (
+            AI_PILOT_SPEED_MAX_SENTINEL_KMH
+        )
+
+    def test_the_top_real_step_can_step_up_to_max(self) -> None:
+        assert step_speed(250.0, "up") == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
+    def test_cannot_step_below_zero(self) -> None:
+        assert step_speed(0.0, "down") == 0.0
+
+    def test_an_unknown_current_speed_is_never_treated_as_a_known_step(self) -> None:
+        assert step_speed(None, "up") is None
+
+
+class TestAiPilotGoalRequest:
+    def test_constructs_with_a_single_meaningful_field(self) -> None:
+        request = AiPilotGoalRequest(param="heading", heading_deg=90.0)
+        assert request.param == "heading"
+        assert request.heading_deg == 90.0
+        assert request.altitude_m is None
+        assert request.speed_kmh is None
 
 
 class TestResolveAltitudeReference:

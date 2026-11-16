@@ -169,6 +169,24 @@ class AiPilotWheelGoal:
 
 
 @dataclass(frozen=True, slots=True)
+class AiPilotGoalRequest:
+    """One voice-driven goal request, queued by `crew_console`'s own
+    handlers as `CrewConsole.ai_pilot_goal_transition` for `body.py`'s
+    poll loop to apply via the matching action (`set_parked_heading`/
+    `set_parked_altitude`/`set_parked_speed`) -- the same one-shot-signal
+    shape `observ_transition`/`weapon_safety_transition` already have.
+    Exactly one of `heading_deg`/`altitude_m`/`speed_kmh` is meaningful,
+    selected by `param`, mirroring `AiPilotWheelGoal`'s own selector
+    design on the wire."""
+
+    param: AiPilotWheelParam
+    heading_deg: float | None = None
+    altitude_m: float | None = None
+    altitude_ref: AiPilotAltitudeRef | None = None
+    speed_kmh: float | Literal["max"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ParkedFlightState:
     """Petrovich's belief about ED's AI-pilot wheel while the stick is
     parked. Replaced wholesale each poll via `replace()`/`advance_parked_
@@ -398,6 +416,39 @@ def set_parked_speed(
         else nearest_speed_step(requested_kmh)
     )
     return request_goal(goal, "speed", now_sim, speed_target_kmh=snapped), snapped
+
+
+def step_speed(
+    current_kmh: float | None, direction: Literal["up", "down"]
+) -> float | None:
+    """`speed_step`'s own "one step up/down" (plan vocabulary table) --
+    walks `AI_PILOT_SPEED_STEPS_KMH` (plus the MAX sentinel as one more
+    rung at the top) one position from `current_kmh`'s own nearest step,
+    never jumping further. `current_kmh` is the AI's own *held* value
+    (`ParkedFlightState.held_speed`), not an in-flight goal target --
+    the caller's job to pick which, matching every other "current" slot
+    in this vocabulary. `None` in, `None` out -- a missing reading is
+    never treated as a known step, same posture every other state-param
+    read in this module takes.
+
+    **Known gap**: `held_speed` parses `speed_text` as a plain number
+    (`belief.ai_pilot_wheel.advance_parked_flight_state`'s own `_parse_
+    float`), which returns `None` for the literal overlay string
+    `"MAX"` -- so "speed down" spoken while already at MAX currently
+    reads as "unable, not ready" rather than stepping down from MAX.
+    Flagged, not fixed in this stage; the parse-time fix belongs with
+    whichever stage first needs `held_speed` to distinguish "unknown"
+    from "MAX" for its own reasons."""
+    if current_kmh is None:
+        return None
+    ladder = (*AI_PILOT_SPEED_STEPS_KMH, AI_PILOT_SPEED_MAX_SENTINEL_KMH)
+    nearest = nearest_speed_step(current_kmh)
+    index = ladder.index(nearest)
+    if direction == "up":
+        index = min(index + 1, len(ladder) - 1)
+    else:
+        index = max(index - 1, 0)
+    return float(ladder[index])
 
 
 def resolve_altitude_reference(

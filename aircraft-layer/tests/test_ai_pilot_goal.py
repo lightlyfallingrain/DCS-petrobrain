@@ -37,6 +37,7 @@ _VALID_BODY = {
     "altitude_target_ref": None,
     "speed_target_kmh": None,
     "hvrt_direction": None,
+    "hvrt_step": None,
 }
 
 _IDLE_BODY = {
@@ -47,6 +48,7 @@ _IDLE_BODY = {
     "altitude_target_ref": None,
     "speed_target_kmh": None,
     "hvrt_direction": None,
+    "hvrt_step": None,
 }
 
 
@@ -77,7 +79,24 @@ class TestSendAiPilotGoal:
                 "altitude_target_ref": "barometric",
                 "speed_target_kmh": None,
                 "hvrt_direction": None,
+                "hvrt_step": None,
             }
+        finally:
+            receiver.close()
+
+    def test_hvrt_step_is_a_one_shot_field(self) -> None:
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(2.0)
+        port = receiver.getsockname()[1]
+
+        try:
+            with CommandSender(host="127.0.0.1", port=port) as sender:
+                sender.send_ai_pilot_goal(5, None, None, None, None, None, None, "up")
+
+            data, _addr = receiver.recvfrom(4096)
+            decoded = json.loads(data.decode("utf-8"))
+            assert decoded["hvrt_step"] == "up"
         finally:
             receiver.close()
 
@@ -134,6 +153,7 @@ class _RecordingCommandSender(CommandSender):
         altitude_target_ref: object,
         speed_target_kmh: object,
         hvrt_direction: object,
+        hvrt_step: object = None,
     ) -> None:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
@@ -146,6 +166,7 @@ class _RecordingCommandSender(CommandSender):
                 altitude_target_ref,
                 speed_target_kmh,
                 hvrt_direction,
+                hvrt_step,
             )
         )
 
@@ -187,7 +208,7 @@ class TestAiPilotGoalCommandEndpoint:
         status, body = _post(server, "/command/ai_pilot_goal", _VALID_BODY)
         assert status == 200
         assert body == {"ok": True}
-        assert sender.sent == [(1, "heading", 90.0, None, None, None, None)]
+        assert sender.sent == [(1, "heading", 90.0, None, None, None, None, None)]
 
     def test_the_idle_message_is_accepted(
         self,
@@ -196,7 +217,7 @@ class TestAiPilotGoalCommandEndpoint:
         server, sender = running_server_with_sender
         status, _body = _post(server, "/command/ai_pilot_goal", _IDLE_BODY)
         assert status == 200
-        assert sender.sent == [(0, None, None, None, None, None, None)]
+        assert sender.sent == [(0, None, None, None, None, None, None, None)]
 
     def test_integer_target_values_are_accepted_and_forwarded_as_floats(
         self,
@@ -206,7 +227,7 @@ class TestAiPilotGoalCommandEndpoint:
         body = {**_VALID_BODY, "heading_target_deg": 90}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
-        assert sender.sent == [(1, "heading", 90.0, None, None, None, None)]
+        assert sender.sent == [(1, "heading", 90.0, None, None, None, None, None)]
 
     def test_an_hvrt_direction_message_is_accepted(
         self,
@@ -216,7 +237,7 @@ class TestAiPilotGoalCommandEndpoint:
         body = {**_IDLE_BODY, "goal_seq": 2, "hvrt_direction": "left"}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
-        assert sender.sent == [(2, None, None, None, None, None, "left")]
+        assert sender.sent == [(2, None, None, None, None, None, "left", None)]
 
     def test_an_invalid_param_returns_400(
         self,
@@ -249,6 +270,26 @@ class TestAiPilotGoalCommandEndpoint:
     ) -> None:
         server, sender = running_server_with_sender
         body = {**_IDLE_BODY, "hvrt_direction": "up"}
+        status, _body = _post(server, "/command/ai_pilot_goal", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_an_hvrt_step_message_is_accepted(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {**_IDLE_BODY, "goal_seq": 3, "hvrt_step": "up"}
+        status, _body = _post(server, "/command/ai_pilot_goal", body)
+        assert status == 200
+        assert sender.sent == [(3, None, None, None, None, None, None, "up")]
+
+    def test_an_invalid_hvrt_step_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {**_IDLE_BODY, "hvrt_step": "sideways"}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 400
         assert sender.sent == []

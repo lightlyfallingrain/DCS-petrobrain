@@ -1543,6 +1543,57 @@ class TestHandleAiPilotGoalCommand:
         assert values["progress"] == "idle"
 
 
+class TestHandleAiPilotGoalCommandHvrtStep:
+    """`hvrt_step`'s own one-shot-trigger behaviour -- acted on exactly
+    once per distinct `goal_seq`, never sticky state."""
+
+    def test_taps_once_on_a_fresh_goal_seq(self) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.0)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3004:1,3004:0"  # AI_WHEEL_UP, one tap
+
+    def test_a_re_delivered_message_with_the_same_goal_seq_does_not_tap_again(
+        self,
+    ) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "up"}', 0.2)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3004:1,3004:0"  # only the first call tapped
+
+    def test_a_new_goal_seq_taps_again(self) -> None:
+        script = """
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "down"}', 0.0)
+        handle_ai_pilot_goal_command('{"goal_seq": 2, "param": null, '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "hvrt_step": "down"}', 0.2)
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_log"] == "3005:1,3005:0,3005:1,3005:0"
+
+
 class TestAiPilotGoalTickHvrt:
     """Stage P2b: HVRT translate's own hold/redirect/hold-clear/timeout."""
 
