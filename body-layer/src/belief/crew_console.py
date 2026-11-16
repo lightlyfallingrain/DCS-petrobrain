@@ -1119,16 +1119,17 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # (`AttackRunState`/`OwnshipState`/the resolving optic) this
         # class cannot reach synchronously.
         "where_is_it",
-        # `BL-B64` Stage 2, direction §6 -- "Observ on"/"Observ off".
-        # `_handle_observ_on`/`_handle_observ_off` always return a
-        # one-line readback unconditionally, so neither needs the
-        # no-return-value exemption.
+        # `BL-B64` Stage 2, direction §6 -- "Observ on"/"Observ off"; and
+        # `BL-B66` Stage 4 -- "weapons armed"/"weapons safe". All four are
+        # dispatched (every token here is), but since `[[BL-B119]]` each
+        # one's own accepted-path line is spoken by the engine when its
+        # sequence row completes, not returned here -- all four are in
+        # `NO_RETURN_VALUE_COMMAND_TOKENS` below. `_handle_observ_on` is
+        # the one case with a second, non-`[]` path: "Unable, guidance
+        # unit not ready." on refusal, unchanged and out of `[[BL-B119]]`'s
+        # scope.
         "observ_on",
         "observ_off",
-        # `BL-B66` Stage 4 -- "weapons armed"/"weapons safe".
-        # `_handle_weapons_armed`/`_handle_weapons_safe` always return a
-        # one-line readback unconditionally, so neither needs the
-        # no-return-value exemption.
         "weapons_armed",
         "weapons_safe",
         "cancel_task",
@@ -1166,8 +1167,20 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
 #: something`'s own exemption list, pulled out as a named constant so the
 #: test and `handle_command`'s early-return branches read the same
 #: definition rather than two independently-maintained lists of two.
+#: `observ_on`/`observ_off`/`weapons_armed`/`weapons_safe` (`[[BL-B119]]`)
+#: are here on their accepted path only -- `_handle_observ_on`'s own
+#: readiness refusal still returns a real line, so the regression test
+#: this set feeds must call it with `sight_ready` already `True`.
 NO_RETURN_VALUE_COMMAND_TOKENS: frozenset[str] = frozenset(
-    {"stop_talking", "silence", "where_is_it"}
+    {
+        "stop_talking",
+        "silence",
+        "where_is_it",
+        "observ_on",
+        "observ_off",
+        "weapons_armed",
+        "weapons_safe",
+    }
 )
 
 
@@ -2114,6 +2127,18 @@ class CrewConsole:
         )
         self._print([line], now_sim)
         self.altimeter_qnh_failed_pending = False
+
+    def drain_effector_speech(self, now_sim: float, spoken: tuple[str, ...]) -> None:
+        """Speaks every effector-sequence row's own `petrovich-says` line
+        that completed this poll (`[[BL-B119]]`) -- `belief.
+        effector_engine.EffectorRunState.spoken`, already in execution
+        order (row order within a trigger, fire order across triggers;
+        see that module's docstring), fed through this class's normal
+        speech path. Called once per poll from `body.py`, right after
+        `advance_effectors` -- unconditionally, same "every poll" shape
+        as `drain_config_error`; `_print` on an empty tuple is already a
+        no-op, so no guard is needed here."""
+        self._print(list(spoken), now_sim)
 
     def _speak_or_defer(
         self,
@@ -4169,29 +4194,37 @@ class CrewConsole:
         cycle (`belief.optic_policy.decide`) only moves into `SIGHTING` at
         its own next phase boundary, the structural rule that makes
         abandoning a scan mid-sweep to glass up (or sight up) an
-        inexpressible state. Speaks unconditionally, same posture as
-        `_handle_disengage` -- **unless the guidance unit is not ready**
+        inexpressible state. **Unless the guidance unit is not ready**
         (`BL-B66` Stage 3, `plans/9k113-effectors/plan.md` §3): gated
         synchronously here, before `observ_transition` is ever set, so a
         request that arrives before power-up completes is refused outright
         rather than accepted and silently never engaging -- see the
         plan's §3 for why this is the moment to gate it, not a new branch
-        inside `decide()`."""
+        inside `decide()`.
+
+        **Returns `[]` on acceptance** (`[[BL-B119]]`) -- "Observ on." is
+        now the `observ-on` sequence file's own `petrovich-says` cell,
+        spoken by `belief.effector_engine.advance` when its row
+        completes, drained by `body.py`'s `CrewConsole.
+        drain_effector_speech` call, not this handler. The readiness
+        refusal above is unchanged: it never reaches the sequence at
+        all."""
         if not self.sight_ready:
             return [render_unable("GUIDANCE_NOT_READY").text]
         self.observ_transition = "on"
-        return ["Observ on."]
+        return []
 
     def _handle_observ_off(self) -> list[str]:
         """ "Observ off" -- the pilot's own command to end OBSERV (direction
         §6), and also what a violent manoeuvre does automatically
         (`belief.optic_policy._force_observ_off`, direction §8) -- this
         handler is the pilot-commanded path only; the manoeuvre path never
-        calls it. Speaks unconditionally, same posture as `_handle_
-        disengage`. **No readiness gate** (plan §3: "OBSERV OFF needs no
-        gating and no sequence")."""
+        calls it. **No readiness gate** (plan §3: "OBSERV OFF needs no
+        gating and no sequence"). **Returns `[]`** (`[[BL-B119]]`, same
+        shape as `_handle_observ_on`) -- "Observ off." is the `observ-off`
+        sequence file's own `petrovich-says` cell now."""
         self.observ_transition = "off"
-        return ["Observ off."]
+        return []
 
     def _handle_weapons_armed(self) -> list[str]:
         """ "weapons armed" -- `BL-B66` Stage 4 (`plans/9k113-effectors/
@@ -4200,22 +4233,29 @@ class CrewConsole:
         write), the same one-shot-signal shape `observ_transition` already
         has. Converges on the same field `_handle_engage` already sets --
         an attack run started while already armed is a harmless re-write,
-        never a conflicting state. Speaks unconditionally, same posture as
-        `_handle_disengage`. **Deliberately the fixed phrase "weapons
-        armed", never "weapons on"** (user direction 2026-10-21: "weapons
-        armed/safe")."""
+        never a conflicting state (and, per `[[BL-B119]]`, also therefore
+        why "weapons armed" is spoken on that path too: the engine does
+        not care which caller fired the trigger). **Returns `[]`**
+        (`[[BL-B119]]`) -- "Weapons armed." is now the `weapons-arm`
+        sequence file's own `petrovich-says` cell, not a fixed string
+        returned here. **Deliberately the fixed phrase "weapons armed",
+        never "weapons on"** (user direction 2026-10-21: "weapons
+        armed/safe") -- that is why the shipped `weapons-arm.md` cell
+        reads that way, even though this handler no longer carries the
+        literal text itself."""
         self.weapon_safety_transition = "armed"
-        return ["Weapons armed."]
+        return []
 
     def _handle_weapons_safe(self) -> list[str]:
         """ "weapons safe" -- the pilot's own command to safe the weapons
         safety bar (procedures direction §4: "set SAFE on -- pilot
         command"). Nothing arms or safes itself on a timer or on egress --
         this handler is the only path that sets `weapon_safety_transition
-        = "safe"`. Speaks unconditionally, same posture as `_handle_
-        weapons_armed`."""
+        = "safe"`. **Returns `[]`** (`[[BL-B119]]`, same shape as
+        `_handle_weapons_armed`) -- "Weapons safe." is the `weapons-safe`
+        sequence file's own `petrovich-says` cell now."""
         self.weapon_safety_transition = "safe"
-        return ["Weapons safe."]
+        return []
 
     def drain_attack_run(
         self,
