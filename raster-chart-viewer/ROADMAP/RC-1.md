@@ -7,7 +7,7 @@
   `plans/raster-chart-viewer/plan.md`.
 
   **DoD-PASSED 2026-11-16 for Stages 1-6** (`plans/raster-chart-viewer/dod-check.md`, tip
-  `91e2296c4236164633624121b0d587e4bac92b0a`); merging to `main` on this report per root
+  `91e2296c4236164633624121b0d587e4bac92b0a`); **merged to `main` 2026-11-16 as `f00ac0c3`** per root
   `CLAUDE.md`'s auto-merge workflow. **Branch to fly after merge: `main`.** Stage 7 — the user's
   own live LAN check on the Windows box — has not been flown; this entry stays `[~]`/
   `#status/in-progress` until it is. What Stage 7 must verify (full detail and run instructions:
