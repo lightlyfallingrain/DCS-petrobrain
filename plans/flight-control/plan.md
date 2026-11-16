@@ -113,7 +113,7 @@ used ("turn heading 3 1 5", "hold 200 m radar", "speed 2 2 0"):
 | "Speed &lt;value&gt;" | `set_speed` | FLT/HVR | nearest step; "max" is a legal value | |
 | "Slow down" / "Speed up" | `speed_step` | FLT/HVR | one step down/up | |
 | "Hover" | `set_speed` with value 0 | FLT/HVR | step 0 | causes the automatic FLT→HVR transition once DCS itself slows to hover |
-| "alt[itude] &lt;value&gt; [radar/barometric]" | `set_altitude` | FLT/HVR | centre-toggle reference if it differs, then hold to value | |
+| "alt[itude] &lt;value&gt; [radar/barometric]" | `set_altitude` | FLT/HVR | centre-toggle reference if it differs, then hold to value | **at risk, added 2026-11-16**: P0-5 measured a centre press *with the menu open* not toggling the reference at all (menu closed, it did). Stage P1's own takeover toggle presses centre while closed, before the menu is ever opened, which sidesteps this — but by the time P2 is built the menu is permanently open (the "menu stays open" decision below), so *this row's* centre-toggle may not be reachable as written. Needs a probe with a real pulse (not same-frame) before P2 commits to it; until then, treat "radar" as possibly unreachable by voice |
 | "climb/descend &lt;m&gt;" | `altitude_step` | FLT/HVR | relative, current ± m | |
 | "hold alt[itude]" | `hold_altitude` | FLT/HVR | freezes the goal at the current read altitude | |
 | "left/right/forward/back" | `hvrt_translate` | **HVRT only** | Lua holds the press open until body-layer clears it — see Stage P2's HVRT sub-section | state-gated, not grammar-gated — see note below |
@@ -379,6 +379,14 @@ overlay is on screen regardless (user, 2026-11-15), so a pass costs nothing cosm
 
 ### Stage P1 — the seam and activation, no goals yet
 
+**SUPERSEDED 2026-11-16** — see "Revised 2026-11-16 — takeover after the Batch A flights" below
+for the production design. Batch A (built to the letter of this section, DoD-PASSED, merged
+`c38740d0`) found two wrong assumptions once flown: the park/pedals-OR detection reads "parked"
+whenever the AI is *not* flying (952 is arg 852's mirror, not a second park sensor), and ED's own
+barometric target can come out hundreds of metres wrong, which the single "nudge if already equal"
+shot never addresses. Kept below verbatim, per `docs/PROCESS.md`'s "Superseding a decision" — the
+account of what was built and why it needed revision is itself worth keeping, not just the fix.
+
 Minimal working version: the park signal takes over, holds altitude, does nothing else.
 
 - **Lua**: `run_ai_pilot_wheel(t)` per frame beside `run_sight_servo(t)`. Parses
@@ -474,6 +482,12 @@ Minimal working version: the park signal takes over, holds altitude, does nothin
 
 ### Stage P5 — terrain reference (Q6) and seat/scope boundaries
 
+**Note added 2026-11-16**: the revised Stage P1 (below) already puts the AI onto baro at
+takeover, as part of the park-sink/wrong-target fix — not a separate decision taken here. This
+stage's own job narrows to *confirming* that choice on the test card against what the player
+actually observes over rising terrain, not implementing the toggle; the bullet below is kept as
+the record of why baro was chosen.
+
 - Default `ALT REF` to **baro** for the smoother hold (Q6 — radar is jerky), terrain avoidance
   along the flight path explicitly deferred to the player's own judgement and to `[[BL-B101]]`
   later, stated on the test card as a known limitation, not a silent gap.
@@ -566,6 +580,257 @@ overlay channel needs forcing open (P0-1) — a fact mode 1 never needed and now
   command via Petrobrain, not player directly."* Always-reassert stands as the production
   behaviour; E-P5 is narrowed accordingly (see the E-P traceability table's E-P5 row and
   `alignment.md`'s Plan check Q-P1). No longer open.
+
+## Revised 2026-11-16 — takeover after the Batch A flights
+
+Batch A (Stage P-ICS/P0/P1 above) was DoD-PASSED and merged (`c38740d0`) on the strength of
+fixtures and code reads — the acceptance boundary in `dod-batch-a.md` said plainly that the live
+behaviour was still unverified. Two flights the same day found it wrong in two independent ways.
+Source for everything below: `docs/acceptance/2026-11-16-bl16-batch-a-feedback.md` (read in full);
+quotes are the pilot's own. This revision replaces **Stage P1 only**; P-ICS is unaffected (passed
+as built) and P0's own measurement rows are all now answered (see "Stage P0 — status" below).
+
+### Why Stage P1 needed to change
+
+1. **The detection never saw the handover.** The AI takes over on the operator-seat binding
+   "Request Aircraft Control" (category "Petrovich AI Helper, Multicrew"); "Copilot Stick -
+   PARK/UNPARK" — the control the original Stage P1 was named after and built to watch — does
+   nothing at all (pilot, verbatim). Production's `852 OR 952 ≥ 0.9` compounds this: **952 is not
+   a second park sensor, it is arg 852's exact mirror** (measured: 852 + 952 = 1.00 at every
+   sample through the handover animation, settling at 852 = 1 / 952 = 0). So the OR term reads
+   "parked" whenever the AI is simply *not* flying, which is the wrong state to call "parked" and
+   is never the rising edge the nudge needs. **852 alone is the handover signal.**
+2. **The fix the old design shipped (a one-shot nudge, armed only if the held and actual altitude
+   already agreed) never had anywhere to apply itself**, because the trigger it waited on never
+   fired. Separately, even where the trigger *does* fire, ED's AI carries two bugs the old design
+   did not anticipate: the starting altitude is shown on the overlay but never reaches the AI's own
+   logic (the sink), and the barometric target the pilot's own fix lands on can come out hundreds
+   of metres wrong — measured **1658 m target against 921 m actual MSL**, so the AI climbed for
+   17 s at up to 11 m/s after the sink had already been stopped. A fixed-duration "nudge" cannot
+   correct an error of that size; it needs a closed loop that watches the readback and keeps
+   correcting until it converges.
+3. **The readback is only in `list_indication(6)` with the command (right) wheel open** — measured
+   directly (P0-1): every overlay field reads `nil` closed, and is populated after one `ShowMenu`
+   toggle. The always-visible compass overlay the pilot described (research note §3) is a
+   different, HUD-only surface; the *text feed* Export.lua reads is gated on the command wheel.
+   Stage P1 cannot read or correct anything without opening it, and the pilot has since accepted
+   keeping it open permanently (next section) — this was not yet decided when Batch A's Stage P1
+   was built.
+
+### Settled, carried forward from the input documents (not re-litigated here)
+
+- **The command menu stays open for as long as the AI flies.** Petrovich opens it on takeover and
+  reopens it at once if the player closes it — accepted by the pilot as a cosmetic tradeoff. This
+  makes `list_indication(6)` readable continuously from shortly after takeover onward.
+- **Barometric is the reference**, chosen once and not re-derived here (Q6 already called it
+  smoother; the pilot's own fix lands on it too). The blind assumption "the AI always starts on
+  radar" is carried over from the pilot's own reasoning (*"Single press assumes the AI always
+  starts on radar, as the pilot saw"* — already in the feedback doc's "What this settles," not a
+  new claim introduced by this revision) — every measured sample so far agrees; flagged as a
+  residual risk below, not re-opened as a question.
+- **Correcting a wrong target is a closed loop**: hold up/down, read the overlay, release at
+  target — the same shape Stage P2's own "release when readback reaches target" already planned,
+  pulled forward into Stage P1 because the correction is needed on *every* takeover, not an
+  optional extra.
+
+### Revised Stage P1 — takeover and stabilisation
+
+Minimal working version, replacing the old one: on the park signal, Petrovich gets the AI onto a
+*correct* barometric altitude target before anything else happens, by watching the readback rather
+than assuming a single press is enough.
+
+**Sequence, in order — all of it time- or condition-driven from Export.lua alone, no body-layer
+goal channel needed** (consistent with, not revising, the Architecture decision above: the
+correction target is derived from `LoGetAltitudeAboveSeaLevel()` locally, nothing body-layer would
+need to send):
+
+1. **Detect takeover on arg 852 alone**, rising past `AI_PILOT_PARK_THRESHOLD` (0.9, unchanged).
+   Arg 952 is no longer read for detection — kept only as a diagnostic value on the status push
+   (see "Behaviour constants" below), so a future discrepancy is debuggable from the wire rather
+   than inferred after the fact.
+2. **Wait `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` (0.5 s, the pilot's own figure — *"I'd put a half
+   second delay there"*), then press centre once, menu closed.** This is the one reliable way to
+   toggle radar → barometric (P0-6's re-fly measured it working closed; P0-5 measured the *same*
+   press failing while the menu was open). Issued blind — Export.lua cannot read anything before
+   the menu has been opened at least once (point 3), so there is nothing to check first, and the
+   toggle+adopt-current-value behaviour is what stops the sink regardless of whether it reads back
+   confirmed.
+3. **Open the command menu** (one `WHEEL_MENU_BUTTON` press — Export.lua's own existing name for
+   command id 3001, the probe's `WHEEL_SHOW_MENU`) and leave it open. From here on, every 5 Hz
+   tick: if the overlay reads every field `nil` for longer than `MODE_READ_SETTLE_S` (1.0 s,
+   reused — not a new constant), conclude the player closed it and press `WHEEL_MENU_BUTTON` again.
+   The settle window exists because the toggle is a single press that *closes* an open menu just
+   as readily as it opens a closed one — reacting to one stale-looking tick would flap it shut
+   again.
+4. **Snapshot the correction target once**: after the first post-open read, take the AI's held
+   altitude (`alt_text`) and the aircraft's own current altitude in whichever reference the
+   overlay now shows (`alt_add_text`, same `ai_pilot_actual_altitude_m`-shaped lookup as before).
+   If they already agree within `AI_PILOT_ALT_TOLERANCE_M`, do nothing further. If not, open a
+   held press — **down** if the held target is above the snapshot, **up** if below (the AI climbs
+   toward a high target, so lowering the target is what stops the climb) — and keep it open,
+   re-reading every 5 Hz tick, releasing the instant the readback crosses the snapshot within
+   tolerance, or at `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` (a safety ceiling, not an expected
+   outcome — see Risks). This **replaces** the old one-shot nudge (`ai_pilot_pending_nudge`/
+   `ai_pilot_should_nudge_altitude`/`ai_pilot_press_altitude_up_long_hold`) outright, not beside
+   it: the old equality check is exactly this loop's own "already within tolerance, do nothing"
+   case, generalised to handle an arbitrarily large error in either direction.
+5. **On unpark** (852 falls below threshold): release any open press immediately (unchanged from
+   before), drop every takeover-sequence field, and **close the command menu** if Petrovich opened
+   it — symmetric with opening it, so the player gets back the view they had before parking. This
+   is a local, reversible choice (Escalation Rules), decided here rather than escalated: nothing in
+   the input documents says the player minds either way, and leaving it open would be the more
+   surprising default.
+
+**The snapshot, not a continuously-re-read target, is what the loop corrects toward** — matching
+E-P1's "holds what it was doing," and avoiding a moving-target loop if the aircraft is itself still
+settling from whatever it was doing at the moment of takeover.
+
+**No shared `press(direction, duration)` entry point** — unchanged posture from the Implementer
+notes above. The correction loop is its own dedicated up/down pair, never a parameterised
+combinator, for the same E-P6 reason.
+
+**Flight P1 (revised), test card, named branch**: from the operator seat, hand over with "Request
+Aircraft Control" (name the binding on the card — the original card's generic "park" wording is
+what produced Batch A's own confusion). Confirm: no sink; the command menu opens on its own within
+a second or two; closing it manually causes it to reopen within about a second; the held
+altitude converges to the actual altitude at takeover (watch `apw_alt_text`/`apw_last_press` —
+note how long convergence actually takes, since the rate is unmeasured, below); `apw_arg852`/
+`apw_arg952` behave as measured (852 alone crosses 0.9, 952 is its mirror). Unpark: confirm the
+menu closes, any open press releases immediately, and nothing resumes on the next park (E-P10,
+unchanged).
+
+### Co-moving Fields (Stage P1 revision)
+
+Trigger fires: a takeover sub-sequence with more than one field tracking "where in the sequence
+are we," written both externally (the park signal, the player closing the menu) and internally
+(the sequence's own advance, the correction loop's convergence). These are Export.lua module-level
+locals, not a table — same naming convention as the existing table above (`apw.foo` read as "the
+AI-pilot-wheel's `foo` state," not a literal Lua field).
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `apw.parked_active` | external (arg 852 only, now) | rising edge | `apw.takeover_stage = "toggling_reference"`; `apw.takeover_t = t` (for the 0.5 s delay) |
+| `apw.parked_active` | external | falling edge (unpark) | any open press released same frame; `apw.takeover_stage = nil`; correction target cleared; menu closed if `apw.menu_open` |
+| `apw.takeover_stage` | internal | `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` elapsed | centre pressed (menu closed); stage → `"opening_menu"` |
+| `apw.takeover_stage` | internal | menu-open press issued | stage → `"correcting_altitude"`; `apw.menu_open = true` |
+| `apw.takeover_stage` | internal | first post-open read lands | correction target snapshotted (or skipped if already within tolerance); stage → `"correcting_altitude"` (holding) or `nil` (nothing to correct) |
+| `apw.takeover_stage` | internal | correction converges, or `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` elapses | open press released; stage → `nil` |
+| `apw.menu_open` | internal | belief disagrees with a `nil`-everywhere read for > `MODE_READ_SETTLE_S` | `WHEEL_MENU_BUTTON` pressed again; belief flips to match what is about to be true, not re-read before trusting it |
+| `apw.altitude_correction_{cmd,target_m,deadline_t}` | internal | opened (point 4 above) | held press open in the resolved direction; cleared on convergence, on `apw.parked_active` going false, or on deadline |
+
+**Implementer's grep, once this stage lands:** `grep -n "takeover_stage\s*=" aircraft-layer/dcs-export/Export.lua` and the same for every other field above — confirm every write site matches a row here, and extend the table with any that does not (the existing table's own note on this: `BL-B71`'s fourth construction site, found only by grep).
+
+### Stage P0 — status (all seven rows answered)
+
+Every row in the original table above now has a measured answer, from the fixed probe
+(`fix/bl16-p0-probe-menu-open`, `aebcfd79`) flown 2026-11-16 — full log in the feedback doc. The
+table's own "Measures"/"Decides" columns stay accurate as written; results:
+
+- **P0-1**: readback only with the menu open, confirmed; toggling is repeatable. Decides
+  `LONG_PRESS_HOLD_S`'s margin is adequate (unchanged) and that Export.lua must keep the menu open
+  — now production behaviour, point 3 above.
+- **P0-2**: 0.7 s reliably reads as long (altitude ±4 m, course ±2° per hold). **Open gap, not
+  closed by this row**: that is the rate for one 0.7 s hold, not for the multi-second holds the
+  correction loop (point 4) will actually issue against a 740 m error — see Risks.
+- **P0-3**: speed steps 120→150→200→250→MAX measured (this flight started at 120, not 0 or 60 —
+  the full low end of `AI_PILOT_SPEED_STEPS_KMH` is still unmeasured, a Stage P2 note, not this
+  one).
+- **P0-4**: release → readback change in ~0.007 s (next frame) — well inside `MODE_READ_SETTLE_S`.
+- **P0-5**: centre press does **not** toggle the reference with the menu open (two presses, no
+  flip); it does with the menu closed. This is why the sequence above toggles before opening, not
+  after — see the P2 vocabulary table's own flagged row for the downstream consequence.
+- **P0-6**: the pilot's fix (centre press, menu closed, 0.5 s after takeover) stops the sink, but
+  the barometric target it lands on can be hundreds of metres wrong — the finding this whole
+  revision is built around.
+- **P0-7**: not a real limit — the AI was climbing to the wrong target and only slowed once it
+  (eventually) got there; FLT → HVR at speed 0 works normally.
+
+### The P1 telemetry mystery — resolved by construction, pending re-observation
+
+Production's own `apw_parked_active` read `false` continuously while the AI was demonstrably
+flying (`t: 12.397`, overlay visible, AI in control) — unexplained in the feedback doc, and the
+probe's own abort check (reading 852 every frame) ruled out a momentary drop in 852 itself. The
+one concrete, confirmed defect in the old detection — reading 952 as a second park sensor when it
+is actually 852's inverted mirror — removes the only failure mode anyone has been able to name:
+the OR term made "parked" read true whenever the AI was simply *not* flying (952 high, 852 low,
+i.e. *before* any takeover) and produced a brief false-negative gap mid-handover-animation while
+both args crossed 0.9 in opposite directions. Dropping 952 from detection removes both of those.
+**This does not fully account for the one observed sample** — by the time of that `curl`, the
+takeover animation had long finished and 852 should have read parked under the old logic too.
+Decided here rather than escalated to Debugger now: **treat this as resolved by construction**,
+re-observe on the next Flight P1 (which now also pushes raw 852/952 on the wire, point 1, so a
+recurrence is directly diagnosable rather than inferred) — if `apw_parked_active` still disagrees
+with an obviously-flying AI after this revision ships, that is the trigger for a Debugger pass,
+not an assumption to carry forward unverified a second time.
+
+### Behaviour constants (Stage P1 revision)
+
+| Constant | Default | Where | Why |
+|---|---|---|---|
+| `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` | 0.5 (pilot, verbatim) | Export.lua constants block | delay from takeover to the blind centre press |
+| `AI_PILOT_ALT_TOLERANCE_M` | 20.0 (renamed from `AI_PILOT_NUDGE_EPSILON_M`, same value and still Lua-local-only) | Export.lua constants block | governs both "is the target already correct" and "has the correction converged." Still duplicated against body-layer's `AI_PILOT_ALTITUDE_TOLERANCE_M` — unchanged from `dod-batch-a.md`'s own note, still deferred to Stage P2, which is where a real goal channel first exists to carry one value instead of two |
+| `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` | 60.0 (architect default, **not** measured — flagged as a judgement call, same posture as `HVRT_TRANSLATE_MAX_HOLD_S`) | Export.lua constants block | safety ceiling only; the expected stop is always convergence, and the loop has no network dependency to lose (unlike HVRT's spoken "Hold") so this exists purely as a defensive bound, not a normal path |
+| `AI_PILOT_PARK_THRESHOLD` | 0.9 (unchanged) | Export.lua constants block | now applied to arg 852 only; 952 dropped from the OR |
+| diagnostic: raw `apw_arg852`/`apw_arg952` | — | added to `push_ai_pilot_wheel_state`'s wire fields | so a recurrence of the telemetry mystery is directly visible on the wire, not re-inferred from a probe |
+
+`MODE_READ_SETTLE_S` is reused as-is (already declared for Stage P2/the probe; this revision is
+its first production use).
+
+### Downstream effects — what P2–P6 inherit
+
+- **P2**: the mode-cycle loop no longer needs to *open* the menu itself — Stage P1 guarantees it is
+  already open by the time any goal is spoken. But the "alt ... radar/barometric" vocabulary row
+  (table above, flagged in place) inherits a real open question: every reference toggle after
+  takeover would have to press centre with the menu open, which P0-5 measured as not working.
+  Needs a probe with a real `SHORT_PRESS_PULSE_S` pulse (not same-frame) before Stage P2 commits to
+  that row; until then, "radar" may be unreachable by voice. Not resolved here — P2 is not being
+  re-planned by this revision, only flagged for whoever plans it.
+  Also: Stage P1's own correction loop (point 4), flown on a known 740 m error, is itself a live
+  data point for dod-batch-a.md's existing MONITOR item (whether a 5 Hz tick is fast enough for
+  "release on readback-within-tolerance") — Flight P1 answers this before P2 needs to ask it again.
+- **P5**: baro-as-default is now implemented by Stage P1, not a separate decision taken at P5 —
+  edited in place above. P5's job narrows to confirming the known terrain-avoidance limitation on
+  the test card.
+- **P6**: gains `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` and `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S`
+  to the retune list, alongside the existing `LONG_PRESS_HOLD_S`/`MODE_READ_SETTLE_S`/tolerances.
+- **P3, P4**: unaffected — neither depends on the takeover sequence's internals, only on
+  `parked_active` and the mode-cycle loop both working, which this revision does not change in
+  shape.
+
+### Risks & Unknowns (Stage P1 revision)
+
+- **The correction-loop rate for a multi-second hold is unmeasured.** P0-2 measured ±4 m over one
+  0.7 s hold (≈5.7 m/s if linear); correcting a 740 m error at that rate would take over two
+  minutes. The pilot's own account (*"press and hold will have it keep incrementing the
+  change ... value keeps changing while hold lasts"*) suggests it may accelerate, but this is not
+  measured. `AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S` (60 s) is a judgement call made without that
+  measurement — if Flight P1 shows the loop timing out before convergence on an ordinary-sized
+  error, that is the signal to raise it or to add the dedicated measurement row this revision
+  chose not to build a separate probe for (proportionality — this is a revision of one stage).
+- **The P1 telemetry mystery is resolved by construction only for its one named cause** (above) —
+  flagged as a real possibility it recurs, not asserted fixed.
+- **"The AI always starts on radar" stays an assumption**, not a universal fact — every sample so
+  far agrees, but an unconditional blind centre press would wrongly flip a baro-starting AI back to
+  radar if that case ever occurs. No case has been observed; not re-opened as a question.
+- **The menu-open centre-press failure (P0-5) blocks a real piece of future vocabulary** (P2's
+  "radar/barometric" row) — carried forward above, not solved here.
+- **Closing the menu on unpark is this revision's own call, not the pilot's explicit word** — low
+  stakes, reversible, decided per the Escalation Rules rather than escalated.
+
+### Second-order effect (Stage P1 revision)
+
+Confirms the "watch the readback, don't trust one press" shape generally, before Stage P2 commits
+to it for heading/speed too — the 740 m correction is a harder test of the hold-and-poll mechanism
+than anything P2's own goals (bounded, user-issued values) would have exercised first, so P2
+inherits a mechanism that has already been proven against a worse case than its own.
+
+### Decisions Requiring User Input — unchanged by this revision
+
+No new U-numbers. U1/U2/U3 (above) are untouched: U1/U2 remain unanswered and deferred to Stage
+P2/P3; U3 remains answered and governs Stage P2's mode-cycle-back, not built in Stage P1. The
+choices this revision makes on its own (blind centre-press ordering, snapshot-vs-live correction
+target, the 60 s safety ceiling, closing the menu on unpark) are each local and reversible per the
+Escalation Rules and are decided above rather than escalated.
 
 ## Series — unparked mode (mode 1): later build, preserved unchanged
 
