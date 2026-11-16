@@ -49,14 +49,14 @@ CACHE_MAX_BYTES = 1_000_000_000
 
 #: Total mip levels in a full chain down to 1x1px -- 11 for the 1024px
 #: base every measured RasterCharts tile uses (research note section C).
-_TOTAL_MIPS = int(math.log2(TILE_BASE_SIZE_PX)) + 1
+TOTAL_MIPS = int(math.log2(TILE_BASE_SIZE_PX)) + 1
 
 #: Defensive cap on how far out a view tile's mip selection can reach --
 #: the plan's own `k` never exceeds 6 for any terrain measured (Afghanistan
 #: 32m, the largest grid, is 48x64 tiles), so this never actually binds;
 #: it exists so a future, much larger terrain degrades to "blurriest mip
 #: available" instead of indexing past the mip chain.
-MAX_MIP_LEVEL = _TOTAL_MIPS - 1
+MAX_MIP_LEVEL = TOTAL_MIPS - 1
 
 #: JPEG quality for composed-tile encoding -- generous enough that chart
 #: text stays legible, far below the ~95+ where file size stops shrinking.
@@ -124,6 +124,16 @@ class TileCache:
     ) -> bool:
         return self._small_mip_path(terrain, tier_label, key, mip).is_file()
 
+    def has_all_small_mips(self, terrain: str, tier_label: str, key: TileKey) -> bool:
+        """True if every small mip (`>= SMALL_MIP_MIN`) of this entry is
+        already cached -- `warmup.py`'s own skip check, so a restart
+        re-warms nothing it already has without re-opening the zip just
+        to find that out."""
+        return all(
+            self.has_small_mip(terrain, tier_label, key, level)
+            for level in range(SMALL_MIP_MIN, TOTAL_MIPS)
+        )
+
     def get_small_mip(
         self, terrain: str, tier_label: str, key: TileKey, mip: int
     ) -> Image.Image | None:
@@ -175,7 +185,7 @@ class TileCache:
             self._total_bytes -= size
 
 
-def _read_and_populate_small_mips(
+def read_and_populate_small_mips(
     cache: TileCache,
     terrain: str,
     tier_label: str,
@@ -190,7 +200,7 @@ def _read_and_populate_small_mips(
     only when the small-mip cache itself was consulted). Returns the raw
     bytes so the caller decodes whichever mip it needs from them."""
     data = read_bytes(location)
-    for level in range(SMALL_MIP_MIN, _TOTAL_MIPS):
+    for level in range(SMALL_MIP_MIN, TOTAL_MIPS):
         if not cache.has_small_mip(terrain, tier_label, key, level):
             cache.put_small_mip(
                 terrain, tier_label, key, level, decode_mip(data, level)
@@ -232,7 +242,7 @@ def compose_view_tile(
             if mip >= SMALL_MIP_MIN:
                 sub_image = cache.get_small_mip(terrain, tier_label, key, mip)
                 if sub_image is None:
-                    data = _read_and_populate_small_mips(
+                    data = read_and_populate_small_mips(
                         cache, terrain, tier_label, key, location, read_bytes
                     )
                     sub_image = cache.get_small_mip(terrain, tier_label, key, mip)
@@ -247,7 +257,7 @@ def compose_view_tile(
                 # of the same entry at different middle zooms is
                 # accepted") -- this function never checks the small-mip
                 # cache before inflating when `mip < SMALL_MIP_MIN`.
-                data = _read_and_populate_small_mips(
+                data = read_and_populate_small_mips(
                     cache, terrain, tier_label, key, location, read_bytes
                 )
                 sub_image = decode_mip(data, mip)

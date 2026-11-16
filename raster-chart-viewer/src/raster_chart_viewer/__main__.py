@@ -23,6 +23,7 @@ from raster_chart_viewer.server import (
     DEFAULT_PORT,
     RasterChartViewerServer,
 )
+from raster_chart_viewer.warmup import WarmupScheduler
 
 #: `raster-chart-viewer/static/`, sibling to `src/` and `tests/` -- the
 #: OpenSeadragon viewer page and its vendored assets. `__file__` is
@@ -105,9 +106,10 @@ def main(argv: list[str] | None = None) -> int:
 
         cache_dir = Path(tempfile.gettempdir()) / _DEFAULT_CACHE_SUBDIR
     cache = TileCache(cache_dir, max_bytes=args.cache_cap_bytes)
+    warmup = WarmupScheduler(cache)
 
     server = RasterChartViewerServer(
-        terrains, cache, args.static_dir, host=args.host, port=args.port
+        terrains, cache, args.static_dir, host=args.host, port=args.port, warmup=warmup
     )
     server.open()
     logger.info(

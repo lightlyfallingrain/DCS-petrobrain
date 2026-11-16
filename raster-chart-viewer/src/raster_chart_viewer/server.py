@@ -29,6 +29,12 @@ closing over whatever state this server needs.
 - Anything else is served as a static file from `static_dir` (the
   OpenSeadragon viewer page and its vendored assets) -- `/` maps to
   `index.html`.
+
+An optional `warmup.WarmupScheduler` is touched from the tier-info and
+tile handlers -- the two requests that name a specific `(terrain, tier)`
+(plan, "started the first time that terrain/tier is actually touched (its
+first tile or tier-listing request)"); the plural `/terrains/<t>/tiers`
+listing never names one tier, so it is not a touch point.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from urllib.parse import urlparse
 from raster_chart_viewer.cache import TileCache, compose_view_tile
 from raster_chart_viewer.discovery import TerrainIndex, tier_label
 from raster_chart_viewer.mosaic import TILE_SIZE_PX, MosaicGrid
+from raster_chart_viewer.warmup import WarmupScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +107,7 @@ def _make_handler(
     grids: dict[tuple[str, str], MosaicGrid],
     cache: TileCache,
     static_dir: Path,
+    warmup: WarmupScheduler | None,
 ) -> type[BaseHTTPRequestHandler]:
     resolved_static_dir = static_dir.resolve()
 
@@ -138,14 +146,20 @@ def _make_handler(
 
         def _handle_tier_info(self, terrain: str, tier: str) -> None:
             """Grid metadata the viewer page needs to configure
-            OpenSeadragon's custom `TileSource` for this (terrain, tier)."""
+            OpenSeadragon's custom `TileSource` for this (terrain, tier).
+            Also the viewer's own first touch of a (terrain, tier) --
+            triggers warm-up here, before the first tile is ever
+            requested."""
             index = terrains.get(terrain)
             grid = grids.get((terrain, tier))
-            if index is None or grid is None or index.tiles_for_label(tier) is None:
+            tiles = None if index is None else index.tiles_for_label(tier)
+            if index is None or grid is None or tiles is None:
                 self._respond_json(
                     404, {"error": f"unknown tier {tier!r} for terrain {terrain!r}"}
                 )
                 return
+            if warmup is not None:
+                warmup.touch(terrain, tier, tiles)
             self._respond_json(
                 200,
                 {
@@ -174,6 +188,8 @@ def _make_handler(
                     404, {"error": f"unknown tier {tier!r} for terrain {terrain!r}"}
                 )
                 return
+            if warmup is not None:
+                warmup.touch(terrain, tier, tiles)
             if not (0 <= level <= grid.max_level):
                 self._respond_json(
                     404,
@@ -239,6 +255,7 @@ class RasterChartViewerServer:
         static_dir: Path,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
+        warmup: WarmupScheduler | None = None,
     ) -> None:
         self._terrains = terrains
         self._grids = _build_grids(terrains)
@@ -246,6 +263,7 @@ class RasterChartViewerServer:
         self._static_dir = static_dir
         self._host = host
         self._port = port
+        self._warmup = warmup
         self._httpd: ThreadingHTTPServer | None = None
 
     def __enter__(self) -> Self:
@@ -271,7 +289,13 @@ class RasterChartViewerServer:
         """Bind and start listening. Does not block."""
         self._httpd = ThreadingHTTPServer(
             (self._host, self._port),
-            _make_handler(self._terrains, self._grids, self._cache, self._static_dir),
+            _make_handler(
+                self._terrains,
+                self._grids,
+                self._cache,
+                self._static_dir,
+                self._warmup,
+            ),
         )
         logger.info("raster chart viewer listening on %s:%d", self._host, self.port)
 
