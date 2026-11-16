@@ -247,6 +247,12 @@ window.
   weather turns out to report a nonsensical static `qnh` while weather is actually varying, that
   surfaces as a wrong cockpit reading on a flight using dynamic weather, not a crash — worth a
   dedicated research note the first time it is observed, not solved speculatively here.
+  **Handling decided (main loop, 2026-11-16, under the pilot's "just build setting QNH"; answers
+  plan-aligner Finding 2):** the hook also reads `env.mission.weather.atmosphere_type` (best-effort,
+  `null` if unreadable) and the mission-start event carries it beside `qnh`; body-layer logs both
+  with the value it set. No special-casing — the static `qnh` is used either way. Home: if a
+  dynamic-weather flight shows a wrong setting, it is filed then as its own body-layer backlog
+  item, linked from `[[BL-B118]]`, with that log line as its evidence.
 - **Interaction with the takeover-fix's own correction loop is additive, not exclusive** — if this
   sync succeeds, the takeover fix (`BL-16` Stage P1 revision) should find nothing to correct on the
   next "Request Aircraft Control" (its own stated safety-net posture: *"if the altimeter is set
@@ -265,6 +271,9 @@ height above the field (~155 m here) and the AI would head for 155 m MSL, below 
 The pilot's reply after that: *"Skip the probe, just build setting QNH."* So QNH stands, and this
 was a recorded decision, not an oversight. If the first flight shows a wild target persisting with
 QNH set, QFE is the first alternative to try.
+
+**U1 and U2 taken as recommended (main loop, 2026-11-16, under the pilot's "Skip the probe, just
+build setting QNH."; plan-aligner judged both to serve the pilot). The pilot may override either.**
 
 - **U1: does Petrovich say anything on success, or stay silent?** Recommend: silent — this is
   background avionics housekeeping before the pilot starts moving, matching the existing
