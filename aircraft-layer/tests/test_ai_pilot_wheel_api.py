@@ -34,7 +34,8 @@ _LINE = (
     '"apw_course_text":"090","apw_alt_text":"500 R","apw_alt_add_text":"MAX",'
     '"apw_speed_text":"120","apw_last_press":"altitude_nudge_up",'
     '"apw_arg852":0.95,"apw_arg952":0.05,'
-    '"apw_takeover_stage":"correcting_altitude","apw_correction_path":"hold"}'
+    '"apw_takeover_stage":"correcting_altitude","apw_correction_path":"hold",'
+    '"apw_seat":"operator","apw_cam_fwd_m":4.7}'
 )
 
 
@@ -126,6 +127,8 @@ class TestAiPilotWheelState:
             arg_952=0.05,
             takeover_stage="correcting_altitude",
             correction_path="hold",
+            seat="operator",
+            cam_fwd_m=4.7,
         )
         assert sample.to_api_dict() == {
             "t": pytest.approx(1.5),
@@ -141,6 +144,8 @@ class TestAiPilotWheelState:
             "apw_arg952": pytest.approx(0.05),
             "apw_takeover_stage": "correcting_altitude",
             "apw_correction_path": "hold",
+            "apw_seat": "operator",
+            "apw_cam_fwd_m": pytest.approx(4.7),
         }
 
 
@@ -257,4 +262,21 @@ class TestAiPilotWheelLatestEndpoint:
             "apw_arg952": pytest.approx(0.05),
             "apw_takeover_stage": "correcting_altitude",
             "apw_correction_path": "hold",
+            "apw_seat": "operator",
+            "apw_cam_fwd_m": pytest.approx(4.7),
         }
+
+
+def test_a_line_without_the_seat_fields_still_parses() -> None:
+    """fix/ai-wheel-pilot-seat-gate: an older `Export.lua` sends no
+    `apw_seat`/`apw_cam_fwd_m` -- both read `None`, the line still parses."""
+    old_line = _LINE.replace(',"apw_seat":"operator","apw_cam_fwd_m":4.7', "")
+    state = AiPilotWheelState.from_json_line(old_line, received_wall_clock_s=0.0)
+    assert state.seat is None
+    assert state.cam_fwd_m is None
+
+
+def test_a_non_string_seat_is_rejected() -> None:
+    bad = _LINE.replace('"apw_seat":"operator"', '"apw_seat":3')
+    with pytest.raises(AiPilotWheelParseError):
+        AiPilotWheelState.from_json_line(bad, received_wall_clock_s=0.0)
