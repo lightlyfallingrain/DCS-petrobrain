@@ -37,7 +37,7 @@ and the user approved one amendment to the cache design. Next is implementation,
   scrambled becomes a follow-up, not a blocker.
 - **Cache:** composed-tile JPEGs plus small-mip PNGs (`N ≥ SMALL_MIP_MIN = 3`) only, 1 GB cap,
   middle zooms re-inflate.
-- **Port 7800**, OpenSeadragon vendored at an exact version with its BSD-3 licence, Python stdlib
+- **Port 7800** (corrected to **7801** on 2026-11-16: 7800 is Piper TTS, audio-adapter), OpenSeadragon vendored at an exact version with its BSD-3 licence, Python stdlib
   server and `zipfile`, Pillow the only dependency.
 
 ## One thing to check before Stage 7 — where the checkout lives
