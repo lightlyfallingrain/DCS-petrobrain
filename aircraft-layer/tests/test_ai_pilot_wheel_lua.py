@@ -1052,6 +1052,40 @@ class TestSeatGate:
         assert values["stage"] == "nil"
         assert values["later_presses"] == "0"
 
+    def test_entering_operator_seat_with_stick_still_stowed_presses_nothing(
+        self,
+    ) -> None:
+        """Pilot -> operator switch: the camera reaches the operator seat
+        while arg 852 still reads stowed for a moment (the player retakes
+        the copilot stick; un-stow lag). That brief false rising edge must
+        be absorbed by the 0.5 s reference-toggle delay -- no press, and
+        the takeover dropped once 852 falls."""
+        script = """
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        msl_value = 900.0
+        agl_value = 300.0
+        run_ai_pilot_wheel(0.0)          -- pilot seat, stowed: not flying
+        camera_fwd = 4.65                -- seat switch
+        run_ai_pilot_wheel(0.1)          -- false rising edge
+        print("stage_at_edge=" .. tostring(ai_pilot_takeover.stage))
+        stick_park_value = 0.5           -- un-stow under way
+        run_ai_pilot_wheel(0.2)
+        stick_park_value = 0.0
+        for i = 3, 30 do run_ai_pilot_wheel(i * 0.1) end
+        print("presses=" .. #press_log)
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["stage_at_edge"] == "toggling_reference"
+        assert values["presses"] == "0"
+        assert values["stage"] == "nil"
+        assert values["parked"] == "false"
+
     def test_external_view_keeps_the_operator_seat(self) -> None:
         """Camera leaves the cockpit (F2 / map) while the AI flies: the
         last known seat holds, the takeover is not dropped."""
