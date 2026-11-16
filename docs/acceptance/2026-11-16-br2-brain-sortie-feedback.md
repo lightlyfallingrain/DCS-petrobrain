@@ -296,3 +296,6 @@ should work through the brain, and where a real crew draws the line.
 Next: Architect re-plans BR-2 (Stage 5 free text first) on `feature/br2-free-text`, from this
 document and `plans/brain-tool-calls/alignment.md`'s 2026-11-16 goal check, **after
 `feature/bl16-takeover-fix` merges.** Plan only; nothing built until the plan is approved.
+
+**Re-ordered the same day:** *"schedule AC-B12 before BR-2"*. BR-2's re-plan now waits for
+`[[AC-B12]]` (splitting Export.lua into modules) as well: BL-16 takeover fix → AC-B12 → BR-2.

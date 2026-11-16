@@ -53,3 +53,7 @@
   ## Order
 
   Part 1 first, before BL-16 Stage P2, with no behaviour change. Part 2 can follow per feed.
+
+  **Scheduled 2026-11-16 (user): *"schedule AC-B12 before BR-2"*.** Queue: BL-16 takeover fix
+  (`feature/bl16-takeover-fix`) merges → **AC-B12** → BR-2's Stage 5 re-plan. Role sequence is the
+  refactor one: Architect → Implementer → Reviewer → Security → Definition of Done.
