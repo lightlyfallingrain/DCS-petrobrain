@@ -121,11 +121,12 @@
   ## Checks before planning — on the DCS machine, from WSL
 
   ```sh
-  unzip -v "$(wslpath "$DCS_INSTALL_PATH")/Mods/terrains/Syria/RasterCharts/rasterCharts.zip" | tail -3
-  unzip -v "$(wslpath "$DCS_INSTALL_PATH")/Mods/terrains/Syria/RasterCharts/rasterCharts.zip" | awk 'NR>3{print $2}' | sort | uniq -c
+  ZIP="/mnt/c/<DCS install>/Mods/terrains/Syria/RasterCharts/rasterCharts.zip"
+  unzip -v "$ZIP" | tail -1                                   # raw total, zipped total, ratio
+  unzip -v "$ZIP" | grep -c ' Stored '; unzip -v "$ZIP" | grep -c ' Defl:'
   ```
 
-  The second line counts entries by method. **`Stored`** means a mipmap is one seek away and the
+  The last line counts entries by method. **`Stored`** means a mipmap is one seek away and the
   zoomed-out first load is fast. **`Defl:*`** means each read inflates the whole ~1.4 MB entry
   first: still workable, slower on that first load. The middle line gives the real raw and zipped
   totals. The raw DDS for Syria is about 1.8 GB by header arithmetic (1280 × 1,398,256 bytes).
