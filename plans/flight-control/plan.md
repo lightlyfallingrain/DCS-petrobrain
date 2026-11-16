@@ -1277,7 +1277,31 @@ inventing their own.
 | `AI_PILOT_HEADING_TOLERANCE_DEG` | 5.0 | body-layer `tuning.py` (`belief.ai_pilot_wheel`) | carried over from the original Behaviour Constants table, now actually declared (it was listed there but not yet in `tuning.py`/`ai_pilot_wheel.py` as of this revision — confirmed by grep) |
 | `AI_PILOT_SPEED_STEPS_KMH` | `(0, 60, 120, 150, 200, 250)` + MAX sentinel | body-layer `tuning.py` (sequence) | **corrected from the original table's `(0, 60, 120, 160, 200, 250)`** — Stage P0's re-fly measured `120 → 150 → 200 → 250 → MAX`, not 160; the low end (0/60) stays the user's own unmeasured figures, flagged in Risks above |
 
-### Decisions Requiring User Input (Stage P2)
+### Decisions Requiring User Input (Stage P2) — answered 2026-11-16
+
+U4 plus plan-aligner's two questions (`alignment.md`, "Plan check — 2026-11-16 (Stage P2 ready to
+build)", Q1/Q2), answered by the pilot, verbatim:
+
+> *"- hover translate -> yes switch automatically. Note that hover is required to start with.*
+> *- "unable, not ready" when mode not reachable -> yes, that is good*
+> *- can rotate between goals. Petrobrain is to have full control of the control wheel and can and
+> should change state according to what must be done to reach desired state. Note that only one of
+> the parameters can be adjusted at a time, so if more than one action is needed they must be
+> either queued or interleaved."*
+
+- **HVRT (plan-aligner Q1) → a bare direction word cycles the wheel into HVRT automatically,** the
+  same cycle-then-press shape as `cbtm_align`/`cbtm_break`. **Hover is the precondition:** HVRT is
+  entered from hover. *Main-loop reading:* when not in hover, a translate word does not first bring
+  the aircraft to a hover on its own; it is answered "unable, not ready" (the answer below), since
+  slowing to a hover is the pilot's own "Hover" command. Confirm on the first flight.
+- **`mode_blocked` (plan-aligner Q2) → "unable, not ready", for heading/altitude/speed as for
+  align,** once the bounded mode-cycle is exhausted. Spoken once per exhausted attempt, not per poll.
+  This supersedes the Readbacks section's "no spoken line" for `mode_blocked`.
+- **U4 → rotation, as recommended.** Petrobrain owns the wheel and changes its state as needed to
+  reach the goal. Only one parameter moves at a time, so several goals are interleaved (the goal
+  slice); queuing is the fallback if interleaving turns out poorly in flight.
+
+The question as it was put:
 
 - **U4 — the goal-slice rotation mechanism.** When more than one of heading/altitude/speed is
   outstanding at once, this plan rotates the active parameter every `AI_PILOT_GOAL_SLICE_S` (3.0 s
