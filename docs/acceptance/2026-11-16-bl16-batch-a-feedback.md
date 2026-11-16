@@ -57,6 +57,48 @@ explored, then planned": nothing here is a decided fix. Card flown:
    radar with the AI holding current radar altitude, and stops the sink. This is a different
    mechanism from Batch A's "altitude up" nudge.
 
-## Open for the explore conversation
+## Explore, 2026-11-16 — the pilot's answers, verbatim
 
-To be settled with the pilot before any plan.
+**How the AI takes over:**
+
+> *"1 - In DCS control options there is "Request Aircraft Control" in Copilot-Gunner seat key
+> bindings, category "Petrovich AI Helper, Multicrew". That is what activates the AI. There is
+> control entry for 'Copilot Stick - PARK/UNPARK', but it does not actually do anything."*
+
+**The `t: 12.397` sample:**
+
+> *"2 - failry new mission, looks ok"*
+
+**The workaround in practice, and ED's bug:**
+
+> *"3 - a second or two after take over. I'd put a half second delay there. It held, I think
+> there's a bug where the initial altitude setting is visible in the overlay, but does not actually
+> go to the code in AI. Setting it via center press (or changing alt by up) resets it and it
+> reaches the AI code. The bug is ED's, not ours, so we work around it."*
+
+**Which altitude reference:**
+
+> *"4 - barometric is a better choise for us, let's actually go for that and change later if
+> needed. This needs observation from flight, will refine later."*
+
+**The P0 probe:**
+
+> *"5 - probe flight is next, I'll report on it shortly."*
+
+## What this settles, as read (not yet a plan)
+
+- **Batch A's trigger is wrong.** The AI takes over on the operator-seat binding "Request Aircraft
+  Control" (category "Petrovich AI Helper, Multicrew"). "Copilot Stick - PARK/UNPARK" does
+  nothing. So args 852/952, which Batch A watches, never show the handover, and the fix could not
+  fire. The new trigger has to see the AI actually taking control. **Whether Export.lua can see
+  that, for example from the AI overlay appearing in `list_indication(6)`, is what the P0 probe
+  answers (P0-1),** so detection waits for that report.
+- **The sink is ED's bug.** The starting altitude shows in the overlay but never reaches the AI's
+  logic. *Any* altitude change pushes it through: a centre press (reference toggle) or an "up".
+  Batch A's "up" nudge was a valid mechanism; it just never fired.
+- **Fix shape: about 0.5 s after takeover, one centre press, radar → barometric.** The AI then
+  holds the current barometric altitude. Barometric is the reference for now, to refine from
+  flight. *Read from answers 3 and 4: this replaces the earlier radar-ending double press. Single
+  press assumes the AI always starts on radar, as the pilot saw.*
+- **Then carry on to whatever the pilot has asked for** (Stage P2's goals), from that stable state.
+- **The `t` field is fine** — a fairly new mission. No second problem there.
