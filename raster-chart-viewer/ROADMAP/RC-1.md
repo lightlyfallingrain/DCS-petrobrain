@@ -28,6 +28,15 @@
   **Acceptance card:** https://claude.ai/artifact/21AkKixYQcXaLDKfnbRSvN (source:
   `docs/acceptance/2026-11-16-raster-chart-viewer-rc1-stage7-sortie.md`).
 
+  **First live run 2026-11-16, user, from WSL Python: "works. very good."** Three page changes
+  followed at the user's request and were merged as `87cbbb9b` (`feature/rc-viewer-ui`):
+  - the tier picker is a row of buttons for the terrain's available tiers;
+  - a terrain opens at 20% of chart width around the chart midpoint, with `immediateRender`, so
+    the whole-chart levels are not composed first;
+  - a tier switch keeps location and zoom, carried as fractions of the real chart extent.
+
+  Not browser-verified when merged. The per-terrain Stage 7 checks above are still open.
+
   **Moved here from [[MI-B4]] on 2026-11-16, user direction:** *"move the backlog item for the
   chart viewer to a proper ROADMAP folder structure under the chart viewer sub-project. Let's
   treat it as a proper sub module of Petrobrain."* The text below is MI-B4's, unchanged apart
