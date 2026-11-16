@@ -46,12 +46,13 @@
     Syria `64maa00` only, `confidence="provisional"`, ~5.5 km z-axis error at a held-out point. Not
     needed for a pan/zoom viewer; relevant only if coordinates or markers are ever overlaid.
 
-  **Unverified, and it decides the zoom design:** the sheet letters look like a **column** index
-  and `level` like a **row** index, which would make each scale tier one big square mosaic rather
-  than "levels of detail". The arithmetic agrees: a 32m sheet is 8 × 1024 px × 32 m ≈ 262 km, so
-  4 × 4 sheets ≈ 1048 km; a 64m sheet ≈ 524 km, so 2 × 2 sheets ≈ 1048 km. Same extent, two
-  different chart scales, the way a real crew switches from a 1:500k to a 1:250k sheet. Decoding
-  the four corner tiles of two adjacent sheets confirms or kills it in minutes.
+  **Sheet mosaic — measured 2026-11-16, and it reversed the guess first written here.** This entry
+  first guessed that the sheet letters were the column and the level the row. Edge matching on
+  every Syria sheet showed the opposite: **the level is the column, increasing east, and the
+  letters are a signed row index increasing north** (ab = +1, aa = 0, xab = −1, xac = −2). Each
+  scale tier is one big mosaic, and Syria's 32m and 64m tiers cover the same ground as two
+  different chart series. All terrains, naming variants, sparse sheets and timings:
+  `raster-chart-viewer/research/2026-11-16-rastercharts-all-terrains-recon.md`.
 
   ## Direction so far — user, 2026-11-16
 
@@ -116,7 +117,9 @@
   already judged not worth it. It also keeps the zip read on the Windows filesystem rather than
   through WSL's slower `/mnt/c` bridge. Linux tools stay useful around it: `unzip -v` for the
   check below, and the probe-script conventions in `world-model/tools/wsl/` (`DCS_INSTALL_PATH`,
-  `to_wsl_path`).
+  `to_wsl_path`). **Found 2026-11-16: Windows `python.exe` is 3.14.7 with no Pillow**, so this
+  route needs a Windows-side venv with Pillow. Reading the zip from WSL over `/mnt/f` measured
+  16 ms per entry warm and 115 ms cold, which native Windows I/O should beat.
 
   **Existing components:**
 
@@ -163,19 +166,22 @@
 
   - **The chart images belong to Eagle Dynamics.** Cached tiles live in a temp folder outside the
     repo and are never committed or published. LAN only.
-  - **Runs on its own** (root `CLAUDE.md`, "Module independence"). Own venv, no import from
-    world-model. The filename grammar is one regex, so copy it with a pointer to
-    `world-model/src/raster/__init__.py` rather than importing it. Where the code lives under
-    `mission-interpreter/` is a plan-time decision.
-  - **Theatre layouts differ.** Read layouts through one small per-theatre adapter. Syria first,
-    because it is the only one decoded so far. Caucasus needs its own adapter. Theatres newer than
-    the 2026-09 listing are unchecked.
+  - **Its own small service, in its own top-level directory `raster-chart-viewer/`**, with its own
+    `pyproject.toml`, venv and `CLAUDE.md`. User, 2026-11-16: *"this should really be it's own
+    small service, not under MI. I just did not want to create another roadmap folder for it."*
+    So **this entry is its only roadmap home** and `raster-chart-viewer/` gets no `ROADMAP/`
+    directory. No import from world-model or mission-interpreter (root `CLAUDE.md`, "Module
+    independence"). The filename pattern is one regex, written fresh from the research note.
+  - **Every terrain on disk opens.** User, 2026-11-16, above. One reader for the single-zip
+    terrains, one special case for Caucasus's zip-per-sheet folders. Terrains are discovered from
+    `Mods/terrains/*/RasterCharts/`, not listed in code. Sparse sheets and missing tiles are normal.
 
   ## Open questions for plan time
 
-  1. Is the column/row reading above right? Settles how the 32m and 64m tiers stack and whether a
-     tier switch can be automatic by zoom level.
-  2. Which theatres beyond Syria are wanted in the first cut?
+  1. Mariana has 62 tiles with no scale prefix. Their tier is unknown: drop them, or place them by
+     edge matching?
+  2. Is the sheet convention measured on Syria the same on every terrain? Caucasus's `0.5M` rows
+     AG–AK would be rows +6..+10 under it.
   3. Overlays — DCS grid, lat/long, the player's own marks — are out of scope for the first cut.
      OpenSeadragon places markers in image pixels, and `registration.py` already maps DCS x/z to
      tile pixels, so marks and own-ship would be cheap later; a lat/long grid would be hand-drawn.
