@@ -118,6 +118,11 @@
   own escalate/poll wire) — and BR-1 itself has never flown. Test card:
   `docs/acceptance/2026-11-13-br2-brain-tool-calls-sortie.md`.
 
+  **First partial flight 2026-11-16 — still `#needs-flight`.** One utterance reached the tool loop
+  ("what do you see on the left": asked "which one" over two contacts on the right, reading tool
+  summaries aloud with raw `OP_*` codes); two more went to BR-1's decider by launch default.
+  Captured, not yet explored: `docs/acceptance/2026-11-16-br2-brain-sortie-feedback.md`.
+
   **Inspect-and-adapt.** This batch does not change what the next milestone should be — Stage 4
   was always the next planned increment and is unaffected — but it does invalidate one downstream
   assumption: `plans/inbound-speech/plan.md`'s implicit "heard clearly, no match → brain" route is
