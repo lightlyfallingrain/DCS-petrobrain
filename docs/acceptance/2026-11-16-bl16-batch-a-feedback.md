@@ -235,6 +235,9 @@ animation is trimmed to its endpoints; every other measured line is verbatim:
   started; whether it is also a step below 150 is not shown.)
 - **P0-4:** release → readback change in 0.007 s, i.e. the next frame.
 - **P0-5: with the menu open, a centre press does not toggle ALT REF** (B before, B after each of
-  two presses). With the menu closed (P0-6) it did. Centre press means different things depending
-  on menu state.
+  two presses). With the menu closed (P0-6) it did. **Pilot, same day:** *"it should. If it did not
+  that is ED bug"* — a centre press with the menu open is meant to toggle the reference. **One
+  cause on our side is not ruled out:** the probe presses and releases centre in the same frame (a
+  zero-length press). That registered with the menu closed, but the open menu may need a real
+  pulse (the probe's own `SHORT_PRESS_PULSE_S`, 0.15 s). Untested.
 - **P0-7:** speed held at 0 for 15 s in FLT, no automatic switch to HVR.
