@@ -138,71 +138,85 @@ def _increment_heading(
     return ctx.console.increment_ai_heading(delta_deg)
 
 
-def _set_heading(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.set_heading(args["deg"])
+def _int_arg(args: dict[str, object], name: str) -> int:
+    # The wrapper has already validated every `kind="int"` param; this only
+    # narrows the type, the same way `_increment_heading` does inline.
+    value = args[name]
+    assert isinstance(value, int)
+    return value
 
 
-def _level_flight(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _set_heading(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.set_heading(_int_arg(args, "deg"))
+
+
+def _level_flight(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.level_flight()
 
 
-def _set_speed(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.set_speed(args["value"])
+def _set_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.set_speed(_int_arg(args, "value"))
 
 
-def _set_speed_max(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _set_speed_max(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.set_speed_max()
 
 
-def _step_speed(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.step_speed(args["sign"])
+def _step_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.step_speed(_int_arg(args, "sign"))
 
 
-def _set_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.set_altitude(args["m"], args["reference_code"])
+def _set_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.set_altitude(
+        _int_arg(args, "m"), _int_arg(args, "reference_code")
+    )
 
 
-def _step_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.step_altitude(args["delta_m"])
+def _step_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.step_altitude(_int_arg(args, "delta_m"))
 
 
-def _hold_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hold_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.hold_altitude()
 
 
-def _level_off(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _level_off(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.level_off()
 
 
-def _hvrt_translate_left(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hvrt_translate_left(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
     return ctx.console.hvrt_translate("left")
 
 
 def _hvrt_translate_right(
-    ctx: ActionContext, args: dict[str, int]
+    ctx: ActionContext, args: dict[str, object]
 ) -> dict[str, object]:
     return ctx.console.hvrt_translate("right")
 
 
 def _hvrt_translate_forward(
-    ctx: ActionContext, args: dict[str, int]
+    ctx: ActionContext, args: dict[str, object]
 ) -> dict[str, object]:
     return ctx.console.hvrt_translate("forward")
 
 
-def _hvrt_translate_back(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hvrt_translate_back(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
     return ctx.console.hvrt_translate("back")
 
 
-def _hvrt_hold(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hvrt_hold(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.hvrt_hold()
 
 
-def _hvrt_step_up(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hvrt_step_up(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.hvrt_step("up")
 
 
-def _hvrt_step_down(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+def _hvrt_step_down(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.hvrt_step("down")
 
 
