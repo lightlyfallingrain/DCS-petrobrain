@@ -222,11 +222,16 @@ def test_action_wrapper_rejects_infinity_instead_of_raising(tmp_path: Path) -> N
     assert outcome.error is False
 
 
-def test_digits_rejects_a_string_slot_instead_of_raising(tmp_path: Path) -> None:
-    """Security Required Fix 1: `digits` is a bare global every rule can
-    call with anything, and a `WordSetElement` slot is always a Lua
-    string -- `digits(s.direction)` must degrade to "Unable." rather than
-    `int("left")`'s bare `ValueError` escaping uncaught."""
+def test_digits_rejects_a_string_slot_as_a_dispatch_error(tmp_path: Path) -> None:
+    """Review of Security Required Fix 1 (`plans/speech-rules/
+    review-security-fix.md`): `digits` is a bare global with no pre-
+    existing "the rule author checks and handles this" contract, so a
+    `WordSetElement` slot (always a Lua string) reaching `digits(s.
+    direction)` is a rule-file bug, not a legitimate precondition
+    failure -- it must raise `RuleRuntimeError` and surface as a D6
+    dispatch error (stderr log, "Action file error.") rather than
+    degrade to a silent "Unable." that reads as one of `_UNABLE_
+    TEMPLATES`' closed reasons."""
     (tmp_path / "r.lua").write_text(
         'when.speech("spell_word", "x", function(s) say(digits(s.direction)) end)',
         encoding="utf-8",
@@ -234,14 +239,17 @@ def test_digits_rejects_a_string_slot_instead_of_raising(tmp_path: Path) -> None
     sandbox = RuleSandbox()
     rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
     outcome = run_rule(rule_set, "spell_word", {"direction": "left"}, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert outcome.error is False
+    assert outcome.lines == []
+    assert outcome.error is True
 
 
-def test_digits_rejects_nan_instead_of_raising(tmp_path: Path) -> None:
-    """Security Required Fix 1, the `digits` twin of the action-wrapper
-    `nan` test above -- `int(nan)` raises `ValueError`, not a `LuaError`,
-    with no stdlib needed to produce the `nan` in the first place."""
+def test_digits_rejects_nan_as_a_dispatch_error(tmp_path: Path) -> None:
+    """The `digits` twin of the action-wrapper `nan` test above, updated
+    the same way as the string-slot test immediately above: `int(nan)`
+    raises `ValueError`, not a `LuaError`, with no stdlib needed to
+    produce the `nan` in the first place, and `_digits_readback` now
+    turns that into a `RuleRuntimeError` so it surfaces as a D6 dispatch
+    error instead of a silent "Unable."."""
     (tmp_path / "r.lua").write_text(
         'when.speech("spell_nan", "x", function(s) say(digits(0/0)) end)',
         encoding="utf-8",
@@ -249,5 +257,5 @@ def test_digits_rejects_nan_instead_of_raising(tmp_path: Path) -> None:
     sandbox = RuleSandbox()
     rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
     outcome = run_rule(rule_set, "spell_nan", None, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert outcome.error is False
+    assert outcome.lines == []
+    assert outcome.error is True

@@ -451,11 +451,11 @@ crash the crew-text REPL main thread.
 - **`engine.py:_make_env_builder`'s `digits` global** — replaced the bare
   `lambda n: CrewConsole._digit_readback(int(n))` with a named module-level function,
   `_digits_readback`, that validates `n` (bool/non-numeric/non-finite-float) before calling
-  `int()`, degrading to `render_unable("").text` ("Unable.") on rejection — the same graceful-
-  degradation posture `_make_action_wrapper` already uses. `""` is deliberately not one of D11's
-  closed reason tokens (it reads as "no specific reason," not a fabricated `ACTION_FILE_ERROR_
-  LINE`-style token). Named rather than a lambda so it carries its own docstring and is callable
-  from a test without going through Lua.
+  `int()`. Named rather than a lambda so it carries its own docstring and is callable from a
+  test without going through Lua. **Superseded by the review-fix round below**: this first pass
+  degraded to `render_unable("").text` ("Unable.") on rejection, the same shape as
+  `_make_action_wrapper`'s reject branch; Reviewer found that shape wrong for this site
+  specifically, and the fix now raises instead — see that section for why.
 - **Checked for the same shape elsewhere in `body-layer/src/rules/`** — `engine.py` and
   `loader.py` have no other `int(...)`/`float(...)` conversion of a Lua-supplied value;
   `sandbox.py` performs none (it never receives rule-author-controlled values, only trusted
@@ -478,3 +478,48 @@ this project's counterfactual-evidence convention.
 pass; `.claude/scripts/fast-tests.sh body-layer` (73 targeted files, parallel) — 2737 passed, 4
 xfailed (pre-existing, unrelated); `test_rules_engine.py` run individually by name, unfiltered
 `-v` — 15 passed, including all four new tests.
+
+## Review-fix round, 2026-11-17 (`plans/speech-rules/review-security-fix.md`, NEEDS REVISION)
+
+Reviewer confirmed, by mutation and by an independent probe, that the security fix closes the
+crash (both sites' `nan`/`inf` guards go red the expected way when removed), but found the two
+sites are **not architecturally equivalent**, and the security fix's uniform "degrade to Unable."
+treatment is only right for one of them:
+
+- **`_make_action_wrapper`'s reject branch is correct as shipped, no change.** Every rule author
+  already checks `if not r.ok then return say(unable(r.reason)) end` for an action call (D5 —
+  "validation in Python of every value Lua passes in" is the action registry's job); `nan`/`inf`
+  joining that same `{ok=false, reason=nil}` reject branch is the same failure class using the
+  same established, already-reviewed contract, not a new one.
+- **`_digits_readback`'s degrade to "Unable." did not satisfy the user's decision — required
+  fix.** `digits` has no equivalent "the rule author checks and handles this" contract; a rule
+  just does `say(digits(n))` with nothing to check. Degrading to `render_unable("").text`
+  produced no stderr log (`_digits_readback` never raised and never called `logger.error`) and
+  spoke "Unable.", which this project's convention reserves for a legitimate precondition
+  failure — but `digits(s.direction)` on a string slot is a rule-file bug (a porting mistake),
+  exactly the class the user's own BL-17 decision names: *"Rule clash or lua error etc -> std
+  error log and say aloud 'action file error'"* (`BL-17.md`) and D6. The fix now raises
+  `RuleRuntimeError(...)` naming what was received (the non-numeric value, or that it was
+  non-finite) instead of returning `render_unable("").text`; `RuleRuntimeError` is already
+  imported into `engine.py` and is one of the two exception types `run_rule`'s own `except`
+  clause names, so it propagates untouched and is caught correctly, routing through D6's existing
+  path (stderr log with the rule id/file/message, "Action file error." readback, one-shot state
+  rollback via `_handle_rule`) instead of a silent, unlogged "Unable."
+
+Also deleted the now-dead docstring sentence explaining why `""` is not one of D11's closed
+reason tokens — there is no more `render_unable` call in `_digits_readback` for it to describe.
+
+**Tests updated** (`body-layer/tests/test_rules_engine.py`): `test_digits_rejects_a_string_slot_
+instead_of_raising` → renamed `test_digits_rejects_a_string_slot_as_a_dispatch_error`, and
+`test_digits_rejects_nan_instead_of_raising` → renamed `test_digits_rejects_nan_as_a_dispatch_
+error` (the old names now misdescribe the behaviour — both cases *do* raise, inside the sandbox,
+and surface as a dispatch error). Both now assert `outcome.lines == []` and `outcome.error is
+True`, the same shape `test_a_lua_error_during_dispatch_is_reported_as_error` already asserts for
+a genuine Lua error, instead of the old `outcome.lines == ["Unable."]` / `outcome.error is False`.
+The two action-wrapper tests (`test_action_wrapper_rejects_nan_instead_of_raising`,
+`test_action_wrapper_rejects_infinity_instead_of_raising`) are unchanged — that half of the fix
+was confirmed correct as shipped.
+
+**Checks** (body-layer, from inside `body-layer/`): `ruff format --check`, `ruff check`,
+`.venv/bin/mypy --strict src` all pass; `.claude/scripts/fast-tests.sh body-layer` — see the
+Checks section of the Implementer's report for the fresh run's numbers.

@@ -260,19 +260,20 @@ def _digits_readback(n: object) -> str:
     (e.g. `s.direction`) is a Lua string, not a number, and a rule's own
     arithmetic can hand this a `nan`/`inf` float, so this cannot assume
     `n` is already a finite int/float the way the pre-rules Python code
-    that called `_digit_readback` directly could. Degrades to the plain
-    "Unable." readback (`render_unable`'s own graceful-degradation
-    posture, same as `_make_action_wrapper`'s reject branch) rather than
-    letting a bare `ValueError`/`TypeError` escape this Lua-callable
-    global uncaught (security Required Fix 1, `plans/speech-rules/
-    security-stage0-2.md`). `""` is not one of D11's closed reason
-    tokens -- it is deliberately not one, so `render_unable` falls
-    through to its own unrecognised-reason default rather than reading
-    as a real `ACTION_FILE_ERROR_LINE`-style reason."""
+    that called `_digit_readback` directly could. Unlike
+    `_make_action_wrapper`'s reject branch, there is no pre-existing
+    "the rule author checks and handles this" contract for `digits` --
+    a rule just does `say(digits(n))` -- so a bad call here is a rule-file
+    bug, not a legitimate precondition failure, and must raise
+    `RuleRuntimeError` rather than degrade to a silent "Unable.": that
+    routes through `run_rule`'s own `except` clause (D6 -- stderr log,
+    "Action file error." readback, one-shot state rollback) instead of
+    masquerading as one of `_UNABLE_TEMPLATES`' closed reasons
+    (review-security-fix.md Required Fix 1)."""
     if isinstance(n, bool) or not isinstance(n, (int, float)):
-        return render_unable("").text
+        raise RuleRuntimeError(f"digits() called with non-numeric value: {n!r}")
     if isinstance(n, float) and not math.isfinite(n):
-        return render_unable("").text
+        raise RuleRuntimeError(f"digits() called with non-finite value: {n!r}")
     return CrewConsole._digit_readback(int(n))
 
 
