@@ -54,7 +54,7 @@ from pathlib import Path
 
 from latency_log import LatencyLogWriter
 from local_playback import make_local_sink
-from rule_patterns import RuleRegistry, rule_words
+from rule_patterns import CachedRulePromptProvider, RuleRegistry
 from server import DEFAULT_HOST, DEFAULT_PORT, AudioSink, TTSAdapterServer
 from stt_engine import DEFAULT_WHISPER_BINARY, WhisperCliEngine
 from tts_engine import DEFAULT_PIPER_URL, DEFAULT_PIPER_VOICE, PiperEngine
@@ -174,10 +174,7 @@ def main() -> None:
     # changes the very next `/transcribe` call's prompt.
     rule_registry = RuleRegistry()
 
-    def _rule_prompt_provider() -> str:
-        extra_words = [
-            word for rule in rule_registry.rules for word in rule_words(rule)
-        ]
+    def _build_rule_prompt(extra_words: list[str]) -> str:
         prompt = to_prompt(extra_words)
         # D10/risk R3: the shipped vocabulary's own 224-token cap is
         # tested statically (`test_vocabulary.py`); a user's own rule
@@ -195,11 +192,16 @@ def main() -> None:
             )
         return prompt
 
+    # D15: only rebuilds the prompt when `rule_registry.version` actually
+    # changes (a `PUT /rules`), not on every `/transcribe` call -- see
+    # `CachedRulePromptProvider`'s own docstring.
+    rule_prompt_provider = CachedRulePromptProvider(rule_registry, _build_rule_prompt)
+
     stt_engine = (
         WhisperCliEngine(
             binary_path=args.whisper_binary,
             model_path=args.whisper_model,
-            prompt=_rule_prompt_provider,
+            prompt=rule_prompt_provider,
         )
         if args.whisper_model
         else None

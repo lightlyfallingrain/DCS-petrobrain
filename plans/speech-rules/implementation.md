@@ -523,3 +523,182 @@ was confirmed correct as shipped.
 **Checks** (body-layer, from inside `body-layer/`): `ruff format --check`, `ruff check`,
 `.venv/bin/mypy --strict src` all pass; `.claude/scripts/fast-tests.sh body-layer` — see the
 Checks section of the Implementer's report for the fresh run's numbers.
+
+## Stage 3a — matching foundation: fuzzy words, number words, performance (2026-11-17)
+
+Builds D13 (literal fuzz), D14 (number-word slot types), D15 (the two performance fixes) exactly
+as scoped. **audio-adapter only** — no body-layer change, per Stage 3a's own boundary ("built and
+tested without touching `handle_command`"); confirmed nothing in body-layer imports anything
+touched here.
+
+### Files changed
+
+- `audio-adapter/src/vocabulary.py` — `_WORD_REPAIR_FLOOR` **relocated here** from
+  `command_matcher.py` (see "Plan departure" below); `_static_recognised_words()`/
+  `_STATIC_RECOGNISED_WORDS` split out of `recognised_words()` so the fixed `PHRASES`/slot-table
+  walk runs once at import time, not on every call (D15 item 2, first half).
+- `audio-adapter/src/rule_patterns.py` — the bulk of the stage:
+  - `_UNITS_WORDS`/`_TEENS_WORDS`/`_TENS_WORDS`, `_consume_small_number_word`,
+    `_consume_number_word_phrase` (the terminating-grammar composer: a bare units multiplier +
+    "hundred" + an optional trailing small number), `_consume_natural_number` (digit run vs.
+    word-phrase, with the one "single units word immediately followed by 'hundred'" override),
+    `_consume_quantity`, `_consume_speed_target` (D14). `_consume_angle` rewritten to use
+    `_consume_natural_number` (D14's "Corrected 2026-11-17" note — `angle` gains the same
+    grammar `quantity` does, keeping its own 1–359 range check and 1–3 digit bound).
+    `SLOT_TYPES` gains `quantity`/`speed_target`.
+  - `_literal_ratio`, `_match_elements` (now returns `(slots, next_index, literal_ratios)`),
+    `match_pattern_with_ratio` (new), `match_pattern` (now a thin wrapper discarding the ratio) —
+    D13's literal fuzz. `WordSetElement`/`SlotElement` branches are untouched (no ratio path at
+    all), which is what keeps E12 true.
+  - `_COLLISION_PROBE_WORDS`, `_best_probe_word`, `_sample_words_with_literal_flags`,
+    `_perturbed_sample`, `_samples_with_perturbation`, widened `_rules_collide`/
+    `_collides_with_legacy` — D13's widened D9 collision check (one perturbed sample per rule,
+    probed against both other rules and the legacy matcher).
+  - `rule_anchor_words` — **moved here from `command_matcher.py`** (D15 item 1): a pure function
+    of `CompiledRule` alone, so it belongs beside `CompiledRule`, and moving it is what lets
+    `RuleRegistry.swap` compute it once rather than `command_matcher` rebuilding it per
+    transcript.
+  - `RuleRegistry` gains `anchor_words: frozenset[str]` and a `swap(rules, version)` method that
+    sets all three fields together (D15 item 1).
+  - `CachedRulePromptProvider` (new) — a callable that only rebuilds the whisper prompt when
+    `registry.version` changes (D15 item 2, second half).
+- `audio-adapter/src/command_matcher.py` — `_rule_anchor_words` deleted (moved, see above).
+  `_match_rules` rewritten: uses `match_pattern_with_ratio`, no longer sorts the full `rules`
+  tuple per call (only the small matched subset, for the tie-break), computes a real ratio and
+  applies `SEPARATION_MIN` between the best two matches instead of "2+ matches is always a tie."
+  `match_transcript` gains an `anchor_words` parameter (D15) and is restructured: the legacy
+  pipeline (verb anchor through the phrase table and its own separation check) is extracted
+  verbatim into a new `_match_legacy`; `match_transcript` now always runs both pipelines (no
+  early return on a rule match) and compares their ratios with the same `SEPARATION_MIN`
+  disposition two legacy phrases already get (D13's own explicit requirement: "`match_
+  transcript`'s ambiguity check applies `SEPARATION_MIN` between rule matches (and between a rule
+  match and a legacy match)").
+- `audio-adapter/src/server.py` — `_handle_put_rules` calls `rule_state.swap(...)` instead of two
+  separate field assignments; `_handle_transcribe` passes `anchor_words=rule_state.anchor_words`
+  to `match_transcript`.
+- `audio-adapter/src/audio_adapter/__main__.py` — `_rule_prompt_provider` closure replaced by
+  `CachedRulePromptProvider(rule_registry, _build_rule_prompt)`; the 224-token-cap warning logic
+  stays here (injected as `_build_rule_prompt`), only the caching moved into the testable class.
+- `audio-adapter/CLAUDE.md` — updated the `rule_patterns.py`/`command_matcher.py` Structure
+  entries, which had gone stale in three concrete ways the moment this stage's own code landed:
+  the slot-type list was missing `quantity`/`speed_target`; "`parse_pattern`/`match_pattern`
+  (full-consumption, exact-literal)" was now flatly wrong (D13 made it fuzzy on literals); and
+  `match_transcript`'s documented signature/behaviour (no early return, no `anchor_words` param)
+  no longer matched the code. Not asked for in the brief, but these are the exact comments this
+  stage's own changes stood next to.
+
+### Plan departures (reversible, decided locally)
+
+1. **D13 says `_WORD_REPAIR_FLOOR` is "imported from `command_matcher.py`."** That is a real
+   import cycle: `command_matcher.py`'s own module docstring and implementer memory
+   (`project_bl17_rule_matcher_cycle_and_scoping.md`) already establish that `rule_patterns.py`
+   must never import `command_matcher.py` — each module needs a name from the other that is
+   defined only after its own import statement runs, so the cycle is genuine regardless of import
+   order, not a style nit. **Decision:** relocated the one constant to `vocabulary.py` (a
+   dependency of both, and of neither), which both modules now import — same value (0.5), same
+   name, one declaration site, matching D13's actual intent ("not a second hand-tuned number")
+   without the cycle. No test referenced `command_matcher._WORD_REPAIR_FLOOR` by its old location,
+   so nothing else needed to change. Reversible if the user wants a different home for it.
+2. **D13's own Stage 3a test-list item contradicts itself, in the same sentence.** The plan's
+   test list says: *a mis-transcribed literal ("turn *lift* two zero") still matches; "right" is
+   never fuzzy-repaired into a slot value anywhere (E12 pin)*. But in the shipped
+   `turn_heading_relative` pattern, "left"/"right" are a `WordSetElement`'s own values, not a
+   `LiteralElement` — and E12 (`alignment.md` line 292, "a number, a direction (left/right) ...")
+   explicitly names "left/right" as values that must be heard exactly. Measured:
+   `ratio("lift","left") = 0.75` (would match if word-sets were fuzzy), `ratio("lift","turn") =
+   0.25` (nowhere near matching the literal) — so the example only makes sense as a fuzzy
+   *word-set* match, which the same sentence's own E12 clause forbids. Confirmed against the
+   shipped parser: `match_pattern` on `"turn lift two zero"` returns `None`. **Decision:** built
+   the literal-fuzz-only design the rest of D13/E12/alignment.md's own resolution table
+   unambiguously specifies (`alignment.md` line 494: "E12 | Stage 3a (D13) | met — a
+   `SlotElement`/`WordSetElement` never gets the fuzzy fallback"), wrote the "mis-transcribed
+   literal still matches" test against the rule's actual literal ("turn" → "turm", ratio 0.75),
+   and added a *separate* test asserting "turn lift two zero" does **not** match, pinning E12
+   directly rather than silently reinterpreting the plan's own contradictory sentence. This is the
+   same shape of defect the plan-aligner's own memory
+   (`project_bl17_test_list_claims_a_fix_its_own_exclusion_rules_out.md`) flags from this same
+   revision's earlier check — not a one-off, worth a second look if a future stage's test list
+   names a specific phrase again.
+3. **`match_transcript` now always runs the legacy pipeline, even when a rule already matched.**
+   Required by D13's own wording ("applies `SEPARATION_MIN` between a rule match and a legacy
+   match"), not a choice — but worth naming as a real (small) cost: before this stage, a matched
+   rule short-circuited before the legacy verb-anchor/phrase-table scan ever ran; now it always
+   runs both. The measured per-call costs in `performance-stage0-2.md` were 3+ orders of magnitude
+   below whisper-cli's own subprocess latency, and the legacy phrase-table scan is the same
+   O(number of phrases) work that already runs on every *non*-rule-matching transcript today, so
+   this is not expected to matter, but it was not previously paid on a rule hit and now is —
+   flagged for Performance's own batch review rather than asserted safe.
+
+### Tests Added
+
+`audio-adapter/tests/test_rule_patterns.py` (29 new tests, 6 new classes): `TestCompileRules` +2
+(the perturbed-sample collision catch, and its own counterfactual showing the pair does not
+collide without perturbation); `TestLiteralFuzz` (6: mis-transcribed literal match, exact literal
+still 1.0, a wholly unrelated literal still rejected, the word-set E12 pin, the slot E12 pin, no
+literal at all defaults to ratio 1.0); `TestQuantitySlot` (parametrized over every Q10 form plus
+the two paired-form rejections); `TestSpeedTargetSlot` (max / a round number / digit-by-digit);
+`TestAngleNumberWords` (turn left thirty, turn left three fifteen rejected, digit forms still
+pass, heading/oclock unaffected); `TestRuleAnchorWordsAndRegistrySwap` (empty rules, first-literal
+derivation, a call-count spy proving `RuleRegistry.swap` computes `rule_anchor_words` exactly
+once per swap); `TestCachedRulePromptProvider` (a call-count spy proving the builder is not
+re-invoked until `registry.version` changes).
+
+`audio-adapter/tests/test_command_matcher_rules.py` (10 new tests): mis-transcribed literal
+resolves the rule; the word-set value mis-transcription does not (E12, at `match_transcript`
+level); "turn left thirty" resolves via number words; "turn left three fifteen" does not; a real
+cross-pipeline collision found while writing the fuzz test (`"tern"` scores exactly `VERB_FLOOR`
+against `step`'s own verb, so it anchors both pipelines — `step` wins outright at a 0.25 gap, not
+ambiguously, pinning that the comparison is a genuine one, not a formality); a rule/legacy exact
+tie is `ambiguous=True`; a rule wins outright with nothing competing; precomputed `anchor_words`
+gives the same result as the fallback; a call-count spy proving `match_transcript` never calls
+`rule_anchor_words` when `anchor_words` is supplied, plus the counterfactual proving the spy
+itself calls through when it is omitted.
+
+### Checks (audio-adapter)
+
+No `.venv` existed in this worktree (fresh worktree, `.venv/` is gitignored) — per implementer
+memory (`feedback_worktree_use_main_checkout_venv.md`), ran the main checkout's already-built
+`audio-adapter/.venv` binaries directly, with `cwd` set inside this worktree's `audio-adapter/`
+(same `pyproject.toml` at the shared base commit, no install step needed):
+
+- `ruff format --check src tests`: pass (36 files)
+- `ruff check src tests`: pass
+- `mypy src` (the mandated command — `tests` is not part of it per this subproject's own
+  `CLAUDE.md`, and `mypy src tests` surfaces 7 pre-existing, unrelated errors in three files I did
+  not touch: `test_transcribe_api.py`, `test_rules_api.py`, `test_ptt_source.py`): pass, 17 source
+  files, 0 issues.
+- `pytest -q` (full suite — `.claude/scripts/fast-tests.sh` could not resolve a venv in this
+  worktree at all, so the full run substitutes for it rather than the targeted subset; it is a
+  strict superset of what the fast script would check): **519 passed, 2 skipped** (the two
+  pre-existing skips are `AUDIO_ADAPTER_PIPER_URL`/whisper-binary env-gated live tests, unrelated).
+  480 passed before this stage; the +39 are all new (29 + 10, above).
+
+**body-layer**: not touched, per Stage 3a's own scope boundary — no checks run.
+
+### Notable Discoveries
+
+- **A real cross-pipeline collision surfaced while writing the literal-fuzz test**: "tern" (a
+  plausible mis-hearing of "turn") scores *exactly* `VERB_FLOOR` (0.5) against `step`'s own verb
+  anchor, so "tern left two zero" anchors onto both `turn_heading_relative` (ratio 0.75, D13's
+  fuzz) and the legacy `step` command (`_parse_step_slots` reads "left" as a direction, ratio
+  1.0). `step` wins outright (gap 0.25, past `SEPARATION_MIN`) — correct behaviour, but it is a
+  live demonstration that D13's widened matching genuinely creates new cross-pipeline near-misses
+  worth watching for once more rules ship with longer literal vocabularies that overlap more of
+  the legacy verb space.
+- **The "digit-run vs. number-word-phrase" ambiguity needed one explicit override, not two
+  independent grammars.** A bare digit-run interpretation of "three" (one word, value 3) and the
+  word-phrase interpretation of "three hundred" (two words, value 300) both start by consuming
+  "three"; without the override in `_consume_natural_number` (digit-run wins unless it consumed
+  exactly one bare *units word* immediately followed by literal "hundred"), "three hundred"/"two
+  hundred" would silently resolve to 3/2 with "hundred"/"twenty" left over, failing the whole
+  rule rather than parsing the natural number — a defect that would have shipped invisibly
+  (wrong number, not a crash) had it not been checked against the stated examples before writing
+  tests.
+- **D15's "sort the rules tuple once" turned out to need no caching at all.** The original
+  `_match_rules` sorted the *entire* active rule set by id on every call just to get a
+  deterministic tie-break order. Scoring every rule first and sorting only the (typically tiny)
+  *matched* subset by `(-ratio, id)` afterward gives the same determinism without ever touching
+  `rules`' own order — so `RuleRegistry` did not need a second cached "pre-sorted rules" field
+  alongside `anchor_words`; only the anchor-words and prompt caching (both genuinely
+  recomputations of a derived value, not an ordering) needed the `RuleRegistry.swap`/
+  `CachedRulePromptProvider` machinery.

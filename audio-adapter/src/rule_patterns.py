@@ -13,17 +13,21 @@ body-layer -- nothing here ever executes Lua.
 - `<name:type>`, a slot of a type in `SLOT_TYPES` below,
 - `<name:w1|w2>`, a word-set slot -- the value is the exact word heard.
 
-**Matching** (this module's own scoping choice, not a literal
-implementation of D8's fuzzy-score description): a rule matches a
-transcript only on **full, exact-literal consumption** -- every element
-must consume its words and nothing may be left over. This is
-deliberately simpler than the legacy matcher's fuzzy phrase-sequence
-score (`command_matcher._phrase_match_ratio`): `[[BL-17]]`'s own guiding
-decision is "fixed wording is the fast path" (U1), and a deterministic
-grammar is what that means for a rule's own words -- tolerance for STT
-noise on a rule's literals is left for a later stage to add if real
-flights show it is needed, rather than building a second fuzzy engine
-now for the one rule this stage ships.
+**Matching**: a rule matches a transcript only on **full consumption** --
+every element must consume its words and nothing may be left over. A
+`LiteralElement` accepts the heard word on exact equality, or (`[[BL-17]]`
+D13, Stage 3a) on a `_WORD_REPAIR_FLOOR`-or-better character ratio against
+it -- the same per-word repair floor the legacy matcher's own
+`_phrase_match_ratio` already uses, not a second hand-tuned number
+(`vocabulary._WORD_REPAIR_FLOOR`, relocated there specifically so both
+matching modules can import the one value, see that constant's own
+comment). **A `SlotElement`/`WordSetElement` never gets this fallback**:
+its own typed `consume`/exact-word check either succeeds exactly or the
+rule does not match at that position -- this is what keeps a rule's
+*values* (a number, "left"/"right", an hour) heard exactly while its
+*wording* tolerates STT noise (goal check E12, "fuzziness forgives the
+words, never the values"). A match's own ratio is therefore no longer
+always `1.0` -- see `match_pattern_with_ratio`.
 
 **`heading`/`bearing` (user direction, 2026-11-17, mid-Stage-1b):**
 *"Until I provide decisions about how to handle 'bearing', treat
@@ -37,13 +41,15 @@ today's behaviour unchanged -- this module has no reader of either yet).
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from vocabulary import _WORD_DIGITS
+from vocabulary import _WORD_DIGITS, _WORD_REPAIR_FLOOR
 
 __all__ = [
     "SLOT_TYPES",
+    "CachedRulePromptProvider",
     "CompiledRule",
     "Element",
     "LegacyProbe",
@@ -59,7 +65,9 @@ __all__ = [
     "compile_rules",
     "generate_samples",
     "match_pattern",
+    "match_pattern_with_ratio",
     "parse_pattern",
+    "rule_anchor_words",
     "rule_words",
 ]
 
@@ -137,17 +145,181 @@ def _consume_digit_run(
     return digit_str, i
 
 
+#: Units (0-9) for the composed natural-number grammar below (D14) --
+#: deliberately its own table rather than reusing `_WORD_DIGITS` (whose
+#: values are *digit characters* for `_consume_digit_run`'s concatenation,
+#: not integers for arithmetic).
+_UNITS_WORDS: dict[str, int] = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+}
+
+#: Teens (10-19), for the composed natural-number grammar (D14).
+_TEENS_WORDS: dict[str, int] = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+}
+
+#: Tens (20-90), for the composed natural-number grammar (D14) -- each
+#: optionally followed by a units word ("twenty two").
+_TENS_WORDS: dict[str, int] = {
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
+
+
+def _consume_small_number_word(words: list[str], idx: int) -> tuple[int, int] | None:
+    """One grammar unit of the composed natural-number phrase (D14): a
+    bare unit (0-9), a teen (10-19), or a tens word optionally followed
+    by a non-zero unit ("twenty two"). Used both standalone (a plain
+    10-99 word) and as the hundreds group's own multiplier/remainder in
+    `_consume_number_word_phrase` below."""
+    if idx >= len(words):
+        return None
+    word = words[idx]
+    if word in _TENS_WORDS:
+        value = _TENS_WORDS[word]
+        next_idx = idx + 1
+        if next_idx < len(words) and words[next_idx] in _UNITS_WORDS:
+            unit = _UNITS_WORDS[words[next_idx]]
+            if unit != 0:
+                return value + unit, next_idx + 1
+        return value, next_idx
+    if word in _TEENS_WORDS:
+        return _TEENS_WORDS[word], idx + 1
+    if word in _UNITS_WORDS:
+        return _UNITS_WORDS[word], idx + 1
+    return None
+
+
+def _consume_number_word_phrase(words: list[str], idx: int) -> tuple[int, int] | None:
+    """A composed English number word/phrase (D14): one small-number
+    group (above), optionally extended into the hundreds by a **bare
+    units** multiplier (1-9) + the literal "hundred" + an optional
+    trailing small-number group ("three hundred twenty", "one hundred
+    fifty three"). Only a bare units word multiplies "hundred" --
+    "twenty hundred"/"thirteen hundred" are not forms Q10 names, and
+    "thousand" composition is out of scope this stage (D14).
+
+    **Terminates at the first complete number, never concatenates two**
+    (D14's own design principle): a paired form like "three fifteen"
+    parses only as far as "three" (a complete unit, 3) -- "fifteen" is
+    a complete number in its own right, not a continuation, so this
+    function stops and leaves it for the caller (full-consumption
+    matching) to reject as unconsumed, rather than silently combining
+    the two into 315 or 15."""
+    small = _consume_small_number_word(words, idx)
+    if small is None:
+        return None
+    value, next_idx = small
+    if 1 <= value <= 9 and next_idx < len(words) and words[next_idx] == "hundred":
+        after_hundred = next_idx + 1
+        remainder = _consume_small_number_word(words, after_hundred)
+        if remainder is not None:
+            remainder_value, remainder_idx = remainder
+            return value * 100 + remainder_value, remainder_idx
+        return value * 100, after_hundred
+    return value, next_idx
+
+
+def _consume_natural_number(
+    words: list[str], idx: int, digit_min: int, digit_max: int
+) -> tuple[int, int] | None:
+    """A digit run (`_consume_digit_run`, bounded `[digit_min,
+    digit_max]` digits -- today's "315" = "3 1 5" = "three one five"
+    collapse) or a composed natural-number word/phrase
+    (`_consume_number_word_phrase`), whichever actually captures more of
+    the utterance. Shared by `angle` and `quantity` (D14's "Corrected
+    2026-11-17" note: `angle` gains the same number-word grammar as
+    `quantity`, keeping its own digit bound and range check).
+
+    **The one override**: a digit run that consumed a single bare
+    *units word* (not a numeral literal like "3") immediately followed
+    by the literal "hundred" defers to the word-phrase parse instead --
+    "three" followed by "hundred" is one number composed across
+    "hundred", not "three" cut short by a word the digit grammar does
+    not know. Without this override, `_consume_digit_run` would
+    (correctly, by its own rules) stop at "three" and hand back `(3, 1
+    word)`, leaving "hundred" to break the rest of the pattern."""
+    digit_result = _consume_digit_run(words, idx, digit_min, digit_max)
+    word_result = _consume_number_word_phrase(words, idx)
+    if (
+        digit_result is not None
+        and digit_result[1] - idx == 1
+        and words[idx] in _UNITS_WORDS
+        and word_result is not None
+        and word_result[1] > digit_result[1]
+    ):
+        return word_result
+    if digit_result is not None:
+        digit_str, next_idx = digit_result
+        return int(digit_str), next_idx
+    return word_result
+
+
 def _consume_angle(words: list[str], idx: int) -> tuple[object, int] | None:
-    """1-3 digits, no anchor word of its own, value 1-359 (D7: the bare
-    number in e.g. "turn left <degrees:angle>")."""
-    result = _consume_digit_run(words, idx, 1, 3)
+    """1-3 digits or a composed number word, no anchor word of its own,
+    value 1-359 (D7: the bare number in e.g. "turn left <degrees:angle>").
+    Gained the number-word grammar in D14's own "Corrected 2026-11-17"
+    note -- the user's own example for wanting number words at all is
+    this slot ("turn left thirty")."""
+    result = _consume_natural_number(words, idx, 1, 3)
     if result is None:
         return None
-    digit_str, next_idx = result
-    value = int(digit_str)
+    value, next_idx = result
     if not (1 <= value <= 359):
         return None
     return value, next_idx
+
+
+def _consume_quantity(words: list[str], idx: int) -> tuple[object, int] | None:
+    """`quantity` (D14): a digit run (any count 1-4 digits) or a
+    composed natural-number word/phrase -- see `_consume_natural_number`.
+    No range check of its own; a command using this slot (e.g. an
+    altitude/speed amount) applies whatever range makes sense for it."""
+    result = _consume_natural_number(words, idx, 1, 4)
+    if result is None:
+        return None
+    value, next_idx = result
+    return value, next_idx
+
+
+def _consume_speed_target(words: list[str], idx: int) -> tuple[object, int] | None:
+    """`speed_target` (D14): a union slot, the literal word "max"
+    (`{"kind": "max"}`) or else `quantity`'s own grammar (`{"kind":
+    "number", "value": N}`) -- what lets "speed max" and "speed two
+    hundred" share one pattern slot. The tagged-table wire convention is
+    D7's own (pulled forward one stage early from the marks stage's
+    `direction`/`origin` union types)."""
+    if idx < len(words) and words[idx] == "max":
+        return {"kind": "max"}, idx + 1
+    quantity_result = _consume_quantity(words, idx)
+    if quantity_result is None:
+        return None
+    value, next_idx = quantity_result
+    return {"kind": "number", "value": value}, next_idx
 
 
 def _consume_heading(words: list[str], idx: int) -> tuple[object, int] | None:
@@ -220,6 +392,10 @@ SLOT_TYPES: dict[str, SlotType] = {
     "angle": SlotType("angle", _consume_angle, lambda: "two zero"),
     "heading": SlotType("heading", _consume_heading, lambda: "heading three one five"),
     "oclock": SlotType("oclock", _consume_oclock, lambda: "three o'clock"),
+    "quantity": SlotType("quantity", _consume_quantity, lambda: "two zero zero"),
+    "speed_target": SlotType(
+        "speed_target", _consume_speed_target, lambda: "two zero zero"
+    ),
 }
 
 
@@ -305,22 +481,51 @@ def parse_pattern(pattern: str) -> tuple[Element, ...]:
 # ---------------------------------------------------------------------------
 
 
+def _literal_ratio(heard: str, literal: str) -> float | None:
+    """`1.0` on an exact hit; otherwise the character ratio against
+    `literal`, or `None` if it fails to clear `_WORD_REPAIR_FLOOR`
+    (`[[BL-17]]` D13) -- the one place a `LiteralElement` tolerates a
+    mis-transcribed word."""
+    if heard == literal:
+        return 1.0
+    ratio = difflib.SequenceMatcher(None, heard, literal).ratio()
+    if ratio < _WORD_REPAIR_FLOOR:
+        return None
+    return ratio
+
+
 def _match_elements(
     elements: tuple[Element, ...], words: list[str], idx: int
-) -> tuple[dict[str, object], int] | None:
+) -> tuple[dict[str, object], int, list[float]] | None:
+    """Returns `(slots, next_index, literal_ratios)` -- `literal_ratios`
+    is every `LiteralElement`'s own match ratio encountered along the
+    way (including inside an `OptionalElement`), for
+    `match_pattern_with_ratio` to average (D13)."""
     slots: dict[str, object] = {}
+    literal_ratios: list[float] = []
     i = idx
     for element in elements:
         if isinstance(element, LiteralElement):
-            if i >= len(words) or words[i] != element.word:
+            if i >= len(words):
                 return None
+            ratio = _literal_ratio(words[i], element.word)
+            if ratio is None:
+                return None
+            literal_ratios.append(ratio)
             i += 1
         elif isinstance(element, WordSetElement):
+            # **Never fuzzy** (E12, "fuzziness forgives the words, never
+            # the values") -- a word-set value is heard exactly or the
+            # rule does not match at this position.
             if i >= len(words) or words[i] not in element.words:
                 return None
             slots[element.name] = words[i]
             i += 1
         elif isinstance(element, SlotElement):
+            # **Never fuzzy either** -- a slot type's own `consume`
+            # either succeeds exactly or returns `None`; no ratio is
+            # ever computed for a slot value (E12, same as `WordSetElement`
+            # above).
             slot_type = SLOT_TYPES.get(element.type_name)
             if slot_type is None:
                 return None
@@ -338,26 +543,40 @@ def _match_elements(
             # stage's own tests can expose.
             sub = _match_elements(element.elements, words, i)
             if sub is not None:
-                sub_slots, i = sub
+                sub_slots, i, sub_ratios = sub
                 slots.update(sub_slots)
+                literal_ratios.extend(sub_ratios)
         else:  # pragma: no cover -- exhaustive by construction
             raise TypeError(f"unknown pattern element {element!r}")
-    return slots, i
+    return slots, i, literal_ratios
+
+
+def match_pattern_with_ratio(
+    elements: tuple[Element, ...], words: list[str]
+) -> tuple[dict[str, object], float] | None:
+    """Full-consumption match from word 0, plus the match's own ratio
+    (`[[BL-17]]` D13) -- `None` if any element fails or words remain
+    unconsumed at the end. The ratio is the mean of every `LiteralElement`
+    position's own word-repair ratio (`1.0` for an exact hit), or `1.0`
+    if the pattern has no literal at all (nothing to be fuzzy about --
+    e.g. a rule whose whole pattern is `<degrees:angle>`)."""
+    result = _match_elements(elements, words, 0)
+    if result is None:
+        return None
+    slots, end, literal_ratios = result
+    if end != len(words):
+        return None
+    ratio = sum(literal_ratios) / len(literal_ratios) if literal_ratios else 1.0
+    return slots, ratio
 
 
 def match_pattern(
     elements: tuple[Element, ...], words: list[str]
 ) -> dict[str, object] | None:
-    """Full-consumption match only, from word 0 -- `None` if any element
-    fails or words remain unconsumed at the end (module docstring's own
-    scoping choice: exact-literal, not fuzzy)."""
-    result = _match_elements(elements, words, 0)
-    if result is None:
-        return None
-    slots, end = result
-    if end != len(words):
-        return None
-    return slots
+    """`match_pattern_with_ratio`, discarding the ratio -- every caller
+    that only needs "did it match" (the collision checks below)."""
+    result = match_pattern_with_ratio(elements, words)
+    return result[0] if result is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +635,132 @@ def generate_samples(rule: CompiledRule) -> list[str]:
     return sorted(s for s in samples if s)
 
 
+#: A small, fixed set of ordinary short words -- the same "fixed list,
+#: not generated" posture `vocabulary.FREE_SPEECH_GUARD` already has --
+#: used to probe whether a *mis-transcribed* variant of a rule's own
+#: literal could collide with a different rule or an existing legacy
+#: phrase (D13's widened D9 collision check, `_perturbed_sample` below).
+#: Deliberately generic rather than hand-picked near-misses of any one
+#: rule's own wording: a later rule's literal is unknown in advance, and
+#: this list only needs to contain *some* word landing in
+#: `[_WORD_REPAIR_FLOOR, 1.0)` against whichever literal is being probed
+#: -- `_perturbed_sample` skips a literal with no hit at all (module
+#: docstring's own "Collision check (D9), widened").
+_COLLISION_PROBE_WORDS: tuple[str, ...] = (
+    "scam",
+    "turn",
+    "burn",
+    "learn",
+    "term",
+    "right",
+    "light",
+    "write",
+    "night",
+    "left",
+    "lift",
+    "list",
+    "set",
+    "sit",
+    "say",
+    "stay",
+    "span",
+    "watch",
+    "what",
+    "wash",
+    "report",
+    "repeat",
+    "support",
+    "engage",
+    "engaged",
+    "mark",
+    "mart",
+    "dark",
+    "speed",
+    "speak",
+    "heading",
+    "level",
+    "lever",
+    "climb",
+    "clime",
+)
+
+
+def _best_probe_word(literal: str) -> str | None:
+    """The first `_COLLISION_PROBE_WORDS` entry scoring in
+    `[_WORD_REPAIR_FLOOR, 1.0)` against `literal` -- `None` if none does."""
+    for candidate in _COLLISION_PROBE_WORDS:
+        if candidate == literal:
+            continue
+        ratio = difflib.SequenceMatcher(None, candidate, literal).ratio()
+        if _WORD_REPAIR_FLOOR <= ratio < 1.0:
+            return candidate
+    return None
+
+
+def _sample_words_with_literal_flags(
+    elements: tuple[Element, ...], include_optionals: bool
+) -> list[tuple[str, bool]]:
+    """Like `_sample_elements`, but keeping each produced word tagged
+    with whether it came from a `LiteralElement` -- only those positions
+    are candidates for `_perturbed_sample`'s substitution; a slot/
+    word-set sample word is never perturbed (E12, same as the matcher
+    itself)."""
+    result: list[tuple[str, bool]] = []
+    for element in elements:
+        if isinstance(element, LiteralElement):
+            result.append((element.word, True))
+        elif isinstance(element, WordSetElement):
+            result.append((element.words[0], False))
+        elif isinstance(element, SlotElement):
+            result.append((SLOT_TYPES[element.type_name].sample(), False))
+        elif isinstance(element, OptionalElement) and include_optionals:
+            result.extend(
+                _sample_words_with_literal_flags(element.elements, include_optionals)
+            )
+    return result
+
+
+def _perturbed_sample(rule: CompiledRule) -> str | None:
+    """One sample for `rule` (D9/D13's "one perturbed sample per rule")
+    with exactly one literal word replaced by a near-miss probe word --
+    tries each literal position in turn and stops at the first one with
+    a usable probe word (module docstring's "the perturbed probe is
+    skipped for that word" is per-literal, not per-rule: the next
+    literal, if any, still gets a chance). `None` if the rule has no
+    literal at all, or none of its literals has a usable probe word."""
+    parts = _sample_words_with_literal_flags(rule.elements, include_optionals=True)
+    for i, (word, is_literal) in enumerate(parts):
+        if not is_literal:
+            continue
+        probe = _best_probe_word(word)
+        if probe is None:
+            continue
+        perturbed_words = [w for w, _ in parts]
+        perturbed_words[i] = probe
+        return " ".join(w for w in perturbed_words if w)
+    return None
+
+
+def rule_anchor_words(rules: tuple[CompiledRule, ...]) -> frozenset[str]:
+    """Every active rule's own `first_literal()` (D8) -- `()` gives the
+    empty set, so `VERB_ANCHOR_WORDS | rule_anchor_words(())` is exactly
+    `VERB_ANCHOR_WORDS`, the "no rules pushed" no-op D7/Stage 1b's own
+    acceptance test pins.
+
+    **Lives here, not in `command_matcher.py` (its original home)**,
+    because it is a pure function of `CompiledRule` alone (D15) --
+    moving it next to `CompiledRule` is what lets `RuleRegistry.swap`
+    below compute it once, at the `PUT /rules` swap point, rather than
+    `command_matcher.match_transcript` rebuilding it from `rules` on
+    every transcript."""
+    words: set[str] = set()
+    for rule in rules:
+        literal = rule.first_literal()
+        if literal is not None:
+            words.add(literal)
+    return frozenset(words)
+
+
 @dataclass(frozen=True)
 class LegacyProbeResult:
     """What the legacy matcher says about one collision-check probe
@@ -433,18 +778,28 @@ class LegacyProbeResult:
 LegacyProbe = Callable[[str], LegacyProbeResult]
 
 
+def _samples_with_perturbation(rule: CompiledRule) -> list[str]:
+    """`generate_samples(rule)` plus (D13) one perturbed sample, if the
+    rule has a usable one -- see `_perturbed_sample`'s own docstring."""
+    samples = generate_samples(rule)
+    perturbed = _perturbed_sample(rule)
+    if perturbed is not None:
+        samples = [*samples, perturbed]
+    return samples
+
+
 def _rules_collide(rule_a: CompiledRule, rule_b: CompiledRule) -> bool:
-    for sample in generate_samples(rule_a):
+    for sample in _samples_with_perturbation(rule_a):
         if match_pattern(rule_b.elements, sample.split()) is not None:
             return True
-    for sample in generate_samples(rule_b):
+    for sample in _samples_with_perturbation(rule_b):
         if match_pattern(rule_a.elements, sample.split()) is not None:
             return True
     return False
 
 
 def _collides_with_legacy(rule: CompiledRule, legacy_probe: LegacyProbe) -> bool:
-    for sample in generate_samples(rule):
+    for sample in _samples_with_perturbation(rule):
         if legacy_probe(sample).token is not None:
             return True
     return False
@@ -497,10 +852,25 @@ class RuleRegistry:
     immutable object swapped in with one assignment"), never mutated in
     place -- `ThreadingHTTPServer` can run `PUT /rules` and `/transcribe`
     concurrently, and a reader must always see either the old tuple or
-    the new one, never a partially-built one."""
+    the new one, never a partially-built one.
+
+    `anchor_words` (`[[BL-17]]` D15) is `rule_anchor_words(rules)`,
+    computed once by `swap` below rather than by every caller that
+    reads `rules` -- `command_matcher.match_transcript`'s own hot path
+    passes it straight through instead of rebuilding it per transcript."""
 
     rules: tuple[CompiledRule, ...] = ()
     version: str | None = None
+    anchor_words: frozenset[str] = frozenset()
+
+    def swap(self, rules: tuple[CompiledRule, ...], version: str) -> None:
+        """The one state transition `PUT /rules` performs (D8/D15):
+        sets `rules`/`version` and recomputes `anchor_words` here, once,
+        so it is never stale relative to `rules` and never recomputed
+        anywhere else."""
+        self.rules = rules
+        self.version = version
+        self.anchor_words = rule_anchor_words(rules)
 
 
 def compile_rules(
@@ -576,3 +946,39 @@ def compile_rules(
         del accepted[rule_id]
 
     return [accepted[rid] for rid in sorted(accepted)], rejected
+
+
+class CachedRulePromptProvider:
+    """A whisper-prompt provider (`server.py`'s `stt_engine` prompt
+    callable) that only rebuilds the prompt when `registry.version`
+    actually changes (`[[BL-17]]` D15) -- the static legacy-vocabulary
+    word list the prompt walks never changes at runtime, and the active
+    rule set only changes when a `PUT /rules` swaps `registry.rules`
+    (via `RuleRegistry.swap`), so rebuilding on every `/transcribe` call
+    (one per utterance) bought nothing.
+
+    `build_prompt` is injected -- the actual `vocabulary.to_prompt(...)`
+    call plus `server.py`'s own 224-token-cap warning stay there, where
+    the warning's own constant is declared; this class owns only the
+    version-keyed caching, so it is testable with a plain call-count
+    spy rather than needing a live server."""
+
+    def __init__(
+        self, registry: RuleRegistry, build_prompt: Callable[[list[str]], str]
+    ) -> None:
+        self._registry = registry
+        self._build_prompt = build_prompt
+        self._initialized = False
+        self._cached_version: str | None = None
+        self._cached_prompt = ""
+
+    def __call__(self) -> str:
+        version = self._registry.version
+        if not self._initialized or version != self._cached_version:
+            extra_words = [
+                word for rule in self._registry.rules for word in rule_words(rule)
+            ]
+            self._cached_prompt = self._build_prompt(extra_words)
+            self._cached_version = version
+            self._initialized = True
+        return self._cached_prompt

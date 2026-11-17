@@ -87,10 +87,11 @@ transcript and never as a coincidental fuzzy hit on an unrelated phrase.
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from rule_patterns import CompiledRule, match_pattern
+from rule_patterns import CompiledRule, match_pattern_with_ratio, rule_anchor_words
 from vocabulary import (
+    _WORD_REPAIR_FLOOR,
     PHRASES,
     TOKENS,
     normalize_for_match,
@@ -148,16 +149,14 @@ _WHAT_VERB = "what"
 #: `test_command_matcher.py`'s reviewer-verified fixtures.
 MATCH_FLOOR: float = 0.6
 
-#: The per-word character-ratio floor a heard word not already an exact
-#: match must clear to be credited against a remaining phrase word in
-#: `_phrase_match_ratio`'s repair pass. Below this, a heard word is
-#: assumed unrelated to anything left in the phrase and earns nothing --
-#: without this floor, *any* two words share some nonzero character
-#: overlap, which is exactly the mechanism that let whole unrelated
-#: sentences repair their way to a passing score under the old
-#: whole-string scoring. Reviewer-specified and reviewer-verified against
-#: the false-positive/real-mishearing fixture set (module docstring).
-_WORD_REPAIR_FLOOR: float = 0.5
+#: `_WORD_REPAIR_FLOOR` -- the per-word character-ratio floor a heard word
+#: not already an exact match must clear to be credited against a
+#: remaining phrase word in `_phrase_match_ratio`'s repair pass -- now
+#: lives in `vocabulary.py` (imported above), not here: `[[BL-17]]` D13
+#: gave `rule_patterns.py` its own need for the identical floor, and
+#: `vocabulary.py` is the one place both modules can import it from
+#: without a circular import (see the import's own comment there for why
+#: `rule_patterns.py` specifically cannot import this module instead).
 
 #: The verb-anchor ratio floor (Decision 4 Layer 2 step 2). **Deliberately
 #: lower than `MATCH_FLOOR`, and that gap is the point, not an oversight.**
@@ -506,48 +505,47 @@ def _verb_anchor_ratio(
     )
 
 
-def _rule_anchor_words(rules: tuple[CompiledRule, ...]) -> frozenset[str]:
-    """Every active rule's own `first_literal()` (D8) -- `()` gives the
-    empty set, so `VERB_ANCHOR_WORDS | _rule_anchor_words(())` is exactly
-    `VERB_ANCHOR_WORDS`, the "no rules pushed" no-op D7/Stage 1b's own
-    acceptance test pins."""
-    words: set[str] = set()
-    for rule in rules:
-        literal = rule.first_literal()
-        if literal is not None:
-            words.add(literal)
-    return frozenset(words)
-
-
 def _match_rules(
     rules: tuple[CompiledRule, ...], words: list[str]
 ) -> MatchResult | None:
     """Tries every active rule's pattern against `words` (full-
-    consumption match, `rule_patterns.match_pattern`), returning `None`
-    if none matches. Every match is `match_ratio=1.0` by construction
-    (this module's own exact-literal matching choice, `rule_patterns`'s
-    module docstring) -- two or more rules matching the same transcript
-    is therefore always a tie, never resolved by a separation check the
-    way two legacy phrases at different ratios are; it is `ambiguous`
-    instead (D8: "set `ambiguous=True`"), naming the first match (sorted
-    by id, for determinism) as `token` so a confirm question has
-    something to describe."""
-    matches: list[tuple[CompiledRule, dict[str, object]]] = []
-    for rule in sorted(rules, key=lambda r: r.id):
-        slots = match_pattern(rule.elements, words)
-        if slots is not None:
-            matches.append((rule, slots))
+    consumption match, `rule_patterns.match_pattern_with_ratio`),
+    returning `None` if none matches.
+
+    **`[[BL-17]]` D13**: a match's own `match_ratio` is no longer always
+    `1.0` -- `match_pattern_with_ratio` now returns the mean of each
+    literal position's own word-repair ratio (`rule_patterns.py`'s own
+    literal fuzz). The best-scoring match wins; a *second* match within
+    `SEPARATION_MIN` of the best is `ambiguous=True` (the same
+    disposition two legacy phrases at a near-tie already get, D13's
+    "Ratio and the tie-break"), not "two or more matches is always a
+    tie" the way exact-literal matching made true before D13. Ties on
+    ratio break by rule id (sorted), for determinism -- no need to sort
+    the whole `rules` tuple up front for this (D15: that per-transcript
+    sort is exactly what the caller no longer has to pay for)."""
+    matches: list[tuple[CompiledRule, dict[str, object], float]] = []
+    for rule in rules:
+        result = match_pattern_with_ratio(rule.elements, words)
+        if result is not None:
+            slots, ratio = result
+            matches.append((rule, slots, ratio))
     if not matches:
         return None
-    rule, slots = matches[0]
+    matches.sort(key=lambda m: (-m[2], m[0].id))
+    rule, slots, ratio = matches[0]
+    ambiguous = False
+    if len(matches) > 1:
+        second_ratio = matches[1][2]
+        if (ratio - second_ratio) < SEPARATION_MIN:
+            ambiguous = True
     typed_slots: dict[str, int | str] = {
         name: value for name, value in slots.items() if isinstance(value, (int, str))
     }
     return MatchResult(
         token=rule.id,
-        match_ratio=1.0,
+        match_ratio=ratio,
         verb_anchored=True,
-        ambiguous=len(matches) > 1,
+        ambiguous=ambiguous,
         slots=typed_slots or None,
     )
 
@@ -937,18 +935,37 @@ def _where_slot_count(slots: dict[str, int | str]) -> int:
 
 
 def match_transcript(
-    text: str, rules: tuple[CompiledRule, ...] | None = None
+    text: str,
+    rules: tuple[CompiledRule, ...] | None = None,
+    anchor_words: frozenset[str] | None = None,
 ) -> MatchResult:
-    """Normalise -> verb anchor -> (bearing slot | phrase match) ->
-    separation check. See module and `MatchResult` docstrings for the
-    full outcome shape.
+    """Normalise -> wake word / HVRT bare word -> (rule match | legacy
+    match) -> cross-pipeline separation check. See module and
+    `MatchResult` docstrings for the full outcome shape.
 
     `rules` (`[[BL-17]]` D1/D8) is the adapter's currently-accepted,
     immutable rule set -- `None`/`()` (every call site that predates
     rules, and `server.py`'s own state before the first successful
     `PUT /rules`) makes this function behave exactly as it did before
     this plan, pinned by the whole existing matcher suite passing
-    unchanged with no rules pushed."""
+    unchanged with no rules pushed.
+
+    `anchor_words` (`[[BL-17]]` D15) is the caller's own precomputed
+    `rule_patterns.rule_anchor_words(rules)` -- `server.py` computes this
+    once, at the same `PUT /rules` swap point that sets `rules` itself
+    (`rule_patterns.RuleRegistry.swap`), rather than this function
+    rebuilding it from `rules` on every transcript. `None` (every call
+    site that predates D15, and every test that passes a bare `rules`
+    tuple) falls back to computing it here.
+
+    **D13's own widened tie-break**: a rule and a legacy phrase can now
+    both resolve the same transcript (the rule engine's own literal fuzz
+    and the legacy matcher's `_phrase_match_ratio` repair overlap more
+    than exact-literal matching ever let them). When both resolve, the
+    higher-ratio one wins outright unless the two ratios are within
+    `SEPARATION_MIN`, in which case the result is `ambiguous=True` --
+    exactly the disposition two legacy phrases at a near-tie already
+    get (E3), just applied one level up."""
     normalized = strip_filler(normalize_for_match(text))
     words = normalized.split()
     if not words:
@@ -984,18 +1001,49 @@ def match_transcript(
     # before every legacy slotted branch (and before the generic anchor
     # gate just below, so a rule whose own first literal is not already
     # a legacy verb -- e.g. "turn" -- is not cut off before it is ever
-    # tried).
-    if active_rules:
-        rule_match = _match_rules(active_rules, words)
-        if rule_match is not None:
-            return rule_match
+    # tried). No longer an early return (D13): the legacy pipeline below
+    # still runs so the two can be compared.
+    rule_match = _match_rules(active_rules, words) if active_rules else None
 
-    verb = words[0]
-    anchor_words = (
-        VERB_ANCHOR_WORDS | _rule_anchor_words(active_rules)
+    widened_anchor_words = (
+        VERB_ANCHOR_WORDS
+        | (
+            anchor_words
+            if anchor_words is not None
+            else rule_anchor_words(active_rules)
+        )
         if active_rules
         else VERB_ANCHOR_WORDS
     )
+    legacy_match = _match_legacy(text, words, widened_anchor_words)
+
+    if rule_match is None:
+        return legacy_match
+    if legacy_match.token is None:
+        # Nothing in the legacy pipeline resolved (including "never even
+        # verb-anchored") -- the rule stands on its own, exactly as
+        # Stage 1b/2 shipped it.
+        return rule_match
+    best, second = (
+        (rule_match, legacy_match)
+        if rule_match.match_ratio >= legacy_match.match_ratio
+        else (legacy_match, rule_match)
+    )
+    if (best.match_ratio - second.match_ratio) < SEPARATION_MIN:
+        return replace(best, ambiguous=True)
+    return best
+
+
+def _match_legacy(
+    text: str, words: list[str], anchor_words: frozenset[str]
+) -> MatchResult:
+    """The legacy matching pipeline: verb anchor -> (bearing slot |
+    phrase match) -> separation check. Exactly `match_transcript`'s own
+    pre-D13 body, extracted so `match_transcript` can run it
+    unconditionally and compare its outcome against a rule match (D13)
+    rather than only running it when no rule has already claimed the
+    transcript."""
+    verb = words[0]
     if _verb_anchor_ratio(verb, anchor_words) < VERB_FLOOR:
         # Cheap early-out (Decision 4 Layer 2 step 2) -- not the primary
         # defence any more, see module docstring. Nothing downstream is

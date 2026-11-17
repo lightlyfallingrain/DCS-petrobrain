@@ -418,7 +418,11 @@ def _make_handler(
             transcribe_duration_s = time.monotonic() - transcribe_start
 
             match_start = time.monotonic()
-            match = match_transcript(transcript.text, rules=rule_state.rules)
+            match = match_transcript(
+                transcript.text,
+                rules=rule_state.rules,
+                anchor_words=rule_state.anchor_words,
+            )
             match_duration_s = time.monotonic() - match_start
 
             transcript_queue.push(
@@ -467,8 +471,10 @@ def _make_handler(
             """`PUT /rules` (`{"version": str, "rules": [{"id", "pattern"},
             ...]}`, `[[BL-17]]` D1/D2) -- parses and runs the collision
             check (`rule_patterns.compile_rules`, D9) over the full set
-            body-layer currently has loaded, then swaps `rule_state.rules`
-            in with one assignment (D8). Answers `{"version", "accepted":
+            body-layer currently has loaded, then swaps `rule_state`'s
+            `rules`/`version`/`anchor_words` in via `RuleRegistry.swap`
+            (D8, widened by D15 to also recompute `anchor_words` here,
+            once, rather than per transcript). Answers `{"version", "accepted":
             [ids], "rejected": [{"id", "reason"}]}` -- `version` is always
             the value the caller sent, even when every rule in the push
             was rejected, so body-layer can tell "the adapter is current
@@ -528,8 +534,7 @@ def _make_handler(
                 legacy_probe=_legacy_probe,
                 free_speech_guard=vocabulary.FREE_SPEECH_GUARD,
             )
-            rule_state.rules = tuple(accepted)
-            rule_state.version = version
+            rule_state.swap(tuple(accepted), version)
             self._respond_json(
                 200,
                 {

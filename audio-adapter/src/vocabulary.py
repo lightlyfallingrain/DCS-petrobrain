@@ -1041,6 +1041,24 @@ def normalized_phrase_index() -> dict[str, str]:
 #: digits as words and others numerically in the same sentence.
 _WORD_DIGITS: dict[str, str] = {name: str(i) for i, name in enumerate(_DIGIT_NAMES)}
 
+#: The per-word character-ratio floor a heard word not already an exact
+#: match must clear to be credited as a repair of some *other* word.
+#: **Declared here, not in `command_matcher.py` (its original home) or
+#: `rule_patterns.py`**, so both can import the one value without a real
+#: circular import: `command_matcher.py` imports `rule_patterns` (for its
+#: own D8 rule-matching branch) and `rule_patterns.py` -- since
+#: `[[BL-17]]` D13 -- needs this same floor for its own literal-word
+#: fuzz, but `rule_patterns.py` must never import `command_matcher.py`
+#: (that module's own `LegacyProbeResult` docstring explains why: the
+#: injected `legacy_probe` callable exists specifically to avoid that
+#: cycle). `vocabulary.py` is a dependency of both and of neither, so it
+#: is the one place this can live without either module reaching into the
+#: other. Measured against `command_matcher.py`'s own real
+#: false-positive/real-mishearing fixture set -- see that module's
+#: `_phrase_match_ratio` for the provenance ("skin bearing 315"/"walk
+#: ahead" admitted, the reviewer's adversarial sentences still rejected).
+_WORD_REPAIR_FLOOR: float = 0.5
+
 
 class BearingParse:
     """Outcome of reading a numeric bearing out of a transcript.
@@ -1691,6 +1709,35 @@ FREE_SPEECH_GUARD: tuple[str, ...] = (
 )
 
 
+def _static_recognised_words() -> tuple[str, ...]:
+    """The part of `recognised_words()` that never changes at runtime --
+    every word of every `PHRASES` phrasing, then every slot table's
+    words, lowercase, in first-seen order, with no `extra_words`.
+    Computed once at import time (`[[BL-17]]` D15) and reused as the
+    base for every `recognised_words` call, rather than re-walking these
+    fixed tables on every recognition for a set that cannot change
+    without a code change."""
+    sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
+    sources += [
+        *DESCRIPTOR_WORDS,
+        *SECTOR_WORDS,
+        *RELATIVE_WORDS,
+        *TIME_OF_DAY_WORDS,
+        *BAND_WORDS,
+        *STEP_DIRECTION_WORDS,
+        *WEAPON_WORDS,
+        *REFERENT_WORDS,
+    ]
+    words: dict[str, None] = {}
+    for source in sources:
+        for word in re.findall(r"[a-z']+", source.lower()):
+            words[word] = None
+    return tuple(words)
+
+
+_STATIC_RECOGNISED_WORDS: tuple[str, ...] = _static_recognised_words()
+
+
 def recognised_words(extra_words: Iterable[str] = ()) -> tuple[str, ...]:
     """Every distinct word the recogniser is expected to hear: each word of
     every `PHRASES` phrasing, then every slot table's words, lowercase, in
@@ -1708,21 +1755,7 @@ def recognised_words(extra_words: Iterable[str] = ()) -> tuple[str, ...]:
     rule's own literal/word-set words -- appended after this vocabulary's
     own words, so a word already here is never duplicated. `()` (the
     default) is every call site that predates rules, unchanged."""
-    sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
-    sources += [
-        *DESCRIPTOR_WORDS,
-        *SECTOR_WORDS,
-        *RELATIVE_WORDS,
-        *TIME_OF_DAY_WORDS,
-        *BAND_WORDS,
-        *STEP_DIRECTION_WORDS,
-        *WEAPON_WORDS,
-        *REFERENT_WORDS,
-    ]
-    words: dict[str, None] = {}
-    for source in sources:
-        for word in re.findall(r"[a-z']+", source.lower()):
-            words[word] = None
+    words: dict[str, None] = dict.fromkeys(_STATIC_RECOGNISED_WORDS)
     for word in extra_words:
         for found in re.findall(r"[a-z']+", word.lower()):
             words[found] = None

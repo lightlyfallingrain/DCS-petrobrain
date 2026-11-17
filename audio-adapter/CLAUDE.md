@@ -440,34 +440,50 @@ consume.
   check — not a second copy of `test_command_matcher.py`'s full adversarial fixture list.
   `recognised_words`/`to_prompt` both take an optional `extra_words` iterable (D10) — the active
   rule set's own words, appended after this vocabulary's.
-- `src/rule_patterns.py` (`plans/speech-rules/plan.md` D7-D9, `[[BL-17]]`) — the adapter-side half
-  of spoken-commands-as-Lua-rules: pattern grammar v1 (a literal word, `[optional]` groups,
-  `<name:type>` typed slots, `<name:w1|w2>` word-sets), the slot-type registry (`SLOT_TYPES`:
-  `angle`, `heading`, `oclock` — `bearing` is deliberately unbuilt, see this module's own
-  docstring), `parse_pattern`/`match_pattern` (full-consumption, exact-literal — a deliberate
-  scoping choice simpler than `command_matcher`'s own fuzzy phrase score, see the module
-  docstring), `generate_samples` (for the collision check), and `compile_rules` (parses + the
-  three-pass collision check: rule×rule, rule×legacy, the free-speech guard). `RuleRegistry` is
-  the one shared, swapped-in-with-one-assignment holder `server.py` and the whisper prompt
-  provider both read. **Never imports `command_matcher`** — the rule×legacy check takes a
-  `legacy_probe` callable injected by the caller (`server.py`'s `_legacy_probe`), specifically to
-  avoid a cycle with `command_matcher.py`'s own import of this module (D8's rule-matching branch).
+- `src/rule_patterns.py` (`plans/speech-rules/plan.md` D7-D9/D13-D15, `[[BL-17]]`) — the
+  adapter-side half of spoken-commands-as-Lua-rules: pattern grammar v1 (a literal word,
+  `[optional]` groups, `<name:type>` typed slots, `<name:w1|w2>` word-sets), the slot-type
+  registry (`SLOT_TYPES`: `angle`, `heading`, `oclock`, `quantity` (natural number words, Stage
+  3a), `speed_target` (the `{kind: max}`/`{kind: number, value}` union) — `bearing` is
+  deliberately unbuilt, see this module's own docstring), `parse_pattern`/
+  `match_pattern_with_ratio`/`match_pattern` (full-consumption; a `LiteralElement` tolerates a
+  `_WORD_REPAIR_FLOOR`-or-better mis-transcription since Stage 3a's D13, a `SlotElement`/
+  `WordSetElement` never does — E12), `generate_samples`/`_perturbed_sample` (for the collision
+  check, the latter probing one near-miss literal substitution per rule, D13's widened D9),
+  `rule_anchor_words`, and `compile_rules` (parses + the three-pass collision check: rule×rule,
+  rule×legacy — both now also run the perturbed sample — the free-speech guard). `RuleRegistry`
+  is the one shared holder `server.py` and the whisper prompt provider both read; `RuleRegistry.
+  swap(rules, version)` is the one call that updates `rules`/`version`/`anchor_words` together
+  (D15: `anchor_words` computed once here, not per transcript). `CachedRulePromptProvider`
+  rebuilds the whisper prompt only when `registry.version` changes (D15). **Never imports
+  `command_matcher`** — the rule×legacy check takes a `legacy_probe` callable injected by the
+  caller (`server.py`'s `_legacy_probe`), specifically to avoid a cycle with `command_matcher.py`'s
+  own import of this module (D8's rule-matching branch); `_WORD_REPAIR_FLOOR` itself lives in
+  `vocabulary.py` for the identical reason (both modules import it from there).
 - `src/command_matcher.py` (Slice 3 Stage 2, `plans/inbound-speech/plan.md` Decision 4 REVISED) —
   the transcript -> candidate-token matcher: normalise (`vocabulary.normalize_for_match`) -> verb
   anchor (`VERB_ANCHOR_WORDS`, derived from `vocabulary.PHRASES`, not hand-copied) -> bearing slot
   (`vocabulary.parse_bearing`) or phrase match (`vocabulary.normalized_phrase_index`) -> separation
-  check. `match_transcript(text, rules=None) -> MatchResult` (`token`, `match_ratio`,
-  `verb_anchored`, `ambiguous`, `slots`) is everything this subproject hands body-layer about one
-  transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching constants (behaviour
-  constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's `belief.voice_commands`, per
+  check. `match_transcript(text, rules=None, anchor_words=None) -> MatchResult` (`token`,
+  `match_ratio`, `verb_anchored`, `ambiguous`, `slots`) is everything this subproject hands
+  body-layer about one transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching
+  constants (behaviour constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's
+  `belief.voice_commands`, per
   the plan's constant split). Wired into `POST /transcribe` as of Slice 3 Stage 3 (`server.py`
   above) — Stage 2's own tests still exercise it directly, and body-layer's `!voice` REPL harness
   is still how a developer drives the act/confirm/say-again pipeline without a real WAV.
   **`rules` (`[[BL-17]]` D8)** — an immutable `tuple[rule_patterns.CompiledRule, ...]`, `None`/`()`
   behaving exactly as before (Stage 1b's own acceptance test: the whole existing suite passes
-  unchanged with no rules pushed). Rule matching runs after the wake word/HVRT bare words and
-  before every legacy slotted branch, widening `VERB_ANCHOR_WORDS` with each active rule's own
-  first literal (`_rule_anchor_words`) for the anchor gate that follows it.
+  unchanged with no rules pushed). Rule matching runs after the wake word/HVRT bare words,
+  widening `VERB_ANCHOR_WORDS` with each active rule's own first literal
+  (`rule_patterns.rule_anchor_words`) for the legacy pipeline's own anchor gate. **Since Stage 3a
+  (D13) it is no longer an early return**: the legacy pipeline (`_match_legacy`, extracted from
+  `match_transcript`'s own pre-D13 body) always runs too, and when both resolve, the
+  higher-`match_ratio` one wins unless the gap is under `SEPARATION_MIN`, in which case the result
+  is `ambiguous=True` — the same disposition two legacy phrases at a near-tie already get (E3),
+  applied one level up. `anchor_words` (D15) lets the caller pass a precomputed
+  `rule_anchor_words(rules)` (`server.py`'s own `RuleRegistry.anchor_words`, refreshed once per
+  `PUT /rules` rather than once per transcript); omitted, it falls back to computing it here.
 - `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
   gate. Runs whisper.cpp plain and with `--prompt` (and with `--grammar` behind `--with-grammar`) over
   a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair
