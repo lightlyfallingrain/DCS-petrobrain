@@ -87,27 +87,25 @@ transcript and never as a coincidental fuzzy hit on an unrelated phrase.
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 
-from rule_patterns import CompiledRule, match_pattern
+from rule_patterns import CompiledRule, match_pattern_with_ratio, rule_anchor_words
 from vocabulary import (
+    _WORD_REPAIR_FLOOR,
     PHRASES,
+    SEPARATION_MIN,
     TOKENS,
     normalize_for_match,
     normalized_phrase_index,
-    parse_altitude_step,
-    parse_altitude_value,
     parse_band,
     parse_bearing,
     parse_clock,
     parse_descriptor,
-    parse_heading_deg,
     parse_range_km,
     parse_referent,
     parse_relative_word,
     parse_sector_word,
-    parse_speed_step_direction,
-    parse_speed_value,
     parse_step_count,
     parse_step_direction,
     parse_time_of_day,
@@ -148,16 +146,14 @@ _WHAT_VERB = "what"
 #: `test_command_matcher.py`'s reviewer-verified fixtures.
 MATCH_FLOOR: float = 0.6
 
-#: The per-word character-ratio floor a heard word not already an exact
-#: match must clear to be credited against a remaining phrase word in
-#: `_phrase_match_ratio`'s repair pass. Below this, a heard word is
-#: assumed unrelated to anything left in the phrase and earns nothing --
-#: without this floor, *any* two words share some nonzero character
-#: overlap, which is exactly the mechanism that let whole unrelated
-#: sentences repair their way to a passing score under the old
-#: whole-string scoring. Reviewer-specified and reviewer-verified against
-#: the false-positive/real-mishearing fixture set (module docstring).
-_WORD_REPAIR_FLOOR: float = 0.5
+#: `_WORD_REPAIR_FLOOR` -- the per-word character-ratio floor a heard word
+#: not already an exact match must clear to be credited against a
+#: remaining phrase word in `_phrase_match_ratio`'s repair pass -- now
+#: lives in `vocabulary.py` (imported above), not here: `[[BL-17]]` D13
+#: gave `rule_patterns.py` its own need for the identical floor, and
+#: `vocabulary.py` is the one place both modules can import it from
+#: without a circular import (see the import's own comment there for why
+#: `rule_patterns.py` specifically cannot import this module instead).
 
 #: The verb-anchor ratio floor (Decision 4 Layer 2 step 2). **Deliberately
 #: lower than `MATCH_FLOOR`, and that gap is the point, not an oversight.**
@@ -201,15 +197,19 @@ WAKE_FLOOR: float = 0.8
 _WAKE_WORD = "petrovich"
 _WAKE_GREETING = "hey"
 
-#: Minimum ratio gap between the best and second-best *different-token*
-#: candidates (Decision 4 Layer 2 step 4, "the separation check") before
-#: they are treated as genuinely distinguishable rather than ambiguous.
-#: Not measured -- Stage 1's bench recorded no case where two different
+#: `SEPARATION_MIN` -- the minimum ratio gap between the best and
+#: second-best *distinct* candidates (Decision 4 Layer 2 step 4, "the
+#: separation check") before they are treated as genuinely
+#: distinguishable rather than ambiguous -- now lives in `vocabulary.py`
+#: (imported above), not here: the E12 revision gave `rule_patterns.py`
+#: its own need for the identical near-tie guard, on a `WordSetElement`'s
+#: own fuzzy resolution, for the same reason `_WORD_REPAIR_FLOOR` moved
+#: there first (see that comment, two entries up). Not measured for
+#: either use -- Stage 1's bench recorded no case where two different
 #: tokens' ratios landed within a hair of each other on the real corpus,
-#: so there is no distribution to set this from. Picked as a small
-#: fraction of `MATCH_FLOOR`'s own scale; revisit once live use produces
+#: so there is no distribution to set this from; picked as a small
+#: fraction of `MATCH_FLOOR`'s own scale, revisit once live use produces
 #: real near-tie cases.
-SEPARATION_MIN: float = 0.05
 
 
 #: Words dropped before matching: hesitation sounds, articles, and the two
@@ -370,21 +370,11 @@ _ENGAGE_VERBS: tuple[str, ...] = ("engage",)
 #: possibly-misheard first word.
 _GREETING_VERB = "good"
 
-#: BL-16 mode 2 Stage P2a's own slotted verbs (`plans/flight-control/
-#: plan.md`, "Stage P2 ready to build"), fuzzy-matched for the same
-#: reason every other slotted token's verb is.
-_TURN_HEADING_VERB = "heading"
-_SET_SPEED_VERB = "speed"
-#: `speed_step`'s own two verbs -- "slow down"/"speed up" -- checked
-#: after `_SET_SPEED_VERB`'s own branch in `match_transcript` so a
-#: numeric "speed <value>" is tried first; `parse_speed_value`'s own
-#: "immediate token after 'speed' only" rule (see its docstring) is what
-#: actually keeps "speed up" from being misread as a numeric request,
-#: not this ordering -- the ordering only decides which parser runs
-#: first, and the wrong one safely returns `None` either way.
-_SPEED_STEP_VERBS: tuple[str, ...] = ("slow", "speed")
-_SET_ALTITUDE_VERBS: tuple[str, ...] = ("alt", "altitude")
-_ALTITUDE_STEP_VERBS: tuple[str, ...] = ("climb", "descend")
+#: BL-16 mode 2 Stage P2a's own slotted verbs (`turn_heading`/`set_speed`/
+#: `speed_step`/`set_altitude`/`altitude_step`) moved out of this module
+#: in `[[BL-17]]` Stage 4 -- every one of those commands is now matched
+#: by the rule engine (`config/rules/flight.lua`), not a slotted branch
+#: here.
 
 #: HVRT's own bare single-word commands -> token, checked as an **exact,
 #: whole-transcript** match before any fuzzy verb-anchor branch runs --
@@ -412,6 +402,20 @@ _HVRT_BARE_WORD_TOKENS: dict[str, str] = {
     "up": "hvrt_step_up",
     "down": "hvrt_step_down",
 }
+
+#: One slot's resolved value -- a plain scalar for every slot type this
+#: vocabulary had before `[[BL-17]]` D7/D14's union types, or the
+#: `{"kind": ..., ...}` tagged table a union slot type (`speed_target`,
+#: and D7's own planned `direction`/`origin`) resolves to. `rule_
+#: patterns._consume_speed_target`'s own docstring is where this tagged
+#: shape is declared; this alias is this module's own copy of "what a
+#: slot value may be" so `MatchResult.slots`/`_match_rules`'s own filter
+#: can admit it, rather than silently dropping it the way the
+#: pre-Stage-4 `isinstance(value, (int, str))` filter did (the first
+#: real exerciser of a union slot through this path, caught by Stage
+#: 4's own differential test against the deleted legacy parsers it
+#: replaced).
+SlotValue = int | str | dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -462,7 +466,12 @@ class MatchResult:
     match_ratio: float
     verb_anchored: bool
     ambiguous: bool = False
-    slots: dict[str, int | str] | None = None
+    #: `Mapping`, not `dict` -- covariant in the value type, so every
+    #: existing `_parse_*_slots` branch's own `dict[str, int | str]`
+    #: construction (every slot but `speed_target`'s) needs no change to
+    #: satisfy this field's widened `SlotValue` (mypy's own suggestion:
+    #: `dict` is invariant).
+    slots: Mapping[str, SlotValue] | None = None
     #: `plans/brain-tool-calls/plan.md` D4's wire note -- set from the same
     #: `opens_with_wake_word` check that already forces `verb_anchored=
     #: False` below, so body-layer can route a wake-prefixed utterance to
@@ -506,48 +515,64 @@ def _verb_anchor_ratio(
     )
 
 
-def _rule_anchor_words(rules: tuple[CompiledRule, ...]) -> frozenset[str]:
-    """Every active rule's own `first_literal()` (D8) -- `()` gives the
-    empty set, so `VERB_ANCHOR_WORDS | _rule_anchor_words(())` is exactly
-    `VERB_ANCHOR_WORDS`, the "no rules pushed" no-op D7/Stage 1b's own
-    acceptance test pins."""
-    words: set[str] = set()
-    for rule in rules:
-        literal = rule.first_literal()
-        if literal is not None:
-            words.add(literal)
-    return frozenset(words)
-
-
 def _match_rules(
     rules: tuple[CompiledRule, ...], words: list[str]
 ) -> MatchResult | None:
     """Tries every active rule's pattern against `words` (full-
-    consumption match, `rule_patterns.match_pattern`), returning `None`
-    if none matches. Every match is `match_ratio=1.0` by construction
-    (this module's own exact-literal matching choice, `rule_patterns`'s
-    module docstring) -- two or more rules matching the same transcript
-    is therefore always a tie, never resolved by a separation check the
-    way two legacy phrases at different ratios are; it is `ambiguous`
-    instead (D8: "set `ambiguous=True`"), naming the first match (sorted
-    by id, for determinism) as `token` so a confirm question has
-    something to describe."""
-    matches: list[tuple[CompiledRule, dict[str, object]]] = []
-    for rule in sorted(rules, key=lambda r: r.id):
-        slots = match_pattern(rule.elements, words)
-        if slots is not None:
-            matches.append((rule, slots))
+    consumption match, `rule_patterns.match_pattern_with_ratio`),
+    returning `None` if none matches.
+
+    **`[[BL-17]]` D13**: a match's own `match_ratio` is no longer always
+    `1.0` -- `match_pattern_with_ratio` now returns the mean of each
+    literal/word-set position's own word-repair ratio (`rule_patterns.py`'s
+    own literal fuzz, widened to word-sets by the E12 revision). The
+    best-scoring match wins; a *second* match within `SEPARATION_MIN` of
+    the best is `ambiguous=True` (the same disposition two legacy
+    phrases at a near-tie already get, D13's "Ratio and the tie-break"),
+    not "two or more matches is always a tie" the way exact-literal
+    matching made true before D13. **E12's revision adds a second,
+    independent source of `ambiguous=True`**: the winning match's own
+    `WordSetElement` resolution can itself be a near-tie (two
+    alternatives, e.g. "left"/"right", too close to call) with no second
+    *rule* competing at all -- `match_pattern_with_ratio`'s own third
+    return value carries that, and it is folded in here rather than
+    discarded, so a single-rule, single-candidate transcript can still
+    come back ambiguous. Ties on ratio break by rule id (sorted), for
+    determinism -- no need to sort the whole `rules` tuple up front for
+    this (D15: that per-transcript sort is exactly what the caller no
+    longer has to pay for)."""
+    matches: list[tuple[CompiledRule, dict[str, object], float, bool]] = []
+    for rule in rules:
+        result = match_pattern_with_ratio(rule.elements, words)
+        if result is not None:
+            slots, ratio, word_set_ambiguous = result
+            matches.append((rule, slots, ratio, word_set_ambiguous))
     if not matches:
         return None
-    rule, slots = matches[0]
-    typed_slots: dict[str, int | str] = {
-        name: value for name, value in slots.items() if isinstance(value, (int, str))
+    matches.sort(key=lambda m: (-m[2], m[0].id))
+    rule, slots, ratio, ambiguous = matches[0]
+    if len(matches) > 1:
+        second_ratio = matches[1][2]
+        if (ratio - second_ratio) < SEPARATION_MIN:
+            ambiguous = True
+    # `isinstance(value, (int, str, dict))` -- widened from `(int, str)`
+    # alone in `[[BL-17]]` Stage 4 to admit a union slot's own tagged
+    # table (`speed_target`'s `{"kind": ..., ...}`, `SlotValue`'s own
+    # comment) rather than silently dropping it, the defect this stage's
+    # own differential test against `set_speed`/`speed_target` caught:
+    # every `SLOT_TYPES` consume function only ever returns `int`/`str`/
+    # a flat `dict`, so this is exactly the real value set, not a
+    # loosening past it.
+    typed_slots: dict[str, SlotValue] = {
+        name: value
+        for name, value in slots.items()
+        if isinstance(value, (int, str, dict))
     }
     return MatchResult(
         token=rule.id,
-        match_ratio=1.0,
+        match_ratio=ratio,
         verb_anchored=True,
-        ambiguous=len(matches) > 1,
+        ambiguous=ambiguous,
         slots=typed_slots or None,
     )
 
@@ -937,18 +962,37 @@ def _where_slot_count(slots: dict[str, int | str]) -> int:
 
 
 def match_transcript(
-    text: str, rules: tuple[CompiledRule, ...] | None = None
+    text: str,
+    rules: tuple[CompiledRule, ...] | None = None,
+    anchor_words: frozenset[str] | None = None,
 ) -> MatchResult:
-    """Normalise -> verb anchor -> (bearing slot | phrase match) ->
-    separation check. See module and `MatchResult` docstrings for the
-    full outcome shape.
+    """Normalise -> wake word / HVRT bare word -> (rule match | legacy
+    match) -> cross-pipeline separation check. See module and
+    `MatchResult` docstrings for the full outcome shape.
 
     `rules` (`[[BL-17]]` D1/D8) is the adapter's currently-accepted,
     immutable rule set -- `None`/`()` (every call site that predates
     rules, and `server.py`'s own state before the first successful
     `PUT /rules`) makes this function behave exactly as it did before
     this plan, pinned by the whole existing matcher suite passing
-    unchanged with no rules pushed."""
+    unchanged with no rules pushed.
+
+    `anchor_words` (`[[BL-17]]` D15) is the caller's own precomputed
+    `rule_patterns.rule_anchor_words(rules)` -- `server.py` computes this
+    once, at the same `PUT /rules` swap point that sets `rules` itself
+    (`rule_patterns.RuleRegistry.swap`), rather than this function
+    rebuilding it from `rules` on every transcript. `None` (every call
+    site that predates D15, and every test that passes a bare `rules`
+    tuple) falls back to computing it here.
+
+    **D13's own widened tie-break**: a rule and a legacy phrase can now
+    both resolve the same transcript (the rule engine's own literal fuzz
+    and the legacy matcher's `_phrase_match_ratio` repair overlap more
+    than exact-literal matching ever let them). When both resolve, the
+    higher-ratio one wins outright unless the two ratios are within
+    `SEPARATION_MIN`, in which case the result is `ambiguous=True` --
+    exactly the disposition two legacy phrases at a near-tie already
+    get (E3), just applied one level up."""
     normalized = strip_filler(normalize_for_match(text))
     words = normalized.split()
     if not words:
@@ -984,18 +1028,49 @@ def match_transcript(
     # before every legacy slotted branch (and before the generic anchor
     # gate just below, so a rule whose own first literal is not already
     # a legacy verb -- e.g. "turn" -- is not cut off before it is ever
-    # tried).
-    if active_rules:
-        rule_match = _match_rules(active_rules, words)
-        if rule_match is not None:
-            return rule_match
+    # tried). No longer an early return (D13): the legacy pipeline below
+    # still runs so the two can be compared.
+    rule_match = _match_rules(active_rules, words) if active_rules else None
 
-    verb = words[0]
-    anchor_words = (
-        VERB_ANCHOR_WORDS | _rule_anchor_words(active_rules)
+    widened_anchor_words = (
+        VERB_ANCHOR_WORDS
+        | (
+            anchor_words
+            if anchor_words is not None
+            else rule_anchor_words(active_rules)
+        )
         if active_rules
         else VERB_ANCHOR_WORDS
     )
+    legacy_match = _match_legacy(text, words, widened_anchor_words)
+
+    if rule_match is None:
+        return legacy_match
+    if legacy_match.token is None:
+        # Nothing in the legacy pipeline resolved (including "never even
+        # verb-anchored") -- the rule stands on its own, exactly as
+        # Stage 1b/2 shipped it.
+        return rule_match
+    best, second = (
+        (rule_match, legacy_match)
+        if rule_match.match_ratio >= legacy_match.match_ratio
+        else (legacy_match, rule_match)
+    )
+    if (best.match_ratio - second.match_ratio) < SEPARATION_MIN:
+        return replace(best, ambiguous=True)
+    return best
+
+
+def _match_legacy(
+    text: str, words: list[str], anchor_words: frozenset[str]
+) -> MatchResult:
+    """The legacy matching pipeline: verb anchor -> (bearing slot |
+    phrase match) -> separation check. Exactly `match_transcript`'s own
+    pre-D13 body, extracted so `match_transcript` can run it
+    unconditionally and compare its outcome against a rule match (D13)
+    rather than only running it when no rule has already claimed the
+    transcript."""
+    verb = words[0]
     if _verb_anchor_ratio(verb, anchor_words) < VERB_FLOOR:
         # Cheap early-out (Decision 4 Layer 2 step 2) -- not the primary
         # defence any more, see module docstring. Nothing downstream is
@@ -1183,91 +1258,11 @@ def match_transcript(
                 token="point", match_ratio=1.0, verb_anchored=True, slots=what_slots
             )
 
-    # BL-16 mode 2 Stage P2a (`plans/flight-control/plan.md`, "Stage P2
-    # ready to build"), tried before the generic phrase table for the
-    # identical reason the slotted branches above are -- a clock-style
-    # "heading two zero zero" would otherwise score against nothing
-    # since no other token anchors on "heading" at all, but the
-    # ordering is kept consistent with every other slotted branch here.
-    # No value resolved (`parse_heading_deg` returns `None`) falls
-    # through unchanged to the ordinary phrase table, where "heading"
-    # alone is not a recorded bare phrasing of any token -- the "say
-    # again" shape every other slotted token's unresolved form takes.
-    if difflib.SequenceMatcher(None, verb, _TURN_HEADING_VERB).ratio() >= VERB_FLOOR:
-        heading_deg = parse_heading_deg(text)
-        if heading_deg is not None:
-            return MatchResult(
-                token="turn_heading",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"heading_deg": heading_deg},
-            )
-
-    # "Speed <value>" -- tried before `speed_step`'s own branch so a
-    # numeric request is read as `set_speed` first; `parse_speed_value`'s
-    # own "immediate token only" rule is what actually keeps "speed up"
-    # from resolving here (see that function's docstring), not this
-    # ordering alone.
-    if difflib.SequenceMatcher(None, verb, _SET_SPEED_VERB).ratio() >= VERB_FLOOR:
-        speed_value = parse_speed_value(text)
-        if speed_value is not None:
-            return MatchResult(
-                token="set_speed",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"speed_kmh": speed_value},
-            )
-
-    # "Slow down" / "speed up" -- `_SPEED_STEP_VERBS` includes "speed"
-    # too (for "speed up"), reached only when the branch above already
-    # found no numeric value.
-    if any(
-        difflib.SequenceMatcher(None, verb, step_verb).ratio() >= VERB_FLOOR
-        for step_verb in _SPEED_STEP_VERBS
-    ):
-        step_direction = parse_speed_step_direction(text)
-        if step_direction is not None:
-            return MatchResult(
-                token="speed_step",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": step_direction},
-            )
-
-    # "alt[itude] <value> [radar/barometric]".
-    if any(
-        difflib.SequenceMatcher(None, verb, alt_verb).ratio() >= VERB_FLOOR
-        for alt_verb in _SET_ALTITUDE_VERBS
-    ):
-        altitude = parse_altitude_value(text)
-        if altitude is not None:
-            value, reference = altitude
-            altitude_slots: dict[str, int | str] = {"altitude_m": value}
-            if reference is not None:
-                altitude_slots["reference"] = reference
-            return MatchResult(
-                token="set_altitude",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots=altitude_slots,
-            )
-
-    # "climb/descend <m>" -- distinct verbs from `_SET_ALTITUDE_VERBS`,
-    # so there is no collision to order against, but the ordering is
-    # kept consistent with the altitude branch just above.
-    if any(
-        difflib.SequenceMatcher(None, verb, step_verb).ratio() >= VERB_FLOOR
-        for step_verb in _ALTITUDE_STEP_VERBS
-    ):
-        altitude_step = parse_altitude_step(text)
-        if altitude_step is not None:
-            step_word, amount = altitude_step
-            return MatchResult(
-                token="altitude_step",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": step_word, "amount_m": amount},
-            )
+    # BL-16 mode 2 Stage P2a's own `turn_heading`/`set_speed`/
+    # `speed_step`/`set_altitude`/`altitude_step` slotted branches moved
+    # to the rule engine in `[[BL-17]]` Stage 4 (`config/rules/
+    # flight.lua`) -- `_match_rules`, run unconditionally above, now
+    # matches all five.
 
     # `[[BL-B102]]` -- "where is it"/"where is that [AAA]", tried before
     # the generic phrase table for the identical reason the slotted

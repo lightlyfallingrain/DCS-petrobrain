@@ -1,0 +1,633 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>BL-17 Flight Commands</title>
+<style>
+/* layout: a single scrolling flight card -- sticky branch banner, then stacked test blocks,
+   each do/expect/record; a fixed "bring-back" rail opens from the bottom on demand.
+   Same system as the Stage 0/1b/2 card (2026-11-17-bl17-speech-rules-card.html). */
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #1b1f26;
+  --fg: #e8e6df;
+  --fg-dim: #9aa0aa;
+  --amber: #ffb02e;
+  --amber-dim: #8a6324;
+  --record: #5fc2ba;
+  --rule: #2a2f38;
+  --danger: #ff6b5e;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --panel-2: #eceae3;
+    --fg: #1c1b18;
+    --fg-dim: #5c584f;
+    --amber: #b3651a;
+    --amber-dim: #d9a35c;
+    --record: #0f7a72;
+    --rule: #ddd8cc;
+    --danger: #b3261e;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --panel: #ffffff;
+  --panel-2: #eceae3;
+  --fg: #1c1b18;
+  --fg-dim: #5c584f;
+  --amber: #b3651a;
+  --amber-dim: #d9a35c;
+  --record: #0f7a72;
+  --rule: #ddd8cc;
+  --danger: #b3261e;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+h1, h2, h3, .display {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+code, .mono, .cmd {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+
+header.banner {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: linear-gradient(180deg, var(--bg) 85%, transparent);
+  padding: 14px 0 10px;
+  margin: 0 -16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.eyebrow {
+  color: var(--amber);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+h1 {
+  font-size: clamp(1.7rem, 6vw, 2.3rem);
+  font-weight: 700;
+  margin: 2px 0 8px;
+  color: var(--fg);
+}
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.branch-row .label { color: var(--fg-dim); font-size: 0.85rem; }
+.branch-row code {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.95rem;
+  color: var(--amber);
+}
+
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+}
+.card.scope { border-left: 3px solid var(--fg-dim); }
+.card.skip { border-left: 3px solid var(--danger); }
+.card.verified { border-left: 3px solid var(--record); }
+.card.prize { border: 1px solid var(--amber-dim); background: linear-gradient(135deg, rgba(255,176,46,0.08), transparent); }
+.card.record-stage { border-left: 3px solid var(--record); }
+
+.card h2 {
+  font-size: 1.05rem;
+  color: var(--fg-dim);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card h2 .n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--amber);
+  font-size: 0.8rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.card ul { margin: 6px 0 0; padding-left: 20px; }
+.card li { margin-bottom: 4px; }
+
+.step {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+}
+.step-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.step-head h3 { font-size: 1.15rem; margin: 0; color: var(--fg); }
+.step-check { display: flex; align-items: center; gap: 8px; }
+.step-check input[type=checkbox] {
+  width: 20px; height: 20px;
+  accent-color: var(--amber);
+}
+.block { margin-bottom: 10px; }
+.block:last-child { margin-bottom: 0; }
+.block .tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.block.expect .tag { color: var(--amber); }
+.block.record .tag { color: var(--record); }
+.block ul { margin: 2px 0 0; padding-left: 20px; }
+.block li { margin-bottom: 3px; }
+pre.cmd {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 0.86rem;
+  color: var(--fg);
+  margin: 0;
+  white-space: pre-wrap;
+}
+pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-size: 0.78rem; }
+.verified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--record);
+  background: rgba(95, 194, 186, 0.12);
+  border: 1px solid var(--record);
+  border-radius: 20px;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+}
+.unverified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: rgba(255, 107, 94, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 20px;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+}
+
+.rail {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  background: var(--panel-2);
+  border-top: 1px solid var(--rule);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.rail button {
+  width: 100%;
+  background: var(--amber);
+  color: #1a1200;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 12px;
+}
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 25;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  border-radius: 14px 14px 0 0;
+  padding: 18px max(18px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.sheet h2 { color: var(--record); margin: 0 0 10px; font-size: 1.1rem; }
+.sheet ol { padding-left: 22px; margin: 0 0 12px; }
+.sheet li { margin-bottom: 8px; }
+.sheet .surprise {
+  background: var(--panel-2);
+  border-left: 3px solid var(--record);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+.sheet .close {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--fg-dim);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: inherit;
+}
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<header class="banner">
+  <div class="eyebrow">BL-17 &middot; Stages 3a / 3b / 3d / 4 &middot; DoD-passed, merged</div>
+  <h1>Flight Commands — Flight Card</h1>
+  <div class="branch-row">
+    <span class="label">Fly this branch:</span>
+    <code>main</code>
+    <span class="label" style="margin-left:auto">after this merge lands</span>
+  </div>
+</header>
+
+<main>
+
+  <section class="card scope">
+    <h2>What this flight is checking</h2>
+    <ul>
+      <li><strong>17 more flight-control commands became rules</strong> this pass, on top of "turn left/right NN" from the last flight — 18 total now in <code>config/rules/flight.lua</code>. All of them: absolute heading, level flight/level off, speed (set/step/max), altitude (set/step/hold, radar or barometric), and the seven HVRT bare words.</li>
+      <li><strong>Fuzzy near-miss wording and number words</strong> now work on these commands — a slightly misheard directive word ("turn lift" for "turn left") still matches, and a spoken number word ("thirty") parses the same as digits, but the <em>value</em> itself is never fuzzy.</li>
+      <li><strong>Every flight command is gated before it runs</strong> — Petrovich must have the controls, and (for commands that need a specific held value) he waits briefly rather than refusing, right after a takeover.</li>
+      <li><strong>Rules can now write cockpit effectors</strong>, but nothing flown this trip actually does — there is no effector-writing command among these 18. Nothing to check for that on this flight.</li>
+    </ul>
+  </section>
+
+  <section class="card skip">
+    <h2>Not in this flight</h2>
+    <ul>
+      <li>The bearing/heading rename and Stage 1a — still paused, unaffected.</li>
+      <li>Stage 3c (the narrowed speech-recognition hint) — not built yet. See the recording card near the bottom: you can record its test corpus today, in this same session, but there is nothing to <em>fly</em> for it yet.</li>
+      <li>The five wording collisions a mid-build check once found among these 18 rules (<code>set_speed</code>/<code>altitude_step</code>, <code>level_off</code>/"straight"/<code>hvrt_translate_right</code>) — all resolved before this merge (a matching-check fix, then dropping "straight" outright). Verified on the ground, zero rules rejected when pushed. Nothing to check for this on the flight either, though if any command below behaves strangely, say so regardless.</li>
+      <li>Copilot-seat commands (9K113/sight) and anything requiring hands/eyes-busy refusals — none of that is in this rule category yet.</li>
+    </ul>
+  </section>
+
+  <section class="card scope">
+    <h2>Before you fly — setup</h2>
+    <div class="block">
+      <div class="tag">1 &middot; lupa, if this is a fresh machine</div>
+      <pre class="cmd"><span class="dir">from body-layer/</span>.venv/bin/pip install lupa==2.8</pre>
+      <p style="margin:6px 0 0; color:var(--fg-dim); font-size:0.9rem;">Already installed if you flew the last BL-17 card from this same machine — nothing new here.</p>
+    </div>
+    <div class="block">
+      <div class="tag">2 &middot; Restart <strong>both</strong> audio-adapter and body-layer from main</div>
+      <p>Both sides changed this pass — the adapter's matcher and the rule-pattern grammar on one side, the gate/category/effector-write machinery on the other. A process started before this merge will not behave as described below.</p>
+    </div>
+  </section>
+
+  <section class="card verified">
+    <h2>Already checked on the ground, no DCS needed</h2>
+    <p class="verified-pill">&#10003; verified this pass</p>
+    <div class="block">
+      <div class="tag">Command</div>
+      <pre class="cmd"><span class="dir">from body-layer/, audio-adapter already running</span>python -m body --print-rules --audio-adapter-url http://127.0.0.1:&lt;port&gt;</pre>
+    </div>
+    <div class="block">
+      <div class="tag">Result</div>
+      <pre class="cmd">loaded 18 rule(s) ...
+  altitude_step [flight_control_altitude]: &lt;direction:climb|descend&gt; &lt;amount_m:quantity&gt;
+  hold_altitude [flight_control_altitude]: hold &lt;verb:altitude|alt&gt;
+  hvrt_hold [flight_control]: hold
+  hvrt_step_down / hvrt_step_up / hvrt_translate_back / hvrt_translate_forward /
+  hvrt_translate_left / hvrt_translate_right [flight_control]: down / up / back / forward / left / right
+  i_have_controls / you_have_controls [always]: i have controls / you have controls
+  level_flight [flight_control_any]: level flight
+  level_off [flight_control_heading]: level off
+  set_altitude [flight_control]: &lt;verb:alt|altitude&gt; &lt;altitude_m:quantity&gt; [&lt;reference:radar|barometric&gt;]
+  set_speed [flight_control]: speed &lt;speed_target:speed_target&gt;
+  speed_step [flight_control_speed]: &lt;verb:slow|speed&gt; &lt;direction:down|up&gt;
+  turn_heading [flight_control]: &lt;heading_deg:heading&gt;
+  turn_heading_relative [flight_control_heading]: turn &lt;direction:left|right&gt; &lt;degrees:angle&gt;
+adapter accepted: [all 18 ids] -- <strong>zero rejected</strong></pre>
+    </div>
+    <p style="color:var(--fg-dim); font-size:0.9rem; margin:8px 0 0;">The HVRT lines above are compressed for space (each is its own id, same one-word pattern) and the accepted-id list is summarized as a count — the raw, uncompressed output is in <code>plans/speech-rules/dod-check-stage3-4.md</code>. This only proves the rules load, push, and don't collide with each other or the existing vocabulary — not that any of them fly or sound right. That's what the rest of this card is for.</p>
+  </section>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>1 &middot; Heading &amp; turn</h3>
+      <label class="step-check"><input type="checkbox" data-k="s1"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <ul>
+        <li>"Turn left two zero." then "turn right four five." (the one from last flight, unchanged)</li>
+        <li>"Turn left thirty." (number word, not digits)</li>
+        <li>"Turn lift two zero." (deliberately misheard "left" as "lift")</li>
+        <li>"Heading three one five." (the absolute form — new this pass)</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>All four work. "Turn lift two zero" still turns <strong>left</strong> — the near-miss wording tolerance is for the directive word, never the number. "Heading three one five" turns to compass heading 315&deg; directly, not relative to current heading.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did "turn lift" actually resolve to left, or did it say "say again"? Any delay or odd phrasing on any of the four?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>2 &middot; Level flight &amp; level off</h3>
+      <label class="step-check"><input type="checkbox" data-k="s2"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Mid-turn or mid-climb, say "level off." Separately, say "level flight."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>"Level off" stops the turn and holds the current heading. "Level flight" freezes heading, altitude and speed together at whatever is currently held. Saying "straight" does <strong>not</strong> work any more — that wording was dropped (it collided with the hover command "right"); if you say it out of habit, expect "say again," not a readback.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Does dropping "straight" feel like a real loss in practice, now that you've flown without it once?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>3 &middot; Speed</h3>
+      <label class="step-check"><input type="checkbox" data-k="s3"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <ul>
+        <li>"Speed two hundred."</li>
+        <li>"Speed max."</li>
+        <li>"Slow down." then "speed up."</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>"Speed two hundred" sets 200 (your usual speed unit). "Speed max" commands the AI's own maximum, not a number. "Slow down"/"speed up" step from whatever speed is currently held, one step at a time.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did "speed max" read back distinctly from a numeric speed command, so you could tell which one happened?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>4 &middot; Altitude</h3>
+      <label class="step-check"><input type="checkbox" data-k="s4"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <ul>
+        <li>"Altitude three hundred."</li>
+        <li>"Altitude three zero zero barometric." (digit-by-digit, with the reference word)</li>
+        <li>"Climb fifty." then "descend one hundred."</li>
+        <li>"Hold altitude."</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>The readback always names the reference it's actually going to use (radar vs. the 700&nbsp;m barometric cap), which may not be the one you said — that's existing behaviour, not new. "Climb"/"descend" step relative to the currently held altitude. "Hold altitude" freezes at the current value and never names a reference in its readback.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did the readback's named reference ever surprise you?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>5 &middot; HVRT bare words</h3>
+      <label class="step-check"><input type="checkbox" data-k="s5"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>In hover mode, say each of: "left", "right", "forward", "back", "hold", "up", "down" — one at a time, pausing between each.</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>Every one behaves exactly as before — these are now rules, but matched the same way they always were (an exact bare-word shortcut, not the fuzzy grammar). No audible difference from flying this same set of words before BL-17.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Any of the seven behave differently than you remember?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>6 &middot; Hold-and-fly right after taking the controls</h3>
+      <label class="step-check"><input type="checkbox" data-k="s6"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>From the operator seat, say "Request Aircraft Control," and <strong>immediately</strong> (within a second or two, before you'd expect a status readback) say a flight command, e.g. "turn left two zero."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>The command is <strong>held briefly, then flown</strong> once the takeover settles — not refused, and not silently dropped. You should not need to repeat it.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did it fly the held command, or did you have to say it again? How long did the hold feel like?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>7 &middot; A flight command while not flying</h3>
+      <label class="step-check"><input type="checkbox" data-k="s7"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Before taking the controls (or after giving them back), say "turn left thirty."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>"Unable, not flying." — not "say again," and not a readback as if it had been flown.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Was the wording clear that the command was understood but refused, versus not understood at all?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>8 &middot; "You have controls" / "I have controls" in AI-overlay mode</h3>
+      <label class="step-check"><input type="checkbox" data-k="s8"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Say "you have controls." Then say "I have controls."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p><strong>Silence, both times.</strong> In AI-overlay mode these phrases are a no-op by design — the actual handover is toggling the AI-overlay flight mode yourself, which this rule does not do. This is not a bug if nothing happens.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did the silence feel wrong, or did you expect it going in?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>9 &middot; A flight readback cutting off a routine callout</h3>
+      <label class="step-check"><input type="checkbox" data-k="s9"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>While flying and Petrovich is mid-sentence on a routine callout (a contact report, a scan update — anything ordinary, not urgent), say a flight command, e.g. "speed two hundred."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>The flight command's own readback <strong>cuts the routine callout off mid-sentence</strong> rather than waiting for it to finish. This is a real, deliberate behaviour change from before this pass — flight readbacks now jump the queue while he's flying.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did the interruption feel abrupt or jarring, or did it read as the right priority? This is exactly the kind of judgment only you flying it can make.</p>
+    </div>
+  </div>
+
+  <section class="card prize">
+    <h2><span class="n">&#9733;</span>The one thing that matters most</h2>
+    <p>Step 9's interruption behaviour is new and was built on your own direction, but nobody has heard it happen in a real cockpit yet. <strong>Does a flight readback cutting off a routine callout feel right, or too abrupt?</strong> This is the one judgment call this whole batch cannot resolve without you in the seat.</p>
+  </section>
+
+  <section class="card record-stage">
+    <h2>Also in this session — recording Stage 3c's test corpus</h2>
+    <p>Stage 3c (a speech-recognition hint that narrows by what Petrovich is doing) isn't built yet, but recording its test corpus doesn't need to wait — and the tool to do it didn't actually work until this pass (its <code>--list-prompts</code>/<code>--out</code> flags in the plan never existed; fixed and verified this pass, not just assumed).</p>
+    <div class="block">
+      <div class="tag">1 &middot; See the phrase list</div>
+      <pre class="cmd"><span class="dir">from audio-adapter/</span>PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts \
+  --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt</pre>
+    </div>
+    <div class="block">
+      <div class="tag">2 &middot; Record it (needs sox and your flying headset plugged in)</div>
+      <pre class="cmd"><span class="dir">from audio-adapter/</span>PYTHONPATH=src .venv/bin/python tools/record_corpus.py \
+  --corpus-dir tests/fixtures/corpus/bl17-stage3c/ \
+  --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt</pre>
+    </div>
+    <div class="block">
+      <div class="tag">What to say, and when</div>
+      <p>Space starts/stops each take, same as before. The list is mostly ordinary flight phrases. Four lines near the end are deliberately refusal cases, and the two pairs need <strong>opposite</strong> states — the tool has no way to know your aircraft state, so get each into the state the plan calls for yourself: "turn left thirty" and "turn left 30" (each said a second time, as the refusal case — the list repeats both on purpose) should be said <strong>on the ground, not flying</strong> (expect "unable, not flying" once this is live — not yet, since Stage 3c itself isn't built). "watch nearest" and "binoculars" should be said <strong>while flying</strong> (expect "unable, hands busy" once Stage 6 ports that reason — recorded now so the corpus doesn't need a second session later). Everything else can be said in whatever state is natural.</p>
+    </div>
+    <p style="color:var(--fg-dim); font-size:0.9rem; margin:8px 0 0;">This is ground work, not something to do mid-flight. Do it before or after, whenever convenient in this same session.</p>
+  </section>
+
+</main>
+
+<button class="rail" id="openRail" style="display:none"></button>
+<div class="rail">
+  <button id="openSheet">Bring-back list</button>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <h2>Bring back from this flight</h2>
+  <ol>
+    <li>Step 1 — did "turn lift two zero" actually resolve to left, not "say again"?</li>
+    <li>Step 2 — does losing "straight" feel like a real loss now that you've flown without it?</li>
+    <li>Step 3 — was "speed max" audibly distinct from a numeric speed readback?</li>
+    <li>Step 4 — did the altitude reference named in the readback ever surprise you?</li>
+    <li>Step 5 — any of the seven HVRT words behave differently than before?</li>
+    <li>Step 6 — did the held command after "Request Aircraft Control" actually fly, or did you have to repeat it?</li>
+    <li>Step 7 — was "unable, not flying" clearly a refusal, not a "didn't understand"?</li>
+    <li>Step 8 — did the silent "you/I have controls" feel wrong?</li>
+    <li>Step 9 (the star question) — did the callout interruption feel right, or too abrupt?</li>
+  </ol>
+  <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+  <button class="close" id="closeSheet">Close</button>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'bl17-flight-commands-card';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+
+  var sheet = document.getElementById('sheet');
+  document.getElementById('openSheet').addEventListener('click', function () {
+    sheet.hidden = false;
+  });
+  document.getElementById('closeSheet').addEventListener('click', function () {
+    sheet.hidden = true;
+  });
+})();
+</script>

@@ -48,3 +48,18 @@
   `import-untyped`. Confine the resulting `# type: ignore[import-untyped]` to the one module that
   imports lupa directly, and expose a typed wrapper to everything else, rather than letting the
   suppression spread.
+
+- **`LuaRuntime` holds one global per-runtime lock for the entire top-level call, including any
+  Python callback invoked from inside it** — measured empirically (8 threads, 16,000 concurrent
+  calls, zero lost increments, consistent with full serialization), not assumed. If thread A is
+  paused mid-dispatch inside a Python action-wrapper callback (even a plain, pure-Python
+  `threading.Event.wait()`), thread B's own call into the *same* `RuleSandbox`/`LuaRuntime`
+  blocks until A's whole dispatch returns — two dispatches sharing one sandbox never actually
+  overlap inside Lua execution, only in the narrow plain-Python window between one dispatch's
+  `rule_runner()` return and whatever runs right after it. A test that needs genuine,
+  deterministic two-thread overlap through the rule-dispatch path must give each thread its own
+  `RuleSandbox`/`LuaRuntime` (each has its own lock) and its own loaded `RuleSet`, with both
+  `ActionContext`s pointed at the same shared state under test — a single `rule_runner` closure
+  then dispatches to whichever sandbox matches the incoming rule id (`[[BL-17]]` Stage 3d
+  re-review Required Fix 4, `test_rules_effector_action.py::
+  test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone`).

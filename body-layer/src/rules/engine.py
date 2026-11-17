@@ -28,7 +28,8 @@ from typing import Any, Final
 
 from belief.crew_console import CrewConsole
 from belief.speech import render_unable
-from rules.actions import Action, ActionContext
+from rules.actions import MAX_SAY_LEN, Action, ActionContext
+from rules.gates import GATE_REGISTRY
 from rules.loader import RawRegistration, RuleLoadError, load_rules
 from rules.sandbox import RuleBudgetExceeded, RuleRuntimeError, RuleSandbox
 
@@ -42,11 +43,6 @@ logger = logging.getLogger(__name__)
 #: loop, not to ration ordinary rule logic.
 RULE_LOAD_INSTRUCTION_BUDGET: Final[int] = 2_000_000
 RULE_DISPATCH_INSTRUCTION_BUDGET: Final[int] = 200_000
-
-#: `say` text length cap (Stage 1b's "sandbox must hold" bullet: "`say`
-#: text is length-capped"). Generous for any real readback; bounds a
-#: pathological rule, not real wording.
-_MAX_SAY_LEN: Final[int] = 500
 
 
 @dataclass(frozen=True)
@@ -65,13 +61,17 @@ class RuleOutcome:
 @dataclass(frozen=True)
 class CompiledLuaRule:
     """One rule that loaded cleanly. `handler` is the Lua function value
-    `when.speech`'s third argument captured -- opaque beyond "callable
-    with one table argument", called only from `run_rule`."""
+    `when.speech`'s fourth argument captured -- opaque beyond "callable
+    with one table argument", called only from `run_rule`. `category`
+    (D16/U19) is validated against `rules.gates.GATE_REGISTRY` before
+    this is ever constructed (`_build_when_table`'s `speech` closure
+    below) -- `_handle_rule`'s own gate lookup can trust it."""
 
     id: str
     pattern: str
     handler: Any
     file: str
+    category: str
 
 
 class _SinkHolder:
@@ -90,8 +90,8 @@ class _SinkHolder:
         if self.lines is None:
             return
         rendered = str(text)
-        if len(rendered) > _MAX_SAY_LEN:
-            rendered = rendered[:_MAX_SAY_LEN]
+        if len(rendered) > MAX_SAY_LEN:
+            rendered = rendered[:MAX_SAY_LEN]
         self.lines.append(rendered)
 
 
@@ -112,10 +112,13 @@ class RuleSet:
     #: of which `_SinkHolder` instance backs them.
     _sink_holder: _SinkHolder = field(repr=False, compare=False)
 
-    def ids_and_patterns(self) -> list[tuple[str, str]]:
-        """What `PUT /rules` sends -- `(id, pattern)` per accepted rule,
-        in no particular order (the adapter/`body.py` sort as needed)."""
-        return [(rule.id, rule.pattern) for rule in self.rules.values()]
+    def ids_and_patterns(self) -> list[tuple[str, str, str]]:
+        """What `PUT /rules` sends -- `(id, pattern, category)` per
+        accepted rule, in no particular order (the adapter/`body.py`
+        sort as needed). `category` rides along for D17's benefit
+        (Stage 3c) -- the gate check itself is entirely local to
+        body-layer and never reads this wire value back."""
+        return [(rule.id, rule.pattern, rule.category) for rule in self.rules.values()]
 
     @classmethod
     def load(
@@ -159,7 +162,11 @@ def _dedupe(
             continue
         reg = regs[0]
         rules[rule_id] = CompiledLuaRule(
-            id=reg.id, pattern=reg.pattern, handler=reg.handler, file=reg.file
+            id=reg.id,
+            pattern=reg.pattern,
+            handler=reg.handler,
+            file=reg.file,
+            category=reg.category,
         )
     return rules, failures
 
@@ -175,19 +182,37 @@ def _make_action_wrapper(
     sandbox: RuleSandbox, action: Action, ctx: ActionContext
 ) -> Any:
     """One Lua-callable per `Action` -- validates every positional
-    argument Lua passed (type and bounds, per that action's own `params`)
-    before `action.invoke` ever sees it (module docstring; security memory
+    argument Lua passed (type and bounds for `kind="int"`, type only for
+    `kind="str"` -- see `ActionParam`'s own docstring on why a string's
+    further legality is `action.invoke`'s job, not this wrapper's) before
+    `action.invoke` ever sees it (module docstring; security memory
     `project_ai_pilot_goal_lua_dispatch_missing_validation`), and converts
     the dict result to a genuine Lua table. A bad call (wrong arity, wrong
     type, out of bounds) answers `{ok=false, reason=nil}` rather than
     raising -- `unable(nil)` degrades to a plain "Unable." (`render_
-    unable`'s own graceful-degradation posture), not a crash."""
+    unable`'s own graceful-degradation posture), not a crash.
+
+    **Arity (D20)**: a trailing `optional` parameter (`ActionParam.
+    optional`) may be omitted from the Lua call entirely -- `required`
+    below is the count of non-optional parameters, and any call with
+    `required <= len(lua_args) <= len(action.params)` is in range. Every
+    parameter Lua did not supply (an outright omission, not an explicit
+    `nil`) is filled with `None` after the loop."""
+    required = sum(0 if param.optional else 1 for param in action.params)
 
     def wrapper(*lua_args: object) -> Any:
-        if len(lua_args) != len(action.params):
+        if not required <= len(lua_args) <= len(action.params):
             return sandbox.table_from({"ok": False, "reason": None})
-        args: dict[str, int] = {}
+        args: dict[str, object] = {}
         for param, value in zip(action.params, lua_args):
+            if value is None and param.optional:
+                args[param.name] = None
+                continue
+            if param.kind == "str":
+                if not isinstance(value, str):
+                    return sandbox.table_from({"ok": False, "reason": None})
+                args[param.name] = value
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 return sandbox.table_from({"ok": False, "reason": None})
             if isinstance(value, float) and not math.isfinite(value):
@@ -203,6 +228,8 @@ def _make_action_wrapper(
             if int_value != value or not (param.lo <= int_value <= param.hi):
                 return sandbox.table_from({"ok": False, "reason": None})
             args[param.name] = int_value
+        for omitted in action.params[len(lua_args) :]:
+            args[omitted.name] = None
         result = action.invoke(ctx, args)
         return sandbox.table_from(result)
 
@@ -224,7 +251,32 @@ def _build_when_table(
     registrations: list[RawRegistration],
     failures: list[RuleLoadError],
 ) -> Any:
-    def speech(rule_id: object, pattern: object, handler: object) -> None:
+    def speech(*args: object) -> None:
+        """`when.speech(id, pattern, category, handler)` (D16/U19,
+        category required, no default -- a missing category is exactly
+        the kind of mistake a closed, visible load error should catch,
+        D6's own finest-grain-honest posture). Takes `*args` rather than
+        four named parameters so an old-arity call (three positionals,
+        the pre-D16 shape) degrades to an ordinary `RuleLoadError`
+        disabling this one rule -- never a bare Python `TypeError`,
+        which lupa propagates through the Lua call boundary unwrapped
+        (`research/2026-11-17-lupa-sandbox.md`'s own finding on
+        exceptions raised inside a Python callback) and would otherwise
+        escape `load_rules`'s `except (RuleCompileError, RuleRuntimeError,
+        RuleBudgetExceeded)` entirely, discarding the whole file instead
+        of just the one bad call."""
+        if len(args) != 4:
+            bad_id = args[0] if args and isinstance(args[0], str) else None
+            failures.append(
+                RuleLoadError(
+                    file_label,
+                    bad_id,
+                    "when.speech: expected 4 arguments (id, pattern, "
+                    f"category, handler), got {len(args)}",
+                )
+            )
+            return
+        rule_id, pattern, category, handler = args
         if not isinstance(rule_id, str) or not rule_id:
             failures.append(
                 RuleLoadError(file_label, None, "when.speech: id must be a string")
@@ -237,6 +289,15 @@ def _build_when_table(
                 )
             )
             return
+        if not isinstance(category, str) or category not in GATE_REGISTRY:
+            failures.append(
+                RuleLoadError(
+                    file_label,
+                    rule_id,
+                    f"when.speech: unknown category {category!r}",
+                )
+            )
+            return
         if not callable(handler):
             failures.append(
                 RuleLoadError(
@@ -246,7 +307,11 @@ def _build_when_table(
             return
         registrations.append(
             RawRegistration(
-                id=rule_id, pattern=pattern, handler=handler, file=file_label
+                id=rule_id,
+                pattern=pattern,
+                handler=handler,
+                file=file_label,
+                category=category,
             )
         )
 
@@ -316,7 +381,22 @@ def run_rule(
     `rule_set.rules` returns an empty, non-error outcome -- callers are
     expected to check `rule_id in rule_set.rules`/`enabled_rule_ids`
     before calling this at all (D4); this is a defensive fallback, not the
-    primary gate."""
+    primary gate.
+
+    **Catches any bare Python exception, not only `RuleRuntimeError`/
+    `RuleBudgetExceeded`** (`[[BL-17]]` Stage 4, `review-stage3b.md`'s
+    optional refinement) -- Stage 0's own research
+    (`research/2026-11-17-lupa-sandbox.md`) found lupa propagates a
+    Python exception raised inside a callback Lua calls *unwrapped*
+    through the call boundary, and Stage 4 extracted several actions
+    whose own precondition is an `assert` (`increment_ai_heading`'s
+    `current is not None` and its siblings), correctly unreachable today
+    because the category gate already guarantees it -- but "correctly
+    unreachable today" is exactly the kind of guarantee a later refactor
+    can quietly break. Degrading to D6's "Action file error." here, the
+    same as any other dispatch-time failure, is strictly safer than
+    letting a bare `AssertionError` (or any other Python exception)
+    escape `run_rule` and crash the poll loop."""
     rule = rule_set.rules.get(rule_id)
     if rule is None:
         return RuleOutcome(lines=[], error=False)
@@ -329,6 +409,17 @@ def run_rule(
             rule.handler(lua_slots)
     except (RuleRuntimeError, RuleBudgetExceeded) as exc:
         logger.error("rule %r (%s) dispatch error: %s", rule_id, rule.file, exc)
+        error = True
+    except Exception as exc:  # noqa: BLE001 -- D6's own "any failure degrades
+        # to Action file error, never a crash" posture; see this function's
+        # own docstring.
+        logger.error(
+            "rule %r (%s) dispatch error (unhandled %s): %s",
+            rule_id,
+            rule.file,
+            type(exc).__name__,
+            exc,
+        )
         error = True
     lines = list(sink.lines) if sink.lines else []
     sink.lines = None

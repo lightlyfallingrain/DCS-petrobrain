@@ -29,6 +29,7 @@ import pytest
 
 import body as body_module
 from aircraft_client import AircraftLayerError
+from belief.ai_pilot_wheel import AiPilotGoalRequest, ParkedFlightState
 from belief.atgm_run import AtgmRunState
 from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
@@ -101,6 +102,10 @@ from perception.source import (
     OwnshipState,
     RelativeDirection,
 )
+from rules.actions import ACTION_NAMESPACES, ActionContext
+from rules.engine import RuleSet, run_rule
+from rules.loader import DEFAULT_RULES_DIR
+from rules.sandbox import RuleSandbox
 from store.writer import open_for_build
 
 
@@ -3053,10 +3058,11 @@ def test_poll_transcripts_skips_items_with_slots_that_are_not_a_dict() -> None:
 
 
 def test_poll_transcripts_skips_items_with_a_malformed_slot_value() -> None:
-    """A `slots` value must be `int | str` -- a `bool` (a `int` subtype in
-    Python) or any other type must be rejected the same way every other
-    field's `isinstance` check already excludes `bool` from `int`/`float`
-    above."""
+    """A `slots` value must be `int | str`, or a union slot's own bounded
+    tagged table (`_is_bounded_slot_dict`) -- a `bool` (an `int` subtype
+    in Python) or any other type must be rejected the same way every
+    other field's `isinstance` check already excludes `bool` from
+    `int`/`float` above."""
     console = _RecordingCrewConsole()
     client = FakeSpeechInputClient(
         transcripts=[
@@ -3074,6 +3080,136 @@ def test_poll_transcripts_skips_items_with_a_malformed_slot_value() -> None:
     )
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
     assert console.calls == []
+
+
+def test_poll_transcripts_threads_a_dict_valued_slot_into_handle_transcript() -> None:
+    """`plans/speech-rules/security-stage3-4.md` Required Fix 1's own
+    regression guard -- the mirror of `test_poll_transcripts_threads_
+    slots_into_handle_transcript` above, for a union slot's own tagged
+    table (`set_speed`'s `speed_target`) rather than a plain scalar. Before
+    this fix, the whole item was silently dropped (`console.calls == []`)
+    -- "speed two hundred" did nothing and said nothing."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "speed two hundred",
+                "confidence": 0.9,
+                "token": "set_speed",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"speed_target": {"kind": "number", "value": 200}},
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == [
+        (
+            "speed two hundred",
+            "set_speed",
+            {"speed_target": {"kind": "number", "value": 200}},
+        )
+    ]
+
+
+def test_poll_transcripts_skips_items_with_an_oversized_slot_dict() -> None:
+    """`_is_bounded_slot_dict`'s own key-count bound (`_MAX_SLOT_DICT_
+    KEYS`) -- a dict value is admitted, but not an arbitrary one; one
+    with more keys than any real tagged table ever carries is rejected
+    exactly like a malformed scalar."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "speed two hundred",
+                "confidence": 0.9,
+                "token": "set_speed",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"speed_target": {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}},
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
+def test_poll_transcripts_skips_items_with_a_nested_slot_dict() -> None:
+    """`_is_bounded_slot_dict` admits exactly one level of nesting -- a
+    dict whose own value is itself a dict (two levels deep) is rejected,
+    not recursively admitted; this is the depth bound the security
+    finding asked for, since `sandbox.table_from` has no depth limit of
+    its own to fall back on."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "speed two hundred",
+                "confidence": 0.9,
+                "token": "set_speed",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"speed_target": {"kind": "number", "value": {"nested": 1}}},
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
+def test_poll_transcripts_drives_a_real_speed_two_hundred_wire_item_to_set_speed() -> (
+    None
+):
+    """End to end, real `rules.engine`/`rules.sandbox`/the shipped
+    `flight.lua` -- not a double anywhere on the dispatch path -- because
+    the gap Required Fix 1 closed was exactly this boundary: every other
+    test either drives `_poll_transcripts` against a recording double
+    (never reaching a real rule) or drives `handle_command`/`run_rule`
+    directly (never crossing the wire filter this fix changed). Mirrors
+    `test_rules_flight_actions.py`'s own `_dispatching_console` wiring,
+    kept local rather than imported across test files (no existing
+    precedent for that in this subproject)."""
+    console = CrewConsole(store=ContactStore())
+    console.parked_flight_state = replace(ParkedFlightState(), parked_active=True)
+    sandbox = RuleSandbox()
+    ctx = ActionContext(console=console)
+    rule_set = RuleSet.load(DEFAULT_RULES_DIR, sandbox, ACTION_NAMESPACES, ctx)
+
+    def runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_set, token, slots, sandbox)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = runner
+    console.set_enabled_rule_ids(
+        frozenset(rule_set.rules),
+        {rid: r.category for rid, r in rule_set.rules.items()},
+    )
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "speed two hundred",
+                "confidence": 0.9,
+                "token": "set_speed",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"speed_target": {"kind": "number", "value": 200}},
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
+        param="speed", speed_kmh=200.0
+    )
 
 
 def test_a_player_command_lowers_the_binoculars() -> None:

@@ -118,6 +118,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import logging
 import shutil
 import sqlite3
@@ -168,6 +169,7 @@ from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
 from belief.effector_engine import EffectorRunState, EffectorTrigger
 from belief.effector_engine import advance as advance_effectors
 from belief.effector_engine import fire_trigger as fire_effector_trigger
+from belief.effector_engine import request_write as request_effector_write
 from belief.effector_registry import (
     DEFAULT_SEQUENCES_DIR,
     EffectorDef,
@@ -3622,7 +3624,10 @@ def _check_for_new_mission(
             crew_console.action_file_error_pending = bool(
                 rule_runtime.rule_set.failures
             )
-            crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+            crew_console.set_enabled_rule_ids(
+                frozenset(rule_runtime.rule_set.rules),
+                _rule_categories(rule_runtime.rule_set),
+            )
         if audio_client is not None and crew_console is not None:
             _push_rules(rule_runtime, audio_client, crew_console)
     # Assigned explicitly after the reset, same pattern as `runner.
@@ -3926,6 +3931,48 @@ def _lookup_memory_entry_fn(
     return lookup
 
 
+#: A union slot's own tagged-table value (`speed_target`'s `{"kind":
+#: "max"}` / `{"kind": "number", "value": N}`, `audio-adapter`'s
+#: `rule_patterns._consume_speed_target`) never carries more than two
+#: keys today; this is generous headroom over that, not a tight fit --
+#: bounding an external process's own wire shape, never Petrovich's
+#: behaviour, so a plain literal rather than a `tuning.*` declaration.
+#: `plans/speech-rules/security-stage3-4.md` Required Fix 1.
+_MAX_SLOT_DICT_KEYS: Final[int] = 4
+
+
+def _is_bounded_slot_dict(value: object) -> bool:
+    """One level deep, `str` keys, `int`/`str` (`bool` excluded) values,
+    at most `_MAX_SLOT_DICT_KEYS` keys -- exactly the tagged-table shape
+    a union slot (`speed_target`, and D7's own planned `direction`/
+    `origin`) resolves to, never an arbitrary dict wholesale.
+    `audio-adapter` is a separate process over this project's own named
+    threat surfaces (a compromised dependency, or a malfunctioning
+    process); bounding depth/shape at this validation boundary, rather
+    than trusting the sender to keep producing only the tagged-table
+    shape, is the cheaper place to hold the invariant."""
+    if not isinstance(value, dict) or len(value) > _MAX_SLOT_DICT_KEYS:
+        return False
+    for key, inner in value.items():
+        if not isinstance(key, str):
+            return False
+        if not isinstance(inner, (int, str)) or isinstance(inner, bool):
+            return False
+    return True
+
+
+def _is_valid_slot_value(value: object) -> bool:
+    """A scalar (`int`/`str`, `bool` excluded) or a union slot's own
+    bounded tagged table (`_is_bounded_slot_dict`) -- anything else (an
+    unbounded or nested dict, a list, ...) is rejected exactly like a
+    malformed scalar value already was."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, str)):
+        return True
+    return _is_bounded_slot_dict(value)
+
+
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
 ) -> str | None:
@@ -3945,6 +3992,8 @@ def _poll_transcripts(
     watch-reporting/plan.md` Decision 2b-i, replacing the earlier
     single-purpose `bearing_degrees` field) is threaded straight through,
     `None` allowed -- populated only for tokens that take a parsed slot.
+    A slot value is either a scalar or a union slot's own bounded tagged
+    table (`_is_valid_slot_value`); anything else drops the whole item.
 
     `correlation_id` (`plans/voice-latency-instrumentation/plan.md` Stage 3)
     is the ninth field `TranscriptEvent.to_dict` now carries -- threaded
@@ -4008,9 +4057,16 @@ def _poll_transcripts(
             continue
         slots: dict[str, int | str] | None = None
         if slots_raw is not None:
+            # `plans/speech-rules/security-stage3-4.md` Required Fix 1 --
+            # widened from `isinstance(value, (int, str))` alone, which
+            # silently dropped the whole transcript for any union slot
+            # (`set_speed`'s `speed_target`): "speed max"/"speed two
+            # hundred" did nothing and said nothing. A dict value is now
+            # admitted, but only in `_is_bounded_slot_dict`'s own narrow
+            # shape -- an unbounded/nested dict is rejected exactly like
+            # any other malformed value, not passed through wholesale.
             if not isinstance(slots_raw, dict) or not all(
-                isinstance(value, (int, str)) and not isinstance(value, bool)
-                for value in slots_raw.values()
+                _is_valid_slot_value(value) for value in slots_raw.values()
             ):
                 continue
             slots = slots_raw
@@ -4251,14 +4307,24 @@ def _load_rules(rules_dir: Path, sandbox: RuleSandbox, ctx: ActionContext) -> Ru
     return rule_set
 
 
+def _rule_categories(rule_set: RuleSet) -> dict[str, str]:
+    """`rule_id -> category` for every rule this load accepted (`[[BL-17]]`
+    D16) -- the one place that reads `CompiledLuaRule.category`, so both
+    `set_enabled_rule_ids` call sites below pass the same map on every
+    call this reload makes, never a half-updated one."""
+    return {rule.id: rule.category for rule in rule_set.rules.values()}
+
+
 def _push_rules(
     rule_runtime: RuleRuntime,
     audio_client: AudioAdapterClient,
     crew_console: CrewConsole,
 ) -> None:
     """`PUT /rules` (D1/D2) -- pushes `rule_runtime.rule_set`'s full
-    `(id, pattern)` set, updates `rule_runtime.adapter_accepted_version`
-    and `crew_console.enabled_rule_ids` (loaded cleanly **and** accepted,
+    `(id, pattern, category)` set (`category` added D16, for Stage 3c's
+    benefit -- the gate check itself never reads it back off the wire),
+    updates `rule_runtime.adapter_accepted_version` and `crew_console.
+    enabled_rule_ids`/`rule_categories` (loaded cleanly **and** accepted,
     D4) from the response, and -- if the adapter rejected anything (a
     collision, bad grammar, an unknown slot type, D9) -- prints the same
     banner shape `_load_rules` does and sets `crew_console.action_file_
@@ -4279,7 +4345,8 @@ def _push_rules(
     rule_runtime.adapter_accepted_version = result.version
     rejected_ids = {rule_id for rule_id, _ in result.rejected}
     crew_console.set_enabled_rule_ids(
-        frozenset(rule_runtime.rule_set.rules) - rejected_ids
+        frozenset(rule_runtime.rule_set.rules) - rejected_ids,
+        _rule_categories(rule_runtime.rule_set),
     )
     if result.rejected:
         lines = [f"{rule_id}: {reason}" for rule_id, reason in result.rejected]
@@ -4797,6 +4864,11 @@ def _run_crew_text_poll_loop(
                             runner, crew_console, aircraft_client
                         )
                         crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
+                        # `[[BL-17]]` D16 -- same spot, after `parked_
+                        # flight_state` has been refreshed this poll
+                        # (just above), so `current_crew_state()` inside
+                        # this call sees this poll's own state.
+                        crew_console.drain_pending_rule_dispatch(runner.last_t_sim)
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
                         )
@@ -5089,13 +5161,44 @@ def _run_crew_text_poll_loop(
                                 runner.last_t_sim,
                             )
                             crew_console.weapon_safety_transition = None
+                        # `[[BL-17]]` D20 Stage 3d review, Required Fix 1
+                        # (`plans/speech-rules/review-stage3d.md`) --
+                        # every `effector.write` request queued since the
+                        # last poll (`crew_console.pending_effector_
+                        # writes`, appended to by `_request_effector_
+                        # write`'s closure above, possibly from the REPL
+                        # thread) is registered against `effector_state`
+                        # here, on the poll thread -- the same place
+                        # every other cross-thread effector signal above
+                        # (`observ_transition`/`weapon_safety_transition`)
+                        # is applied, and before `advance_effectors`
+                        # below so a newly dispatched write starts
+                        # progressing this same poll. Swap with a fresh
+                        # list rather than iterate-then-clear, so a
+                        # request appended during this exact swap lands
+                        # in the next poll's batch instead of being lost
+                        # to an unconditional `= []` after the loop.
+                        pending_writes, crew_console.pending_effector_writes = (
+                            crew_console.pending_effector_writes,
+                            [],
+                        )
+                        for pending_write in pending_writes:
+                            runner.effector_state = request_effector_write(
+                                runner.effector_state,
+                                pending_write.request_id,
+                                pending_write.effector,
+                                pending_write.value,
+                                pending_write.says,
+                                runner.last_t_sim,
+                            )
                         # Advances every currently-running trigger by at
                         # most one write each, in fire order (D9) --
-                        # takeoff and any of the four transitions fired
-                        # above all progress in this one call. No
-                        # `readback` argument any more (Stage 4) -- each
-                        # running trigger makes its own one-shot
-                        # `client.read_args(...)` call internally.
+                        # takeoff, any of the four transitions fired
+                        # above, and any ad hoc write just registered
+                        # all progress in this one call. No `readback`
+                        # argument any more (Stage 4) -- each running
+                        # trigger makes its own one-shot `client.read_
+                        # args(...)` call internally.
                         runner.effector_state = advance_effectors(
                             runner.effector_state,
                             runner.last_t_sim,
@@ -6271,8 +6374,8 @@ def main() -> None:
         rules_ctx = ActionContext(console=CrewConsole(store=ContactStore()))
         rule_set = _load_rules(args.rules_dir, rules_sandbox, rules_ctx)
         print(f"loaded {len(rule_set.rules)} rule(s) from {args.rules_dir}:")
-        for rule_id, pattern in sorted(rule_set.ids_and_patterns()):
-            print(f"  {rule_id}: {pattern}")
+        for rule_id, pattern, category in sorted(rule_set.ids_and_patterns()):
+            print(f"  {rule_id} [{category}]: {pattern}")
         for failure in rule_set.failures:
             where = (
                 f" (rule {failure.rule_id!r})" if failure.rule_id is not None else ""
@@ -6549,6 +6652,50 @@ def main() -> None:
         ),
         config_error_pending=had_config_errors,
     )
+    # `[[BL-17]]` D20 (`plans/speech-rules/plan.md` Stage 3d) --
+    # `ActionContext.request_effector_write`'s own closure, built here
+    # (not in `rules.actions`, same reasoning D4/D5 already give for
+    # `rule_runner`: keeps `rules.*` from importing `belief.effector_
+    # engine`/`belief.effector_registry` directly). Validates `name`/
+    # `value` against this runtime's own loaded registry and queues the
+    # request on success (Stage 3d review Required Fix 1) -- it no
+    # longer mutates `crew_runner.effector_state` itself: `handle_command`
+    # is reachable from both the poll thread (voice) and the REPL thread
+    # (typed input), so a direct read-modify-write here could race the
+    # poll loop's own `effector_state` assignments below. The actual
+    # `effector_engine.request_write` call happens only on the poll
+    # thread, once per poll, draining `crew_console.pending_effector_
+    # writes` (see that field's own docstring) immediately before
+    # `advance_effectors` runs.
+    # `crew_runner.last_t_sim` is `None` only before the poll loop's
+    # first successful poll -- a request that arrives that early (the
+    # REPL thread, in principle, before telemetry exists) degrades to
+    # the same generic `reason=None` every other precondition-not-yet-
+    # met failure already uses, rather than inventing a new reason for
+    # an edge no shipped rule can reach yet (no rule calls `effector.
+    # write` in this stage).
+    # Queues via `crew_console.queue_effector_write` -- not by building
+    # the queued-write dataclass here directly -- so the entry is
+    # stamped with this dispatch's own token: Stage 3d re-review
+    # Required Fix 4's own rollback has nothing to find otherwise. That
+    # was exactly this closure's own gap, caught only because a test
+    # built its own separate closure that happened to stamp the token by
+    # hand (`test_body_py_never_constructs_pending_effector_write_
+    # directly` now pins this).
+    _next_ad_hoc_request_id = itertools.count()
+
+    def _request_effector_write(
+        name: str, value_name: str, says: str | None
+    ) -> dict[str, object]:
+        effector_def = effector_registry_entries.get(name)
+        if effector_def is None or value_name not in effector_def.values:
+            return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+        if crew_runner.last_t_sim is None:
+            return {"ok": False, "reason": None}
+        request_id = f"rule-{next(_next_ad_hoc_request_id)}"
+        crew_console.queue_effector_write(request_id, name, value_name, says)
+        return {"ok": True, "reason": None}
+
     # `[[BL-17]]` (`plans/speech-rules/plan.md`) -- loaded/pushed once
     # here, after `crew_console` exists (the action registry's `Action
     # Context` needs a live reference to close over, D5) but before the
@@ -6558,7 +6705,9 @@ def main() -> None:
     # directly on `crew_console` here, not passed as constructor kwargs
     # above, for exactly this ordering reason.
     rules_sandbox = RuleSandbox()
-    rules_ctx = ActionContext(console=crew_console)
+    rules_ctx = ActionContext(
+        console=crew_console, request_effector_write=_request_effector_write
+    )
     rule_runtime = RuleRuntime(
         sandbox=rules_sandbox,
         ctx=rules_ctx,
@@ -6566,7 +6715,9 @@ def main() -> None:
         rule_set=_load_rules(args.rules_dir, rules_sandbox, rules_ctx),
     )
     crew_console.action_file_error_pending = bool(rule_runtime.rule_set.failures)
-    crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+    crew_console.set_enabled_rule_ids(
+        frozenset(rule_runtime.rule_set.rules), _rule_categories(rule_runtime.rule_set)
+    )
 
     def _run_rule_token(
         token: str, slots: dict[str, int | str] | None

@@ -55,6 +55,7 @@ import binascii
 import json
 import logging
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
 from typing import Any, Protocol, Self
@@ -187,7 +188,11 @@ def _legacy_probe(text: str) -> LegacyProbeResult:
     import cycle `rule_patterns`'s own `LegacyProbeResult` docstring
     explains."""
     result = match_transcript(text)
-    return LegacyProbeResult(token=result.token, verb_anchored=result.verb_anchored)
+    return LegacyProbeResult(
+        token=result.token,
+        verb_anchored=result.verb_anchored,
+        match_ratio=result.match_ratio,
+    )
 
 
 def _make_handler(
@@ -418,7 +423,11 @@ def _make_handler(
             transcribe_duration_s = time.monotonic() - transcribe_start
 
             match_start = time.monotonic()
-            match = match_transcript(transcript.text, rules=rule_state.rules)
+            match = match_transcript(
+                transcript.text,
+                rules=rule_state.rules,
+                anchor_words=rule_state.anchor_words,
+            )
             match_duration_s = time.monotonic() - match_start
 
             transcript_queue.push(
@@ -464,16 +473,27 @@ def _make_handler(
             self._respond_json(200, {"ok": True})
 
         def _handle_put_rules(self) -> None:
-            """`PUT /rules` (`{"version": str, "rules": [{"id", "pattern"},
-            ...]}`, `[[BL-17]]` D1/D2) -- parses and runs the collision
-            check (`rule_patterns.compile_rules`, D9) over the full set
-            body-layer currently has loaded, then swaps `rule_state.rules`
-            in with one assignment (D8). Answers `{"version", "accepted":
+            """`PUT /rules` (`{"version": str, "rules": [{"id", "pattern",
+            "category"}, ...]}`, `[[BL-17]]` D1/D2; `category` added
+            D16/Stage 3b) -- parses and runs the collision check
+            (`rule_patterns.compile_rules`, D9) over the full set
+            body-layer currently has loaded, then swaps `rule_state`'s
+            `rules`/`version`/`anchor_words` in via `RuleRegistry.swap`
+            (D8, widened by D15 to also recompute `anchor_words` here,
+            once, rather than per transcript). Answers `{"version", "accepted":
             [ids], "rejected": [{"id", "reason"}]}` -- `version` is always
             the value the caller sent, even when every rule in the push
             was rejected, so body-layer can tell "the adapter is current
             with this push" from "the adapter never got the push at all"
-            (a differing/absent header on the next `/transcripts/poll`)."""
+            (a differing/absent header on the next `/transcripts/poll`).
+
+            `category` is validated the same way `id`/`pattern` already
+            are (a missing or non-string value is the same 400 shape) but
+            plays no part in `compile_rules`'s own matching/collision
+            logic -- it is attached to each accepted `CompiledRule` by
+            `dataclasses.replace` *after* `compile_rules` returns, purely
+            so it can ride along for Stage 3c's benefit; nothing reads it
+            back off the wire in this stage."""
             raw_body = self._read_body()
             if raw_body is None:
                 return
@@ -498,6 +518,7 @@ def _make_handler(
                 return
 
             raw_pairs: list[tuple[str, str]] = []
+            categories: dict[str, str] = {}
             for entry in rules_raw:
                 if not isinstance(entry, dict):
                     self._respond_json(
@@ -506,30 +527,37 @@ def _make_handler(
                     return
                 rule_id = entry.get("id")
                 pattern = entry.get("pattern")
+                category = entry.get("category")
                 if (
                     not isinstance(rule_id, str)
                     or not rule_id
                     or not isinstance(pattern, str)
                     or not pattern
+                    or not isinstance(category, str)
+                    or not category
                 ):
                     self._respond_json(
                         400,
                         {
                             "error": (
-                                "each rule needs a non-empty string 'id' and 'pattern'"
+                                "each rule needs a non-empty string 'id', "
+                                "'pattern' and 'category'"
                             )
                         },
                     )
                     return
                 raw_pairs.append((rule_id, pattern))
+                categories[rule_id] = category
 
             accepted, rejected = compile_rules(
                 raw_pairs,
                 legacy_probe=_legacy_probe,
                 free_speech_guard=vocabulary.FREE_SPEECH_GUARD,
             )
-            rule_state.rules = tuple(accepted)
-            rule_state.version = version
+            accepted = [
+                replace(rule, category=categories[rule.id]) for rule in accepted
+            ]
+            rule_state.swap(tuple(accepted), version)
             self._respond_json(
                 200,
                 {

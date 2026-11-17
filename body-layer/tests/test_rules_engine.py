@@ -19,7 +19,7 @@ def _ctx() -> ActionContext:
 
 def test_a_clean_rule_loads_and_dispatches(tmp_path: Path) -> None:
     (tmp_path / "greet.lua").write_text(
-        'when.speech("hello_rule", "hello", function(s) say("hi") end)',
+        'when.speech("hello_rule", "hello", "always", function(s) say("hi") end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -32,7 +32,8 @@ def test_a_clean_rule_loads_and_dispatches(tmp_path: Path) -> None:
 
 def test_slots_reach_the_handler(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("echo", "x", function(s) say(s.word) end)', encoding="utf-8"
+        'when.speech("echo", "x", "always", function(s) say(s.word) end)',
+        encoding="utf-8",
     )
     sandbox = RuleSandbox()
     rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
@@ -43,7 +44,7 @@ def test_slots_reach_the_handler(tmp_path: Path) -> None:
 
 def test_unable_renders_the_closed_catalogue(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("nope", "x", function(s) say(unable("NOT_READY")) end)',
+        'when.speech("nope", "x", "always", function(s) say(unable("NOT_READY")) end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -54,7 +55,7 @@ def test_unable_renders_the_closed_catalogue(tmp_path: Path) -> None:
 
 def test_digits_reuses_the_digit_readback(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("spell", "x", function(s) say(digits(315)) end)',
+        'when.speech("spell", "x", "always", function(s) say(digits(315)) end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -65,7 +66,7 @@ def test_digits_reuses_the_digit_readback(tmp_path: Path) -> None:
 
 def test_a_lua_error_during_dispatch_is_reported_as_error(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("boom", "x", function(s) error("kaboom") end)',
+        'when.speech("boom", "x", "always", function(s) error("kaboom") end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -77,7 +78,7 @@ def test_a_lua_error_during_dispatch_is_reported_as_error(tmp_path: Path) -> Non
 
 def test_a_runaway_handler_is_aborted_and_reported_as_error(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("loop", "x", function(s) while true do end end)',
+        'when.speech("loop", "x", "always", function(s) while true do end end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -87,12 +88,59 @@ def test_a_runaway_handler_is_aborted_and_reported_as_error(tmp_path: Path) -> N
     assert outcome.error is True
 
 
+def test_a_valid_category_loads_and_is_carried_on_the_compiled_rule(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "r.lua").write_text(
+        'when.speech("flies", "x", "flight_control", function(s) end)',
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+    rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
+    assert rule_set.failures == ()
+    assert rule_set.rules["flies"].category == "flight_control"
+
+
+def test_an_unrecognised_category_disables_only_that_rule(tmp_path: Path) -> None:
+    """D16/U19 -- a bad `when.speech` call (here, an unrecognised
+    category) disables that one rule, not the whole file -- the file's
+    other, valid rule still loads."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("bad_category", "x", "not_a_real_category", function(s) end)\n'
+        'when.speech("good_rule", "y", "always", function(s) end)\n',
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+    rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
+    assert set(rule_set.rules) == {"good_rule"}
+    assert len(rule_set.failures) == 1
+    assert rule_set.failures[0].rule_id == "bad_category"
+
+
+def test_a_missing_category_degrades_to_a_load_error_not_a_crash(
+    tmp_path: Path,
+) -> None:
+    """The pre-D16 three-argument call shape (no `category`) is a bad
+    `when.speech` call now, same as any other -- not a bare Python
+    `TypeError` escaping the sandbox and discarding the whole file."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("old_style", "x", function(s) end)\n'
+        'when.speech("good_rule", "y", "always", function(s) end)\n',
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+    rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
+    assert set(rule_set.rules) == {"good_rule"}
+    assert len(rule_set.failures) == 1
+    assert rule_set.failures[0].rule_id == "old_style"
+
+
 def test_duplicate_rule_id_disables_both_even_across_two_files(tmp_path: Path) -> None:
     (tmp_path / "a.lua").write_text(
-        'when.speech("dup", "a", function(s) end)', encoding="utf-8"
+        'when.speech("dup", "a", "always", function(s) end)', encoding="utf-8"
     )
     (tmp_path / "b.lua").write_text(
-        'when.speech("dup", "b", function(s) end)', encoding="utf-8"
+        'when.speech("dup", "b", "always", function(s) end)', encoding="utf-8"
     )
     sandbox = RuleSandbox()
     rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
@@ -106,7 +154,7 @@ def test_version_is_stable_for_the_same_rules_and_changes_when_they_do(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("a_rule", "a", function(s) end)', encoding="utf-8"
+        'when.speech("a_rule", "a", "always", function(s) end)', encoding="utf-8"
     )
     sandbox = RuleSandbox()
     rule_set_1 = RuleSet.load(tmp_path, sandbox, {}, _ctx())
@@ -114,7 +162,8 @@ def test_version_is_stable_for_the_same_rules_and_changes_when_they_do(
     assert rule_set_1.version == rule_set_2.version
 
     (tmp_path / "r.lua").write_text(
-        'when.speech("a_rule", "a changed", function(s) end)', encoding="utf-8"
+        'when.speech("a_rule", "a changed", "always", function(s) end)',
+        encoding="utf-8",
     )
     rule_set_3 = RuleSet.load(tmp_path, sandbox, {}, _ctx())
     assert rule_set_3.version != rule_set_1.version
@@ -133,7 +182,7 @@ def test_a_reload_picks_up_an_edited_file(tmp_path: Path) -> None:
     DCS mission."""
     rule_file = tmp_path / "r.lua"
     rule_file.write_text(
-        'when.speech("greet", "hi", function(s) say("first") end)',
+        'when.speech("greet", "hi", "always", function(s) say("first") end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -141,7 +190,7 @@ def test_a_reload_picks_up_an_edited_file(tmp_path: Path) -> None:
     assert run_rule(rule_set_1, "greet", None, sandbox).lines == ["first"]
 
     rule_file.write_text(
-        'when.speech("greet", "hi", function(s) say("second") end)',
+        'when.speech("greet", "hi", "always", function(s) say("second") end)',
         encoding="utf-8",
     )
     rule_set_2 = RuleSet.load(tmp_path, sandbox, {}, _ctx())
@@ -150,7 +199,7 @@ def test_a_reload_picks_up_an_edited_file(tmp_path: Path) -> None:
 
 def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> None:
     (tmp_path / "r.lua").write_text(
-        'when.speech("bad_call", "x", function(s)\n'
+        'when.speech("bad_call", "x", "always", function(s)\n'
         "  local r = probe.one(99999)\n"
         "  if not r.ok then say(unable(r.reason)) end\n"
         "end)",
@@ -158,7 +207,7 @@ def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> Non
     )
     sandbox = RuleSandbox()
 
-    def _invoke(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "reason": None}
 
     namespaces = {
@@ -177,18 +226,18 @@ def _probe_action_rule_set(tmp_path: Path, sandbox: RuleSandbox) -> RuleSet:
     bound action whose only job is to echo whether the wrapper accepted
     its argument, same `probe.one` shape as the out-of-bounds test above."""
     (tmp_path / "r.lua").write_text(
-        'when.speech("nan_call", "x", function(s)\n'
+        'when.speech("nan_call", "x", "always", function(s)\n'
         "  local r = probe.one(0/0)\n"
         "  if not r.ok then say(unable(r.reason)) end\n"
         "end)\n"
-        'when.speech("inf_call", "x", function(s)\n'
+        'when.speech("inf_call", "x", "always", function(s)\n'
         "  local r = probe.one(1/0)\n"
         "  if not r.ok then say(unable(r.reason)) end\n"
         "end)\n",
         encoding="utf-8",
     )
 
-    def _invoke(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "reason": None}
 
     namespaces = {
@@ -233,7 +282,7 @@ def test_digits_rejects_a_string_slot_as_a_dispatch_error(tmp_path: Path) -> Non
     degrade to a silent "Unable." that reads as one of `_UNABLE_
     TEMPLATES`' closed reasons."""
     (tmp_path / "r.lua").write_text(
-        'when.speech("spell_word", "x", function(s) say(digits(s.direction)) end)',
+        'when.speech("spell_word", "x", "always", function(s) say(digits(s.direction)) end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()
@@ -251,7 +300,7 @@ def test_digits_rejects_nan_as_a_dispatch_error(tmp_path: Path) -> None:
     turns that into a `RuleRuntimeError` so it surfaces as a D6 dispatch
     error instead of a silent "Unable."."""
     (tmp_path / "r.lua").write_text(
-        'when.speech("spell_nan", "x", function(s) say(digits(0/0)) end)',
+        'when.speech("spell_nan", "x", "always", function(s) say(digits(0/0)) end)',
         encoding="utf-8",
     )
     sandbox = RuleSandbox()

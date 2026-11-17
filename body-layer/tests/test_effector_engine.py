@@ -25,6 +25,7 @@ from belief.effector_engine import (
     EffectorTrigger,
     advance,
     fire_trigger,
+    request_write,
 )
 from belief.effector_registry import EffectorDef
 from belief.effector_sequences import Condition, SequenceFile, SwitchRow, WaitRow
@@ -1177,3 +1178,183 @@ def test_bl_b119_two_triggers_in_one_poll_report_in_fire_order() -> None:
 
     assert client.writes == []
     assert state.spoken == ("Weapons armed.", "Observ on.")
+
+
+# -- `[[BL-17]]` D20 (`plans/speech-rules/plan.md` Stage 3d): rule-
+# originated ad hoc effector writes (`request_write`/`EffectorRunState.
+# ad_hoc_runs`), sharing `_execute_switch_row` with the sequence-row
+# passes above -- no sequence file involved in any of these.
+
+
+def test_request_write_enqueues_an_idle_ad_hoc_run() -> None:
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+    assert set(state.ad_hoc_runs) == {"req-1"}
+    cursor = state.ad_hoc_runs["req-1"]
+    assert cursor.effector == "observ"
+    assert cursor.value == "on"
+    assert cursor.says == "Observ on."
+    assert cursor.status == "pending"
+
+
+def test_request_write_to_an_already_pending_effector_is_a_no_op() -> None:
+    """Mirrors `fire_trigger`'s own D1 "fire while already running" shape
+    -- a second dispatch naming the *same effector* while one is still
+    pending is dropped, even though it mints a fresh request id (every
+    real dispatch does)."""
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+    state = request_write(
+        state, "req-2", "observ", "on", "Observ on, again.", now_sim=1.0
+    )
+    assert set(state.ad_hoc_runs) == {"req-1"}
+    assert state.ad_hoc_runs["req-1"].says == "Observ on."
+
+
+def test_request_write_with_a_differing_value_replaces_the_pending_request() -> None:
+    """Stage 3d review fix 2 (`plans/speech-rules/review-stage3d.md`
+    Required Fix 2) -- a second `effector.write` naming the same
+    effector as an already-pending ad hoc run, but a *different* target
+    value, replaces the pending entry (latest wins, nothing lost -- U21/
+    `AiPilotWheelGoal`'s existing convention for this same kind of
+    arbitration), unlike the same-value case above where a repeated
+    command really is the same request twice."""
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+    state = request_write(state, "req-2", "observ", "off", "Observ off.", now_sim=1.0)
+    assert set(state.ad_hoc_runs) == {"req-2"}
+    cursor = state.ad_hoc_runs["req-2"]
+    assert cursor.value == "off"
+    assert cursor.says == "Observ off."
+
+
+def test_advance_ad_hoc_self_check_match_speaks_and_removes() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {886: 1.0}  # "observ" already "on"
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+
+    state = advance(state, 0.0, _client(client), {}, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ("Observ on.",)
+    assert state.ad_hoc_runs == {}
+
+
+def test_advance_ad_hoc_real_write_succeeds_and_speaks() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}  # "observ" currently "off"
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+
+    state = advance(state, 0.0, _client(client), {}, _REGISTRY)
+
+    assert client.writes == [(7, 3002, 1.0)]
+    assert state.spoken == ("Observ on.",)
+    assert state.ad_hoc_runs == {}
+    assert state.commanded_values["observ"] == "on"
+
+
+def test_advance_ad_hoc_no_says_speaks_nothing_on_success() -> None:
+    """D20: "queued" is the synchronous answer; the rule's own handler
+    says nothing on dispatch (the silent-on-dispatch convention the
+    observ/weapons handlers already follow) -- `says=None` must not
+    manufacture a line out of nowhere once the write resolves."""
+    client = _FakeAircraftClient()
+    client.read_values = {886: 1.0}
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", None, now_sim=0.0
+    )
+
+    state = advance(state, 0.0, _client(client), {}, _REGISTRY)
+
+    assert state.spoken == ()
+    assert state.ad_hoc_runs == {}
+
+
+def test_advance_ad_hoc_failed_write_retries_silently_then_succeeds() -> None:
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}
+    client.fail_device_cmds.add((7, 3002))
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+
+    state = advance(state, 0.0, _client(client), {}, _REGISTRY)
+    assert client.writes == []
+    assert state.spoken == ()
+    assert state.ad_hoc_runs["req-1"].status == "failed_write"
+
+    client.fail_device_cmds.clear()
+    state = advance(state, 1.0, _client(client), {}, _REGISTRY)
+    assert client.writes == [(7, 3002, 1.0)]
+    assert state.spoken == ("Observ on.",)
+    assert state.ad_hoc_runs == {}
+
+
+def test_advance_ad_hoc_unknown_readback_on_non_absolute_effector_retries_forever() -> (
+    None
+):
+    """D20's own documented departure from a sequence row's behaviour:
+    a non-absolute effector with no readback ever arriving is kept and
+    retried with a fresh read next poll, not silently abandoned the way
+    a sequence row would skip past it for good."""
+    client = _FakeAircraftClient()
+    client.fail_reads = True
+    state = request_write(
+        EffectorRunState(),
+        "req-1",
+        "covered_button",
+        "pressed",
+        "Pressed.",
+        now_sim=0.0,
+    )
+
+    now_sim = 0.0
+    state = advance(state, now_sim, _client(client), {}, _REGISTRY)
+    now_sim += EFFECTOR_CONDITION_READBACK_WAIT_S
+    state = advance(state, now_sim, _client(client), {}, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ()
+    assert state.ad_hoc_runs["req-1"].status == "failed_no_readback"
+    assert state.ad_hoc_runs["req-1"].snapshot is None  # re-armed for a fresh read
+
+
+def test_advance_ad_hoc_and_sequence_row_same_poll_collision_shares_failed_effectors() -> (
+    None
+):
+    """D9's same-poll collision rule applies across the two passes, not
+    just within one of them: once a sequence row's write to `observ`
+    fails this poll, an ad hoc write to the same effector in the same
+    `advance()` call must not also attempt to write -- it holds too."""
+    client = _FakeAircraftClient()
+    client.read_values = {886: 0.0}
+    client.fail_device_cmds.add((7, 3002))
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.OBSERV_ON.value): _sequence(
+            EffectorTrigger.OBSERV_ON,
+            (
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="observ on",
+                    comment="",
+                ),
+            ),
+        )
+    }
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.OBSERV_ON, now_sim=0.0)
+    state = request_write(state, "req-1", "observ", "on", "Observ on.", now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == []
+    assert state.spoken == ()
+    assert state.ad_hoc_runs["req-1"].status == "failed_write"

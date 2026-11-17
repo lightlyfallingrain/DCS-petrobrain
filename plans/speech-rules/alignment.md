@@ -255,3 +255,288 @@ cockpit — so either answer leaves this verdict unchanged.
 ### Questions for the user
 None beyond Q1–Q6 already on file above, and U17/U18, already open — neither changes this
 verdict regardless of how they are answered (see Verdict).
+
+## Goal check — next stages (matching foundation + flight-control port), 2026-11-17
+
+**Verdict:** CONCERNS. Three assumptions, each filled the obvious way, break a named expectation:
+Finding 1 breaks **E17**, Finding 2 breaks **E13**, Finding 3 breaks **E13/E16**. Everything else is
+aligned. The open questions are listed separately.
+
+Scope: (a) a matching foundation: fuzzy tolerance, number words, the two performance fixes, and a
+speech-to-text hint that follows Petrovich's seat and state; (b) porting the flight-control
+commands (plan Stage 4 row) plus "you have controls". Base `c309092b`. Inputs: `BL-17.md` (every
+2026-11-17 section), this plan's D1–D12 and later-stages table, `BL-16.md`, `BL-B123.md`,
+`plans/flight-control/alignment.md` (E-P1..E-P11), the 2026-09-19 whisper research notes, and the
+memories on "say again" vs "unable" and on Petrovich working the opposite seat. E1–E10 above still
+stand; numbering continues from them.
+
+### Why
+
+The key case is the player in the operator seat on the 9K113 while Petrovich flies (BL-16 A7:
+*"this is a key reason"*). In that case the pilot's voice is the only way he steers the aircraft.
+So the purpose is that **flight commands are as reliable to say as they are today, or more
+reliable, once they move to rules**, and that the crew's answers stay honest: he either does it,
+says why he can't, or asks for it again.
+
+Asked "why" a second time, the foundation is what keeps E1 true. Exact-literal matching would make
+every ported command harder to say (*"STT is imperfect, we'll need some fuzzy matching"*).
+Narrowing the hint is there so recognition gets better as the vocabulary grows (*"STT reliability
+and whisper speed might increase if we limit the excepted command set"*). Neither is a goal in its
+own right. Both are measured by one thing: what the pilot hears back when he speaks.
+
+### Player expectations
+
+- **E11** — Every ported flight command still matches when the fixed words have a near-miss (a
+  filler, a verb heard slightly wrong), at least as often as the legacy matcher manages today.
+  "Turn left thirty", "turn left 30" and "turn left three zero" all turn 30° left.
+- **E12** — Fuzziness forgives the *words*, never the *values*. A number, a direction (left/right),
+  an altitude reference (radar/barometric) or a bare HVRT word is either heard exactly, after the
+  number-word collapse, or the answer is "say again". "Thirteen" never becomes 30, and "right"
+  never becomes "sight".
+- **E13** — A command he understood but cannot carry out in his current seat or state gets
+  "unable, <reason>". The reason names something the pilot can act on, such as "not flying". It is
+  never a readback of a goal he will not fly, and never "say again" (user: *"As you recommended, I
+  agree with that"*; memory `project-say-again-vs-unable`).
+- **E14** — Questions about what he believes and what mission memory holds, and "describe", are
+  answered in every seat and state (*"Regardless of state, Petrovich must answer…"*).
+- **E15** — Once Petrovich starts or stops flying, the next transmission is transcribed with the
+  hint for the new state. A flight command spoken a second or two after the handover is recognised
+  as well as one spoken a minute later. The same holds after a seat change.
+- **E16** — Narrowing never makes any command harder to recognise than it is today. In-state
+  commands are recognised at least as well as now. Out-of-state commands are still heard well
+  enough to be refused *with a reason* (E13).
+- **E17** — The pilot always knows who is flying. "I have controls" from Petrovich means he really
+  is flying. In AI-overlay mode the handover is the park, with no words needed (E-P1, E-P2). While
+  he flies, the pilot's take-back phrase is always in the expected set.
+- **E18** — Ported flight commands keep their behaviour and readbacks as built in BL-16 P2 (E1),
+  except where E13 says otherwise. Speed reads back as the wheel step ("two hundred", E-P3).
+  Altitude names the reference actually achieved. "Level flight", "hold altitude" and "straight" /
+  "level off" mean what they mean today.
+
+### Open assumptions
+
+- **Which state the hint follows.** Serves the why: the same state the dispatcher checks for
+  "unable". In mode 2 that is `ParkedFlightState.parked_active`, which tracks arg 852, the park
+  that *is* the handover. The player's seat comes from `apw_seat`, and later mode 1 adds its
+  handover phase. Would not: the spoken phrase "you have controls", or any second copy of the
+  state. *Belief or DCS truth:* these are crew facts. A real crewmate knows which seat he is in and
+  whether his hands are on the controls, so reading them from cockpit args is not omniscience
+  (lens: bounded knowledge, silent). What breaks E13 is a hint and a refusal that follow different
+  states.
+- **What fuzzy forgives.** Serves: the literal words of the pattern only, slot spans excluded, as
+  D8 already says. Word-set slots, number words and HVRT bare words stay exact. Would not: running
+  `_phrase_match_ratio` over the whole utterance, values included, or making the number-word table
+  fuzzy. That breaks E12 (Finding 4).
+- **Which number forms count.** Serves: the forms the pilot actually says, measured. Would not: a
+  general English number parser that accepts forms nobody uses and so widens what can collide. For
+  `heading`, "three fifteen" collapses to 315 but is not three digits spoken. Whether it counts is
+  the user's call (Q10).
+- **When the state is judged for "unable".** Serves: a command spoken just after the handover is
+  not refused because body-layer had not caught up yet (Q12). Would not: today's per-dispatch
+  check, which during takeover settle answers NOT_READY, because `held_heading` is `None` until the
+  menu-open readback.
+- **How the hint narrows.** Serves: a measured choice between removing words and putting the
+  in-state words first (Finding 3). Would not: removing the out-of-state words and shipping
+  unmeasured.
+- **What "priority" changes.** Serves: what he does and says first while flying (Finding 5). Would
+  not: a tie-break that turns an unclear transmission into a flight action, which contradicts E3.
+- **Collision check scope (D9) once vocabularies are per state.** Serves: the check runs over
+  *every* rule, because matching always covers every rule (user: *"keep matching every
+  command"*). Would not: checking only within each state's set, which misses two commands from
+  different states that both match one utterance. A looser fuzzy match makes such collisions more
+  likely, as `BL-17.md` itself notes.
+- **Scan commands while flying.** The user's text says *"eyes stay free for naked-eye scanning"*.
+  The table under it lists only flight commands, queries and describe. Serves: whichever the user
+  confirms (Q8). Would not: reading BL-B123's *"no optic at all"* as covering the naked eye. The
+  code models the naked eye as `UNAIDED_OPTIC`, so a literal reading would blind him while he
+  flies, against A5 / E-P11.
+
+### Findings
+
+1. **In AI-overlay mode, "you have controls" is not what starts Petrovich flying.** Lens: world
+   truth / whose job. **Breaks E17.**
+   - *Assumption:* the brief's "'you have controls' as the trigger for him to start flying" means
+     the ported rule starts the takeover, and the "has controls" vocabulary is keyed to it.
+   - *In the sim:* the only flying built today is mode 2. There the handover is the player's own
+     "Request Aircraft Control" binding (arg 852). The 2026-11-16 flight found that out: Batch A
+     was watching the wrong signal and never saw the handover. E-P1 says *"Parking is the
+     handover … without the player saying anything."* No handover token exists in
+     `audio-adapter/src` or `body-layer/src`. The spoken handover belongs to mode 1, which is
+     unbuilt and next in BL-16. Flight-control D-e (what the spoken phrases mean while parked) is
+     still open, and the plan check flagged it as conflicting with *"Handover is spoken only"*.
+   - *The pilot would hear:* a rule built the obvious way either does nothing (the controls are
+     already parked) or answers "I have controls" when he is not flying. If the hint is keyed to
+     the phrase, it never switches to flight words in the key case, because the player parks and
+     never says it.
+   - *Grounded in:* `BL-16.md` (2026-11-16 flight, arg 852); `plans/flight-control/alignment.md`
+     E-P1; `plans/flight-control/plan.md` D-e.
+   - *Suggests:* in this stage the vocabulary follows the actual flying state. What "you have
+     controls" and "I have controls" do in mode 2 is the user's call (Q7). Their full meaning
+     arrives with mode 1.
+
+2. **Porting faithfully would carry over a readback for a goal that is never flown.** Lens: crew
+   sense. **Breaks E13.**
+   - *Assumption:* D3 / E1, "a ported rule keeps its readback".
+   - *In code now:* `_handle_turn_heading` and `_handle_set_speed` set the goal transition without
+     checking whether he is flying, and read back "Heading three one five." and the speed.
+     `_apply_ai_pilot_wheel_goal` then drops the goal without a word when not parked
+     (`body.py:3288`). The relative commands check only `held_*`, the overlay readback, and
+     BL-B117 says those overlay fields are not reset on export stop. So "heading 315" spoken while
+     he is not flying sounds accepted and nothing happens. Where the code does refuse, it says
+     "Unable, not ready", which does not tell the pilot the reason is that Petrovich does not have
+     the controls.
+   - *Grounded in:* the user's wrong-state decision (*"unable, <reason>"*), memory
+     `project-say-again-vs-unable`, and the code above.
+   - *Suggests:* each flight action checks the flying state itself and returns its reason, which
+     the rule speaks. This is the deliberate exception to E1 and should be recorded as one. The
+     reason's wording is Q9.
+
+3. **A narrowed hint has never been measured, and every recognition threshold assumes the full
+   one.** Lens: the envelope (recognition is the envelope here). **Breaks E13 / E16 if shipped
+   unmeasured.**
+   - *Measured:* `--prompt` took the user's corpus from 90.5% to 98.4%, and cut repaired matches
+     from 85 to 19. `ACT_FLOOR = 0.60` is *"defensible on this row and no other"*, meaning
+     prompted with the full vocabulary (`audio-adapter/research/2026-09-19-corpus-bench-results.md`).
+     The model sweep counts **unsafe wrong commands** as the column that matters.
+   - *The risk:* with out-of-state words taken out of the hint, an out-of-state command
+     ("observ on" while flying) is more likely to come back as text that scores "say again", which
+     loses the "unable, <reason>" the user chose. Worse, it may come back as a *different, in-state*
+     command, which is the unsafe class. Meanwhile the in-state gain is unmeasured, and the
+     shipped vocabulary is still inside the 224-token cap (a test enforces it), so the cap does
+     not force narrowing yet.
+   - *Suggests:* the user's direction stands. What should change is the order: measure each
+     state's hint with `stt_bench.py` on the user's corpus, with flight phrases recorded through
+     `record_corpus.py`, since the September corpus predates them (Q13). Count unsafe errors and
+     out-of-state answers, not only accuracy. Also measure "in-state words first" as well as
+     "out-of-state words removed".
+
+4. **Fuzzy matching must leave values alone. D8 already says so, and the number-word parser must
+   follow it.** Lens: unit of action (a value is what the aircraft acts on). Aligned; recorded so
+   the plan inherits it.
+   - `difflib` ratios: "right"/"sight" 0.8, a collision already measured and the reason HVRT bare
+     words are matched exactly (`command_matcher.py:389`); "thirty"/"thirteen" ≈0.71 and
+     "fifty"/"fifteen" ≈0.67, both above `_WORD_REPAIR_FLOOR` (0.5). A positional repair of a
+     number word would turn 13° into 30°. The research note warns that repair *"can repair a wrong
+     verb into a valid command"*.
+   - So: fuzzy scoring covers the literal words with slot spans taken out (D8). Word-set slots,
+     the number-word table and the bare words stay exact. A value heard wrong gets "say again"
+     (E12).
+
+5. **"Priority" should be something the pilot notices, never a tie-break.** Lens: crew sense.
+   This is a recommendation; the user confirms (as `BL-17.md` already says).
+   - A tie-break toward flight commands while flying turns a near-tie, which E3 says must be "say
+     again", into an aircraft action. That is the worst place to guess.
+   - What a pilot would notice and value while Petrovich flies: his flight readback is spoken
+     before any queued contact callout (the `CalloutScheduler` busy model already decides what
+     waits); flight words come first in the hint; and while flying, a flight command never waits
+     behind a long description. When not flying, scanning and detection calls lead. Q11.
+
+**Vignette, handover then an immediate command.** The player sits in the operator seat at 300 m
+AGL. He presses Request Aircraft Control and keys the mic about a second later: "turn left thirty".
+Arg 852 flips, Export's 5 Hz tick reports it, body-layer's poll sees `parked_active`, and the hint
+is rebuilt. Whisper runs only after PTT release, two or three seconds after the press, so the
+flight hint is most likely in place (E15 holds). The dispatch is the weak point. The takeover
+sequence (0.5 s centre tap, menu open, altitude correction) leaves `held_heading` `None` until the
+menu-open readback, so the ported rule answers "Unable, not ready." to a correct command at the
+moment it is most natural to say it. Whether he should hold the command and fly it once ready is
+Q12. Today's P2 behaves the same way, so this is not a regression, but it is where the "unable"
+contract gets tested first.
+
+**Not a concern:** making queries and describe exempt from narrowing (E14) follows the user's words
+directly. The performance items (rule anchors cached per load, prompt built per change) have no
+behavioural content beyond E15: the prompt must be rebuilt on a *state* change as well as on a rule
+push.
+
+### Questions for the user
+
+- **Q7:** In AI-overlay mode the handover is your "Request Aircraft Control" press, and Petrovich
+  takes over with no words needed. What should "you have controls" do there? Options: nothing yet
+  (it belongs to mode 1, built later); an acknowledgement ("I have controls") only once he is
+  really flying; or something else. And what about "I have controls" from you while parked?
+- **Q8:** While he flies, should naked-eye scan commands ("scan two o'clock", "scan left") still
+  be expected, since your text says his eyes stay free? Or only flight commands, queries and
+  describe, as the table shows?
+- **Q9:** What reason do you want to hear for a command in the wrong state? Suggested: "unable,
+  not flying" for a flight command while he isn't flying; "unable, your sight" (or "pilot seat")
+  for a 9K113 command when he's in the pilot seat; "unable, hands busy" for binoculars while he
+  flies.
+- **Q10:** Which number forms do you actually say for speed and altitude: "speed two hundred",
+  "speed two twenty", or "two two zero"? "Altitude three hundred" or "three zero zero"? "Climb
+  fifty"? And for a heading, would you ever say "heading three fifteen", or always "three one
+  five"?
+- **Q11:** By "priority while flying", do you mean his flight readbacks come before any queued
+  callout and flight commands are recognised best? Recommended. Or something else? Recommend also:
+  an unclear transmission is never resolved toward a flight command; it stays "say again".
+- **Q12:** If you give a flight command right after the handover, before his takeover has settled,
+  should he hold it and fly it once ready, or say "unable, not ready"?
+- **Q13:** Will you record a short corpus of the flight commands (`record_corpus.py`) so the
+  narrowed hint can be measured on your voice before it ships? The September corpus has none of
+  them.
+
+## Plan check — Revision 2, 2026-11-17
+
+**Verdict:** CONCERNS. One expectation is contradicted by the plan's own text: E11's named example
+("turn left thirty") is asserted fixed in two places (Stage 3a's test list, Stage 4's flight card)
+by a mechanism that cannot reach it (Finding 1). Everything else — E12–E18, and all three of the
+user's post-goal-check decisions (the second goal check's Q7–Q13 answers, category gates, rules
+writing effectors) — traces cleanly to a named stage and decision letter.
+
+Inputs: `plans/speech-rules/plan.md` Revision 2 (D13–D20, U19–U24, Stages 3a/3b/3d/3c/4), this
+file's "Goal check — next stages" section (E11–E18), `body-layer/ROADMAP/BL-17.md` (every
+2026-11-17 section, especially "Answers to the second goal check," "Category gates, before any
+rule runs," "Rules can write effectors, from the start"), and the shipped
+`audio-adapter/src/rule_patterns.py` (checked directly: `angle` calls only `_consume_digit_run`
+today, confirming Finding 1 rather than assuming it).
+
+| expectation / decision | stage | status |
+|---|---|---|
+| E11 | Stage 3a (D13), Stage 4 (D18) | **contradicted, partial** — "Turn left, 30." and "turn left three zero" are met via D13's literal fuzz and today's existing digit grammar. "Turn left thirty" (the user's own canonical number-word example) is not: see Finding 1 |
+| E12 | Stage 3a (D13) | met — a `SlotElement`/`WordSetElement` never gets the fuzzy fallback; a value is heard exactly or the rule does not match |
+| E13 | Stage 3b (D16), Stage 4 (D18) | met for `flight_control` (gate-first `UNABLE("NOT_FLYING")`, hold-and-retry on `settling`); the seat/hands-busy half (`"PILOT_SEAT"`, `"HANDS_BUSY"`) is deferred → Stage 5/6, named explicitly in D16/D18 as pending `[[BL-B123]]` |
+| E14 | — | met, unaffected — no stage in this batch touches the legacy query/describe path; D16 states plainly "this mechanism governs rules only" |
+| E15 | Stage 3b (D16's `CrewState`), Stage 3c (D17) | met — one `CrewState`, computed once per poll, feeds both the gate check and the `PUT /crew_state` push (Co-moving Fields table, revision 2) |
+| E16 | Stage 3c (D17, U23) | met — reordering, never removal, is the default; the narrowed/removed variant ships only if the recorded-corpus measurement clears U23's safety bar (zero new unsafe errors, zero new lost "unable"s) |
+| E17 | Stage 3b (D16), Stage 4 (D18) | met — `has_controls` reads `ParkedFlightState.parked_active` (arg 852), never the spoken phrase; "you/I have controls" is a silent no-op, category `"always"` (Q7) |
+| E18 | Stage 4 (D18) | met — readback text pinned verbatim from BL-16 P2 by the differential tests; only the refusal path moves from a generic message to the gate's named reason |
+| "Category gates, before any rule runs" (BL-17.md) | Stage 3b (D16) | met — matches the verbatim correction exactly: one gate per category, run before any matched rule in that category executes, "unable" before the handler ever runs; the coordinator's own worked example (copilot rule vs. pilot seat) is correctly deferred → Stage 5/6, named rather than stubbed |
+| "Rules can write effectors, from the start" (BL-17.md) | Stage 3d (D20) | met — `_execute_switch_row` extracted and shared between the trigger-run and new ad-hoc-run passes inside `effector_engine.advance`, so this is the existing engine extended, not a second write path; no sequence file is migrated and no shipped rule calls it yet, exactly as scoped |
+| "Answers to the second goal check" (Q7–Q13) | Stages 3a–4 (D13–D19) | met — each answer traces to a named decision: fuzzy forgives words only → D13; "Request Aircraft Control" as the real handover → D16's `CrewState.has_controls`; Q7 (no-op) → D18; Q8 (scan stays while flying) → D17's active-set note; Q9 (reasons) → D16/D18's reason catalogue; Q10 (number forms) → D14, checked against the Stage 3c corpus below; Q11 (priority, never a tie-break) → D17/D19; Q12 (hold and fly when ready) → D16's `HOLD`/`drain_pending_rule_dispatch`; Q13 (record a corpus) → Stage 3c item 3 |
+
+### Findings
+
+1. **"Turn left thirty" is asserted fixed twice, by a mechanism that cannot reach it.** Lens:
+   grounded in the code / the non-obvious case. **Breaks E11.**
+   - *Assumption:* Stage 3a's own test list ("turn left thirty"/"Turn left, 30."/"turn left three
+     zero" all still resolve... "closing the Reviewer-flagged gap from Stage 1b/2") and Stage 4's
+     flight card ("'turn left thirty' (number word)"; "the fuzzy near-miss cases from 3a ('turn
+     left thirty' by the near-miss route...)") both treat "turn left thirty" as resolved by D13's
+     literal-fuzz work.
+   - *In the plan and the shipped code:* `turn_heading_relative`'s degree slot is `<degrees:angle>`
+     — Stage 4 item 2 says this explicitly ("the existing `angle`/word-set types (relative turn,
+     HVRT directions)" are unaffected by the number-word work). D14 says plainly: "`heading`,
+     `angle`, `oclock` are **not** touched." D13's fuzzy fallback applies only to a
+     `LiteralElement`; "a `SlotElement`/`WordSetElement` never gets this fallback" (D13's own
+     text). Checked directly against the shipped code: `audio-adapter/src/rule_patterns.py:220`
+     registers `"angle"` as `_consume_angle`, which calls only `_consume_digit_run` — no
+     number-word branch exists or is added anywhere in Revision 2. Nothing in D13, D14 or Stage
+     3a/4 teaches "thirty" to parse as 30 in this slot.
+   - *The pilot would hear:* exactly the defect the Reviewer already flagged at Stage 1b/2 —
+     "turn left thirty" still falls to "say again" — the first time he actually tries the phrase
+     BL-17.md names as the reason number words were asked for at all, in flight, after the card
+     told the tester it would work.
+   - *Grounded in:* `BL-17.md`, "Number words count: 'turn left thirty'" — the user's own
+     canonical example, answered "yes, I'd actually say that." E11 names it as one of three
+     equivalent forms that must all turn 30° left.
+   - *Suggests:* a one-line fix to D14, not a redesign — either give `angle` the same number-word
+     branch `quantity` already has, bounded 1–359 so it cannot be confused with a three-digit
+     `heading`/`bearing`, or redirect `turn_heading_relative`'s `degrees` slot to `quantity` with a
+     range check in the action. This should be settled before Stage 3a is built, since Stage 3a's
+     own test suite currently pins a result its own stated mechanism cannot produce.
+
+### Questions for the user
+None. Finding 1 needs an architect-side fix (one line in D14) before Stage 3a/4 are built, not a
+user decision — the user already said yes to the phrase it breaks. U19–U24 stay open as recorded
+in the plan; none of their recommendations conflict with anything the user has already decided
+(U22's "build it" extends Q11's own "flight readbacks jump ahead of queued callouts" rather than
+contradicting it, and U21's "latest wins" is the same precedent `AiPilotGoalRequest`/E-P4 already
+set, applied one level up).

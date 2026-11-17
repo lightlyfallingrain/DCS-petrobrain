@@ -1,0 +1,63 @@
+# Stage 3c corpus phrase list (plans/speech-rules/plan.md, "Stage 3c -- state-dependent
+# speech-to-text hint", step 3). Read by tools/record_corpus.py --phrases-file.
+#
+# Lines starting with # are comments (including this block) and blank lines are skipped.
+# Record each phrase at its default --takes repetitions. The four phrases under "Refusal
+# cases" must be said while NOT in the matching state, exactly as plan.md specifies --
+# record_corpus.py has no way to enforce or prompt for aircraft state, so follow the
+# per-line note yourself:
+#   - "turn left thirty" / "turn left 30" -- say these while NOT flying (parked AI-overlay
+#     off, or not in the pilot's seat with controls) -- expect "unable, not flying" once
+#     Stage 4's gate is exercised live.
+#   - "watch nearest" / "binoculars" -- say these WHILE flying -- expect "unable, hands
+#     busy" once Stage 6 ports that reason (recorded now so the corpus does not need a
+#     second session later; this will not yet produce that refusal live).
+
+# Number words and digit forms
+turn left thirty
+turn left 30
+turn left three zero
+
+# Heading / level / straight-synonym forms
+heading three one five
+level flight
+straight
+level off
+
+# Speed forms
+speed two hundred
+speed max
+speed one hundred fifty three
+speed two two zero
+
+# Altitude forms
+altitude three hundred
+altitude three zero zero barometric
+climb fifty
+descend one hundred
+
+# Hold altitude
+hold altitude
+
+# HVRT bare words
+left
+right
+forward
+back
+hold
+up
+down
+
+# Refusal cases -- record these while NOT in the matching state (see header note)
+turn left thirty
+turn left 30
+watch nearest
+binoculars
+
+# Non-command sentences, for contrast (real entries from vocabulary.FREE_SPEECH_GUARD,
+# not invented -- checked against src/vocabulary.py directly)
+look at that
+the tanks are on the ridge
+describe the mission to me
+silence is golden
+be careful

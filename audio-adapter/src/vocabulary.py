@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Literal
 
 #: The 15 tokens that also existed in the now-removed F10 radio menu, in
 #: that menu's own order. Kept as a named group for traceability only --
@@ -301,44 +300,18 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # point form (`clock`/compass `sector`), per the plan's "one
         # token, dispatch on which slot fired."
         "point",
-        # BL-16 mode 2 Stage P2a (`plans/flight-control/plan.md`, "Stage
-        # P2 ready to build") -- the FLT/HVR goal vocabulary. No F10
-        # equivalent at all (BL-16 has no F10 menu involvement), so every
-        # one of these is voice-only by construction, not by omission.
-        # `heading_deg`/`direction`+`degrees`/`speed_kmh`/`direction`/
-        # `altitude_m`+`reference`/`direction`+`amount_m` are all parsed
-        # slots (`command_matcher.py`'s own new branches), never
-        # enumerated -- the same combinatorial reason `follow`/`report`
-        # are slotted (a heading alone is 360 values, a speed and an
-        # altitude each open-ended).
-        "level_flight",
-        "turn_heading",
-        # `turn_heading_relative` moved out of this static vocabulary in
-        # `[[BL-17]]` Stage 2 -- it is now a rule id (`config/rules/
-        # flight.lua`, `rule_patterns`'s own grammar), not a `PHRASES`
-        # entry; `command_matcher`'s rule branch (D8) matches it, not the
-        # phrase table below. `parse_turn_relative` is deleted in the
-        # same stage.
-        "set_speed",
-        "speed_step",
-        "set_altitude",
-        "altitude_step",
-        "hold_altitude",
-        "level_off",
-        # Stage P2b -- HVRT translate. "No slot parser needed" (plan
-        # vocabulary note) rules out carrying the direction as a slot on
-        # a single token once several bare words would share it (the
-        # generic phrase match carries no information beyond the token
-        # once that happens) -- enumerated one token per bare direction
-        # word instead, the same shape `scan_ahead`/`scan_left`/
-        # `scan_right` already use for *their* bare direction words.
-        "hvrt_translate_left",
-        "hvrt_translate_right",
-        "hvrt_translate_forward",
-        "hvrt_translate_back",
-        "hvrt_hold",
-        "hvrt_step_up",
-        "hvrt_step_down",
+        # BL-16 mode 2 Stage P2a/P2b's own FLT/HVR goal vocabulary
+        # (`level_flight`/`turn_heading`/`set_speed`/`speed_step`/
+        # `set_altitude`/`altitude_step`/`hold_altitude`/`level_off`, and
+        # the seven HVRT tokens) all moved out of this static vocabulary
+        # in `[[BL-17]]` Stage 4 -- every one is now a rule id
+        # (`config/rules/flight.lua`, `rule_patterns`'s own grammar), not
+        # a `PHRASES` entry; `command_matcher`'s rule branch (D8) matches
+        # them, not the phrase table below (HVRT's seven bare direction
+        # words are a separate, pre-rule exact-match shortcut,
+        # `_HVRT_BARE_WORD_TOKENS` in `command_matcher.py`, unaffected by
+        # this move). Every corresponding `parse_*` slot parser below is
+        # deleted in the same stage.
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -744,65 +717,16 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `report_all`, and giving it its own verb-anchor branch is
     # `command_matcher.py`'s job (that module's own comment on why).
     "point": ("look", "sight"),
-    # BL-16 mode 2 Stage P2a (`plans/flight-control/plan.md`, "Stage P2
-    # ready to build") -- "level flight" freezes heading/altitude/speed
-    # at their current held values; plain, slot-free phrase, matching
-    # `drop_target`'s own posture.
-    "level_flight": ("level flight",),
-    # "Heading <deg>"/"Heading <compass>" -- the numeric and compass
-    # forms both resolve through `parse_heading_deg` (the plan's own
-    # Readbacks note: the readback always speaks the resolved number).
-    # One bare-verb bias phrase, like `point`'s own `"look"`/`"sight"`
-    # entries -- every real phrase is slot-resolved before the generic
-    # phrase table is reached, so the exact words recorded here matter
-    # only for `VERB_ANCHOR_WORDS`/`to_prompt()`'s whisper bias, not for
-    # matching itself. **Unbenched**, like every token added here
-    # without a re-recorded corpus -- whether this speaker gives a
-    # heading digit-by-digit ("three one five") or as a whole number
-    # ("three fifteen") is unmeasured; `parse_heading_deg` assumes the
-    # former, the same digit-by-digit convention `parse_bearing` already
-    # uses for this vocabulary's other numeric slot.
-    "turn_heading": ("heading three one five",),
-    # "Speed <value>" -- "max" is a legal value (plan vocabulary table).
-    "set_speed": ("speed two zero zero", "speed max"),
-    # "Slow down" / "speed up" -- one step down/up from the AI's own
-    # held speed. Plain phrases, not slot-free bias hints: `direction`
-    # is read off which phrase matched (`parse_speed_step_direction`),
-    # not a parsed number, so both wordings are real, complete commands.
-    "speed_step": ("slow down", "speed up"),
-    # "alt[itude] <value> [radar/barometric]" -- `altitude_m`/`reference`
-    # parsed (`command_matcher.py`'s own new branch); the 700 m radar cap
-    # (plan, "The 700 m radar cap") decides the *achieved* reference the
-    # readback actually speaks, independent of recognition.
-    "set_altitude": ("altitude three zero zero", "altitude three zero zero radar"),
-    # "climb/descend <m>" -- relative to the AI's own held altitude, same
-    # "current, not re-derived" posture `turn_heading_relative` has.
-    "altitude_step": ("climb five zero", "descend five zero"),
-    # "hold alt[itude]" -- freezes the goal at the current held altitude.
-    "hold_altitude": ("hold altitude", "hold alt"),
-    # "Straight" / "level off" -- stops a turn, holds the current
-    # heading (plan vocabulary table; Stage P4's own second meaning for
-    # this token, a spoken alignment abort, is not reachable yet --
-    # `belief.crew_console._handle_level_off`'s own docstring).
-    "level_off": ("straight", "level off"),
-    # Stage P2b -- HVRT translate's four bare direction words. One word
-    # each, matching the spoken command exactly (plan's own Readbacks
-    # row) -- state-gated at dispatch (`ai_mode in ("HVR", "HVRT")`,
-    # `belief.crew_console._ai_pilot_hvrt_ready`), not grammar-gated; see
-    # this file's own "Vocabulary collision check" note above for why a
-    # bare single-word phrase needed that gate in the first place.
-    "hvrt_translate_left": ("left",),
-    "hvrt_translate_right": ("right",),
-    "hvrt_translate_forward": ("forward",),
-    "hvrt_translate_back": ("back",),
-    # "Hold" -- clears an open HVRT translate press. Bare single word,
-    # same state-gated-dispatch posture as the four direction words
-    # above; no existing token collision (grepped, same as the original
-    # vocabulary note's own check).
-    "hvrt_hold": ("hold",),
-    # "up"/"down" -- the 2 m HVRT altitude tap, no hold semantics at all.
-    "hvrt_step_up": ("up",),
-    "hvrt_step_down": ("down",),
+    # BL-16 mode 2 Stage P2a/P2b's own `level_flight`/`turn_heading`/
+    # `set_speed`/`speed_step`/`set_altitude`/`altitude_step`/
+    # `hold_altitude`/`level_off` and the seven HVRT bare-word tokens all
+    # moved out of this table in `[[BL-17]]` Stage 4 -- every one is now
+    # a rule id (`config/rules/flight.lua`), and its own words reach the
+    # whisper prompt through the active-rule-words path (D10) instead of
+    # this static table. HVRT's seven bare words still match via
+    # `command_matcher._HVRT_BARE_WORD_TOKENS`'s own exact pre-rule
+    # shortcut (unaffected by this move); their rule patterns exist for
+    # `PUT /rules`'s collision check and the loader, not for recognition.
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
@@ -1040,6 +964,40 @@ def normalized_phrase_index() -> dict[str, str]:
 #: bearing parser. Wider than `_DIGIT_NAMES` because whisper writes some
 #: digits as words and others numerically in the same sentence.
 _WORD_DIGITS: dict[str, str] = {name: str(i) for i, name in enumerate(_DIGIT_NAMES)}
+
+#: The per-word character-ratio floor a heard word not already an exact
+#: match must clear to be credited as a repair of some *other* word.
+#: **Declared here, not in `command_matcher.py` (its original home) or
+#: `rule_patterns.py`**, so both can import the one value without a real
+#: circular import: `command_matcher.py` imports `rule_patterns` (for its
+#: own D8 rule-matching branch) and `rule_patterns.py` -- since
+#: `[[BL-17]]` D13 -- needs this same floor for its own literal-word
+#: fuzz, but `rule_patterns.py` must never import `command_matcher.py`
+#: (that module's own `LegacyProbeResult` docstring explains why: the
+#: injected `legacy_probe` callable exists specifically to avoid that
+#: cycle). `vocabulary.py` is a dependency of both and of neither, so it
+#: is the one place this can live without either module reaching into the
+#: other. Measured against `command_matcher.py`'s own real
+#: false-positive/real-mishearing fixture set -- see that module's
+#: `_phrase_match_ratio` for the provenance ("skin bearing 315"/"walk
+#: ahead" admitted, the reviewer's adversarial sentences still rejected).
+_WORD_REPAIR_FLOOR: float = 0.5
+
+#: Minimum ratio gap between the best and second-best *distinct*
+#: candidates before they are treated as genuinely distinguishable rather
+#: than ambiguous. **Relocated here from `command_matcher.py` (its
+#: original home) for the identical reason `_WORD_REPAIR_FLOOR` was**
+#: (comment above): `[[BL-17]]`'s E12 revision (user direction,
+#: 2026-11-17 -- "directive words... get fuzzy matching," only an open/
+#: arbitrary *value* stays exact) gives `rule_patterns.py` its own need
+#: for this same near-tie guard, on a `WordSetElement`'s own fuzzy
+#: resolution ("left" vs "right" must never silently swap on a
+#: coin-flip) -- not a second hand-tuned number, the one `command_
+#: matcher.py` already uses between two competing token/rule matches.
+#: Not measured for either use -- see `command_matcher.py`'s own
+#: former comment for the "no real near-tie case on the bench corpus yet"
+#: provenance, unchanged by the move.
+SEPARATION_MIN: float = 0.05
 
 
 class BearingParse:
@@ -1483,159 +1441,14 @@ def parse_weapon(text: str) -> str | None:
     return None
 
 
-#: BL-16 mode 2 Stage P2a's own slot parsers (`plans/flight-control/
-#: plan.md`, "Stage P2 ready to build") -- `turn_heading`'s numeric and
-#: compass forms, `set_speed`, `speed_step`, `set_altitude`,
-#: `altitude_step`. (`turn_heading_relative` moved to a rule in
-#: `[[BL-17]]` Stage 2 -- `rule_patterns.py`'s own `angle` slot type is
-#: its numeric parser now, not one of these.) All four remaining numeric
-#: slots reuse `parse_bearing`'s own "digit by digit after an anchor
-#: word" convention (`_read_digits_after` below) rather than a whole-
-#: number-word parser -- **unbenched**, like every token added without a
-#: re-recorded corpus: whether this speaker gives these numbers digit-by-
-#: digit or as whole words is unmeasured, and digit-by-digit is the one
-#: form this vocabulary already has a proven parser for.
-
-#: The 8-point compass -> degrees, for `parse_heading_deg`'s compass
-#: form ("Heading north"). Reuses `SECTOR_WORDS`' own eight spellings
-#: rather than a second table, so "scan north" and "heading north" agree
-#: on which word means what.
-SECTOR_WORD_DEGREES: dict[str, int] = {
-    "north": 0,
-    "northeast": 45,
-    "east": 90,
-    "southeast": 135,
-    "south": 180,
-    "southwest": 225,
-    "west": 270,
-    "northwest": 315,
-}
-
-
-def _read_digits_after(words: list[str], anchor_index: int) -> int | None:
-    """Concatenates consecutive digit words/digits immediately after
-    `words[anchor_index]` into one integer -- the same convention
-    `parse_bearing` uses, generalised to any anchor position rather than
-    only `"bearing"`. `None` if nothing numeric immediately follows."""
-    digits: list[str] = []
-    for word in words[anchor_index + 1 :]:
-        if word in _WORD_DIGITS:
-            digits.append(_WORD_DIGITS[word])
-        elif word.isdigit():
-            digits.extend(word)
-        else:
-            break
-    if not digits:
-        return None
-    return int("".join(digits))
-
-
-def parse_heading_deg(text: str) -> int | None:
-    """ "Heading <deg>" / "Heading <compass point>" -- digit-by-digit
-    after the word "heading", like `parse_bearing` but with **no 5
-    degree checksum** (the AI wheel's own heading hold has no such
-    constraint, unlike a scan sector) -- any value in `0..359` is
-    accepted. A compass point in place of digits resolves through
-    `SECTOR_WORD_DEGREES`, so both spoken forms feed the same numeric
-    path (the plan's own Readbacks note: the readback always speaks the
-    resolved number, never the compass word). `None` if "heading" is
-    absent, or nothing recognisable follows it."""
-    words = normalize_for_match(text).split()
-    if "heading" not in words:
-        return None
-    anchor = words.index("heading")
-    value = _read_digits_after(words, anchor)
-    if value is not None:
-        return value if value <= 359 else None
-    for word in words[anchor + 1 :]:
-        compass = SECTOR_WORD_DEGREES.get(word)
-        if compass is not None:
-            return compass
-    return None
-
-
-def parse_speed_value(text: str) -> int | Literal["max"] | None:
-    """ "Speed <value>" -- "max" immediately after "speed" is the literal
-    value; otherwise digits immediately after "speed". `None` if
-    "speed" is absent or nothing recognisable immediately follows it.
-    Deliberately immediate-only (not "anywhere after"), so a transcript
-    like "speed up" -- `speed_step`'s own phrase -- cannot be misread as
-    a numeric `set_speed` request (`parse_speed_value("speed up")` is
-    `None`, by construction: "up" is neither "max" nor a digit)."""
-    words = normalize_for_match(text).split()
-    if "speed" not in words:
-        return None
-    anchor = words.index("speed")
-    rest = words[anchor + 1 :]
-    if rest and rest[0] == "max":
-        return "max"
-    return _read_digits_after(words, anchor)
-
-
-def parse_speed_step_direction(text: str) -> str | None:
-    """ "Slow down" -> `"down"`, "speed up" -> `"up"` -- one step from the
-    AI's own held speed (plan vocabulary table). Checked as whole-word
-    membership, not phrase equality, so filler words cannot defeat it."""
-    words = set(normalize_for_match(text).split())
-    if "slow" in words:
-        return "down"
-    if "speed" in words and "up" in words:
-        return "up"
-    return None
-
-
-#: "alt"/"altitude" -- both spellings admitted as `set_altitude`'s own
-#: anchor word, since a recognizer has no reason to prefer the clipped
-#: form over the full word (or the reverse).
-_ALTITUDE_ANCHORS: tuple[str, ...] = ("alt", "altitude")
-
-
-def parse_altitude_value(text: str) -> tuple[int, str | None] | None:
-    """ "alt[itude] <value> [radar/barometric]" -- digits immediately
-    after the anchor word, with an optional trailing reference word
-    anywhere after that. `None` if neither anchor word is present, or
-    nothing numeric immediately follows it. The *achieved* reference
-    (the 700 m radar cap, `belief.ai_pilot_wheel.resolve_altitude_
-    reference`) is decided downstream, never here -- this only reports
-    what was heard."""
-    words = normalize_for_match(text).split()
-    anchor_index = None
-    for index, word in enumerate(words):
-        if word in _ALTITUDE_ANCHORS:
-            anchor_index = index
-            break
-    if anchor_index is None:
-        return None
-    value = _read_digits_after(words, anchor_index)
-    if value is None:
-        return None
-    reference: str | None = None
-    for word in words[anchor_index + 1 :]:
-        if word in ("radar", "barometric"):
-            reference = word
-            break
-    return value, reference
-
-
-#: "climb"/"descend" -- `altitude_step`'s own two directions, distinct
-#: words with no ambiguity to resolve via a slot (unlike the HVRT bare
-#: direction words), so one parser per direction's own anchor suffices.
-_ALTITUDE_STEP_VERBS: tuple[str, ...] = ("climb", "descend")
-
-
-def parse_altitude_step(text: str) -> tuple[str, int] | None:
-    """ "climb/descend <m>" -- digits immediately after whichever of
-    `_ALTITUDE_STEP_VERBS` appears first. `None` if neither is present,
-    or nothing numeric immediately follows it."""
-    words = normalize_for_match(text).split()
-    for index, word in enumerate(words):
-        if word in _ALTITUDE_STEP_VERBS:
-            amount = _read_digits_after(words, index)
-            if amount is not None:
-                return word, amount
-            return None
-    return None
-
+#: BL-16 mode 2 Stage P2a's own slot parsers for `turn_heading`'s numeric
+#: and compass forms, `set_speed`, `speed_step`, `set_altitude`,
+#: `altitude_step` all moved out of this module in `[[BL-17]]` Stage 4 --
+#: every one of those commands is now matched and slot-parsed by the
+#: rule engine (`rule_patterns.py`'s `heading`/`speed_target`/`quantity`
+#: slot types), not a hand-written parser here. The compass-point form of
+#: `turn_heading` ("heading north") is not ported -- the shipped
+#: `heading` slot type is three digits only (D7); dropped, not replaced.
 
 #: Framing sentence for `to_prompt`. Whisper's initial prompt conditions
 #: the decoder on *style and domain* as much as on individual words, so
@@ -1691,6 +1504,35 @@ FREE_SPEECH_GUARD: tuple[str, ...] = (
 )
 
 
+def _static_recognised_words() -> tuple[str, ...]:
+    """The part of `recognised_words()` that never changes at runtime --
+    every word of every `PHRASES` phrasing, then every slot table's
+    words, lowercase, in first-seen order, with no `extra_words`.
+    Computed once at import time (`[[BL-17]]` D15) and reused as the
+    base for every `recognised_words` call, rather than re-walking these
+    fixed tables on every recognition for a set that cannot change
+    without a code change."""
+    sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
+    sources += [
+        *DESCRIPTOR_WORDS,
+        *SECTOR_WORDS,
+        *RELATIVE_WORDS,
+        *TIME_OF_DAY_WORDS,
+        *BAND_WORDS,
+        *STEP_DIRECTION_WORDS,
+        *WEAPON_WORDS,
+        *REFERENT_WORDS,
+    ]
+    words: dict[str, None] = {}
+    for source in sources:
+        for word in re.findall(r"[a-z']+", source.lower()):
+            words[word] = None
+    return tuple(words)
+
+
+_STATIC_RECOGNISED_WORDS: tuple[str, ...] = _static_recognised_words()
+
+
 def recognised_words(extra_words: Iterable[str] = ()) -> tuple[str, ...]:
     """Every distinct word the recogniser is expected to hear: each word of
     every `PHRASES` phrasing, then every slot table's words, lowercase, in
@@ -1708,21 +1550,7 @@ def recognised_words(extra_words: Iterable[str] = ()) -> tuple[str, ...]:
     rule's own literal/word-set words -- appended after this vocabulary's
     own words, so a word already here is never duplicated. `()` (the
     default) is every call site that predates rules, unchanged."""
-    sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
-    sources += [
-        *DESCRIPTOR_WORDS,
-        *SECTOR_WORDS,
-        *RELATIVE_WORDS,
-        *TIME_OF_DAY_WORDS,
-        *BAND_WORDS,
-        *STEP_DIRECTION_WORDS,
-        *WEAPON_WORDS,
-        *REFERENT_WORDS,
-    ]
-    words: dict[str, None] = {}
-    for source in sources:
-        for word in re.findall(r"[a-z']+", source.lower()):
-            words[word] = None
+    words: dict[str, None] = dict.fromkeys(_STATIC_RECOGNISED_WORDS)
     for word in extra_words:
         for found in re.findall(r"[a-z']+", word.lower()):
             words[found] = None

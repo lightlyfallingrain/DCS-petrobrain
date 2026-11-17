@@ -1,8 +1,8 @@
 """Tests for `server.TTSAdapterServer`'s `PUT /rules` and the
 `X-Rules-Version` header on `GET /transcripts/poll` (`plans/
-speech-rules/plan.md` D1/D2, Stage 1b). Structural copy of `test_
-transcribe_api.py`'s pattern (real loopback server, recording/fake
-collaborator doubles)."""
+speech-rules/plan.md` D1/D2, Stage 1b; `category` added D16/Stage 3b).
+Structural copy of `test_transcribe_api.py`'s pattern (real loopback
+server, recording/fake collaborator doubles)."""
 
 from __future__ import annotations
 
@@ -73,6 +73,7 @@ def test_a_valid_rule_is_accepted(running_server: TTSAdapterServer) -> None:
                 {
                     "id": "example_rule",
                     "pattern": "xyzzy <direction:left|right> <degrees:angle>",
+                    "category": "flight_control",
                 }
             ],
         },
@@ -88,7 +89,12 @@ def test_bad_grammar_is_rejected_with_a_reason(
 ) -> None:
     status, body = _put_rules(
         running_server,
-        {"version": "v1", "rules": [{"id": "bad", "pattern": "scan <deg:bearing>"}]},
+        {
+            "version": "v1",
+            "rules": [
+                {"id": "bad", "pattern": "scan <deg:bearing>", "category": "always"}
+            ],
+        },
     )
     assert status == 200
     assert body["accepted"] == []
@@ -101,7 +107,10 @@ def test_a_rule_colliding_with_an_existing_command_is_rejected(
 ) -> None:
     status, body = _put_rules(
         running_server,
-        {"version": "v1", "rules": [{"id": "new_rule", "pattern": "scan left"}]},
+        {
+            "version": "v1",
+            "rules": [{"id": "new_rule", "pattern": "scan left", "category": "always"}],
+        },
     )
     assert status == 200
     assert body["accepted"] == []
@@ -120,7 +129,31 @@ def test_missing_rules_is_a_400(running_server: TTSAdapterServer) -> None:
 
 def test_a_rule_missing_an_id_is_a_400(running_server: TTSAdapterServer) -> None:
     status, _body = _put_rules(
-        running_server, {"version": "v1", "rules": [{"pattern": "x"}]}
+        running_server,
+        {"version": "v1", "rules": [{"pattern": "x", "category": "always"}]},
+    )
+    assert status == 400
+
+
+def test_a_rule_missing_a_category_is_a_400(running_server: TTSAdapterServer) -> None:
+    """D16/Stage 3b -- `category` is required, same 400 shape as a
+    missing `id`/`pattern`."""
+    status, _body = _put_rules(
+        running_server,
+        {"version": "v1", "rules": [{"id": "x", "pattern": "x"}]},
+    )
+    assert status == 400
+
+
+def test_a_rule_with_a_non_string_category_is_a_400(
+    running_server: TTSAdapterServer,
+) -> None:
+    status, _body = _put_rules(
+        running_server,
+        {
+            "version": "v1",
+            "rules": [{"id": "x", "pattern": "x", "category": 1}],
+        },
     )
     assert status == 400
 
@@ -149,6 +182,7 @@ def test_pushing_the_same_set_twice_is_harmless(
             {
                 "id": "example_rule",
                 "pattern": "xyzzy <direction:left|right> <degrees:angle>",
+                "category": "flight_control",
             }
         ],
     }

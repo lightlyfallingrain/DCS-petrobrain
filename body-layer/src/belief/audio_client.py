@@ -173,9 +173,12 @@ class AudioAdapterClient:
             )
         return result, rules_version
 
-    def put_rules(self, version: str, rules: list[tuple[str, str]]) -> PutRulesResult:
-        """`PUT /rules` (`{"version": version, "rules": [{"id", "pattern"},
-        ...]}`, D1/D2) -- pushes the full `(id, pattern)` set this process
+    def put_rules(
+        self, version: str, rules: list[tuple[str, str, str]]
+    ) -> PutRulesResult:
+        """`PUT /rules` (`{"version": version, "rules": [{"id", "pattern",
+        "category"}, ...]}`, D1/D2; `category` added D16/Stage 3b) --
+        pushes the full `(id, pattern, category)` set this process
         currently has loaded. `rules` is unordered; `audio-adapter` sorts
         as needed for its own collision check. Raises `AudioAdapterError`
         on any transport/parse failure, same posture as every other call
@@ -185,7 +188,8 @@ class AudioAdapterClient:
         payload = {
             "version": version,
             "rules": [
-                {"id": rule_id, "pattern": pattern} for rule_id, pattern in rules
+                {"id": rule_id, "pattern": pattern, "category": category}
+                for rule_id, pattern, category in rules
             ],
         }
         data = json.dumps(payload).encode("utf-8")

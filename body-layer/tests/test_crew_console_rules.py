@@ -7,9 +7,11 @@ engine) is tested end to end in `test_rules_engine.py`; here every
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from belief.ai_pilot_wheel import AiPilotGoalRequest
+from belief.ai_pilot_wheel import AiPilotGoalRequest, ParkedFlightState
 from belief.contacts import ContactStore
 from belief.crew_console import ACTION_FILE_ERROR_LINE, CrewConsole
 
@@ -20,6 +22,26 @@ def _console_with_rule(
     console = CrewConsole(store=ContactStore())
     console.rule_runner = runner  # type: ignore[assignment]
     console.set_enabled_rule_ids(enabled)
+    return console
+
+
+def _flight_console_with_rule(
+    runner: object, category: str = "flight_control", **state_fields: object
+) -> CrewConsole:
+    """A `category`-categorised `"my_rule"` (`[[BL-17]]` D16) --
+    `state_fields` overrides `ParkedFlightState`'s own defaults
+    (`parked_active=False`, `held_heading=None` -- i.e. not flying,
+    unless a test says otherwise). Defaults to `"flight_control"` (the
+    base, has-controls-only category) for the pass/unable tests that
+    only care about `parked_active`; the hold-and-retry tests (Stage 4
+    split `"flight_control"` into per-parameter categories, review-
+    stage3b.md Required Fix 1) pass `category="flight_control_heading"`
+    explicitly, since only that family actually holds on a missing
+    `held_*` value."""
+    console = CrewConsole(store=ContactStore())
+    console.rule_runner = runner  # type: ignore[assignment]
+    console.set_enabled_rule_ids(frozenset({"my_rule"}), {"my_rule": category})
+    console.parked_flight_state = replace(ParkedFlightState(), **state_fields)
     return console
 
 
@@ -134,3 +156,125 @@ def test_drain_action_file_error_can_speak_twice_across_two_reloads() -> None:
     console.drain_action_file_error(1.0, intercom_open=True)
     assert console.action_file_error_pending is False
     assert output.getvalue() == (ACTION_FILE_ERROR_LINE + "\n") * 2
+
+
+# --- Category gates ([[BL-17]] D16, Stage 3b) --------------------------------
+
+
+def test_gate_pass_runs_the_handler_unchanged_from_today() -> None:
+    console = _flight_console_with_rule(
+        lambda token, slots: (["hi there"], False),
+        parked_active=True,
+        held_heading=10.0,
+    )
+    assert console.handle_command("my_rule", now_sim=0.0) == ["hi there"]
+    assert console.pending_rule_dispatch is None
+
+
+def test_gate_unable_speaks_the_reason_and_never_calls_the_runner() -> None:
+    calls: list[tuple[str, object]] = []
+
+    def runner(token: str, slots: object) -> tuple[list[str], bool]:
+        calls.append((token, slots))
+        return (["should never be heard"], False)
+
+    console = _flight_console_with_rule(runner, parked_active=False)
+    lines = console.handle_command("my_rule", now_sim=0.0)
+    assert lines == ["Unable, not flying."]
+    assert calls == []
+    assert console.pending_rule_dispatch is None
+
+
+def test_gate_hold_sets_pending_and_speaks_nothing() -> None:
+    console = _flight_console_with_rule(
+        lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
+    lines = console.handle_command("my_rule", now_sim=5.0)
+    assert lines == []
+    assert console.pending_rule_dispatch is not None
+    assert console.pending_rule_dispatch.rule_id == "my_rule"
+    assert console.pending_rule_dispatch.category == "flight_control_heading"
+    assert console.pending_rule_dispatch.held_since_sim == 5.0
+
+
+def test_drain_resolves_to_pass_on_a_later_poll_not_at_dispatch_time() -> None:
+    calls: list[float] = []
+
+    def runner(token: str, slots: object) -> tuple[list[str], bool]:
+        calls.append(1.0)
+        return (["now flying"], False)
+
+    console = _flight_console_with_rule(
+        runner,
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
+    console.handle_command("my_rule", now_sim=0.0)
+    assert calls == []  # not called at dispatch time -- it was held
+
+    console.parked_flight_state = replace(
+        console.parked_flight_state, held_heading=10.0
+    )
+    lines = console.drain_pending_rule_dispatch(now_sim=1.0)
+    assert calls == [1.0]
+    assert lines == ["now flying"]
+    assert console.pending_rule_dispatch is None
+
+
+def test_drain_stays_held_silently_under_the_timeout() -> None:
+    console = _flight_console_with_rule(
+        lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
+    console.handle_command("my_rule", now_sim=0.0)
+    lines = console.drain_pending_rule_dispatch(now_sim=1.0)  # well under 5.0s default
+    assert lines == []
+    assert console.pending_rule_dispatch is not None
+
+
+def test_drain_times_out_to_render_unable() -> None:
+    console = _flight_console_with_rule(
+        lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
+    console.handle_command("my_rule", now_sim=0.0)
+    lines = console.drain_pending_rule_dispatch(now_sim=100.0)
+    assert lines == ["Unable, not ready."]
+    assert console.pending_rule_dispatch is None
+
+
+def test_a_second_held_command_replaces_the_first_with_no_line_for_it() -> None:
+    """U21: latest wins, the earlier hold silently dropped."""
+    console = _flight_console_with_rule(
+        lambda token, slots: ([f"ran {token}"], False),
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
+    console.set_enabled_rule_ids(
+        frozenset({"my_rule", "other_rule"}),
+        {
+            "my_rule": "flight_control_heading",
+            "other_rule": "flight_control_heading",
+        },
+    )
+    lines_first = console.handle_command("my_rule", now_sim=0.0)
+    assert lines_first == []
+    lines_second = console.handle_command("other_rule", now_sim=1.0)
+    assert lines_second == []  # the second hold speaks nothing either, yet
+    assert console.pending_rule_dispatch is not None
+    assert console.pending_rule_dispatch.rule_id == "other_rule"
+
+    console.parked_flight_state = replace(
+        console.parked_flight_state, held_heading=10.0
+    )
+    lines = console.drain_pending_rule_dispatch(now_sim=2.0)
+    assert lines == ["ran other_rule"]

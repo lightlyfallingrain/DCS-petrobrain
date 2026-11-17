@@ -24,6 +24,19 @@ this subproject is stdlib-only (`audio-adapter/CLAUDE.md`).
     set PYTHONPATH=src
     python tools\\record_corpus.py --corpus-dir <dir>
 
+**A custom phrase list, instead of `vocabulary.PHRASES`** (added for BL-17 Stage 3c,
+`plans/speech-rules/plan.md`'s corpus step -- the new flight-command number-word/
+state-dependent forms are rule patterns now, never entries in `vocabulary.PHRASES`, so the
+default loop above cannot reach them at all): pass `--phrases-file <path>`, one phrase per
+line, `#`-comments and blank lines skipped. `--list-prompts` prints every phrase that would
+be recorded (from either source) and exits -- no `--corpus-dir`, no `sox`, same way it is
+used below.
+
+    PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts \\
+        --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt
+    PYTHONPATH=src .venv/bin/python tools/record_corpus.py --corpus-dir <dir> \\
+        --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt
+
 **Record on the box whose headset you actually fly with.** For this
 project that means Windows, even though the bench that consumes the
 corpus runs on the Mac. The corpus is raw audio -- recording and
@@ -73,7 +86,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import vocabulary
@@ -389,9 +402,61 @@ def _slug(phrase: str) -> str:
     return phrase.replace(" ", "_")
 
 
+def _load_phrase_groups(phrases_file: Path | None) -> list[tuple[str, Sequence[str]]]:
+    """(token, [phrasings]) pairs to record.
+
+    `vocabulary.PHRASES` by default (Stage 1's own 34-phrasing corpus). When
+    `phrases_file` is given (BL-17 Stage 3c, `plans/speech-rules/plan.md`'s
+    corpus step -- the flight commands' new number-word/state-dependent
+    forms are rule patterns now, not entries in `vocabulary.PHRASES`, so the
+    fixed-vocabulary loop below cannot reach them at all), one phrase per
+    non-blank, non-`#`-comment line, each its own token (slugged for the
+    directory name, since a free-form list has no shared grouping the way
+    `vocabulary.PHRASES` does). The same wording may deliberately appear on
+    more than one line (plan.md's Stage 3c list says "turn left thirty"
+    twice -- once to say normally, once as a refusal case in a different
+    aircraft state) -- a repeat's token gets a numbered suffix so the two
+    takes land in different directories rather than one recording session
+    silently overwriting/continuing the other's take count under an
+    identical slug.
+    """
+    if phrases_file is None:
+        return list(vocabulary.PHRASES.items())
+    groups: list[tuple[str, Sequence[str]]] = []
+    seen: dict[str, int] = {}
+    for raw_line in phrases_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        slug = _slug(line)
+        seen[slug] = seen.get(slug, 0) + 1
+        token = slug if seen[slug] == 1 else f"{slug}-{seen[slug]}"
+        groups.append((token, [line]))
+    return groups
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--corpus-dir", type=Path, required=True)
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        default=None,
+        help="required unless --list-prompts is given",
+    )
+    parser.add_argument(
+        "--phrases-file",
+        type=Path,
+        default=None,
+        help="one phrase per line (# comments/blank lines skipped) to record "
+        "instead of vocabulary.PHRASES -- e.g. plans/speech-rules/plan.md's "
+        "Stage 3c corpus list",
+    )
+    parser.add_argument(
+        "--list-prompts",
+        action="store_true",
+        help="print every phrase that would be recorded (from vocabulary.PHRASES, "
+        "or --phrases-file if given) and exit -- no --corpus-dir or sox needed",
+    )
     parser.add_argument(
         "--takes",
         type=int,
@@ -439,6 +504,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.list_prompts:
+        for token, phrases in _load_phrase_groups(args.phrases_file):
+            for phrase in phrases:
+                print(f'{token}: "{phrase}"')
+        return 0
+
+    if args.corpus_dir is None:
+        parser.error("--corpus-dir is required unless --list-prompts is given")
+
     if not _sox_available():
         print(
             "`sox` not found. Install it with:\n"
@@ -451,7 +525,7 @@ def main() -> int:
         return 1
 
     work: list[tuple[str, str, int]] = []
-    for token, phrases in vocabulary.PHRASES.items():
+    for token, phrases in _load_phrase_groups(args.phrases_file):
         for phrase in phrases:
             done = _existing_takes(args.corpus_dir / token, _slug(phrase))
             for take in range(done, args.takes):

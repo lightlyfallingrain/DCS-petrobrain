@@ -223,12 +223,19 @@ def test_put_rules_posts_version_and_rules() -> None:
     received: list[dict[str, object]] = []
     with _start_server(received=received) as httpd:
         client = AudioAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
-        client.put_rules("v1", [("turn_heading_relative", "turn <d:left|right>")])
+        client.put_rules(
+            "v1",
+            [("turn_heading_relative", "turn <d:left|right>", "flight_control")],
+        )
     assert received == [
         {
             "version": "v1",
             "rules": [
-                {"id": "turn_heading_relative", "pattern": "turn <d:left|right>"}
+                {
+                    "id": "turn_heading_relative",
+                    "pattern": "turn <d:left|right>",
+                    "category": "flight_control",
+                }
             ],
         }
     ]
@@ -244,7 +251,8 @@ def test_put_rules_parses_accepted_and_rejected() -> None:
     ) as httpd:
         client = AudioAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
         result = client.put_rules(
-            "v1", [("turn_heading_relative", "turn <d:left|right>")]
+            "v1",
+            [("turn_heading_relative", "turn <d:left|right>", "flight_control")],
         )
     assert result.version == "v1"
     assert result.accepted == ("turn_heading_relative",)
