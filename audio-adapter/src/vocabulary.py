@@ -1059,6 +1059,22 @@ _WORD_DIGITS: dict[str, str] = {name: str(i) for i, name in enumerate(_DIGIT_NAM
 #: ahead" admitted, the reviewer's adversarial sentences still rejected).
 _WORD_REPAIR_FLOOR: float = 0.5
 
+#: Minimum ratio gap between the best and second-best *distinct*
+#: candidates before they are treated as genuinely distinguishable rather
+#: than ambiguous. **Relocated here from `command_matcher.py` (its
+#: original home) for the identical reason `_WORD_REPAIR_FLOOR` was**
+#: (comment above): `[[BL-17]]`'s E12 revision (user direction,
+#: 2026-11-17 -- "directive words... get fuzzy matching," only an open/
+#: arbitrary *value* stays exact) gives `rule_patterns.py` its own need
+#: for this same near-tie guard, on a `WordSetElement`'s own fuzzy
+#: resolution ("left" vs "right" must never silently swap on a
+#: coin-flip) -- not a second hand-tuned number, the one `command_
+#: matcher.py` already uses between two competing token/rule matches.
+#: Not measured for either use -- see `command_matcher.py`'s own
+#: former comment for the "no real near-tie case on the bench corpus yet"
+#: provenance, unchanged by the move.
+SEPARATION_MIN: float = 0.05
+
 
 class BearingParse:
     """Outcome of reading a numeric bearing out of a transcript.

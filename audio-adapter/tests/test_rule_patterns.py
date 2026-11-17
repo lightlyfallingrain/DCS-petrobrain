@@ -25,6 +25,7 @@ from rule_patterns import (
     match_pattern_with_ratio,
     parse_pattern,
     rule_anchor_words,
+    rule_words,
 )
 from vocabulary import normalize_for_match
 
@@ -293,44 +294,111 @@ class TestCompileRules:
 
 class TestLiteralFuzz:
     """`[[BL-17]]` D13 -- a `LiteralElement` tolerates a mis-transcribed
-    word; a `SlotElement`/`WordSetElement` never does (E12, "fuzziness
-    forgives the words, never the values")."""
+    word; `WordSetElement` does too, since E12's revision (user
+    direction, 2026-11-17, module docstring): a closed-set directive
+    ("left"/"right") is part of the command's own short phrase, fuzzy
+    like a literal, while a `SlotElement`'s own open-ended value (a
+    number, a landmark name -- genuinely arbitrary, unlike a unit class,
+    which the module docstring's own later correction moved to the
+    closed-set/fuzzy side) stays exact -- every shipped slot type is
+    open-ended today, not by any rule tied to `SlotElement` itself."""
 
     _PATTERN = "turn <direction:left|right> <degrees:angle>"
 
     def test_mis_transcribed_literal_still_matches(self) -> None:
+        """Ratio is 0.875, not "turn"/"tern"'s own 0.75: E12's revision
+        folds "left"'s exact word-set hit (`1.0`) into the same average,
+        the whole literal-plus-directive phrase scored together."""
         elements = parse_pattern(self._PATTERN)
         result = match_pattern_with_ratio(elements, _words("tern left two zero"))
         assert result is not None
-        slots, ratio = result
+        slots, ratio, ambiguous = result
         assert slots == {"direction": "left", "degrees": 20}
-        assert ratio == pytest.approx(0.75)
+        assert ratio == pytest.approx(0.875)
+        assert ambiguous is False
 
     def test_exact_literal_still_scores_1_0(self) -> None:
         elements = parse_pattern(self._PATTERN)
         result = match_pattern_with_ratio(elements, _words("turn left two zero"))
         assert result is not None
-        _slots, ratio = result
+        _slots, ratio, ambiguous = result
         assert ratio == 1.0
+        assert ambiguous is False
 
     def test_wholly_unrelated_literal_does_not_match(self) -> None:
         elements = parse_pattern(self._PATTERN)
         assert match_pattern(elements, _words("xyzzy left two zero")) is None
 
-    def test_word_set_value_is_never_fuzzy_repaired(self) -> None:
-        """E12 pin: "lift" scores 0.75 against "left" -- well above
-        `_WORD_REPAIR_FLOOR` -- but it is a *value* (the word-set
-        `direction` slot), not a literal, so it must not match."""
+    def test_mis_transcribed_word_set_value_now_resolves_fuzzily(self) -> None:
+        """E12's revision flips the old pin (this test used to assert
+        `None`): "lift" scores 0.75 against "left" -- clears
+        `_WORD_REPAIR_FLOOR` -- and `direction` is a closed-set directive
+        now, not an exact-only value, so it resolves to the canonical
+        "left", not the mis-heard "lift" itself."""
         elements = parse_pattern(self._PATTERN)
-        assert match_pattern(elements, _words("turn lift two zero")) is None
+        result = match_pattern_with_ratio(elements, _words("turn lift two zero"))
+        assert result is not None
+        slots, ratio, ambiguous = result
+        assert slots == {"direction": "left", "degrees": 20}
+        assert ratio == pytest.approx((1.0 + 0.75) / 2)
+        assert ambiguous is False
+
+    def test_word_set_never_silently_flips_the_wrong_way(self) -> None:
+        """ "light" (a clear mishearing of "right") must resolve to
+        "right", never to "left" -- the fuzzy resolution always picks
+        whichever alternative the heard word is actually closest to, it
+        does not default to the first option or swap on any tolerance
+        hit."""
+        elements = parse_pattern(self._PATTERN)
+        result = match_pattern_with_ratio(elements, _words("turn light two zero"))
+        assert result is not None
+        slots, _ratio, ambiguous = result
+        assert slots["direction"] == "right"
+        assert ambiguous is False
+
+    def test_word_set_near_tie_is_ambiguous_not_a_guess(self) -> None:
+        """E12/E3: a heard directive word within `SEPARATION_MIN` of two
+        alternatives must not be silently picked either way -- the
+        position still resolves to its best-scoring alternative (so the
+        caller has a best guess to describe in a confirm question) but
+        is flagged `near_tie=True`, folding into the same `ambiguous`
+        disposition two competing rules already get at a near-tie.
+        Constructed directly against `_resolve_word_set` with synthetic
+        options engineered to tie exactly (measured: "cab" scores
+        0.6667 against both "cap" and "cat") rather than hunting real
+        English words for a contrived near-rhyme, since the point is the
+        near-tie *mechanism*, not any specific word pair -- "left"/
+        "right" themselves are different enough in spelling that no
+        natural mishearing lands this close to both at once."""
+        best_word, ratio, near_tie = rule_patterns._resolve_word_set(
+            "cab", ("cap", "cat")
+        )
+        assert best_word == "cap"  # first-seen wins a genuine tie, deterministically
+        assert near_tie is True
+        assert ratio == pytest.approx(2 / 3)
+        assert ratio >= rule_patterns._WORD_REPAIR_FLOOR
+
+    def test_word_set_match_folds_near_tie_into_match_ambiguous(self) -> None:
+        """The same near-tie, now through the full grammar: a rule using
+        a synthetic `<choice:cap|cat>` word-set must come back
+        `ambiguous=True` on "cab" even though there is only one rule and
+        one slot -- E12's whole point is that this can happen with no
+        second rule competing at all."""
+        elements = parse_pattern("set <choice:cap|cat>")
+        result = match_pattern_with_ratio(elements, _words("set cab"))
+        assert result is not None
+        _slots, _ratio, ambiguous = result
+        assert ambiguous is True
 
     def test_slot_value_is_never_fuzzy_repaired(self) -> None:
         """Same pin, for a `SlotElement` rather than a `WordSetElement`:
         "free" scores 0.667 against "three" -- well inside the fuzzy
-        band a `LiteralElement` would accept -- but a digit run only
-        recognises an exact member of `_WORD_DIGITS`/a numeral, with no
-        character-ratio fallback at all, so it is simply not a digit and
-        the slot fails to parse, not "forgiven" into 3."""
+        band a `LiteralElement`/`WordSetElement` would accept -- but a
+        digit run only recognises an exact member of `_WORD_DIGITS`/a
+        numeral, with no character-ratio fallback at all, so it is
+        simply not a digit and the slot fails to parse, not "forgiven"
+        into 3. `SlotElement` carries an open/arbitrary value (E12's
+        revision) -- there is no closed set to fuzzy-match against."""
         elements = parse_pattern("<deg:heading>")
         assert match_pattern(elements, _words("heading free one five")) is None
 
@@ -338,8 +406,9 @@ class TestLiteralFuzz:
         elements = parse_pattern("<degrees:angle>")
         result = match_pattern_with_ratio(elements, _words("two zero"))
         assert result is not None
-        _slots, ratio = result
+        _slots, ratio, ambiguous = result
         assert ratio == 1.0
+        assert ambiguous is False
 
 
 class TestQuantitySlot:
@@ -435,6 +504,37 @@ class TestAngleNumberWords:
         assert match_pattern(heading_elements, _words("heading thirty")) is None
         oclock_elements = parse_pattern("<hour:oclock>")
         assert match_pattern(oclock_elements, _words("thirty o'clock")) is None
+
+
+class TestRuleWordsNeverCarriesComposedNumberWords:
+    """Regression pin for Required Fix 1 of `plans/speech-rules/
+    review-stage3a.md`, resolved by user direction (2026-11-17)
+    *against* the review's own suggested shape: D14's composed number
+    words ("thirty", "hundred", the teens) must never reach `rule_words`
+    (and from there `vocabulary.to_prompt`'s whisper prompt bias) for
+    `quantity`/`angle`/`speed_target` -- spelling every permutation into
+    the prompt was rejected as impractical, since whisper already writes
+    recognised numbers as numerals regardless of the prompt's own
+    wording (`research/2026-09-19-whisper-contract-and-grammar-probe.md`)
+    and the numeral-token path through `_consume_digit_run` already
+    parses whatever whisper hands back (`TestAngleSlot.test_whole_number`
+    pins the "45" case). Derived from `rule_patterns`'s own number-word
+    tables, not a hand-copied list, so a table that grows is checked
+    against itself rather than a second list drifting out of sync."""
+
+    _NUMBER_WORDS = frozenset(
+        {*rule_patterns._TEENS_WORDS, *rule_patterns._TENS_WORDS, "hundred"}
+    )
+
+    @pytest.mark.parametrize(
+        "pattern",
+        ["<n:quantity>", "<degrees:angle>", "speed <target:speed_target>"],
+    )
+    def test_number_slot_types_add_no_number_words(self, pattern: str) -> None:
+        rule = CompiledRule(
+            id="probe", pattern=pattern, elements=parse_pattern(pattern)
+        )
+        assert not set(rule_words(rule)) & self._NUMBER_WORDS
 
 
 class TestRuleAnchorWordsAndRegistrySwap:

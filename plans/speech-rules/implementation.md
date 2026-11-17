@@ -918,3 +918,236 @@ declares no runtime dependencies):
   itself, per root `CLAUDE.md`'s own instruction on this exact failure mode, not by re-reading the
   source comment. Fixed by rewording to avoid any embedded ". " in the first sentence at all
   ("such as" in place of "e.g.") rather than teaching the generator about abbreviations.
+
+---
+
+## Stage 3a review fix (2026-11-17)
+
+Addresses the one Required Fix from `plans/speech-rules/review-stage3a.md`: D14's composed
+number-word grammar (`angle`/`quantity`/`speed_target` accepting "twenty"..."ninety",
+"thirteen"..."nineteen", "hundred") taught the *matcher* these words but never reached whisper's
+prompt bias via `rule_words()`/`vocabulary.to_prompt()`.
+
+**The review's suggested shape was built, then reverted on user direction mid-task.** First pass
+added a `vocabulary_words: tuple[str, ...]` field to `SlotType`, populated for `angle`/`quantity`/
+`speed_target` with the teens/tens words plus `"hundred"` (and `"max"` for `speed_target`), folded
+into `rule_words()`/`_words_in()` — exactly the review's own suggested mechanism. The user
+overrode this before it was committed, verbatim:
+
+> *"Writes all number formats as text vocabulary is very impractical. There's a ton of
+> permutations. Nope. Numbers STT as numeric, please."*
+
+So that field and its population were removed again; `rule_patterns.py`'s `SlotType`/`SLOT_TYPES`/
+`_words_in`/`rule_words` are back to their pre-fix shape, byte-for-byte, apart from `rule_words`'s
+own docstring (below).
+
+**Why "no prompt change" is the right fix, not a dodge:**
+
+1. **Whisper already writes recognised numbers as digit numerals, independent of the prompt's own
+   wording.** `research/2026-09-19-whisper-contract-and-grammar-probe.md` measured this directly:
+   "three o'clock" decodes to `"3 o'clock"` on both benched models, even though the prompt's own
+   static vocabulary carries the *spelled* digit words ("zero".."nine", via `_DIGIT_NAMES`) for
+   exactly this reason already. If spelling a word into the prompt does not push the transcript
+   toward that spelling for single digits, there is no mechanism by which spelling "thirty" into
+   the prompt would push the transcript toward text "thirty" instead of numeral "30" either — the
+   normalisation is a property of whisper's own output formatting, not of what the prompt contains.
+2. **The numeral-token path this needs already exists and is already tested, independent of D14.**
+   `_consume_digit_run` treats any `word.isdigit()` token (a whole already-collapsed numeral like
+   "45", not just single digit words) as a digit run and concatenates its characters —
+   `TestAngleSlot.test_whole_number` (`tests/test_rule_patterns.py`, predates this stage) pins
+   exactly this for `"turn right 45"`. So whatever numeral text whisper actually produces for a
+   spoken "thirty" ("30") is already parsed correctly by the pre-D14 grammar, with zero prompt
+   bias required.
+3. **D14's spelled-word grammar therefore stays what it always was underneath: a fallback**, for
+   the rarer case whisper emits the spelled word instead of the numeral. No change needed there
+   either — ordinary English number words are exceedingly common in general training data, unlike
+   this project's actual out-of-distribution vocabulary (callsigns, "Petrovich", weapon names),
+   which is what the prompt bias mechanism exists to help with in the first place.
+
+**Decision, going forward:** D14's number-word grammar is unbiased by design, not by oversight —
+documented in `rule_words()`'s own docstring rather than only here, since that is the function a
+future reader will land on when wondering why these words are absent from the prompt.
+
+### Files Changed
+
+- `audio-adapter/src/rule_patterns.py` — `rule_words()`'s docstring corrected: the old claim ("a
+  slot's own value words... are already covered by `vocabulary.py`'s own digit/time words") was
+  true before D14 and stopped being true the moment `angle`/`quantity`/`speed_target` gained
+  composed number words with no `vocabulary.py` equivalent (the review's own finding) — now states
+  the actual, deliberate reason these words stay out of the prompt (points 1-3 above, condensed,
+  with the research note and the pinning test named). No other production code changed; `SlotType`/
+  `SLOT_TYPES`/`_words_in`/`rule_words()`'s behaviour is identical to pre-fix Stage 3a.
+
+### Tests Added
+
+- `audio-adapter/tests/test_rule_patterns.py`, `TestRuleWordsNeverCarriesComposedNumberWords` (1
+  parametrized test, 3 cases: `<n:quantity>`, `<degrees:angle>`, `speed <target:speed_target>`) —
+  a regression pin for the decision above: `rule_words()` on a rule using any of these three slot
+  types must never add a teens/tens word or `"hundred"` to the prompt bias. The expected word set
+  is derived from `rule_patterns._TEENS_WORDS`/`_TENS_WORDS` directly (plus `"hundred"`), not a
+  hand-copied list, so it cannot silently drift from the grammar's own tables if either grows. This
+  is the test the original review asked for, reshaped to pin the opposite outcome from its
+  suggested mechanism, per the override above.
+
+### Checks (audio-adapter)
+
+Fresh `.venv` built from `/opt/homebrew/bin/python3.14` (none existed in this worktree):
+
+- `ruff format --check src tests`: pass (1 file — the new test — needed `ruff format`, then clean)
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass, 17 source files, 0 issues
+- `.claude/scripts/fast-tests.sh audio-adapter`: pass, 468 passed, 2 skipped (smoke + 15 targeted
+  files, parallel)
+- `pytest -q` (full suite, run once to confirm the exact pre/post delta): 522 passed, 2 skipped —
+  519 passed before this fix (per the review's own run), +3 the new parametrized test's cases.
+
+---
+
+## Stage 3a review fix, round 2 — E12 revised: directive words become fuzzy (2026-11-17)
+
+A second, independent user decision landed in the same task, widening E12 further: a
+`WordSetElement` (a closed-set directive — "left"/"right", a scan direction) is no longer an
+exact-only value. It is now fuzzy like a `LiteralElement`, scored as part of the same
+command phrase; only a genuinely open-ended value (a number, a landmark name) stays exact. Three
+messages, in the order they arrived, because each corrected the one before it:
+
+1. **The core decision**, verbatim:
+
+   > *""Turn left 30" I would read it like "Turn" is base command, "Left" is sub part of command,
+   > "30" is value. ... I'd want fuzzy matching for "turn left" and "scan ahead". Even more so
+   > because the command base word and its directives form a short sentence that makes it easier
+   > to match against something that was kinda almost heard properly."*
+
+   So: `WordSetElement` fuzzes like a literal; the base word and its directives score together as
+   one phrase; numeric/slot values stay exact; a heard word within `SEPARATION_MIN` of two
+   alternatives must not be silently picked (E3 — "say again"); "left"/"right" must never swap.
+
+2. **Clarifying where the line actually is**, verbatim:
+
+   > *"Values would be numeric values, unit class/type, landmark name etc. — things that can be
+   > truly arbitrary instead of like one of five options."*
+
+   Read at the time as: closed-set (`WordSetElement`) is fuzzy, open-ended (`SlotElement` — a
+   number, a unit class, a landmark) is exact, and that split should be a property of the
+   *element type*, not a per-rule choice.
+
+3. **Self-correction, one message later**, verbatim:
+
+   > *"the user decided unit class words (armor, truck, air defence, AAA, tank, …) are a closed
+   > set → fuzzy with the near-tie guard, not an exact 'value'."*
+
+   A unit class turned out to belong on the *fuzzy* side after all — it is a short, closed list,
+   the same shape as a direction, not an arbitrary value. **This is why the fix does not hard-wire
+   "fuzzy ⇔ `WordSetElement`, exact ⇔ `SlotElement`" as a rule enforced in code.** It is true today
+   only because every shipped `SlotType` (`angle`/`quantity`/`heading`/`oclock`/`speed_target`)
+   happens to be open-ended — the real distinction is closed-set-vs-open-ended, and a future unit-
+   class slot type would need the same fuzzy-plus-near-tie mechanism `WordSetElement` now has,
+   wired into its own `consume`, not an automatic exemption for being a `SlotElement`. No such slot
+   type ships this stage (no rule needs one yet) — `rule_patterns.py`'s own module docstring and
+   the `SlotElement` branch's comment in `_match_elements` both say this explicitly, specifically
+   so a later implementer does not read the current code's accident as the rule.
+
+### Mechanism
+
+- **`_resolve_word_set(heard, options)`** (new, `rule_patterns.py`) — the `WordSetElement`
+  counterpart to `_literal_ratio`: scores `heard` against every alternative (`_char_ratio`, a
+  small helper factored out of `_literal_ratio` so both share one comparison), picks the
+  best-scoring one, rejects outright (returns `None`) if nothing clears `_WORD_REPAIR_FLOOR` (same
+  floor a literal uses), and reports `near_tie=True` when a *different* alternative's own ratio
+  lands within `SEPARATION_MIN` of the winner's.
+- **`_match_elements`** — the `WordSetElement` branch now calls `_resolve_word_set` instead of
+  `words[i] not in element.words`; resolves to the *canonical* alternative (not the raw heard
+  word), appends its ratio into the same `word_ratios` list a `LiteralElement` feeds, and ORs
+  `near_tie` into a new `ambiguous` return value (also threaded through `OptionalElement`'s
+  recursive sub-match). `match_pattern_with_ratio` now returns a 3-tuple
+  `(slots, ratio, ambiguous)`; `match_pattern` discards both, unchanged for its callers (the
+  collision checks, which only need "did it match").
+- **Why the existing averaging already *is* "the phrase as a whole," with no `_phrase_match_ratio`
+  port needed**: the user's own phrasing invoked that function's "idea." `_phrase_match_ratio`
+  exists because the legacy matcher searches an unconstrained sentence against a phrase table and
+  needs `SequenceMatcher`'s alignment (insert/delete opcodes) to handle length mismatches. This
+  grammar never has that problem — full-consumption matching already walks every element
+  positionally, so every fuzzy position here is a length-1 "equal-length replace" block by
+  construction. `_phrase_match_ratio`'s three-step algorithm, specialised to that case (no
+  inserts/deletes, every block length 1), reduces exactly to "credit each position's own ratio if
+  it clears the floor, divide by the count" — which is precisely `match_pattern_with_ratio`'s
+  existing mean. So folding `WordSetElement` ratios into the same `word_ratios` list the literal
+  fuzz already averages *is* the phrase-level score, not an approximation of it.
+- **`_match_rules`** (`command_matcher.py`) — unpacks the new 3-tuple; the winning match's own
+  `word_set_ambiguous` seeds `ambiguous` (previously always `False` until the cross-rule near-tie
+  check), so a single rule with no competitor can now come back ambiguous purely from its own
+  directive resolution. The cross-rule/cross-pipeline near-tie check is unchanged and still ORs in.
+- **`SEPARATION_MIN` relocated `command_matcher.py` → `vocabulary.py`**, same move and the same
+  reason `_WORD_REPAIR_FLOOR` made in Stage 3a's first pass: `rule_patterns.py` needs it now (for
+  the near-tie guard) and must never import `command_matcher.py` (the established cycle).
+  `command_matcher.py` imports it back from `vocabulary`, so `command_matcher.SEPARATION_MIN`
+  still resolves unchanged for the one existing test (`test_command_matcher.py`) that reads it
+  that way.
+- **Collision probe widened to word-set positions** (`_sample_words_with_fuzzable_flags`, renamed
+  from `_sample_words_with_literal_flags`; `_perturbed_sample`) — a mis-heard directive word is now
+  part of the fuzzable surface a collision can hide in, the same reasoning D13 already applied to
+  literals. `_COLLISION_PROBE_WORDS` already happened to carry near-misses for both "left"
+  ("lift") and "right" ("light"/"write"/"night") before this change — convenient, not planned for
+  it, noted in the list's own comment. Re-ran the full collision-check test suite
+  (`TestCompileRules` and friends) to confirm nothing already shipped regressed: it did not — the
+  shipped `turn_heading_relative` rule's own perturbed sample is unchanged, because its first
+  fuzzable position ("turn", a literal) already had a usable probe word, so the widening only
+  takes effect for a rule whose first fuzzable position has none, which no shipped rule triggers.
+
+### Files Changed
+
+- `audio-adapter/src/vocabulary.py` — `SEPARATION_MIN` constant + comment moved in from
+  `command_matcher.py` (see above).
+- `audio-adapter/src/rule_patterns.py` — module docstring's E12 section rewritten to the revised
+  rule and its own later correction (above); `_char_ratio` (new, factored out of `_literal_ratio`);
+  `_resolve_word_set` (new); `_match_elements`/`match_pattern_with_ratio`/`match_pattern` signature
+  and behaviour changes (above); `_sample_words_with_fuzzable_flags`
+  (renamed+widened)/`_perturbed_sample` (widened); `_COLLISION_PROBE_WORDS`'s own comment updated
+  to say it now probes word-set positions too.
+- `audio-adapter/src/command_matcher.py` — `SEPARATION_MIN` import added from `vocabulary`, its
+  own former declaration replaced by a pointer comment (mirroring `_WORD_REPAIR_FLOOR`'s own);
+  `_match_rules` unpacks/folds the new `ambiguous` source (above).
+
+### Tests Added/Changed
+
+- `audio-adapter/tests/test_rule_patterns.py`, `TestLiteralFuzz`:
+  - `test_word_set_value_is_never_fuzzy_repaired` → **flipped**, renamed
+    `test_mis_transcribed_word_set_value_now_resolves_fuzzily`: "turn lift two zero" now resolves
+    to `direction="left"`, ratio `(1.0 + 0.75) / 2`, `ambiguous=False` — the exact case the old
+    test pinned as a non-match.
+  - `test_mis_transcribed_literal_still_matches` — ratio assertion updated `0.75` → `0.875` (the
+    word-set's own exact hit now folds into the average).
+  - `test_word_set_never_silently_flips_the_wrong_way` (new) — "turn light two zero" resolves to
+    `"right"`, never `"left"`, pinning that the fuzzy pick always follows the actual best-ratio
+    alternative rather than defaulting to the first option.
+  - `test_word_set_near_tie_is_ambiguous_not_a_guess` (new) — `_resolve_word_set` directly, against
+    synthetic options (`"cap"`/`"cat"`) engineered to tie exactly against `"cab"` (measured: both
+    score `2/3`) rather than hunting a real English near-rhyme for "left"/"right" (there isn't a
+    clean one — the two words are different enough in spelling that no natural mishearing lands
+    this close to both). Pins `near_tie=True`, deterministic first-seen-wins tie-break.
+  - `test_word_set_match_folds_near_tie_into_match_ambiguous` (new) — the same near-tie through the
+    full grammar (`set <choice:cap|cat>` against "set cab"), pinning that a single rule with no
+    competitor can still come back `ambiguous=True` purely from its own word-set resolution.
+- `audio-adapter/tests/test_command_matcher_rules.py`:
+  - `test_word_set_value_mis_transcription_does_not_resolve_the_rule` → **flipped**, renamed
+    `test_mis_transcribed_word_set_value_now_resolves_the_rule`: same shape as the
+    `test_rule_patterns.py` flip, at the `match_transcript` level.
+  - `test_mis_transcribed_literal_still_resolves_the_rule` — ratio assertion updated `0.75` →
+    `0.875`, docstring explains why.
+  - `test_legacy_wins_outright_over_a_weaker_rule_match` — docstring's cited ratio/gap corrected
+    (`0.75`/`0.25` → `0.875`/`0.125`); the test's own assertions (`token == "step"`,
+    `ambiguous is False`) were already correct and unchanged, since the gap is still well past
+    `SEPARATION_MIN` either way — this was a stale-comment fix, not a behaviour change.
+
+No test needed rewriting beyond the two flips and the two ratio-comment corrections — every other
+collision/ambiguity/separation test in both files passed unchanged against the new matching logic.
+
+### Checks (audio-adapter)
+
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass, 17 source files, 0 issues
+- `.claude/scripts/fast-tests.sh audio-adapter`: pass, 471 passed, 2 skipped (smoke + 15 targeted
+  files, parallel)
+- `pytest -q` (full suite): 525 passed, 2 skipped — 522 before this round, +3 net (4 new tests,
+  1 fewer because the two flipped tests replace their old selves 1-for-1, not additions).

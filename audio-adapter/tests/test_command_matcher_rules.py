@@ -79,23 +79,31 @@ def test_mis_transcribed_literal_still_resolves_the_rule() -> None:
     `_WORD_REPAIR_FLOOR`) and does not anchor onto any legacy verb,
     closing the Reviewer-flagged gap from Stage 1b/2 for the rule's own
     literal cleanly (contrast `tern`, which happens to anchor "step" at
-    exactly `VERB_FLOOR` -- see the cross-pipeline test below)."""
+    exactly `VERB_FLOOR` -- see the cross-pipeline test below). The
+    overall ratio is 0.875, not 0.75 -- E12's revision (2026-11-17) means
+    "left"'s own exact word-set hit (`1.0`) is averaged in alongside
+    "turn"'s literal ratio, the whole phrase scored together, not the
+    literal alone."""
     result = match_transcript("turm left two zero", rules=(_TURN_RULE,))
     assert result.token == "turn_heading_relative"
     assert result.slots == {"direction": "left", "degrees": 20}
-    assert result.match_ratio == 0.75
+    assert result.match_ratio == 0.875
     assert result.ambiguous is False
 
 
-def test_word_set_value_mis_transcription_does_not_resolve_the_rule() -> None:
-    """E12 pin, at `match_transcript` level: "lift" scores 0.75 against
-    "left" too, but it is a *value* (the `direction` word-set), not a
-    literal -- it must not be forgiven. The rule still anchors on
-    "turn" (now in the widened set) but nothing resolves -- "say again",
-    not silence, and not a false execution with the wrong direction."""
+def test_mis_transcribed_word_set_value_now_resolves_the_rule() -> None:
+    """E12's revision (user direction, 2026-11-17) flips the old pin
+    this test used to be (`test_word_set_value_mis_transcription_does_
+    not_resolve_the_rule`): "lift" scores 0.75 against "left" and
+    `direction` is a closed-set directive now, not an exact-only value,
+    so it resolves cleanly to "left" -- same 0.875 overall ratio as the
+    mis-transcribed-literal case above, by the same averaging, and
+    `ambiguous=False` since "lift" is not close to "right" at all."""
     result = match_transcript("turn lift two zero", rules=(_TURN_RULE,))
-    assert result.token is None
-    assert result.verb_anchored is True
+    assert result.token == "turn_heading_relative"
+    assert result.slots == {"direction": "left", "degrees": 20}
+    assert result.match_ratio == 0.875
+    assert result.ambiguous is False
 
 
 def test_turn_left_thirty_resolves_via_number_words() -> None:
@@ -116,9 +124,11 @@ def test_legacy_wins_outright_over_a_weaker_rule_match() -> None:
     """A real cross-pipeline case, found while writing the test above:
     "tern" scores exactly `VERB_FLOOR` (0.5) against "step"'s own verb,
     so "tern left two zero" verb-anchors onto *both* pipelines --
-    `turn_heading_relative` at ratio 0.75 (the literal fuzz) and the
-    legacy `step` command at ratio 1.0 (`_parse_step_slots` reads "left"
-    as a direction). The gap (0.25) is well past `SEPARATION_MIN`, so
+    `turn_heading_relative` at ratio 0.875 ("tern"/"turn"'s own 0.75
+    averaged with "left"'s exact word-set hit, E12's revision -- it was
+    0.75 before that stage, the literal alone) and the legacy `step`
+    command at ratio 1.0 (`_parse_step_slots` reads "left" as a
+    direction). The gap (0.125) is still well past `SEPARATION_MIN`, so
     `step` wins outright, not ambiguously -- D13's cross-pipeline check
     is a genuine comparison, not merely a formality that always finds a
     near-tie."""

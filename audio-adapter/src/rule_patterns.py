@@ -11,23 +11,63 @@ body-layer -- nothing here ever executes Lua.
 - `[ ... ]`, an optional group that may itself contain literals and/or
   slots (not nested optionals -- no shipped rule needs that yet),
 - `<name:type>`, a slot of a type in `SLOT_TYPES` below,
-- `<name:w1|w2>`, a word-set slot -- the value is the exact word heard.
+- `<name:w1|w2>`, a word-set slot -- a **directive** from a small,
+  closed set of alternatives ("left"/"right", a scan direction); the
+  resolved value is whichever alternative was actually meant, not
+  necessarily the exact word heard (see E12 below).
 
 **Matching**: a rule matches a transcript only on **full consumption** --
-every element must consume its words and nothing may be left over. A
-`LiteralElement` accepts the heard word on exact equality, or (`[[BL-17]]`
-D13, Stage 3a) on a `_WORD_REPAIR_FLOOR`-or-better character ratio against
-it -- the same per-word repair floor the legacy matcher's own
-`_phrase_match_ratio` already uses, not a second hand-tuned number
+every element must consume its words and nothing may be left over.
+`LiteralElement` and `WordSetElement` both accept the heard word on exact
+equality, or (`[[BL-17]]` D13/Stage 3a's literal fuzz, widened to
+word-sets by the E12 revision below) on a `_WORD_REPAIR_FLOOR`-or-better
+character ratio -- the same per-word repair floor the legacy matcher's
+own `_phrase_match_ratio` already uses, not a second hand-tuned number
 (`vocabulary._WORD_REPAIR_FLOOR`, relocated there specifically so both
 matching modules can import the one value, see that constant's own
-comment). **A `SlotElement`/`WordSetElement` never gets this fallback**:
-its own typed `consume`/exact-word check either succeeds exactly or the
-rule does not match at that position -- this is what keeps a rule's
-*values* (a number, "left"/"right", an hour) heard exactly while its
-*wording* tolerates STT noise (goal check E12, "fuzziness forgives the
-words, never the values"). A match's own ratio is therefore no longer
-always `1.0` -- see `match_pattern_with_ratio`.
+comment). **Only `SlotElement` never gets this fallback**: its own typed
+`consume` either succeeds exactly or the rule does not match at that
+position.
+
+**E12, revised (user direction, 2026-11-17, overriding this module's own
+original reading of it):** *"fuzziness forgives the words, never the
+values"* originally read `WordSetElement` as a value (exact-only, same as
+a slot). The user corrected that distinction directly: *"Values would be
+numeric values, unit class/type, landmark name etc. -- things that can be
+truly arbitrary instead of like one of five options."* -- then corrected
+his own example a message later, once unit-class words were actually
+considered: a unit class ("armor", "truck", "air defence", "AAA", "tank",
+...) **is** a closed, limited list, so it wants the same fuzzy-plus-
+near-tie treatment a `WordSetElement` gets, not the exact treatment "a
+number, a unit class, a landmark" first suggested. So the real line is
+between **closed-set** (a handful of known alternatives -- fuzzy, with
+the near-tie guard, since a mis-heard member of a short known list is
+still a command worth forgiving) and **open-ended** (a number, a
+landmark name; genuinely arbitrary, so there is nothing to fuzzy-match
+against and the exact parse stands). Today that line still happens to
+coincide with the element class -- `WordSetElement` is the only
+closed-set element this grammar has, every shipped `SlotType`
+(`angle`/`quantity`/`heading`/`oclock`/`speed_target`) is open-ended, so
+every `SlotElement` is exact in practice -- but it is **not** a
+per-element-class rule enforced anywhere in code, and must not be read as
+one: a future closed-set slot type (a unit class, built as a named
+`SlotType` rather than spelled out inline like a direction) would need
+`_resolve_word_set`'s own fuzzy-plus-near-tie mechanism wired into its
+own `consume`, the same mechanism `WordSetElement` already has, not a
+second one and not "exact by default because it's a `SlotElement`." No
+such slot type ships this stage (no rule needs one yet); this paragraph
+exists so a later implementer does not read the current code's
+accident -- every `SlotType` happens to be open-ended today -- as the
+rule itself. A match's own ratio folds in each resolved `WordSetElement`
+position alongside every `LiteralElement`'s own (both are now the same
+kind of fuzzy word), so a rule's match ratio is scored over its whole
+literal-plus-directive phrase, not each word in isolation -- see
+`match_pattern_with_ratio`. A `WordSetElement` position whose best and
+second-best alternatives land within `vocabulary.SEPARATION_MIN` of each
+other resolves to neither: "left" and "right" must never be silently
+guessed on a near-tie, so that position makes the whole match `ambiguous`
+(E3's existing "say again" disposition, not a new one) rather than
+picking one.
 
 **`heading`/`bearing` (user direction, 2026-11-17, mid-Stage-1b):**
 *"Until I provide decisions about how to handle 'bearing', treat
@@ -45,7 +85,7 @@ import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from vocabulary import _WORD_DIGITS, _WORD_REPAIR_FLOOR
+from vocabulary import _WORD_DIGITS, _WORD_REPAIR_FLOOR, SEPARATION_MIN
 
 __all__ = [
     "SLOT_TYPES",
@@ -481,28 +521,70 @@ def parse_pattern(pattern: str) -> tuple[Element, ...]:
 # ---------------------------------------------------------------------------
 
 
+def _char_ratio(heard: str, candidate: str) -> float:
+    """`1.0` on an exact hit; otherwise the plain character ratio -- the
+    one comparison shared by `_literal_ratio` (a single candidate, with
+    its own `_WORD_REPAIR_FLOOR` gate) and `_resolve_word_set` (the best
+    of several candidates, gated once on the winner)."""
+    if heard == candidate:
+        return 1.0
+    return difflib.SequenceMatcher(None, heard, candidate).ratio()
+
+
 def _literal_ratio(heard: str, literal: str) -> float | None:
-    """`1.0` on an exact hit; otherwise the character ratio against
-    `literal`, or `None` if it fails to clear `_WORD_REPAIR_FLOOR`
+    """`_char_ratio`, or `None` if it fails to clear `_WORD_REPAIR_FLOOR`
     (`[[BL-17]]` D13) -- the one place a `LiteralElement` tolerates a
     mis-transcribed word."""
-    if heard == literal:
-        return 1.0
-    ratio = difflib.SequenceMatcher(None, heard, literal).ratio()
+    ratio = _char_ratio(heard, literal)
     if ratio < _WORD_REPAIR_FLOOR:
         return None
     return ratio
 
 
+def _resolve_word_set(
+    heard: str, options: tuple[str, ...]
+) -> tuple[str, float, bool] | None:
+    """Fuzzy-resolve a `WordSetElement`'s own heard word against its
+    closed set of alternatives (E12's revision, module docstring): each
+    alternative's own `_char_ratio` is computed and the best one wins,
+    same floor (`_WORD_REPAIR_FLOOR`) a `LiteralElement` uses. Returns
+    `None` if nothing clears the floor at all -- the rule does not match
+    at this position, same as a `LiteralElement`'s own rejection.
+
+    The third element is `near_tie`: `True` when a *different*
+    alternative's own ratio lands within `SEPARATION_MIN` of the winner's
+    -- "left" and "right" must never be silently guessed on a coin-flip,
+    so the caller must not treat a near-tie resolution as a clean pick
+    (it still returns the best word and its ratio, for the caller's own
+    bookkeeping/samples, but folds `near_tie` into the overall match's
+    `ambiguous` flag rather than committing to either alternative)."""
+    scored = sorted(
+        ((_char_ratio(heard, option), option) for option in options),
+        key=lambda pair: -pair[0],
+    )
+    best_ratio, best_word = scored[0]
+    if best_ratio < _WORD_REPAIR_FLOOR:
+        return None
+    near_tie = len(scored) > 1 and (best_ratio - scored[1][0]) < SEPARATION_MIN
+    return best_word, best_ratio, near_tie
+
+
 def _match_elements(
     elements: tuple[Element, ...], words: list[str], idx: int
-) -> tuple[dict[str, object], int, list[float]] | None:
-    """Returns `(slots, next_index, literal_ratios)` -- `literal_ratios`
-    is every `LiteralElement`'s own match ratio encountered along the
-    way (including inside an `OptionalElement`), for
-    `match_pattern_with_ratio` to average (D13)."""
+) -> tuple[dict[str, object], int, list[float], bool] | None:
+    """Returns `(slots, next_index, word_ratios, ambiguous)` --
+    `word_ratios` is every `LiteralElement`/`WordSetElement` position's
+    own match ratio encountered along the way (including inside an
+    `OptionalElement`), for `match_pattern_with_ratio` to average (D13,
+    widened to word-sets by E12's revision -- both are fuzzy "directive"
+    words now, scored as one phrase, not independently). `ambiguous` is
+    `True` if any `WordSetElement` position resolved to a near-tie
+    (E12/E3: a directive word this close between two alternatives is
+    "say again," never a silent pick) -- `False` otherwise, including
+    every pre-existing case that has no word-set at all."""
     slots: dict[str, object] = {}
-    literal_ratios: list[float] = []
+    word_ratios: list[float] = []
+    ambiguous = False
     i = idx
     for element in elements:
         if isinstance(element, LiteralElement):
@@ -511,21 +593,33 @@ def _match_elements(
             ratio = _literal_ratio(words[i], element.word)
             if ratio is None:
                 return None
-            literal_ratios.append(ratio)
+            word_ratios.append(ratio)
             i += 1
         elif isinstance(element, WordSetElement):
-            # **Never fuzzy** (E12, "fuzziness forgives the words, never
-            # the values") -- a word-set value is heard exactly or the
-            # rule does not match at this position.
-            if i >= len(words) or words[i] not in element.words:
+            # A **closed-set directive** (module docstring's E12
+            # revision): fuzzy like a literal, not an exact-only value --
+            # "turn left"/"turn lift" are both the same command, heard
+            # slightly differently, not a command plus an opaque token.
+            if i >= len(words):
                 return None
-            slots[element.name] = words[i]
+            resolved = _resolve_word_set(words[i], element.words)
+            if resolved is None:
+                return None
+            best_word, ratio, near_tie = resolved
+            slots[element.name] = best_word
+            word_ratios.append(ratio)
+            ambiguous = ambiguous or near_tie
             i += 1
         elif isinstance(element, SlotElement):
-            # **Never fuzzy either** -- a slot type's own `consume`
-            # either succeeds exactly or returns `None`; no ratio is
-            # ever computed for a slot value (E12, same as `WordSetElement`
-            # above).
+            # Exact today because every shipped `SlotType` is open-ended
+            # (a number -- there is no closed set to fuzzy-match a
+            # number against). **Not a per-element-class rule**: a
+            # future closed-set slot type (a unit class) would need its
+            # own `consume` wired to `_resolve_word_set`'s mechanism, not
+            # an automatic exemption just for being a `SlotElement` (E12's
+            # revision, module docstring, its own later correction).
+            # Until one ships, a slot type's own `consume` either
+            # succeeds exactly or returns `None`; no ratio is computed.
             slot_type = SLOT_TYPES.get(element.type_name)
             if slot_type is None:
                 return None
@@ -543,38 +637,45 @@ def _match_elements(
             # stage's own tests can expose.
             sub = _match_elements(element.elements, words, i)
             if sub is not None:
-                sub_slots, i, sub_ratios = sub
+                sub_slots, i, sub_ratios, sub_ambiguous = sub
                 slots.update(sub_slots)
-                literal_ratios.extend(sub_ratios)
+                word_ratios.extend(sub_ratios)
+                ambiguous = ambiguous or sub_ambiguous
         else:  # pragma: no cover -- exhaustive by construction
             raise TypeError(f"unknown pattern element {element!r}")
-    return slots, i, literal_ratios
+    return slots, i, word_ratios, ambiguous
 
 
 def match_pattern_with_ratio(
     elements: tuple[Element, ...], words: list[str]
-) -> tuple[dict[str, object], float] | None:
-    """Full-consumption match from word 0, plus the match's own ratio
-    (`[[BL-17]]` D13) -- `None` if any element fails or words remain
-    unconsumed at the end. The ratio is the mean of every `LiteralElement`
-    position's own word-repair ratio (`1.0` for an exact hit), or `1.0`
-    if the pattern has no literal at all (nothing to be fuzzy about --
-    e.g. a rule whose whole pattern is `<degrees:angle>`)."""
+) -> tuple[dict[str, object], float, bool] | None:
+    """Full-consumption match from word 0, plus the match's own ratio and
+    `ambiguous` flag (`[[BL-17]]` D13, E12's revision) -- `None` if any
+    element fails or words remain unconsumed at the end. The ratio is the
+    mean of every `LiteralElement`/`WordSetElement` position's own
+    word-repair ratio (`1.0` for an exact hit) -- the command's own
+    literal-plus-directive phrase scored as a whole -- or `1.0` if the
+    pattern has neither at all (nothing to be fuzzy about -- e.g. a rule
+    whose whole pattern is `<degrees:angle>`). `ambiguous` is `True` only
+    when some `WordSetElement` position resolved to a near-tie; the
+    caller (`command_matcher._match_rules`) folds this into the same
+    `MatchResult.ambiguous` a cross-rule near-tie already sets."""
     result = _match_elements(elements, words, 0)
     if result is None:
         return None
-    slots, end, literal_ratios = result
+    slots, end, word_ratios, ambiguous = result
     if end != len(words):
         return None
-    ratio = sum(literal_ratios) / len(literal_ratios) if literal_ratios else 1.0
-    return slots, ratio
+    ratio = sum(word_ratios) / len(word_ratios) if word_ratios else 1.0
+    return slots, ratio, ambiguous
 
 
 def match_pattern(
     elements: tuple[Element, ...], words: list[str]
 ) -> dict[str, object] | None:
-    """`match_pattern_with_ratio`, discarding the ratio -- every caller
-    that only needs "did it match" (the collision checks below)."""
+    """`match_pattern_with_ratio`, discarding the ratio/ambiguous flag --
+    every caller that only needs "did it match" (the collision checks
+    below)."""
     result = match_pattern_with_ratio(elements, words)
     return result[0] if result is not None else None
 
@@ -648,14 +749,18 @@ def generate_samples(rule: CompiledRule) -> list[str]:
 #: A small, fixed set of ordinary short words -- the same "fixed list,
 #: not generated" posture `vocabulary.FREE_SPEECH_GUARD` already has --
 #: used to probe whether a *mis-transcribed* variant of a rule's own
-#: literal could collide with a different rule or an existing legacy
-#: phrase (D13's widened D9 collision check, `_perturbed_sample` below).
-#: Deliberately generic rather than hand-picked near-misses of any one
-#: rule's own wording: a later rule's literal is unknown in advance, and
-#: this list only needs to contain *some* word landing in
-#: `[_WORD_REPAIR_FLOOR, 1.0)` against whichever literal is being probed
-#: -- `_perturbed_sample` skips a literal with no hit at all (module
-#: docstring's own "Collision check (D9), widened").
+#: literal or word-set word could collide with a different rule or an
+#: existing legacy phrase (D13's widened D9 collision check, widened
+#: again by E12's revision to cover word-sets too, `_perturbed_sample`
+#: below). Deliberately generic rather than hand-picked near-misses of
+#: any one rule's own wording: a later rule's literal/word-set vocabulary
+#: is unknown in advance, and this list only needs to contain *some* word
+#: landing in `[_WORD_REPAIR_FLOOR, 1.0)` against whichever word is being
+#: probed -- `_perturbed_sample` skips a position with no hit at all
+#: (module docstring's own "Collision check (D9), widened"). Already
+#: carries both of `turn_heading_relative`'s own word-set alternatives'
+#: near-misses ("lift" for "left", "light"/"write"/"night" for "right")
+#: from before this widening -- convenient, not planned for it.
 _COLLISION_PROBE_WORDS: tuple[str, ...] = (
     "scam",
     "turn",
@@ -707,40 +812,44 @@ def _best_probe_word(literal: str) -> str | None:
     return None
 
 
-def _sample_words_with_literal_flags(
+def _sample_words_with_fuzzable_flags(
     elements: tuple[Element, ...], include_optionals: bool
 ) -> list[tuple[str, bool]]:
     """Like `_sample_elements`, but keeping each produced word tagged
-    with whether it came from a `LiteralElement` -- only those positions
-    are candidates for `_perturbed_sample`'s substitution; a slot/
-    word-set sample word is never perturbed (E12, same as the matcher
-    itself)."""
+    with whether it came from a `LiteralElement` or a `WordSetElement`
+    -- only those positions are candidates for `_perturbed_sample`'s
+    substitution, since E12's revision (module docstring) made both
+    fuzzy; a slot's own sample word is never perturbed (it is an exact
+    value, with nothing to probe a near-miss collision against)."""
     result: list[tuple[str, bool]] = []
     for element in elements:
         if isinstance(element, LiteralElement):
             result.append((element.word, True))
         elif isinstance(element, WordSetElement):
-            result.append((element.words[0], False))
+            result.append((element.words[0], True))
         elif isinstance(element, SlotElement):
             result.append((SLOT_TYPES[element.type_name].sample(), False))
         elif isinstance(element, OptionalElement) and include_optionals:
             result.extend(
-                _sample_words_with_literal_flags(element.elements, include_optionals)
+                _sample_words_with_fuzzable_flags(element.elements, include_optionals)
             )
     return result
 
 
 def _perturbed_sample(rule: CompiledRule) -> str | None:
-    """One sample for `rule` (D9/D13's "one perturbed sample per rule")
-    with exactly one literal word replaced by a near-miss probe word --
-    tries each literal position in turn and stops at the first one with
-    a usable probe word (module docstring's "the perturbed probe is
-    skipped for that word" is per-literal, not per-rule: the next
-    literal, if any, still gets a chance). `None` if the rule has no
-    literal at all, or none of its literals has a usable probe word."""
-    parts = _sample_words_with_literal_flags(rule.elements, include_optionals=True)
-    for i, (word, is_literal) in enumerate(parts):
-        if not is_literal:
+    """One sample for `rule` (D9/D13's "one perturbed sample per rule",
+    widened by E12's revision to cover `WordSetElement` positions too --
+    a mis-heard directive word is now part of the fuzzable surface a
+    collision can hide in, the same as a mis-heard literal) with exactly
+    one literal-or-word-set word replaced by a near-miss probe word --
+    tries each such position in turn and stops at the first one with a
+    usable probe word (module docstring's "the perturbed probe is
+    skipped for that word" is per-position, not per-rule: the next one,
+    if any, still gets a chance). `None` if the rule has no literal or
+    word-set element at all, or none of them has a usable probe word."""
+    parts = _sample_words_with_fuzzable_flags(rule.elements, include_optionals=True)
+    for i, (word, fuzzable) in enumerate(parts):
+        if not fuzzable:
             continue
         probe = _best_probe_word(word)
         if probe is None:
@@ -840,15 +949,29 @@ def _words_in(elements: tuple[Element, ...]) -> list[str]:
 def rule_words(rule: CompiledRule) -> list[str]:
     """Every literal/word-set word this rule's pattern can produce --
     what `server.py` adds to the whisper prompt bias (D10) alongside the
-    existing vocabulary. A slot's own *value* words (digits, "o'clock")
-    are not included -- those are already covered by `vocabulary.py`'s
-    own digit/time words; a slot type's one fixed anchor word, where it
-    has one (`heading`'s "heading"), is a `LiteralElement` in nobody's
-    pattern string today (it lives inside the slot type's own `consume`,
-    not the grammar), so it is not picked up here either -- a later
-    stage that ships a rule using `heading` should add that one word by
-    hand to whichever rule file's own bias list needs it, the same way
-    any other fixed vocabulary word is added."""
+    existing vocabulary. A slot's own *value* words are never included,
+    by deliberate decision, not just the pre-D14 default: review
+    (`plans/speech-rules/review-stage3a.md` Required Fix 1) flagged that
+    `angle`/`quantity`/`speed_target`'s D14 composed number words
+    ("thirty", "hundred", ...) reach neither `vocabulary.py`'s static
+    tables nor this prompt bias; user direction (2026-11-17, overriding
+    the review's suggested per-slot-type vocabulary list) kept it that
+    way -- spelling every number-word permutation into the prompt is
+    impractical, whisper already writes recognised numbers as numerals
+    regardless of a prompt's wording (`research/
+    2026-09-19-whisper-contract-and-grammar-probe.md`: "three o'clock"
+    decodes to `"3 o'clock"` on both benched models), and the
+    numeral-token path through `_consume_digit_run` (`word.isdigit()`)
+    already parses whatever whisper hands back -- `test_whole_number`
+    (`tests/test_rule_patterns.py`) pins this for a bare "45". So D14's
+    word grammar stays a parser-level fallback, intentionally unbiased.
+    A slot type's one fixed anchor word, where it has one (`heading`'s
+    "heading"), is a `LiteralElement` in nobody's pattern string today
+    (it lives inside the slot type's own `consume`, not the grammar), so
+    it is not picked up here either -- a later stage that ships a rule
+    using `heading` should add that one word by hand to whichever rule
+    file's own bias list needs it, the same way any other fixed
+    vocabulary word is added."""
     return _words_in(rule.elements)
 
 

@@ -93,6 +93,7 @@ from rule_patterns import CompiledRule, match_pattern_with_ratio, rule_anchor_wo
 from vocabulary import (
     _WORD_REPAIR_FLOOR,
     PHRASES,
+    SEPARATION_MIN,
     TOKENS,
     normalize_for_match,
     normalized_phrase_index,
@@ -200,15 +201,19 @@ WAKE_FLOOR: float = 0.8
 _WAKE_WORD = "petrovich"
 _WAKE_GREETING = "hey"
 
-#: Minimum ratio gap between the best and second-best *different-token*
-#: candidates (Decision 4 Layer 2 step 4, "the separation check") before
-#: they are treated as genuinely distinguishable rather than ambiguous.
-#: Not measured -- Stage 1's bench recorded no case where two different
+#: `SEPARATION_MIN` -- the minimum ratio gap between the best and
+#: second-best *distinct* candidates (Decision 4 Layer 2 step 4, "the
+#: separation check") before they are treated as genuinely
+#: distinguishable rather than ambiguous -- now lives in `vocabulary.py`
+#: (imported above), not here: the E12 revision gave `rule_patterns.py`
+#: its own need for the identical near-tie guard, on a `WordSetElement`'s
+#: own fuzzy resolution, for the same reason `_WORD_REPAIR_FLOOR` moved
+#: there first (see that comment, two entries up). Not measured for
+#: either use -- Stage 1's bench recorded no case where two different
 #: tokens' ratios landed within a hair of each other on the real corpus,
-#: so there is no distribution to set this from. Picked as a small
-#: fraction of `MATCH_FLOOR`'s own scale; revisit once live use produces
+#: so there is no distribution to set this from; picked as a small
+#: fraction of `MATCH_FLOOR`'s own scale, revisit once live use produces
 #: real near-tie cases.
-SEPARATION_MIN: float = 0.05
 
 
 #: Words dropped before matching: hesitation sounds, articles, and the two
@@ -514,26 +519,33 @@ def _match_rules(
 
     **`[[BL-17]]` D13**: a match's own `match_ratio` is no longer always
     `1.0` -- `match_pattern_with_ratio` now returns the mean of each
-    literal position's own word-repair ratio (`rule_patterns.py`'s own
-    literal fuzz). The best-scoring match wins; a *second* match within
-    `SEPARATION_MIN` of the best is `ambiguous=True` (the same
-    disposition two legacy phrases at a near-tie already get, D13's
-    "Ratio and the tie-break"), not "two or more matches is always a
-    tie" the way exact-literal matching made true before D13. Ties on
-    ratio break by rule id (sorted), for determinism -- no need to sort
-    the whole `rules` tuple up front for this (D15: that per-transcript
-    sort is exactly what the caller no longer has to pay for)."""
-    matches: list[tuple[CompiledRule, dict[str, object], float]] = []
+    literal/word-set position's own word-repair ratio (`rule_patterns.py`'s
+    own literal fuzz, widened to word-sets by the E12 revision). The
+    best-scoring match wins; a *second* match within `SEPARATION_MIN` of
+    the best is `ambiguous=True` (the same disposition two legacy
+    phrases at a near-tie already get, D13's "Ratio and the tie-break"),
+    not "two or more matches is always a tie" the way exact-literal
+    matching made true before D13. **E12's revision adds a second,
+    independent source of `ambiguous=True`**: the winning match's own
+    `WordSetElement` resolution can itself be a near-tie (two
+    alternatives, e.g. "left"/"right", too close to call) with no second
+    *rule* competing at all -- `match_pattern_with_ratio`'s own third
+    return value carries that, and it is folded in here rather than
+    discarded, so a single-rule, single-candidate transcript can still
+    come back ambiguous. Ties on ratio break by rule id (sorted), for
+    determinism -- no need to sort the whole `rules` tuple up front for
+    this (D15: that per-transcript sort is exactly what the caller no
+    longer has to pay for)."""
+    matches: list[tuple[CompiledRule, dict[str, object], float, bool]] = []
     for rule in rules:
         result = match_pattern_with_ratio(rule.elements, words)
         if result is not None:
-            slots, ratio = result
-            matches.append((rule, slots, ratio))
+            slots, ratio, word_set_ambiguous = result
+            matches.append((rule, slots, ratio, word_set_ambiguous))
     if not matches:
         return None
     matches.sort(key=lambda m: (-m[2], m[0].id))
-    rule, slots, ratio = matches[0]
-    ambiguous = False
+    rule, slots, ratio, ambiguous = matches[0]
     if len(matches) > 1:
         second_ratio = matches[1][2]
         if (ratio - second_ratio) < SEPARATION_MIN:
