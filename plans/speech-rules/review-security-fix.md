@@ -120,3 +120,67 @@ inspection alone. All stated checks (`ruff format --check`, `ruff check`, `mypy 
 Not spot-checked: the rest of the merged batch (audio-adapter `rule_patterns.py`, the sandbox/
 loader modules, the crew-console rule-dispatch wiring) was read for this fix's blast radius only,
 not re-reviewed end to end — that was `review-stage1b-2.md`'s job, not this one's.
+
+---
+
+### Re-review, 2026-11-17
+
+Scope: did the Required Fix 1 commit above actually land correctly. Diff checked:
+`git diff 6ec02ae4..1b68c101` — `body-layer/src/rules/engine.py`, `body-layer/tests/
+test_rules_engine.py`, `plans/speech-rules/implementation.md`, and one new implementer memory
+file (`feedback_restore_mutation_probe_not_via_git_checkout.md`). Nothing else is in this diff —
+confirmed with `git diff ... --name-only`, four files, matching the dispatch's stated scope
+exactly.
+
+**`_digits_readback` now raises as required.** Both branches changed from `return
+render_unable("").text` to `raise RuleRuntimeError(f"digits() called with non-numeric value:
+{n!r}")` / `raise RuleRuntimeError(f"digits() called with non-finite value: {n!r}")` — the exact
+shape asked for, and the docstring was rewritten (not just trimmed) to explain why `digits` has no
+pre-existing reject-branch contract the way `_make_action_wrapper` does, naming this review's
+Required Fix 1 by file. The dead sentence about `""` not being one of D11's closed reason tokens
+(flagged as an Optional Refinement above) is gone, correctly, since there is no more
+`render_unable` call left in the function for it to describe — nothing load-bearing was lost with
+it; it described code that no longer exists.
+
+**Tests assert the D6 outcome and are real, not decorative.** Both renamed tests
+(`test_digits_rejects_a_string_slot_as_a_dispatch_error`,
+`test_digits_rejects_nan_as_a_dispatch_error`) now assert `outcome.lines == []` and `outcome.error
+is True` — the shape `test_a_lua_error_during_dispatch_is_reported_as_error` already asserts for a
+genuine Lua error — in place of the old `outcome.lines == ["Unable."]` / `outcome.error is False`.
+**Verified by mutation myself, not just by reading the diff**: reverted `_digits_readback` to the
+pre-fix `return render_unable("").text` shape (via a backed-up copy of the file, restored from
+that copy afterward — not `git checkout --`, per the new implementer memory's own lesson, since
+this worktree had no uncommitted state to lose anyway), re-ran `tests/test_rules_engine.py -k
+digits`: both renamed tests go red with exactly `AssertionError: assert ['Unable.'] == []` /
+the string-slot twin, the old-behaviour failure the fix is supposed to prevent. Restored and
+re-ran: 15/15 green again, matching `implementation.md`'s claimed count.
+
+**`implementation.md` is accurate.** The "Review-fix round, 2026-11-17" section correctly
+describes the asymmetry (action-wrapper reject-branch unchanged and correct vs. `digits` now
+raising), cites the review file and the user's BL-17 decision by name, records which two tests
+changed and how, and explicitly notes the two action-wrapper tests are untouched. It does not read
+as more uniform than the fix actually is — the problem this Required Fix existed to close.
+
+**Checks, fresh in this worktree** (`cd body-layer`, venv built from
+`/opt/homebrew/bin/python3.14` since none existed): `ruff format --check` — 218 files already
+formatted; `ruff check` — all checks passed; `.venv/bin/mypy --strict src` — success, 89 source
+files; `.claude/scripts/fast-tests.sh body-layer` — 2737 passed, 4 xfailed, matching
+`implementation.md`'s numbers exactly. `git status --porcelain` clean in `body-layer/` after the
+mutation probe and restore.
+
+**Nothing else changed.** No scope creep beyond the four files the dispatch named; the one new
+memory file is a legitimate implementer self-correction (restoring a mutated file from a backup
+copy rather than `git checkout --`, which would have discarded the uncommitted fix along with the
+mutation at the time it was written) and not itself part of the fix.
+
+#### Verdict
+
+APPROVED
+
+#### Review Confidence
+
+Full read of the diff and both touched functions' current state; verified by mutation (fresh
+revert-and-restore, not relying on the first review's probe); all four stated checks re-run fresh
+in this worktree and pass with matching numbers. Not spot-checked: the rest of the merged
+`feature/speech-rules` tip beyond this diff (audio-adapter, sandbox/loader, crew-console wiring)
+— out of scope for this re-review, per the dispatch.
