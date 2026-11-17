@@ -133,7 +133,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B92]] — `test_connection_reporter_*` tests order-dependent under pytest-randomly (fixed, merged `27f9821f`)
 - [[BL-B93]] — `test_tuning.py` autouse fixture leaves the tuning registry empty for later tests
 - [[BL-B94]] — named, checked catalogue of state params (light level as the example) `[>]` deferred
-- [[BL-B95]] — event-driven behaviour scripting in Lua (was: behaviour trees) `[>]` deferred
+- [[BL-B95]] — event-driven behaviour scripting in Lua (was: behaviour trees) `[>]` deferred; speech-command slice promoted to [[BL-17]] 2026-11-17
 - [[BL-B96]] — crew pipeline by default: no mode flags, F10 and overlay removed, `logger` → `body` (done, merged `af9254d5`)
 - [[BL-B97]] — attack-run LOS: "eyes on" means line of sight, and "where is it?" (2026-10-24 sortie F2/F3)
 - [[BL-B98]] — 9K113 sight returns to dead-ahead after a glance-away instead of staying at its last position (done, folded into BL-B89)

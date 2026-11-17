@@ -270,3 +270,169 @@ There are more important things first."* So:
 - `[[BL-B94]]` was narrowed to the param catalogue. The table condition syntax was dropped and the
   light level stays an example only. Deferred.
 - The root `CLAUDE.md` actions-and-params rule stands, re-aimed at scripting.
+
+## 2026-11-17: speech commands as Lua rules (`/explore`, reopened by the user)
+
+The user reopened `[[BL-B95]]` with a narrower, concrete entry point: **player speech commands
+defined in Lua**, pattern + slot checks + handler. Verbatim:
+
+> *"I have this idea that I'd like to be able to do, in pseudocode
+> (note: I'm using brackets '[' to denote optional values.)"*
+
+Example 1:
+
+```
+when.speech("turn left <value>")
+    .where($value).isNumber()
+    .do(
+        incrementHeading(-1 * $value)
+        .then().say("left $value")
+        )
+```
+
+> *"Speech meaning player command STT string. Numeric values "315" and "3 1 5" and "three one five"
+> must all collapse to 315 before this code runs."*
+
+Example 2:
+
+```
+when.speech("[set] mark [heading] <direction> [o'clock] <distance> <distance_unit>")
+    .where($direction).isNumber()
+    .where($distance).isNumber()
+    .where($distance_unit).isOneOf("meters", "kilometers")
+    .do(
+        if present("heading") then
+            heading = $direction
+        else if present("o'clock") then
+            heading = oclockToHeading($direction)
+        else
+            say("say again")
+            error("direction unit not recognized")
+        fi
+
+        distance = $distance
+        if $distance_unit == "meters" then
+            distance = distance / 1000
+        fi
+        mark = setMark(currentPosition().translate().heading(heading).distance(distance))
+        say("mark $1", mark.number())
+```
+
+Example 3:
+
+```
+when.speech("engage/'attack run' <unit> <direction> [o'clock] [<distance> kilometers] [<weapon>]")
+    .where($unit).isText()
+    .where($direction).map("ahead", 12).isNumber()    # map -> if "ahead" change to 12 else pass through
+    .where($distance).isNumber()
+    .where($weapon).isOneOf("missiles","rockets","guns","bombs")   # note, since weapon is optional value, brackets, it can be empty
+    .do(
+        unit = getUnit($direction, $distance, $unit)
+        setTarget(unit)
+        attackRun()
+        say("attack run $unit")
+        trigger('attack_run')
+        )
+```
+
+> *"This would move lot's of hardcoded actions to config lua. We'd need exposed tool set to call.
+> But then creating and modifying actions (and user speech commands) would become easy."*
+
+### What is already on record (checked before the first question)
+
+- Today a command is a token in `audio-adapter/src/vocabulary.py` (84 tokens, 148 bias phrasings),
+  a hand-written `parse_*` slot function there, matching in `command_matcher.py`, and a handler in
+  body-layer (`crew_console.py`, plus e.g. `ai_pilot_wheel.py`). Example 1 already exists as
+  `turn_heading_relative`; Example 3's shape exists as `engage [<what> <where>] [weapon]`; marks
+  exist as `mark_here` / `mark_target`.
+- Number collapse already exists for the digit-by-digit form (`_read_digits_after`); whole-number
+  words ("three hundred fifteen") are unbenched.
+- `vocabulary.py:645` records why **"attack" was refused as an `engage` synonym**: the fuzzy verb
+  anchor scores "tanks" vs "attack" at 0.545, over the 0.5 floor, so "the tanks are on the ridge"
+  would stop falling through as free speech and become "say again". A pattern written in a script
+  meets the same recogniser and matcher, so adding a phrase can change how another one matches.
+- BR-2 (`plans/brain-tool-calls/plan.md`): the brain fills the same slots and calls the same handler
+  as a matched command; BL-B95's own gap 4 says parsing stays in code.
+
+### Round 1, 2026-11-17
+
+Main loop raised two findings (the "attack"/"tanks" matcher collision above, and adjacent numbers
+running together once optional words are dropped: "mark two three kilometers") and asked four
+questions. Answers, verbatim:
+
+1. **Phrasing.** *"to get the deterministic (=fast) path, I use fixed wording"*. Fixed wording is the
+   fast path; loose speech is not what the patterns are for.
+2. **Engage a unit Petrovich has not seen.** *"report no contact"*.
+3. **What a mark is.** *"point to come back to, to use as reference for scanning or flight
+   waypoint."* (Marks carry `MarkPayload.index` today, always written as 0; a spoken mark number
+   would be new.)
+4. **Readbacks.** *"each rule writes it's own"*.
+
+**Numbers: the direction's type is always spoken, and the type fixes the digit count.** Verbatim:
+
+> *"heading/bearing <value>" - value is \d\d\d - always three digits*
+> *"<value> o'clock" - value is \d\d? - 1 and 12 ok*
+> *numeric direction value must specify what type it is "heading", "o'clock", "bearing"*
+>
+> *From this*
+> *"mark heading 3 1 5 2 kilometers" -> mark heading 315, 2 km*
+> *"mark heading 0 1 5 2 kilometers" -> mark heading 015, 2 km*
+> *"mark 1 o'clock 3 kilometers" -> do action would handle oclockToHeading()*
+
+So the ambiguity is resolved by spoken phraseology, not by the grammar guessing: heading and
+bearing take exactly three digits, o'clock takes one or two (1–12) and comes before its type word.
+
+### Round 2, 2026-11-17
+
+Main loop proposed **typed slots defined in code** (`heading`, `bearing`, `oclock`, `distance`),
+each owning its spoken shape and normalisation, so a rule receives a parsed value and a slot that
+fails to parse means the rule did not match (one standard "say again"). Example 2 reduces to:
+
+```lua
+when.speech("[set] mark <dir:heading|oclock> <dist:distance>", function(s)
+  local hdg = s.dir.kind == "oclock" and oclock_to_heading(s.dir.hour) or s.dir.deg
+  local m = set_mark(position():offset(hdg, s.dist.km))
+  say("mark " .. m.number)
+end)
+```
+
+Answers, verbatim:
+
+1. **Port existing commands or only new ones?** *"all of them. Group by what they do, split to files
+   as needed."* All 84 tokens move to Lua rule files, grouped by function. This overrides the
+   root `CLAUDE.md` default ("existing hard-coded behaviour stays unless a change touches it") for
+   speech commands.
+2. **Target choice within a group.** *"as recommended"*: code picks the unit and returns one unit
+   or `nil`; the rule says "no contact" on `nil`. Target choice is perception/judgement and stays
+   out of scripts.
+3. **Heading vs bearing.** *"bearing is ownship relative so that 0 is boresight. Rarely used, but
+   let's support it."*
+4. **Mark numbers.** *"yes, reference by number. Only ever add marks, edit and delete are not
+   supported."* Marks are numbered, referenced later by number, append-only.
+
+### Round 3, 2026-11-17: bearing vs heading, dependency, sequencing
+
+Main loop pointed out that existing code already uses "bearing" for a **compass** direction
+("scan bearing three two zero" → compass-absolute sector, `crew_console.py:374`, with a ×5
+checksum in `vocabulary.parse_bearing`), which contradicts answer 3. Verbatim:
+
+> *"Standard usage of bearing is ownship relative degrees. Standard usage of heading is compass
+> degrees, either magnetic or true depending on application.*
+> *Change the naming in existing code to reflect this."*
+
+> *"ok for lupa dependency"*
+
+> *"build the scructure first, then take one or two rules and port them. Then test flight is in
+> order. Then we can schedule porting the rest in stages."*
+
+So:
+
+- **Bearing = ownship-relative degrees (0 = boresight). Heading = compass degrees**, magnetic or
+  true by application. Existing code that says "bearing" for a compass direction is renamed to
+  "heading", spoken vocabulary included ("scan bearing 320" → "scan heading 320").
+- **`lupa` (MIT) approved** as a new dependency.
+- **Sequencing:** the rule engine structure first, then port one or two existing commands, then a
+  test flight, then the remaining commands in scheduled stages.
+- Left open for planning: which application uses magnetic and which true; whether the ×5
+  checksum stays on scan headings only or applies to every three-digit direction (the existing
+  "turn heading" has none, deliberately).
