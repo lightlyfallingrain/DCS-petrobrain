@@ -364,8 +364,9 @@ questions. Answers, verbatim:
    fast path; loose speech is not what the patterns are for.
 2. **Engage a unit Petrovich has not seen.** *"report no contact"*.
 3. **What a mark is.** *"point to come back to, to use as reference for scanning or flight
-   waypoint."* (Marks carry `MarkPayload.index` today, always written as 0; a spoken mark number
-   would be new.)
+   waypoint."* (Correction, from the goal check: marks are already numbered per mission —
+   `MissionMemoryStore` overwrites the caller's `index=0` from `_next_mark_index` — and "mark here"
+   already reads back "mark N set". What is new is a command that *uses* the number.)
 4. **Readbacks.** *"each rule writes it's own"*.
 
 **Numbers: the direction's type is always spoken, and the type fixes the digit count.** Verbatim:
