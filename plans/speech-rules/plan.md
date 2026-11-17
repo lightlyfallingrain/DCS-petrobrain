@@ -1158,6 +1158,13 @@ open.
 
 ### Revision 2's own open decisions (U19–U24)
 
+> **Answered 2026-11-17.** User, to all six recommendations as put to them: *"as recommeded"*. So:
+> U19 category required (no default); U20 `RULE_GATE_HOLD_TIMEOUT_S` = 5.0 s (lo 1.0 / hi 15.0),
+> tunable; U21 latest held flight command wins; U22 flight readbacks may cut off a routine callout
+> while he flies; U23 the narrowed hint ships only on zero new unsafe-command errors and zero lost
+> "unable, <reason>" answers; U24 no change to failing-write behaviour now, revisit when the first
+> effector-writing rule ships.
+
 - **U19 — the `when.speech` signature change** (`when.speech(id, pattern, category, handler)`,
   D16). **Recommend: yes, proceed as a required positional argument**, not optional/defaulted and
   not a trailing options table. Why: a missing category is exactly the kind of mistake a closed,
