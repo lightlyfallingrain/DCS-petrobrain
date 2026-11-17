@@ -139,3 +139,182 @@ checked against the shipped code and found accurate. Not independently re-verifi
 own compatibility with the widened `match_ratio`/`ambiguous` semantics for `turn_heading_relative`
 (body-layer is untouched by this diff and out of this review's scope per the brief; its own test
 suite is DoD's/Stage 3b's concern).
+
+---
+
+## Re-review — 2026-11-17
+
+Reviewed `1cb9b0de` (one commit, "BL-17 Stage 3a review fix: number-word prompt bias rejected,
+E12 revised for directive words"), cherry-picked on top of Stage 3b, against this file's own
+Required Fix 1, `body-layer/ROADMAP/BL-17.md`'s three verbatim user decisions from 2026-11-17
+("Numbers reach speech-to-text as numerals", "Directives are part of the command, and fuzzy; only
+values are exact", "Unit class words are a fixed list, matched fuzzily"), and
+`plans/speech-rules/implementation.md`'s "Stage 3a review fix" / "...round 2" accounts. HEAD
+started at `fc282270` (a strict ancestor of the tip, clean tree); fast-forwarded to `1cb9b0de`.
+**The commit message's own summary has the `SEPARATION_MIN` move direction backwards** ("moved
+vocabulary.py -> command_matcher.py") — the diff and every in-code comment agree the real move is
+`command_matcher.py` -> `vocabulary.py` (mirroring `_WORD_REPAIR_FLOOR`'s own prior move, for the
+same import-cycle reason). Immutable history, code and docs are correct, not required to fix.
+
+**Checks run myself** (no `.venv` existed in this worktree; built one from
+`/opt/homebrew/bin/python3.14`):
+- `ruff format --check src tests`: pass, 36 files already formatted.
+- `ruff check src tests`: pass, no findings.
+- `mypy --strict src` (from inside `audio-adapter/`): pass, 17 source files, 0 issues.
+- `pytest -q` (full suite): 527 passed, 2 skipped (the two pre-existing whisper/Piper env-gated
+  live skips).
+- `.claude/scripts/fast-tests.sh audio-adapter`: 473 passed, 2 skipped.
+
+### Required Fix 1 — closed, in the user's chosen shape
+
+Verified against the commit itself, not just the account of it: the review's own suggested
+per-slot-type `vocabulary_words` mechanism is **not** present in `SlotType`/`SLOT_TYPES`/
+`_words_in`/`rule_words` — those are byte-identical to pre-fix Stage 3a apart from `rule_words`'s
+docstring. `TestRuleWordsNeverCarriesComposedNumberWords` (3 parametrized cases, derived from
+`rule_patterns._TEENS_WORDS`/`_TENS_WORDS` directly, not a hand-copied list) pins the opposite of
+the review's suggested fix: a rule using `quantity`/`angle`/`speed_target` must add **no** teens/
+tens word or `"hundred"` to the whisper prompt bias. This is the user's own direction verbatim
+("Numbers STT as numeric, please... Writes all number formats as text vocabulary is very
+impractical") and `BL-17.md`'s roadmap entry, correctly built.
+
+**But the docstring's supporting claim overreaches its own citation, and this is a required
+fix.** `rule_words()`'s docstring (and `TestRuleWordsNeverCarriesComposedNumberWords`'s mirroring
+docstring) states as settled fact: *"whisper already writes recognised numbers as numerals
+regardless of a prompt's wording"*, citing
+`research/2026-09-19-whisper-contract-and-grammar-probe.md`. Read that file directly: its one
+relevant measurement is *"report three o'clock"* decoding to `"3 o'clock"` on both benched
+models — a **single digit** word ("three"), in a clock-position context, on synthetic `say`
+audio with no accent. The file's own "Two findings" section states the finding as "the number"
+(singular), and its own "What this does not tell us" section limits itself to the accent
+question — it never claims anything about composed two/three-digit number words ("thirty",
+"hundred", "three hundred twenty"), which is exactly the case D14's grammar and this fix concern.
+Generalizing a single-digit-in-clock-position measurement to "whisper already writes **recognised
+numbers** as numerals" (unqualified) is an extrapolation the citation does not support — and
+`BL-17.md`'s own roadmap entry for this exact decision says the opposite about certainty:
+*"Unknown what STT does, does it become 30 or thirty... Settle with real whisper output when the
+re-plan picks this up."* The docstring now states as measured fact something the project's own
+roadmap entry, two sections earlier in the same file, calls unmeasured.
+
+This does not make the *decision* wrong — point 2 of the implementation's own three-point
+rationale (the numeral-token path through `_consume_digit_run` already parses a numeral, and
+D14's word-grammar fallback already parses a spelled word, so the fix is safe under **either**
+outcome) stands on its own without needing point 1's generalization at all, which is why nothing
+here is a design problem. It is a citation-accuracy problem: a future reader hits this docstring,
+trusts the cited research as having settled the composed-number case, and does not know Stage 3c's
+real corpus recording is still the thing that actually settles it.
+
+**Fix needed (mechanical, no behaviour change):** reword `rule_words()`'s docstring and
+`TestRuleWordsNeverCarriesComposedNumberWords`'s class docstring so the citation is scoped to what
+was actually measured (a single digit word in a clock-position context) and the composed-number
+case is named as an inference from that plus the digit-run/word-grammar fallback's existing
+coverage, not as something the research itself measured — a one-line hedge pointing at
+`BL-17.md`'s own "Settle with real whisper output when the re-plan picks this up" is enough so the
+next reader knows Stage 3c's corpus bench is where this actually gets confirmed.
+
+### E12 revision (directive words become fuzzy) — sound, well tested
+
+- **Directive fuzz scores base word + directives as one phrase**: `_match_elements`'s
+  `WordSetElement` branch now calls `_resolve_word_set` and folds its ratio into the same
+  `word_ratios` list a `LiteralElement` feeds; `match_pattern_with_ratio` averages them together.
+  Traced and measured by hand against the shipped `turn_heading_relative` pattern: "tern left"
+  scores `(0.75 + 1.0) / 2 = 0.875`, matching both the production code and
+  `test_mis_transcribed_literal_still_matches`/`test_mis_transcribed_literal_still_resolves_the_rule`.
+- **Near-tie guard, verified at both the unit and the full-match level.**
+  `_resolve_word_set("cab", ("cap", "cat"))` → `near_tie=True` (both score `2/3`, within
+  `SEPARATION_MIN`), pinned directly by `test_word_set_near_tie_is_ambiguous_not_a_guess`; the same
+  near-tie folded through the full grammar (`test_word_set_match_folds_near_tie_into_match_ambiguous`)
+  comes back `ambiguous=True` from a **single rule with no competitor at all** — exactly E12's new
+  claim, and `_match_rules` (`command_matcher.py`) correctly seeds its own `ambiguous` from
+  `matches[0]`'s own `word_set_ambiguous` before the cross-rule separation check runs, so this is
+  not lost or overwritten. `MatchResult`'s own pre-existing docstring contract (`ambiguous=True` ->
+  "never treat this as a silent pick") is unchanged and still what a caller has to honour — not
+  reverified here since body-layer is out of this diff's scope, same as the first review's own
+  caveat.
+- **"left"/"right" never silently swap.** `test_word_set_never_silently_flips_the_wrong_way`
+  ("light" -> `"right"`, never defaulting to the first alternative) is a real test, not decorative —
+  verified by hand that `_resolve_word_set` picks strictly by ratio, with tie-break only on an exact
+  tie (`sorted` is stable, so the first-declared alternative wins a genuine tie — itself routed
+  through `near_tie=True`, never silently committed).
+- **Values (numeric slots) stay exact.** `SlotElement`'s branch in `_match_elements` is
+  unchanged — no `_resolve_word_set` call, no ratio computed, `test_slot_value_is_never_fuzzy_
+  repaired` still pins "free" (0.667 against "three", above `_WORD_REPAIR_FLOOR`) failing to parse
+  as a digit.
+- **The fuzzy-vs-exact split is documented as closed-set-vs-open-ended, not hard-wired to
+  `WordSetElement`/`SlotElement`.** Confirmed in three places that all say the same thing
+  consistently: the module docstring's revised E12 section, the `SlotElement` branch's own inline
+  comment in `_match_elements`, and `implementation.md`'s own account of the user's
+  self-correction on unit-class words. No code anywhere branches on `isinstance(element,
+  SlotElement)` to decide fuzziness — it is a property of the element implementation each type
+  happens to have today, exactly as documented.
+- **`SEPARATION_MIN` relocation**: confirmed in both directions — `vocabulary.py` gains the
+  constant with a comment explaining the move and its reason; `command_matcher.py`'s own former
+  declaration is replaced by an import plus a pointer comment, consistent with how
+  `_WORD_REPAIR_FLOOR` was handled in the first pass. `rule_patterns.py` imports it from
+  `vocabulary`, never from `command_matcher` — no cycle reintroduced.
+- **Interaction with Stage 3b's `category` field**: no conflict. `CompiledRule.category` defaults
+  to `"always"` and this commit's own new `CompiledRule(...)` test constructions
+  (`TestRuleWordsNeverCarriesComposedNumberWords`) rely on that default, same as every other
+  pre-category fixture in this file. `server.py` (touched by Stage 3b, not by this commit) calls
+  only `compile_rules`/`match_pattern` indirectly through `compile_rules`'s own collision checks,
+  never `match_pattern_with_ratio` or `rule_words` directly, so the signature changes in this
+  commit (3-tuple instead of 2-tuple) touch nothing `server.py` calls.
+- **Widened collision probe**: `_sample_words_with_fuzzable_flags`/`_perturbed_sample` now treat a
+  `WordSetElement` position as fuzzable, same as a `LiteralElement`. Verified this is a real
+  widening, not cosmetic (`WordSetElement`'s own sample previously came back tagged `False`, now
+  `True`). No new test proves the widened probe catching a *novel* word-set collision it would
+  previously have missed — the implementation notes only claim (and the full `TestCompileRules`
+  suite confirms) that nothing already shipped regressed. That is consistent with Stage 3a's own
+  Optional Refinement on this exact point (the probe is "necessarily partial" by construction,
+  one-sample-per-rule) — not a new gap this commit introduces, so not required here either.
+
+### E3 — no near-tie becomes an action
+
+Confirmed structurally: a `WordSetElement` near-tie sets `ambiguous=True` on the same `MatchResult`
+field a cross-rule tie already uses, and nothing in this commit's diff touches whatever downstream
+code (body-layer, out of scope) is responsible for honouring that flag. Within audio-adapter's own
+contract, `ambiguous=True` always carries the *best*-scoring candidate in `token`/`slots` (never
+`None`) specifically so a caller can describe it in a confirm question — this is the pre-existing
+`MatchResult` docstring contract, unchanged, and correctly still respected by `_match_rules`'s new
+code path.
+
+### Required Fixes
+
+1. **`rule_words()`'s docstring and `TestRuleWordsNeverCarriesComposedNumberWords`'s class
+   docstring overstate what `research/2026-09-19-whisper-contract-and-grammar-probe.md` actually
+   measured** — the citation supports a single-digit word decoding to a numeral in a clock-position
+   context, not the unqualified "whisper already writes recognised numbers as numerals" the
+   docstrings now assert, and `BL-17.md`'s own roadmap entry for this decision already calls the
+   composed-number case unmeasured. Mechanical, no behaviour change: reword the citation to scope
+   it to what was measured, note the composed-number case as an inference (safe either way, since
+   `_consume_digit_run`/D14's word-grammar fallback cover both outcomes), and point at Stage 3c's
+   real corpus bench as where it actually gets settled.
+
+### Optional Refinements
+
+- (Carried over, unaddressed by this commit and not required to be — see Stage 3a's own Optional
+  Refinements section above): the D15 `anchor_words` cache-read race, the collision probe's
+  inherent one-sample-per-rule partiality (now also true for word-set positions, not a new gap),
+  and "three hundred and twenty" not parsing.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES — Required Fix 1 from the original review is closed, correctly, in the
+user's chosen shape; the E12 revision (directive-word fuzz, the near-tie guard, the closed-set-vs-
+open-ended documentation, the `SEPARATION_MIN` relocation, the widened collision probe) is sound,
+traced by hand against the shipped code, and well tested. One new required fix, of the same
+"bounded and mechanical, not a design problem" shape as the original: correct the whisper-numerals
+docstring citation so it does not claim more certainty than the cited research, or the project's
+own roadmap entry two sections above it, actually supports.
+
+### Review Confidence
+
+Full read of this commit's diff (`command_matcher.py`, `rule_patterns.py`, `vocabulary.py`, both
+changed test files) against the prior review's Required Fix 1, `BL-17.md`'s three verbatim
+2026-11-17 decisions, and `implementation.md`'s two "Stage 3a review fix" sections. The grammar's
+new fuzzy/near-tie behaviour was traced by hand against the shipped `turn_heading_relative` pattern
+and the synthetic `cap`/`cat`/`cab` fixture, not just read. The whisper-numerals citation was
+checked by reading the cited research file directly, not taken on the docstring's word. Not
+independently re-verified: body-layer's own handling of the `ambiguous` flag from a word-set
+near-tie (body-layer is untouched by this diff and stays out of this review's scope, per the
+brief) and whether the widened collision probe would in fact catch a real word-set collision
+beyond the regression check already run.
