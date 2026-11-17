@@ -125,7 +125,6 @@ def test_shipped_rule_files_load_with_zero_failures() -> None:
         "altitude_step",
         "hold_altitude",
         "level_off",
-        "straight",
         "hvrt_translate_left",
         "hvrt_translate_right",
         "hvrt_translate_forward",
@@ -528,22 +527,15 @@ class TestHoldAltitude:
         )
 
 
-class TestLevelOffAndStraight:
+class TestLevelOff:
     """Differential pin against the deleted `TestLevelOff`. Category
-    `"flight_control_heading"`. Two rule ids (`level_off`/`straight`)
-    sharing one action -- both pinned."""
+    `"flight_control_heading"`. The legacy synonym "straight" was dropped
+    by the user (2026-11-17, "Drop "straight"") -- its near-miss "right"
+    is the HVRT bare word."""
 
     def test_level_off_holds_the_current_heading(self) -> None:
         console = _dispatching_console(parked_active=True, held_heading=120.0)
         lines = console.handle_command("level_off", now_sim=0.0)
-        assert lines == ["Heading 1 2 0."]
-        assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
-            param="heading", heading_deg=120.0
-        )
-
-    def test_straight_holds_the_current_heading(self) -> None:
-        console = _dispatching_console(parked_active=True, held_heading=120.0)
-        lines = console.handle_command("straight", now_sim=0.0)
         assert lines == ["Heading 1 2 0."]
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
             param="heading", heading_deg=120.0

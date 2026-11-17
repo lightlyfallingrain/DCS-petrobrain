@@ -37,7 +37,6 @@ _FLIGHT_RULE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("altitude_step", "<direction:climb|descend> <amount_m:quantity>"),
     ("hold_altitude", "hold <verb:altitude|alt>"),
     ("level_off", "level off"),
-    ("straight", "straight"),
     ("hvrt_translate_left", "left"),
     ("hvrt_translate_right", "right"),
     ("hvrt_translate_forward", "forward"),
@@ -87,29 +86,10 @@ def _real_legacy_probe(text: str) -> LegacyProbeResult:
 #: - `level_off` / the existing `observe_off` command: own `1.0` vs.
 #:   legacy's `0.75` -- gap `0.25`.
 #:
-#: **Two remain genuinely rejected**, both from *one* shared rule x rule
-#: collision (so `compile_rules` disables both ids together, the same
-#: pair the un-recalibrated check also caught, for a different reason):
-#: `straight`'s own `_perturbed_sample` probe word for "straight" is
-#: "right" (`_COLLISION_PROBE_WORDS`' own list, `ratio("right",
-#: "straight") == 0.769`) -- a real near-miss `straight` could plausibly
-#: be heard as. That perturbed sample ("right") matches
-#: `hvrt_translate_right`'s own bare-word pattern at ratio `1.0` (exact),
-#: clear of `straight`'s own `0.769` self-match on the same sample by
-#: `0.231`, well past `SEPARATION_MIN` -- saying a mis-heard "straight"
-#: would make Petrovich confidently translate the HVRT sight instead of
-#: levelling off. The *clean* "straight" sample, which scored `0.769`
-#: against `point`'s own "sight" verb and against `hvrt_translate_right`
-#: directly, is **not** this collision's cause under the new check (own
-#: `1.0` beats both clearly) -- the previous writeup's framing of this as
-#: "straight vs sight" was the un-recalibrated check's own false
-#: positive; the measured, surviving cause is the perturbed sample, not
-#: the clean one. `hvrt_translate_right`'s own perturbed sample ("light,"
-#: a near-miss of "right") lands on an exact `0.8`-vs-`0.8` tie against
-#: `point`'s own "sight" verb -- a genuine near-tie, correctly *not* a
-#: collision on its own -- so `hvrt_translate_right` is rejected only
-#: because `straight`'s collision takes it down too, not on its own
-#: account.
+#: **`straight`/`hvrt_translate_right` collided** (a perturbed
+#: "straight" lands exactly on the HVRT bare word "right"); the user
+#: dropped the `straight` synonym (2026-11-17, "Drop "straight"") --
+#: "level off" does the same thing -- so none remain.
 #:
 #: These are real: `compile_rules`'s own rule x legacy check is fixed in
 #: this same stage to stop flagging a sample that resolves to the rule's
@@ -123,7 +103,7 @@ def _real_legacy_probe(text: str) -> LegacyProbeResult:
 #: "Action file error." spoken once, and the id excluded from
 #: `enabled_rule_ids` -- graceful, not silent, degradation that needed no
 #: new code.
-_EXPECTED_REJECTED_IDS: frozenset[str] = frozenset({"straight", "hvrt_translate_right"})
+_EXPECTED_REJECTED_IDS: frozenset[str] = frozenset()
 
 
 def test_the_real_shipped_pattern_set_rejects_exactly_the_known_collisions() -> None:
@@ -309,9 +289,6 @@ class TestPlainPhrases:
         result = match_transcript("hold altitude", rules=_FLIGHT_RULES)
         assert result.token == "hold_altitude"
         assert result.slots == {"verb": "altitude"}
-
-    def test_straight(self) -> None:
-        assert match_transcript("straight", rules=_FLIGHT_RULES).token == "straight"
 
     def test_level_off(self) -> None:
         assert match_transcript("level off", rules=_FLIGHT_RULES).token == "level_off"

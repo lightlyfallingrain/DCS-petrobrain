@@ -180,7 +180,6 @@ local function speak_level_off()
 end
 
 when.speech("level_off", "level off", "flight_control_heading", speak_level_off)
-when.speech("straight", "straight", "flight_control_heading", speak_level_off)
 
 -- HVRT translate/hold/step -- bare single-word commands. The adapter
 -- recognises these via its own exact, pre-rule `_HVRT_BARE_WORD_TOKENS`

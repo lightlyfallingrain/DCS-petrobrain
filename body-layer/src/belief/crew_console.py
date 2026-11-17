@@ -5032,10 +5032,8 @@ class CrewConsole:
 
     def level_off(self) -> dict[str, object]:
         """`[[BL-17]]` Stage 4's `flight.level_off` action, extracted
-        from the pre-rules `_handle_level_off` (deleted) -- "straight" /
-        "level off" (two separate rule ids, `level_off`/`straight`,
-        sharing this one action -- `config/rules/flight.lua`'s own
-        comment on why), stops a turn and holds the *current* heading
+        from the pre-rules `_handle_level_off` (deleted) -- "level off"
+        (the "straight" synonym was dropped by the user, 2026-11-17), stops a turn and holds the *current* heading
         (plan vocabulary table). F-P1's own second meaning for this same
         command (a spoken abort, while an alignment is in progress) is
         Stage P4's own addition, not built here -- `align_phase` never
