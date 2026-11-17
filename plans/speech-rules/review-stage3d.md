@@ -146,3 +146,162 @@ than taking the implementer's note on faith). Ran the full subproject check suit
 fresh `.venv`, rather than trusting the reported numbers. Did not independently re-derive the
 Stage 3a/3b content that arrived via the fast-forward (out of this review's scope per the task
 brief) or re-review audio-adapter (untouched by commit `68387d90`).
+
+---
+
+## Re-review — 2026-11-17
+
+Branch `feature/speech-rules-matching`, fast-forwarded cleanly onto this worktree's prior tip
+`fc282270` to `eba9cb5c` ("BL-17: Stage 3d review fixes") — no conflicts, no snapshot fallback
+needed. Reviewed `eba9cb5c`'s diff directly against the three Required Fixes above, `U21`/
+`AiPilotWheelGoal`'s "latest wins, nothing lost" convention, and the implementer's own account in
+`implementation.md`'s "Stage 3d review fixes" section.
+
+### Required Fix 1 (cross-thread race) — VERIFIED FIXED
+
+`body.py`'s `_request_effector_write` closure (around line 6558) no longer touches
+`crew_runner.effector_state` at all — it validates and appends a new frozen
+`belief.crew_console.PendingEffectorWrite(request_id, effector, value, says)` to
+`CrewConsole.pending_effector_writes: list[PendingEffectorWrite]`. The poll loop (`body.py`
+~line 5073) drains it with a swap-to-fresh-list (`pending_writes, crew_console.
+pending_effector_writes = crew_console.pending_effector_writes, []`), immediately before
+`advance_effectors`, calling `request_effector_write` once per queued entry against
+`runner.effector_state` — exactly the place `observ_transition`/`weapon_safety_transition` are
+already applied, as promised. The new field's own docstring correctly states why it is a list and
+not a one-shot slot (several different effectors may be queued before one drain), why `list.append`
+from either thread is safe (GIL-atomic), and why it is deliberately absent from
+`_reset_one_shot_command_state`'s field list (an earlier dispatch's undrained entry must survive
+an unrelated later command) — all three claims checked against the code, not taken on faith.
+`test_effector_write_queued_from_background_thread_is_applied_on_next_poll_drain` dispatches from
+a real `threading.Thread`, asserts nothing reaches any `EffectorRunState` from that thread, then
+drives the simulated poll-thread drain itself and asserts the request only lands there — the right
+boundary to test given `body.py`'s own `main()` wiring is untested by design.
+
+### Required Fix 2 (differing-value dedup) — VERIFIED FIXED
+
+`effector_engine.request_write` now looks up the pending entry by effector name first (unchanged
+from before), then branches on `.value`: same value → logs and no-ops exactly as before (D1's
+shape, unchanged); different value → deletes the old `request_id` entry and inserts a fresh one
+under the *new* `request_id` with the new `value`/`says` — a true replace, not a merge-in-place,
+so a stale `request_id` can never be found in `ad_hoc_runs` afterward. Matches the specified
+semantics exactly (latest wins, same value stays a no-op).
+`test_request_write_with_a_differing_value_replaces_the_pending_request` asserts
+`set(state.ad_hoc_runs) == {"req-2"}` (old id gone) and the new cursor's `value`/`says` — this is
+the right assertion shape; a weaker one (just checking the final value) would have passed even if
+the implementation had left the stale `req-1` entry sitting alongside, which `advance`'s
+`_execute_switch_row` pass would then have tried to execute concurrently against the same switch.
+`config/rules/README.md`'s `effector.write` row states both halves of the rule in the prose a rule
+author would read, not just in a docstring.
+
+### Required Fix 3 (`says` length cap) — VERIFIED FIXED
+
+`MAX_SAY_LEN` moved from `rules/engine.py` (`_MAX_SAY_LEN`) to `rules/actions.py` (public,
+`Final[int] = 500`) to avoid the cyclic import, and `engine.py` now imports and uses the shared
+constant for `say()`'s own cap — confirmed `_SinkHolder.say`'s behaviour is unchanged (same cap
+value, same silent-truncate, not a rejection). `_write_effector` now truncates `says` to
+`MAX_SAY_LEN` *before* calling `ctx.request_effector_write`, so neither the closure, the queue,
+the engine, nor the eventual spoken line ever sees an uncapped value.
+`test_write_effector_caps_says_at_the_same_length_say_enforces` asserts both the truncation point
+and that the untruncated case (`test_write_effector_says_within_the_cap_is_untouched`) is
+unaffected — good coverage of both sides of the boundary.
+
+### Optional refinement (explicit Lua `nil`) — DONE
+
+`test_effector_write_says_explicit_nil_is_also_optional` passes a literal third `nil` argument
+(distinct from omitting it) and asserts the same `(name, value, None)` outcome as the
+omitted-argument test beside it. `implementation.md`'s "Notable Discoveries" entry is corrected
+to no longer claim this was "covered implicitly."
+
+### Checks — all pass except the named pre-existing failure
+
+`.venv` built fresh from `/opt/homebrew/bin/python3.14` (none existed in this worktree);
+`ruff format --check`, `ruff check`, `mypy --strict src` (91 source files) all clean.
+`fast-tests.sh body-layer`: 2658 passed, 1 failed
+(`test_shipped_effector_config_loads_without_errors` — the named pre-existing, unrelated
+`seat-copilot.md` empty-row failure), 4 xfailed — matches the task brief's stated known failure
+exactly. Also re-ran the four touched-module test files directly (75 tests) in isolation: all
+pass.
+
+### Required Fix 4 (new) — the D6 rollback gap the implementer flagged must be closed, but not
+### with the fix shape its own write-up suggests
+
+**This is required, not optional, and for the same reason Required Fix 1 above was required over
+"no shipped rule reaches this yet": `effector.write` is a documented, callable Lua action from the
+moment this merges, and D6's own contract is unconditional —** *"A Lua error at dispatch time →
+... every one-shot transition field set during this dispatch is cleared, so the action does not
+happen without the pilot hearing about it."* **This is a different case from the one D20 already
+decided to leave alone.** D20's own text says *"D6 rollback does not apply here, and should
+not... an ad hoc effector write that **later fails** is not a dispatch-time error (dispatch
+already returned 'queued' cleanly)"* — that is about the engine's own multi-poll execution failing
+on a *later* poll, after a clean dispatch. The gap here is narrower and squarely inside D6's own
+scope: a rule handler calls `effector.write` (which queues cleanly), and *then*, still inside the
+**same** Lua dispatch, something else in the handler raises `RuleRuntimeError`/
+`RuleBudgetExceeded`. `_dispatch_rule` catches that, calls `_reset_one_shot_command_state()`, and
+returns `ACTION_FILE_ERROR_LINE` — but `pending_effector_writes` is not in that reset's field
+list (correctly, for the reason its own docstring gives: an *earlier* dispatch's undrained entry
+must survive), so the entry *this* dispatch just queued survives too. Concretely: a rule writes
+`effector.write("weapons", "armed", "Weapons armed.")` and then hits a bug three lines later;
+Petrovich says "Action file error," and the switch still moves (and, if `says` was given, he later
+says the confirmation line for an action he just told the pilot didn't happen) — the exact
+"callout fires with the wrong content" failure this role's checklist names, and worse than D20's
+own already-accepted tension (silence on a late failure) because this one speaks a confirmed
+contradiction.
+
+**Why "snapshot the queue length at dispatch start, truncate on error" (the shape suggested in the
+dispatching brief) is not safe to build as stated, and the reviewer flagging it here is required,
+not optional, before it ships:** `pending_effector_writes` is shared and appended to from
+*either* thread without a lock (that is the entire point of Required Fix 1 — GIL-atomic
+`list.append`, no lock needed for an append-only field drained wholesale on one thread). A
+length-based truncate is not append-only-safe: if the REPL thread's dispatch snapshots
+`before = len(pending_effector_writes)`, then while its own Lua handler is still running the poll
+thread's voice dispatch appends its *own*, unrelated, legitimately-queued entry, and then the
+REPL dispatch's handler errors — `del pending_effector_writes[before:]` deletes both entries,
+silently discarding the poll thread's write along with the REPL dispatch's own. That is precisely
+the class of bug Required Fix 1 exists to prevent, reintroduced by the fix for a different bug.
+This is a low-probability window (two concurrent dispatches, each queuing a write, with one
+erroring, inside one dispatch's instruction budget), but this project does not get to apply a
+lower correctness bar to a low-probability cross-thread race than Required Fix 1 was just held to
+one review cycle ago — consistency requires the same standard here.
+
+**What is required**: a rollback that identifies *which* queued entries belong to *this specific
+dispatch*, not a position- or count-based snapshot of a shared list. The natural shape, consistent
+with how this field already avoids a lock: give `_dispatch_rule` a way to mark "entries queued
+during this call" by identity, not by range —
+for example, a dispatch-scoped token (minted fresh by `_dispatch_rule`, e.g. an incrementing
+counter or `object()`, stored so the calling thread's own closure invocation can read it — thread-
+local is the natural mechanism, since a thread never runs two dispatches at once but the two
+threads run independently) attached to each `PendingEffectorWrite` at append time (a new field,
+defaulting to `None` so the existing direct-construction tests are unaffected), and on error,
+filtering `pending_effector_writes` to drop exactly the entries carrying *this* dispatch's token —
+never a `[:n]`/`[n:]` slice of the shared list. This correctly rolls back every `effector.write`
+call the errored handler made (a handler can call it more than once before erroring), and
+correctly leaves any other thread's concurrently-queued, unrelated entry alone.
+
+**Required test coverage**: (1) the basic case — a rule that calls `effector.write` then raises,
+dispatched through the real `_dispatch_rule`/`handle_command` path (not `run_rule` directly, the
+way the Required-Fix-1 test necessarily bypasses `_dispatch_rule`), asserting
+`pending_effector_writes` is empty afterward and the line spoken is `ACTION_FILE_ERROR_LINE`; and
+(2) the concurrency-safety case, mirroring Required Fix 1's own test shape — a second, real
+background thread's unrelated `effector.write` call queued *during* the erroring dispatch's
+window must still be present in `pending_effector_writes` after the rollback. Test (2) is the one
+that actually exercises the reason a length-based truncate is wrong, and should fail against the
+naive implementation before it is fixed, not just against no implementation at all.
+
+### Verdict
+
+CHANGES REQUIRED — Required Fixes 1–3 and the optional nil test are all correctly built and
+tested; one new Required Fix (4, above) must be closed before this stage merges.
+
+### Review Confidence
+
+Full read of `eba9cb5c`'s diff (`body.py`, `crew_console.py`, `effector_engine.py`,
+`rules/actions.py`, `rules/engine.py`, `config/rules/README.md`, every changed test file, and the
+implementer's `implementation.md` account), cross-checked against the three Required Fixes'
+original text and `U21`'s convention. Built a fresh `.venv` and ran `ruff format --check`,
+`ruff check`, `mypy --strict`, and `fast-tests.sh body-layer` myself, plus the four touched test
+files directly in isolation, rather than trusting the reported numbers. Required Fix 4 was reached
+by tracing `_dispatch_rule`/`_reset_one_shot_command_state`'s actual field list and D20's own
+"D6 rollback does not apply here" paragraph side by side, not by taking either account at face
+value — the two are about different failure windows, and the text of D20's carve-out does not
+cover the gap the implementer flagged. Did not independently re-derive Stage 3a/3b (out of scope,
+unchanged by this commit) or re-review audio-adapter (untouched).
