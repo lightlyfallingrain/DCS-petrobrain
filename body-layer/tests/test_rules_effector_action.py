@@ -11,22 +11,22 @@ aircraft -- a small synthetic test-only rule file, never shipped
 from __future__ import annotations
 
 import io
+import re
 import threading
 from pathlib import Path
 from typing import cast
 
+import body as body_module
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
-from belief.crew_console import (
-    ACTION_FILE_ERROR_LINE,
-    CrewConsole,
-    PendingEffectorWrite,
-)
+from belief.crew_console import ACTION_FILE_ERROR_LINE, CrewConsole
 from belief.effector_engine import EffectorRunState, advance, request_write
 from belief.effector_registry import EffectorDef
 from rules.actions import ACTION_NAMESPACES, ActionContext
 from rules.engine import RuleSet, run_rule
 from rules.sandbox import RuleSandbox
+
+_SRC = Path(__file__).resolve().parent.parent / "src"
 
 _OBSERV = EffectorDef(
     name="observ",
@@ -260,11 +260,7 @@ def test_effector_write_queued_from_background_thread_is_applied_on_next_poll_dr
         effector_def = _REGISTRY.get(name)
         if effector_def is None or value not in effector_def.values:
             return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
-        console.pending_effector_writes.append(
-            PendingEffectorWrite(
-                request_id="req-1", effector=name, value=value, says=says
-            )
-        )
+        console.queue_effector_write("req-1", name, value, says)
         return {"ok": True, "reason": None}
 
     sandbox = RuleSandbox()
@@ -373,15 +369,7 @@ def test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back(
     def request_effector_write(
         name: str, value: str, says: str | None
     ) -> dict[str, object]:
-        console.pending_effector_writes.append(
-            PendingEffectorWrite(
-                request_id="req-1",
-                effector=name,
-                value=value,
-                says=says,
-                dispatch_token=console.current_dispatch_token(),
-            )
-        )
+        console.queue_effector_write("req-1", name, value, says)
         return {"ok": True, "reason": None}
 
     ctx = ActionContext(console=console, request_effector_write=request_effector_write)
@@ -449,15 +437,7 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     def request_effector_write(
         name: str, value: str, says: str | None
     ) -> dict[str, object]:
-        console.pending_effector_writes.append(
-            PendingEffectorWrite(
-                request_id=f"req-{name}",
-                effector=name,
-                value=value,
-                says=says,
-                dispatch_token=console.current_dispatch_token(),
-            )
-        )
+        console.queue_effector_write(f"req-{name}", name, value, says)
         if name == "observ":
             # Rule A's own write -- pause here, still holding rule A's
             # own dispatch token on *this* thread, so the test can run
@@ -525,3 +505,71 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     assert [(w.effector, w.value) for w in console.pending_effector_writes] == [
         ("weapons", "safe")
     ]
+
+
+# --- `queue_effector_write`: the one appender, and the one construction site ---
+#
+# `body.py`'s real `_request_effector_write` closure is nested inside `main()`,
+# which is untested by design (`body-layer/CLAUDE.md`'s module map: "`main()`'s
+# CLI wiring is untested by design -- the runners are tested against fakes"),
+# and cannot be exercised here without a live aircraft-layer/world-model setup.
+# The actual defect this follow-up closes -- a caller appending a bare
+# `PendingEffectorWrite` with no token, so the rollback above has nothing to
+# find -- is pinned two other ways instead: a direct test of what `queue_
+# effector_write` stamps, and a grep-enforced fence (the same shape `mission_
+# memory/store.py`'s own "single construction site" test already uses in this
+# codebase) proving `body.py` cannot reintroduce a hand-built `PendingEffector
+# Write` without failing a test.
+
+
+def test_queue_effector_write_stamps_the_current_dispatch_token() -> None:
+    """Outside any dispatch, `current_dispatch_token()` is `None`, so a
+    write queued there carries no token (nothing to roll back against,
+    which is correct -- there is no dispatch to roll back). Inside one
+    (simulated here by setting the thread-local directly, the same field
+    `_dispatch_rule` itself sets), the queued write carries that exact
+    token -- this is the one fact `body.py`'s real closure depends on to
+    participate in Stage 3d re-review Required Fix 4's rollback at all."""
+    console = CrewConsole(store=ContactStore())
+
+    console.queue_effector_write("req-1", "observ", "on", "Observ on.")
+    assert console.pending_effector_writes[-1].dispatch_token is None
+
+    token = object()
+    console._dispatch_token_local.token = token
+    console.queue_effector_write("req-2", "weapons", "safe", "Weapons safe.")
+    assert console.pending_effector_writes[-1].dispatch_token is token
+
+
+def test_pending_effector_write_is_constructed_in_exactly_one_place_in_crew_console_py() -> (
+    None
+):
+    """`queue_effector_write` is the plan's named single construction
+    site for a live `PendingEffectorWrite` -- grepped, not counted by
+    eye, mirroring `test_mission_memory_store.py`'s own `test_entry_is_
+    constructed_in_exactly_one_place_in_store_py`."""
+    text = (_SRC / "belief" / "crew_console.py").read_text(encoding="utf-8")
+    hits = re.findall(r"\bPendingEffectorWrite\(", text)
+    assert len(hits) == 1, (
+        f"expected exactly one `PendingEffectorWrite(` construction in "
+        f"crew_console.py (inside queue_effector_write), found {len(hits)}"
+    )
+
+
+def test_body_py_never_constructs_pending_effector_write_directly() -> None:
+    """`body.py`'s real `_request_effector_write` closure must call
+    `crew_console.queue_effector_write(...)`, never build a
+    `PendingEffectorWrite` by hand -- the exact gap this follow-up
+    closes (the closure originally appended one with no `dispatch_
+    token`, so the rollback had nothing to find in production).
+    Checked against the live module's own source file, not a copy, so a
+    future edit cannot silently reintroduce this without failing here."""
+    text = Path(body_module.__file__).read_text(encoding="utf-8")
+    assert "PendingEffectorWrite(" not in text, (
+        "body.py constructs PendingEffectorWrite() directly -- it should "
+        "call crew_console.queue_effector_write(...) instead"
+    )
+    assert "PendingEffectorWrite" not in text, (
+        "body.py still references PendingEffectorWrite -- drop the now-"
+        "unused import if the construction above is really gone"
+    )

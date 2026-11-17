@@ -1692,3 +1692,72 @@ tests above).
 **Notable discovery**: the project's own tuning-constants rule does not apply to anything added
 here — no new bare numeric literal was introduced; `object()` tokens and `threading.local` carry
 no magic number to tune.
+
+### Required Fix 4 follow-up (same day) — `body.py`'s real closure was still not stamping the token
+
+**Self-caught gap, reported rather than left silent**: the commit above built the rollback
+correctly, but `body.py`'s real `_request_effector_write` closure still appended a bare
+`PendingEffectorWrite(request_id=..., effector=..., value=..., says=...)` with no `dispatch_
+token` — only the *test* closures passed `dispatch_token=console.current_dispatch_token()` by
+hand. In production, every queued write would have carried `dispatch_token=None` (the dataclass
+field's own default), so `_dispatch_rule`'s rollback filter (`write.dispatch_token is not token`)
+would never find anything to remove — the fix was real and tested, but the one caller that matters
+in flight never participated in it.
+
+**Fix: make the production path unable to forget, not just remind it to remember.**
+`CrewConsole` gains `queue_effector_write(request_id, effector, value, says) -> None` — the single
+appender of `pending_effector_writes`, stamping `dispatch_token=self.current_dispatch_token()`
+itself. `body.py`'s `_request_effector_write` closure now calls `crew_console.queue_effector_write
+(request_id, name, value_name, says)` instead of importing and constructing `PendingEffectorWrite`
+directly (the import is dropped from `body.py` entirely — nothing there references the dataclass
+any more). Every test closure that used to construct `PendingEffectorWrite(..., dispatch_token=
+console.current_dispatch_token())` by hand now calls `console.queue_effector_write(...)` the same
+way, so there is exactly one way to queue a write anywhere in this codebase.
+
+**Pinning it so it cannot regress silently, without touching `main()`'s untested CLI wiring.**
+`body.py`'s real closure lives inside `main()`, which `body-layer/CLAUDE.md`'s own module map
+already documents as untested by design (the runners are tested against fakes; `main()`'s wiring
+is not) — restructuring it to be call-through-testable without a live aircraft-layer/world-model
+setup was judged out of scope for this fix. Instead, pinned the invariant two other ways, both in
+`test_rules_effector_action.py`:
+
+- `test_queue_effector_write_stamps_the_current_dispatch_token` — calls `queue_effector_write`
+  directly, once outside any dispatch (asserts the queued entry's `dispatch_token is None`) and
+  once with the thread-local token field set by hand the way `_dispatch_rule` sets it (asserts the
+  queued entry's `dispatch_token is` that exact object). This is the actual mechanism under test,
+  independent of whether `body.py` remembers to call it correctly.
+- `test_pending_effector_write_is_constructed_in_exactly_one_place_in_crew_console_py` and
+  `test_body_py_never_constructs_pending_effector_write_directly` — grep-enforced fences, the same
+  shape `test_mission_memory_store.py`'s own `test_entry_is_constructed_in_exactly_one_place_in_
+  store_py`/`test_admission_and_marks_never_construct_entry_directly` already use in this codebase
+  for an identical "one construction site, checked by caller" shape. The first asserts exactly one
+  `PendingEffectorWrite(` construction exists anywhere in `crew_console.py` (inside `queue_
+  effector_write`); the second reads `body.py`'s own live source file (via `body_module.__file__`,
+  not a copy) and asserts neither `PendingEffectorWrite(` nor the bare name `PendingEffectorWrite`
+  appears in it at all.
+  **Counterfactual run**: reintroduced the exact original gap (imported `PendingEffectorWrite` and
+  appended one by hand, no `dispatch_token`, inside the closure) — `test_body_py_never_constructs_
+  pending_effector_write_directly` failed for the stated reason. Restored the real file afterward;
+  `shasum -a 256` before and after matched.
+
+**Files changed**:
+- `belief/crew_console.py` — `queue_effector_write` method added; `PendingEffectorWrite`'s,
+  `pending_effector_writes`'s, `_dispatch_token_local`'s and `current_dispatch_token`'s docstrings
+  updated to name it as the one appender (comment pruned where it described the now-superseded
+  "body.py's closure stamps it" shape, per root `CLAUDE.md`'s "Prune the comment you are standing
+  next to" — the `_dispatch_rule` docstring itself needed no change, since "stamped with it via
+  `current_dispatch_token`" is still accurate — `queue_effector_write` is what calls it now).
+- `body.py` — `_request_effector_write` now calls `crew_console.queue_effector_write(...)`; the
+  `PendingEffectorWrite` import is dropped (no longer referenced anywhere in this file).
+- `tests/test_rules_effector_action.py` — the three existing `request_effector_write` test
+  closures that built `PendingEffectorWrite` by hand now call `console.queue_effector_write(...)`
+  instead (two of the three no longer need `dispatch_token=console.current_dispatch_token()`
+  spelled out, since the method does it); `PendingEffectorWrite` import dropped (no longer
+  constructed in this file); three tests added (above); `import body as body_module`, `import re`,
+  and a module-level `_SRC` path constant added.
+
+**Checks.** Same `.venv`. `ruff format --check`, `ruff check`, `mypy --strict src` (91 source
+files) all clean. `fast-tests.sh body-layer`: 2663 passed, 1 failed (the same named pre-existing
+`test_shipped_effector_config_loads_without_errors`), 4 xfailed — three more passing tests than the
+prior round, matching the three added. `test_rules_effector_action.py` directly: 12 tests, all
+pass.

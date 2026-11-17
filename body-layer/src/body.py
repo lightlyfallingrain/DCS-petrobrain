@@ -164,11 +164,7 @@ from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.contacts import Contact, ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
-from belief.crew_console import (
-    ON_GROUND_AGL_THRESHOLD_M,
-    CrewConsole,
-    PendingEffectorWrite,
-)
+from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
 from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
 from belief.effector_engine import EffectorRunState, EffectorTrigger
 from belief.effector_engine import advance as advance_effectors
@@ -6575,6 +6571,14 @@ def main() -> None:
     # met failure already uses, rather than inventing a new reason for
     # an edge no shipped rule can reach yet (no rule calls `effector.
     # write` in this stage).
+    # Queues via `crew_console.queue_effector_write` -- not by building
+    # the queued-write dataclass here directly -- so the entry is
+    # stamped with this dispatch's own token: Stage 3d re-review
+    # Required Fix 4's own rollback has nothing to find otherwise. That
+    # was exactly this closure's own gap, caught only because a test
+    # built its own separate closure that happened to stamp the token by
+    # hand (`test_body_py_never_constructs_pending_effector_write_
+    # directly` now pins this).
     _next_ad_hoc_request_id = itertools.count()
 
     def _request_effector_write(
@@ -6586,11 +6590,7 @@ def main() -> None:
         if crew_runner.last_t_sim is None:
             return {"ok": False, "reason": None}
         request_id = f"rule-{next(_next_ad_hoc_request_id)}"
-        crew_console.pending_effector_writes.append(
-            PendingEffectorWrite(
-                request_id=request_id, effector=name, value=value_name, says=says
-            )
-        )
+        crew_console.queue_effector_write(request_id, name, value_name, says)
         return {"ok": True, "reason": None}
 
     # `[[BL-17]]` (`plans/speech-rules/plan.md`) -- loaded/pushed once

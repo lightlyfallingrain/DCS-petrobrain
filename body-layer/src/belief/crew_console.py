@@ -1381,19 +1381,20 @@ class PendingEffectorWrite:
     here.
 
     `dispatch_token` (Stage 3d re-review Required Fix 4) identifies
-    *which* `_dispatch_rule` call queued this entry -- `None` for every
-    direct-construction test and for a write queued outside a dispatch
-    (neither case this field's rollback use needs to find). `_dispatch_
-    rule` stamps the current thread's live token (`CrewConsole.
-    current_dispatch_token`) onto a write at append time via `body.py`'s
-    closure, then -- on a Lua error raised later in that same dispatch --
-    filters `pending_effector_writes` by this field to roll back exactly
-    this dispatch's own entries. Identity, not a length/count snapshot of
-    the shared list: `pending_effector_writes` is appended to from either
-    thread without a lock (GIL-atomic `list.append`), so a position-based
-    truncate would also discard whatever the *other* thread legitimately
-    queued in the same window (`feedback_rollback_on_lockfree_queue_must_
-    use_identity_not_length.md`)."""
+    *which* `_dispatch_rule` call queued this entry -- `None` only for a
+    test that builds this dataclass directly without going through
+    `CrewConsole.queue_effector_write` (the one appender that stamps it,
+    so a real caller can never forget to). `_dispatch_rule` mints the
+    current thread's live token (`CrewConsole.current_dispatch_token`)
+    at dispatch start, and -- on a Lua error raised later in that same
+    dispatch -- filters `pending_effector_writes` by this field to roll
+    back exactly this dispatch's own entries. Identity, not a
+    length/count snapshot of the shared list: `pending_effector_writes`
+    is appended to from either thread without a lock (GIL-atomic
+    `list.append`), so a position-based truncate would also discard
+    whatever the *other* thread legitimately queued in the same window
+    (`feedback_rollback_on_lockfree_queue_must_use_identity_not_length.
+    md`)."""
 
     request_id: str
     effector: str
@@ -1567,16 +1568,21 @@ class CrewConsole:
     #: on or off; the weapons bar is armed or safe), while an ad hoc write
     #: names an arbitrary effector and several *different* effectors can
     #: legitimately be requested before the poll loop next drains this
-    #: field. Appended to by `body.py`'s `_request_effector_write` closure
-    #: (`list.append` is GIL-atomic, so concurrent appends from the poll
-    #: thread's own `handle_transcript` and the REPL thread's `handle_
-    #: line` cannot lose an entry the way a direct `EffectorRunState`
-    #: mutation could -- the race this fix exists to close) and drained
-    #: wholesale by the poll loop, which calls `belief.effector_engine.
-    #: request_write` for each entry against `ConsolePerceptionRunner.
-    #: effector_state` -- the one place that mutation is now allowed to
-    #: happen. Deliberately **not** reset by `_reset_one_shot_command_
-    #: state` (same reasoning as `where_is_it_requested`): an entry queued
+    #: field. Appended to only via `queue_effector_write` below -- never
+    #: construct and append a `PendingEffectorWrite` directly outside a
+    #: test, so `dispatch_token` can never be forgotten (Stage 3d
+    #: re-review Required Fix 4: `body.py`'s original closure appended
+    #: one by hand with no token, so the rollback had nothing to find in
+    #: production). `list.append` is GIL-atomic, so concurrent appends
+    #: from the poll thread's own `handle_transcript` and the REPL
+    #: thread's `handle_line` cannot lose an entry the way a direct
+    #: `EffectorRunState` mutation could -- the race this fix exists to
+    #: close -- and drained wholesale by the poll loop, which calls
+    #: `belief.effector_engine.request_write` for each entry against
+    #: `ConsolePerceptionRunner.effector_state` -- the one place that
+    #: mutation is now allowed to happen. Deliberately **not** reset by
+    #: `_reset_one_shot_command_state` (same reasoning as `where_is_it_
+    #: requested`): an entry queued
     #: by an earlier dispatch this poll has not yet drained must survive
     #: an unrelated later command in between, not just the next poll
     #: boundary. Resets to empty on a mission (re)start for free (not in
@@ -1586,13 +1592,13 @@ class CrewConsole:
     pending_effector_writes: list[PendingEffectorWrite] = field(default_factory=list)
     #: Thread-local holding the calling thread's own in-flight `_dispatch_
     #: rule` token (Stage 3d re-review Required Fix 4) -- `object()`,
-    #: minted fresh per dispatch and read by `body.py`'s `_request_
-    #: effector_write` closure (via `current_dispatch_token`) so it can
-    #: stamp `PendingEffectorWrite.dispatch_token` at append time. Thread-
-    #: local, not a plain field, because the poll thread and the REPL
-    #: thread each run their own `_dispatch_rule` call independently and
-    #: must never see or overwrite each other's token. `.token` is unset
-    #: (reads as `None` via `getattr`) outside any dispatch.
+    #: minted fresh per dispatch. Read via `current_dispatch_token` by
+    #: `queue_effector_write`, the one place that stamps `PendingEffector
+    #: Write.dispatch_token` at append time. Thread-local, not a plain
+    #: field, because the poll thread and the REPL thread each run their
+    #: own `_dispatch_rule` call independently and must never see or
+    #: overwrite each other's token. `.token` is unset (reads as `None`
+    #: via `getattr`) outside any dispatch.
     _dispatch_token_local: threading.local = field(
         default_factory=threading.local, repr=False, compare=False
     )
@@ -3173,11 +3179,35 @@ class CrewConsole:
 
     def current_dispatch_token(self) -> object | None:
         """The calling thread's own in-flight `_dispatch_rule` token, or
-        `None` outside one -- `body.py`'s `_request_effector_write`
-        closure reads this to stamp `PendingEffectorWrite.dispatch_token`
-        at append time (Stage 3d re-review Required Fix 4). Thread-local:
-        see `_dispatch_token_local`'s own docstring for why."""
+        `None` outside one -- read by `queue_effector_write` to stamp
+        `PendingEffectorWrite.dispatch_token` at append time (Stage 3d
+        re-review Required Fix 4). Thread-local: see `_dispatch_token_
+        local`'s own docstring for why."""
         return getattr(self._dispatch_token_local, "token", None)
+
+    def queue_effector_write(
+        self, request_id: str, effector: str, value: str, says: str | None
+    ) -> None:
+        """The one appender of `pending_effector_writes` -- stamps
+        `dispatch_token=self.current_dispatch_token()` itself, so a
+        caller can never forget it. Added as a follow-up to the Stage 3d
+        re-review Required Fix 4 commit: that commit's own rollback was
+        correct, but `body.py`'s real `_request_effector_write` closure
+        still appended a bare `PendingEffectorWrite` by hand with no
+        token, so in production the rollback above had nothing to find
+        -- only a test closure that happened to pass the token itself
+        ever exercised it. `body.py`'s closure and every test that
+        queues a write now call this instead of constructing
+        `PendingEffectorWrite` directly."""
+        self.pending_effector_writes.append(
+            PendingEffectorWrite(
+                request_id=request_id,
+                effector=effector,
+                value=value,
+                says=says,
+                dispatch_token=self.current_dispatch_token(),
+            )
+        )
 
     def _dispatch_rule(
         self, rule_id: str, slots: dict[str, int | str] | None
