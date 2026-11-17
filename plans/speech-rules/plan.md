@@ -149,6 +149,13 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
   `ambiguous=True`, and the existing body-side disposition applies (E3). The compiled rule table is
   an immutable object swapped in with one assignment, because `ThreadingHTTPServer` can run
   `PUT /rules` and `/transcribe` at the same time.
+
+  > **As built, 2026-11-17 (Stages 1b–2):** rule literals are **not** fuzzy-scored. Matching is
+  > full-consumption, exact-literal (`audio-adapter/src/rule_patterns.py`), after the existing
+  > filler/punctuation stripping — a scope-down disclosed in `implementation.md`, judged acceptable
+  > for the one ported rule in `review-stage1b-2.md` ("Turn left, 30." still matches; "turn left
+  > thirty" falls to "say again", as the legacy handler did). Revisit before Stage 4+ ports
+  > longer literal phrasing, where the fuzzy scorer's tolerance matters more.
 - **D9 — The collision check, run by the adapter at `PUT` time, before anything is accepted.**
   1. Rule × rule: each rule's generated sample utterances (one per optional branch, slots filled
      with sample values from each type) are run against every other rule. A hit disables both.
