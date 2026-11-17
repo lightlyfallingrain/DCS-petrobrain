@@ -11,6 +11,30 @@ not body-layer itself. Check an edit without flying: `--print-rules` (standalone
 `--print-rules --audio-adapter-url http://127.0.0.1:7795` (also pushes and shows what the
 adapter accepted/rejected).
 
+## Checking your rules
+
+```sh
+cd body-layer && .venv/bin/python tools/check_rules.py
+```
+
+Reports every problem as `file: rule 'id': message`, with the Lua line number where there is
+one, and exits 1 if it found any:
+
+- Lua syntax and load errors, and bad `when.speech` calls (duplicate id, unknown category);
+- wording: an unparsable pattern, or one that clashes with another rule, an existing command
+  or ordinary speech — the same check audio-adapter runs at load, offline (needs
+  `audio-adapter/.venv`; without it this part is skipped with a warning);
+- a **dry run** of every handler with sample slot values — each directive alternative, each
+  slot form — while flying, while hovering, and with every action answering `ok = false`. It
+  catches a misspelt action, a wrong argument type or count, `nil` arithmetic, `digits()` of
+  a word, and an `effector.write` naming a switch or value `effectors.toml` does not have.
+  A branch none of the samples reach is not checked.
+
+The same check runs as a **git pre-commit hook** whenever a commit touches
+`config/rules/*.lua`, on the staged versions, and **blocks the commit** if it finds a problem
+(`git commit --no-verify` overrides). Install the hooks once per clone with
+`.claude/scripts/install-git-hooks.sh`.
+
 ## A rule
 
 ```lua

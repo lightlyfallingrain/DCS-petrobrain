@@ -74,6 +74,11 @@ class ActionContext:
     request_effector_write: (
         Callable[[str, str, str | None], dict[str, object]] | None
     ) = None
+    #: Called with the action name and why, each time a rule's call is
+    #: refused for a bad argument (count, type or range) before the action
+    #: runs. `None` in flight -- the rule just gets `ok = false`. Set only
+    #: by `tools/check_rules.py`, which reports such a call as a rule bug.
+    on_rejected_call: Callable[[str, str], None] | None = None
 
 
 @dataclass(frozen=True)

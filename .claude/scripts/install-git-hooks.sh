@@ -12,8 +12,11 @@
 #   pre-commit   graphify-dirty-flag.sh   -- records that docs changed
 #   pre-commit   switch-reference-regen.sh -- regenerates body-layer's switch reference
 #   post-commit  graphify-ast-refresh.sh  -- refreshes code structure in the graph
+#   pre-commit   rule-check-hook.sh        -- checks staged body-layer rule files
 #
-# All fail open. None can block a commit.
+# All fail open except rule-check-hook.sh, which blocks a commit whose rule
+# files have errors (BL-17, user: "command and commit hook"); it still skips
+# when it cannot run, and `git commit --no-verify` bypasses it.
 #
 # If a hook already exists and is not ours, this appends rather than replacing
 # it -- silently discarding someone's existing hook would be worse than doing
@@ -34,6 +37,11 @@ install_hook() {
     # $script in the same `local` that sets it is unbound under `set -u`.
     local name="$1"
     local script="$2"
+    # A third argument "blocking" makes a failing script fail the hook.
+    local on_fail="|| true"
+    if [ "${3:-}" = "blocking" ]; then
+        on_fail="|| exit 1"
+    fi
     local marker="# petrobrain: $script"
     local path="$HOOKS/$name"
 
@@ -49,7 +57,7 @@ install_hook() {
     {
         printf '\n%s\n' "$marker"
         printf 'if [ -x "$(git rev-parse --show-toplevel)/.claude/scripts/%s" ]; then\n' "$script"
-        printf '    "$(git rev-parse --show-toplevel)/.claude/scripts/%s" || true\n' "$script"
+        printf '    "$(git rev-parse --show-toplevel)/.claude/scripts/%s" %s\n' "$script" "$on_fail"
         printf 'fi\n'
     } >> "$path"
 
@@ -61,6 +69,7 @@ echo "installing git hooks:"
 install_hook pre-commit  graphify-dirty-flag.sh
 install_hook pre-commit  switch-reference-regen.sh
 install_hook post-commit graphify-ast-refresh.sh
+install_hook pre-commit  rule-check-hook.sh blocking
 
 echo
 echo "To remove, edit .git/hooks/{pre,post}-commit and delete the petrobrain blocks."
