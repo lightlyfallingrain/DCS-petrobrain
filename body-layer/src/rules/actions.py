@@ -138,18 +138,142 @@ def _increment_heading(
     return ctx.console.increment_ai_heading(delta_deg)
 
 
-#: `flight.increment_heading(delta_deg)` -- "turn left/right NN" (Stage 2,
-#: U12). `delta_deg`'s own bound (`-359..359`) is wider than any one call
-#: ever needs (`angle`'s own slot type already restricts the spoken
-#: degree value to `1..359`, and `config/rules/flight.lua` negates it for
-#: "left"), but the action's own validation must not assume its caller's
-#: grammar got it right -- see this module's docstring.
+def _set_heading(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.set_heading(args["deg"])
+
+
+def _level_flight(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.level_flight()
+
+
+def _set_speed(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.set_speed(args["value"])
+
+
+def _set_speed_max(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.set_speed_max()
+
+
+def _step_speed(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.step_speed(args["sign"])
+
+
+def _set_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.set_altitude(args["m"], args["reference_code"])
+
+
+def _step_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.step_altitude(args["delta_m"])
+
+
+def _hold_altitude(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hold_altitude()
+
+
+def _level_off(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.level_off()
+
+
+def _hvrt_translate_left(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hvrt_translate("left")
+
+
+def _hvrt_translate_right(
+    ctx: ActionContext, args: dict[str, int]
+) -> dict[str, object]:
+    return ctx.console.hvrt_translate("right")
+
+
+def _hvrt_translate_forward(
+    ctx: ActionContext, args: dict[str, int]
+) -> dict[str, object]:
+    return ctx.console.hvrt_translate("forward")
+
+
+def _hvrt_translate_back(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hvrt_translate("back")
+
+
+def _hvrt_hold(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hvrt_hold()
+
+
+def _hvrt_step_up(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hvrt_step("up")
+
+
+def _hvrt_step_down(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.hvrt_step("down")
+
+
+#: `[[BL-17]]` Stage 4 (`plans/speech-rules/plan.md` D18) -- one action per
+#: extracted flight handler. Every numeric bound is generous for the
+#: grammar that feeds it (never domain-tight): the action's own job is to
+#: validate type and bounds, not to re-enforce a range the pattern grammar
+#: already restricts (D5's "never trusted enough to hand a value straight
+#: to a method that assumes its caller already checked it" cuts both
+#: ways -- generous here is what keeps this action usable if a later rule
+#: ever composes a wider pattern onto the same action).
+#:
+#: `reference_code`/`sign`/`delta_m` are how a closed, three-or-fewer-way
+#: Lua-side directive (`[<reference:radar|barometric>]`, `<direction:
+#: down|up>`, `<direction:climb|descend>`) reaches an action that can only
+#: ever take a bounded int (`ActionParam`'s own shape) -- the rule's own
+#: handler resolves the word-set into a small integer before calling,
+#: exactly the same "Lua resolves a directive into a number" idiom
+#: `increment_heading`'s own sign flip (`s.direction == "left" and
+#: -s.degrees or s.degrees`) already uses, just generalised from a
+#: continuous range to a closed set of two or three. `hvrt_translate_*`/
+#: `hvrt_step_*` take the opposite approach -- one zero-argument action
+#: per bare direction word, since each is already its own rule id with no
+#: slot to carry a value at all (the same "one enumerated token per word"
+#: shape `crew_console.py`'s own `hvrt_translate`/`hvrt_step` methods'
+#: docstrings describe) -- sharing one Python method, not duplicating it.
 FLIGHT_ACTIONS: tuple[Action, ...] = (
     Action(
         name="increment_heading",
         params=(ActionParam(name="delta_deg", lo=-359, hi=359),),
         invoke=_increment_heading,
     ),
+    Action(
+        name="set_heading",
+        params=(ActionParam(name="deg", lo=0, hi=359),),
+        invoke=_set_heading,
+    ),
+    Action(name="level_flight", params=(), invoke=_level_flight),
+    Action(
+        name="set_speed",
+        params=(ActionParam(name="value", lo=0, hi=9999),),
+        invoke=_set_speed,
+    ),
+    Action(name="set_speed_max", params=(), invoke=_set_speed_max),
+    Action(
+        name="step_speed",
+        params=(ActionParam(name="sign", lo=-1, hi=1),),
+        invoke=_step_speed,
+    ),
+    Action(
+        name="set_altitude",
+        params=(
+            ActionParam(name="m", lo=0, hi=9999),
+            ActionParam(name="reference_code", lo=0, hi=2),
+        ),
+        invoke=_set_altitude,
+    ),
+    Action(
+        name="step_altitude",
+        params=(ActionParam(name="delta_m", lo=-9999, hi=9999),),
+        invoke=_step_altitude,
+    ),
+    Action(name="hold_altitude", params=(), invoke=_hold_altitude),
+    Action(name="level_off", params=(), invoke=_level_off),
+    Action(name="hvrt_translate_left", params=(), invoke=_hvrt_translate_left),
+    Action(name="hvrt_translate_right", params=(), invoke=_hvrt_translate_right),
+    Action(name="hvrt_translate_forward", params=(), invoke=_hvrt_translate_forward),
+    Action(name="hvrt_translate_back", params=(), invoke=_hvrt_translate_back),
+    Action(name="hvrt_hold", params=(), invoke=_hvrt_hold),
+    Action(name="hvrt_step_up", params=(), invoke=_hvrt_step_up),
+    Action(name="hvrt_step_down", params=(), invoke=_hvrt_step_down),
 )
 
 

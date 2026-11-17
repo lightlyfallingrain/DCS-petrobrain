@@ -1390,3 +1390,210 @@ worktree); `ruff format --check`, `ruff check`, `mypy --strict src` (91 source f
 `fast-tests.sh body-layer`: 2658 passed, 1 failed (`test_shipped_effector_config_loads_without_
 errors` — the named pre-existing, unrelated `seat-copilot.md` empty-row failure, untouched by
 this change), 4 xfailed — matches the dispatching brief's stated known failure exactly.
+
+---
+
+## Stage 4 — flight-control port (2026-11-17)
+
+Builds D18 (plan's "Stage 4 — flight-control port" section): `turn_heading`, `level_flight`,
+`set_speed`, `set_altitude`, `hold_altitude`, `level_off`, `altitude_step`, `speed_step`, the HVRT
+bare words, and "you/i have controls," all as rules in `config/rules/flight.lua`. 19 rules ship
+(`turn_heading_relative` + 18 new). Depends on Stage 3b's gate (D16); resolves that stage's own
+Required Fix 1 (the `settling` generalisation) as part of this stage, per the review's own
+instruction to pick one approach and record why.
+
+### D16 Required Fix 1 — per-parameter categories, not per-handler checks
+
+**Chose option (a): the gate's settle test became per-parameter**, not (b) keeping per-handler
+checks. `rules.gates.GATE_REGISTRY` grew from two entries to six: `"always"`, `"flight_control"`
+(base — has-controls only, no held value needed — the absolute-set forms and HVRT, whose own
+`_ai_pilot_hvrt_ready()` mode check stays the action's own finer precondition per D16), and four
+more that also hold on their own specific value: `"flight_control_heading"` (`held_heading`),
+`"_speed"` (`held_speed`), `"_altitude"` (`held_altitude`), `"_any"` (passes once *any* of the
+three is known — `level_flight`'s own rule). `belief.crew_state.CrewState` dropped the single
+`settling: bool` field in favour of carrying `held_heading`/`held_altitude`/`held_speed` directly,
+so each gate function reads whichever one its own category needs. `turn_heading_relative` migrated
+from `"flight_control"` to `"flight_control_heading"` in the same stage (its own precondition
+*is* `held_heading`, so this is the one rule the old single-category design happened to get right).
+
+**Why (a) over (b):** D16's own stated design already puts the "when" (precondition) in the gate,
+apart from the action, as a *generic*, reusable mechanism — keeping per-handler checks instead
+would have meant reintroducing the exact second-source-of-truth problem D16 was built to remove
+(the gate says `PASS`, the action re-derives the same check and could disagree). Splitting into
+named categories keeps the mechanism entirely in `gates.py`, costs one new gate function per
+parameter shape (four), and every extracted action's own dead `held_* is None -> NOT_READY` branch
+is removed and replaced with an `assert`, mirroring `increment_ai_heading`'s own precedent exactly
+(Stage 3b already set this precedent for the one rule it shipped).
+
+### Actions — extracted CrewConsole methods, not actions.py-resident logic
+
+Each flight handler's math moved onto a **public `CrewConsole` method** (`set_heading`,
+`level_flight`, `set_speed`/`set_speed_max`, `step_speed`, `set_altitude`, `step_altitude`,
+`hold_altitude`, `level_off`, `hvrt_translate`, `hvrt_hold`, `hvrt_step`), exactly mirroring
+`increment_ai_heading`'s own Stage 2 shape — `rules/actions.py`'s `FLIGHT_ACTIONS` entries are thin
+one-line wrappers calling these. `rules/actions.py` grew by 16 actions but **the action mechanism
+itself (`Action`/`ActionParam`/`_make_action_wrapper`) is untouched** — every new action still
+takes only bounded ints, per the task's own instruction to keep this file's change small while
+Stage 3d (effector writes) builds on the same module elsewhere. Four of those ints are **closed
+small-integer encodings of a word the Lua handler already resolved**, the same idiom `increment_
+heading`'s own sign flip established: `set_altitude`'s `reference_code` (0 none / 1 radar /
+2 barometric), `step_speed`'s `sign` (±1), `step_altitude`'s already-signed `delta_m`. HVRT's four
+translate directions and two step directions are **zero-arg actions, one per bare word**
+(`hvrt_translate_left/right/forward/back`, `hvrt_step_up/down`), each a one-line wrapper to the
+*same* `hvrt_translate`/`hvrt_step` method — no int-code needed since the direction is implicit in
+which rule/action is called, not a runtime value.
+
+**The absolute `turn_heading` drops the legacy compass-point form** ("heading north"). The shipped
+`heading` slot type (D7: "always a world compass three digit number") has no compass-word
+alternative, and the plan's own Stage 4 text names only `heading` for this slot. A real, reported
+behaviour narrowing — flagged in the handback, not silently dropped.
+
+### Hardening `run_rule` against a bare Python exception (review-stage3b.md's optional refinement)
+
+Several new actions' own precondition is an `assert` (mirroring `increment_ai_heading`'s), each
+"correctly unreachable today" because its category's gate already guarantees it — the exact shape
+the optional refinement flagged as worth hardening "the next time this area is touched." Added a
+second `except Exception` clause to `run_rule` (`rules/engine.py`), degrading *any* bare exception
+to D6's `ACTION_FILE_ERROR_LINE`/`error=True`, logged with the exception's own type name. Confirmed
+via Stage 0's own research note that lupa propagates a Python exception raised inside a callback
+unwrapped through the Lua boundary — this is the second place that finding has driven a fix
+(the first was Stage 3b's `when.speech` `*args` arity shape).
+
+### Two genuine bugs found and fixed in shared collision-check infrastructure (both zero-behaviour-change for the pilot)
+
+Building the real matching differential tests (`audio-adapter/tests/test_flight_rules_matching.py`)
+against the *real* `compile_rules`/`match_transcript` surfaced two defects neither the one rule
+Stage 1b/2 shipped, nor Stage 3a/3b's own tests, had ever exercised:
+
+1. **`speed_target`'s own tagged table (`{"kind": ..., ...}`) was silently dropped at the wire**,
+   never a crash: `command_matcher._match_rules`'s own `typed_slots` filter kept only `isinstance
+   (value, (int, str))`, and `body.py`'s own `/transcripts/poll` row validator rejected (`continue`
+   -- the whole transcript, not just the slot) any slots dict whose values were not scalar. `set_
+   speed`'s own rule is the *first* time any shipped rule has carried a union slot value through
+   the real dispatch path (D7/D14's "a union arrives in Lua as a table" design predates this stage,
+   but nothing had wired it end to end until now). Fixed by widening the type both filters check
+   against to `int | str | dict[str, object]` (`command_matcher.SlotValue`, `MatchResult.slots`
+   and `transcript_queue.TranscriptEvent.slots` both become `Mapping[str, SlotValue]`, `Mapping`
+   rather than `dict` so every pre-existing `_parse_*_slots` branch's own `dict[str, int | str]`
+   construction needs no change — mypy's own covariance suggestion) and widening `body.py`'s own
+   validator's `isinstance` check (one level of nesting, matching the tagged-table shape exactly,
+   never arbitrary recursion). Confirmed via `nested dict -> lupa table_from` probes that the
+   nested dict crosses into Lua correctly (`s.speed_target.kind`) under the real sandbox's real
+   `attribute_filter` — `sandbox.py`'s own `_deny_all_attributes` docstring already documents that
+   a plain `dict` (never a custom object) is tolerated as "userdata" for exactly this reason.
+2. **Every HVRT bare-word rule "collided with itself."** `rule_patterns._collides_with_legacy`
+   treated *any* non-`None` legacy-probe token as a collision, including when that token is the
+   rule's *own* id — which is exactly what happens for all seven HVRT rules, since `command_
+   matcher._HVRT_BARE_WORD_TOKENS`'s own exact shortcut resolves a bare "left"/"hold"/etc. to that
+   same token regardless of whether any rule is active at all. Fixed by requiring the legacy
+   token to differ from the rule's own id before counting it as a collision — a one-line, narrowly
+   scoped change with its own direct unit test (`test_rule_patterns.py`'s `test_a_legacy_probe_
+   resolving_to_the_rules_own_id_is_not_a_collision`).
+
+### Notable discovery — five real wording collisions, not forced through
+
+Running the *real* 19-rule pattern set through the *real* collision check (after the two fixes
+above) found **five genuine, measured collisions** this stage does not resolve by renaming
+anything, because that is a product decision, not an Implementer's to make unilaterally:
+
+| rule | collides with | mechanism | ratio |
+|---|---|---|---|
+| `set_speed` | `altitude_step` (rule x rule) | "speed two zero zero" fuzzy-resolves `altitude_step`'s own `<direction:climb\|descend>` word-set to "descend" | `ratio("speed","descend") == 0.5`, exactly `_WORD_REPAIR_FLOOR` |
+| `altitude_step` | `set_speed` | same, the other direction | 0.5 |
+| `level_off` | the existing `observ_off` command (rule x legacy) | word-sequence scoring against "observe off" | 0.75, comfortably above `MATCH_FLOOR` |
+| `straight` | the existing `point` command, and `hvrt_translate_right` | "straight" vs "sight"/"right" | 0.77 both |
+| `hvrt_translate_right` | the existing `point` command (rule x legacy, via the perturbed-sample probe) | "right"'s own near-miss probe word "light" resolves to `point` | — the *exact* collision `_HVRT_BARE_WORD_TOKENS`'s own comment already named (`ratio("right","sight")==0.8`) as the reason that exact-match shortcut exists; it protects an *exact* "right," not a mis-transcribed "light" landing outside it |
+
+All five are real per the project's own existing mechanism (not an artifact introduced by this
+stage), and all five were checked for a narrower fix before accepting them: dropping `straight`
+entirely does **not** rescue `hvrt_translate_right` (its own collision is independent, via the
+perturbed-sample probe); reordering `altitude_step`'s word-set does not change `_resolve_word_set`'s
+own best-of-all-alternatives search. **Consequence, already handled correctly by existing
+machinery, not newly built**: `body.py`'s `_push_rules` already treats an adapter-rejected rule id
+exactly like a load-time failure (D6) — one stderr banner naming each id and reason, "Action file
+error." spoken once, and the id excluded from `enabled_rule_ids`. Nothing new needed building for
+this to degrade gracefully; it already does. The five rule ids still *load* cleanly in body-layer
+(`test_shipped_rule_files_load_with_zero_failures` asserts all 19) — only the adapter's own `PUT
+/rules` collision check, run separately, disables them. `test_flight_rules_matching.py`'s own
+`test_the_real_shipped_pattern_set_rejects_exactly_the_known_collisions` pins this exact set rather
+than asserting zero rejections, so a drift either direction is caught.
+
+**Recommendation for whoever picks this up**: `set_speed`/`altitude_step` is the cheapest to fix
+(rename one word-set alternative, e.g. a synonym for "descend" that scores further from "speed");
+`level_off`/`straight`/`hvrt_translate_right` all involve an *existing* shipped command's wording
+and need a product decision, not a code fix.
+
+### U22 — not built in this stage
+
+D19's `CalloutScheduler.note_urgent` proposal (flight readbacks cutting ahead of a queued routine
+callout) is answered "build it" (U22), but Stage 4's own five numbered build steps in the plan
+never mention it, and no code here wires it. Per the task's own instruction ("build it here only
+if the plan places it in Stage 4"), it is left unbuilt. It belongs with whichever stage actually
+reorders `CalloutScheduler`'s own queue — most likely folded into this stage's own follow-up once
+U22 is explicitly scheduled, but not assumed here.
+
+### Test deletions and moves
+
+- `audio-adapter/tests/test_bl16_stage_p2_vocabulary.py` deleted entirely — every test in it
+  exercised a parser (`parse_heading_deg`/`parse_speed_value`/`parse_speed_step_direction`/`parse_
+  altitude_value`/`parse_altitude_step`) or a slotted `match_transcript` branch this stage deletes.
+  Its still-live HVRT bare-word tests (a real, unchanged mechanism, `_HVRT_BARE_WORD_TOKENS`) moved
+  to a new `TestHvrtBareWordShortcut` class in `test_command_matcher.py`, where that mechanism
+  lives — plus one new test (`test_a_multi_word_transcript_never_takes_this_shortcut`) and the
+  `hold`-vs-`hold_altitude` disambiguation test, updated to build its `hold_altitude` fixture rule
+  via the real grammar rather than assuming a legacy phrase table entry.
+- `body-layer/tests/test_crew_console_ai_pilot_wheel.py` lost `TestLevelFlight`/`TestTurnHeading`/
+  `TestSetSpeed`/`TestSpeedStep`/`TestSetAltitude`/`TestAltitudeStep`/`TestHoldAltitude`/
+  `TestLevelOff`/`TestHvrtTranslate`/`TestHvrtHold`/`TestHvrtStep`/`TestTransitionsResetEachDispatch`
+  (12 classes) — every one dispatched a token this stage moved to a rule. `TestIncrementAiHeading`
+  (Stage 2) and `TestDrainAiPilotWheelSpeech` (never a command token) are unaffected and stay.
+  Their differential equivalents, dispatched through the real gate and the real shipped
+  `flight.lua` (not a bare `handle_command` call with no gate at all), now live in `test_rules_
+  flight_actions.py` — one class per command, 44 tests total in that file, each setting exactly the
+  held field its own rule's category needs rather than a blanket "flying" fixture.
+- `body-layer/tests/test_crew_console_rules.py`'s five Stage 3b hold-and-retry tests (`test_gate_
+  hold_sets_pending_and_speaks_nothing`, both `test_drain_*` timeout tests, `test_drain_resolves_
+  to_pass_...`, `test_a_second_held_command_replaces_...`) used a synthetic `"my_rule"` under
+  category `"flight_control"` with `held_heading=None` to exercise the *generic* hold mechanism --
+  broken by the category split, since bare `"flight_control"` no longer holds on any `held_*` value
+  at all. Fixed by widening `_flight_console_with_rule`'s own helper to take an explicit `category`
+  parameter, and passing `category="flight_control_heading"` at each of the five call sites that
+  actually need a hold-capable category; the two pass/unable tests that only care about `has_
+  controls` keep the default. This is exactly the fast-tests risk the role instructions name
+  (`fast-tests.sh body-layer` caught all five locally before the full suite ran) — found by running
+  the touched-file selection, not by reasoning about what Stage 3b's own tests would still assert.
+- `body-layer/tests/test_rule_gates.py` rewritten for six categories instead of two (one test per
+  category plus the registry-membership pin).
+
+### Checks (both subprojects)
+
+**body-layer** (existing `.venv`, Python 3.14.10, `lupa==2.8` already installed):
+- `ruff format --check src tests`: pass (221 files)
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass, 91 source files, 0 issues
+- `.claude/scripts/fast-tests.sh body-layer`: 1 failed (the named pre-existing `test_shipped_
+  effector_config_loads_without_errors`), 2643 passed, 4 xfailed
+- `.claude/scripts/fast-tests.sh --full body-layer`: same single pre-existing failure, 3501 passed,
+  4 xfailed
+
+**audio-adapter**:
+- `ruff format --check src tests`: pass (36 files)
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass, 17 source files, 0 issues
+- `.claude/scripts/fast-tests.sh --full audio-adapter`: 523 passed, 2 skipped (parallel)
+
+### Notable discoveries, summarised
+
+1. The five wording collisions above — the single most consequential finding of this stage.
+2. The `speed_target`/nested-slot wire-type gap — a real, if latent, defect in shared
+   infrastructure that no prior stage's own tests exercised, now fixed and covered.
+3. The HVRT self-collision bug in `_collides_with_legacy` — same shape, now fixed and covered.
+4. `heading`'s own collision-probe sample ("heading three one five") coincided with `scan_bearing_
+   deg`'s hardcoded example list — moved to "heading two zero zero" (collision-check infrastructure
+   only; the accepted grammar is unchanged, still any `0..359` value).
+5. `rules/actions.py`'s own change is additive only (16 new actions, zero changes to `Action`/
+   `ActionParam`/`_make_action_wrapper`) — should not conflict with Stage 3d's own planned widening
+   of `ActionParam` and new `"effector"` namespace, built in parallel on a different branch.
+6. Comment pruned: `belief/speech.py`'s `NOT_FLYING`/`HANDS_BUSY` comment block, stale the moment
+   this stage shipped more than one `flight_control*` rule (it said "the one rule in this category
+   until Stage 4 ports the rest" — true when written, false now).

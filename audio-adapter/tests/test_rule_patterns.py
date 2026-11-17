@@ -221,6 +221,28 @@ class TestCompileRules:
         assert accepted == []
         assert rejected[0].id == "new_rule"
 
+    def test_a_legacy_probe_resolving_to_the_rules_own_id_is_not_a_collision(
+        self,
+    ) -> None:
+        """`[[BL-17]]` Stage 4's own fix -- a rule whose sample the legacy
+        probe resolves to that **same** rule's own id (the real shape of
+        `command_matcher.match_transcript`'s `_HVRT_BARE_WORD_TOKENS`
+        shortcut: it always resolves a bare "left"/"hold"/etc. to that
+        exact token regardless of whether any rule is active) must not be
+        treated as a collision -- the two pipelines agree, which is the
+        opposite of ambiguity. A probe resolving to a genuinely different
+        token is still disabled (`test_rule_colliding_with_legacy_is_
+        disabled`, just above)."""
+        accepted, rejected = compile_rules(
+            [("hvrt_translate_left", "left")],
+            legacy_probe=lambda text: LegacyProbeResult(
+                token="hvrt_translate_left", verb_anchored=True
+            ),
+            free_speech_guard=(),
+        )
+        assert [r.id for r in accepted] == ["hvrt_translate_left"]
+        assert rejected == []
+
     def test_rule_matching_a_free_speech_guard_sentence_is_disabled(self) -> None:
         accepted, rejected = compile_rules(
             [("attack_rule", "attack <target:tanks|trucks>")],

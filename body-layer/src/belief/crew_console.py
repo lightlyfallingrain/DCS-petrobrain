@@ -353,26 +353,6 @@ _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
     "full": "full arc",
 }
 
-#: BL-16 mode 2 Stage P2b -- `hvrt_translate_left`/`_right`/`_forward`/
-#: `_back` -> the spoken direction, one enumerated token per bare
-#: direction word (`DISPATCHED_COMMAND_TOKENS`'s own comment on why --
-#: the generic phrase match carries no information beyond the token once
-#: several phrases share one). `_handle_hvrt_translate` dispatches on the
-#: resolved `AiPilotHvrtDirection` value, not the token string itself.
-_HVRT_TRANSLATE_TOKENS: dict[str, AiPilotHvrtDirection] = {
-    "hvrt_translate_left": "left",
-    "hvrt_translate_right": "right",
-    "hvrt_translate_forward": "forward",
-    "hvrt_translate_back": "back",
-}
-
-#: Same shape as `_HVRT_TRANSLATE_TOKENS`, for the 2 m altitude tap
-#: (`hvrt_step_up`/`_down`).
-_HVRT_STEP_TOKENS: dict[str, Literal["up", "down"]] = {
-    "hvrt_step_up": "up",
-    "hvrt_step_down": "down",
-}
-
 #: `scan_bearing_n`/... -> `belief.attention.Sector` -- the compass-absolute
 #: half of the F10 scan vocabulary. Token suffixes match `Sector`'s own
 #: literals lowercased, so this table is also how the token string is
@@ -1192,46 +1172,17 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # readback`/`render_say_again`), never `[]`. No no-return-value
         # exemption needed.
         "point",
-        # BL-16 mode 2 Stage P2a (`plans/flight-control/plan.md`, "Stage
-        # P2 ready to build") -- the FLT/HVR goal vocabulary. Every
-        # handler below always returns a readback or a "say again"/
-        # render_unable line unconditionally; none needs the
-        # no-return-value exemption.
-        "level_flight",
-        "turn_heading",
-        # `turn_heading_relative` moved out of this static set in
-        # `[[BL-17]]` Stage 2 -- it is now a rule id (`config/rules/
-        # flight.lua`), dispatched through `enabled_rule_ids`/
-        # `_handle_rule`, not this table. No fallback: the Python handler
-        # (`_handle_turn_heading_relative`) is deleted in the same stage
-        # (D6/E5's "a ported rule fails to load" answer -- "Action file
-        # error.", never a silent revert to the old path).
-        "set_speed",
-        "speed_step",
-        "set_altitude",
-        "altitude_step",
-        "hold_altitude",
-        "level_off",
-        # Stage P2b -- HVRT translate. The plan's vocabulary table names
-        # one token per row ("hvrt_translate"/"hvrt_step" covering four
-        # and two bare direction words respectively), but the generic
-        # phrase-table match (`command_matcher.match_transcript`'s own
-        # fallback) carries no information beyond the matched *token*
-        # once several phrases share one -- "no slot parser needed"
-        # (plan) rules out adding one to recover it. Implemented instead
-        # as one enumerated token per direction word, the same shape
-        # `_RELATIVE_SCAN_TOKENS` already uses for "scan ahead"/"scan
-        # left"/"scan right" (also one token per bare direction word);
-        # `_HVRT_TRANSLATE_TOKENS`/`_HVRT_STEP_TOKENS` below are the
-        # lookup tables `handle_command` dispatches through to the one
-        # shared handler per action.
-        "hvrt_translate_left",
-        "hvrt_translate_right",
-        "hvrt_translate_forward",
-        "hvrt_translate_back",
-        "hvrt_hold",
-        "hvrt_step_up",
-        "hvrt_step_down",
+        # BL-16 mode 2 Stage P2a/P2b's own FLT/HVR goal vocabulary --
+        # `level_flight`/`turn_heading`/`set_speed`/`speed_step`/
+        # `set_altitude`/`altitude_step`/`hold_altitude`/`level_off` and
+        # the seven HVRT tokens (`hvrt_translate_left`/`_right`/
+        # `_forward`/`_back`/`hvrt_hold`/`hvrt_step_up`/`_down`) all moved
+        # out of this static set in `[[BL-17]]` Stage 4 -- every one is
+        # now a rule id (`config/rules/flight.lua`), dispatched through
+        # `enabled_rule_ids`/`_handle_rule`, not this table. No fallback:
+        # every pre-rules Python handler these replaced is deleted in the
+        # same stage (D6/E5's "a ported rule fails to load" answer --
+        # "Action file error.", never a silent revert to the old path).
     }
 )
 
@@ -3173,13 +3124,19 @@ class CrewConsole:
         (`_handle_rule`/`drain_pending_rule_dispatch`) and (Stage 3c) the
         decision to push `PUT /crew_state` must read the same computed
         value within one poll (plan's "Co-moving Fields" table).
-        `seat`/`hands_free`/`eyes_free` are named stubs pending
-        `[[BL-B123]]` -- see `CrewState`'s own docstring for why."""
+        `held_heading`/`held_altitude`/`held_speed` are read-only mirrors
+        of the same-named `parked_flight_state` fields, so each gate
+        (`rules.gates`) can check whichever one its own category needs
+        (Stage 4, review-stage3b.md Required Fix 1) rather than one
+        shared proxy. `seat`/`hands_free`/`eyes_free` are named stubs
+        pending `[[BL-B123]]` -- see `CrewState`'s own docstring for why."""
         state = self.parked_flight_state
         has_controls = state.parked_active
         return CrewState(
             has_controls=has_controls,
-            settling=has_controls and state.held_heading is None,
+            held_heading=state.held_heading,
+            held_altitude=state.held_altitude,
+            held_speed=state.held_speed,
             seat="copilot",
             hands_free=not has_controls,
             eyes_free=True,
@@ -3428,28 +3385,6 @@ class CrewConsole:
             lines = self._handle_weapons_armed()
         elif token == "weapons_safe":
             lines = self._handle_weapons_safe()
-        elif token == "level_flight":
-            lines = self._handle_level_flight()
-        elif token == "turn_heading":
-            lines = self._handle_turn_heading(slots)
-        elif token == "set_speed":
-            lines = self._handle_set_speed(slots)
-        elif token == "speed_step":
-            lines = self._handle_speed_step(slots)
-        elif token == "set_altitude":
-            lines = self._handle_set_altitude(slots)
-        elif token == "altitude_step":
-            lines = self._handle_altitude_step(slots)
-        elif token == "hold_altitude":
-            lines = self._handle_hold_altitude()
-        elif token == "level_off":
-            lines = self._handle_level_off()
-        elif token in _HVRT_TRANSLATE_TOKENS:
-            lines = self._handle_hvrt_translate(_HVRT_TRANSLATE_TOKENS[token])
-        elif token == "hvrt_hold":
-            lines = self._handle_hvrt_hold()
-        elif token in _HVRT_STEP_TOKENS:
-            lines = self._handle_hvrt_step(_HVRT_STEP_TOKENS[token])
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -4750,40 +4685,55 @@ class CrewConsole:
         project wants."""
         return " ".join(str(int(value)))
 
-    def _handle_level_flight(self) -> list[str]:
-        """ "Level flight" -- freezes heading, altitude *and* speed at
-        their current *held* values in one command (plan vocabulary
-        table: "stabilise, not a numeric target the pilot names").
-        `ai_pilot_level_flight_transition` (not `ai_pilot_goal_
-        transition`) carries this, since freezing three parameters at
-        once needs `body.py`'s own live read of all three held values,
-        not a single request this class could build itself. "Unable,
-        not ready" only if *none* of the three is known yet -- partial
-        knowledge still freezes what is known."""
-        state = self.parked_flight_state
-        if (
-            state.held_heading is None
-            and state.held_altitude is None
-            and state.held_speed is None
-        ):
-            return [render_unable("NOT_READY").text]
-        self.ai_pilot_level_flight_transition = True
-        return ["Level flight."]
+    def level_flight(self) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.level_flight` action, extracted
+        from the pre-rules `_handle_level_flight` (deleted) -- freezes
+        heading, altitude *and* speed at their current *held* values in
+        one command (plan vocabulary table: "stabilise, not a numeric
+        target the pilot names"). `ai_pilot_level_flight_transition` (not
+        `ai_pilot_goal_transition`) carries this, since freezing three
+        parameters at once needs `body.py`'s own live read of all three
+        held values, not a single request this class could build itself.
 
-    def _handle_turn_heading(self, slots: dict[str, int | str] | None) -> list[str]:
-        """ "Heading &lt;deg&gt;" / "Heading &lt;compass point&gt;" -- both
-        forms resolve to the same numeric `heading_deg` slot before
-        reaching here (audio-adapter's own compass-point parser feeds
-        the same numeric path, per the plan's Readbacks note), so this
-        handler only ever sees a degree value."""
-        deg = slots.get("heading_deg") if slots is not None else None
-        if not isinstance(deg, int):
-            return ["say again -- no heading heard"]
-        resolved = deg % 360
-        self.ai_pilot_goal_transition = AiPilotGoalRequest(
-            param="heading", heading_deg=float(resolved)
+        **The old "unable, not ready only if *none* of the three is
+        known yet" branch is removed** (D16/D18): the `"flight_control_
+        any"` category gate now owns that precondition (`rules.gates.
+        _flight_control_any`'s own "partial knowledge still passes" rule,
+        promoted from here) -- by the time dispatch reaches this far, at
+        least one of the three is already known. Asserted, not
+        re-checked, for the same reason `increment_ai_heading` asserts
+        `held_heading is not None`."""
+        state = self.parked_flight_state
+        assert (
+            state.held_heading is not None
+            or state.held_altitude is not None
+            or state.held_speed is not None
         )
-        return [f"Heading {self._digit_readback(resolved)}."]
+        self.ai_pilot_level_flight_transition = True
+        return {"ok": True, "reason": None}
+
+    def set_heading(self, deg: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.set_heading` action, extracted
+        from the pre-rules `_handle_turn_heading` (deleted) -- "heading
+        &lt;deg&gt;", the absolute form. The ported rule's own `heading`
+        slot type (`rule_patterns.SLOT_TYPES`) already restricts the
+        spoken value to `0..359` (three digits, exactly), so the `deg %
+        360` normalisation and the old "say again -- no heading heard"
+        branch for a non-`int`/out-of-range slot are both dead by
+        construction here -- the same "gate/grammar already guarantees
+        it" reasoning `increment_ai_heading` uses for its own dead
+        branch, just enforced by the pattern grammar instead of a gate.
+        **The legacy compass-point form ("heading north") is dropped**
+        in this port -- the shipped `heading` slot type is three digits
+        only (D7's "always a world compass three digit number"), with no
+        compass-word alternative; flagged in `implementation.md` as a
+        user-visible narrowing, not a silent one.
+        Returns an action result, never a readback -- the rule writes
+        its own (D4/U4)."""
+        self.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=float(deg)
+        )
+        return {"ok": True, "heading_deg": deg}
 
     def increment_ai_heading(self, delta_deg: int) -> dict[str, object]:
         """`[[BL-17]]` Stage 2's `flight.increment_heading` action --
@@ -4817,65 +4767,84 @@ class CrewConsole:
         )
         return {"ok": True, "reason": None}
 
-    def _handle_set_speed(self, slots: dict[str, int | str] | None) -> list[str]:
-        """ "Speed &lt;value&gt;" -- "max" is a legal value (Decision 10's
-        own vocabulary). Readback names "the step actually set"
-        (plan), computed the same way `set_parked_speed` will when
-        `body.py` applies the transition -- `nearest_speed_step` is a
-        pure function, so calling it here for the words and again there
-        for the write never disagrees."""
-        value = slots.get("speed_kmh") if slots is not None else None
-        if value == "max":
-            self.ai_pilot_goal_transition = AiPilotGoalRequest(
-                param="speed", speed_kmh="max"
-            )
-            return ["Speed max."]
-        if not isinstance(value, int):
-            return ["say again -- no speed heard"]
+    def set_speed(self, value: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.set_speed` action, extracted
+        from the pre-rules `_handle_set_speed` (deleted) -- "speed
+        &lt;value&gt;", the numeric branch (the literal "max" is a
+        separate rule/action, `set_speed_max`, since the ported
+        `speed_target` slot resolves that choice in Lua before either
+        action is ever called -- D7's own union-slot convention). Readback
+        info names "the value actually set" (`r["snapped"]`), computed
+        the same way `set_parked_speed` will when `body.py` applies the
+        transition -- `nearest_speed_step` is a pure function, so calling
+        it here for the readback and again there for the write never
+        disagrees. The old non-`int` slot guard is dead by construction
+        (the `speed_target` grammar's numeric branch is always an int)."""
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="speed", speed_kmh=float(value)
         )
         snapped = nearest_speed_step(float(value))
         if snapped >= AI_PILOT_SPEED_MAX_SENTINEL_KMH:
-            return ["Speed max."]
-        return [f"Speed {self._digit_readback(int(snapped))}."]
+            return {"ok": True, "is_max": True, "speed_kmh": 0}
+        return {"ok": True, "is_max": False, "speed_kmh": int(snapped)}
 
-    def _handle_speed_step(self, slots: dict[str, int | str] | None) -> list[str]:
-        """ "Slow down" / "speed up" -- one step from the AI's own
-        *held* speed (`step_speed`), never from an in-flight goal
-        target."""
-        raw_direction = slots.get("direction") if slots is not None else None
-        step_direction: Literal["up", "down"]
-        if raw_direction == "up":
-            step_direction = "up"
-        elif raw_direction == "down":
-            step_direction = "down"
-        else:
-            return ["say again -- no speed heard"]
-        stepped = step_speed(self.parked_flight_state.held_speed, step_direction)
-        if stepped is None:
-            return [render_unable("NOT_READY").text]
+    def set_speed_max(self) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.set_speed_max` action -- "speed
+        max" (the `speed_target` union's literal branch). Extracted from
+        the same pre-rules `_handle_set_speed`."""
+        self.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="speed", speed_kmh="max"
+        )
+        return {"ok": True, "reason": None}
+
+    def step_speed(self, sign: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.step_speed` action, extracted
+        from the pre-rules `_handle_speed_step` (deleted) -- "slow down"/
+        "speed up", one step from the AI's own *held* speed (the module-
+        level `step_speed` helper), never from an in-flight goal target.
+        `sign` (`+1`/`-1`) is resolved from the rule's own `<direction:
+        down|up>` word-set slot in Lua before this is ever called, the
+        same "Lua resolves a word-set into a number" idiom `increment_
+        heading`'s own `s.direction == "left" and -s.degrees or s.degrees`
+        already uses.
+
+        **The old `stepped is None -> NOT_READY` branch is removed**
+        (D16/D18): the `"flight_control_speed"` category gate now
+        guarantees `held_speed is not None` by the time this runs, so the
+        module-level `step_speed(current_kmh, direction)` helper's own
+        `current_kmh is None` branch is unreachable here -- asserted, not
+        re-checked."""
+        direction: Literal["up", "down"] = "up" if sign > 0 else "down"
+        stepped = step_speed(self.parked_flight_state.held_speed, direction)
+        assert stepped is not None
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="speed",
             speed_kmh="max" if stepped >= AI_PILOT_SPEED_MAX_SENTINEL_KMH else stepped,
         )
         if stepped >= AI_PILOT_SPEED_MAX_SENTINEL_KMH:
-            return ["Speed max."]
-        return [f"Speed {self._digit_readback(int(stepped))}."]
+            return {"ok": True, "is_max": True, "speed_kmh": 0}
+        return {"ok": True, "is_max": False, "speed_kmh": int(stepped)}
 
-    def _handle_set_altitude(self, slots: dict[str, int | str] | None) -> list[str]:
-        """ "alt[itude] &lt;value&gt; [radar/barometric]" -- the readback
-        always names the reference actually about to be pursued
-        (`resolve_altitude_reference`, the 700 m radar cap), never the
-        one the player said (Decision 9/E-P3)."""
-        m = slots.get("altitude_m") if slots is not None else None
-        if not isinstance(m, int):
-            return ["say again -- no altitude heard"]
-        requested_word = slots.get("reference") if slots is not None else None
+    def set_altitude(self, m: int, reference_code: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.set_altitude` action, extracted
+        from the pre-rules `_handle_set_altitude` (deleted) -- "alt[itude]
+        &lt;value&gt; [radar/barometric]". The readback always names the
+        reference actually about to be pursued (`resolve_altitude_
+        reference`, the 700 m radar cap), never the one the player said
+        (Decision 9/E-P3).
+
+        `reference_code` (`0`=none heard, `1`=radar, `2`=barometric) is
+        how the rule's own `[<reference:radar|barometric>]` optional
+        word-set slot reaches this action -- `ActionParam` only ever
+        carries a bounded int (`rules/actions.py`'s own docstring), so
+        Lua maps its three-way directive onto one of three small integers
+        before calling this, the same kind of word-to-number resolution
+        `increment_heading`'s own sign flip already does, just over a
+        closed set of three rather than a continuous range."""
         requested: AiPilotAltitudeRef | None
-        if requested_word == "radar":
+        if reference_code == 1:
             requested = "radar"
-        elif requested_word == "barometric":
+        elif reference_code == 2:
             requested = "barometric"
         else:
             requested = None
@@ -4886,22 +4855,24 @@ class CrewConsole:
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="altitude", altitude_m=float(m), altitude_ref=achieved
         )
-        if achieved == "barometric":
-            return [f"{m} meters barometric."]
-        return [f"{m} meters."]
+        return {"ok": True, "altitude_m": m, "barometric": achieved == "barometric"}
 
-    def _handle_altitude_step(self, slots: dict[str, int | str] | None) -> list[str]:
-        """ "climb/descend &lt;m&gt;" -- relative to the AI's own *held*
-        altitude, same "current, not re-derived" posture `turn_heading_
-        relative` already has."""
-        direction = slots.get("direction") if slots is not None else None
-        amount = slots.get("amount_m") if slots is not None else None
-        if direction not in ("climb", "descend") or not isinstance(amount, int):
-            return ["say again -- no altitude heard"]
+    def step_altitude(self, delta_m: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.step_altitude` action, extracted
+        from the pre-rules `_handle_altitude_step` (deleted) -- "climb/
+        descend &lt;m&gt;", relative to the AI's own *held* altitude, same
+        "current, not re-derived" posture `turn_heading_relative` already
+        has. `delta_m` is already signed (positive for "climb," negative
+        for "descend") by the time Lua calls this, resolved from the
+        rule's own `<direction:climb|descend>` word-set slot.
+
+        **The old `current is None -> NOT_READY` branch is removed**
+        (D16/D18): the `"flight_control_altitude"` category gate now
+        guarantees `held_altitude is not None` -- asserted, not
+        re-checked."""
         current = self.parked_flight_state.held_altitude
-        if current is None:
-            return [render_unable("NOT_READY").text]
-        target = current + amount if direction == "climb" else current - amount
+        assert current is not None
+        target = current + delta_m
         current_ref = altitude_ref_from_letter(
             self.parked_flight_state.held_altitude_ref
         )
@@ -4910,39 +4881,53 @@ class CrewConsole:
             param="altitude", altitude_m=target, altitude_ref=achieved
         )
         target_int = round(target)
-        if achieved == "barometric":
-            return [f"{target_int} meters barometric."]
-        return [f"{target_int} meters."]
+        return {
+            "ok": True,
+            "altitude_m": target_int,
+            "barometric": achieved == "barometric",
+        }
 
-    def _handle_hold_altitude(self) -> list[str]:
-        """ "hold alt[itude]" -- freezes the goal at the current *held*
-        altitude (plan vocabulary table: "freezes the goal at the
-        current read altitude")."""
+    def hold_altitude(self) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.hold_altitude` action, extracted
+        from the pre-rules `_handle_hold_altitude` (deleted) -- "hold
+        alt[itude]", freezes the goal at the current *held* altitude
+        (plan vocabulary table: "freezes the goal at the current read
+        altitude"). No barometric/radar suffix in the readback, matching
+        the pre-rules handler's own text exactly -- unlike `set_altitude`/
+        `step_altitude`, this command never names a reference.
+
+        **The old `current is None -> NOT_READY` branch is removed**
+        (D16/D18): the `"flight_control_altitude"` category gate owns it."""
         current = self.parked_flight_state.held_altitude
-        if current is None:
-            return [render_unable("NOT_READY").text]
+        assert current is not None
         current_ref = altitude_ref_from_letter(
             self.parked_flight_state.held_altitude_ref
         )
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="altitude", altitude_m=current, altitude_ref=current_ref
         )
-        return [f"Holding {round(current)} meters."]
+        return {"ok": True, "altitude_m": round(current)}
 
-    def _handle_level_off(self) -> list[str]:
-        """ "Straight" / "level off" -- stops a turn and holds the
-        *current* heading (plan vocabulary table). F-P1's own second
-        meaning for this same token (a spoken abort, while an alignment
-        is in progress) is Stage P4's own addition, not built here --
-        `align_phase` never leaves `"none"` in this stage, so this
-        handler's "stop turn" meaning is the only one reachable yet."""
+    def level_off(self) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.level_off` action, extracted
+        from the pre-rules `_handle_level_off` (deleted) -- "straight" /
+        "level off" (two separate rule ids, `level_off`/`straight`,
+        sharing this one action -- `config/rules/flight.lua`'s own
+        comment on why), stops a turn and holds the *current* heading
+        (plan vocabulary table). F-P1's own second meaning for this same
+        command (a spoken abort, while an alignment is in progress) is
+        Stage P4's own addition, not built here -- `align_phase` never
+        leaves `"none"` in this stage, so this action's "stop turn"
+        meaning is the only one reachable yet.
+
+        **The old `current is None -> NOT_READY` branch is removed**
+        (D16/D18): the `"flight_control_heading"` category gate owns it."""
         current = self.parked_flight_state.held_heading
-        if current is None:
-            return [render_unable("NOT_READY").text]
+        assert current is not None
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="heading", heading_deg=current
         )
-        return [f"Heading {self._digit_readback(round(current) % 360)}."]
+        return {"ok": True, "heading_deg": round(current) % 360}
 
     def _ai_pilot_hvrt_ready(self) -> bool:
         """Stage P2b's own hover precondition (plan, "Decisions
@@ -4950,22 +4935,32 @@ class CrewConsole:
         HVRT is entered from hover, and a bare direction word never
         brings the aircraft to a hover on its own -- "Hover" is the
         player's own command for that. `"HVRT"` itself also counts
-        (already there, e.g. redirecting or stepping)."""
+        (already there, e.g. redirecting or stepping). **Stays the
+        action's own finer check, not promoted to the gate** (D16/D18):
+        it is specific to the HVRT sub-family, not a property of the
+        whole `"flight_control"` category."""
         return self.parked_flight_state.ai_mode in ("HVR", "HVRT")
 
-    def _handle_hvrt_translate(self, direction: AiPilotHvrtDirection) -> list[str]:
-        """ "left"/"right"/"forward"/"back" -- a bare direction word
-        cycles the wheel into HVRT automatically (Lua's own mode-cycle),
-        the same cycle-then-press shape as `cbtm_align`/`cbtm_break`.
-        "Unable, not ready" when not even in hover (the precondition),
-        per the pilot's own answer."""
+    def hvrt_translate(self, direction: AiPilotHvrtDirection) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's shared body for the four `flight.hvrt_
+        translate_*` actions (one per bare direction word, `rules/
+        actions.py`'s own comment on why), extracted from the pre-rules
+        `_handle_hvrt_translate` (deleted) -- a bare direction word cycles
+        the wheel into HVRT automatically (Lua's own mode-cycle), the
+        same cycle-then-press shape as `cbtm_align`/`cbtm_break`. "Unable,
+        not ready" when not even in hover (the precondition), per the
+        pilot's own answer -- `_ai_pilot_hvrt_ready`'s own finer check,
+        unaffected by the `"flight_control"` category gate (which only
+        ever checks `has_controls`)."""
         if not self._ai_pilot_hvrt_ready():
-            return [render_unable("NOT_READY").text]
+            return {"ok": False, "reason": "NOT_READY"}
         self.ai_pilot_hvrt_transition = direction
-        return [f"{direction.capitalize()}."]
+        return {"ok": True, "reason": None}
 
-    def _handle_hvrt_hold(self) -> list[str]:
-        """ "Hold" -- clears an open HVRT translate press.
+    def hvrt_hold(self) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's `flight.hvrt_hold` action, extracted from
+        the pre-rules `_handle_hvrt_hold` (deleted) -- "Hold," clears an
+        open HVRT translate press.
 
         **Unconditional whenever a translate direction is already
         outstanding (review fix, BL-16 Stage P2)**: the cancel must never
@@ -4980,19 +4975,21 @@ class CrewConsole:
         goal = self.parked_flight_state.goal
         if goal is not None and goal.hvrt_direction is not None:
             self.ai_pilot_hvrt_transition = "hold"
-            return ["Holding."]
+            return {"ok": True, "reason": None}
         if not self._ai_pilot_hvrt_ready():
-            return [render_unable("NOT_READY").text]
+            return {"ok": False, "reason": "NOT_READY"}
         self.ai_pilot_hvrt_transition = "hold"
-        return ["Holding."]
+        return {"ok": True, "reason": None}
 
-    def _handle_hvrt_step(self, direction: Literal["up", "down"]) -> list[str]:
-        """ "up"/"down" -- the 2 m HVRT altitude tap, no hold semantics
-        at all (plan vocabulary table)."""
+    def hvrt_step(self, direction: Literal["up", "down"]) -> dict[str, object]:
+        """`[[BL-17]]` Stage 4's shared body for the two `flight.hvrt_
+        step_*` actions, extracted from the pre-rules `_handle_hvrt_step`
+        (deleted) -- "up"/"down," the 2 m HVRT altitude tap, no hold
+        semantics at all (plan vocabulary table)."""
         if not self._ai_pilot_hvrt_ready():
-            return [render_unable("NOT_READY").text]
+            return {"ok": False, "reason": "NOT_READY"}
         self.ai_pilot_hvrt_step_transition = direction
-        return [f"{direction.capitalize()}."]
+        return {"ok": True, "reason": None}
 
     def drain_ai_pilot_wheel_speech(self, now_sim: float) -> list[str]:
         """BL-16 mode 2 Stage P2a -- `"mode_blocked"`'s own spoken line

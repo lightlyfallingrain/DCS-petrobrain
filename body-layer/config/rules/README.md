@@ -47,12 +47,26 @@ gate already works for scan/watch commands.
 
 | category | gate |
 |---|---|
-| `always` | always runs — queries, describe, recall, and anything else not limited by seat or flight state |
-| `flight_control` | runs only while Petrovich has the aircraft's controls; while he is taking them over (the moment right after "Request Aircraft Control"), the command is understood and held briefly, then flown once controls settle — it is not refused |
+| `always` | always runs — queries, describe, recall, and the "you/i have controls" no-op |
+| `flight_control` | runs once Petrovich has the aircraft's controls, with no further precondition — the absolute-set flight commands and HVRT (whose own hover-mode check stays inside the action) |
+| `flight_control_heading` | `flight_control`'s own has-controls check, **plus** holds (then retries) during the takeover-settle window until a held heading is known |
+| `flight_control_speed` | same shape, for a held speed |
+| `flight_control_altitude` | same shape, for a held altitude |
+| `flight_control_any` | same shape, but passes once **any one** of held heading/altitude/speed is known (`level_flight`'s own "partial knowledge still freezes what is known" rule) |
+
+Every `flight_control*` category answers "unable, not flying" immediately if Petrovich has no
+controls at all; the four finer ones additionally hold briefly (never refuse) during the
+takeover-settle window (the moment right after "Request Aircraft Control") until their own
+needed value arrives. **Split into per-parameter categories, not one shared `flight_control`
+gate re-deriving a single proxy** (`[[BL-17]]` Stage 4) — a single "settling" boolean checking
+only the held heading was correct for exactly one rule (`turn_heading_relative`) and wrong for
+most of the others, each of which needs a *different* held value before it may run.
 
 Declaring a category does not add a second check inside the handler — a rule's own action may
 still validate its *arguments* (D5), but the category already owns the seat/flight-state
-precondition, so an action extracted from a ported handler should not re-check it.
+precondition, so an action extracted from a ported handler should not re-check it. A genuinely
+*finer*, rule-specific precondition that is not a property of the whole category (HVRT's own
+"is the AI actually in hover" check) stays inside that rule's own action instead.
 
 ## Pattern grammar
 
@@ -67,9 +81,11 @@ precondition, so an action extracted from a ported handler should not re-check i
 
 | type | spoken | value | notes |
 |---|---|---|---|
-| `angle` | 1–3 digits, digit-by-digit or whole ("two zero", "20") | int 1–359 | no anchor word of its own |
-| `heading` | the word "heading" + exactly 3 digits | int 0–359 (360 normalises to 0) | world compass degrees; no ×5 checksum |
+| `angle` | 1–3 digits, digit-by-digit, or a composed number word ("two zero", "20", "thirty") | int 1–359 | no anchor word of its own |
+| `heading` | the word "heading" + exactly 3 digits | int 0–359 (360 normalises to 0) | world compass degrees; no ×5 checksum; no compass-word form |
 | `oclock` | 1–12 + "o'clock" | int hour | |
+| `quantity` | a digit run (1–4 digits) or a composed number word/phrase ("three two zero", "three hundred twenty") | int | no range check of its own — the using rule applies whatever range makes sense; paired forms ("three fifteen") do not parse as one number |
+| `speed_target` | `quantity`'s own grammar, or the literal word "max" | `{kind="number", value=N}` or `{kind="max"}` (a Lua table) | a union slot — the rule's own handler branches on `s.<name>.kind` |
 
 `bearing` is **not built yet** — the bearing/heading rename is paused (see
 `body-layer/ROADMAP/BL-17.md`); do not write a rule that assumes it exists.
@@ -99,10 +115,23 @@ Every argument is validated in Python before the underlying code runs; a bad cal
 | call | params | effect |
 |---|---|---|
 | `flight.increment_heading(delta_deg)` | int, −359..359 | turns the AI-overlay heading hold by `delta_deg` relative to its current held value |
+| `flight.set_heading(deg)` | int, 0..359 | sets the absolute heading hold |
+| `flight.level_flight()` | — | freezes heading, altitude and speed at their current held values |
+| `flight.set_speed(value)` | int, 0..9999 | sets the speed hold to the nearest wheel step; `r.is_max`/`r.speed_kmh` name what was actually set |
+| `flight.set_speed_max()` | — | sets the speed hold to max |
+| `flight.step_speed(sign)` | int, −1..1 | one step up (`1`) or down (`-1`) from the held speed |
+| `flight.set_altitude(m, reference_code)` | ints, `m` 0..9999, `reference_code` 0 (none)/1 (radar)/2 (barometric) | sets the altitude hold; `r.altitude_m`/`r.barometric` name the achieved value and reference |
+| `flight.step_altitude(delta_m)` | int, −9999..9999 (already signed — positive climbs, negative descends) | one step from the held altitude |
+| `flight.hold_altitude()` | — | freezes the altitude hold at its current held value |
+| `flight.level_off()` | — | stops a turn and holds the current heading |
+| `flight.hvrt_translate_left/right/forward/back()` | — | cycles the AI wheel into HVRT (from hover) and presses the named direction |
+| `flight.hvrt_hold()` | — | clears an outstanding HVRT translate press |
+| `flight.hvrt_step_up/down()` | — | the 2 m HVRT altitude tap |
 | `effector.write(name, value, says)` | `name`/`value`: strings, checked against the loaded aircraft's own effector registry; `says` optional, free-text (silently capped at the same length `say()` enforces) | queues a cockpit switch write; **says nothing when it returns** — `r.ok = true` only means the write was accepted, not that it happened yet (it may take several polls). If `says` was given, that text is spoken once the write actually lands, through the same path a sequence file's own `petrovich-says` cell uses. No shipped rule calls this yet — it exists so a later rule group can write effectors without a second mechanism. A second `effector.write` naming the same effector while the first is still pending is a no-op if it names the *same* value (the pilot repeating themselves), or **replaces** the pending request if it names a *different* one — latest wins, nothing lost. |
 
 Every action returns a table: `r.ok` (bool), `r.reason` (a reason key for `unable`, or `nil` on
-success). `effector.write`'s own failure reason is always `"UNKNOWN_EFFECTOR"` — an unknown
+success), plus whatever extra fields that action's own row above names (e.g. `r.altitude_m`) for
+the handler's own readback. `effector.write`'s own failure reason is always `"UNKNOWN_EFFECTOR"` — an unknown
 `name`, or a `value` that effector does not know.
 
 ## Failures

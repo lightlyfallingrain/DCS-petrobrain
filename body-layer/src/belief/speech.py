@@ -515,10 +515,9 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # altitude/speed) and the HVRT-translate hover precondition both
     # answer this exact phrase.
     "NOT_READY": "Unable, not ready.",
-    # `[[BL-17]]` D16/Stage 3b -- the `"flight_control"` category gate's
-    # own `UNABLE` reason (`not state.has_controls`), reachable today
-    # through `turn_heading_relative`, the one rule in this category until
-    # Stage 4 ports the rest; the wording is the goal check's Q9.
+    # `[[BL-17]]` D16 -- every `"flight_control*"` category gate's own
+    # `UNABLE` reason (`not state.has_controls`); the wording is the goal
+    # check's own Q9.
     # `"HANDS_BUSY"` is declared ahead of use -- a future naked-eye/hands-busy category's own gate, not
     # reachable until Stage 6 -- so that stage needs no `speech.py`
     # change of its own. `"PILOT_SEAT"` (9K113-while-in-pilot-seat) is

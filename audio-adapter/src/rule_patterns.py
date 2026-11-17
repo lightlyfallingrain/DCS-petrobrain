@@ -430,7 +430,16 @@ class SlotType:
 
 SLOT_TYPES: dict[str, SlotType] = {
     "angle": SlotType("angle", _consume_angle, lambda: "two zero"),
-    "heading": SlotType("heading", _consume_heading, lambda: "heading three one five"),
+    # `[[BL-17]]` Stage 4: this sample value, used only by the collision
+    # check's own probe (never the accepted grammar, which still takes
+    # any 0-359 value), must not coincide with one of
+    # `vocabulary.PHRASES["scan_bearing_deg"]`'s own hardcoded example
+    # bearings (every 45 degrees from 0) -- "heading three one five"
+    # (315) did, and the word-sequence scorer's own repair tolerance
+    # scored it a 0.6 collision against the real legacy `scan_bearing_deg`
+    # command (caught by this stage's own differential test against the
+    # real collision check). 200 is not in that list.
+    "heading": SlotType("heading", _consume_heading, lambda: "heading two zero zero"),
     "oclock": SlotType("oclock", _consume_oclock, lambda: "three o'clock"),
     "quantity": SlotType("quantity", _consume_quantity, lambda: "two zero zero"),
     "speed_target": SlotType(
@@ -918,8 +927,20 @@ def _rules_collide(rule_a: CompiledRule, rule_b: CompiledRule) -> bool:
 
 
 def _collides_with_legacy(rule: CompiledRule, legacy_probe: LegacyProbe) -> bool:
+    """A hit counts only when the legacy probe resolves to a **different**
+    token than `rule`'s own id (`[[BL-17]]` Stage 4 fix) -- without this,
+    every HVRT bare-word rule (`hvrt_translate_left`/`hvrt_hold`/...)
+    always "collides" with itself: `command_matcher.match_transcript`'s
+    own `_HVRT_BARE_WORD_TOKENS` shortcut resolves a bare "left"/"hold"/
+    etc. to that exact same token id regardless of whether any rule is
+    pushed at all, so `legacy_probe` reports a non-`None` token for every
+    one of these samples even when there is no genuine ambiguity -- the
+    legacy pipeline and the rule agree on what the command *is*, which is
+    the opposite of a collision. A probe resolving to some *other* token
+    is still a real collision, exactly as before."""
     for sample in _samples_with_perturbation(rule):
-        if legacy_probe(sample).token is not None:
+        token = legacy_probe(sample).token
+        if token is not None and token != rule.id:
             return True
     return False
 

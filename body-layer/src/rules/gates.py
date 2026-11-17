@@ -57,22 +57,88 @@ def _always(state: CrewState) -> GateOutcome:
     return GateOutcome("pass")
 
 
-def _flight_control(state: CrewState) -> GateOutcome:
-    """The coarse, category-wide precondition only ("has controls at
-    all"). `settling` is the takeover-settle window (`CrewState`'s own
-    docstring) -- held, not refused, since the pilot will have controls
-    a moment later and the command was already understood."""
+def _require_controls(state: CrewState) -> GateOutcome | None:
+    """The one check every `flight_control*` gate below shares --
+    `None` to let the caller continue to its own finer precondition (if
+    any), or the `UNABLE` outcome if Petrovich has no controls at all.
+    Factored out (`[[BL-17]]` Stage 4) once a single `flight_control`
+    category split into several, each needing this same base check
+    first (review-stage3b.md Required Fix 1 -- see `CrewState`'s own
+    docstring for why one shared `settling` proxy could not do this)."""
     if not state.has_controls:
         return GateOutcome("unable", "NOT_FLYING")
-    if state.settling:
+    return None
+
+
+def _flight_control(state: CrewState) -> GateOutcome:
+    """The coarse, has-controls-only precondition -- for a rule whose own
+    action needs no particular `held_*` value to run (the absolute-set
+    forms -- `turn_heading`/`set_speed`/`set_altitude` -- and HVRT, whose
+    own finer `_ai_pilot_hvrt_ready()` mode check stays inside the
+    action, per D16)."""
+    return _require_controls(state) or GateOutcome("pass")
+
+
+def _flight_control_heading(state: CrewState) -> GateOutcome:
+    """Holds (then retries) during the takeover-settle window until
+    `held_heading` arrives -- `turn_heading_relative`/`level_off`."""
+    outcome = _require_controls(state)
+    if outcome is not None:
+        return outcome
+    if state.held_heading is None:
         return GateOutcome("hold", "NOT_READY")
     return GateOutcome("pass")
 
 
-#: Closed -- see module docstring.
+def _flight_control_speed(state: CrewState) -> GateOutcome:
+    """Holds until `held_speed` arrives -- `speed_step`."""
+    outcome = _require_controls(state)
+    if outcome is not None:
+        return outcome
+    if state.held_speed is None:
+        return GateOutcome("hold", "NOT_READY")
+    return GateOutcome("pass")
+
+
+def _flight_control_altitude(state: CrewState) -> GateOutcome:
+    """Holds until `held_altitude` arrives -- `altitude_step`/
+    `hold_altitude`."""
+    outcome = _require_controls(state)
+    if outcome is not None:
+        return outcome
+    if state.held_altitude is None:
+        return GateOutcome("hold", "NOT_READY")
+    return GateOutcome("pass")
+
+
+def _flight_control_any(state: CrewState) -> GateOutcome:
+    """Holds only while *none* of the three held values is known yet --
+    `level_flight`'s own "partial knowledge still freezes what is known"
+    rule (`CrewConsole.level_flight`'s docstring), promoted to the gate."""
+    outcome = _require_controls(state)
+    if outcome is not None:
+        return outcome
+    if (
+        state.held_heading is None
+        and state.held_altitude is None
+        and state.held_speed is None
+    ):
+        return GateOutcome("hold", "NOT_READY")
+    return GateOutcome("pass")
+
+
+#: Closed -- see module docstring. `[[BL-17]]` Stage 4 splits the original
+#: single `flight_control` category into one base (has-controls-only) plus
+#: three per-parameter variants, instead of one gate re-deriving a
+#: single-field `settling` proxy that was only ever correct for one rule
+#: (review-stage3b.md Required Fix 1).
 GATE_REGISTRY: dict[str, GateFn] = {
     "always": _always,
     "flight_control": _flight_control,
+    "flight_control_heading": _flight_control_heading,
+    "flight_control_speed": _flight_control_speed,
+    "flight_control_altitude": _flight_control_altitude,
+    "flight_control_any": _flight_control_any,
 }
 
 

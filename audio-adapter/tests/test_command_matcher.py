@@ -24,7 +24,17 @@ from command_matcher import (
     match_transcript,
     opens_with_wake_word,
 )
+from rule_patterns import CompiledRule, parse_pattern
 from vocabulary import bearing_phrase, normalize_for_match
+
+
+def _rule(rule_id: str, pattern: str) -> CompiledRule:
+    """Mirrors `test_command_matcher_rules.py`'s own helper -- builds a
+    `CompiledRule` directly from a hand-copied pattern string (module
+    independence: this module cannot import `config/rules/flight.lua`
+    from body-layer, so the pattern string must stay in sync by hand)."""
+    return CompiledRule(id=rule_id, pattern=pattern, elements=parse_pattern(pattern))
+
 
 #: "scan est" scores an identical 0.941 `SequenceMatcher` ratio against
 #: both "scan east" (`scan_bearing_e`) and "scan west" (`scan_bearing_w`)
@@ -1569,3 +1579,44 @@ def test_free_speech_guard_sentences_never_resolve_to_a_command() -> None:
     for sentence in FREE_SPEECH_GUARD:
         result = match_transcript(sentence)
         assert result.token is None, sentence
+
+
+class TestHvrtBareWordShortcut:
+    """`_HVRT_BARE_WORD_TOKENS` -- checked as an exact, whole-transcript
+    match before any fuzzy branch, legacy phrase table or rule matching
+    (that constant's own comment on the measured `"right"`/`"sight"`
+    collision this sidesteps). Unaffected by `[[BL-17]]` Stage 4 moving
+    `hvrt_translate_*`/`hvrt_hold`/`hvrt_step_*` off the legacy `PHRASES`
+    table onto rule ids -- these tests used to live in
+    `test_bl16_stage_p2_vocabulary.py` (removed in that stage, since
+    every other test there pinned a slotted branch this stage deleted);
+    moved here because this is the real, unchanged mechanism they
+    exercise, with no `rules=` argument needed at all."""
+
+    def test_bare_direction_words_each_resolve_to_their_own_token(self) -> None:
+        assert match_transcript("left").token == "hvrt_translate_left"
+        assert match_transcript("right").token == "hvrt_translate_right"
+        assert match_transcript("forward").token == "hvrt_translate_forward"
+        assert match_transcript("back").token == "hvrt_translate_back"
+
+    def test_hold(self) -> None:
+        assert match_transcript("hold").token == "hvrt_hold"
+
+    def test_up_and_down(self) -> None:
+        assert match_transcript("up").token == "hvrt_step_up"
+        assert match_transcript("down").token == "hvrt_step_down"
+
+    def test_a_multi_word_transcript_never_takes_this_shortcut(self) -> None:
+        """`len(words) == 1` guards the shortcut -- "the tanks are on the
+        right" never reaches it, and nothing else in this vocabulary
+        resolves it to a command either."""
+        result = match_transcript("the tanks are on the right")
+        assert result.token is None
+
+    def test_hold_altitude_and_bare_hold_resolve_to_different_tokens(self) -> None:
+        """ "hold altitude" (two words, now `hold_altitude`'s own rule
+        pattern) and "hold" (one word, the bare-word shortcut's
+        `hvrt_hold`) must not collapse onto the same token."""
+        rules = (_rule("hold_altitude", "hold <verb:altitude|alt>"),)
+        assert match_transcript("hold altitude", rules=rules).token == "hold_altitude"
+        assert match_transcript("hold", rules=rules).token == "hvrt_hold"

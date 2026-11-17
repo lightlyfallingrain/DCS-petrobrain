@@ -25,14 +25,22 @@ def _console_with_rule(
     return console
 
 
-def _flight_console_with_rule(runner: object, **state_fields: object) -> CrewConsole:
-    """A `"flight_control"`-categorised `"my_rule"` (`[[BL-17]]` D16) --
+def _flight_console_with_rule(
+    runner: object, category: str = "flight_control", **state_fields: object
+) -> CrewConsole:
+    """A `category`-categorised `"my_rule"` (`[[BL-17]]` D16) --
     `state_fields` overrides `ParkedFlightState`'s own defaults
     (`parked_active=False`, `held_heading=None` -- i.e. not flying,
-    unless a test says otherwise)."""
+    unless a test says otherwise). Defaults to `"flight_control"` (the
+    base, has-controls-only category) for the pass/unable tests that
+    only care about `parked_active`; the hold-and-retry tests (Stage 4
+    split `"flight_control"` into per-parameter categories, review-
+    stage3b.md Required Fix 1) pass `category="flight_control_heading"`
+    explicitly, since only that family actually holds on a missing
+    `held_*` value."""
     console = CrewConsole(store=ContactStore())
     console.rule_runner = runner  # type: ignore[assignment]
-    console.set_enabled_rule_ids(frozenset({"my_rule"}), {"my_rule": "flight_control"})
+    console.set_enabled_rule_ids(frozenset({"my_rule"}), {"my_rule": category})
     console.parked_flight_state = replace(ParkedFlightState(), **state_fields)
     return console
 
@@ -180,6 +188,7 @@ def test_gate_unable_speaks_the_reason_and_never_calls_the_runner() -> None:
 def test_gate_hold_sets_pending_and_speaks_nothing() -> None:
     console = _flight_console_with_rule(
         lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
         parked_active=True,
         held_heading=None,
     )
@@ -187,7 +196,7 @@ def test_gate_hold_sets_pending_and_speaks_nothing() -> None:
     assert lines == []
     assert console.pending_rule_dispatch is not None
     assert console.pending_rule_dispatch.rule_id == "my_rule"
-    assert console.pending_rule_dispatch.category == "flight_control"
+    assert console.pending_rule_dispatch.category == "flight_control_heading"
     assert console.pending_rule_dispatch.held_since_sim == 5.0
 
 
@@ -198,7 +207,12 @@ def test_drain_resolves_to_pass_on_a_later_poll_not_at_dispatch_time() -> None:
         calls.append(1.0)
         return (["now flying"], False)
 
-    console = _flight_console_with_rule(runner, parked_active=True, held_heading=None)
+    console = _flight_console_with_rule(
+        runner,
+        category="flight_control_heading",
+        parked_active=True,
+        held_heading=None,
+    )
     console.handle_command("my_rule", now_sim=0.0)
     assert calls == []  # not called at dispatch time -- it was held
 
@@ -214,6 +228,7 @@ def test_drain_resolves_to_pass_on_a_later_poll_not_at_dispatch_time() -> None:
 def test_drain_stays_held_silently_under_the_timeout() -> None:
     console = _flight_console_with_rule(
         lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
         parked_active=True,
         held_heading=None,
     )
@@ -226,6 +241,7 @@ def test_drain_stays_held_silently_under_the_timeout() -> None:
 def test_drain_times_out_to_render_unable() -> None:
     console = _flight_console_with_rule(
         lambda token, slots: (["hi there"], False),
+        category="flight_control_heading",
         parked_active=True,
         held_heading=None,
     )
@@ -239,12 +255,16 @@ def test_a_second_held_command_replaces_the_first_with_no_line_for_it() -> None:
     """U21: latest wins, the earlier hold silently dropped."""
     console = _flight_console_with_rule(
         lambda token, slots: ([f"ran {token}"], False),
+        category="flight_control_heading",
         parked_active=True,
         held_heading=None,
     )
     console.set_enabled_rule_ids(
         frozenset({"my_rule", "other_rule"}),
-        {"my_rule": "flight_control", "other_rule": "flight_control"},
+        {
+            "my_rule": "flight_control_heading",
+            "other_rule": "flight_control_heading",
+        },
     )
     lines_first = console.handle_command("my_rule", now_sim=0.0)
     assert lines_first == []

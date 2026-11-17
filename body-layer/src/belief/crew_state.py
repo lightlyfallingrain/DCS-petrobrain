@@ -21,10 +21,21 @@ from typing import Literal
 @dataclass(frozen=True)
 class CrewState:
     """`has_controls` mirrors `belief.ai_pilot_wheel.ParkedFlightState.
-    parked_active`. `settling` is the takeover-settle window every
-    flight handler used to check individually before D16 (`has_controls
-    and held_heading is None`) -- promoted here to one place a gate can
-    read instead of each action re-deriving it.
+    parked_active`. `held_heading`/`held_altitude`/`held_speed` mirror
+    that same state's own `held_*` fields -- the AI's own current values,
+    read-only here, same as there.
+
+    **Per-parameter, not one shared `settling` bool** (`[[BL-17]]` Stage 4,
+    `plans/speech-rules/review-stage3b.md` Required Fix 1): Stage 3b's
+    original `settling` field (`has_controls and held_heading is None`)
+    was claimed to be "the same proxy every flight handler already checks
+    today" -- false for five of the seven ported commands, which each
+    check a *different* `held_*` field (or, for the absolute-set forms,
+    none at all). Carrying the three raw values lets each category's own
+    gate function (`rules.gates`) decide which field it needs, rather
+    than collapsing them into one proxy that only happens to be correct
+    for the one rule (`turn_heading_relative`) that shipped before this
+    was caught.
 
     `seat`/`hands_free`/`eyes_free` are named stubs, not guesses,
     pending `[[BL-B123]]`'s seat/hands/eyes-busy model -- they exist so
@@ -38,7 +49,9 @@ class CrewState:
     the stick, so flying implies `hands_free=False`."""
 
     has_controls: bool
-    settling: bool
+    held_heading: float | None
+    held_altitude: float | None
+    held_speed: float | None
     seat: Literal["pilot", "copilot"]
     hands_free: bool
     eyes_free: bool

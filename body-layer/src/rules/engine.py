@@ -381,7 +381,22 @@ def run_rule(
     `rule_set.rules` returns an empty, non-error outcome -- callers are
     expected to check `rule_id in rule_set.rules`/`enabled_rule_ids`
     before calling this at all (D4); this is a defensive fallback, not the
-    primary gate."""
+    primary gate.
+
+    **Catches any bare Python exception, not only `RuleRuntimeError`/
+    `RuleBudgetExceeded`** (`[[BL-17]]` Stage 4, `review-stage3b.md`'s
+    optional refinement) -- Stage 0's own research
+    (`research/2026-11-17-lupa-sandbox.md`) found lupa propagates a
+    Python exception raised inside a callback Lua calls *unwrapped*
+    through the call boundary, and Stage 4 extracted several actions
+    whose own precondition is an `assert` (`increment_ai_heading`'s
+    `current is not None` and its siblings), correctly unreachable today
+    because the category gate already guarantees it -- but "correctly
+    unreachable today" is exactly the kind of guarantee a later refactor
+    can quietly break. Degrading to D6's "Action file error." here, the
+    same as any other dispatch-time failure, is strictly safer than
+    letting a bare `AssertionError` (or any other Python exception)
+    escape `run_rule` and crash the poll loop."""
     rule = rule_set.rules.get(rule_id)
     if rule is None:
         return RuleOutcome(lines=[], error=False)
@@ -394,6 +409,17 @@ def run_rule(
             rule.handler(lua_slots)
     except (RuleRuntimeError, RuleBudgetExceeded) as exc:
         logger.error("rule %r (%s) dispatch error: %s", rule_id, rule.file, exc)
+        error = True
+    except Exception as exc:  # noqa: BLE001 -- D6's own "any failure degrades
+        # to Action file error, never a crash" posture; see this function's
+        # own docstring.
+        logger.error(
+            "rule %r (%s) dispatch error (unhandled %s): %s",
+            rule_id,
+            rule.file,
+            type(exc).__name__,
+            exc,
+        )
         error = True
     lines = list(sink.lines) if sink.lines else []
     sink.lines = None

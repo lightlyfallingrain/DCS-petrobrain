@@ -20,8 +20,11 @@ by adding a second, differently-named drain-on-GET endpoint.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from command_matcher import SlotValue
 
 #: Bounded so a pathological flood of transcribed clips (or a stuck
 #: poller) cannot grow this queue unboundedly -- same generous-relative-to-
@@ -60,7 +63,10 @@ class TranscriptEvent:
     verb_anchored: bool
     ambiguous: bool
     t_wall: float
-    slots: dict[str, int | str] | None = None
+    #: `Mapping`, not `dict` -- see `command_matcher.MatchResult.slots`'s
+    #: own comment on why (covariance; this field is assigned straight
+    #: from that one in `server.py`).
+    slots: Mapping[str, SlotValue] | None = None
     #: The capture-side correlation id (`plans/voice-latency-instrumentation/
     #: plan.md` Stage 2), carried through from `POST /transcribe`'s own
     #: optional body field when the capture process supplied one. `None`

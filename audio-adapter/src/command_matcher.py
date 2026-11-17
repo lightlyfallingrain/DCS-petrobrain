@@ -87,6 +87,7 @@ transcript and never as a coincidental fuzzy hit on an unrelated phrase.
 from __future__ import annotations
 
 import difflib
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from rule_patterns import CompiledRule, match_pattern_with_ratio, rule_anchor_words
@@ -97,19 +98,14 @@ from vocabulary import (
     TOKENS,
     normalize_for_match,
     normalized_phrase_index,
-    parse_altitude_step,
-    parse_altitude_value,
     parse_band,
     parse_bearing,
     parse_clock,
     parse_descriptor,
-    parse_heading_deg,
     parse_range_km,
     parse_referent,
     parse_relative_word,
     parse_sector_word,
-    parse_speed_step_direction,
-    parse_speed_value,
     parse_step_count,
     parse_step_direction,
     parse_time_of_day,
@@ -374,21 +370,11 @@ _ENGAGE_VERBS: tuple[str, ...] = ("engage",)
 #: possibly-misheard first word.
 _GREETING_VERB = "good"
 
-#: BL-16 mode 2 Stage P2a's own slotted verbs (`plans/flight-control/
-#: plan.md`, "Stage P2 ready to build"), fuzzy-matched for the same
-#: reason every other slotted token's verb is.
-_TURN_HEADING_VERB = "heading"
-_SET_SPEED_VERB = "speed"
-#: `speed_step`'s own two verbs -- "slow down"/"speed up" -- checked
-#: after `_SET_SPEED_VERB`'s own branch in `match_transcript` so a
-#: numeric "speed <value>" is tried first; `parse_speed_value`'s own
-#: "immediate token after 'speed' only" rule (see its docstring) is what
-#: actually keeps "speed up" from being misread as a numeric request,
-#: not this ordering -- the ordering only decides which parser runs
-#: first, and the wrong one safely returns `None` either way.
-_SPEED_STEP_VERBS: tuple[str, ...] = ("slow", "speed")
-_SET_ALTITUDE_VERBS: tuple[str, ...] = ("alt", "altitude")
-_ALTITUDE_STEP_VERBS: tuple[str, ...] = ("climb", "descend")
+#: BL-16 mode 2 Stage P2a's own slotted verbs (`turn_heading`/`set_speed`/
+#: `speed_step`/`set_altitude`/`altitude_step`) moved out of this module
+#: in `[[BL-17]]` Stage 4 -- every one of those commands is now matched
+#: by the rule engine (`config/rules/flight.lua`), not a slotted branch
+#: here.
 
 #: HVRT's own bare single-word commands -> token, checked as an **exact,
 #: whole-transcript** match before any fuzzy verb-anchor branch runs --
@@ -416,6 +402,20 @@ _HVRT_BARE_WORD_TOKENS: dict[str, str] = {
     "up": "hvrt_step_up",
     "down": "hvrt_step_down",
 }
+
+#: One slot's resolved value -- a plain scalar for every slot type this
+#: vocabulary had before `[[BL-17]]` D7/D14's union types, or the
+#: `{"kind": ..., ...}` tagged table a union slot type (`speed_target`,
+#: and D7's own planned `direction`/`origin`) resolves to. `rule_
+#: patterns._consume_speed_target`'s own docstring is where this tagged
+#: shape is declared; this alias is this module's own copy of "what a
+#: slot value may be" so `MatchResult.slots`/`_match_rules`'s own filter
+#: can admit it, rather than silently dropping it the way the
+#: pre-Stage-4 `isinstance(value, (int, str))` filter did (the first
+#: real exerciser of a union slot through this path, caught by Stage
+#: 4's own differential test against the deleted legacy parsers it
+#: replaced).
+SlotValue = int | str | dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -466,7 +466,12 @@ class MatchResult:
     match_ratio: float
     verb_anchored: bool
     ambiguous: bool = False
-    slots: dict[str, int | str] | None = None
+    #: `Mapping`, not `dict` -- covariant in the value type, so every
+    #: existing `_parse_*_slots` branch's own `dict[str, int | str]`
+    #: construction (every slot but `speed_target`'s) needs no change to
+    #: satisfy this field's widened `SlotValue` (mypy's own suggestion:
+    #: `dict` is invariant).
+    slots: Mapping[str, SlotValue] | None = None
     #: `plans/brain-tool-calls/plan.md` D4's wire note -- set from the same
     #: `opens_with_wake_word` check that already forces `verb_anchored=
     #: False` below, so body-layer can route a wake-prefixed utterance to
@@ -550,8 +555,18 @@ def _match_rules(
         second_ratio = matches[1][2]
         if (ratio - second_ratio) < SEPARATION_MIN:
             ambiguous = True
-    typed_slots: dict[str, int | str] = {
-        name: value for name, value in slots.items() if isinstance(value, (int, str))
+    # `isinstance(value, (int, str, dict))` -- widened from `(int, str)`
+    # alone in `[[BL-17]]` Stage 4 to admit a union slot's own tagged
+    # table (`speed_target`'s `{"kind": ..., ...}`, `SlotValue`'s own
+    # comment) rather than silently dropping it, the defect this stage's
+    # own differential test against `set_speed`/`speed_target` caught:
+    # every `SLOT_TYPES` consume function only ever returns `int`/`str`/
+    # a flat `dict`, so this is exactly the real value set, not a
+    # loosening past it.
+    typed_slots: dict[str, SlotValue] = {
+        name: value
+        for name, value in slots.items()
+        if isinstance(value, (int, str, dict))
     }
     return MatchResult(
         token=rule.id,
@@ -1243,91 +1258,11 @@ def _match_legacy(
                 token="point", match_ratio=1.0, verb_anchored=True, slots=what_slots
             )
 
-    # BL-16 mode 2 Stage P2a (`plans/flight-control/plan.md`, "Stage P2
-    # ready to build"), tried before the generic phrase table for the
-    # identical reason the slotted branches above are -- a clock-style
-    # "heading two zero zero" would otherwise score against nothing
-    # since no other token anchors on "heading" at all, but the
-    # ordering is kept consistent with every other slotted branch here.
-    # No value resolved (`parse_heading_deg` returns `None`) falls
-    # through unchanged to the ordinary phrase table, where "heading"
-    # alone is not a recorded bare phrasing of any token -- the "say
-    # again" shape every other slotted token's unresolved form takes.
-    if difflib.SequenceMatcher(None, verb, _TURN_HEADING_VERB).ratio() >= VERB_FLOOR:
-        heading_deg = parse_heading_deg(text)
-        if heading_deg is not None:
-            return MatchResult(
-                token="turn_heading",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"heading_deg": heading_deg},
-            )
-
-    # "Speed <value>" -- tried before `speed_step`'s own branch so a
-    # numeric request is read as `set_speed` first; `parse_speed_value`'s
-    # own "immediate token only" rule is what actually keeps "speed up"
-    # from resolving here (see that function's docstring), not this
-    # ordering alone.
-    if difflib.SequenceMatcher(None, verb, _SET_SPEED_VERB).ratio() >= VERB_FLOOR:
-        speed_value = parse_speed_value(text)
-        if speed_value is not None:
-            return MatchResult(
-                token="set_speed",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"speed_kmh": speed_value},
-            )
-
-    # "Slow down" / "speed up" -- `_SPEED_STEP_VERBS` includes "speed"
-    # too (for "speed up"), reached only when the branch above already
-    # found no numeric value.
-    if any(
-        difflib.SequenceMatcher(None, verb, step_verb).ratio() >= VERB_FLOOR
-        for step_verb in _SPEED_STEP_VERBS
-    ):
-        step_direction = parse_speed_step_direction(text)
-        if step_direction is not None:
-            return MatchResult(
-                token="speed_step",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": step_direction},
-            )
-
-    # "alt[itude] <value> [radar/barometric]".
-    if any(
-        difflib.SequenceMatcher(None, verb, alt_verb).ratio() >= VERB_FLOOR
-        for alt_verb in _SET_ALTITUDE_VERBS
-    ):
-        altitude = parse_altitude_value(text)
-        if altitude is not None:
-            value, reference = altitude
-            altitude_slots: dict[str, int | str] = {"altitude_m": value}
-            if reference is not None:
-                altitude_slots["reference"] = reference
-            return MatchResult(
-                token="set_altitude",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots=altitude_slots,
-            )
-
-    # "climb/descend <m>" -- distinct verbs from `_SET_ALTITUDE_VERBS`,
-    # so there is no collision to order against, but the ordering is
-    # kept consistent with the altitude branch just above.
-    if any(
-        difflib.SequenceMatcher(None, verb, step_verb).ratio() >= VERB_FLOOR
-        for step_verb in _ALTITUDE_STEP_VERBS
-    ):
-        altitude_step = parse_altitude_step(text)
-        if altitude_step is not None:
-            step_word, amount = altitude_step
-            return MatchResult(
-                token="altitude_step",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": step_word, "amount_m": amount},
-            )
+    # BL-16 mode 2 Stage P2a's own `turn_heading`/`set_speed`/
+    # `speed_step`/`set_altitude`/`altitude_step` slotted branches moved
+    # to the rule engine in `[[BL-17]]` Stage 4 (`config/rules/
+    # flight.lua`) -- `_match_rules`, run unconditionally above, now
+    # matches all five.
 
     # `[[BL-B102]]` -- "where is it"/"where is that [AAA]", tried before
     # the generic phrase table for the identical reason the slotted
