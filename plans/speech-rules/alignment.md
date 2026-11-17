@@ -203,3 +203,55 @@ receives one unit or `nil`, never a group centroid.
   and Stage P2's results first?
 - **Q6:** If two rules claim the same phrasing when they load, what should happen? Both disabled
   with a spoken warning, or one of them winning by a rule you set?
+
+## Plan check — 2026-11-17
+
+**Verdict:** ALIGNED. Both goal-check concerns are resolved by explicit user decisions recorded in
+`body-layer/ROADMAP/BL-17.md` and correctly carried into the plan: Finding 1 (rename ambiguity) by
+D12's plain relative readback (U9), Finding 2 (mark elevation) by the plan's own Answers table.
+Stages 0–3 are detailed and trace cleanly to E1–E7, E10. The marks expectations (E8, E9) and the
+target-choice half of E7 are deferred to the later-stages table (Stage 7/8), which names and
+mentions each. U17 (rename scope) and U18 (where rule files are edited), still open with the user,
+are both non-behavioural — internal naming reach and a file-edit location, neither reaching the
+cockpit — so either answer leaves this verdict unchanged.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 | 1a / 2 | met — D3 (a ported rule keeps its token's name, slot names and readback) plus Stage 2's pre-deletion differential test; later ports (the Stage 4–9 table) inherit the same obligation under D3 but are not yet detailed, per the plan's own stated scope |
+| E2 | 1b, 2, 3 | met — D11 `--print-rules`, D2 re-push, mission-restart reload (U11); card step 3 cites E2 directly |
+| E3 | 1a, D7, D8 | met — typed slots with a fixed digit count per type; a near-tie sets `ambiguous=True` and the existing "say again" disposition applies |
+| E4 | D12, D3, D6 | met — the rename's readback ("Scanning bearing three two zero.") names which meaning was heard (U9); a Lua error at dispatch rolls back one-shot transitions so nothing half-happens silently |
+| E5 | D6, Stage 1b/3 | met, narrowed by U13 — the spoken line is one fixed phrase ("Action file error."), not a per-cause description; "what is missing" lives only in the stderr banner. This is the user's own later choice (U13) overriding the goal check's "says what is missing" wording — see Finding 1 |
+| E6 | D9 | met — rule×rule, rule×legacy, and a free-speech guard naming the "attack"/"tanks" case as a pinned test |
+| E7 | D6 (met); Stage 7 (deferred → [[Stage 7]]) | met for load/dispatch failure (rollback, the `unable` catalogue); the target-choice "no contact" case defers to Stage 7, whose table row names it ("target choice as an action returning one unit or `nil` (U5)") |
+| E8 | deferred → Stage 8 | Stage 8's table row names terrain elevation; U14 (numbered, append-only, spoken number only) is mapped there explicitly in the Decisions list |
+| E9 | deferred → Stage 8 | the Answers-to-assumptions table names the PTT-release-pose mechanism for Stage 8; R7 flags the one open implementation risk, see Finding 2 |
+| E10 | D5 | met — by construction: a rule id is the one dispatch path for both a spoken phrase and a brain-carried command, same as BR-2's E3 |
+
+### Findings
+1. **E5's wording is narrowed by U13, by the user's own later choice.** Lens: crew sense.
+   - *Assumption:* the goal check's E5 ("Petrovich says... what is missing") reads as a spoken,
+     per-cause explanation.
+   - *In the sim:* the user's actual decision (`BL-17.md`, U13) is one fixed phrase — "Action file
+     error." — with the cause only in the stderr log, not on the intercom. D6 follows U13.
+   - *Suggests:* nothing to change. Per this task's own framing, `BL-17.md`'s decisions override
+     the alignment file's wording where they differ, and the user made this choice knowingly
+     ("One fixed phrase, not a per-cause description"). Recorded so a later reader does not mistake
+     the gap between E5's prose and D6's behaviour for an oversight.
+
+2. **R7's "may have to carry the timestamp" undersells how close it already is.** Lens: grounded
+   in the code.
+   - *In the code:* `audio-adapter/src/capture_loop.py` already mints `t_ptt_release_wall` at PTT
+     release and threads it through `POST /transcribe` (`transcribe_client.py:54`,
+     `server.py:357-412`) — but `server.py:387-400` uses it only for `_log_latency`. The
+     `TranscriptEvent` actually pushed to the queue body-layer reads stamps `t_wall=time.time()`
+     at match-completion (`server.py:395`), confirming R7's suspicion that today's `t_wall` is not
+     release time.
+   - *Suggests:* Stage 8 does not need a new timestamp mechanism for E9, only to thread the
+     already-existing `t_ptt_release_wall` into `TranscriptEvent`/`transcript_queue` and
+     body-layer's read of it. Worth one line in the Stage 8 plan when it is written; not a blocker
+     now, and not a reason to revisit this verdict.
+
+### Questions for the user
+None beyond Q1–Q6 already on file above, and U17/U18, already open — neither changes this
+verdict regardless of how they are answered (see Verdict).
