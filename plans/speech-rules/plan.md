@@ -195,6 +195,405 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
   "scan bearing three two zero, confirm?". The compass forms keep Decision 3's rule from
   `plans/voice-command-completeness/plan.md`: the confirm text names the rounded sector.
 
+### Revision 2, 2026-11-17 — matching foundation, dispatch gates, flight-control port
+
+Re-planned per the checkpoint after Stage 3 (`BL-17.md`): Stages 0–3 are merged; this revision
+plans the next stages, starting with the flight-control commands as the user asked. Inputs: the
+"Settled after the goal check"/"Near-miss wording"/"Number words count"/"Performance items"/
+"Expected vocabulary"/"Answers to the second goal check" sections of `BL-17.md` (all 2026-11-17),
+`alignment.md`'s second goal check (E11–E18), `BL-16.md`'s P2a/P2b merge, `BL-B123`/`BL-B117`/
+`BL-B122`, and two mid-task course corrections from the coordinator (below, D16 and D20). Stage
+numbers 3a/3b/3c/3d/4 are new; 4 was already reserved by the provisional later-stages table below,
+which is now superseded for row 4 only (see that table's note).
+
+**Mid-task correction 1 (coordinator, 2026-11-17), replacing this revision's original D16 draft
+("each flight action checks the flying state itself")**: the gate is per **rule category**, run
+once before any matched rule in that category executes — never a check repeated inside every
+action. Verbatim: *"All the flight command category (or any other category) rules, before getting
+executed, must pass the gate. In flight control case, Petrovich must have controls, otherwise it's
+unable before any rule even executes. Likewise, copilot rule cannot execute when Petrovich is in
+pilot seat and vice versa."* D16 below is written to this correction, not the original draft.
+
+**Mid-task correction 2 (coordinator, 2026-11-17), adding D20**: *"effector sequences will
+eventually move to lua rules. To that end, we must build support for writing effectors via rules
+from the start."* The user is recording both corrections in `body-layer/ROADMAP/BL-17.md` on the
+feature branch directly — not repeated verbatim here beyond what each decision below needs.
+
+- **D13 — Fuzzy tolerance on a rule's own literal words; slot values stay exact.** Extends D8
+  (Stage 1b/2's own documented scope-down, flagged by Reviewer and Security as needing revisit
+  "before Stage 4+ ports longer literal phrasing"). `rule_patterns.match_pattern` keeps its
+  existing full-consumption, positional walk over a rule's elements — that structure already
+  solves what `_phrase_match_ratio`'s word-*sequence* alignment exists for (recovering from
+  inserted/deleted/reordered words), because filler/punctuation stripping already runs upstream
+  and a rule's own elements are already positional. What changes: a `LiteralElement` at position
+  *i* now accepts the heard word at *i* either on exact equality (as today) or when
+  `difflib.SequenceMatcher(None, heard, literal.word).ratio() >= _WORD_REPAIR_FLOOR` — **the exact
+  same floor constant the legacy matcher's own per-word repair already uses**, imported from
+  `command_matcher.py`, not a second hand-tuned number. A `SlotElement`/`WordSetElement` never gets
+  this fallback: its own typed `consume` either succeeds exactly or the rule does not match at that
+  position — this is what keeps E12 true ("fuzziness forgives the words, never the values") by
+  construction, the same way D8 always intended, not a new rule.
+  *Departure, named:* this reuses `_WORD_REPAIR_FLOOR`'s own per-word ratio check, not
+  `_phrase_match_ratio`'s whole opcode-alignment algorithm — rule matching has no
+  insertion/deletion/reordering case to solve (full-consumption already handles that), so only the
+  *repair* half of the legacy scorer is the part that transfers.
+  *Ratio and the tie-break (E3 preserved).* A rule match's own ratio is no longer always `1.0` —
+  it is the mean of each literal position's ratio (`1.0` for an exact hit). Two rule matches (or a
+  rule match and a legacy match) within `SEPARATION_MIN` of each other — **the same constant**,
+  not a new one — are `ambiguous=True`, exactly the existing disposition for a legacy near-tie
+  (E3). A single rule match at or above `MATCH_FLOOR`/`VERB_FLOOR` is unambiguous as before.
+  *Collision check (D9), widened.* Looser literal matching raises clash risk, so `compile_rules`'s
+  rule×rule and rule×legacy passes now also probe **one perturbed sample per rule** alongside the
+  exact sample `generate_samples` already produces — one literal word replaced by a word scoring
+  inside `[_WORD_REPAIR_FLOOR, 1.0)` against it (drawn from a small fixed adversarial list the way
+  `FREE_SPEECH_GUARD` is a fixed list, not generated), so a rule that only collides *after* fuzzy
+  tolerance is applied is caught at load time rather than first appearing as a live "say again"
+  gone wrong. If no word in the adversarial list scores in that band against a given literal, the
+  perturbed probe is skipped for that word (no collision risk to find).
+- **D14 — Number-word slot types; `heading`/`angle`/`oclock` unchanged.** Two new slot types in
+  `rule_patterns.SLOT_TYPES`:
+  - **`quantity`** — accepts `_consume_digit_run` exactly as today (digit-by-digit or a whole
+    numeral, any digit count 1–4) **or** a composed English number word/phrase: units
+    (zero–nine), teens (ten–nineteen), tens (twenty…ninety, optionally + a unit — "twenty two"),
+    and hundreds (a units/teens/tens word + "hundred" + an optional units/teens/tens — "three
+    hundred", "three hundred twenty", "one hundred fifty three"). The grammar is written to
+    *terminate* at the first complete number — it never concatenates two independent number
+    words — so a paired form like "three fifteen" parses only as far as "three" (a complete
+    unit, 3) and then stops; the following "fifteen" is left unconsumed, which (full-consumption
+    matching) makes the whole rule fail to match rather than silently resolving to 315 or 15. This
+    is what Q10 asks for ("not combinations of three fifteen and like") **falling out of a
+    correctly terminating grammar**, not a separate reject rule. "Thousand" composition is
+    out of scope this stage — a value past 999 is still reachable digit-by-digit
+    ("two zero zero zero"), which already works; flagged (not built) if a flight actually needs a
+    four-digit *natural* phrase.
+  - **`speed_target`** — a union slot (the same `{kind, ...}` tagged-table convention D7 already
+    plans for the marks stage's `direction`/`origin` types, pulled forward one stage early): the
+    literal word "max" (`{"kind": "max"}`), or else `quantity`'s own grammar (`{"kind": "number",
+    "value": N}`). This is what lets "speed max" and "speed two hundred" share one pattern slot
+    rather than two separately-registered rules for the same command.
+  - `heading`, `angle`, `oclock` are **not** touched — BL-17.md is explicit that number words do
+    not change `heading`'s three-digit rule, and nothing in the goal check asks for natural words
+    on a clock position or a relative angle either.
+- **D15 — The two performance fixes**, exactly as the Performance Reviewer's own suggestions
+  (`performance-stage0-2.md`, both filed MONITOR, now taken since Stage 4 is where rule count
+  starts actually growing):
+  1. `_rule_anchor_words(rules)` and the rules tuple's sorted-by-id order are computed once, at
+     the point `RuleRegistry`'s compiled rules are swapped in (the one assignment D8 already
+     requires), not recomputed per transcript in `_match_rules`/`match_transcript`.
+  2. The static legacy-vocabulary word list `to_prompt()` walks is built once (it never changes at
+     runtime); only the rule-word tail is re-derived, keyed on `RuleRegistry.version` (which
+     already changes exactly when the answer should).
+
+  Neither is a behaviour change — both are pinned by the existing matcher/prompt test suites
+  passing with identical outputs before and after.
+- **D16 — Rule categories and dispatch gates** (coordinator correction, above). A matched rule's
+  category decides, **before its Lua handler ever runs**, whether it may execute at all — this is
+  the "when" (precondition), kept apart from the actions exactly as root `CLAUDE.md`'s "Behaviour
+  as actions and params" already asks, generalising the project's existing ad hoc precedent (the
+  on-ground look gate already in `handle_command`'s preamble, D4) into a declared, reusable
+  mechanism for rules.
+
+  **One shared state type, read by both the gate and the speech-to-text hint (D17), per the
+  coordinator's own instruction** — `body-layer/src/belief/crew_state.py`, `CrewState` (frozen
+  dataclass): `has_controls: bool` (`ParkedFlightState.parked_active`), `settling: bool`
+  (`has_controls and held_heading is None` — the takeover-settle window, the same proxy every
+  flight handler already checks today, promoted to one place), `seat: Literal["pilot",
+  "copilot"]` (today always `"copilot"` — `[[BL-B123]]` is unbuilt, so this field is a named stub,
+  not a guess: it exists so a gate can read it once BL-B123 lands, and today's gates that would
+  depend on it simply never see anything but `"copilot"`), `hands_free: bool`/`eyes_free: bool`
+  (also stubs pending `[[BL-B123]]`'s hands/eyes-busy model for the optic side; `has_controls`
+  already implies `hands_free=False` for the flying case, which is all this batch needs).
+  `CrewConsole.current_crew_state()` computes it fresh each poll from fields already read
+  (`parked_flight_state`), never a second source of truth.
+
+  **`GateOutcome`** (`body-layer/src/rules/gates.py`) is one of three verdicts, not two:
+  - `PASS` — run the handler now.
+  - `HOLD(reason)` — do not run the handler yet, and do not refuse either; retry on a later poll
+    (below).
+  - `UNABLE(reason)` — run the handler. **Not required** — the rule never runs; its own
+    closed-vocabulary `reason` token is spoken via `render_unable` immediately, same shape every
+    other "unable" already has.
+
+  **`GATE_REGISTRY: dict[str, GateFn]`**, closed, in `gates.py`. This batch declares two:
+  - `"always"` — a trivial `PASS` regardless of `CrewState` (queries, describe, recall, the
+    "you/I have controls" no-op — none of these are gated by seat or state, per BL-17.md's
+    "always expected" layer).
+  - `"flight_control"` — `UNABLE("NOT_FLYING")` if `not has_controls`; `HOLD("NOT_READY")` if
+    `settling`; `PASS` otherwise. This is the coarse, category-wide precondition only ("has
+    controls at all"). A *finer* per-rule precondition — HVRT's own "is the AI actually in
+    HVR/HVRT mode" check — stays where it already is, inside the action/handler, because it is not
+    a property of the whole category, it is specific to the HVRT sub-family; the coordinator's own
+    "actions may still validate their own arguments" extends naturally to "and their own narrower
+    state preconditions" (D5 already allows an action to return `{ok: false, reason: ...}`).
+
+  Further categories (`"copilot_sight"`/9K113, a pilot-seat-tools category, a naked-eye/hands-busy
+  category for scan/binoculars) are declared when those rule groups are ported (Stage 5/6+ in the
+  table below), each with its own gate function in the same registry — not stubbed in now for
+  commands that do not exist yet. Any category depending on `seat` reads today's always-`"copilot"`
+  stub until `[[BL-B123]]` lands; that dependency is named here so it is not silently assumed away
+  later.
+
+  **Lua declaration, a signature change to `when.speech`**: `when.speech(id, pattern, category,
+  handler)` — `category` a plain string, required (a missing or unrecognised category is a bad
+  `when.speech` call, D6's existing finest-grain-honest handling: that one rule is disabled, not
+  the file). Chosen over a file-level `category(...)` declaration (rejected: order-dependent —
+  a rule registered before the file's own category call would silently take no category or the
+  wrong one — and invisible at a glance per rule when a file ever needs to mix categories) and
+  over a trailing options table (rejected: adds a second shape for one required field with nothing
+  else in it yet). This is a breaking change to the one already-shipped rule
+  (`turn_heading_relative` in `config/rules/flight.lua`) — it is migrated to `category="flight_control"`
+  in this same stage, and `config/rules/README.md`'s API reference is updated. **U19.**
+
+  **Dispatch wiring.** `CrewConsole._handle_rule` (D4) now: looks up the matched rule's category →
+  `gates.check_gate(category, self.current_crew_state())` → on `PASS`, calls
+  `self.rule_runner(token, slots)` exactly as today; on `UNABLE`, speaks `render_unable(reason)`
+  and never calls the runner; on `HOLD`, sets a new one-shot field, `pending_rule_dispatch =
+  PendingRuleDispatch(rule_id=token, slots=slots, category=category, held_since_sim=now_sim)`, and
+  speaks nothing yet (Co-moving Fields table below).
+
+  **Hold-and-retry (`BL-17.md`'s "hold and fly when ready", the takeover-settle vignette).**
+  `drain_pending_rule_dispatch(now_sim)`, called once per poll from `body.py` beside
+  `drain_ai_pilot_wheel_speech` (same spot, after `advance_parked_flight_state` has refreshed
+  `parked_flight_state` this poll): re-runs `gates.check_gate` on the held category against the
+  *current* `CrewState`. `PASS` → run the handler now and speak its lines (the command happens
+  exactly as if it had been said at this later moment — not narrated as delayed, matching this
+  project's existing "never narrate settlement" posture). Still `HOLD` and
+  `now_sim - held_since_sim < RULE_GATE_HOLD_TIMEOUT_S` → do nothing, wait for the next poll.
+  `UNABLE` (the player unparked while holding) or the timeout elapsed while still `HOLD` → speak
+  `render_unable(reason)` once and clear the field. **A new command matched while one is already
+  held replaces it — latest wins, the earlier hold is silently dropped**, the same convention
+  `AiPilotGoalRequest`/E-P4 already use for an outstanding flight goal; not escalated, since this
+  is the same precedent applied one level up (**U21** records it anyway, since it is a real,
+  if narrow, behaviour choice).
+
+  **`RULE_GATE_HOLD_TIMEOUT_S`** — a new behaviour-affecting constant (how long Petrovich holds an
+  understood-but-not-yet-actionable command before giving up and saying "unable"), declared through
+  `tuning.py` per root `CLAUDE.md`'s standing rule. Default and bounds: **U20**.
+
+  **`increment_ai_heading`'s own `current is None` check becomes dead code once the gate is wired
+  ahead of it, and is removed in this stage** (its action is now only ever called after
+  `flight_control`'s gate has already confirmed `held_heading is not None`) — simplicity heuristic
+  #2, and leaving an unreachable branch in place would read as a second source of truth for the
+  same precondition the gate now owns.
+
+  **Scope boundary, stated plainly**: this mechanism governs **rules only**. The existing ad hoc
+  on-ground look gate in `handle_command`'s legacy preamble is unchanged — it is naturally
+  subsumed once "look"/scan commands themselves become rules (Stage 6), at which point a
+  `"naked_eye_scan"` category's gate absorbs it as that port's own work, not retrofitted here.
+- **D17 — State-dependent speech-to-text hint**, built on D16's `CrewState`/category, measured
+  before it ships (BL-17.md's own condition). A new endpoint, `PUT /crew_state`
+  (`{"active_categories": [str, ...], "priority_category": str | null}`), pushed by body-layer only
+  when `CrewState`'s category-relevant projection changes (not every poll) — **deliberately
+  separate from `PUT /rules`**, so a state flip (several times a sortie) never re-runs D9's O(n²)
+  collision check, which only needs to run when the *rule set* changes (a reload). The adapter
+  stores the pushed state in a small holder the prompt provider reads; absent (no push yet, or an
+  adapter restart) behaves exactly as today — the full, unnarrowed prompt, the same "additive,
+  true no-op when absent" posture every other optional collaborator in this project has.
+  `PUT /rules`'s own per-rule dict additionally carries `category` (needed here, not for the
+  gate — gating is body-layer-only and never crosses the wire) so the adapter knows which rule's
+  words belong to which category for ordering.
+
+  **What narrowing changes, per the goal check's own resolution of Q7/Q8/Q11:**
+  - In-state words (the active categories' own rule/legacy words) are included; out-of-state words
+    are **never removed outright** in the shipped design — narrowing means *reordering*
+    (in-state first, matching E11), not deletion, **unless the measurement (below) shows removal
+    is actually safe** on the user's own corpus. This is the conservative default the goal check's
+    Finding 3 asked for: a removed word cannot be heard at all, which is worse than being heard
+    late.
+  - The priority category's words (while flying: `flight_control`) are placed first in the
+    reordered prompt — "flight words go first in the hint" (Q11).
+  - Scan (naked-eye) words stay in the active set while flying (Q8's "yes" — `BL-B123`'s "no optic
+    at all" does not cover the naked eye, alignment Finding resolved this already); only
+    hands-requiring tools (binoculars, 9K113) would be narrowed out while flying, and neither is a
+    rule yet (Stage 6+), so this batch's own narrowing set is just `{flight_control, always}` while
+    flying, `{always, <whatever is ported so far>}` otherwise — a small, honest set given how
+    little is ported.
+  - An unclear transmission is **never** resolved toward a flight command by a tie-break — the
+    hint can make flight words easier to *hear correctly*, but matching's own `SEPARATION_MIN`
+    disposition (D13) is untouched; "say again" still wins a genuine near-tie (Q11's second half).
+
+  **Measured before it ships** (the goal check's Finding 3, Q13): `stt_bench.py` run on a short
+  corpus of the number forms and phrases D14/Stage 4 introduce, recorded by the user via
+  `record_corpus.py` (the exact list is Stage 3c's own deliverable, below), comparing three
+  prompt variants — today's full prompt (baseline), "in-state words first, nothing removed," and
+  "out-of-state words removed." The column that decides is **unsafe errors** (a command recognised
+  as a *different* command) and **out-of-state answers losing their "unable, &lt;reason&gt;"**
+  (recognised as "say again" instead) — not raw accuracy, per the alignment finding and this
+  project's own performance-reviewer convention that a *measured* number is what settles a sizing
+  question. **Ship threshold: U23.**
+- **D18 — Flight-control port (Stage 4).** `turn_heading`, `level_flight`, `set_speed`,
+  `set_altitude`, `hold_altitude`, `level_off`, `altitude_step`, `speed_step`, the HVRT bare words,
+  and "you/I have controls" all become rules in `config/rules/flight.lua`, category
+  `"flight_control"` except "you/I have controls" (category `"always"`, a handler that calls
+  nothing and says nothing — Q7's own answer). Every flight handler's own `held_* is None ->
+  NOT_READY` check is **removed** — D16's gate now owns that precondition for the whole category,
+  including the already-ported `turn_heading_relative`. The one exception: HVRT's
+  `_ai_pilot_hvrt_ready()` (ai_mode in `HVR`/`HVRT`) stays as the action's own finer check, per D16.
+  Readback text is **unchanged** from BL-16 P2 (E18) — only the refusal path moves, from a generic
+  "Unable, not ready" to the gate's "unable, not flying" (immediate, permanent-until-handover) or
+  the held-and-retried path (transient, during takeover settle). `"NOT_FLYING"`/`"HANDS_BUSY"` join
+  `_UNABLE_TEMPLATES` (speech.py) as new closed reasons (Q9); `"PILOT_SEAT"` is **not** added yet —
+  it names a seat distinction `[[BL-B123]]` has not built, and adding the string now with nothing
+  that can ever select it would be a reason nobody can reach.
+
+  **Differential tests before deletion**, the same shape Stage 2 used: for each of the seven
+  commands above, the pre-rules handler's own behaviour (every branch, every edge — a wrap past
+  0/360 for heading, the speed-max sentinel, the altitude reference-resolution cases, the HVRT
+  hover precondition) is pinned in a test *before* the legacy branch is deleted, then the ported
+  rule is asserted to reproduce it exactly, loading the **real** shipped `flight.lua`.
+- **D19 — "Priority while flying" (Q11), a mechanism proposal, not yet built.** The goal check's
+  own words: *"what it changes in code... is the architect's to propose and the user's to
+  confirm."* Flight-rule readbacks already go out immediately today — `handle_command`'s dispatch
+  returns a handler's lines directly, and flight tokens are not among the commands
+  `_speak_or_defer` defers behind `CalloutScheduler.busy_until_sim` — so the "never queued behind"
+  half of Q11 is already true by construction for anything issued *after* a flight readback. What
+  is not yet true: a flight readback issued while a **routine callout is already in flight**
+  (queued ahead of it in `SpeechWorker`'s FIFO) would still play after that callout finishes,
+  because nothing today reorders the queue for it. **Proposal: route a `flight_control`-category
+  rule's own readback through `CalloutScheduler.note_urgent`** — the same mechanism
+  `!inject-urgent`'s test harness already exercises (`AudioPlaybackSender.interrupt`, which stops
+  in-flight playback and resets `busy_until_sim` to the new line's own duration) — rather than
+  building a second "skip the queue without killing what's playing" mechanism that does not exist
+  today. *Why reuse rather than build new:* "do not reinvent the wheel" — this is exactly the
+  already-built, already-tested "this must be heard now" path, and a flight readback silenced
+  mid-callout for a couple of seconds is a real cost (the pilot steering by voice gets a late
+  answer) that an in-progress contact callout, which will be repeated in essence by the next scan
+  cycle, is not. **This is a real behaviour change (a flight readback can now cut off an in-flight
+  routine callout mid-sentence) and is not built without confirmation: U22.**
+- **D20 — The effector-write action surface** (coordinator correction, 2026-11-17, verbatim:
+  *"effector sequences will eventually move to lua rules. To that end, we must build support for
+  writing effectors via rules from the start... not a second write path"*). Built now, as
+  foundation, in Stage 3d below — **no sequence file is migrated and no shipped rule calls this
+  yet**; the point is that the mechanism exists before Stage 5 (`crew.lua`/`weapons.lua`,
+  `observ_on/off`/`weapons_armed/safe`) needs it, so that stage ports onto an already-proven path
+  rather than inventing one under schedule pressure.
+
+  **Not a second write path: the engine is extended, not duplicated.** Today, `effector_engine.
+  advance` processes only trigger-fired `SequenceFile` rows (`EffectorRunState.runs`, keyed by
+  `EffectorTrigger`); the actual per-row execution (condition check → the implicit self-check →
+  the `absolute_write` gate → `client.write_cockpit_switch` → `assumed_writes`/`commanded_values`
+  update → the row's own `petrovich-says` line into `spoken`) is one contiguous block inside
+  `advance`'s per-row loop (`effector_engine.py` lines ~399–497). This block is **extracted into
+  its own function**, `_execute_switch_row` (same module), taking exactly the state
+  (`effector_def`, the row's `value`/`condition`, the current `cursor`/`assumed_writes`/
+  `failed_effectors`, `now_sim`, `client`) and returning what it already computes today (the next
+  cursor, updated `assumed_writes`/`commanded_values`, and an optional spoken line) — `advance`'s
+  sequence-row loop calls it exactly as before, now through the named function instead of inline.
+  A **second, new kind of run**, `EffectorRunState.ad_hoc_runs: Mapping[str,
+  _AdHocEffectorCursor]` (keyed by a request id the rule dispatch mints, not an `EffectorTrigger`
+  — there is no sequence file or trigger behind one), holds a single target `(effector, value,
+  says)` plus the same `_RunCursor`-shaped read/write progress a sequence row already carries.
+  `advance` gains one more pass, after the trigger-run loop, that walks `ad_hoc_runs` and calls
+  the **same** `_execute_switch_row` for each — sharing `assumed_writes`/`failed_effectors`/
+  `spoken`/`commanded_values` with the trigger-run pass in the same call, so a rule-originated
+  write and a sequence-row write to the same effector in the same poll still respect the existing
+  same-poll collision rule (D9's "a write to this same effector already failed this poll... hold
+  and retry next poll"). `body.py`'s existing single call site for `advance()` needs no change —
+  the new pass rides inside it.
+
+  **How a rule calls an effector write** — `rules/actions.py` gains a new namespace,
+  `ACTION_NAMESPACES["effector"]`, one action: `effector.write(name, value, says)`. This needs
+  `ActionParam` widened beyond its current "always a bounded integer" shape (its own docstring
+  already anticipates this: "widen this... when a later action needs a different kind") to admit
+  a **string parameter validated against a vocabulary**: `name` checked against the loaded
+  aircraft's curated `effectors.toml` keys, `value` checked against *that* effector's own legal
+  value names (the same `EffectorDef.values` mapping the engine itself reads), `says` a free-text,
+  length-capped string (the same cap `say()` already enforces) or absent. An unknown effector or
+  illegal value name is a **synchronous** validation failure — `{"ok": false, "reason":
+  "UNKNOWN_EFFECTOR"}` — resolved in Python before the engine is ever touched, the same "validate
+  every value Lua passes in" posture D5 already states.
+  `_write_effector`'s own body does not call `effector_engine`/`effector_registry` directly — it
+  calls a closure injected into `ActionContext` at construction (`request_effector_write:
+  Callable[[str, str, str | None], dict[str, object]]`, built in `body.py` the same way
+  `speech_log_sink`/`rule_runner` are already injected), which validates against the live registry
+  and, on success, mints a request id and calls a new `effector_engine.request_write(state,
+  request_id, name, value, says, now_sim) -> EffectorRunState` (mirrors `fire_trigger`'s own
+  "start if idle" shape) against `body.py`'s own runner-owned `EffectorRunState`. This keeps
+  `rules/` from needing a new import edge into `belief.effector_engine`/`effector_registry`
+  specifically for this one piece of mutable, poll-owned state — the same reason `crew_console.py`
+  avoids importing `rules.*` directly (D4).
+
+  **Reporting running/succeeded/failed.** The *synchronous* action result is only ever "queued"
+  (validated, enqueued) or a validation failure — the physical write's own outcome is not known at
+  dispatch time, because it is multi-poll (a read, then a write, potentially spanning several
+  polls under `EFFECTOR_CONDITION_READBACK_WAIT_S`/retry). So the rule's own Lua handler, on
+  "queued," **says nothing** — the same silent-on-dispatch convention the four existing
+  observ/weapons handlers already follow ("the sequence files' text is the only source" of the
+  eventual confirmation, `body-layer/CLAUDE.md`). The eventual spoken confirmation is the `says`
+  text the rule supplied at call time, carried on the ad hoc run and appended to
+  `EffectorRunState.spoken` on completion — **the same `spoken`/`drain_effector_speech` pipe every
+  sequence row already uses**, not a new speech path; `says` simply replaces a markdown row's
+  `petrovich-says` cell as the source of that text. A genuine downstream failure (no readback
+  within the wait window, or `write_cockpit_switch` raising) inherits the engine's **existing**
+  posture exactly: no line is spoken, and the run retries indefinitely next poll — **this is a
+  real tension with the rule engine's own "always say something" culture (D6's "Action file
+  error." on a Lua error) that this stage does not resolve, only inherits; flagged as U24** rather
+  than silently building a second failure-speech convention or silently leaving the pilot with no
+  eventual answer. Each `_AdHocEffectorCursor` also carries a `status` field
+  (`"pending"`/`"succeeded"`/`"failed_write"`/`"failed_no_readback"`) purely for introspection
+  (e.g. a future `--print-rules`-style debug dump) — nothing reads it yet, since nothing beyond
+  speech needs to today.
+
+  **Category gates (the coordinator's own example — "copilot-only switches gated by seat") need no
+  new mechanism.** A rule that calls `effector.write` declares its own category exactly like any
+  other rule (D16) — e.g. a 9K113-switch-writing rule declares `"copilot_sight"`, whose gate is
+  (today, pending `[[BL-B123]]`) the same trivial-pass stub D16 already names for that category.
+  The effector registry itself stays seat-agnostic — which seat may touch a given switch is a
+  property of the **rule's** declared category, never of the effector definition, keeping
+  `effectors.toml`'s own format unchanged.
+
+  **D6 rollback does not apply here, and should not.** D6's one-shot-transition rollback fires on
+  a Lua error *during this dispatch*; an ad hoc effector write that later fails is not a dispatch-
+  time error (dispatch already returned "queued" cleanly), and the write itself sets no
+  `CrewConsole` one-shot field for anything to roll back — the two mechanisms are deliberately
+  unrelated, stated here so a later reader does not look for a connection that was never intended.
+
+  **Event triggers, mentioned as asked, not built.** The coordinator's own three new triggers
+  (`attack-run-start`, `attack-run-start-missiles`, `attack-run-stop`, landing on a separate
+  branch) extend `belief.effector_sequences.EffectorTrigger`/`TRIGGER_INFO` — the project's **one**
+  declared trigger vocabulary. When BL-B95 eventually builds a `when.trigger(trigger_name,
+  handler)` rule kind (named already in this plan's original "Second-order effect," below), it
+  should dispatch on this same enum rather than a second trigger taxonomy — this falls out of
+  `EffectorTrigger` already being the one place a "when" of this shape is named in the codebase,
+  not something this stage needs to build. Not planned further here, per the coordinator's own
+  instruction.
+
+  **Migration, named only, not planned**: see the later-stages table's new row 11.
+
+### Second-order effect (revision 2)
+
+The category-gate mechanism (D16) is the first *generic* "when" layer this project's rule engine
+has had — every later rule group (scan/report, watch/target, marks) inherits it rather than
+inventing its own precondition shape, and `[[BL-B123]]`'s seat distinction, whenever it lands, is
+a new category plus a new `CrewState` field rather than a new mechanism. `CrewState` is also the
+first state type explicitly shared between a dispatch-time check and a recognition-time hint —
+BL-B95's eventual `when.trigger(...)` interrupts will likely want the same state, so this is worth
+keeping as one well-known type rather than letting a second ad hoc reader of `ParkedFlightState`
+appear later. **D20's effector-write surface means the rule engine now reaches every write
+mechanism this project has** (flight goals, and now cockpit switches) through one allowlisted
+registry each — `[[BL-B90]]`'s effector sequences and `[[BL-17]]`'s rules were built independently
+and now share one execution primitive (`_execute_switch_row`) rather than converging only at the
+DCS wire; this is what makes the later-stages table's row 11 (sequence files becoming rules) a
+rewrite of *how a row is declared*, not a rewrite of *how a row runs*.
+
+### Co-moving Fields (revision 2)
+
+Step 6a's trigger, applied to the new cross-process and cross-poll state this revision adds.
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `CrewState` (`has_controls`/`settling`/`seat`/...) | internal (`current_crew_state()`, every poll) | `parked_flight_state` refreshed this poll | both the gate check (`_handle_rule`/`drain_pending_rule_dispatch`) and the decision to push `PUT /crew_state` read the **same** computed value this poll — never two independent reads of `parked_flight_state` that could disagree within one poll |
+| `pending_rule_dispatch` | internal (`_handle_rule`, on `HOLD`) | a flight-category rule matched while `settling` | set once; nothing spoken yet |
+| `pending_rule_dispatch` | internal (`drain_pending_rule_dispatch`) | gate re-check: `PASS` | handler runs, lines spoken, field cleared |
+| `pending_rule_dispatch` | internal | gate re-check: still `HOLD`, timeout not elapsed | unchanged, retried next poll |
+| `pending_rule_dispatch` | internal | gate re-check: `UNABLE`, or timeout elapsed while `HOLD` | `render_unable(reason)` spoken once, field cleared |
+| `pending_rule_dispatch` | external (voice, a second flight command) | a new rule matches while one is already held | the new one replaces the old (latest wins, U21); the old is dropped with no line spoken for it |
+| `EffectorRunState.ad_hoc_runs` | external (a rule's `effector.write` call, via the injected closure) | request validated | one new entry, keyed by request id; shares `assumed_writes`/`failed_effectors` with the trigger-run pass in the same `advance()` call |
+| `EffectorRunState.ad_hoc_runs` entry | internal (`advance`, via `_execute_switch_row`) | self-check satisfied or a write succeeds | removed from `ad_hoc_runs`; its `says` text (if any) appended to `EffectorRunState.spoken` this call |
+| `EffectorRunState.ad_hoc_runs` entry | internal | no readback within the wait window, or a write fails | stays in `ad_hoc_runs`, `status` set to the matching `failed_*`, retried next poll (D20's own inherited-posture note; U24) |
+| adapter's pushed crew-state holder | external (`PUT /crew_state`), reset by adapter restart | a push, or an adapter restart | absent → prompt provider falls back to the full, unnarrowed prompt (no silent partial state) |
+| `reset_for_new_mission` | internal | mission (re)start | `pending_rule_dispatch` cleared to `None`, same as every other one-shot command-transition field |
+
 ### Answers to the goal check's open assumptions (step 1b)
 
 | assumption | answer in this plan |
@@ -391,6 +790,203 @@ the branch only if run before merge. The air start and AI-overlay setup are refe
    o'clock; "scan heading three two one" is accepted.
 7. Free speech: "the tanks are on the ridge" is still not a command.
 
+### Stage 3a — matching foundation: fuzzy words, number words, performance fixes
+
+Builds D13/D14/D15. No new category/gate machinery yet (D16) and no new rules — this stage only
+widens what the *existing* matching/collision/prompt machinery can recognise, so it can be built
+and tested (audio-adapter mostly, plus `vocabulary.py`) without touching `handle_command`.
+
+1. **Literal fuzz (D13).** `rule_patterns.match_pattern`'s `LiteralElement` branch gains the
+   `_WORD_REPAIR_FLOOR` fallback; `_match_rules` computes a real ratio instead of always `1.0`;
+   `match_transcript`'s ambiguity check applies `SEPARATION_MIN` between rule matches (and between
+   a rule match and a legacy match) exactly as it already does between two legacy matches.
+   `compile_rules`'s rule×rule/rule×legacy passes gain the one-perturbed-sample probe. Tests: "turn
+   left thirty"/"Turn left, 30."/"turn left three zero" all still resolve to `turn_heading_relative`
+   (closing the Reviewer-flagged gap from Stage 1b/2); a mis-transcribed literal ("turn *lift* two
+   zero") still matches; "right" is never fuzzy-repaired into a slot value anywhere (E12 pin); two
+   rules whose patterns only collide once `_WORD_REPAIR_FLOOR` is applied are caught by the
+   perturbed-sample collision pass, with a synthetic fixture rule pair built for the test since the
+   one real shipped rule has no such partner yet.
+2. **Number words (D14).** `quantity`/`speed_target` added to `SLOT_TYPES`. Tests: every form Q10
+   names ("three hundred twenty", "one hundred fifty three", "two hundred", "three two zero") parses
+   to the same integer; "three fifteen"/"two twenty" (paired forms) fail to parse as a single
+   number and the owning rule falls through to "say again"; "speed max" and "speed two hundred"
+   both reach the same rule via `speed_target`; `heading`/`angle`/`oclock`'s own existing tests are
+   unchanged (regression pin that D14 did not touch them).
+3. **Performance (D15).** `_rule_anchor_words`/the sorted rule order cached at the `PUT /rules` swap
+   point; the legacy-vocabulary word list in `to_prompt()` cached, keyed on `RuleRegistry.version`.
+   Tests: a microbenchmark-shaped unit test asserting the cached path is not recomputed on a second
+   call with an unchanged `rules`/`version` (a call-count spy on the underlying builder, not a wall-
+   clock assertion); the existing matcher/prompt suites pass with byte-identical output.
+
+### Stage 3b — rule categories and dispatch gates
+
+Builds D16, the coordinator's mid-task correction. The one new piece of cross-process wiring is
+`category` riding along in `PUT /rules`'s existing rule dicts (for D17's benefit, Stage 3c) — the
+gate check itself is entirely local to body-layer.
+
+1. `body-layer/src/belief/crew_state.py` — `CrewState` (frozen dataclass: `has_controls`,
+   `settling`, `seat`, `hands_free`, `eyes_free`); `CrewConsole.current_crew_state()`.
+2. `body-layer/src/rules/gates.py` — `GateOutcome` (`PASS`/`HOLD(reason)`/`UNABLE(reason)`),
+   `GateFn = Callable[[CrewState], GateOutcome]`, `GATE_REGISTRY = {"always": ..., "flight_control":
+   ...}`, `check_gate(category, state) -> GateOutcome` (an unregistered category is a defensive
+   `UNABLE("NO_SUCH_COMMAND")` — should be unreachable once the loader validates categories at load
+   time, but never silently `PASS`es on a programming error).
+3. `body-layer/src/rules/loader.py` — `when.speech`'s Lua-side signature becomes `(id, pattern,
+   category, handler)`; an unrecognised/missing `category` is a bad-call `RuleLoadError` disabling
+   that one rule (D6), not the file.
+4. `body-layer/src/belief/crew_console.py` — `_handle_rule` runs the gate before the rule runner
+   (dispatch wiring above); `pending_rule_dispatch: PendingRuleDispatch | None`;
+   `drain_pending_rule_dispatch(now_sim)`; `reset_for_new_mission` clears the new field.
+5. `body-layer/src/body.py` — calls `drain_pending_rule_dispatch` once per poll, beside
+   `drain_ai_pilot_wheel_speech`; `--print-rules` prints each rule's category alongside its id and
+   pattern.
+6. `body-layer/src/belief/speech.py` — `"NOT_FLYING"`/`"HANDS_BUSY"` reasons are **declared here**
+   even though neither is reachable until Stage 4 (`"NOT_FLYING"`) or a later stage
+   (`"HANDS_BUSY"`, Stage 6+) — added now so Stage 4 does not also need a `speech.py` change.
+7. `body-layer/src/tuning.py` / `config/defaults.toml` — `RULE_GATE_HOLD_TIMEOUT_S` (U20).
+8. `config/rules/flight.lua` — `turn_heading_relative`'s registration gains `"flight_control"`;
+   `increment_ai_heading`'s own `current is None` check removed (dead once the gate runs first).
+9. `audio-adapter/src/rule_patterns.py`/`server.py` — `PUT /rules`'s per-rule dict gains `category`
+   (parsed and stored on `CompiledRule`, not yet read by anything in this stage — Stage 3c's own
+   job; a missing `category` in the request body is the same 400 shape every other required field
+   already gets).
+
+**Tests.** `gates.py`: each registered category's three outcomes constructed directly (no Lua
+involved — this is ordinary Python logic); an unregistered category degrading safely. `_handle_rule`:
+`PASS` runs the handler unchanged from today; `UNABLE` speaks the reason and never calls the runner
+(a spy runner asserting zero calls); `HOLD` sets `pending_rule_dispatch` and speaks nothing.
+`drain_pending_rule_dispatch`: resolves to `PASS` on a later poll and runs the handler then, not at
+dispatch time; stays `HOLD` and is silently retried while under the timeout; times out to
+`render_unable`; a second held command replaces the first with no line spoken for the dropped one.
+`reset_for_new_mission` clears `pending_rule_dispatch` (the generic field-preservation test in
+`test_mission_start_reset.py` catches an omission here, per that module's own precedent). A loader
+test for the new required `category` argument: present-and-valid loads; absent or unrecognised
+disables that one rule, with the file's other rules unaffected. `turn_heading_relative` through the
+real shipped `flight.lua`: `NOT_FLYING` when `parked_active` is `False`; held-then-passed when
+`settling` resolves within the timeout; held-then-unable when it does not.
+
+### Stage 3d — effector-write action surface
+
+Builds D20. Part of the same "matching-foundation/gate" batch as 3b, built alongside it, before
+any command group is ported onto it — **no sequence file is migrated and no shipped rule calls
+this in this stage**; it is pure capability, proven by test rather than by a live command.
+
+1. `body-layer/src/belief/effector_engine.py` — extract `_execute_switch_row` from `advance`'s
+   inline per-row block (same behaviour, now a named, independently callable function);
+   `EffectorRunState.ad_hoc_runs: Mapping[str, _AdHocEffectorCursor]`; `request_write(state,
+   request_id, effector_name, value_name, says, now_sim) -> EffectorRunState`; `advance` gains the
+   second pass over `ad_hoc_runs`, sharing `assumed_writes`/`failed_effectors`/`spoken` with the
+   trigger-run pass in the same call.
+2. `body-layer/src/rules/actions.py` — `ActionParam` widened to admit a validated string parameter
+   (a closed/open vocabulary check, not just an integer bound); `ACTION_NAMESPACES["effector"]` =
+   one action, `write(name, value, says)`, invoking the injected `request_effector_write` closure.
+3. `body-layer/src/body.py` — builds `ActionContext.request_effector_write` as a closure over the
+   loaded aircraft's curated registry and the runner-owned `EffectorRunState`, the same injection
+   pattern `speech_log_sink`/`rule_runner` already use; `drain_effector_speech` (existing) needs no
+   change — it already drains `EffectorRunState.spoken` regardless of which run produced a line.
+4. **Tests.** `_execute_switch_row` extracted with zero behaviour change — the full existing
+   `test_effector_engine.py` suite passes unchanged (a regression pin that the extraction is
+   mechanical). `request_write`: enqueues an idle ad hoc run; a second request for the same
+   effector while one is pending is a no-op (mirrors `fire_trigger`'s own D1 shape). `advance`
+   processing `ad_hoc_runs`: the implicit self-check short-circuits to "succeeded" + `says` spoken,
+   exactly as a sequence row would; a real write succeeds and speaks `says`; a failed write is
+   silently retried next poll, never speaking anything (pin — the two cultures named in D20 stay
+   distinguishable in the test suite, not just in prose); an ad hoc run and a trigger-fired
+   sequence row targeting the *same* effector in the same poll respect D9's same-poll collision
+   rule regardless of which kind each is. `effector.write` action: unknown effector/value name
+   degrades to `{"ok": false, "reason": "UNKNOWN_EFFECTOR"}` without touching the engine at all; a
+   valid call enqueues and returns `{"ok": true}` with no line spoken by the handler itself. A
+   small synthetic rule (test-only, never shipped) calling `effector.write` end to end through the
+   real sandbox, proving the whole chain — Lua call → validated action → ad hoc run → `advance` →
+   `EffectorRunState.spoken` → `CrewConsole.drain_effector_speech` — without needing a real aircraft
+   or a real sequence file.
+
+### Stage 3c — state-dependent speech-to-text hint
+
+Builds D17, on top of 3b's `CrewState`/`category`. The corpus and the measurement are this stage's
+own deliverable, not a separate stage — the narrowing code does not ship until the measurement
+supports it (U23).
+
+1. **Wire.** `PUT /crew_state` (`audio-adapter/src/server.py`), body-layer pushes on `CrewState`
+   change only (`body.py` compares this poll's `CrewState` against the last one pushed); the
+   adapter's holder defaults to "no active-category restriction" (today's full prompt) until the
+   first push.
+2. **Hint construction** (`audio-adapter/src/vocabulary.py`/`stt_engine.py`'s prompt provider):
+   given the pushed `active_categories`/`priority_category`, reorder (never remove, pending the
+   measurement) `to_prompt()`'s word list so the priority category's rule words come first, then
+   the rest of the active categories' words, then everything else unchanged. With no push, this is
+   a no-op — the existing `to_prompt()` output, byte-identical.
+3. **Corpus to record** (`audio-adapter/tools/record_corpus.py`, a testing aid — light, per root
+   `CLAUDE.md`'s "Testing aids take the light path"; no plan/notes-harvest overhead for this part):
+   a short list the user reads once, covering every new form this revision introduces plus the
+   seven refusal cases, sized to record in a few minutes:
+   - "turn left thirty", "turn left 30" (said aloud as digits), "turn left three zero"
+   - "heading three one five", "level flight", "straight", "level off"
+   - "speed two hundred", "speed max", "speed one hundred fifty three", "speed two two zero"
+   - "altitude three hundred", "altitude three zero zero barometric", "climb fifty", "descend one
+     hundred"
+   - "hold altitude"
+   - "left", "right", "forward", "back", "hold", "up", "down" (the HVRT bare words, said once each
+     in isolation)
+   - the three refusal cases, said while **not** in the matching state (the card should note which
+     state to be in when recording each): "turn left thirty" (not flying → expect "unable, not
+     flying"), "binoculars" or "watch nearest" while flying (→ "unable, hands busy", once Stage 6
+     ports it — recorded now anyway so the corpus does not need a second recording session later)
+   - five ordinary non-command sentences already in `FREE_SPEECH_GUARD`, read for contrast
+   Run: `PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts` to get the exact
+   phrasing prompts, then `tools/record_corpus.py --out audio-adapter/tests/fixtures/corpus/bl17-stage3c/`
+   (or wherever the existing corpus lives — see that tool's own docstring for the exact flag names).
+4. **Measurement**: `tools/stt_bench.py` run three times against the recorded corpus (full prompt /
+   in-state-first / out-of-state-removed), reported as `research/2026-11-17-state-hint-bench.md`
+   (dated Investigator-style research note, since this is reconnaissance on recognition behaviour,
+   not pipeline code — written by whoever runs the bench, following the format every other dated
+   research note in this subproject uses). **Ships only if U23's threshold is met**; otherwise the
+   wire/hint-construction code from steps 1–2 stays built (harmless, inert without a push) and the
+   narrowing itself is parked as a backlog item until a later corpus shows it is safe.
+
+### Stage 4 — flight-control port
+
+Builds D18. Depends on 3a (fuzzy/number-word slots), 3b (the `flight_control` gate — every rule
+here is dispatched under it), and 3c's hint (ships alongside if 3c's measurement supports it;
+otherwise Stage 4 ships with today's full, unnarrowed prompt and the hint follows later).
+
+1. **Actions**, extracted from the existing handlers into `rules/actions.py`'s `flight` namespace,
+   each keeping the extracted handler's own math/readback text verbatim (E18): `set_heading`
+   (from `_handle_turn_heading`), `level_flight` (from `_handle_level_flight`), `set_speed`/
+   `step_speed` (from `_handle_set_speed`/`_handle_speed_step`), `set_altitude`/`step_altitude`
+   (from `_handle_set_altitude`/`_handle_altitude_step`), `hold_altitude` (from
+   `_handle_hold_altitude`), `level_off` (from `_handle_level_off`), and the three HVRT action
+   families (translate/hold/step, from `_handle_hvrt_*`, each keeping its own
+   `_ai_pilot_hvrt_ready()` check). Every `held_* is None -> NOT_READY` branch inside these is
+   removed (D16/D18) — the gate already guarantees it by the time the action runs.
+2. `config/rules/flight.lua` gains one `when.speech(id, pattern, "flight_control", handler)` per
+   command above, using `heading` (for `turn_heading`'s absolute form, now that D14 confirms it is
+   unaffected by the number-word work), `quantity` (altitude/climb/descend amounts),
+   `speed_target` (speed), and the existing `angle`/word-set types (relative turn, HVRT directions).
+   One more rule, category `"always"`: "you have controls"/"I have controls" — handler does
+   nothing, says nothing (Q7).
+3. `body-layer/src/belief/speech.py` — `"NOT_FLYING"`/`"HANDS_BUSY"` were already declared in 3b;
+   `"NOT_FLYING"` becomes reachable here (the `flight_control` gate's own `UNABLE` reason).
+   `"HANDS_BUSY"` stays unreachable until Stage 6 — declared, not dead code, since a reachable
+   reason string with nothing yet pointing at it is a normal, temporary state for a closed
+   vocabulary being built out in stages (compare `"PILOT_SEAT"`, deliberately *not* declared yet
+   per D18 — the difference is that this batch's own gate can already produce `NOT_FLYING`/
+   eventually `HANDS_BUSY`, where nothing in this batch or the next can ever produce `PILOT_SEAT`).
+4. **Differential tests before deletion** (D18) for all seven ported commands plus the two HVRT
+   families; a body-layer test loading the real shipped `flight.lua` with zero failures; an
+   adapter test pushing the real patterns and matching every new slot form from the Stage 3c corpus
+   list.
+5. **Flight card** (`/test-card`, names `main` per the auto-merge rule): the seven commands plus
+   HVRT bare words flown in AI-overlay mode; "turn left thirty" (number word) and "speed two
+   hundred"/"speed max"; a flight command spoken immediately after Request Aircraft Control (the
+   takeover-settle vignette) confirmed to be *held and flown*, not refused; "turn left 30" said
+   while **not** parked confirmed to answer "unable, not flying" rather than silently accepting a
+   readback (today's defect, BL-17.md Finding 2/E13); "you have controls" confirmed silent; the
+   fuzzy near-miss cases from 3a ("turn left thirty" by the near-miss route, a mis-transcribed
+   literal) confirmed to still work; the state-dependent hint (if 3c shipped) confirmed not to
+   change what is *accepted*, only what is heard more reliably.
+
 **Later stages: the remaining ~80 commands, one rule file per group** (U6; planned in its own
 pass when scheduled):
 
@@ -398,17 +994,20 @@ pass when scheduled):
 > merge what is build and plan what stages to take next and whether some are needed sooner and some
 > later. I'd say that we start with the flight control commnads and then see about the others."*
 > Stages 0–3 go through Reviewer, Performance, Security and DoD as one batch, then merge. The table
-> below is a provisional order only; it is re-planned with the user, flight-control commands first.
+> below is a provisional order only; **its row 4 is superseded by this revision's own "Stage 4 —
+> flight-control port" section above**, planned in full now per this run's own task. Rows 5–10
+> stay provisional, re-planned with the user when scheduled.
 
 | stage | file | commands | why this order |
 |---|---|---|---|
-| 4 | `flight.lua` | `turn_heading` (three digits now enforced, U2), `level_flight`, speed, altitude, `hold_altitude`, `level_off`, HVRT bare words | same actions family as Stage 2, lowest risk; the bare single words test the guard (D9) |
-| 5 | `crew.lua`, `weapons.lua` | `radio_check`, `greeting`, `silence`, `stop_talking`; `observ_on/off`, `weapons_armed/safe` | slot-free; checks that a rule may stay silent when its effector sequence speaks (`[[BL-B119]]`) |
+| 4 | — | **superseded — see "Stage 4 — flight-control port" above** | — |
+| 5 | `crew.lua`, `weapons.lua` | `radio_check`, `greeting`, `silence`, `stop_talking`; `observ_on/off`, `weapons_armed/safe` | slot-free; checks that a rule may stay silent when its effector sequence speaks (`[[BL-B119]]`); **first real user of D20/Stage 3d's `effector.write`** — whether `observ_on`/`weapons_armed` etc. call it directly or still fire the existing trigger-run path (today's `fire_trigger`) for their own sequence files is this stage's own decision, to be made once a real command is in front of it, not guessed here |
 | 6 | `scan.lua`, `report.lua` | every `scan_*`, `report*`, `where_is_it`, `cancel_scan` | largest set, allowlisted for the brain: the `BRAIN_COMMANDS` existence test moves to checking enabled rule ids; positional-readback deferral (`_speak_or_defer`) becomes action behaviour |
 | 7 | `watch.lua`, `target.lua` | `watch_*`, `follow`, `cancel_watch/task`, `select_target`, `drop_target`, `step`, `engage`, `disengage`, `point` | target choice as an action returning one unit or `nil` (U5) |
 | 8 | `marks.lua` | `mark_here`, `mark_target`, plus new offset, origin and place marks (U14–U16) | needs the union types (D7), ownship pose at PTT release, terrain elevation, waypoint numbering (R8), map-feature lookup |
 | 9 | — | delete the legacy matcher branches and `PHRASES` apart from routing | — |
 | 10 | — | full internal bearing→heading rename: compass-meaning "bearing" in perception, world-model, DCS-side Lua and tests; `BEARING_SIGMA_DEG` with the old key still read (U17). **Method, approved by the user 2026-11-17** (*"suggestion for stage 10 is a good one"*): classify every use by meaning first, then one mechanical rename per class — relative uses (`relative_bearing_deg`, `relative_now["bearing_deg"]`) **stay "bearing"**; compass direction *to a thing* (`geometry.bearing_deg`, `true_bearing_deg`) becomes `heading_to_*`, not plain "heading", because "heading" already means where a vehicle points or moves (`Group.heading_deg`, ownship `heading_true_deg`). A blind `sed` was measured and rejected: it inverts 10 relative identifiers, collides 5 names, and rewrites verbatim user quotes in 678 Markdown files. Docs keep historical quotes as said. | last, after every command is ported, so it touches settled code once |
+| 11 | — | **named only, not planned** (D20, coordinator direction 2026-11-17): `[[BL-B90]]`'s effector sequence `.md` files become rule files — each row's write becomes an `effector.write(...)` call in a rule's own handler body, a row's `condition` becomes a plain Lua `if`/the gate's own category check where it was really a seat/state precondition rather than a cockpit readback, and a `WaitRow` becomes a new engine primitive (`wait(s)`) rules do not have yet; `EffectorTrigger`-fired sequences become `when.trigger(...)` rules once `[[BL-B95]]` builds that trigger kind, reading the same `EffectorTrigger` enum rather than a second taxonomy. | after Stage 3d has been exercised by at least one real ported effector group (Stage 5), so the migration has a working example to generalise from, not a guess |
 
 These stay in code and never become rules: `wake_petrovich`, `cancel_nevermind`, `say_again`, and
 the confirm-band answers. They route a transmission; they are not commands. The marks stage should
@@ -556,3 +1155,49 @@ open.
 
   **Answered 2026-11-17: (a), in place in the repo**, as recommended. Uncommitted rule edits in the
   root make `/merge` stop and ask (R5); that is accepted.
+
+### Revision 2's own open decisions (U19–U24)
+
+- **U19 — the `when.speech` signature change** (`when.speech(id, pattern, category, handler)`,
+  D16). **Recommend: yes, proceed as a required positional argument**, not optional/defaulted and
+  not a trailing options table. Why: a missing category is exactly the kind of mistake a closed,
+  visible load error should catch (D6's own finest-grain-honest posture), and an optional field
+  that silently defaults to `"always"` would make a flight-control rule gate-free by omission
+  rather than by choice — the one already-shipped rule (`turn_heading_relative`) needs one line
+  added either way.
+- **U20 — `RULE_GATE_HOLD_TIMEOUT_S`'s default.** **Recommend: 5.0 s**, `lo=1.0`/`hi=15.0`. Why:
+  the takeover-settle window the vignette describes is expected to be well under a second in the
+  ordinary case (one status push after the handover) — 5 s is a generous margin that still fails
+  fast if `held_heading` genuinely never arrives (a real fault, not a settle delay), rather than
+  leaving the pilot wondering for the ~14 s the worst-case barometric-target correction can take.
+  Needs confirming against a real takeover on the test card, same as every other timing constant
+  in this feature family (`LONG_PRESS_HOLD_S`, `MODE_READ_SETTLE_S`) was.
+- **U21 — a second held command replacing the first, silently.** **Recommend: as designed** —
+  latest wins, the earlier hold dropped with no line spoken for it, mirroring `AiPilotGoalRequest`/
+  E-P4's own precedent exactly. Flagged rather than silently assumed because it is a real, if
+  narrow, behaviour choice (a pilot who says two things in quick succession during a takeover
+  hears only the second one answered), not because there is a live disagreement about it.
+- **U22 — flight-rule readbacks cutting off an in-flight routine callout** (D19,
+  `CalloutScheduler.note_urgent` reuse). **Recommend: build it** — a flight readback is the one
+  class of speech where lateness has a real cost (steering by voice), and the mechanism already
+  exists and is already tested. **Needs your confirmation because it is a genuine behaviour
+  change**: today a callout in progress finishes before anything else plays; after this, a flight
+  command spoken mid-callout would cut that callout off mid-sentence. If that reads as too abrupt,
+  the narrower alternative — never interrupt, only ensure a flight readback is never placed *behind*
+  anything newly queued after it — is possible but has no existing mechanism and would be new code.
+- **U23 — the narrowed-hint ship threshold** (D17, Stage 3c). **Recommend: ship the narrowed/
+  in-state-first hint only if the recorded-corpus measurement shows zero *new* unsafe-command
+  errors and zero *new* out-of-state answers losing their "unable, &lt;reason&gt;" (becoming "say
+  again" instead), versus today's full-prompt baseline** — raw accuracy improving is not itself
+  sufficient, per the alignment finding's own framing (a safety class of error, not an accuracy
+  number). If the threshold is not met, ship Stage 4 with today's full, unnarrowed prompt and park
+  the narrowing as a backlog item pending a larger corpus or a different ordering strategy.
+- **U24 — a rule-originated effector write that keeps failing** (D20). Today's sequence engine
+  never speaks on a failed write and retries forever, silently. A rule-originated write inherits
+  that exact posture in this stage (no change). But rules otherwise always answer *something*
+  (D6's "Action file error.", every `unable` reason) — should a rule-originated effector write
+  that is still failing after some bound eventually say "unable, &lt;reason&gt;" instead of staying
+  silent indefinitely, the way a sequence-file write never has? **Recommend: no change for now** —
+  this stage ships no rule that calls `effector.write`, so there is nothing yet to observe the gap
+  in practice; revisit when Stage 5 actually ports the first effector-writing command and a real
+  flight either does or does not surface this as a problem.
