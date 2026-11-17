@@ -197,8 +197,8 @@ rather than from this dump).
 | `HYDRO-MAIN-SECOND-PTR` | Main/Auxiliary Hydraulic Switch, MAIN/AUXILIARY | pilot (defaulted) | default_2_position_tumb | [3001] | [217] |  | 0/1 |  |
 | `LANDING-GEAR-MAIN-BACKUP-COVER-PTR` | Main/Reserve Gear Hydraulic Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [218] |  | 0/1 |  |
 | `LANDING-GEAR-MAIN-BACKUP-PTR` | Main/Reserve Gear Hydraulic Switch, MAIN/RESERVE | pilot (defaulted) | default_2_position_tumb | [3003] | [219] |  | 0/1 |  |
-| `PEDAL-DAMPER-COVER-PTR` | Pedal Damper, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [290] |  | 0/1 |  |
-| `PEDAL-DAMPER-COVER-PTR-PTR` | Pedal Damper Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3008] | [289] |  | 0/1 |  |
+| `PEDAL-DAMPER-COVER-PTR` | Pedal Damper, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [290] |  | 0/1 | `p_pedal_damper` |
+| `PEDAL-DAMPER-COVER-PTR-PTR` | Pedal Damper Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3008] | [289] |  | 0/1 | `p_pedal_damper_cover` |
 
 ## Device 6 -- WEAP_SYS
 
@@ -339,7 +339,7 @@ rather than from this dump).
 | `OP-STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3028] | [855] |  | 0/1 momentary |  |
 | `SAU-AZ-PTR` | Autopilot Route Azimuth | pilot (defaulted) | default_axis | [3030] | [262] |  | 0 to 1 continuous (gain 0.166667) |  |
 | `SAU-B-OFF-PTR` | Autopilot B Channel OFF | pilot (defaulted) | default_button | [3015] | [254] |  | 0/1 momentary |  |
-| `SAU-B-ON-PTR` | Autopilot B Channel ON | pilot (defaulted) | default_button | [3013] | [255] |  | 0/1 momentary |  |
+| `SAU-B-ON-PTR` | Autopilot B Channel ON | pilot (defaulted) | default_button | [3013] | [255] |  | 0/1 momentary | `p_sau_b_channel_on` |
 | `SAU-B-SWITCH-PTR` | Autopilot Altitude Control | pilot (defaulted) | springloaded_3_pos_tumb | [3019, 3017] | [253] |  | -1/0/1 momentary |  |
 | `SAU-BRIGHT-DIM-PTR` | Buttons Lighting BRIGHT/DIM | pilot (defaulted) | default_2_position_tumb | [3070] | [267] |  | 0/1 |  |
 | `SAU-H-KNOB-PTR` | Autopilot H Channel Delta Correction | pilot (defaulted) | default_axis | [3023] | [234] |  | 0 to 1 continuous (gain 0.1) |  |
