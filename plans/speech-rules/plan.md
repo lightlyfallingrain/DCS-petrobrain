@@ -391,6 +391,7 @@ pass when scheduled):
 | 7 | `watch.lua`, `target.lua` | `watch_*`, `follow`, `cancel_watch/task`, `select_target`, `drop_target`, `step`, `engage`, `disengage`, `point` | target choice as an action returning one unit or `nil` (U5) |
 | 8 | `marks.lua` | `mark_here`, `mark_target`, plus new offset, origin and place marks (U14–U16) | needs the union types (D7), ownship pose at PTT release, terrain elevation, waypoint numbering (R8), map-feature lookup |
 | 9 | — | delete the legacy matcher branches and `PHRASES` apart from routing | — |
+| 10 | — | full internal bearing→heading rename: compass-meaning "bearing" in perception, world-model, DCS-side Lua and tests; `BEARING_SIGMA_DEG` with the old key still read (U17) | last, after every command is ported, so it touches settled code once |
 
 These stay in code and never become rules: `wake_petrovich`, `cancel_nevermind`, `say_again`, and
 the confirm-band answers. They route a transmission; they are not commands. The marks stage should
@@ -520,9 +521,18 @@ open.
   tests). Leave perception and world-model geometry as it is, with one sentence in
   `docs/STRUCTURE.md` on the convention. **Why:** the user's words were about commands and
   vocabulary, and the cost sits almost entirely outside them.
+
+  **Answered 2026-11-17 (user, verbatim): *"everything, but leave that as later stage"*.** So
+  Stage 1a renames the command surface as recommended, and the full internal rename (perception,
+  world-model, DCS-side Lua, tests, the `BEARING_SIGMA_DEG` tuning key) is Stage 10, after the
+  port. A renamed tuning key needs the old key still read, or users' `tuning.toml` silently stops
+  applying.
 - **U18: where do you edit rule files?** (a) In place in `body-layer/config/rules/`, in the root
   checkout, committing when you are happy. That is simple, but uncommitted edits make `/merge` stop
   and ask (R5). (b) Point `--rules-dir` at your own copy outside git, the way `tuning.toml` works.
   — **recommend:** (a) for now. The flag exists either way, so (b) is one argument away if (a)
   gets in the way. **Why:** while you are the only author, the shipped files *are* your rules, and
   a copy would drift from them.
+
+  **Answered 2026-11-17: (a), in place in the repo**, as recommended. Uncommitted rule edits in the
+  root make `/merge` stop and ask (R5); that is accepted.
