@@ -42,6 +42,7 @@ phrasings this user actually says and which get misheard.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Literal
 
 #: The 15 tokens that also existed in the now-removed F10 radio menu, in
@@ -1670,8 +1671,42 @@ _PROMPT_DISPLAY_FORMS: dict[str, str] = {
     "aaa": "AAA",
 }
 
+#: Ordinary sentences that must stay non-commands -- `[[BL-17]]` D9's own
+#: "free-speech guard," run against every candidate rule at `PUT /rules`
+#: time: if adding a rule makes any of these verb-anchored or matched,
+#: that rule is disabled (`rule_patterns.compile_rules`'s own collision
+#: check). Pulled from `test_command_matcher.py`'s own pinned adversarial
+#: fixtures -- the exact sentences that caught this matcher's real
+#: false-execution bugs (module docstring there: `"look at that"` scoring
+#: as `scan_ahead`, `"the tanks are on the ridge"` fuzzy-anchoring on
+#: `"weapons"`) -- not every adversarial sentence that test file pins (a
+#: representative set, not a second copy of that file's full fixture
+#: list), so both the rule check and a dedicated new test here read one
+#: shared tuple rather than each hand-copying a slightly different list.
+FREE_SPEECH_GUARD: tuple[str, ...] = (
+    "look at that",
+    "watch out",
+    "report says otherwise",
+    "this kind of stuff",
+    "it's kind of full",
+    "the tanks are on the ridge",
+    "scan the trucks on the road",
+    "set the throttle to idle",
+    "be careful",
+    "shut the door",
+    "silence is golden",
+    "quiet down there",
+    "report quietly",
+    "stay quiet",
+    "describe the mission to me",
+    "can you describe that",
+    "i described it already",
+    "describing the situation",
+    "the scribe wrote it down",
+)
 
-def recognised_words() -> tuple[str, ...]:
+
+def recognised_words(extra_words: Iterable[str] = ()) -> tuple[str, ...]:
     """Every distinct word the recogniser is expected to hear: each word of
     every `PHRASES` phrasing, then every slot table's words, lowercase, in
     first-seen order.
@@ -1682,7 +1717,12 @@ def recognised_words() -> tuple[str, ...]:
     whisper is not biased toward comes back as a near-homophone ("silence"
     as "violence", 2026-10-15) and the pilot gets "say again" (user
     direction 2026-10-23: vocabulary and prompt kept in sync as a rule).
-    """
+
+    `extra_words` (`[[BL-17]]` D10) is the *current* set of active rule
+    words -- `server.py`'s own caller derives this from every active
+    rule's own literal/word-set words -- appended after this vocabulary's
+    own words, so a word already here is never duplicated. `()` (the
+    default) is every call site that predates rules, unchanged."""
     sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
     sources += [
         *DESCRIPTOR_WORDS,
@@ -1698,10 +1738,13 @@ def recognised_words() -> tuple[str, ...]:
     for source in sources:
         for word in re.findall(r"[a-z']+", source.lower()):
             words[word] = None
+    for word in extra_words:
+        for found in re.findall(r"[a-z']+", word.lower()):
+            words[found] = None
     return tuple(words)
 
 
-def to_prompt() -> str:
+def to_prompt(extra_words: Iterable[str] = ()) -> str:
     """An initial prompt biasing whisper toward this vocabulary.
 
     Unlike `to_gbnf`, this is a **soft** bias: it makes these words more
@@ -1728,6 +1771,13 @@ def to_prompt() -> str:
     "scan ahead, scan north, scan north, ..."); a phrase-fragment variant
     scored 247/252. The corpus predates the new commands, so this shows
     no regression on the old ones, not the gain on the new.
+
+    `extra_words` (`[[BL-17]]` D10) is forwarded to `recognised_words`
+    unchanged -- the active rule words, when any rule is loaded. The
+    224-token cap above is a test for the *shipped* vocabulary only; at
+    runtime, a large set of user rules that pushes the prompt past the
+    cap is `server.py`'s own concern (logs a warning, not spoken here),
+    not this function's.
     """
-    words = [_PROMPT_DISPLAY_FORMS.get(w, w) for w in recognised_words()]
+    words = [_PROMPT_DISPLAY_FORMS.get(w, w) for w in recognised_words(extra_words)]
     return f"{_PROMPT_FRAMING} {' '.join(words)}."

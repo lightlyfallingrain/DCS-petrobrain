@@ -24,6 +24,13 @@ as `push_speech` -- **not** a swallow-and-return-`[]` posture, since
 `body.py`'s poll loop is the place that decides to log-and-continue, not
 this client.
 
+`put_rules`/`get_transcripts`'s added `X-Rules-Version` return value
+(`plans/speech-rules/plan.md` D1/D2, `[[BL-17]]`) are this seam's own
+rule-push/version mechanism: `body.py` pushes `(id, pattern)` pairs once
+at startup and again at every mission (re)start reload, and reads the
+version header off every poll to detect an adapter restart (absent/
+differing version -> re-push, D2).
+
 `stop()` has its own, separately bounded `stop_timeout_s` rather than
 sharing `timeout_s` with `push_speech`/`get_transcripts`
 (`plans/async-speech/performance-review.md`'s NOW finding): `/stop` is
@@ -135,20 +142,25 @@ class AudioAdapterClient:
         except (urllib.error.URLError, OSError) as exc:
             raise AudioAdapterError(f"request to {url} failed: {exc}") from exc
 
-    def get_transcripts(self) -> list[dict[str, Any]]:
+    def get_transcripts(self) -> tuple[list[dict[str, Any]], str | None]:
         """`GET /transcripts/poll` -> drains `audio-adapter`'s recognised-
         speech queue (`audio-adapter/src/transcript_queue.py`,
         `plans/inbound-speech/plan.md` Stage 3), returning every pending
         transcript as a list of dicts (`transcript_queue.TranscriptEvent.
         to_dict`, i.e. `{"transcript", "confidence", "token", "match_ratio",
         "verb_anchored", "ambiguous", "t_wall", "slots", "correlation_id"}`),
-        oldest first. Returns `[]` when nothing is pending -- see the module
-        docstring for why this is `[]`, not `None`. Raises `AudioAdapterError`
-        on any transport/parse failure, same as `push_speech`."""
+        oldest first, plus the `X-Rules-Version` header's value (`[[BL-17]]`
+        D2) -- `None` when the header is absent (every adapter before this
+        plan, or one that has not yet had a successful `put_rules` call,
+        e.g. right after its own restart). Returns `([], ...)` when nothing
+        is pending -- see the module docstring for why `[]`, not `None`.
+        Raises `AudioAdapterError` on any transport/parse failure, same as
+        `push_speech`."""
         url = f"{self.base_url}/transcripts/poll"
         try:
             with urllib.request.urlopen(url, timeout=self.timeout_s) as response:
                 body = response.read()
+                rules_version = response.headers.get("X-Rules-Version")
         except (urllib.error.URLError, OSError) as exc:
             raise AudioAdapterError(f"request to {url} failed: {exc}") from exc
         try:
@@ -159,4 +171,66 @@ class AudioAdapterClient:
             raise AudioAdapterError(
                 f"expected a JSON list from /transcripts/poll, got {type(result).__name__}"
             )
-        return result
+        return result, rules_version
+
+    def put_rules(self, version: str, rules: list[tuple[str, str]]) -> PutRulesResult:
+        """`PUT /rules` (`{"version": version, "rules": [{"id", "pattern"},
+        ...]}`, D1/D2) -- pushes the full `(id, pattern)` set this process
+        currently has loaded. `rules` is unordered; `audio-adapter` sorts
+        as needed for its own collision check. Raises `AudioAdapterError`
+        on any transport/parse failure, same posture as every other call
+        on this client -- `body.py`'s caller decides how to log/retry a
+        failed push, this method never swallows one."""
+        url = f"{self.base_url}/rules"
+        payload = {
+            "version": version,
+            "rules": [
+                {"id": rule_id, "pattern": pattern} for rule_id, pattern in rules
+            ],
+        }
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                body = response.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise AudioAdapterError(f"request to {url} failed: {exc}") from exc
+        try:
+            result = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise AudioAdapterError(f"invalid JSON from {url}: {exc}") from exc
+        if not isinstance(result, dict):
+            raise AudioAdapterError(
+                f"expected a JSON object from PUT /rules, got {type(result).__name__}"
+            )
+        accepted = result.get("accepted", [])
+        rejected = result.get("rejected", [])
+        if not isinstance(accepted, list) or not isinstance(rejected, list):
+            raise AudioAdapterError(
+                f"malformed PUT /rules response from {url}: {result!r}"
+            )
+        return PutRulesResult(
+            version=str(result.get("version", version)),
+            accepted=tuple(str(rid) for rid in accepted),
+            rejected=tuple(
+                (str(entry.get("id", "")), str(entry.get("reason", "")))
+                for entry in rejected
+                if isinstance(entry, dict)
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class PutRulesResult:
+    """`PUT /rules`'s own response, parsed. `rejected` is `(id, reason)`
+    pairs -- a rule the adapter would not accept (bad grammar, unknown
+    slot type, a collision check hit, D9)."""
+
+    version: str
+    accepted: tuple[str, ...]
+    rejected: tuple[tuple[str, str], ...]

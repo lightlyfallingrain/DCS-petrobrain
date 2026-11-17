@@ -34,4 +34,5 @@ known-first-party = [
     "capture_loop",
     "ptt_source",
     "transcribe_client",
+    "rule_patterns",
 ]

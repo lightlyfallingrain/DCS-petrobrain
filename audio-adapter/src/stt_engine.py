@@ -51,6 +51,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -150,12 +151,17 @@ class WhisperCliEngine:
         model_path: str = "",
         grammar_path: str | None = None,
         grammar_penalty: float | None = None,
-        prompt: str | None = None,
+        prompt: str | Callable[[], str] | None = None,
     ) -> None:
         self._binary_path = binary_path
         self._model_path = model_path
         self._grammar_path = grammar_path
         self._grammar_penalty = grammar_penalty
+        #: A plain `str` (every call site before this plan) or a *provider*
+        #: callable (`[[BL-17]]` D10) -- `transcribe` resolves it fresh on
+        #: every call, not once here, so a rule pushed mid-sortie changes
+        #: the prompt whisper actually sees on the very next recognition
+        #: without this engine being reconstructed.
         self._prompt = prompt
 
     @staticmethod
@@ -202,8 +208,11 @@ class WhisperCliEngine:
                 # Soft bias, unlike --grammar: makes these words more
                 # likely without making anything else impossible, so a
                 # mishearing still comes back looking wrong instead of
-                # arriving as a confident in-vocabulary command.
-                command += ["--prompt", self._prompt]
+                # arriving as a confident in-vocabulary command. Resolved
+                # fresh here, not at construction -- see `__init__`'s own
+                # comment on why (`[[BL-17]]` D10's prompt provider).
+                prompt_text = self._prompt() if callable(self._prompt) else self._prompt
+                command += ["--prompt", prompt_text]
             if self._grammar_path is not None:
                 # `--grammar-rule` is NOT optional, despite whisper-cli's
                 # own `--help` showing an empty default. Verified against

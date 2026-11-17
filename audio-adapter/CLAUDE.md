@@ -240,7 +240,20 @@ consume.
 - `tests/test_command_matcher.py` (Slice 3 Stage 2) — `match_transcript`: exact hits across token
   families, verb-anchor rejection, the separation check on a measured genuine tie, legal/illegal
   bearing outcomes, and the derived `VERB_ANCHOR_WORDS`' coverage of alternate spellings
-  (`"never mind"`, `"hey petrovich"`) that a hand-copied verb list would have missed.
+  (`"never mind"`, `"hey petrovich"`) that a hand-copied verb list would have missed. Plus
+  `test_free_speech_guard_sentences_never_resolve_to_a_command` (`[[BL-17]]` D9), reading
+  `vocabulary.FREE_SPEECH_GUARD`.
+- `tests/test_command_matcher_rules.py` (`[[BL-17]]` D8) — the rule branch itself: a match, the
+  widened verb-anchor set (`"turn"` only anchors once a rule using it is active), ambiguity
+  between two colliding rules, and that an active rule changes nothing about an existing legacy
+  match or the free-speech guard.
+- `tests/test_rule_patterns.py` (`[[BL-17]]` D7-D9) — grammar parsing (literal/optional/slot/
+  word-set, bad-grammar/unknown-slot-type errors), each slot type (`angle`/`heading`/`oclock`,
+  including `heading`'s 360->0 normalisation and "no checksum" case), sample generation, and
+  `compile_rules`'s three collision passes.
+- `tests/test_rules_api.py` (`[[BL-17]]` D1/D2) — `PUT /rules` against a real `TTSAdapterServer`
+  (acceptance, bad grammar, a legacy collision, malformed-body 400s) and the `X-Rules-Version`
+  header's absent-then-present-then-stable behaviour on `GET /transcripts/poll`.
 - `tests/test_server.py` — `POST /speak` against a real `TTSAdapterServer` with recording
   `TTSEngine`/`AudioSink` doubles, direct structural copy of
   `aircraft-layer/tests/test_text_push_api.py`'s pattern (valid speak, urgent-flag threading,
@@ -316,7 +329,15 @@ consume.
   `sink.interrupt()` directly (the `AudioSink` protocol's second method, alongside `deliver`) and
   answering `500` if that raises `AudioDeliveryError`, `200 {"ok": true}` otherwise. This is what
   lets `body-layer`'s `stop_talking` token interrupt playback and say nothing, rather than needing
-  to push a new audio line just to reach the interrupt mechanism.
+  to push a new audio line just to reach the interrupt mechanism. **`PUT /rules`**
+  (`plans/speech-rules/plan.md` D1/D2, `[[BL-17]]`) — body-layer pushes its full `(id, pattern)`
+  rule set (`{"version", "rules": [{"id", "pattern"}]}`); this handler parses and runs the
+  collision check (`rule_patterns.compile_rules`) and swaps the result into a shared
+  `rule_patterns.RuleRegistry` with one assignment, answering `{"version", "accepted", "rejected"}`.
+  `GET /transcripts/poll` gains an `X-Rules-Version` header (the registry's current `version`,
+  absent until the first successful push) so body-layer can detect an adapter restart or a failed
+  push and re-push on the next poll. `match_transcript` is called with `rules=registry.rules`
+  here, so the same registry governs both recognition and matching.
 - `src/transcript_queue.py` (Slice 3 Stage 3) — `TranscriptEvent` (the seven-field row) +
   `TranscriptQueue` (`push`/`drain_all`), a bounded FIFO mirroring `aircraft-layer/src/collector/
   cache.py`'s `F10CommandQueue` shape and reasoning almost exactly — two transmissions landing
@@ -412,17 +433,41 @@ consume.
   never only into `command_matcher.py` or body-layer, or whisper is never biased toward it. Before
   2026-10-23 the prompt sampled 24 of 66 tokens' phrasings and missed silence, engage, set target,
   describe and every slot word — the cause of "violence"/"same ahead" in the speech logs.
+  **`turn_heading_relative` moved out of `TOKENS`/`PHRASES` in `[[BL-17]]` Stage 2** — it is a
+  rule now (`config/rules/flight.lua`, body-layer), matched by `command_matcher.py`'s own rule
+  branch, not this table. `FREE_SPEECH_GUARD` (D9) is a representative set of ordinary sentences
+  that must never resolve to a command, read by both a dedicated test and the rule-push collision
+  check — not a second copy of `test_command_matcher.py`'s full adversarial fixture list.
+  `recognised_words`/`to_prompt` both take an optional `extra_words` iterable (D10) — the active
+  rule set's own words, appended after this vocabulary's.
+- `src/rule_patterns.py` (`plans/speech-rules/plan.md` D7-D9, `[[BL-17]]`) — the adapter-side half
+  of spoken-commands-as-Lua-rules: pattern grammar v1 (a literal word, `[optional]` groups,
+  `<name:type>` typed slots, `<name:w1|w2>` word-sets), the slot-type registry (`SLOT_TYPES`:
+  `angle`, `heading`, `oclock` — `bearing` is deliberately unbuilt, see this module's own
+  docstring), `parse_pattern`/`match_pattern` (full-consumption, exact-literal — a deliberate
+  scoping choice simpler than `command_matcher`'s own fuzzy phrase score, see the module
+  docstring), `generate_samples` (for the collision check), and `compile_rules` (parses + the
+  three-pass collision check: rule×rule, rule×legacy, the free-speech guard). `RuleRegistry` is
+  the one shared, swapped-in-with-one-assignment holder `server.py` and the whisper prompt
+  provider both read. **Never imports `command_matcher`** — the rule×legacy check takes a
+  `legacy_probe` callable injected by the caller (`server.py`'s `_legacy_probe`), specifically to
+  avoid a cycle with `command_matcher.py`'s own import of this module (D8's rule-matching branch).
 - `src/command_matcher.py` (Slice 3 Stage 2, `plans/inbound-speech/plan.md` Decision 4 REVISED) —
   the transcript -> candidate-token matcher: normalise (`vocabulary.normalize_for_match`) -> verb
   anchor (`VERB_ANCHOR_WORDS`, derived from `vocabulary.PHRASES`, not hand-copied) -> bearing slot
   (`vocabulary.parse_bearing`) or phrase match (`vocabulary.normalized_phrase_index`) -> separation
-  check. `match_transcript(text) -> MatchResult` (`token`, `match_ratio`, `verb_anchored`,
-  `ambiguous`, `bearing_degrees`) is everything this subproject hands body-layer about one
+  check. `match_transcript(text, rules=None) -> MatchResult` (`token`, `match_ratio`,
+  `verb_anchored`, `ambiguous`, `slots`) is everything this subproject hands body-layer about one
   transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching constants (behaviour
   constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's `belief.voice_commands`, per
   the plan's constant split). Wired into `POST /transcribe` as of Slice 3 Stage 3 (`server.py`
   above) — Stage 2's own tests still exercise it directly, and body-layer's `!voice` REPL harness
   is still how a developer drives the act/confirm/say-again pipeline without a real WAV.
+  **`rules` (`[[BL-17]]` D8)** — an immutable `tuple[rule_patterns.CompiledRule, ...]`, `None`/`()`
+  behaving exactly as before (Stage 1b's own acceptance test: the whole existing suite passes
+  unchanged with no rules pushed). Rule matching runs after the wake word/HVRT bare words and
+  before every legacy slotted branch, widening `VERB_ANCHOR_WORDS` with each active rule's own
+  first literal (`_rule_anchor_words`) for the anchor gate that follows it.
 - `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
   gate. Runs whisper.cpp plain and with `--prompt` (and with `--grammar` behind `--with-grammar`) over
   a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair

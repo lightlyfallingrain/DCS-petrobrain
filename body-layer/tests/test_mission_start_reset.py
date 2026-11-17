@@ -230,6 +230,16 @@ _CREW_CONSOLE_PRESERVE = {
     # `plans/effector-sequences/plan.md` D6 -- describes this *process's*
     # startup state, not per-mission state, same as `silenced` above.
     "config_error_pending",
+    # `[[BL-17]]` (`plans/speech-rules/plan.md` D4) -- the closure itself
+    # is built once by `body.py` at process start and never rebuilt per
+    # mission; `_ever_enabled_rule_ids` is process history (same
+    # reasoning as `config_error_pending`), not per-mission state.
+    # `enabled_rule_ids`/`action_file_error_pending` are deliberately
+    # **not** here -- both reset to their declared default and are
+    # re-populated synchronously by `body.py`'s own mission-restart
+    # handler (see those two fields' own docstrings).
+    "rule_runner",
+    "_ever_enabled_rule_ids",
 }
 
 

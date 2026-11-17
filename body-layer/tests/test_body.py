@@ -2726,13 +2726,13 @@ class FakeSpeechInputClient:
         self.should_fail = should_fail
         self.poll_count = 0
 
-    def get_transcripts(self) -> list[dict[str, object]]:
+    def get_transcripts(self) -> tuple[list[dict[str, object]], str | None]:
         self.poll_count += 1
         if self.should_fail:
             raise AudioAdapterError("poll failed (test double)")
         drained = self._transcripts
         self._transcripts = []
-        return drained
+        return drained, None
 
 
 def test_poll_transcripts_dispatches_a_matched_command_through_handle_transcript() -> (

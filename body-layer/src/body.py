@@ -293,6 +293,10 @@ from pov_view import (
     pov_ground_truth_markers_from_trace,
 )
 from pov_view import render_frame as render_pov_frame
+from rules.actions import ACTION_NAMESPACES, ActionContext
+from rules.engine import RuleSet, run_rule
+from rules.loader import DEFAULT_RULES_DIR
+from rules.sandbox import RuleSandbox
 from run_log_paths import per_run_log_path
 from sight_trace_writer import SightTraceWriter
 from speech_log import SpeechLogWriter
@@ -3419,6 +3423,8 @@ def _check_for_new_mission(
     forest_occlusion: bool = False,
     fired_on_tracker: FiredOnTracker | None = None,
     lost_contact_tracker: LostContactTracker | None = None,
+    rule_runtime: RuleRuntime | None = None,
+    audio_client: AudioAdapterClient | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -3569,6 +3575,24 @@ def _check_for_new_mission(
     _maybe_start_altimeter_qnh_sync(
         runner, event.get("qnh"), event.get("atmosphere_type")
     )
+    # `[[BL-17]]` D2/U11 -- "rule files reload at mission restart," so the
+    # pilot's edit-and-retry loop needs no body-layer restart. Reloads
+    # from disk, re-arms `action_file_error_pending` from the fresh
+    # load's own failures (D6: a reload's own failure set is what
+    # matters, not a stale one), then re-pushes to the adapter -- `_push_
+    # rules` may OR the flag true again if the adapter rejects something
+    # the reload itself did not catch (D9's collision check).
+    if rule_runtime is not None:
+        rule_runtime.rule_set = _load_rules(
+            rule_runtime.rules_dir, rule_runtime.sandbox, rule_runtime.ctx
+        )
+        if crew_console is not None:
+            crew_console.action_file_error_pending = bool(
+                rule_runtime.rule_set.failures
+            )
+            crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+        if audio_client is not None and crew_console is not None:
+            _push_rules(rule_runtime, audio_client, crew_console)
     # Assigned explicitly after the reset, same pattern as `runner.
     # last_mission_start_sequence` just below -- `reset_for_new_mission`'s
     # re-run `__init__` has already put all three back to their declared
@@ -3872,7 +3896,7 @@ def _lookup_memory_entry_fn(
 
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
-) -> None:
+) -> str | None:
     """Drains pending recognised-speech transcripts (`plans/inbound-speech/
     plan.md` Stage 3) and dispatches each through `CrewConsole.
     handle_transcript`. Wrapped in
@@ -3907,15 +3931,21 @@ def _poll_transcripts(
     default-path case (speech is unconditional), not a rare opt-in
     failure, so the old `exc_info=True` posture would flood the log the
     moment a sortie starts before `audio-adapter` does. `None` (every
-    test that doesn't wire one) falls back to the old noisy behaviour."""
+    test that doesn't wire one) falls back to the old noisy behaviour.
+
+    **Returns the poll's own `X-Rules-Version` header** (`[[BL-17]]` D2),
+    or `None` on a failed poll (the caller may retry a push either way --
+    see `audio_client.get_transcripts`'s own docstring on the header's
+    meaning) -- the caller compares it against `RuleRuntime.adapter_
+    accepted_version` to decide whether to re-push the current rule set."""
     try:
-        transcripts = audio_client.get_transcripts()
+        transcripts, rules_version = audio_client.get_transcripts()
     except AudioAdapterError as exc:
         if crew_console.audio_adapter_reporter is not None:
             crew_console.audio_adapter_reporter.report_failure(exc)
         else:
             logger.warning("transcript poll failed (continuing)", exc_info=True)
-        return
+        return None
     if crew_console.audio_adapter_reporter is not None:
         crew_console.audio_adapter_reporter.report_success()
     for item in transcripts:
@@ -3970,6 +4000,7 @@ def _poll_transcripts(
             correlation_id=correlation_id_raw,
             addressed=addressed_raw,
         )
+    return rules_version
 
 
 #: How often an unconfirmed `watch_args` install is re-sent (`plans/
@@ -4129,6 +4160,101 @@ def _load_effector_config(
     return sequences_by_key, own_registry, bool(banner_lines), polled
 
 
+@dataclass
+class RuleRuntime:
+    """`[[BL-17]]` (`plans/speech-rules/plan.md`) -- bundles what `main()`
+    builds once and the poll loop reaches on every mission (re)start/
+    version-mismatch re-push: the one shared `RuleSandbox`, the `Action
+    Context` every action wrapper closed over at rule-load time, the
+    directory rules load from, and the current `RuleSet`. `rule_set` is
+    reassigned (never mutated in place) on every reload -- `_load_rules`
+    always returns a fresh one.
+
+    `adapter_accepted_version` is `None` until the first successful
+    `_push_rules` call; compared against each poll's own `X-Rules-Version`
+    header (D2) to detect an adapter restart or a prior failed push."""
+
+    sandbox: RuleSandbox
+    ctx: ActionContext
+    rules_dir: Path
+    rule_set: RuleSet
+    adapter_accepted_version: str | None = None
+
+
+def _print_rule_banner(heading: str, lines: list[str]) -> None:
+    """Same stderr-banner-plus-`logger.error`-per-line shape `_load_
+    effector_config` uses for its own config errors -- one unmissable
+    console block at the moment it happens, one `logger.error` per finding
+    for anyone grepping the log afterward. A true no-op when `lines` is
+    empty (the common case: no failures)."""
+    if not lines:
+        return
+    banner = "\n".join(
+        [
+            "=" * 78,
+            f"{heading} -- see config/rules/README.md.",
+            "Petrobrain will continue, but some rule-based commands may not work.",
+            *lines,
+            "=" * 78,
+        ]
+    )
+    print(banner, file=sys.stderr)
+    for line in lines:
+        logger.error("rules: %s", line)
+
+
+def _load_rules(rules_dir: Path, sandbox: RuleSandbox, ctx: ActionContext) -> RuleSet:
+    """Loads/reloads `rules_dir` (`RuleSet.load`), printing the same
+    banner shape as every other config loader in this file for each
+    `RuleLoadError` found (D6) -- a file-level failure (`rule_id is None`)
+    or a duplicate-id failure alike."""
+    rule_set = RuleSet.load(rules_dir, sandbox, ACTION_NAMESPACES, ctx)
+    lines = [
+        f"{failure.file}"
+        + (f" (rule {failure.rule_id!r})" if failure.rule_id is not None else "")
+        + f": {failure.reason}"
+        for failure in rule_set.failures
+    ]
+    _print_rule_banner("RULE LOAD ERROR", lines)
+    return rule_set
+
+
+def _push_rules(
+    rule_runtime: RuleRuntime,
+    audio_client: AudioAdapterClient,
+    crew_console: CrewConsole,
+) -> None:
+    """`PUT /rules` (D1/D2) -- pushes `rule_runtime.rule_set`'s full
+    `(id, pattern)` set, updates `rule_runtime.adapter_accepted_version`
+    and `crew_console.enabled_rule_ids` (loaded cleanly **and** accepted,
+    D4) from the response, and -- if the adapter rejected anything (a
+    collision, bad grammar, an unknown slot type, D9) -- prints the same
+    banner shape `_load_rules` does and sets `crew_console.action_file_
+    error_pending` (D6: an adapter-side rejection is still one of this
+    plan's "rule-file failures," even though it is caught a step later
+    than a Lua-level one).
+
+    A transport failure (`AudioAdapterError`) is logged and left for the
+    next poll's version-mismatch check to retry -- same "warn and keep
+    trying" posture every other audio-adapter call in this file has."""
+    try:
+        result = audio_client.put_rules(
+            rule_runtime.rule_set.version, rule_runtime.rule_set.ids_and_patterns()
+        )
+    except AudioAdapterError as exc:
+        logger.warning("PUT /rules failed (will retry): %s", exc)
+        return
+    rule_runtime.adapter_accepted_version = result.version
+    rejected_ids = {rule_id for rule_id, _ in result.rejected}
+    crew_console.set_enabled_rule_ids(
+        frozenset(rule_runtime.rule_set.rules) - rejected_ids
+    )
+    if result.rejected:
+        lines = [f"{rule_id}: {reason}" for rule_id, reason in result.rejected]
+        _print_rule_banner("RULE REJECTED BY ADAPTER", lines)
+        crew_console.action_file_error_pending = True
+
+
 def _apply_point_request_transition(
     optic_state: OpticState,
     transition: Literal["clear"] | BoundedSightLook,
@@ -4189,6 +4315,7 @@ def _run_crew_text_poll_loop(
     effector_registry: Mapping[str, EffectorDef] | None = None,
     polled_args: Sequence[int] | None = None,
     expected_area_log_base: Path | None = None,
+    rule_runtime: RuleRuntime | None = None,
 ) -> None:
     """The crew session's background poll thread: opens `world_model_conn`
     and builds `runner.sources` here, on this thread (`sqlite3.Connection`s
@@ -4245,7 +4372,15 @@ def _run_crew_text_poll_loop(
     read-only way. `None`/empty is treated as "nothing to watch" (the
     poll block below never sends an install, and `refresh_cockpit_switch_
     readback` always sees `None`), same degenerate-but-safe posture as
-    `effector_sequences`/`effector_registry`'s own `None` case."""
+    `effector_sequences`/`effector_registry`'s own `None` case.
+
+    `rule_runtime` (`[[BL-17]]`, `plans/speech-rules/plan.md` D2/U11) is
+    `main()`'s own `RuleRuntime`, threaded through to `_check_for_new_
+    mission` so a genuine mission (re)start reloads `config/rules/*.lua`
+    and re-pushes to the adapter. `None` (every existing test, and a call
+    site built before this plan) means no rule engine is wired --
+    `crew_console.enabled_rule_ids` then stays whatever `main()` set it
+    to (empty, if `main()` never built one either)."""
     effector_sequences_by_key: Mapping[tuple[str, str, str], SequenceFile] = (
         effector_sequences if effector_sequences is not None else {}
     )
@@ -4378,6 +4513,8 @@ def _run_crew_text_poll_loop(
                     forest_occlusion=forest_occlusion,
                     fired_on_tracker=fired_on_tracker,
                     lost_contact_tracker=lost_contact_tracker,
+                    rule_runtime=rule_runtime,
+                    audio_client=speech_client,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -4977,6 +5114,9 @@ def _run_crew_text_poll_loop(
                         if (
                             crew_console.config_error_pending
                             or crew_console.altimeter_qnh_failed_pending
+                            # `[[BL-17]]` D6 -- shares this same one-shot-
+                            # flag `/spu8/state` fetch, same reasoning.
+                            or crew_console.action_file_error_pending
                         ):
                             spu8_latest = aircraft_client.get_spu8_state_latest()
                             intercom_open = (
@@ -4994,6 +5134,9 @@ def _run_crew_text_poll_loop(
                                 if runner.altimeter_qnh_sync is not None
                                 else None
                             ),
+                        )
+                        crew_console.drain_action_file_error(
+                            runner.last_t_sim, intercom_open=intercom_open
                         )
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
@@ -5206,9 +5349,18 @@ def _run_crew_text_poll_loop(
                     crew_console.drain_speech_results(runner.last_t_sim)
                     commands_before = crew_console.commands_handled
                     if speech_input_enabled and speech_client is not None:
-                        _poll_transcripts(
+                        rules_version = _poll_transcripts(
                             speech_client, crew_console, runner.last_t_sim
                         )
+                        # `[[BL-17]]` D2 -- a differing (including absent)
+                        # header means an adapter restart or a prior
+                        # failed push; re-push on this same poll rather
+                        # than waiting for the next mission (re)start.
+                        if (
+                            rule_runtime is not None
+                            and rules_version != rule_runtime.adapter_accepted_version
+                        ):
+                            _push_rules(rule_runtime, speech_client, crew_console)
                     if crew_console.commands_handled != commands_before:
                         # Any command lowers the binoculars (`plans/
                         # binocular-optic/plan.md` D4) -- not per command
@@ -5853,6 +6005,29 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--rules-dir",
+        type=Path,
+        default=DEFAULT_RULES_DIR,
+        help=(
+            "directory of config/rules/*.lua rule files (plans/"
+            "speech-rules/plan.md, [[BL-17]]) -- always on, not a debug "
+            "flag; defaults to the shipped config/rules/. Reloaded at "
+            "every mission (re)start, so editing a rule file needs only "
+            "a mission restart, never a body-layer restart."
+        ),
+    )
+    parser.add_argument(
+        "--print-rules",
+        action="store_true",
+        help=(
+            "load --rules-dir standalone and print every id/pattern/"
+            "failure, then exit 0 -- works without --aircraft-layer-url, "
+            "like --print-tuning. With --audio-adapter-url also pushes "
+            "the loaded rules and prints the adapter's accepted/rejected "
+            "verdict (D11: checking an edit without flying)."
+        ),
+    )
+    parser.add_argument(
         "--speech-log",
         type=Path,
         default=None,
@@ -6035,16 +6210,46 @@ def main() -> None:
     if args.print_tuning:
         print(render_print_tuning(tuning_resolution))
         return
+    if args.print_rules:
+        # D11 -- standalone, like --print-tuning: no --aircraft-layer-url
+        # needed. A throwaway `CrewConsole` is built only so the action
+        # registry has something to close over (`ActionContext.console`);
+        # nothing is ever dispatched through it here.
+        rules_sandbox = RuleSandbox()
+        rules_ctx = ActionContext(console=CrewConsole(store=ContactStore()))
+        rule_set = _load_rules(args.rules_dir, rules_sandbox, rules_ctx)
+        print(f"loaded {len(rule_set.rules)} rule(s) from {args.rules_dir}:")
+        for rule_id, pattern in sorted(rule_set.ids_and_patterns()):
+            print(f"  {rule_id}: {pattern}")
+        for failure in rule_set.failures:
+            where = (
+                f" (rule {failure.rule_id!r})" if failure.rule_id is not None else ""
+            )
+            print(f"  FAILED {failure.file}{where}: {failure.reason}")
+        if args.audio_adapter_url is not None:
+            push_client = AudioAdapterClient(base_url=args.audio_adapter_url)
+            try:
+                result = push_client.put_rules(
+                    rule_set.version, rule_set.ids_and_patterns()
+                )
+            except AudioAdapterError as exc:
+                print(f"PUT /rules failed: {exc}")
+            else:
+                print(f"adapter accepted: {sorted(result.accepted)}")
+                for rule_id, reason in result.rejected:
+                    print(f"  REJECTED {rule_id}: {reason}")
+        return
     print(render_startup_block(tuning_resolution))
 
     if args.aircraft_layer_url is None:
         parser.error(
-            "--aircraft-layer-url is required (omit only together with --print-tuning)"
+            "--aircraft-layer-url is required (omit only together with "
+            "--print-tuning/--print-rules)"
         )
     if args.audio_adapter_url is None:
         parser.error(
             "--audio-adapter-url is required (omit only together with "
-            "--print-tuning) -- BL-B96: speech in/out are always on"
+            "--print-tuning/--print-rules) -- BL-B96: speech in/out are always on"
         )
     if args.speech_log is not None and args.no_speech_log:
         parser.error("--speech-log is mutually exclusive with --no-speech-log")
@@ -6292,6 +6497,33 @@ def main() -> None:
         ),
         config_error_pending=had_config_errors,
     )
+    # `[[BL-17]]` (`plans/speech-rules/plan.md`) -- loaded/pushed once
+    # here, after `crew_console` exists (the action registry's `Action
+    # Context` needs a live reference to close over, D5) but before the
+    # poll thread starts, so the first poll already has a real `enabled_
+    # rule_ids`/`rule_runner` rather than racing the loop's own first
+    # iteration. `action_file_error_pending`/`enabled_rule_ids` are set
+    # directly on `crew_console` here, not passed as constructor kwargs
+    # above, for exactly this ordering reason.
+    rules_sandbox = RuleSandbox()
+    rules_ctx = ActionContext(console=crew_console)
+    rule_runtime = RuleRuntime(
+        sandbox=rules_sandbox,
+        ctx=rules_ctx,
+        rules_dir=args.rules_dir,
+        rule_set=_load_rules(args.rules_dir, rules_sandbox, rules_ctx),
+    )
+    crew_console.action_file_error_pending = bool(rule_runtime.rule_set.failures)
+    crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+
+    def _run_rule_token(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_runtime.rule_set, token, slots, rule_runtime.sandbox)
+        return outcome.lines, outcome.error
+
+    crew_console.rule_runner = _run_rule_token
+    _push_rules(rule_runtime, audio_adapter_client, crew_console)
     stop_event = threading.Event()
     poll_thread = threading.Thread(
         target=_run_crew_text_poll_loop,
@@ -6324,6 +6556,7 @@ def main() -> None:
             effector_registry_entries,
             polled_args_set.args,
             expected_area_log_base,
+            rule_runtime,
         ),
         daemon=True,
     )

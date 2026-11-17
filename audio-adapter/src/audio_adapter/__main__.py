@@ -33,6 +33,13 @@ detectable misses). Without `--whisper-model`, `POST /transcribe` answers
 `503` and `GET /transcripts/poll` always drains empty -- a true no-op,
 same posture as `--target aircraft-layer` requiring `--aircraft-layer-url`.
 
+**Rules** (`plans/speech-rules/plan.md`, `[[BL-17]]`): `PUT /rules`/
+`GET /transcripts/poll`'s `X-Rules-Version` header are always on (no
+flag) -- body-layer pushes its loaded `config/rules/*.lua` set here,
+and the whisper prompt (when `--whisper-model` is given) is rebuilt from
+the active rule set's own words on every recognition, via a *provider*
+callable rather than a fixed string computed once at startup.
+
 Usage: python -m audio_adapter [--host HOST] [--port PORT] [--target local]
        [--piper-url URL] [--piper-voice VOICE] [--whisper-model PATH]
        [--whisper-binary NAME]
@@ -47,12 +54,20 @@ from pathlib import Path
 
 from latency_log import LatencyLogWriter
 from local_playback import make_local_sink
+from rule_patterns import RuleRegistry, rule_words
 from server import DEFAULT_HOST, DEFAULT_PORT, AudioSink, TTSAdapterServer
 from stt_engine import DEFAULT_WHISPER_BINARY, WhisperCliEngine
 from tts_engine import DEFAULT_PIPER_URL, DEFAULT_PIPER_VOICE, PiperEngine
 from vocabulary import to_prompt
 
 logger = logging.getLogger(__name__)
+
+#: whisper.cpp keeps only the last `n_text_ctx/2` = 224 prompt tokens
+#: (`vocabulary.to_prompt`'s own docstring) -- the shipped vocabulary
+#: measures at ~135 tokens for ~135 words (roughly one BPE token per
+#: word for this short, plain-English list), so a word count is a
+#: reasonable, dependency-free proxy for the runtime check above.
+_WHISPER_PROMPT_WORD_CAP = 200
 
 
 def main() -> None:
@@ -152,11 +167,39 @@ def main() -> None:
     else:
         sink = make_local_sink()
 
+    # `[[BL-17]]` D1/D10 -- one `RuleRegistry`, shared between the server
+    # (writes it on every `PUT /rules`) and the prompt provider below
+    # (reads it on every recognition). `rule_prompt_provider` closes over
+    # it rather than capturing a snapshot, so a rule pushed mid-sortie
+    # changes the very next `/transcribe` call's prompt.
+    rule_registry = RuleRegistry()
+
+    def _rule_prompt_provider() -> str:
+        extra_words = [
+            word for rule in rule_registry.rules for word in rule_words(rule)
+        ]
+        prompt = to_prompt(extra_words)
+        # D10/risk R3: the shipped vocabulary's own 224-token cap is
+        # tested statically (`test_vocabulary.py`); a user's own rule
+        # words are not, so this is the runtime check for that case.
+        # Word count, not a real BPE token count (no tokenizer
+        # dependency here) -- a conservative-enough proxy for this
+        # short, plain-English vocabulary.
+        if len(prompt.split()) > _WHISPER_PROMPT_WORD_CAP:
+            logger.warning(
+                "whisper prompt is ~%d words, over the ~%d-word cap -- "
+                "whisper drops the front of the prompt, so some active "
+                "rule words may not be biased",
+                len(prompt.split()),
+                _WHISPER_PROMPT_WORD_CAP,
+            )
+        return prompt
+
     stt_engine = (
         WhisperCliEngine(
             binary_path=args.whisper_binary,
             model_path=args.whisper_model,
-            prompt=to_prompt(),
+            prompt=_rule_prompt_provider,
         )
         if args.whisper_model
         else None
@@ -173,6 +216,7 @@ def main() -> None:
         port=args.port,
         stt_engine=stt_engine,
         latency_log=latency_log,
+        rule_registry=rule_registry,
     )
     server.open()
     logger.info(

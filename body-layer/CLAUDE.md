@@ -36,11 +36,16 @@ transport into that dispatcher — removed entirely by `BL-B96`
 
 ## Tech stack
 
-- Python 3.11+, fully type-hinted, `mypy --strict` (`pyproject.toml`). Stdlib only for
+- Python 3.11+, fully type-hinted, `mypy --strict` (`pyproject.toml`). Stdlib for almost all of
   body-layer's own code (`urllib.request` for the aircraft-layer HTTP client, `json`, `math`),
-  consistent with `aircraft-layer/`'s and `world-model/`'s dependency policy. The one dependency
-  declared in `pyproject.toml` (`pyproj`) is transitive — body-layer never imports it directly,
-  it comes in through world-model's `query`/`coordinates` packages (see next point).
+  consistent with `aircraft-layer/`'s and `world-model/`'s dependency policy. The one genuinely
+  transitive dependency (`pyproj`, see next point) comes in through world-model's `query`/
+  `coordinates` packages. **`lupa` is the one direct, non-transitive dependency this subproject
+  declares** (`[[BL-17]]`, `plans/speech-rules/plan.md`, U7 — user-approved 2026-11-17): rule
+  files (`config/rules/*.lua`) run inside a sandboxed Lua 5.4 interpreter, the deterministic
+  "fixed wording" fast path for spoken commands. `src/rules/sandbox.py` is the only module that
+  imports it; everything else in `src/rules/` sees plain Python types. Pinned to the exact
+  version verified in `research/2026-11-17-lupa-sandbox.md`.
 - **World-model seam: in-process Python import, not HTTP** (`plans/body-layer/plan.md` §1,
   narrowed to "same box always" by `plans/pb1-perception-logger/plan.md` decision 3). `mypy_path`
   and `pytest`'s `pythonpath` both include `../world-model/src` alongside this subproject's own
