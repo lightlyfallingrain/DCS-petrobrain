@@ -274,6 +274,14 @@ feature branch directly — not repeated verbatim here beyond what each decision
   - `heading`, `angle`, `oclock` are **not** touched — BL-17.md is explicit that number words do
     not change `heading`'s three-digit rule, and nothing in the goal check asks for natural words
     on a clock position or a relative angle either.
+
+  > **Corrected 2026-11-17 by the main loop, from the plan check (`alignment.md`, "Plan check —
+  > Revision 2", Finding 1):** the last bullet is wrong for `angle`. The user's own example for
+  > wanting number words is a relative angle — *""turn left thirty" -> yes, I'd actually say that"*
+  > (BL-17.md, "Number words count") — and Stage 3a's tests and Stage 4's card both expect it to
+  > work. So **`angle` gains `quantity`'s number-word grammar**, same terminating parser (paired forms
+  > still fail), with `angle`'s existing range check kept. `heading` (exactly three digits) and
+  > `oclock` stay untouched.
 - **D15 — The two performance fixes**, exactly as the Performance Reviewer's own suggestions
   (`performance-stage0-2.md`, both filed MONITOR, now taken since Stage 4 is where rule count
   starts actually growing):
@@ -811,8 +819,10 @@ and tested (audio-adapter mostly, plus `vocabulary.py`) without touching `handle
    names ("three hundred twenty", "one hundred fifty three", "two hundred", "three two zero") parses
    to the same integer; "three fifteen"/"two twenty" (paired forms) fail to parse as a single
    number and the owning rule falls through to "say again"; "speed max" and "speed two hundred"
-   both reach the same rule via `speed_target`; `heading`/`angle`/`oclock`'s own existing tests are
-   unchanged (regression pin that D14 did not touch them).
+   both reach the same rule via `speed_target`; "turn left thirty" reaches `turn_heading_relative`
+   with 30 (`angle` now takes `quantity`'s number words, D14 correction) and "turn left three
+   fifteen" does not match; `heading`/`oclock`'s own existing tests are unchanged and `angle`'s
+   digit forms still pass (regression pin).
 3. **Performance (D15).** `_rule_anchor_words`/the sorted rule order cached at the `PUT /rules` swap
    point; the legacy-vocabulary word list in `to_prompt()` cached, keyed on `RuleRegistry.version`.
    Tests: a microbenchmark-shaped unit test asserting the cached path is not recomputed on a second
