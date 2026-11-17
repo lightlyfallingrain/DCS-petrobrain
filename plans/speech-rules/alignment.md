@@ -472,3 +472,71 @@ push.
 - **Q13:** Will you record a short corpus of the flight commands (`record_corpus.py`) so the
   narrowed hint can be measured on your voice before it ships? The September corpus has none of
   them.
+
+## Plan check — Revision 2, 2026-11-17
+
+**Verdict:** CONCERNS. One expectation is contradicted by the plan's own text: E11's named example
+("turn left thirty") is asserted fixed in two places (Stage 3a's test list, Stage 4's flight card)
+by a mechanism that cannot reach it (Finding 1). Everything else — E12–E18, and all three of the
+user's post-goal-check decisions (the second goal check's Q7–Q13 answers, category gates, rules
+writing effectors) — traces cleanly to a named stage and decision letter.
+
+Inputs: `plans/speech-rules/plan.md` Revision 2 (D13–D20, U19–U24, Stages 3a/3b/3d/3c/4), this
+file's "Goal check — next stages" section (E11–E18), `body-layer/ROADMAP/BL-17.md` (every
+2026-11-17 section, especially "Answers to the second goal check," "Category gates, before any
+rule runs," "Rules can write effectors, from the start"), and the shipped
+`audio-adapter/src/rule_patterns.py` (checked directly: `angle` calls only `_consume_digit_run`
+today, confirming Finding 1 rather than assuming it).
+
+| expectation / decision | stage | status |
+|---|---|---|
+| E11 | Stage 3a (D13), Stage 4 (D18) | **contradicted, partial** — "Turn left, 30." and "turn left three zero" are met via D13's literal fuzz and today's existing digit grammar. "Turn left thirty" (the user's own canonical number-word example) is not: see Finding 1 |
+| E12 | Stage 3a (D13) | met — a `SlotElement`/`WordSetElement` never gets the fuzzy fallback; a value is heard exactly or the rule does not match |
+| E13 | Stage 3b (D16), Stage 4 (D18) | met for `flight_control` (gate-first `UNABLE("NOT_FLYING")`, hold-and-retry on `settling`); the seat/hands-busy half (`"PILOT_SEAT"`, `"HANDS_BUSY"`) is deferred → Stage 5/6, named explicitly in D16/D18 as pending `[[BL-B123]]` |
+| E14 | — | met, unaffected — no stage in this batch touches the legacy query/describe path; D16 states plainly "this mechanism governs rules only" |
+| E15 | Stage 3b (D16's `CrewState`), Stage 3c (D17) | met — one `CrewState`, computed once per poll, feeds both the gate check and the `PUT /crew_state` push (Co-moving Fields table, revision 2) |
+| E16 | Stage 3c (D17, U23) | met — reordering, never removal, is the default; the narrowed/removed variant ships only if the recorded-corpus measurement clears U23's safety bar (zero new unsafe errors, zero new lost "unable"s) |
+| E17 | Stage 3b (D16), Stage 4 (D18) | met — `has_controls` reads `ParkedFlightState.parked_active` (arg 852), never the spoken phrase; "you/I have controls" is a silent no-op, category `"always"` (Q7) |
+| E18 | Stage 4 (D18) | met — readback text pinned verbatim from BL-16 P2 by the differential tests; only the refusal path moves from a generic message to the gate's named reason |
+| "Category gates, before any rule runs" (BL-17.md) | Stage 3b (D16) | met — matches the verbatim correction exactly: one gate per category, run before any matched rule in that category executes, "unable" before the handler ever runs; the coordinator's own worked example (copilot rule vs. pilot seat) is correctly deferred → Stage 5/6, named rather than stubbed |
+| "Rules can write effectors, from the start" (BL-17.md) | Stage 3d (D20) | met — `_execute_switch_row` extracted and shared between the trigger-run and new ad-hoc-run passes inside `effector_engine.advance`, so this is the existing engine extended, not a second write path; no sequence file is migrated and no shipped rule calls it yet, exactly as scoped |
+| "Answers to the second goal check" (Q7–Q13) | Stages 3a–4 (D13–D19) | met — each answer traces to a named decision: fuzzy forgives words only → D13; "Request Aircraft Control" as the real handover → D16's `CrewState.has_controls`; Q7 (no-op) → D18; Q8 (scan stays while flying) → D17's active-set note; Q9 (reasons) → D16/D18's reason catalogue; Q10 (number forms) → D14, checked against the Stage 3c corpus below; Q11 (priority, never a tie-break) → D17/D19; Q12 (hold and fly when ready) → D16's `HOLD`/`drain_pending_rule_dispatch`; Q13 (record a corpus) → Stage 3c item 3 |
+
+### Findings
+
+1. **"Turn left thirty" is asserted fixed twice, by a mechanism that cannot reach it.** Lens:
+   grounded in the code / the non-obvious case. **Breaks E11.**
+   - *Assumption:* Stage 3a's own test list ("turn left thirty"/"Turn left, 30."/"turn left three
+     zero" all still resolve... "closing the Reviewer-flagged gap from Stage 1b/2") and Stage 4's
+     flight card ("'turn left thirty' (number word)"; "the fuzzy near-miss cases from 3a ('turn
+     left thirty' by the near-miss route...)") both treat "turn left thirty" as resolved by D13's
+     literal-fuzz work.
+   - *In the plan and the shipped code:* `turn_heading_relative`'s degree slot is `<degrees:angle>`
+     — Stage 4 item 2 says this explicitly ("the existing `angle`/word-set types (relative turn,
+     HVRT directions)" are unaffected by the number-word work). D14 says plainly: "`heading`,
+     `angle`, `oclock` are **not** touched." D13's fuzzy fallback applies only to a
+     `LiteralElement`; "a `SlotElement`/`WordSetElement` never gets this fallback" (D13's own
+     text). Checked directly against the shipped code: `audio-adapter/src/rule_patterns.py:220`
+     registers `"angle"` as `_consume_angle`, which calls only `_consume_digit_run` — no
+     number-word branch exists or is added anywhere in Revision 2. Nothing in D13, D14 or Stage
+     3a/4 teaches "thirty" to parse as 30 in this slot.
+   - *The pilot would hear:* exactly the defect the Reviewer already flagged at Stage 1b/2 —
+     "turn left thirty" still falls to "say again" — the first time he actually tries the phrase
+     BL-17.md names as the reason number words were asked for at all, in flight, after the card
+     told the tester it would work.
+   - *Grounded in:* `BL-17.md`, "Number words count: 'turn left thirty'" — the user's own
+     canonical example, answered "yes, I'd actually say that." E11 names it as one of three
+     equivalent forms that must all turn 30° left.
+   - *Suggests:* a one-line fix to D14, not a redesign — either give `angle` the same number-word
+     branch `quantity` already has, bounded 1–359 so it cannot be confused with a three-digit
+     `heading`/`bearing`, or redirect `turn_heading_relative`'s `degrees` slot to `quantity` with a
+     range check in the action. This should be settled before Stage 3a is built, since Stage 3a's
+     own test suite currently pins a result its own stated mechanism cannot produce.
+
+### Questions for the user
+None. Finding 1 needs an architect-side fix (one line in D14) before Stage 3a/4 are built, not a
+user decision — the user already said yes to the phrase it breaks. U19–U24 stay open as recorded
+in the plan; none of their recommendations conflict with anything the user has already decided
+(U22's "build it" extends Q11's own "flight readbacks jump ahead of queued callouts" rather than
+contradicting it, and U21's "latest wins" is the same precedent `AiPilotGoalRequest`/E-P4 already
+set, applied one level up).
