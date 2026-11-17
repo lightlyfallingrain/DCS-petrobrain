@@ -513,10 +513,10 @@ class TestRuleWordsNeverCarriesComposedNumberWords:
     words ("thirty", "hundred", the teens) must never reach `rule_words`
     (and from there `vocabulary.to_prompt`'s whisper prompt bias) for
     `quantity`/`angle`/`speed_target` -- spelling every permutation into
-    the prompt was rejected as impractical, since whisper already writes
-    recognised numbers as numerals regardless of the prompt's own
-    wording (`research/2026-09-19-whisper-contract-and-grammar-probe.md`)
-    and the numeral-token path through `_consume_digit_run` already
+    the prompt was rejected as impractical. Whisper writing composed
+    numbers as numerals is expected but unmeasured (the 2026-09-19 probe
+    measured one single-digit word; Stage 3c's corpus bench settles it),
+    and either form is safe: the numeral-token path through `_consume_digit_run` already
     parses whatever whisper hands back (`TestAngleSlot.test_whole_number`
     pins the "45" case). Derived from `rule_patterns`'s own number-word
     tables, not a hand-copied list, so a table that grows is checked

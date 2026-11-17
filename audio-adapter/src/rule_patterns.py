@@ -957,10 +957,12 @@ def rule_words(rule: CompiledRule) -> list[str]:
     tables nor this prompt bias; user direction (2026-11-17, overriding
     the review's suggested per-slot-type vocabulary list) kept it that
     way -- spelling every number-word permutation into the prompt is
-    impractical, whisper already writes recognised numbers as numerals
-    regardless of a prompt's wording (`research/
+    impractical. Whisper is expected to write numbers as numerals, but
+    that is only measured for a single digit word (`research/
     2026-09-19-whisper-contract-and-grammar-probe.md`: "three o'clock"
-    decodes to `"3 o'clock"` on both benched models), and the
+    decodes to `"3 o'clock"` on both benched models); composed numbers
+    ("thirty", "three hundred twenty") are unmeasured until Stage 3c's
+    corpus bench on the user's voice. Either form is safe: the
     numeral-token path through `_consume_digit_run` (`word.isdigit()`)
     already parses whatever whisper hands back -- `test_whole_number`
     (`tests/test_rule_patterns.py`) pins this for a bare "45". So D14's
