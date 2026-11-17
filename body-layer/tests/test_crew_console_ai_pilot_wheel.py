@@ -1,14 +1,16 @@
 """`CrewConsole`'s BL-16 mode 2 Stage P2a/P2b dispatch (`plans/
 flight-control/plan.md`, "Stage P2 ready to build"): the FLT/HVR goal
-vocabulary (`level_flight`/`turn_heading`/`turn_heading_relative`/
-`set_speed`/`speed_step`/`set_altitude`/`altitude_step`/`hold_altitude`/
-`level_off`) and HVRT translate (`hvrt_translate_*`/`hvrt_hold`/
-`hvrt_step_*`). Each handler only ever sets a one-shot transition field
-for `body.py`'s poll loop to apply (`ai_pilot_goal_transition`/
-`ai_pilot_level_flight_transition`/`ai_pilot_hvrt_transition`/`ai_pilot_
-hvrt_step_transition`) -- these tests check the readback and the
-transition value, not the real wire effect (covered by `test_ai_pilot_
-wheel.py`'s own actions/`test_ai_pilot_wheel_lua.py`'s Lua tests)."""
+vocabulary (`level_flight`/`turn_heading`/`set_speed`/`speed_step`/
+`set_altitude`/`altitude_step`/`hold_altitude`/`level_off`) and HVRT
+translate (`hvrt_translate_*`/`hvrt_hold`/`hvrt_step_*`). Each handler
+only ever sets a one-shot transition field for `body.py`'s poll loop to
+apply (`ai_pilot_goal_transition`/`ai_pilot_level_flight_transition`/
+`ai_pilot_hvrt_transition`/`ai_pilot_hvrt_step_transition`) -- these tests
+check the readback and the transition value, not the real wire effect
+(covered by `test_ai_pilot_wheel.py`'s own actions/`test_ai_pilot_wheel_
+lua.py`'s Lua tests). `turn_heading_relative` moved off this static
+dispatch table onto a rule in `[[BL-17]]` Stage 2 -- see
+`TestIncrementAiHeading` below and `test_rules_flight_actions.py`."""
 
 from __future__ import annotations
 
@@ -68,39 +70,38 @@ class TestTurnHeading:
         assert console.ai_pilot_goal_transition is None
 
 
-class TestTurnHeadingRelative:
+class TestIncrementAiHeading:
+    """`[[BL-17]]` Stage 2 moved "turn left/right NN" off a static
+    `handle_command` token onto a rule (`config/rules/flight.lua`'s
+    `turn_heading_relative`, dispatched through `enabled_rule_ids`/
+    `_handle_rule`) calling `CrewConsole.increment_ai_heading` directly --
+    `test_rules_flight_actions.py` differentially pins the *old*
+    `_handle_turn_heading_relative` readback/transition against the new
+    rule end to end; these three are the unit-level equivalent of the
+    `TestTurnHeadingRelative` class this replaced, now exercising the
+    extracted method rather than a dispatch token that no longer exists."""
+
     def test_turns_right_from_the_held_heading(self) -> None:
         console = _console(held_heading=10.0)
-        lines = console.handle_command(
-            "turn_heading_relative",
-            now_sim=0.0,
-            slots={"direction": "right", "degrees": 20},
-        )
-        assert lines == ["20 right."]
+        result = console.increment_ai_heading(20)
+        assert result == {"ok": True, "reason": None}
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
             param="heading", heading_deg=30.0
         )
 
     def test_turns_left_from_the_held_heading(self) -> None:
         console = _console(held_heading=10.0)
-        lines = console.handle_command(
-            "turn_heading_relative",
-            now_sim=0.0,
-            slots={"direction": "left", "degrees": 20},
-        )
-        assert lines == ["20 left."]
+        result = console.increment_ai_heading(-20)
+        assert result == {"ok": True, "reason": None}
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
             param="heading", heading_deg=350.0
         )
 
     def test_unable_without_a_known_current_heading(self) -> None:
         console = _console()
-        lines = console.handle_command(
-            "turn_heading_relative",
-            now_sim=0.0,
-            slots={"direction": "left", "degrees": 20},
-        )
-        assert lines == ["Unable, not ready."]
+        result = console.increment_ai_heading(-20)
+        assert result == {"ok": False, "reason": "NOT_READY"}
+        assert console.ai_pilot_goal_transition is None
 
 
 class TestSetSpeed:

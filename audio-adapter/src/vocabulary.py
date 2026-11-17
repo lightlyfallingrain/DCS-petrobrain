@@ -313,7 +313,12 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # altitude each open-ended).
         "level_flight",
         "turn_heading",
-        "turn_heading_relative",
+        # `turn_heading_relative` moved out of this static vocabulary in
+        # `[[BL-17]]` Stage 2 -- it is now a rule id (`config/rules/
+        # flight.lua`, `rule_patterns`'s own grammar), not a `PHRASES`
+        # entry; `command_matcher`'s rule branch (D8) matches it, not the
+        # phrase table below. `parse_turn_relative` is deleted in the
+        # same stage.
         "set_speed",
         "speed_step",
         "set_altitude",
@@ -758,10 +763,6 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # former, the same digit-by-digit convention `parse_bearing` already
     # uses for this vocabulary's other numeric slot.
     "turn_heading": ("heading three one five",),
-    # "Turn left/right <deg>" -- `direction`/`degrees` parsed
-    # (`command_matcher.py`'s own new branch), relative to the AI's own
-    # held heading at command time (plan: "relative, not re-derived").
-    "turn_heading_relative": ("turn left two zero", "turn right two zero"),
     # "Speed <value>" -- "max" is a legal value (plan vocabulary table).
     "set_speed": ("speed two zero zero", "speed max"),
     # "Slow down" / "speed up" -- one step down/up from the AI's own
@@ -1484,14 +1485,16 @@ def parse_weapon(text: str) -> str | None:
 
 #: BL-16 mode 2 Stage P2a's own slot parsers (`plans/flight-control/
 #: plan.md`, "Stage P2 ready to build") -- `turn_heading`'s numeric and
-#: compass forms, `turn_heading_relative`, `set_speed`, `speed_step`,
-#: `set_altitude`, `altitude_step`. All five numeric slots reuse `parse_
-#: bearing`'s own "digit by digit after an anchor word" convention
-#: (`_read_digits_after` below) rather than a whole-number-word parser --
-#: **unbenched**, like every token added without a re-recorded corpus:
-#: whether this speaker gives these numbers digit-by-digit or as whole
-#: words is unmeasured, and digit-by-digit is the one form this
-#: vocabulary already has a proven parser for.
+#: compass forms, `set_speed`, `speed_step`, `set_altitude`,
+#: `altitude_step`. (`turn_heading_relative` moved to a rule in
+#: `[[BL-17]]` Stage 2 -- `rule_patterns.py`'s own `angle` slot type is
+#: its numeric parser now, not one of these.) All four remaining numeric
+#: slots reuse `parse_bearing`'s own "digit by digit after an anchor
+#: word" convention (`_read_digits_after` below) rather than a whole-
+#: number-word parser -- **unbenched**, like every token added without a
+#: re-recorded corpus: whether this speaker gives these numbers digit-by-
+#: digit or as whole words is unmeasured, and digit-by-digit is the one
+#: form this vocabulary already has a proven parser for.
 
 #: The 8-point compass -> degrees, for `parse_heading_deg`'s compass
 #: form ("Heading north"). Reuses `SECTOR_WORDS`' own eight spellings
@@ -1548,24 +1551,6 @@ def parse_heading_deg(text: str) -> int | None:
         compass = SECTOR_WORD_DEGREES.get(word)
         if compass is not None:
             return compass
-    return None
-
-
-def parse_turn_relative(text: str) -> tuple[str, int] | None:
-    """ "Turn left/right <deg>" -- the direction word nearest after
-    "turn", then digits immediately after *that* word. `None` if "turn"
-    is absent, no direction word follows it, or no digits follow the
-    direction word."""
-    words = normalize_for_match(text).split()
-    if "turn" not in words:
-        return None
-    turn_index = words.index("turn")
-    for index in range(turn_index + 1, len(words)):
-        if words[index] in ("left", "right"):
-            degrees = _read_digits_after(words, index)
-            if degrees is not None:
-                return words[index], degrees
-            return None
     return None
 
 

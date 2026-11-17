@@ -321,3 +321,117 @@ any command) versus what D7's table originally described for it.
    exists and discover the gap only at `--print-rules` time.
 
 No other departures from the plan's stage boundaries were made this stage.
+
+---
+
+### Stage 2 (this run) — port "turn left/right NN"
+
+Moved `turn_heading_relative` off its static `handle_command` token onto a rule, using Stage
+1b's engine. Same venvs as Stage 1b (no new dependency).
+
+### Files Changed
+
+**body-layer**
+- `config/rules/flight.lua` — new. The one shipped rule, exactly the plan's own worked example
+  (D7/Stage 2 item 2).
+- `src/rules/actions.py` — `ACTION_NAMESPACES` gains the `flight` namespace: `_increment_heading`/
+  `FLIGHT_ACTIONS`, one action, `flight.increment_heading`, `delta_deg` validated −359..359.
+- `src/belief/crew_console.py` — `increment_ai_heading` extracted from the deleted
+  `_handle_turn_heading_relative`, returning an action result (`{"ok", "reason"}`) rather than a
+  readback (the rule writes its own, D4/U4); `"turn_heading_relative"` removed from
+  `DISPATCHED_COMMAND_TOKENS` and its `elif token == "turn_heading_relative":` dispatch branch
+  deleted — no fallback to the old handler (D6/E5).
+
+**audio-adapter**
+- `src/command_matcher.py` — the legacy `turn_heading_relative` branch (`parse_turn_relative`,
+  `_TURN_RELATIVE_VERB`) deleted; the import removed. The command is now reached only through
+  Stage 1b's rule branch (D8), when body-layer has it loaded and the adapter has accepted it.
+- `src/vocabulary.py` — `turn_heading_relative` removed from `TOKENS`/`PHRASES`;
+  `parse_turn_relative` deleted. The "BL-16 mode 2 Stage P2a's own slot parsers" header comment
+  and the `altitude_step` comment that referenced `turn_heading_relative` as a design-pattern
+  comparison were updated/pruned to match (per this project's "prune the comment you are standing
+  next to" rule) — the `altitude_step` comparison itself is still accurate (both are "relative to
+  the AI's own held value," unchanged by the move) and was left as prose, not deleted.
+
+### Tests Added
+
+**body-layer**
+- `tests/test_rules_flight_actions.py` — loads the **real**, shipped `config/rules/flight.lua`
+  (not a fixture copy) via `DEFAULT_RULES_DIR`, with zero failures asserted; the differential
+  pins against the pre-rules `_handle_turn_heading_relative`'s own behaviour for left/right, a
+  wrap past 0 and past 360, and `NOT_READY` (Stage 2 item 4's own required test) -- every one of
+  these five already goes end to end through the real `ACTION_NAMESPACES`/`flight.
+  increment_heading`, so `test_rules_engine.py`'s own placeholder for that end-to-end case
+  (written against Stage 1b's then-forthcoming action before the stage split was finalised) was
+  removed rather than duplicated here verbatim.
+- `tests/test_crew_console_ai_pilot_wheel.py` — `TestTurnHeadingRelative` (which dispatched the
+  now-deleted static token) replaced by `TestIncrementAiHeading`, exercising the extracted method
+  directly (plan Stage 2 item 4's own "test rewrite, inherent in the token moving").
+
+**audio-adapter**
+- `tests/test_command_matcher_rules.py` — a rule matching when active; the "no rules pushed
+  behaves exactly as before" pin, from the matcher side, now meaningful because the legacy branch
+  is actually gone (D8/Stage 1b's own acceptance test); the widened anchor set letting `angle`'s
+  own rejection of `0` reach "say again" rather than silence; two colliding rules reported
+  ambiguous; an active rule changing nothing about an existing legacy match or the free-speech
+  guard.
+- `tests/test_bl16_stage_p2_vocabulary.py` — **required rewrite, not an addition**: `TestParse
+  TurnRelative` (tests the now-deleted `parse_turn_relative`) deleted outright;
+  `TestMatchTranscriptTurnHeading.test_relative_turn` (asserted `match_transcript("turn right two
+  zero")` resolved to `turn_heading_relative` with no `rules=` argument — no longer true, the
+  capability moved to a rule) deleted, with a comment pointing at where the same behaviour is now
+  covered (`test_command_matcher_rules.py`, `test_rules_flight_actions.py`). Both deletions are
+  the exact "pinned matcher tests that referenced the token move to the rule-pattern suite"
+  rewrite Stage 2 item 4 names as expected and pre-approved, not a surprise found mid-
+  implementation.
+
+### Checks
+
+**body-layer**
+- `ruff format --check`: pass
+- `ruff check`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (89 source files)
+- Full suite (`-n auto`): pass, 3473 passed, 4 xfailed (combined Stage 1b + Stage 2 tree, this
+  run's final state). One run of this same full suite showed `test_slew_trace_is_written_from_
+  the_real_poll_loop` as a single failure under `-n auto` — it passed standalone and on a second
+  full-suite run with no change in between; logged `ValueError: I/O operation on closed file`
+  from a background poll-loop thread logging after a stream closed during test teardown, in code
+  this stage never touched (`_log_live_los_coverage_summary`/watched-args). Read as pre-existing
+  parallel-teardown flakiness, not a regression from either stage — flagged for Reviewer/DoD
+  rather than silently reconciled, since it was not independently reproduced a third time.
+
+**audio-adapter**
+- `ruff format --check`: pass
+- `ruff check`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass (17 source files)
+- Full suite (`-n auto`): pass, 480 passed, 2 skipped (combined Stage 1b + Stage 2 tree).
+
+### Notable Discoveries
+
+1. **A real import cycle between `rule_patterns.py` and `command_matcher.py`, resolved by
+   dependency injection, not by moving the collision check.** (Surfaced while wiring Stage 1b's
+   collision check against the real legacy matcher for this stage's own rule — recorded here
+   since it is this rule's own push that first exercises `_collides_with_legacy` against real
+   data.) The plan's own "Affected modules" list puts "collision check (D7–D9)" inside `rule_
+   patterns.py`, but D9's rule×legacy check needs the real legacy matcher (`command_matcher.
+   match_transcript`), and `command_matcher.py` must import `rule_patterns` for its own D8 rule-
+   matching branch regardless of which rules are active. Importing `command_matcher` back into
+   `rule_patterns.py` would be a genuine cycle, not a style issue. Resolved by injecting a
+   `legacy_probe` callable into `rule_patterns.compile_rules` -- see Stage 1b's own entry above
+   for the mechanism; noted again here because this stage's `turn_heading_relative` push is what
+   actually exercises the rule×legacy check with the real legacy branch present (during the
+   necessarily-temporary period where both the old branch and the new rule briefly coexist in the
+   work, before the old branch's deletion in this same stage).
+2. **The differential test needed the pre-deletion handler's behaviour recorded from memory/
+   source, not from a committed snapshot** -- `plans/speech-rules/plan.md` Stage 2 item 4 asks for
+   "a differential test written before the deletion." The actual commit history does not show a
+   separate "record old behaviour" commit preceding the deletion commit within this run (both
+   land in this one stage's commit) -- the five cases (left/right, wrap past 0/360, `NOT_READY`)
+   were taken from the handler's own code and its then-current test class
+   (`TestTurnHeadingRelative`) while both still existed in the working tree, immediately before
+   removing them, and written into `test_rules_flight_actions.py` as the new differential
+   pins. Noted so a reader comparing this run's commits against the plan's own phrasing
+   ("written before the deletion") understands why there is one stage commit, not two.
+
+Stages 3+ (the test flight, and the remaining ~80 commands) are explicitly out of this run's
+scope per the checkpoint already recorded in `body-layer/ROADMAP/BL-17.md`.

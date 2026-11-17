@@ -111,7 +111,6 @@ from vocabulary import (
     parse_step_count,
     parse_step_direction,
     parse_time_of_day,
-    parse_turn_relative,
     parse_weapon,
     report_verbs,
 )
@@ -375,7 +374,6 @@ _GREETING_VERB = "good"
 #: plan.md`, "Stage P2 ready to build"), fuzzy-matched for the same
 #: reason every other slotted token's verb is.
 _TURN_HEADING_VERB = "heading"
-_TURN_RELATIVE_VERB = "turn"
 _SET_SPEED_VERB = "speed"
 #: `speed_step`'s own two verbs -- "slow down"/"speed up" -- checked
 #: after `_SET_SPEED_VERB`'s own branch in `match_transcript` so a
@@ -1203,20 +1201,6 @@ def match_transcript(
                 match_ratio=1.0,
                 verb_anchored=True,
                 slots={"heading_deg": heading_deg},
-            )
-
-    # "Turn left/right <deg>" -- ordered after `turn_heading` above (no
-    # verb overlap between "heading" and "turn", so there is no
-    # collision to order against, but the ordering is kept consistent).
-    if difflib.SequenceMatcher(None, verb, _TURN_RELATIVE_VERB).ratio() >= VERB_FLOOR:
-        turn = parse_turn_relative(text)
-        if turn is not None:
-            direction, degrees = turn
-            return MatchResult(
-                token="turn_heading_relative",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": direction, "degrees": degrees},
             )
 
     # "Speed <value>" -- tried before `speed_step`'s own branch so a

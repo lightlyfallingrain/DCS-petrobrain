@@ -1197,7 +1197,13 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "level_flight",
         "turn_heading",
-        "turn_heading_relative",
+        # `turn_heading_relative` moved out of this static set in
+        # `[[BL-17]]` Stage 2 -- it is now a rule id (`config/rules/
+        # flight.lua`), dispatched through `enabled_rule_ids`/
+        # `_handle_rule`, not this table. No fallback: the Python handler
+        # (`_handle_turn_heading_relative`) is deleted in the same stage
+        # (D6/E5's "a ported rule fails to load" answer -- "Action file
+        # error.", never a silent revert to the old path).
         "set_speed",
         "speed_step",
         "set_altitude",
@@ -3224,8 +3230,6 @@ class CrewConsole:
             lines = self._handle_level_flight()
         elif token == "turn_heading":
             lines = self._handle_turn_heading(slots)
-        elif token == "turn_heading_relative":
-            lines = self._handle_turn_heading_relative(slots)
         elif token == "set_speed":
             lines = self._handle_set_speed(slots)
         elif token == "speed_step":
@@ -4579,26 +4583,29 @@ class CrewConsole:
         )
         return [f"Heading {self._digit_readback(resolved)}."]
 
-    def _handle_turn_heading_relative(
-        self, slots: dict[str, int | str] | None
-    ) -> list[str]:
-        """ "Turn left/right &lt;deg&gt;" -- relative to the AI's own
-        *held* heading at command time, computed once here rather than
-        re-derived as the aircraft turns (plan's own "relative, not
-        re-derived" note)."""
-        direction = slots.get("direction") if slots is not None else None
-        degrees = slots.get("degrees") if slots is not None else None
-        if direction not in ("left", "right") or not isinstance(degrees, int):
-            return ["say again -- no turn heard"]
+    def increment_ai_heading(self, delta_deg: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 2's `flight.increment_heading` action --
+        "turn left/right NN", extracted from the pre-rules `_handle_turn_
+        heading_relative` (deleted; `config/rules/flight.lua`'s
+        `turn_heading_relative` rule is now the only caller, via `rules.
+        actions.FLIGHT_ACTIONS`) so the rule and this method share the
+        exact math: relative to the AI's own *held* heading at command
+        time, computed once here rather than re-derived as the aircraft
+        turns (the pre-rules handler's own "relative, not re-derived"
+        note, unchanged).
+
+        Returns an action result (`{"ok", "reason"}`, `rules.actions.
+        ActionContext`'s own shape), never a readback -- the rule writes
+        its own readback (D4/U4); this method only ever sets the one-shot
+        `ai_pilot_goal_transition` `body.py`'s poll loop applies."""
         current = self.parked_flight_state.held_heading
         if current is None:
-            return [render_unable("NOT_READY").text]
-        delta = -degrees if direction == "left" else degrees
-        target = (current + delta) % 360.0
+            return {"ok": False, "reason": "NOT_READY"}
+        target = (current + delta_deg) % 360.0
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="heading", heading_deg=target
         )
-        return [f"{degrees} {direction}."]
+        return {"ok": True, "reason": None}
 
     def _handle_set_speed(self, slots: dict[str, int | str] | None) -> list[str]:
         """ "Speed &lt;value&gt;" -- "max" is a legal value (Decision 10's

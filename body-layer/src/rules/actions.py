@@ -19,10 +19,11 @@ file is trusted enough to run (`[[BL-17]]`'s own sandbox is what bounds
 what it can reach), but never trusted enough to hand a value straight to
 a method that assumes its caller already checked it.
 
-**Empty apart from the framework** (`plans/speech-rules/plan.md` Stage
-1b item 2: "action registry (empty apart from `say`, `unable(reason)`...
-and `digits(n)`)" -- those three live in `engine.py`, this module is the
-*namespace* half). Stage 2 adds the first real action."""
+An action's own body is extracted from the pre-rules Python handler it
+replaces (`CrewConsole.increment_ai_heading`, from `_handle_turn_heading_
+relative`) rather than duplicated -- so a future brain- or confirm-band-
+driven path, if one is ever added here, calls the exact same code a rule
+does."""
 
 from __future__ import annotations
 
@@ -75,7 +76,24 @@ class Action:
     invoke: Callable[[ActionContext, dict[str, int]], dict[str, object]]
 
 
+def _increment_heading(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    return ctx.console.increment_ai_heading(args["delta_deg"])
+
+
+#: `flight.increment_heading(delta_deg)` -- "turn left/right NN" (Stage 2,
+#: U12). `delta_deg`'s own bound (`-359..359`) is wider than any one call
+#: ever needs (`angle`'s own slot type already restricts the spoken
+#: degree value to `1..359`, and `config/rules/flight.lua` negates it for
+#: "left"), but the action's own validation must not assume its caller's
+#: grammar got it right -- see this module's docstring.
+FLIGHT_ACTIONS: tuple[Action, ...] = (
+    Action(
+        name="increment_heading",
+        params=(ActionParam(name="delta_deg", lo=-359, hi=359),),
+        invoke=_increment_heading,
+    ),
+)
+
 #: namespace name -> the actions it exposes. `engine.py` builds one Lua
 #: table per entry and makes it a global visible to every rule file.
-#: Empty until a stage ships a real action (Stage 2's `flight` namespace).
-ACTION_NAMESPACES: dict[str, tuple[Action, ...]] = {}
+ACTION_NAMESPACES: dict[str, tuple[Action, ...]] = {"flight": FLIGHT_ACTIONS}
