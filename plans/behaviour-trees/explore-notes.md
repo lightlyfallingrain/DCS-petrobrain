@@ -433,6 +433,6 @@ So:
 - **`lupa` (MIT) approved** as a new dependency.
 - **Sequencing:** the rule engine structure first, then port one or two existing commands, then a
   test flight, then the remaining commands in scheduled stages.
-- Left open for planning: which application uses magnetic and which true; whether the ×5
-  checksum stays on scan headings only or applies to every three-digit direction (the existing
-  "turn heading" has none, deliberately).
+- Left open, then settled the same day: *"magneric vs true -> use existing convention in code"*;
+  *"multiple of 5 -> no, allow any three digit value"*. So the existing magnetic/true usage stays,
+  and no direction slot carries the ×5 checksum (today's "scan bearing" checksum is dropped).
