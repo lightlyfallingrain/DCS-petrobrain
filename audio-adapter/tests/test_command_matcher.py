@@ -1558,3 +1558,14 @@ class TestReferentSlots:
             "_parse_watch_slots(text)",
         ):
             assert source.index(marker) < phrase_table_index
+
+
+def test_free_speech_guard_sentences_never_resolve_to_a_command() -> None:
+    """`vocabulary.FREE_SPEECH_GUARD` (`[[BL-17]]` D9) -- the same tuple
+    the rule-push collision check reads, so this is the "both the tests
+    and the check read one shared list" half of that design."""
+    from vocabulary import FREE_SPEECH_GUARD
+
+    for sentence in FREE_SPEECH_GUARD:
+        result = match_transcript(sentence)
+        assert result.token is None, sentence

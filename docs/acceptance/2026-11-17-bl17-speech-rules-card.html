@@ -1,0 +1,470 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>BL-17 Speech Rules</title>
+<style>
+/* layout: a single scrolling flight card -- sticky branch banner, then stacked test blocks,
+   each do/expect/record; a fixed "bring-back" rail opens from the bottom on demand */
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #1b1f26;
+  --fg: #e8e6df;
+  --fg-dim: #9aa0aa;
+  --amber: #ffb02e;
+  --amber-dim: #8a6324;
+  --record: #5fc2ba;
+  --rule: #2a2f38;
+  --danger: #ff6b5e;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --panel-2: #eceae3;
+    --fg: #1c1b18;
+    --fg-dim: #5c584f;
+    --amber: #b3651a;
+    --amber-dim: #d9a35c;
+    --record: #0f7a72;
+    --rule: #ddd8cc;
+    --danger: #b3261e;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --panel: #ffffff;
+  --panel-2: #eceae3;
+  --fg: #1c1b18;
+  --fg-dim: #5c584f;
+  --amber: #b3651a;
+  --amber-dim: #d9a35c;
+  --record: #0f7a72;
+  --rule: #ddd8cc;
+  --danger: #b3261e;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+h1, h2, h3, .display {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+code, .mono, .cmd {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+
+header.banner {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: linear-gradient(180deg, var(--bg) 85%, transparent);
+  padding: 14px 0 10px;
+  margin: 0 -16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.eyebrow {
+  color: var(--amber);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+h1 {
+  font-size: clamp(1.7rem, 6vw, 2.3rem);
+  font-weight: 700;
+  margin: 2px 0 8px;
+  color: var(--fg);
+}
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.branch-row .label { color: var(--fg-dim); font-size: 0.85rem; }
+.branch-row code {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.95rem;
+  color: var(--amber);
+}
+
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+}
+.card.scope { border-left: 3px solid var(--fg-dim); }
+.card.skip { border-left: 3px solid var(--danger); }
+.card.verified { border-left: 3px solid var(--record); }
+.card.prize { border: 1px solid var(--amber-dim); background: linear-gradient(135deg, rgba(255,176,46,0.08), transparent); }
+
+.card h2 {
+  font-size: 1.05rem;
+  color: var(--fg-dim);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card h2 .n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--amber);
+  font-size: 0.8rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.card ul { margin: 6px 0 0; padding-left: 20px; }
+.card li { margin-bottom: 4px; }
+
+.step {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+}
+.step-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.step-head h3 { font-size: 1.15rem; margin: 0; color: var(--fg); }
+.step-check { display: flex; align-items: center; gap: 8px; }
+.step-check input[type=checkbox] {
+  width: 20px; height: 20px;
+  accent-color: var(--amber);
+}
+.block { margin-bottom: 10px; }
+.block:last-child { margin-bottom: 0; }
+.block .tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.block.expect .tag { color: var(--amber); }
+.block.record .tag { color: var(--record); }
+pre.cmd {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  color: var(--fg);
+  margin: 0;
+}
+pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-size: 0.78rem; }
+.verified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--record);
+  background: rgba(95, 194, 186, 0.12);
+  border: 1px solid var(--record);
+  border-radius: 20px;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+}
+
+.rail {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  background: var(--panel-2);
+  border-top: 1px solid var(--rule);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.rail button {
+  width: 100%;
+  background: var(--amber);
+  color: #1a1200;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 12px;
+}
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 25;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  border-radius: 14px 14px 0 0;
+  padding: 18px max(18px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.sheet h2 { color: var(--record); margin: 0 0 10px; font-size: 1.1rem; }
+.sheet ol { padding-left: 22px; margin: 0 0 12px; }
+.sheet li { margin-bottom: 8px; }
+.sheet .surprise {
+  background: var(--panel-2);
+  border-left: 3px solid var(--record);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+.sheet .close {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--fg-dim);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: inherit;
+}
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<header class="banner">
+  <div class="eyebrow">BL-17 &middot; Stages 0 / 1b / 2 &middot; DoD-passed, merged</div>
+  <h1>Speech Rules — Flight Card</h1>
+  <div class="branch-row">
+    <span class="label">Fly this branch:</span>
+    <code>main</code>
+    <span class="label" style="margin-left:auto">after this merge lands</span>
+  </div>
+</header>
+
+<main>
+
+  <section class="card scope">
+    <h2>What this flight is checking</h2>
+    <ul>
+      <li>Every spoken command is now meant to run off a Lua rule file, not hand-written Python — this flight checks the <em>one</em> command that has actually been moved: <strong>"turn left/right NN"</strong>, flown on the AI overlay (parked, mode 2).</li>
+      <li>Editing a rule file and restarting the <em>mission</em> (not body-layer) picks the change up.</li>
+      <li>A rule-file problem — two rules clashing, or a typo in the Lua — is spoken as one fixed line, "Action file error," with the real cause only in the log, not on the intercom.</li>
+    </ul>
+  </section>
+
+  <section class="card skip">
+    <h2>Not in this flight</h2>
+    <ul>
+      <li>The bearing/heading rename — paused mid-build on its own branch, nothing here depends on it, no existing scan/report command's meaning has changed.</li>
+      <li>Every other command (~80 of them) — still hand-written Python, unaffected, untouched.</li>
+    </ul>
+  </section>
+
+  <section class="card verified">
+    <h2>Already checked on the ground, no DCS needed</h2>
+    <p class="verified-pill">&#10003; verified this pass</p>
+    <div class="block">
+      <div class="tag">Command</div>
+      <pre class="cmd"><span class="dir">from body-layer/, audio-adapter already running</span>python -m body --print-rules --audio-adapter-url http://127.0.0.1:&lt;port&gt;</pre>
+    </div>
+    <div class="block">
+      <div class="tag">Result</div>
+      <pre class="cmd">loaded 1 rule(s) ...
+  turn_heading_relative: turn &lt;direction:left|right&gt; &lt;degrees:angle&gt;
+adapter accepted: ['turn_heading_relative']</pre>
+    </div>
+    <p style="color:var(--fg-dim); font-size:0.9rem; margin:8px 0 0;">Run it again yourself before you fly if you want to see it. It doesn't prove the rule flies right — only that it's loaded.</p>
+  </section>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>1 &middot; Turn left, turn right</h3>
+      <label class="step-check"><input type="checkbox" data-k="s1"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>AI overlay flying, you in the operator seat. Say "turn left two zero." Then say "turn right four five."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>"20 left." and the aircraft turns about 20&deg; left. Then "45 right." and it turns the other way. Feels exactly like it did before this change.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Any difference in how it sounds, how fast it answers, or how it flies, versus what you remember from before?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>2 &middot; Edit the readback</h3>
+      <label class="step-check"><input type="checkbox" data-k="s2"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>On the ground, open <code>body-layer/config/rules/flight.lua</code> and change the spoken readback line. Save it. <strong>Restart the mission</strong> — not body-layer. Say "turn left two zero" again.</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>You hear your new wording, not the old one. No code was rebuilt or restarted — only the mission.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did the new wording actually come through on the first try after the mission restart?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>3 &middot; A clash between two rules</h3>
+      <label class="step-check"><input type="checkbox" data-k="s3"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Add a second rule under a different id but the exact same wording as "turn left/right NN." Restart the mission. Say "turn left two zero."</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>One "Action file error." on the intercom, and the command does nothing — not "say again," not silence. Remove the duplicate, restart again — the command works.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Was "Action file error" clearly audible and distinct from ordinary radio chatter?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>4 &middot; A typo in the Lua</h3>
+      <label class="step-check"><input type="checkbox" data-k="s4"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Put a syntax error into <code>flight.lua</code> (an unmatched quote is enough). Restart the mission.</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>The same single "Action file error" line, once. The real complaint — which file, which line — only shows up in the log, not on the intercom. Fix it and restart; the command comes back.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Did you need to look at a log to understand what broke, or could you tell from the cockpit alone?</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <h3>5 &middot; Edge phrasing</h3>
+      <label class="step-check"><input type="checkbox" data-k="s5"></label>
+    </div>
+    <div class="block">
+      <div class="tag">Do</div>
+      <p>Try "uh, turn left two zero" (a filler word). Try "turn left thirty" (a number word, not digits). Try "the tanks are on the ridge" (ordinary speech, not a command).</p>
+    </div>
+    <div class="block expect">
+      <div class="tag">Expect</div>
+      <p>Filler word: still works. "Thirty" as a word: falls to "say again" (same as before this change — it never understood number words here either). The tanks sentence: never treated as a command.</p>
+    </div>
+    <div class="block record">
+      <div class="tag">Record</div>
+      <p>Any of the three behave differently than expected?</p>
+    </div>
+  </div>
+
+  <section class="card prize">
+    <h2><span class="n">&#9733;</span>The one thing that matters most</h2>
+    <p>From the seat, with your eyes closed to the code: <strong>can you tell "turn left/right NN" is now a rule file instead of hand-written Python?</strong> If you can't tell, the port did its job. If you can, that difference — in timing, wording, or behaviour — is the most valuable thing this flight can report.</p>
+  </section>
+
+</main>
+
+<button class="rail" id="openRail" style="display:none"></button>
+<div class="rail">
+  <button id="openSheet">Bring-back list</button>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <h2>Bring back from this flight</h2>
+  <ol>
+    <li>Step 1 — any difference at all from the old "turn left/right," in sound, timing or flight behaviour?</li>
+    <li>Step 2 — did the edited readback actually land after a mission restart, first try?</li>
+    <li>Step 3 — was "Action file error" clearly heard and understood as "something's wrong with a rule file," not just odd radio noise?</li>
+    <li>Step 4 — same question for the syntax-error case; did you need the log, or was the cockpit enough?</li>
+    <li>Step 5 — did filler words, number words, and ordinary speech each behave the way you'd expect?</li>
+  </ol>
+  <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+  <button class="close" id="closeSheet">Close</button>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'bl17-speech-rules-card';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+
+  var sheet = document.getElementById('sheet');
+  document.getElementById('openSheet').addEventListener('click', function () {
+    sheet.hidden = false;
+  });
+  document.getElementById('closeSheet').addEventListener('click', function () {
+    sheet.hidden = true;
+  });
+})();
+</script>

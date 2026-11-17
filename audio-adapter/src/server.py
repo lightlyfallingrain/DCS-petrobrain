@@ -60,8 +60,10 @@ from types import TracebackType
 from typing import Any, Protocol, Self
 from urllib.parse import urlparse
 
+import vocabulary
 from command_matcher import match_transcript
 from latency_log import LatencyLogWriter
+from rule_patterns import LegacyProbeResult, RuleRegistry, compile_rules
 from stt_engine import STTEngine, STTRecognitionError
 from transcript_queue import TranscriptEvent, TranscriptQueue
 from tts_engine import TTSEngine, TTSSynthesisError
@@ -78,6 +80,14 @@ _SPEAK_PATH = "/speak"
 _TRANSCRIBE_PATH = "/transcribe"
 _TRANSCRIPTS_POLL_PATH = "/transcripts/poll"
 _STOP_PATH = "/stop"
+_RULES_PATH = "/rules"
+
+#: `X-Rules-Version` header name (`[[BL-17]]` D2). Module independence
+#: forbids importing this constant into body-layer's own `belief.
+#: audio_client.AudioAdapterClient` (the header's other reader) -- that
+#: side spells the literal string itself; keeping it as a named constant
+#: here is still worth it so every writer on *this* side agrees.
+RULES_VERSION_HEADER = "X-Rules-Version"
 
 #: The capture side mints a fixed ~12-char id (`uuid.uuid4().hex[:12]`,
 #: `capture_loop.CaptureLoop`) -- a generous cap on what this server
@@ -169,20 +179,47 @@ class AudioSink(Protocol):
         ...
 
 
+def _legacy_probe(text: str) -> LegacyProbeResult:
+    """The collision check's own injected callable (D9) -- runs the
+    *real* legacy matcher (no `rules=` argument, so it is unaffected by
+    whatever candidate rule is being checked) over one probe sentence.
+    Lives here, not in `rule_patterns.py`, specifically to avoid the
+    import cycle `rule_patterns`'s own `LegacyProbeResult` docstring
+    explains."""
+    result = match_transcript(text)
+    return LegacyProbeResult(token=result.token, verb_anchored=result.verb_anchored)
+
+
 def _make_handler(
     engine: TTSEngine,
     sink: AudioSink,
     stt_engine: STTEngine | None,
     transcript_queue: TranscriptQueue,
     latency_log: LatencyLogWriter | None = None,
+    rule_registry: RuleRegistry | None = None,
 ) -> type[BaseHTTPRequestHandler]:
+    rule_state = rule_registry if rule_registry is not None else RuleRegistry()
+
     class SpeakRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             if path == _TRANSCRIPTS_POLL_PATH:
                 self._respond_json(
-                    200, [event.to_dict() for event in transcript_queue.drain_all()]
+                    200,
+                    [event.to_dict() for event in transcript_queue.drain_all()],
+                    extra_headers=(
+                        {RULES_VERSION_HEADER: rule_state.version}
+                        if rule_state.version is not None
+                        else None
+                    ),
                 )
+                return
+            self._respond_json(404, {"error": f"not found: {path}"})
+
+        def do_PUT(self) -> None:
+            path = urlparse(self.path).path
+            if path == _RULES_PATH:
+                self._handle_put_rules()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -381,7 +418,7 @@ def _make_handler(
             transcribe_duration_s = time.monotonic() - transcribe_start
 
             match_start = time.monotonic()
-            match = match_transcript(transcript.text)
+            match = match_transcript(transcript.text, rules=rule_state.rules)
             match_duration_s = time.monotonic() - match_start
 
             transcript_queue.push(
@@ -426,11 +463,97 @@ def _make_handler(
                 return
             self._respond_json(200, {"ok": True})
 
-        def _respond_json(self, status: int, body: Any) -> None:
+        def _handle_put_rules(self) -> None:
+            """`PUT /rules` (`{"version": str, "rules": [{"id", "pattern"},
+            ...]}`, `[[BL-17]]` D1/D2) -- parses and runs the collision
+            check (`rule_patterns.compile_rules`, D9) over the full set
+            body-layer currently has loaded, then swaps `rule_state.rules`
+            in with one assignment (D8). Answers `{"version", "accepted":
+            [ids], "rejected": [{"id", "reason"}]}` -- `version` is always
+            the value the caller sent, even when every rule in the push
+            was rejected, so body-layer can tell "the adapter is current
+            with this push" from "the adapter never got the push at all"
+            (a differing/absent header on the next `/transcripts/poll`)."""
+            raw_body = self._read_body()
+            if raw_body is None:
+                return
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            version = data.get("version")
+            if not isinstance(version, str) or not version:
+                self._respond_json(
+                    400, {"error": "'version' must be a non-empty string"}
+                )
+                return
+            rules_raw = data.get("rules")
+            if not isinstance(rules_raw, list):
+                self._respond_json(400, {"error": "'rules' must be a list"})
+                return
+
+            raw_pairs: list[tuple[str, str]] = []
+            for entry in rules_raw:
+                if not isinstance(entry, dict):
+                    self._respond_json(
+                        400, {"error": "each item of 'rules' must be an object"}
+                    )
+                    return
+                rule_id = entry.get("id")
+                pattern = entry.get("pattern")
+                if (
+                    not isinstance(rule_id, str)
+                    or not rule_id
+                    or not isinstance(pattern, str)
+                    or not pattern
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "each rule needs a non-empty string 'id' and 'pattern'"
+                            )
+                        },
+                    )
+                    return
+                raw_pairs.append((rule_id, pattern))
+
+            accepted, rejected = compile_rules(
+                raw_pairs,
+                legacy_probe=_legacy_probe,
+                free_speech_guard=vocabulary.FREE_SPEECH_GUARD,
+            )
+            rule_state.rules = tuple(accepted)
+            rule_state.version = version
+            self._respond_json(
+                200,
+                {
+                    "version": version,
+                    "accepted": [rule.id for rule in accepted],
+                    "rejected": [
+                        {"id": rejection.id, "reason": rejection.reason}
+                        for rejection in rejected
+                    ],
+                },
+            )
+
+        def _respond_json(
+            self,
+            status: int,
+            body: Any,
+            extra_headers: dict[str, str] | None = None,
+        ) -> None:
             payload = json.dumps(body).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -442,8 +565,8 @@ def _make_handler(
 
 class TTSAdapterServer:
     """Owns the `POST /speak` + `POST /transcribe` + `GET /transcripts/poll`
-    HTTP server; mirrors `aircraft-layer`'s `TelemetryAPIServer` open()/
-    close()/serve_forever() shape.
+    + `PUT /rules` HTTP server; mirrors `aircraft-layer`'s
+    `TelemetryAPIServer` open()/close()/serve_forever() shape.
 
     `stt_engine`/`transcript_queue` are Stage 3 additions
     (`plans/inbound-speech/plan.md`). `stt_engine` defaults to `None` --
@@ -452,7 +575,15 @@ class TTSAdapterServer:
     `_handle_transcribe` answers `503` in that case (module docstring).
     `transcript_queue` defaults to a fresh, empty `TranscriptQueue` --
     always constructed so `GET /transcripts/poll` always has something to
-    drain (an empty list, not a 503), whether or not `stt_engine` is set."""
+    drain (an empty list, not a 503), whether or not `stt_engine` is set.
+
+    `rule_registry` (`[[BL-17]]` D1/D2) defaults to a fresh, empty
+    `rule_patterns.RuleRegistry` -- `PUT /rules` has nothing accepted yet
+    and `/transcripts/poll` carries no `X-Rules-Version` header, the same
+    "additive, true no-op until something is pushed" posture every other
+    optional collaborator here has. `__main__.py` constructs one and
+    shares it with the whisper prompt provider too (D10), so a push is
+    visible to recognition without restarting this process."""
 
     def __init__(
         self,
@@ -463,6 +594,7 @@ class TTSAdapterServer:
         stt_engine: STTEngine | None = None,
         transcript_queue: TranscriptQueue | None = None,
         latency_log: LatencyLogWriter | None = None,
+        rule_registry: RuleRegistry | None = None,
     ) -> None:
         self._engine = engine
         self._sink = sink
@@ -476,6 +608,9 @@ class TTSAdapterServer:
         #: Stage 2) -- `None` (the default) is a true no-op, same posture as
         #: every other optional collaborator on this class.
         self._latency_log = latency_log
+        self._rule_registry = (
+            rule_registry if rule_registry is not None else RuleRegistry()
+        )
         self._httpd: ThreadingHTTPServer | None = None
 
     def __enter__(self) -> Self:
@@ -507,6 +642,7 @@ class TTSAdapterServer:
                 self._stt_engine,
                 self._transcript_queue,
                 self._latency_log,
+                self._rule_registry,
             ),
         )
         logger.info("audio-adapter listening on %s:%d", self._host, self.port)

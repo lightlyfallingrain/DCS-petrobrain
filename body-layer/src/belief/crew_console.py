@@ -1197,7 +1197,13 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "level_flight",
         "turn_heading",
-        "turn_heading_relative",
+        # `turn_heading_relative` moved out of this static set in
+        # `[[BL-17]]` Stage 2 -- it is now a rule id (`config/rules/
+        # flight.lua`), dispatched through `enabled_rule_ids`/
+        # `_handle_rule`, not this table. No fallback: the Python handler
+        # (`_handle_turn_heading_relative`) is deleted in the same stage
+        # (D6/E5's "a ported rule fails to load" answer -- "Action file
+        # error.", never a silent revert to the old path).
         "set_speed",
         "speed_step",
         "set_altitude",
@@ -1358,6 +1364,16 @@ ALTIMETER_QNH_NO_RESPONSE_LINE: Final[str] = (
     "Unable, operator altimeter not responding."
 )
 ALTIMETER_QNH_TIMEOUT_LINE: Final[str] = "Unable, altimeter pressure not set."
+
+#: `[[BL-17]]` (`plans/speech-rules/plan.md` D6, U13) -- the one fixed
+#: phrase for **every** rule-file failure, load-time or dispatch-time
+#: alike: a pattern clash, a Lua syntax error, a bad `when.speech` call, a
+#: Lua error while a handler runs. User, verbatim: *"Rule clash or lua
+#: error etc -> std error log and say aloud 'action file error'"* -- one
+#: fixed phrase, not a per-cause description; the stderr banner/log line
+#: `body.py` writes alongside it is the actual file/reason detail, same
+#: split `CONFIG_ERROR_LINE`'s own docstring describes for sequence files.
+ACTION_FILE_ERROR_LINE: Final[str] = "Action file error."
 
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
 #: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
@@ -1933,6 +1949,49 @@ class CrewConsole:
     #: also fails.
     altimeter_qnh_failed_pending: bool = field(default=False, repr=False)
 
+    #: `[[BL-17]]` (`plans/speech-rules/plan.md` D4) -- `body.py`'s own
+    #: closure over its `RuleSandbox`/current `RuleSet`/`ActionContext`;
+    #: `(token, slots) -> (lines, error)`. Deliberately a plain tuple, not
+    #: a `rules.engine.RuleOutcome`, so this module imports nothing from
+    #: `rules.*` (D4's own "avoids a `belief` <-> `rules` import cycle").
+    #: `None` is every test/caller that builds a `CrewConsole` with no
+    #: rule engine wired -- `enabled_rule_ids` is then always empty too,
+    #: so `handle_command` never reaches `_handle_rule` in that case.
+    rule_runner: (
+        Callable[[str, dict[str, int | str] | None], tuple[list[str], bool]] | None
+    ) = field(default=None, repr=False)
+    #: The rule ids currently dispatchable -- loaded cleanly from
+    #: `config/rules/*.lua` **and** accepted by the audio-adapter's own
+    #: collision check (D4/D9). `DISPATCHED_COMMAND_TOKENS`'s own readers
+    #: (this field's callers) now check static tokens **or** membership
+    #: here; a rule id the adapter has since rejected (or that a reload
+    #: dropped) is removed from this set by `body.py`, so a stale
+    #: transcript naming it answers `NO_SUCH_COMMAND` rather than running.
+    enabled_rule_ids: frozenset[str] = field(default_factory=frozenset, repr=False)
+    #: Every rule id this process has ever had enabled, union across every
+    #: `set_enabled_rule_ids` call -- grows, never shrinks, never reset by
+    #: `reset_for_new_mission` (same reasoning as `config_error_pending`:
+    #: this describes the process's own history, not per-mission state).
+    #: What lets `handle_command`'s final `else` distinguish "a rule id
+    #: the adapter just matched against a since-dropped rule" (D4: speaks
+    #: `NO_SUCH_COMMAND`, never silent) from "a token that was never a
+    #: command at all" (silent + logged, `test_unknown_token_returns_
+    #: nothing_and_logs_a_warning`'s own unchanged case). Written only by
+    #: `set_enabled_rule_ids` -- never assign `enabled_rule_ids` directly.
+    _ever_enabled_rule_ids: frozenset[str] = field(
+        default_factory=frozenset, repr=False
+    )
+    #: `[[BL-17]]` D6/U13 -- set (or re-set) by `body.py` every time a
+    #: rule load/reload has at least one load-time failure. **Re-armed by
+    #: every reload that has failures**, unlike `config_error_pending`: a
+    #: reload is the user's edit-and-retry loop (U11), so the next load's
+    #: own failure set is what matters, not whatever an earlier, possibly
+    #: already-fixed load left pending. Resets to its declared default
+    #: here and is **not** passed through by `reset_for_new_mission` --
+    #: `body.py`'s mission-restart handler recomputes it synchronously
+    #: from the fresh reload, the same shape `enabled_rule_ids` above has.
+    action_file_error_pending: bool = field(default=False, repr=False)
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
@@ -1983,7 +2042,21 @@ class CrewConsole:
         against the class's own fields rather than assumed -- without it,
         a mission restart silently dropped back to the full-traceback
         push-failure path (`self.audio_adapter_reporter` would reset to
-        `None`, the field's own default, on every restart)."""
+        `None`, the field's own default, on every restart).
+
+        **`[[BL-17]]` adds `rule_runner` to this same pass-through list** --
+        the closure itself is built once by `body.py` at process start,
+        wrapping a holder that reload updates in place (D2's own re-push
+        mechanism), so nothing needs to rebuild it per mission. `enabled_
+        rule_ids` deliberately resets to its declared default (empty) and
+        is **not** passed through -- unlike `rule_runner`, it names
+        *which* rules are currently enabled, and D2/U11 reload the rule
+        files at every mission (re)start; `body.py`'s mission-restart
+        handler re-populates it synchronously, in the same call, right
+        after this reset -- the same "resets to default, refreshed by the
+        very next thing that runs" shape `enrichment`/`sight_ready`
+        already have, not a window where a stale set could dispatch a
+        rule that no longer exists."""
         if self.speech_worker is not None:
             self.speech_worker.interrupt()
         self.__init__(  # type: ignore[misc]
@@ -2001,6 +2074,8 @@ class CrewConsole:
             audio_adapter_reporter=self.audio_adapter_reporter,
             silenced=self.silenced,
             config_error_pending=self.config_error_pending,
+            rule_runner=self.rule_runner,
+            _ever_enabled_rule_ids=self._ever_enabled_rule_ids,
         )
 
     def _refusal_response(
@@ -2209,6 +2284,23 @@ class CrewConsole:
             return
         self._print([CONFIG_ERROR_LINE], now_sim)
         self.config_error_pending = False
+
+    def drain_action_file_error(self, now_sim: float, *, intercom_open: bool) -> None:
+        """Speaks `ACTION_FILE_ERROR_LINE` the first poll `self.
+        action_file_error_pending and intercom_open and not self.
+        silenced` -- same shape as `drain_config_error` (called every
+        poll, unconditionally), except `action_file_error_pending` can be
+        set `True` again by a later reload (that field's own docstring),
+        so unlike `drain_config_error` this can legitimately speak more
+        than once per process -- just never twice for the same load."""
+        if not self.action_file_error_pending:
+            return
+        if not intercom_open:
+            return
+        if self.silenced:
+            return
+        self._print([ACTION_FILE_ERROR_LINE], now_sim)
+        self.action_file_error_pending = False
 
     def drain_altimeter_qnh_failed(
         self,
@@ -2593,7 +2685,13 @@ class CrewConsole:
 
         parse, transcript = turn.parse, turn.transcript
         reply = validate_brain_reply(
-            reply, parse, transcript, DISPATCHED_COMMAND_TOKENS
+            reply,
+            parse,
+            transcript,
+            # `[[BL-17]]` D4: "static tokens union enabled rule ids" --
+            # even though this BR-1 decider path is, per the comment
+            # below, unreachable in practice today.
+            DISPATCHED_COMMAND_TOKENS | self.enabled_rule_ids,
         )
 
         if reply.t_sim is not None and now_sim - reply.t_sim > BRAIN_REPLY_MAX_AGE_S:
@@ -2856,9 +2954,14 @@ class CrewConsole:
         token validated. The inline check below is kept as a second,
         cheap line of defence rather than removed, in case a future
         caller ever reaches this method without going through the
-        validator first."""
+        validator first. `[[BL-17]]` widens the membership check to
+        "static tokens or an enabled rule id" (D4), same as every other
+        reader of `DISPATCHED_COMMAND_TOKENS`."""
         token = reply.token
-        if token is None or token not in DISPATCHED_COMMAND_TOKENS:
+        if token is None or (
+            token not in DISPATCHED_COMMAND_TOKENS
+            and token not in self.enabled_rule_ids
+        ):
             return [render_unable("NO_SUCH_COMMAND").text]
         description = _describe_token_for_confirm(token)
         self._pending_confirmation = PendingConfirmation(
@@ -2909,6 +3012,67 @@ class CrewConsole:
         `commands_handled`."""
         self.commands_handled += 1
 
+    def _reset_one_shot_command_state(self) -> None:
+        """Clears every one-shot dispatch-time signal before the next
+        command is evaluated -- extracted from `handle_command`'s own
+        preamble (unchanged logic) so `[[BL-17]]`'s rule-dispatch error
+        rollback (D6: "every one-shot transition field set during this
+        dispatch is cleared") can call the identical reset rather than a
+        second, driftable copy of the same field list.
+
+        See `last_command_target_contact_id`'s own docstring for why a
+        stale value from an earlier `follow` must not leak into this
+        command's evaluation -- the same reasoning applies to every field
+        reset here. `where_is_it_requested`/`where_is_it_slots` are
+        deliberately **not** reset here (`plans/brain-tool-calls/plan.md`
+        R1) -- see `handle_command`'s own history for the full reasoning;
+        that reasoning does not change for the rollback call, since a rule
+        dispatch never sets either field (no rule reaches `_handle_where_
+        is_it`)."""
+        self.last_command_target_contact_id = None
+        self.attack_run_transition = None
+        self.attack_run_weapon = None
+        self.observ_transition = None
+        self.weapon_safety_transition = None
+        self.ai_pilot_goal_transition = None
+        self.ai_pilot_level_flight_transition = False
+        self.ai_pilot_hvrt_transition = None
+        self.ai_pilot_hvrt_step_transition = None
+        self._pending_mentions = None
+
+    def set_enabled_rule_ids(self, ids: frozenset[str]) -> None:
+        """The one writer of `enabled_rule_ids` -- `body.py` calls this
+        instead of assigning the field directly, so `_ever_enabled_rule_
+        ids` (that field's own docstring) always grows alongside it."""
+        self.enabled_rule_ids = ids
+        self._ever_enabled_rule_ids |= ids
+
+    def _handle_rule(
+        self, token: str, slots: dict[str, int | str] | None, now_sim: float
+    ) -> list[str]:
+        """Dispatches a rule id (`[[BL-17]]`, `plans/speech-rules/
+        plan.md` D4) through the injected `rule_runner` closure
+        (`body.py` built it; see that field's own docstring for why this
+        class imports nothing from `rules.*` itself). `rule_runner` is
+        only ever `None` in a test that builds a `CrewConsole` with no
+        rule engine wired -- `token` can then never be a member of
+        `enabled_rule_ids` either (empty by default), so this method is
+        unreachable from `handle_command`'s own dispatch in that case; the
+        `assert` documents that rather than silently returning `[]`.
+
+        On a Lua error during dispatch (`error=True`), the reply is the
+        fixed `ACTION_FILE_ERROR_LINE` in place of any readback, and every
+        one-shot field this dispatch may have set is rolled back
+        (`_reset_one_shot_command_state`) -- so a rule that raises after
+        partially applying an effect never leaves that effect silently in
+        place with nothing said about it (D6/E7)."""
+        assert self.rule_runner is not None
+        lines, error = self.rule_runner(token, slots)
+        if error:
+            self._reset_one_shot_command_state()
+            return [ACTION_FILE_ERROR_LINE]
+        return lines
+
     def handle_command(
         self,
         token: str,
@@ -2957,53 +3121,7 @@ class CrewConsole:
         if refusal is not None:
             return refusal
         self._note_player_command()
-        # Reset before dispatch -- see `last_command_target_contact_id`'s
-        # own docstring for why a stale value from an earlier `follow`
-        # must not leak into this command's evaluation.
-        self.last_command_target_contact_id = None
-        # Same reset, same reason -- `attack_run_transition`'s own
-        # docstring -- so a stale `"engage"`/`"disengage"` from an earlier
-        # dispatch this poll loop has not yet consumed cannot leak into an
-        # unrelated later command's evaluation this same poll.
-        self.attack_run_transition = None
-        # Same reset, same reason, for `[[BL-B67]]`'s weapon slot
-        # (`attack_run_weapon`'s own docstring).
-        self.attack_run_weapon = None
-        # Same reset, same reason, for OBSERV (`observ_transition`'s own
-        # docstring).
-        self.observ_transition = None
-        # Same reset, same reason, for the weapons safety bar
-        # (`weapon_safety_transition`'s own docstring).
-        self.weapon_safety_transition = None
-        # Same reset, same reason, for BL-16 mode 2 Stage P2a/P2b's own
-        # one-shot signals (`ai_pilot_goal_transition`/`ai_pilot_hvrt_
-        # transition`/`ai_pilot_hvrt_step_transition`'s own docstrings).
-        self.ai_pilot_goal_transition = None
-        self.ai_pilot_level_flight_transition = False
-        self.ai_pilot_hvrt_transition = None
-        self.ai_pilot_hvrt_step_transition = None
-        # `where_is_it_requested`/`where_is_it_slots` are deliberately
-        # **not** reset here -- `plans/brain-tool-calls/plan.md` R1.
-        # Every other one-shot signal above is consumed in the *same*
-        # poll it is set (by `drain_attack_run`/`drain_events`'s own
-        # callers, earlier in `body.py`'s loop than any `handle_command`
-        # call), so an unrelated dispatch this poll can safely clear a
-        # stale one without racing its own consumer. "Where is it?"'s
-        # consumer, `body.py`'s `drain_where_is_it`, instead runs at the
-        # *top* of the **next** poll -- and Stage 3 adds a second
-        # dispatcher (a brain command, `drain_brain`) that can set this
-        # flag in the same poll a transcript's own `handle_command` call
-        # (`_poll_transcripts`, later in that same poll) would otherwise
-        # reset it right back to `False` before `drain_where_is_it` ever
-        # sees it `True`. Leaving the reset out means the flag can only
-        # ever be set by `_handle_where_is_it` and only ever cleared by
-        # `drain_where_is_it`'s own consumption (or a mission reset,
-        # `reset_for_new_mission`'s `__init__` call) -- a request is
-        # delayed at worst, by one poll if a second command lands before
-        # consumption, never silently dropped by an unrelated dispatch.
-        # Same reset, same reason, for `[[BL-B102]]`'s referent-mention
-        # recording -- see `_pending_mentions`' own docstring.
-        self._pending_mentions = None
+        self._reset_one_shot_command_state()
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -3112,8 +3230,6 @@ class CrewConsole:
             lines = self._handle_level_flight()
         elif token == "turn_heading":
             lines = self._handle_turn_heading(slots)
-        elif token == "turn_heading_relative":
-            lines = self._handle_turn_heading_relative(slots)
         elif token == "set_speed":
             lines = self._handle_set_speed(slots)
         elif token == "speed_step":
@@ -3175,6 +3291,20 @@ class CrewConsole:
             lines = self._handle_radio_check()
         elif token == "greeting":
             lines = self._handle_greeting(slots)
+        elif token in self.enabled_rule_ids:
+            # `[[BL-17]]` D4 -- checked last, after every static token, so
+            # a rule id can never shadow one of this table's own branches
+            # (ported rules keep the static token's exact name, D3, so
+            # this never fires for them; a brand-new rule-only id only
+            # ever reaches here).
+            lines = self._handle_rule(token, slots, now_sim)
+        elif token in self._ever_enabled_rule_ids:
+            # D4 -- a rule id the adapter matched against a rule that has
+            # since been dropped (a reload race, or a push rejection) --
+            # heard and understood, not a silent nothing: `_ever_enabled_
+            # rule_ids`' own docstring. Distinct from the `else` below,
+            # which is a token that was never a command at all.
+            lines = [render_unable("NO_SUCH_COMMAND").text]
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
@@ -4453,26 +4583,29 @@ class CrewConsole:
         )
         return [f"Heading {self._digit_readback(resolved)}."]
 
-    def _handle_turn_heading_relative(
-        self, slots: dict[str, int | str] | None
-    ) -> list[str]:
-        """ "Turn left/right &lt;deg&gt;" -- relative to the AI's own
-        *held* heading at command time, computed once here rather than
-        re-derived as the aircraft turns (plan's own "relative, not
-        re-derived" note)."""
-        direction = slots.get("direction") if slots is not None else None
-        degrees = slots.get("degrees") if slots is not None else None
-        if direction not in ("left", "right") or not isinstance(degrees, int):
-            return ["say again -- no turn heard"]
+    def increment_ai_heading(self, delta_deg: int) -> dict[str, object]:
+        """`[[BL-17]]` Stage 2's `flight.increment_heading` action --
+        "turn left/right NN", extracted from the pre-rules `_handle_turn_
+        heading_relative` (deleted; `config/rules/flight.lua`'s
+        `turn_heading_relative` rule is now the only caller, via `rules.
+        actions.FLIGHT_ACTIONS`) so the rule and this method share the
+        exact math: relative to the AI's own *held* heading at command
+        time, computed once here rather than re-derived as the aircraft
+        turns (the pre-rules handler's own "relative, not re-derived"
+        note, unchanged).
+
+        Returns an action result (`{"ok", "reason"}`, `rules.actions.
+        ActionContext`'s own shape), never a readback -- the rule writes
+        its own readback (D4/U4); this method only ever sets the one-shot
+        `ai_pilot_goal_transition` `body.py`'s poll loop applies."""
         current = self.parked_flight_state.held_heading
         if current is None:
-            return [render_unable("NOT_READY").text]
-        delta = -degrees if direction == "left" else degrees
-        target = (current + delta) % 360.0
+            return {"ok": False, "reason": "NOT_READY"}
+        target = (current + delta_deg) % 360.0
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="heading", heading_deg=target
         )
-        return [f"{degrees} {direction}."]
+        return {"ok": True, "reason": None}
 
     def _handle_set_speed(self, slots: dict[str, int | str] | None) -> list[str]:
         """ "Speed &lt;value&gt;" -- "max" is a legal value (Decision 10's

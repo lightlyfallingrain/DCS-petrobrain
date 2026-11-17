@@ -89,6 +89,7 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 
+from rule_patterns import CompiledRule, match_pattern
 from vocabulary import (
     PHRASES,
     TOKENS,
@@ -110,7 +111,6 @@ from vocabulary import (
     parse_step_count,
     parse_step_direction,
     parse_time_of_day,
-    parse_turn_relative,
     parse_weapon,
     report_verbs,
 )
@@ -374,7 +374,6 @@ _GREETING_VERB = "good"
 #: plan.md`, "Stage P2 ready to build"), fuzzy-matched for the same
 #: reason every other slotted token's verb is.
 _TURN_HEADING_VERB = "heading"
-_TURN_RELATIVE_VERB = "turn"
 _SET_SPEED_VERB = "speed"
 #: `speed_step`'s own two verbs -- "slow down"/"speed up" -- checked
 #: after `_SET_SPEED_VERB`'s own branch in `match_transcript` so a
@@ -488,16 +487,68 @@ def opens_with_wake_word(words: list[str]) -> bool:
     )
 
 
-def _verb_anchor_ratio(verb: str) -> float:
-    """Best fuzzy ratio between `verb` and any word in
-    `VERB_ANCHOR_WORDS`. `0.0` if the set is somehow empty (never true in
-    practice; guards the `max()` call rather than asserting)."""
+def _verb_anchor_ratio(
+    verb: str, anchor_words: frozenset[str] = VERB_ANCHOR_WORDS
+) -> float:
+    """Best fuzzy ratio between `verb` and any word in `anchor_words`
+    (`VERB_ANCHOR_WORDS` by default). `0.0` if the set is somehow empty
+    (never true in practice; guards the `max()` call rather than
+    asserting). `anchor_words` is overridable (`[[BL-17]]` D8: "`VERB_
+    ANCHOR_WORDS` becomes legacy union active rules") so `match_
+    transcript`'s own gate can widen it per call without mutating the
+    module-level constant every other caller still reads unchanged."""
     return max(
         (
             difflib.SequenceMatcher(None, verb, candidate).ratio()
-            for candidate in VERB_ANCHOR_WORDS
+            for candidate in anchor_words
         ),
         default=0.0,
+    )
+
+
+def _rule_anchor_words(rules: tuple[CompiledRule, ...]) -> frozenset[str]:
+    """Every active rule's own `first_literal()` (D8) -- `()` gives the
+    empty set, so `VERB_ANCHOR_WORDS | _rule_anchor_words(())` is exactly
+    `VERB_ANCHOR_WORDS`, the "no rules pushed" no-op D7/Stage 1b's own
+    acceptance test pins."""
+    words: set[str] = set()
+    for rule in rules:
+        literal = rule.first_literal()
+        if literal is not None:
+            words.add(literal)
+    return frozenset(words)
+
+
+def _match_rules(
+    rules: tuple[CompiledRule, ...], words: list[str]
+) -> MatchResult | None:
+    """Tries every active rule's pattern against `words` (full-
+    consumption match, `rule_patterns.match_pattern`), returning `None`
+    if none matches. Every match is `match_ratio=1.0` by construction
+    (this module's own exact-literal matching choice, `rule_patterns`'s
+    module docstring) -- two or more rules matching the same transcript
+    is therefore always a tie, never resolved by a separation check the
+    way two legacy phrases at different ratios are; it is `ambiguous`
+    instead (D8: "set `ambiguous=True`"), naming the first match (sorted
+    by id, for determinism) as `token` so a confirm question has
+    something to describe."""
+    matches: list[tuple[CompiledRule, dict[str, object]]] = []
+    for rule in sorted(rules, key=lambda r: r.id):
+        slots = match_pattern(rule.elements, words)
+        if slots is not None:
+            matches.append((rule, slots))
+    if not matches:
+        return None
+    rule, slots = matches[0]
+    typed_slots: dict[str, int | str] = {
+        name: value for name, value in slots.items() if isinstance(value, (int, str))
+    }
+    return MatchResult(
+        token=rule.id,
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=len(matches) > 1,
+        slots=typed_slots or None,
     )
 
 
@@ -885,10 +936,19 @@ def _where_slot_count(slots: dict[str, int | str]) -> int:
     return sum(1 for name in _WHERE_SLOT_NAMES if name in slots)
 
 
-def match_transcript(text: str) -> MatchResult:
+def match_transcript(
+    text: str, rules: tuple[CompiledRule, ...] | None = None
+) -> MatchResult:
     """Normalise -> verb anchor -> (bearing slot | phrase match) ->
     separation check. See module and `MatchResult` docstrings for the
-    full outcome shape."""
+    full outcome shape.
+
+    `rules` (`[[BL-17]]` D1/D8) is the adapter's currently-accepted,
+    immutable rule set -- `None`/`()` (every call site that predates
+    rules, and `server.py`'s own state before the first successful
+    `PUT /rules`) makes this function behave exactly as it did before
+    this plan, pinned by the whole existing matcher suite passing
+    unchanged with no rules pushed."""
     normalized = strip_filler(normalize_for_match(text))
     words = normalized.split()
     if not words:
@@ -918,8 +978,25 @@ def match_transcript(text: str) -> MatchResult:
             verb_anchored=True,
         )
 
+    active_rules: tuple[CompiledRule, ...] = rules if rules is not None else ()
+
+    # Rule matching (D8) -- after the wake word and HVRT bare words,
+    # before every legacy slotted branch (and before the generic anchor
+    # gate just below, so a rule whose own first literal is not already
+    # a legacy verb -- e.g. "turn" -- is not cut off before it is ever
+    # tried).
+    if active_rules:
+        rule_match = _match_rules(active_rules, words)
+        if rule_match is not None:
+            return rule_match
+
     verb = words[0]
-    if _verb_anchor_ratio(verb) < VERB_FLOOR:
+    anchor_words = (
+        VERB_ANCHOR_WORDS | _rule_anchor_words(active_rules)
+        if active_rules
+        else VERB_ANCHOR_WORDS
+    )
+    if _verb_anchor_ratio(verb, anchor_words) < VERB_FLOOR:
         # Cheap early-out (Decision 4 Layer 2 step 2) -- not the primary
         # defence any more, see module docstring. Nothing downstream is
         # scored at all.
@@ -1124,20 +1201,6 @@ def match_transcript(text: str) -> MatchResult:
                 match_ratio=1.0,
                 verb_anchored=True,
                 slots={"heading_deg": heading_deg},
-            )
-
-    # "Turn left/right <deg>" -- ordered after `turn_heading` above (no
-    # verb overlap between "heading" and "turn", so there is no
-    # collision to order against, but the ordering is kept consistent).
-    if difflib.SequenceMatcher(None, verb, _TURN_RELATIVE_VERB).ratio() >= VERB_FLOOR:
-        turn = parse_turn_relative(text)
-        if turn is not None:
-            direction, degrees = turn
-            return MatchResult(
-                token="turn_heading_relative",
-                match_ratio=1.0,
-                verb_anchored=True,
-                slots={"direction": direction, "degrees": degrees},
             )
 
     # "Speed <value>" -- tried before `speed_step`'s own branch so a

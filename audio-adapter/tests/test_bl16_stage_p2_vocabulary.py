@@ -12,7 +12,6 @@ from vocabulary import (
     parse_heading_deg,
     parse_speed_step_direction,
     parse_speed_value,
-    parse_turn_relative,
 )
 
 
@@ -35,23 +34,6 @@ class TestParseHeadingDeg:
 
     def test_heading_with_nothing_after_it_is_none(self) -> None:
         assert parse_heading_deg("heading") is None
-
-
-class TestParseTurnRelative:
-    def test_left(self) -> None:
-        assert parse_turn_relative("turn left two zero") == ("left", 20)
-
-    def test_right(self) -> None:
-        assert parse_turn_relative("turn right four five") == ("right", 45)
-
-    def test_no_turn_word_is_none(self) -> None:
-        assert parse_turn_relative("heading two zero zero") is None
-
-    def test_no_direction_word_is_none(self) -> None:
-        assert parse_turn_relative("turn two zero") is None
-
-    def test_direction_with_no_digits_after_it_is_none(self) -> None:
-        assert parse_turn_relative("turn left") is None
 
 
 class TestParseSpeedValue:
@@ -133,10 +115,12 @@ class TestMatchTranscriptTurnHeading:
         assert result.token == "turn_heading"
         assert result.slots == {"heading_deg": 0}
 
-    def test_relative_turn(self) -> None:
-        result = match_transcript("turn right two zero")
-        assert result.token == "turn_heading_relative"
-        assert result.slots == {"direction": "right", "degrees": 20}
+    # "turn right two zero" moved to a rule in `[[BL-17]]` Stage 2 --
+    # `test_command_matcher_rules.py`'s `test_a_rule_matches_when_active`
+    # and `test_rules_flight_actions.py` (body-layer) now cover it; with
+    # no `rules=` argument this transcript is no longer a command at all
+    # (`test_command_matcher_rules.py`'s own `test_no_rules_behaves_
+    # exactly_as_before`).
 
 
 class TestMatchTranscriptSpeed:

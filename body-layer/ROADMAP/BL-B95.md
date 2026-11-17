@@ -6,6 +6,10 @@
   event-driven alternative. The full conversation, the user's API sketch and every answer, verbatim,
   are in `plans/behaviour-trees/explore-notes.md`. Concept only, nothing designed.
 
+  **2026-11-17: the speech-command slice is promoted to `[[BL-17]]`** (spoken commands as Lua
+  rules, all existing commands ported). This entry keeps the rest: triggers, interrupts,
+  arbitration, non-speech handlers.
+
   > *"I think we're better off expanding the effector table solution. That's already like a branch
   > of a tree. Petrobrain would do better with an event driven system. Expand effector tables to
   > define Petrovitch actions, not only cockpit effector. Add custom triggers that files can register
