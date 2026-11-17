@@ -348,22 +348,54 @@ def request_write(
     there is no sequence file or trigger behind an ad hoc write.
 
     **A second request for the same effector while one is already
-    pending is a no-op** (plan's own Stage 3d test list) -- the dedup
-    check is against `ad_hoc_runs`' own `.effector` values, not
-    `request_id`: two distinct dispatches (e.g. the pilot repeating a
-    command before the first write has resolved) naturally mint two
-    distinct ids even when they name the same switch, so a plain
-    `request_id in state.ad_hoc_runs` check would never actually catch
-    the case this mirrors (`fire_trigger`'s own "fire while already
-    running" is keyed by the trigger itself, the equivalent "target"
-    concept here)."""
-    if any(ad_hoc.effector == name for ad_hoc in state.ad_hoc_runs.values()):
-        logger.debug(
-            "ad hoc write to effector %r already pending; no-op (mirrors D1)",
-            name,
-        )
-        return state
+    pending, at the *same* value, is a no-op** (plan's own Stage 3d test
+    list) -- the same-effector check is against `ad_hoc_runs`' own
+    `.effector` values, not `request_id`: two distinct dispatches (e.g.
+    the pilot repeating a command before the first write has resolved)
+    naturally mint two distinct ids even when they name the same switch,
+    so a plain `request_id in state.ad_hoc_runs` check would never
+    actually catch the case this mirrors (`fire_trigger`'s own "fire
+    while already running" is keyed by the trigger itself, the
+    equivalent "target" concept here).
+
+    **A second request naming a *different* value replaces the pending
+    one** (Stage 3d review Required Fix 2) -- this project's existing
+    "latest wins, nothing lost" convention for exactly this kind of
+    arbitration (U21; `AiPilotWheelGoal`'s own outstanding-flight-goal
+    rule, `body-layer/CLAUDE.md`). The plan's own test-list wording only
+    ever considered the same-value case, which mirrors `fire_trigger`'s
+    D1 because a trigger carries no value of its own; an ad hoc write
+    does, and a pilot's most recent instruction must not silently lose
+    to an earlier one still in flight (the switch would otherwise settle
+    at the *first* value while Petrovich eventually speaks the second
+    request's own confirmation line for a value that was never
+    reached)."""
+    existing_id = next(
+        (
+            request_id_in_flight
+            for request_id_in_flight, ad_hoc in state.ad_hoc_runs.items()
+            if ad_hoc.effector == name
+        ),
+        None,
+    )
     new_ad_hoc_runs = dict(state.ad_hoc_runs)
+    if existing_id is not None:
+        if state.ad_hoc_runs[existing_id].value == value:
+            logger.debug(
+                "ad hoc write to effector %r already pending at the same "
+                "value; no-op (mirrors D1)",
+                name,
+            )
+            return state
+        logger.debug(
+            "ad hoc write to effector %r already pending at a different "
+            "value (%r); replacing with the latest request (%r) -- "
+            "latest wins (U21)",
+            name,
+            state.ad_hoc_runs[existing_id].value,
+            value,
+        )
+        del new_ad_hoc_runs[existing_id]
     new_ad_hoc_runs[request_id] = _AdHocEffectorCursor(
         effector=name, value=value, says=says, next_due_sim=now_sim
     )

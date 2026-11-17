@@ -1213,6 +1213,24 @@ def test_request_write_to_an_already_pending_effector_is_a_no_op() -> None:
     assert state.ad_hoc_runs["req-1"].says == "Observ on."
 
 
+def test_request_write_with_a_differing_value_replaces_the_pending_request() -> None:
+    """Stage 3d review fix 2 (`plans/speech-rules/review-stage3d.md`
+    Required Fix 2) -- a second `effector.write` naming the same
+    effector as an already-pending ad hoc run, but a *different* target
+    value, replaces the pending entry (latest wins, nothing lost -- U21/
+    `AiPilotWheelGoal`'s existing convention for this same kind of
+    arbitration), unlike the same-value case above where a repeated
+    command really is the same request twice."""
+    state = request_write(
+        EffectorRunState(), "req-1", "observ", "on", "Observ on.", now_sim=0.0
+    )
+    state = request_write(state, "req-2", "observ", "off", "Observ off.", now_sim=1.0)
+    assert set(state.ad_hoc_runs) == {"req-2"}
+    cursor = state.ad_hoc_runs["req-2"]
+    assert cursor.value == "off"
+    assert cursor.says == "Observ off."
+
+
 def test_advance_ad_hoc_self_check_match_speaks_and_removes() -> None:
     client = _FakeAircraftClient()
     client.read_values = {886: 1.0}  # "observ" already "on"

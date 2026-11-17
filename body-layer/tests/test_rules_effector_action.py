@@ -11,12 +11,13 @@ aircraft -- a small synthetic test-only rule file, never shipped
 from __future__ import annotations
 
 import io
+import threading
 from pathlib import Path
 from typing import cast
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
-from belief.crew_console import CrewConsole
+from belief.crew_console import CrewConsole, PendingEffectorWrite
 from belief.effector_engine import EffectorRunState, advance, request_write
 from belief.effector_registry import EffectorDef
 from rules.actions import ACTION_NAMESPACES, ActionContext
@@ -193,6 +194,111 @@ def test_effector_write_says_is_optional(tmp_path: Path) -> None:
     outcome = run_rule(rule_set, "probe_no_says", None, sandbox)
     assert outcome.lines == []
     assert calls == [("observ", "on", None)]
+
+
+def test_effector_write_says_explicit_nil_is_also_optional(tmp_path: Path) -> None:
+    """Distinct from the omitted-argument case above -- an explicit Lua
+    `nil` as the third argument (`feedback_lua_native_function_optional_
+    trailing_arg.md`'s own pattern: write both, never assume one implies
+    the other) must resolve the same way as omitting it entirely."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_explicit_nil_says", "x", "always", function(s)\n'
+        '  local r = effector.write("observ", "on", nil)\n'
+        "  if not r.ok then say(unable(r.reason)) end\n"
+        "end)\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str, str | None]] = []
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        calls.append((name, value, says))
+        return {"ok": True, "reason": None}
+
+    console = CrewConsole(store=ContactStore())
+    sandbox = RuleSandbox()
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    outcome = run_rule(rule_set, "probe_explicit_nil_says", None, sandbox)
+    assert outcome.lines == []
+    assert calls == [("observ", "on", None)]
+
+
+def test_effector_write_queued_from_background_thread_is_applied_on_next_poll_drain(
+    tmp_path: Path,
+) -> None:
+    """Stage 3d review fix 1 (`plans/speech-rules/review-stage3d.md`
+    Required Fix 1) -- `body.py`'s real closure only validates and
+    appends a `PendingEffectorWrite` to `CrewConsole.pending_effector_
+    writes`; it never touches an `EffectorRunState` itself. Dispatching
+    the rule from a background thread (standing in for the REPL thread
+    `handle_command` is also reachable from, concurrently with the poll
+    thread's own voice dispatch) proves the enqueue step cannot race the
+    poll thread's `EffectorRunState` reads/writes, because it never
+    reaches one -- only the simulated poll-loop drain below, run on
+    *this* thread, ever calls `request_write`."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_observ_on", "x", "always", function(s)\n'
+        '  effector.write("observ", "on", "Observ on.")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    console = CrewConsole(store=ContactStore())
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        # Mirrors `body.py`'s real closure post-fix: validate, then
+        # queue -- never touch any `EffectorRunState`.
+        effector_def = _REGISTRY.get(name)
+        if effector_def is None or value not in effector_def.values:
+            return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+        console.pending_effector_writes.append(
+            PendingEffectorWrite(
+                request_id="req-1", effector=name, value=value, says=says
+            )
+        )
+        return {"ok": True, "reason": None}
+
+    sandbox = RuleSandbox()
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    thread = threading.Thread(
+        target=lambda: run_rule(rule_set, "probe_observ_on", None, sandbox)
+    )
+    thread.start()
+    thread.join()
+
+    # Queued by the "REPL" thread; nothing applied yet, and no
+    # `EffectorRunState` was ever touched by the dispatch itself.
+    assert len(console.pending_effector_writes) == 1
+    queued = console.pending_effector_writes[0]
+    assert (queued.effector, queued.value, queued.says) == (
+        "observ",
+        "on",
+        "Observ on.",
+    )
+
+    # The "poll thread"'s own drain (`body.py`'s poll loop, same shape)
+    # -- only now does the request actually reach the engine.
+    pending, console.pending_effector_writes = console.pending_effector_writes, []
+    engine_state = EffectorRunState()
+    for request in pending:
+        engine_state = request_write(
+            engine_state,
+            request.request_id,
+            request.effector,
+            request.value,
+            request.says,
+            0.0,
+        )
+    assert set(engine_state.ad_hoc_runs) == {"req-1"}
+    assert console.pending_effector_writes == []
 
 
 def test_a_write_that_never_gets_a_readback_is_silently_retried(

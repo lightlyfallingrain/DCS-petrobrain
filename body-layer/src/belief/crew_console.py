@@ -1417,6 +1417,23 @@ class PendingRuleDispatch:
     held_since_sim: float
 
 
+@dataclass(frozen=True)
+class PendingEffectorWrite:
+    """One validated `effector.write` dispatch, queued on `CrewConsole.
+    pending_effector_writes` for the poll loop to apply (`[[BL-17]]` D20
+    Stage 3d review, Required Fix 1) -- see that field's own docstring
+    for why this is a queue rather than a single one-shot slot like
+    `observ_transition`. `request_id` is minted by `body.py`'s closure
+    at dispatch time (either thread -- `itertools.count.__next__` is
+    GIL-atomic, so concurrent dispatches still mint distinct ids), not
+    here."""
+
+    request_id: str
+    effector: str
+    value: str
+    says: str | None
+
+
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
 #: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
 #: way `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s `F10CommandQueue`
@@ -1575,6 +1592,30 @@ class CrewConsole:
     #: dispatch, same convention as `observ_transition`, and
     #: consumed-and-cleared by the poll loop the moment it is applied.
     weapon_safety_transition: Literal["armed", "safe"] | None = None
+    #: `effector.write`'s own cross-thread queue (`[[BL-17]]` D20 Stage 3d
+    #: review, Required Fix 1) -- a **queue**, not a single one-shot slot
+    #: like `observ_transition`/`weapon_safety_transition` above, because
+    #: those two each carry exactly one domain fact at a time (OBSERV is
+    #: on or off; the weapons bar is armed or safe), while an ad hoc write
+    #: names an arbitrary effector and several *different* effectors can
+    #: legitimately be requested before the poll loop next drains this
+    #: field. Appended to by `body.py`'s `_request_effector_write` closure
+    #: (`list.append` is GIL-atomic, so concurrent appends from the poll
+    #: thread's own `handle_transcript` and the REPL thread's `handle_
+    #: line` cannot lose an entry the way a direct `EffectorRunState`
+    #: mutation could -- the race this fix exists to close) and drained
+    #: wholesale by the poll loop, which calls `belief.effector_engine.
+    #: request_write` for each entry against `ConsolePerceptionRunner.
+    #: effector_state` -- the one place that mutation is now allowed to
+    #: happen. Deliberately **not** reset by `_reset_one_shot_command_
+    #: state` (same reasoning as `where_is_it_requested`): an entry queued
+    #: by an earlier dispatch this poll has not yet drained must survive
+    #: an unrelated later command in between, not just the next poll
+    #: boundary. Resets to empty on a mission (re)start for free (not in
+    #: `reset_for_new_mission`'s pass-through list) since `effector_state`
+    #: itself is dropped wholesale then too (D11) -- a pre-restart request
+    #: would otherwise apply against the wrong mission's state.
+    pending_effector_writes: list[PendingEffectorWrite] = field(default_factory=list)
     #: BL-16 mode 2 Stage P2a's own one-shot signal to `body.py`'s poll
     #: loop (`plans/flight-control/plan.md`, "Stage P2 ready to build")
     #: -- the same division `observ_transition`'s own docstring states:

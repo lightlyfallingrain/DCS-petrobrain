@@ -77,3 +77,43 @@ def test_write_effector_passes_through_the_closures_own_reason() -> None:
     ctx = _ctx(request_effector_write=fake_request)
     result = _write_effector(ctx, {"name": "nope", "value": "on", "says": None})
     assert result == {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+
+
+def test_write_effector_caps_says_at_the_same_length_say_enforces() -> None:
+    """Stage 3d review Required Fix 3 (`plans/speech-rules/
+    review-stage3d.md`) -- D20's own text promised `says` is "a
+    free-text, length-capped string (the same cap `say()` already
+    enforces)," but nothing enforced it until this fix. Same silent-
+    truncation behaviour as `rules.engine._SinkHolder.say`'s own
+    overflow handling, not a rejection."""
+    from rules.actions import MAX_SAY_LEN, _write_effector
+
+    calls: list[tuple[str, str, str | None]] = []
+
+    def fake_request(name: str, value: str, says: str | None) -> dict[str, object]:
+        calls.append((name, value, says))
+        return {"ok": True, "reason": None}
+
+    ctx = _ctx(request_effector_write=fake_request)
+    overlong = "x" * (MAX_SAY_LEN + 50)
+    result = _write_effector(ctx, {"name": "observ", "value": "on", "says": overlong})
+    assert result == {"ok": True, "reason": None}
+    assert calls == [("observ", "on", overlong[:MAX_SAY_LEN])]
+    assert calls[0][2] is not None and len(calls[0][2]) == MAX_SAY_LEN
+
+
+def test_write_effector_says_within_the_cap_is_untouched() -> None:
+    from rules.actions import _write_effector
+
+    calls: list[tuple[str, str, str | None]] = []
+
+    def fake_request(name: str, value: str, says: str | None) -> dict[str, object]:
+        calls.append((name, value, says))
+        return {"ok": True, "reason": None}
+
+    ctx = _ctx(request_effector_write=fake_request)
+    result = _write_effector(
+        ctx, {"name": "observ", "value": "on", "says": "Observ on."}
+    )
+    assert result == {"ok": True, "reason": None}
+    assert calls == [("observ", "on", "Observ on.")]

@@ -28,7 +28,7 @@ from typing import Any, Final
 
 from belief.crew_console import CrewConsole
 from belief.speech import render_unable
-from rules.actions import Action, ActionContext
+from rules.actions import MAX_SAY_LEN, Action, ActionContext
 from rules.gates import GATE_REGISTRY
 from rules.loader import RawRegistration, RuleLoadError, load_rules
 from rules.sandbox import RuleBudgetExceeded, RuleRuntimeError, RuleSandbox
@@ -43,11 +43,6 @@ logger = logging.getLogger(__name__)
 #: loop, not to ration ordinary rule logic.
 RULE_LOAD_INSTRUCTION_BUDGET: Final[int] = 2_000_000
 RULE_DISPATCH_INSTRUCTION_BUDGET: Final[int] = 200_000
-
-#: `say` text length cap (Stage 1b's "sandbox must hold" bullet: "`say`
-#: text is length-capped"). Generous for any real readback; bounds a
-#: pathological rule, not real wording.
-_MAX_SAY_LEN: Final[int] = 500
 
 
 @dataclass(frozen=True)
@@ -95,8 +90,8 @@ class _SinkHolder:
         if self.lines is None:
             return
         rendered = str(text)
-        if len(rendered) > _MAX_SAY_LEN:
-            rendered = rendered[:_MAX_SAY_LEN]
+        if len(rendered) > MAX_SAY_LEN:
+            rendered = rendered[:MAX_SAY_LEN]
         self.lines.append(rendered)
 
 

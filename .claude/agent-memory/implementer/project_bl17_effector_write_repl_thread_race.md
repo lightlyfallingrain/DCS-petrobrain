@@ -1,9 +1,14 @@
 ---
 name: project-bl17-effector-write-repl-thread-race
-description: body.py's request_effector_write closure (BL-17 D20, Stage 3d) mutates the poll-thread-owned ConsolePerceptionRunner.effector_state directly, synchronously, from rule dispatch -- which handle_line/handle_command can also run on the REPL thread, a real data race with the poll loop's own advance_effectors call that no existing one-shot CrewConsole field has, latent because no shipped rule calls effector.write yet
+description: FIXED (Stage 3d review, Required Fix 1) -- body.py's request_effector_write closure used to mutate the poll-thread-owned ConsolePerceptionRunner.effector_state directly, synchronously, from rule dispatch (handle_line/handle_command is reachable from the REPL thread too); now it only appends to CrewConsole.pending_effector_writes (a plain list, GIL-atomic append), and the poll loop is the sole caller of effector_engine.request_write. See feedback_cross_thread_one_shot_queue_vs_single_slot.md for the generalised pattern.
 metadata:
   type: project
 ---
+
+**Resolved** in the Stage 3d review-fix round (`plans/speech-rules/review-stage3d.md` Required Fix
+1, `plans/speech-rules/implementation.md` "Stage 3d review fixes"). Kept below for the full
+original diagnosis -- still the right account of *why* the race existed, only "not fixed"/"must be
+addressed before Stage 5" no longer apply.
 
 `body.py`'s `_request_effector_write` closure (built in `main()`, wired into `ActionContext.
 request_effector_write`) calls `effector_engine.request_write(crew_runner.effector_state, ...)`
@@ -25,13 +30,13 @@ Lupa's own per-runtime lock (R4, `research/2026-11-17-lupa-sandbox.md`) only ser
 call itself*; it says nothing about a plain Python attribute access made from inside a Python
 callback that Lua call reaches.
 
-**Not fixed in Stage 3d** — no shipped rule calls `effector.write` in that stage, so the race is
-latent and unreachable in practice. **Must be addressed before Stage 5** ports the first real
-effector-writing rule (`observ_on`/`weapons_armed`, per the plan's later-stages table row 5). The
-likely fix: route the ad hoc write request through a one-shot field the poll loop itself drains
-(the same shape `observ_transition` already uses), rather than mutating `effector_state` from the
-dispatch call directly — a real design decision, not a one-line patch, and belongs to whoever
-plans/builds that stage.
+**Not fixed when first found, in Stage 3d's own implementation** — no shipped rule called
+`effector.write` yet, so the race was latent. The Stage 3d *review* (not Stage 5) is what actually
+fixed it: "no shipped rule calls it yet" turned out not to bound the window, since `effector.write`
+was already a documented, callable Lua action the moment the stage merged — any hand-written test
+`.lua` file dropped into `config/rules/` reached it. Fixed by routing the ad hoc write request
+through a queued `CrewConsole` field (`pending_effector_writes`) the poll loop drains once per
+poll, rather than mutating `effector_state` from the dispatch call directly.
 
 **How to apply:** before extending `rules.actions`/`ActionContext` with any closure that touches
 `ConsolePerceptionRunner`-owned, poll-thread-mutated state (not just `effector_state` — check for

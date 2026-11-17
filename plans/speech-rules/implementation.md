@@ -1264,9 +1264,13 @@ conflicts.
   (`required <= len(lua_args) <= len(params)`) and the per-parameter loop treats an explicit
   `None` on an optional parameter the same as an omitted one; parameters past `len(lua_args)` are
   filled with `None` after the loop. Covered by `test_effector_write_says_is_optional` (the
-  omitted-from-the-call case) and the Lua literal `nil` case is covered implicitly — every other
-  synthetic-rule test in `test_rules_effector_action.py` that supplies `says` explicitly is the
-  "present" side of the same arity check.
+  omitted-from-the-call case); the Lua literal `nil` case was **not** actually covered until the
+  Stage 3d review's optional refinement added `test_effector_write_says_explicit_nil_is_also_
+  optional` — "covered implicitly" above was wrong: no test in this stage's own diff passed a
+  literal third `nil` argument, and the "present" side of the arity check other tests exercise is
+  a real string, not `nil`, so it proved nothing about this specific path. The behaviour itself was
+  already correct (traced by hand and confirmed by the new test), only the claim that it was
+  proven was not.
 - **`Action.__post_init__` is new, cheap, correctness hygiene, not asked for by the plan.** With a
   tuple of `ActionParam`s and no mechanical check, a future action could declare a required
   parameter after an optional one, and the "parameters past `len(lua_args)` are optional" slicing
@@ -1298,3 +1302,91 @@ conflicts.
   covered by a test (it needs a live `ConsolePerceptionRunner` with a real poll thread to exercise
   meaningfully, which is `test_body.py`'s territory, not this stage's unit-level tests) — flagged
   here rather than silently assumed.
+
+### Stage 3d review fixes
+
+Applying the three Required Fixes from `plans/speech-rules/review-stage3d.md`, plus the optional
+"explicit Lua `nil`" test. Scoped tight to the effector-write path, per the dispatching brief —
+Stage 4 (flight-control port) is being built in parallel on `crew_console.py`'s flight handlers
+and did not need touching.
+
+**Required Fix 1 (cross-thread race on `effector_state`).** `body.py`'s `_request_effector_write`
+closure no longer mutates `crew_runner.effector_state` itself. It still validates `name`/`value`
+against the live registry and `crew_runner.last_t_sim is not None` synchronously (so the rule
+still gets its immediate `{ok=false}`), but on success it now appends a new
+`belief.crew_console.PendingEffectorWrite(request_id, effector, value, says)` to a new
+`CrewConsole.pending_effector_writes: list[PendingEffectorWrite]` field instead. `body.py`'s poll
+loop drains that list (swap-with-a-fresh-`[]`, not iterate-then-clear, so an append landing during
+the swap is never dropped) immediately before `advance_effectors`, calling `effector_engine.
+request_write` once per queued entry against `runner.effector_state` — the same place every other
+cross-thread effector signal (`observ_transition`/`weapon_safety_transition`) is already applied.
+
+A **queue**, not a single one-shot slot like `observ_transition`, because those two each carry
+exactly one domain fact at a time while an ad hoc write names an arbitrary effector — two
+different-effector requests dispatched in the same poll window must not collide the way they would
+in a single slot. `list.append()` is GIL-atomic, so concurrent appends from the poll thread's own
+voice dispatch and the REPL thread's typed dispatch cannot lose an entry; this is the same
+"append from any thread, drain-and-rebuild on the poll thread, no lock" shape `_pending_
+positional_replies` already uses (`crew_console.py`), not a new mechanism.
+
+Deliberately **not** reset by `_reset_one_shot_command_state` (same reasoning as `where_is_it_
+requested`): an entry queued by an earlier dispatch this poll has not yet drained must survive an
+unrelated later command dispatched in between. One consequence not asked for by the review and not
+built here: `_dispatch_rule`'s D6 rollback (a Lua error later in the same dispatch) does **not**
+retroactively remove an `effector.write` this dispatch already queued earlier in its own handler.
+This is not a regression — the pre-fix code never rolled this back either, since it mutated
+`crew_runner.effector_state` directly, an object `_reset_one_shot_command_state` (a `CrewConsole`
+method) cannot reach at all — but it is a real gap, now sitting on a field that could in principle
+be truncated back to its pre-dispatch length on rollback. Left alone because the review did not
+ask for it and no shipped rule can reach it yet; flagging it here rather than silently deciding it
+is out of scope. Resets to empty for free on a mission (re)start (not in `reset_for_new_mission`'s
+pass-through list) since `effector_state` itself is dropped wholesale then too (D11).
+
+Test added: `test_effector_write_queued_from_background_thread_is_applied_on_next_poll_drain`
+(`test_rules_effector_action.py`) — dispatches the rule from a real background `threading.Thread`
+(standing in for the REPL thread), asserts the request is queued but no `EffectorRunState` was
+ever touched by the dispatch itself, then simulates the poll loop's own drain on the test's own
+thread and asserts the request only reaches `ad_hoc_runs` there. `body.py`'s own closure and poll
+loop are not directly unit-tested (`main()`'s CLI wiring is untested by design, per `body-layer/
+CLAUDE.md`'s module map) — this test exercises the same queue field and the same `effector_engine.
+request_write` call the real wiring uses, at the boundary that is actually testable.
+
+**Required Fix 2 (differing-value second request).** Main-loop decision, consistent with U21 and
+`AiPilotWheelGoal`'s "latest wins, nothing lost" convention (`body-layer/CLAUDE.md`,
+flight-control): `effector_engine.request_write` now distinguishes the two cases its dedup check
+used to conflate. A second `effector.write` naming an effector that already has a pending ad hoc
+run is a no-op only if it names the **same** value (the pilot repeating themselves, or a rule
+re-firing — D1's own shape, unchanged); if it names a **different** value, the pending entry is
+replaced outright — new `request_id`, new `value`/`says`, the old entry discarded — so Petrovich's
+eventual spoken confirmation is always for the pilot's most recent instruction, never a stale
+earlier one. `config/rules/README.md`'s `effector.write` row now states both halves of this rule
+explicitly, so a future rule author is not surprised by either.
+
+Test added: `test_request_write_with_a_differing_value_replaces_the_pending_request`
+(`test_effector_engine.py`), beside the existing same-value no-op test.
+
+**Required Fix 3 (`says` length cap).** D20's own plan text promised `says` is "a free-text,
+length-capped string (the same cap `say()` already enforces)," but nothing enforced it. The cap
+(`_MAX_SAY_LEN` = 500) moved from `rules/engine.py` to `rules/actions.py` as `MAX_SAY_LEN` — a
+single declaration, not a duplicated magic number — because `rules/actions.py` cannot import from
+`rules/engine.py` (the reverse import already exists, D5) but `engine.py` already imports from
+`actions.py`, so this is the only non-cyclic shared home. `engine.py`'s `_SinkHolder.say` now
+imports and uses the same constant it always enforced; `rules/actions.py`'s `_write_effector` now
+truncates `says` to `MAX_SAY_LEN` characters (silently, matching `say()`'s own overflow behaviour)
+before ever calling `ctx.request_effector_write` — so neither the closure, the engine, nor the
+eventual spoken line ever sees an uncapped value.
+
+Tests added (`test_rules_actions.py`): `test_write_effector_caps_says_at_the_same_length_say_
+enforces` (an over-cap `says` is truncated to exactly `MAX_SAY_LEN` characters before reaching the
+closure) and `test_write_effector_says_within_the_cap_is_untouched` (a normal-length `says` passes
+through unchanged).
+
+**Optional refinement (explicit Lua `nil`).** Added `test_effector_write_says_explicit_nil_is_
+also_optional` (`test_rules_effector_action.py`) — see the corrected "Notable Discoveries" entry
+above for why the earlier "covered implicitly" claim was wrong.
+
+**Checks.** `.venv` built fresh from `/opt/homebrew/bin/python3.14` (none existed in this
+worktree); `ruff format --check`, `ruff check`, `mypy --strict src` (91 source files) all clean.
+`fast-tests.sh body-layer`: 2658 passed, 1 failed (`test_shipped_effector_config_loads_without_
+errors` — the named pre-existing, unrelated `seat-copilot.md` empty-row failure, untouched by
+this change), 4 xfailed — matches the dispatching brief's stated known failure exactly.

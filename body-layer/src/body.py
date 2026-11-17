@@ -164,7 +164,11 @@ from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.contacts import Contact, ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
-from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
+from belief.crew_console import (
+    ON_GROUND_AGL_THRESHOLD_M,
+    CrewConsole,
+    PendingEffectorWrite,
+)
 from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
 from belief.effector_engine import EffectorRunState, EffectorTrigger
 from belief.effector_engine import advance as advance_effectors
@@ -5069,13 +5073,44 @@ def _run_crew_text_poll_loop(
                                 runner.last_t_sim,
                             )
                             crew_console.weapon_safety_transition = None
+                        # `[[BL-17]]` D20 Stage 3d review, Required Fix 1
+                        # (`plans/speech-rules/review-stage3d.md`) --
+                        # every `effector.write` request queued since the
+                        # last poll (`crew_console.pending_effector_
+                        # writes`, appended to by `_request_effector_
+                        # write`'s closure above, possibly from the REPL
+                        # thread) is registered against `effector_state`
+                        # here, on the poll thread -- the same place
+                        # every other cross-thread effector signal above
+                        # (`observ_transition`/`weapon_safety_transition`)
+                        # is applied, and before `advance_effectors`
+                        # below so a newly dispatched write starts
+                        # progressing this same poll. Swap with a fresh
+                        # list rather than iterate-then-clear, so a
+                        # request appended during this exact swap lands
+                        # in the next poll's batch instead of being lost
+                        # to an unconditional `= []` after the loop.
+                        pending_writes, crew_console.pending_effector_writes = (
+                            crew_console.pending_effector_writes,
+                            [],
+                        )
+                        for pending_write in pending_writes:
+                            runner.effector_state = request_effector_write(
+                                runner.effector_state,
+                                pending_write.request_id,
+                                pending_write.effector,
+                                pending_write.value,
+                                pending_write.says,
+                                runner.last_t_sim,
+                            )
                         # Advances every currently-running trigger by at
                         # most one write each, in fire order (D9) --
-                        # takeoff and any of the four transitions fired
-                        # above all progress in this one call. No
-                        # `readback` argument any more (Stage 4) -- each
-                        # running trigger makes its own one-shot
-                        # `client.read_args(...)` call internally.
+                        # takeoff, any of the four transitions fired
+                        # above, and any ad hoc write just registered
+                        # all progress in this one call. No `readback`
+                        # argument any more (Stage 4) -- each running
+                        # trigger makes its own one-shot `client.read_
+                        # args(...)` call internally.
                         runner.effector_state = advance_effectors(
                             runner.effector_state,
                             runner.last_t_sim,
@@ -6523,9 +6558,16 @@ def main() -> None:
     # (not in `rules.actions`, same reasoning D4/D5 already give for
     # `rule_runner`: keeps `rules.*` from importing `belief.effector_
     # engine`/`belief.effector_registry` directly). Validates `name`/
-    # `value` against this runtime's own loaded registry; on success,
-    # mints a fresh request id and mutates `crew_runner.effector_state`
-    # in place (mirrors `fire_effector_trigger`'s own call shape above).
+    # `value` against this runtime's own loaded registry and queues the
+    # request on success (Stage 3d review Required Fix 1) -- it no
+    # longer mutates `crew_runner.effector_state` itself: `handle_command`
+    # is reachable from both the poll thread (voice) and the REPL thread
+    # (typed input), so a direct read-modify-write here could race the
+    # poll loop's own `effector_state` assignments below. The actual
+    # `effector_engine.request_write` call happens only on the poll
+    # thread, once per poll, draining `crew_console.pending_effector_
+    # writes` (see that field's own docstring) immediately before
+    # `advance_effectors` runs.
     # `crew_runner.last_t_sim` is `None` only before the poll loop's
     # first successful poll -- a request that arrives that early (the
     # REPL thread, in principle, before telemetry exists) degrades to
@@ -6544,13 +6586,10 @@ def main() -> None:
         if crew_runner.last_t_sim is None:
             return {"ok": False, "reason": None}
         request_id = f"rule-{next(_next_ad_hoc_request_id)}"
-        crew_runner.effector_state = request_effector_write(
-            crew_runner.effector_state,
-            request_id,
-            name,
-            value_name,
-            says,
-            crew_runner.last_t_sim,
+        crew_console.pending_effector_writes.append(
+            PendingEffectorWrite(
+                request_id=request_id, effector=name, value=value_name, says=says
+            )
         )
         return {"ok": True, "reason": None}
 

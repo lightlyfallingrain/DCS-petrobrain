@@ -29,10 +29,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
     from belief.crew_console import CrewConsole
+
+#: Cap on any free-text spoken line a rule produces via this module's own
+#: action wrappers -- today, `effector.write`'s `says`. The same bound
+#: `engine.py`'s `say()` enforces on every line spoken through *that*
+#: path (`_SinkHolder.say`); declared here, and imported by `engine.py`,
+#: rather than duplicated there, because `engine.py` already imports from
+#: this module (D5) and the reverse import would cycle. Stage 3d review
+#: Required Fix 3 (`plans/speech-rules/review-stage3d.md`): the plan's
+#: own D20 text promised `says` is "a free-text, length-capped string
+#: (the same cap `say()` already enforces)," but nothing enforced it
+#: until this fix.
+MAX_SAY_LEN: Final[int] = 500
 
 
 @dataclass
@@ -153,13 +165,21 @@ def _write_effector(ctx: ActionContext, args: dict[str, object]) -> dict[str, ob
     are. An unknown effector name, an illegal value name for that
     effector, or (defensively) a context built with no registry/runner
     to close over all answer the same closed reason, `"UNKNOWN_EFFECTOR"`
-    -- the request never reaches the engine in any of those cases."""
+    -- the request never reaches the engine in any of those cases.
+
+    `says` is capped at `MAX_SAY_LEN` here, the same silent-truncation
+    behaviour `say()` applies (Stage 3d review Required Fix 3) --
+    checked before the closure is ever called, so neither the closure
+    nor anything downstream of it (the engine, the eventual spoken line)
+    ever sees an uncapped value."""
     name = args["name"]
     value = args["value"]
     says = args["says"]
     assert isinstance(name, str)
     assert isinstance(value, str)
     assert says is None or isinstance(says, str)
+    if says is not None and len(says) > MAX_SAY_LEN:
+        says = says[:MAX_SAY_LEN]
     if ctx.request_effector_write is None:
         return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
     return ctx.request_effector_write(name, value, says)
