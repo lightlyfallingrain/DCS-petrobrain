@@ -383,6 +383,12 @@ the branch only if run before merge. The air start and AI-overlay setup are refe
 **Later stages: the remaining ~80 commands, one rule file per group** (U6; planned in its own
 pass when scheduled):
 
+> **This run stops after Stage 3** (user, 2026-11-17): *"stop after stage 3. That's a good place to
+> merge what is build and plan what stages to take next and whether some are needed sooner and some
+> later. I'd say that we start with the flight control commnads and then see about the others."*
+> Stages 0–3 go through Reviewer, Performance, Security and DoD as one batch, then merge. The table
+> below is a provisional order only; it is re-planned with the user, flight-control commands first.
+
 | stage | file | commands | why this order |
 |---|---|---|---|
 | 4 | `flight.lua` | `turn_heading` (three digits now enforced, U2), `level_flight`, speed, altitude, `hold_altitude`, `level_off`, HVRT bare words | same actions family as Stage 2, lowest risk; the bare single words test the guard (D9) |
