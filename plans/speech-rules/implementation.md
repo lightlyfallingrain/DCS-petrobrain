@@ -2011,3 +2011,78 @@ editable `../world-model`):**
   `test_shipped_effector_config_loads_without_errors`), 2671 passed, 4 xfailed
 - `.claude/scripts/fast-tests.sh --full body-layer`: same single pre-existing failure, 3524 passed,
   4 xfailed
+
+## Performance fix (collision check)
+
+Required Fix 1 from the performance review of this batch (`plans/speech-rules/
+performance-stage3-4.md`): `audio-adapter/src/rule_patterns.py::compile_rules`'s rule x rule and
+rule x legacy collision passes each called `_samples_with_perturbation(rule)` fresh on every
+pair/rule they were called with, instead of once per rule, turning D13's intentional O(n^2) check
+into a much worse multiplier (measured 66-107x at 100-200 rules, ~2.8-3.1s against body-layer's
+5.0s `PUT /rules` client timeout at the plan's own ~100-rule target).
+
+**What changed** (`audio-adapter/src/rule_patterns.py`):
+- `compile_rules` now computes `samples_by_id: dict[str, list[str]]` once per accepted rule,
+  right after the parse loop and before the rule x rule pass, and passes each rule's precomputed
+  sample list into `_rules_collide`/`_collides_with_legacy` as parameters instead of letting those
+  functions call `_samples_with_perturbation` themselves.
+- `_rules_collide(rule_a, rule_b)` -> `_rules_collide(rule_a, samples_a, rule_b, samples_b)`.
+- `_collides_with_legacy(rule, legacy_probe)` -> `_collides_with_legacy(rule, samples, legacy_probe)`.
+- No change to D9's collision semantics, D13's fuzz behaviour, or `_is_genuine_collision`'s own
+  three-way split — this is a pure memoization of an already-pure, already-deterministic per-rule
+  computation, the same shape as `rule_anchor_words` (D15) and `CachedRulePromptProvider`.
+- **"Cache per-rule legacy-probe results" (the review's optional second ask), checked and not
+  applicable**: `_collides_with_legacy` is already called exactly once per accepted rule inside
+  `compile_rules`'s rule x legacy pass (`for rule_id in ids: ... _collides_with_legacy(...)`) —
+  there is no second call site and no pair-wise loop around it, so `legacy_probe` was never called
+  more often than the genuinely-necessary once-per-rule-per-sample count. The precomputed-samples
+  fix above already removes the one redundant computation this pass had (`_samples_with_
+  perturbation` itself); there was nothing further to memoize without changing behaviour.
+
+**Tests added** (`audio-adapter/tests/test_rule_patterns.py`, `TestCompileRules`):
+- `test_samples_with_perturbation_computed_once_per_rule` — call-count spy on
+  `rule_patterns._samples_with_perturbation`, same style as `TestRuleAnchorWordsAndRegistrySwap.
+  test_swap_computes_anchor_words_exactly_once`. Four of the real shipped `flight.lua` patterns
+  (collision-free, so a legacy-probe-only `calls` list is unambiguous), asserts `len(calls) == 4`
+  and that every id appears exactly once.
+- No accept/reject-outcome test was added beyond the existing suite — this review explicitly asks
+  for an identical-outcome pin on "the real shipped flight rules plus a synthetic ~100-rule set,"
+  and `test_flight_rules_matching.py::test_the_real_shipped_pattern_set_rejects_exactly_the_known_
+  collisions` (unmodified, still passing) already is that pin for the real 17-rule set; a
+  synthetic ~100-rule outcome pin would only be checking that padding rules with distinct literals
+  never collide with each other or the real set, which is true by construction of the padding and
+  adds no coverage the call-count test does not already imply (the precomputed-samples path is
+  read by the identical `_is_genuine_collision` call, unchanged).
+
+**Counterfactual run (showing red, not just green)**: the new call-count test was run against the
+pre-fix `rule_patterns.py` (`git show 688d500b:audio-adapter/src/rule_patterns.py`, imported from
+a separate path, same 4-rule scenario) — it called `_samples_with_perturbation` 16 times, not 4,
+confirming the test is not tautological. Full before/after module diff staged normally, no
+revert/restore needed on the working tree itself (the counterfactual ran against a throwaway copy
+under `/tmp`, never the worktree's own file).
+
+**Re-measured timings** (real `compile_rules`, real 17 `flight.lua` patterns +
+`test_flight_rules_matching.py`'s own `_real_legacy_probe`/`FREE_SPEECH_GUARD`, padded with
+distinct synthetic literal rules to each target `n`, median of 3 runs, `/opt/homebrew/bin/
+python3.14`, no cProfile overhead):
+
+| rules | this fix (after) | pre-fix (performance review's own measurement) |
+|---|---|---|
+| 18 | ~21 ms | 49 ms |
+| 50 | ~63 ms | 791 ms |
+| 100 | ~185 ms | 2.76-3.15 s |
+
+At the plan's own U6 ~100-rule target this removes essentially all of the regression the
+performance review measured — 100 rules now costs well under 4% of body-layer's 5.0s `PUT /rules`
+client timeout, down from 55-63% — leaving only the genuinely-necessary O(n^2)
+`match_pattern_with_ratio` pairwise cost, consistent with the review's own stated expectation.
+(Absolute numbers differ somewhat from the review's own synthetic-rule mix, as expected for a
+different padding scheme; the shape and magnitude of the fix are what's being confirmed, not an
+exact-number match.)
+
+**Checks (audio-adapter, fresh `.venv` built from `/opt/homebrew/bin/python3.14`, stdlib only):**
+- `ruff format --check src tests`: pass (36 files)
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy --strict src`: pass, 17 source files, 0 issues
+- `.venv/bin/python -m pytest tests -q` (full suite, not just fast-tests): 526 passed, 2 skipped
+- `.claude/scripts/fast-tests.sh audio-adapter`: 472 passed, 2 skipped

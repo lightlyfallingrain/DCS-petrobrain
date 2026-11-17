@@ -997,15 +997,27 @@ def _is_genuine_collision(
     return False
 
 
-def _rules_collide(rule_a: CompiledRule, rule_b: CompiledRule) -> bool:
-    for sample in _samples_with_perturbation(rule_a):
+def _rules_collide(
+    rule_a: CompiledRule,
+    samples_a: list[str],
+    rule_b: CompiledRule,
+    samples_b: list[str],
+) -> bool:
+    """`samples_a`/`samples_b` are each rule's own precomputed
+    `_samples_with_perturbation` result -- passed in rather than
+    recomputed here (performance fix, 2026-11-17): `compile_rules`'s
+    rule x rule pass calls this once per pair, `C(n,2)` times, so
+    recomputing a pure per-rule value on every call rebuilt it
+    `~2(n-1)` times instead of once (measured 66-107x regression at
+    100-200 rules, `plans/speech-rules/performance-stage3-4.md`)."""
+    for sample in samples_a:
         other = match_pattern_with_ratio(rule_b.elements, sample.split())
         if other is None:
             continue
         own_ratio = _own_ratio(rule_a, sample)
         if _is_genuine_collision(rule_a.id, sample, own_ratio, rule_b.id, other[1]):
             return True
-    for sample in _samples_with_perturbation(rule_b):
+    for sample in samples_b:
         other = match_pattern_with_ratio(rule_a.elements, sample.split())
         if other is None:
             continue
@@ -1015,7 +1027,9 @@ def _rules_collide(rule_a: CompiledRule, rule_b: CompiledRule) -> bool:
     return False
 
 
-def _collides_with_legacy(rule: CompiledRule, legacy_probe: LegacyProbe) -> bool:
+def _collides_with_legacy(
+    rule: CompiledRule, samples: list[str], legacy_probe: LegacyProbe
+) -> bool:
     """A hit counts only when the legacy probe resolves to a **different**
     token than `rule`'s own id (`[[BL-17]]` Stage 4 fix) -- without this,
     every HVRT bare-word rule (`hvrt_translate_left`/`hvrt_hold`/...)
@@ -1030,8 +1044,14 @@ def _collides_with_legacy(rule: CompiledRule, legacy_probe: LegacyProbe) -> bool
     **Recalibrated 2026-11-17** (see `_is_genuine_collision`'s own
     docstring): a probe resolving to some *other* token is no longer
     automatically a collision -- it is one only when that resolution
-    beats, or exactly ties, `rule`'s own ratio on the same sample."""
-    for sample in _samples_with_perturbation(rule):
+    beats, or exactly ties, `rule`'s own ratio on the same sample.
+
+    `samples` is `rule`'s own precomputed `_samples_with_perturbation`
+    result, passed in rather than recomputed here (same performance fix
+    as `_rules_collide` -- this pass is already O(n), one call per rule,
+    so the precomputation saves nothing here beyond letting `compile_
+    rules` compute every rule's samples in one place)."""
+    for sample in samples:
         probe = legacy_probe(sample)
         if probe.token is None or probe.token == rule.id:
             continue
@@ -1166,6 +1186,16 @@ def compile_rules(
             continue
         accepted[rule_id] = CompiledRule(id=rule_id, pattern=pattern, elements=elements)
 
+    # Performance fix, 2026-11-17 (`plans/speech-rules/performance-stage3-4.md`
+    # Required Fix 1): each accepted rule's own perturbed-sample set is a
+    # pure function of that rule alone, computed once here rather than
+    # inside the O(n^2) rule x rule pass below -- the un-memoized version
+    # rebuilt it ~2(n-1) times per rule across that pass's C(n,2) pairs,
+    # measured as a 66-107x regression at 100-200 rules.
+    samples_by_id: dict[str, list[str]] = {
+        rid: _samples_with_perturbation(r) for rid, r in accepted.items()
+    }
+
     disabled: set[str] = set()
     ids = sorted(accepted)
     for i, id_a in enumerate(ids):
@@ -1174,14 +1204,21 @@ def compile_rules(
         for id_b in ids[i + 1 :]:
             if id_b in disabled:
                 continue
-            if _rules_collide(accepted[id_a], accepted[id_b]):
+            if _rules_collide(
+                accepted[id_a],
+                samples_by_id[id_a],
+                accepted[id_b],
+                samples_by_id[id_b],
+            ):
                 disabled.add(id_a)
                 disabled.add(id_b)
 
     for rule_id in ids:
         if rule_id in disabled:
             continue
-        if _collides_with_legacy(accepted[rule_id], legacy_probe):
+        if _collides_with_legacy(
+            accepted[rule_id], samples_by_id[rule_id], legacy_probe
+        ):
             disabled.add(rule_id)
 
     for rule_id in ids:

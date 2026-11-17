@@ -413,6 +413,49 @@ class TestCompileRules:
         assert accepted == []
         assert {r.id for r in rejected} == {"scan_rule", "scam_rule"}
 
+    def test_samples_with_perturbation_computed_once_per_rule(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Performance fix, 2026-11-17 (`plans/speech-rules/
+        performance-stage3-4.md` Required Fix 1) -- `compile_rules`
+        precomputes each accepted rule's `_samples_with_perturbation`
+        once, before the O(n^2) rule x rule pass, rather than letting
+        `_rules_collide`/`_collides_with_legacy` recompute it on every
+        pair/rule they are called with. Same call-count-spy style as
+        `TestRuleAnchorWordsAndRegistrySwap.
+        test_swap_computes_anchor_words_exactly_once` above. Four of the
+        real shipped `flight.lua` patterns (`test_flight_rules_matching.
+        py`'s own `_FLIGHT_RULE_PATTERNS` pins the full 17 as
+        collision-free, so any subset is too, against the no-op legacy
+        probe used here) -- the un-fixed code called this `~2*(n-1)`
+        times per rule across the rule x rule pass alone (`n=4` -> 6
+        pairs, 12 calls) plus once more per rule in the rule x legacy
+        pass; the fixed code calls it exactly `n` times total,
+        regardless of how many pairs/passes a rule's precomputed
+        samples are then read from."""
+        calls: list[str] = []
+        original = rule_patterns._samples_with_perturbation
+
+        def spy(rule: CompiledRule) -> list[str]:
+            calls.append(rule.id)
+            return original(rule)
+
+        monkeypatch.setattr(rule_patterns, "_samples_with_perturbation", spy)
+
+        raw = [
+            ("turn_heading_relative", "turn <direction:left|right> <degrees:angle>"),
+            ("level_flight", "level flight"),
+            ("set_speed", "speed <speed_target:speed_target>"),
+            ("hold_altitude", "hold <verb:altitude|alt>"),
+        ]
+        accepted, rejected = compile_rules(
+            raw, legacy_probe=self._no_legacy_hit, free_speech_guard=()
+        )
+        assert {r.id for r in accepted} == {rid for rid, _ in raw}
+        assert rejected == []
+        assert sorted(calls) == sorted(rid for rid, _ in raw)
+        assert len(calls) == 4
+
 
 class TestLiteralFuzz:
     """`[[BL-17]]` D13 -- a `LiteralElement` tolerates a mis-transcribed
