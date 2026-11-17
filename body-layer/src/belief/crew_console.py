@@ -1380,27 +1380,20 @@ class PendingEffectorWrite:
     GIL-atomic, so concurrent dispatches still mint distinct ids), not
     here.
 
-    `dispatch_token` (Stage 3d re-review Required Fix 4) identifies
-    *which* `_dispatch_rule` call queued this entry -- `None` only for a
-    test that builds this dataclass directly without going through
-    `CrewConsole.queue_effector_write` (the one appender that stamps it,
-    so a real caller can never forget to). `_dispatch_rule` mints the
-    current thread's live token (`CrewConsole.current_dispatch_token`)
-    at dispatch start, and -- on a Lua error raised later in that same
-    dispatch -- filters `pending_effector_writes` by this field to roll
-    back exactly this dispatch's own entries. Identity, not a
-    length/count snapshot of the shared list: `pending_effector_writes`
-    is appended to from either thread without a lock (GIL-atomic
-    `list.append`), so a position-based truncate would also discard
-    whatever the *other* thread legitimately queued in the same window
-    (`feedback_rollback_on_lockfree_queue_must_use_identity_not_length.
-    md`)."""
+    No `dispatch_token` field (Stage 3d re-review, Fix 4 round 2,
+    `plans/speech-rules/review-stage3d.md`'s "Re-review (Fix 4)"
+    section): round 1's identity-based rollback filtered this field out
+    of the shared list *after* it was already visible there, which the
+    poll loop's own unconditional drain (Required Fix 1) could win a
+    race against -- draining an entry away before the rollback ever ran
+    to remove it. Round 2 instead keeps a dispatch's own entries off the
+    shared list entirely until the dispatch itself decides they stand;
+    see `queue_effector_write`/`_dispatch_rule`."""
 
     request_id: str
     effector: str
     value: str
     says: str | None
-    dispatch_token: object | None = None
 
 
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
@@ -1570,19 +1563,25 @@ class CrewConsole:
     #: legitimately be requested before the poll loop next drains this
     #: field. Appended to only via `queue_effector_write` below -- never
     #: construct and append a `PendingEffectorWrite` directly outside a
-    #: test, so `dispatch_token` can never be forgotten (Stage 3d
-    #: re-review Required Fix 4: `body.py`'s original closure appended
-    #: one by hand with no token, so the rollback had nothing to find in
-    #: production). `list.append` is GIL-atomic, so concurrent appends
-    #: from the poll thread's own `handle_transcript` and the REPL
-    #: thread's `handle_line` cannot lose an entry the way a direct
-    #: `EffectorRunState` mutation could -- the race this fix exists to
-    #: close -- and drained wholesale by the poll loop, which calls
-    #: `belief.effector_engine.request_write` for each entry against
-    #: `ConsolePerceptionRunner.effector_state` -- the one place that
-    #: mutation is now allowed to happen. Deliberately **not** reset by
+    #: test. **Only ever holds entries from a dispatch that has already
+    #: finished and succeeded** (Stage 3d re-review, Fix 4 round 2):
+    #: while a `_dispatch_rule` call is in flight, any write its own Lua
+    #: handler requests sits in that call's own thread-local buffer, not
+    #: here -- `_dispatch_rule` extends this list with the buffer's
+    #: contents on success, or drops the buffer untouched on error, only
+    #: after `rule_runner` has already returned. This is what makes
+    #: `list.extend`'s own GIL-atomicity sufficient (no lock, same as
+    #: the plain `list.append` a write queued outside any dispatch still
+    #: uses): the poll loop's unconditional per-poll drain, below, can
+    #: only ever see a dispatch's writes in the all-or-nothing state its
+    #: own rollback already decided, never a write it queued but has not
+    #: yet decided to keep -- the race Fix 4 round 1's token-filter
+    #: rollback was still exposed to (`project_bl17_fix4_rollback_races_
+    #: fix1_drain.md`: round 1 filtered this field *after* an entry was
+    #: already visible on it, which the drain could win a race to empty
+    #: before the filter ever ran). Deliberately **not** reset by
     #: `_reset_one_shot_command_state` (same reasoning as `where_is_it_
-    #: requested`): an entry queued
+    #: requested`): an entry committed
     #: by an earlier dispatch this poll has not yet drained must survive
     #: an unrelated later command in between, not just the next poll
     #: boundary. Resets to empty on a mission (re)start for free (not in
@@ -1590,16 +1589,17 @@ class CrewConsole:
     #: itself is dropped wholesale then too (D11) -- a pre-restart request
     #: would otherwise apply against the wrong mission's state.
     pending_effector_writes: list[PendingEffectorWrite] = field(default_factory=list)
-    #: Thread-local holding the calling thread's own in-flight `_dispatch_
-    #: rule` token (Stage 3d re-review Required Fix 4) -- `object()`,
-    #: minted fresh per dispatch. Read via `current_dispatch_token` by
-    #: `queue_effector_write`, the one place that stamps `PendingEffector
-    #: Write.dispatch_token` at append time. Thread-local, not a plain
-    #: field, because the poll thread and the REPL thread each run their
-    #: own `_dispatch_rule` call independently and must never see or
-    #: overwrite each other's token. `.token` is unset (reads as `None`
-    #: via `getattr`) outside any dispatch.
-    _dispatch_token_local: threading.local = field(
+    #: Thread-local holding the calling thread's own in-flight
+    #: `_dispatch_rule` call's write buffer (Stage 3d re-review, Fix 4
+    #: round 2) -- `None` outside any dispatch, else the `list[
+    #: PendingEffectorWrite]` `_dispatch_rule` itself created for this
+    #: call. `queue_effector_write` appends to this buffer when one is
+    #: open, so a write requested mid-dispatch never reaches
+    #: `pending_effector_writes` until `_dispatch_rule` commits it.
+    #: Thread-local, not a plain field, because the poll thread and the
+    #: REPL thread each run their own `_dispatch_rule` call independently
+    #: and must never see or overwrite each other's buffer.
+    _dispatch_write_buffer_local: threading.local = field(
         default_factory=threading.local, repr=False, compare=False
     )
     #: BL-16 mode 2 Stage P2a's own one-shot signal to `body.py`'s poll
@@ -3177,37 +3177,31 @@ class CrewConsole:
             eyes_free=True,
         )
 
-    def current_dispatch_token(self) -> object | None:
-        """The calling thread's own in-flight `_dispatch_rule` token, or
-        `None` outside one -- read by `queue_effector_write` to stamp
-        `PendingEffectorWrite.dispatch_token` at append time (Stage 3d
-        re-review Required Fix 4). Thread-local: see `_dispatch_token_
-        local`'s own docstring for why."""
-        return getattr(self._dispatch_token_local, "token", None)
-
     def queue_effector_write(
         self, request_id: str, effector: str, value: str, says: str | None
     ) -> None:
-        """The one appender of `pending_effector_writes` -- stamps
-        `dispatch_token=self.current_dispatch_token()` itself, so a
-        caller can never forget it. Added as a follow-up to the Stage 3d
-        re-review Required Fix 4 commit: that commit's own rollback was
-        correct, but `body.py`'s real `_request_effector_write` closure
-        still appended a bare `PendingEffectorWrite` by hand with no
-        token, so in production the rollback above had nothing to find
-        -- only a test closure that happened to pass the token itself
-        ever exercised it. `body.py`'s closure and every test that
-        queues a write now call this instead of constructing
-        `PendingEffectorWrite` directly."""
-        self.pending_effector_writes.append(
-            PendingEffectorWrite(
-                request_id=request_id,
-                effector=effector,
-                value=value,
-                says=says,
-                dispatch_token=self.current_dispatch_token(),
-            )
+        """The one construction site for `PendingEffectorWrite`. Inside
+        a `_dispatch_rule` call on the calling thread, appends to that
+        call's own thread-local buffer (`_dispatch_write_buffer_local`)
+        instead of `pending_effector_writes` directly -- the entry only
+        reaches the shared list if and when `_dispatch_rule` itself
+        commits the buffer, never before (Stage 3d re-review, Fix 4
+        round 2: round 1 appended straight to the shared list and rolled
+        back by identity afterward, which the poll loop's own
+        unconditional drain could win a race against). Outside any
+        dispatch -- the one caller that reaches this with no open buffer
+        is a test that calls `run_rule` directly rather than through
+        `handle_command`/`_dispatch_rule` -- there is no dispatch to
+        commit against, and also none to roll back, so the entry is
+        appended straight to the shared list exactly as before."""
+        write = PendingEffectorWrite(
+            request_id=request_id, effector=effector, value=value, says=says
         )
+        buffer = getattr(self._dispatch_write_buffer_local, "buffer", None)
+        if buffer is not None:
+            buffer.append(write)
+        else:
+            self.pending_effector_writes.append(write)
 
     def _dispatch_rule(
         self, rule_id: str, slots: dict[str, int | str] | None
@@ -3222,38 +3216,39 @@ class CrewConsole:
         this is unreachable in that case; the `assert` documents that
         rather than silently returning `[]`.
 
-        Mints a fresh dispatch token (Stage 3d re-review Required Fix 4)
-        before calling `rule_runner`, so any `effector.write` the
-        handler makes -- possibly more than one -- is stamped with it via
-        `current_dispatch_token`. On a Lua error, D6's rollback must also
-        undo those queued writes, not just the one-shot transition
-        fields `_reset_one_shot_command_state` already clears: a switch
-        must not move, and no confirmation must be spoken, for an action
-        whose own dispatch just reported "Action file error." The filter
-        is by this token's identity, never a length/count snapshot of
-        `pending_effector_writes` -- that field is shared and appended to
-        from either thread without a lock, so a position-based truncate
-        would also discard whatever the *other* thread legitimately
-        queued in the same window. This does not cover D20's own
-        already-accepted case: an ad hoc write that queues cleanly here
-        and only fails on a *later* poll, after this dispatch has already
-        returned -- that is not a dispatch-time error at all, and stays
-        unrolled-back exactly as D20 decided."""
-        token = object()
-        self._dispatch_token_local.token = token
+        Buffer-then-commit (Stage 3d re-review, Fix 4 round 2,
+        `plans/speech-rules/review-stage3d.md`'s "Re-review (Fix 4)"
+        section): opens a fresh thread-local buffer before calling
+        `rule_runner`, so any `effector.write` the handler makes --
+        possibly more than one -- lands in this call's own buffer via
+        `queue_effector_write`, never directly on the shared
+        `pending_effector_writes`. On success, the buffer's entries are
+        extended onto the shared list in one `list.extend` call (GIL-
+        atomic, same no-lock posture `list.append` already relied on);
+        on a Lua error, the buffer is simply discarded -- nothing it
+        holds was ever visible on the shared list for the poll loop's
+        own unconditional drain (Required Fix 1) to pick up, so there is
+        nothing left to roll back by the time this returns. This
+        replaces round 1's identity-stamped filter-after-the-fact, which
+        a drain landing between "write appended" and "rollback runs"
+        could defeat (`project_bl17_fix4_rollback_races_fix1_drain.md`).
+        This does not cover D20's own already-accepted case: an ad hoc
+        write that commits cleanly here and only fails on a *later*
+        poll, after this dispatch has already returned -- that is not a
+        dispatch-time error at all, and stays unrolled-back exactly as
+        D20 decided."""
+        buffer: list[PendingEffectorWrite] = []
+        self._dispatch_write_buffer_local.buffer = buffer
         try:
             assert self.rule_runner is not None
             lines, error = self.rule_runner(rule_id, slots)
         finally:
-            self._dispatch_token_local.token = None
+            self._dispatch_write_buffer_local.buffer = None
         if error:
             self._reset_one_shot_command_state()
-            self.pending_effector_writes = [
-                write
-                for write in self.pending_effector_writes
-                if write.dispatch_token is not token
-            ]
             return [ACTION_FILE_ERROR_LINE]
+        if buffer:
+            self.pending_effector_writes.extend(buffer)
         return lines
 
     def _handle_rule(

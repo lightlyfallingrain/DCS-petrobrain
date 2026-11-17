@@ -1761,3 +1761,112 @@ files) all clean. `fast-tests.sh body-layer`: 2663 passed, 1 failed (the same na
 `test_shipped_effector_config_loads_without_errors`), 4 xfailed — three more passing tests than the
 prior round, matching the three added. `test_rules_effector_action.py` directly: 12 tests, all
 pass.
+
+### Required Fix 4, round 2 — buffer then commit
+
+**Why round 1 was not enough.** The re-review's "Re-review (Fix 4)" section
+(`plans/speech-rules/review-stage3d.md`) demonstrated, against the unmodified round-1 code, that
+the poll loop's own unconditional per-poll drain (Required Fix 1's mechanism,
+`pending_writes, crew_console.pending_effector_writes = crew_console.pending_effector_writes, []`)
+could run *inside* a still-open REPL-thread dispatch's window — after that dispatch's own
+`effector.write` call had already appended to the shared list, but before the same dispatch's
+later error ran the token-filter rollback. The drain would remove the entry (correctly stamped
+with the dispatch's token) and feed it straight into `effector_state`, where it started executing,
+before the rollback ever ran to find it. The entry was gone by the time the filter looked, not
+because nothing was queued, but because something else had already taken it — round 1's rollback
+filtered the shared list *after* an entry was visible on it, and anything else reading that same
+unlocked list first could always win that race.
+
+**The fix: keep a dispatch's own writes off the shared list until the dispatch itself has decided
+to keep them.** `CrewConsole` gains `_dispatch_write_buffer_local: threading.local` (replacing
+`_dispatch_token_local`) — `None`/unset outside any dispatch, else the `list[PendingEffectorWrite]`
+`_dispatch_rule` opened for *this* call on *this* thread. `queue_effector_write` checks it: if a
+buffer is open, the write is appended there, invisible to anything reading the shared
+`pending_effector_writes`; if not (the one path that reaches this with no open dispatch — a test
+calling `run_rule` directly rather than through `handle_command`/`_dispatch_rule`), it appends
+straight to the shared list exactly as before, since there is no dispatch to stage it under and
+none to roll back. `_dispatch_rule` opens a fresh buffer before calling `rule_runner`, and on
+return: success extends the shared list with the whole buffer in one `list.extend` call (GIL-
+atomic, same no-lock posture `list.append` already relied on — confirmed by reading CPython's
+`listextend`, which does not release the GIL mid-copy for a list argument); error discards the
+buffer untouched. Either way the shared list only ever receives a block of writes from a dispatch
+that has already finished and already succeeded, so the poll thread's drain can only ever see a
+dispatch's writes in the state its own outcome already decided — there is no window where a
+decision is still pending on the shared list for the drain to race.
+
+**`dispatch_token` is gone, not just unused.** `PendingEffectorWrite` no longer carries the field
+at all (removing, per the task's own direction, the identity-filter machinery round 1 needed and
+round 2 does not); `current_dispatch_token()` is removed with it. `queue_effector_write` remains
+the single construction site and the single appender, and `body.py`'s `_request_effector_write`
+closure needed no change at all — it already only ever called `crew_console.queue_effector_write
+(...)`, never constructed the dataclass itself, so the grep fences
+(`test_pending_effector_write_is_constructed_in_exactly_one_place_in_crew_console_py`,
+`test_body_py_never_constructs_pending_effector_write_directly`) needed no change either and both
+still pass unmodified.
+
+**Tests.** `test_rules_effector_action.py`:
+- `test_poll_thread_drain_during_an_open_dispatch_window_gets_nothing_from_it` (new) — the
+  reviewer's own probe interleaving, reproduced against the real `_dispatch_rule`/`handle_command`
+  path rather than argued from the call graph: opens a dispatch, pauses it mid-handler (past its
+  own `effector.write` call, before its own error), runs the poll loop's exact drain line from the
+  test thread during that open window, then lets the dispatch error. Asserts the drained batch was
+  empty and nothing reached a real `EffectorRunState`/`ad_hoc_runs` — the stronger claim the review
+  asked for, not just "`pending_effector_writes` ends up empty," which would also hold if the entry
+  had already been drained away and started executing.
+- `test_a_successful_dispatchs_write_commits_to_the_shared_list` (new) — the success side: a
+  dispatch with no later error must still land its write on `pending_effector_writes` once
+  `_dispatch_rule` returns.
+- `test_concurrent_dispatches_do_not_lose_each_others_queued_writes` (renamed from
+  `test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone`, same two-sandbox/two-thread
+  plumbing reused) — asserts only rule B's committed write is visible on the shared list while rule
+  A is still paused mid-dispatch (A's own write is sitting in A's own buffer, not the shared list
+  at all — a different, stronger reason than round 1's "both visible, a truncate must not drop
+  either"), and that B's entry survives untouched once A later errors and discards its own buffer.
+- `test_queue_effector_write_buffers_inside_a_dispatch_and_appends_directly_outside_one` (replaces
+  `test_queue_effector_write_stamps_the_current_dispatch_token`, which tested the now-removed
+  `dispatch_token` field directly) — exercises `queue_effector_write`'s own branch: outside a
+  dispatch it appends straight to the shared list; with a buffer set on the thread-local (the same
+  field `_dispatch_rule` itself opens), it appends there instead, leaving the shared list
+  unchanged.
+- `test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back` and
+  `test_effector_write_queued_from_background_thread_is_applied_on_next_poll_drain` — unchanged
+  assertions (docstrings updated to describe buffer-then-commit instead of rollback-by-identity);
+  both still exercise the behaviour they always did — the first through `_dispatch_rule`, the
+  second through `run_rule` directly, confirming the no-dispatch path still works.
+
+**Counterfactual run, not taken on faith.** Reverted `queue_effector_write` to append straight to
+the shared list unconditionally (the exact round-1 shape, minus the token stamp) — `shasum -a 256`
+confirmed the file's content before and after the probe. Four tests failed for the stated reason:
+the new probe test, the new buffer/no-buffer test, the renamed concurrency test, and (because an
+unrolled-back write now actually dispatched into Lua's own error path) the basic rollback test —
+each failure traced to the missing buffer, not an unrelated break. Restored the real file;
+`shasum -a 256` matched the pre-probe value exactly, and the full test file (14 tests) passed again
+unchanged.
+
+**Files changed:**
+- `belief/crew_console.py` — `PendingEffectorWrite.dispatch_token` field removed;
+  `_dispatch_token_local` renamed `_dispatch_write_buffer_local` (holds a buffer, not a token);
+  `current_dispatch_token()` removed; `queue_effector_write` now branches on whether a buffer is
+  open; `_dispatch_rule` opens/commits/discards a buffer instead of minting/filtering-by a token.
+  Docstrings on all four updated or replaced, not left describing the superseded mechanism (root
+  `CLAUDE.md`'s "Prune the comment you are standing next to").
+- `tests/test_rules_effector_action.py` — one test renamed with updated assertions/docstring
+  (`test_concurrent_dispatches_do_not_lose_each_others_queued_writes`), one test replaced
+  (`test_queue_effector_write_buffers_inside_a_dispatch_and_appends_directly_outside_one`), two
+  tests added (`test_poll_thread_drain_during_an_open_dispatch_window_gets_nothing_from_it`,
+  `test_a_successful_dispatchs_write_commits_to_the_shared_list`), one docstring updated for
+  accuracy with no assertion change; `PendingEffectorWrite` added to the existing `crew_console`
+  import for the new buffer test's type annotation.
+
+**Checks.** `.venv` built fresh from `/opt/homebrew/bin/python3.14` (none existed in this
+worktree); `ruff format --check`, `ruff check`, `mypy --strict src` (91 source files) all clean.
+`fast-tests.sh body-layer`: 2673 passed, 1 failed (the same named pre-existing
+`test_shipped_effector_config_loads_without_errors`), 4 xfailed — matches the task brief's stated
+known failure exactly. `test_rules_effector_action.py` directly: 14 tests, all pass.
+
+**Notable discovery:** none beyond what the counterfactual run above already surfaced — no new
+tuning-constant-shaped literal was introduced (a buffer is a `list`, not a magic number), and no
+other module references `dispatch_token`/`current_dispatch_token`/`_dispatch_token_local` (checked
+with `grep -rn` over `src/` and `tests/` before removing them; the only other hit,
+`tests/test_brain_reply.py::test_confirm_of_a_real_but_unoffered_dispatch_token_is_rejected`, is an
+unrelated confirm-band token with no connection to this mechanism).

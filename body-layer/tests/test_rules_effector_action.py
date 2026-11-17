@@ -19,7 +19,11 @@ from typing import cast
 import body as body_module
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
-from belief.crew_console import ACTION_FILE_ERROR_LINE, CrewConsole
+from belief.crew_console import (
+    ACTION_FILE_ERROR_LINE,
+    CrewConsole,
+    PendingEffectorWrite,
+)
 from belief.effector_engine import EffectorRunState, advance, request_write
 from belief.effector_registry import EffectorDef
 from rules.actions import ACTION_NAMESPACES, ActionContext
@@ -350,12 +354,16 @@ def test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back(
     """Stage 3d re-review Required Fix 4 (`plans/speech-rules/
     review-stage3d.md`), test (1), the basic case: a rule that calls
     `effector.write` and then raises later in the *same* dispatch must
-    have that write rolled back out of `pending_effector_writes` -- the
+    never have that write reach `pending_effector_writes` at all -- the
     switch must never move, and no confirmation must ever be spoken, for
     an action whose own dispatch just reported "Action file error."
-    Dispatched through the real `handle_command`/`_dispatch_rule` path,
-    not `run_rule` directly, since the gate/category/rollback plumbing
-    this is testing only exists on that path."""
+    Round 2 (buffer-then-commit) makes this a non-event rather than a
+    rollback: the write sits in `_dispatch_rule`'s own thread-local
+    buffer the whole time and the buffer is simply discarded on error,
+    so the shared list this test checks was never touched in the first
+    place. Dispatched through the real `handle_command`/`_dispatch_rule`
+    path, not `run_rule` directly, since the gate/category/buffer
+    plumbing this is testing only exists on that path."""
     (tmp_path / "r.lua").write_text(
         'when.speech("probe_write_then_error", "x", "always", function(s)\n'
         '  effector.write("observ", "on", "Observ on.")\n'
@@ -391,17 +399,23 @@ def test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back(
     assert console.pending_effector_writes == []
 
 
-def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
+def test_concurrent_dispatches_do_not_lose_each_others_queued_writes(
     tmp_path: Path,
 ) -> None:
-    """Stage 3d re-review Required Fix 4, test (2): the concurrency-
-    safety case the length-based shape the dispatching brief suggested
-    ("snapshot the queue length at dispatch start, truncate on error")
-    would fail -- a second, real background thread's own unrelated
-    `effector.write` call, queued while the first dispatch is still
-    mid-flight (already past its own `effector.write` call, not yet at
-    the error that rolls it back), must still be present in `pending_
-    effector_writes` after that rollback runs.
+    """Stage 3d re-review Required Fix 4, round 2, test (2): two
+    dispatches running concurrently on independent threads must not
+    interfere with each other's writes, in either direction -- rule A's
+    own write must stay invisible to the shared list while A is still
+    open (nothing for a concurrent drain to see), and rule B's own
+    write, committed while A is still paused, must survive untouched
+    once A later errors and discards its own buffer. Round 1's version
+    of this test asserted both entries were visible on the shared list
+    *while A was still open* (the point being that a length-based
+    truncate would wrongly discard B's entry too); round 2's buffer-
+    then-commit shape makes that assertion false for a different, better
+    reason -- A's own write was never on the shared list to begin with,
+    so there is nothing for any truncate, length-based or otherwise, to
+    get wrong.
 
     Uses two independent `RuleSandbox`es (two separate `LuaRuntime`s),
     one per dispatch, rather than sharing one sandbox between the two
@@ -409,11 +423,11 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     *single* shared runtime (`research/2026-11-17-lupa-sandbox.md` R4),
     which would force the two dispatches to run one after the other and
     never actually overlap. What is under test here is `CrewConsole`'s
-    own token-based rollback over the *shared* `pending_effector_writes`
-    list -- a field on `CrewConsole`, not on either sandbox -- so two
-    independent Lua runtimes feeding the same `CrewConsole` is a faithful
-    way to get real overlap without fighting a lock this test has
-    nothing to do with."""
+    own per-dispatch buffering over the *shared* `pending_effector_
+    writes` list -- a field on `CrewConsole`, not on either sandbox --
+    so two independent Lua runtimes feeding the same `CrewConsole` is a
+    faithful way to get real overlap without fighting a lock this test
+    has nothing to do with."""
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "r.lua").write_text(
         'when.speech("probe_a_write_then_error", "x", "always", function(s)\n'
@@ -439,10 +453,11 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     ) -> dict[str, object]:
         console.queue_effector_write(f"req-{name}", name, value, says)
         if name == "observ":
-            # Rule A's own write -- pause here, still holding rule A's
-            # own dispatch token on *this* thread, so the test can run
-            # rule B's whole dispatch to completion before letting A's
-            # error (and rollback) happen.
+            # Rule A's own write -- pause here, still inside A's own
+            # open `_dispatch_rule` call on *this* thread (so A's write
+            # sits only in A's own thread-local buffer, not yet on the
+            # shared list), so the test can run rule B's whole dispatch
+            # to completion before letting A's error happen.
             a_queued.set()
             assert allow_a_to_proceed.wait(timeout=5.0)
         return {"ok": True, "reason": None}
@@ -490,12 +505,11 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     thread_b.start()
     thread_b.join(timeout=5.0)
 
-    # Both entries coexist while A is still paused, mid-dispatch, before
-    # its own rollback has run -- a `del pending_effector_writes[0:]`
-    # truncate here would wrongly discard rule B's entry too.
+    # Only B's entry is visible while A is still paused, mid-dispatch --
+    # A's own write has not been committed yet, so it is sitting in A's
+    # own thread-local buffer, not on the shared list at all.
     assert [(w.effector, w.value) for w in console.pending_effector_writes] == [
-        ("observ", "on"),
-        ("weapons", "safe"),
+        ("weapons", "safe")
     ]
 
     allow_a_to_proceed.set()
@@ -507,38 +521,191 @@ def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
     ]
 
 
+def test_poll_thread_drain_during_an_open_dispatch_window_gets_nothing_from_it(
+    tmp_path: Path,
+) -> None:
+    """The new finding from the Stage 3d re-review's "Re-review (Fix 4)"
+    section: round 1's identity-stamped rollback could be defeated by
+    the poll thread's own unconditional per-poll drain (`body.py`'s
+    `pending_writes, crew_console.pending_effector_writes = crew_console.
+    pending_effector_writes, []`) landing *inside* an open dispatch's
+    window -- after its own `effector.write` call, before its own
+    error -- because that drain read the shared list before the
+    rollback ever ran to remove the entry. Reproduces that exact
+    interleaving against the real `_dispatch_rule`/`handle_command`
+    path, with the drain run from the test itself (standing in for the
+    poll thread) while the REPL-style dispatch is still paused mid-
+    handler, then lets the dispatch error -- and asserts the drain saw
+    *nothing* (not just that `pending_effector_writes` ends up empty,
+    which would also be true if the entry had been drained away and
+    then fed into a real `EffectorRunState`, the actual bug this guards
+    against)."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_write_then_error", "x", "always", function(s)\n'
+        '  effector.write("observ", "on", "Observ on.")\n'
+        '  digits("not_a_number")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    console = CrewConsole(store=ContactStore())
+    sandbox = RuleSandbox()
+    write_queued = threading.Event()
+    allow_dispatch_to_error = threading.Event()
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        console.queue_effector_write("req-1", name, value, says)
+        # Still inside the open dispatch, past the write, not yet at
+        # the error -- pause so the test can run the poll thread's own
+        # drain against the shared list during this exact window.
+        write_queued.set()
+        assert allow_dispatch_to_error.wait(timeout=5.0)
+        return {"ok": True, "reason": None}
+
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    def rule_runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_set, token, slots, sandbox)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = rule_runner
+    console.set_enabled_rule_ids(frozenset({"probe_write_then_error"}))
+
+    result: list[list[str]] = []
+    dispatch_thread = threading.Thread(
+        target=lambda: result.append(
+            console.handle_command("probe_write_then_error", 0.0)
+        )
+    )
+    dispatch_thread.start()
+    assert write_queued.wait(timeout=5.0)
+
+    # The poll thread's exact drain line (`body.py` ~line 5089), run
+    # from this thread while the dispatch above is still open.
+    drained, console.pending_effector_writes = console.pending_effector_writes, []
+    engine_state = EffectorRunState()
+    for request in drained:
+        engine_state = request_write(
+            engine_state,
+            request.request_id,
+            request.effector,
+            request.value,
+            request.says,
+            0.0,
+        )
+
+    # Nothing was there to drain -- the write is still sitting in the
+    # open dispatch's own thread-local buffer, not on the shared list.
+    assert drained == []
+    assert engine_state.ad_hoc_runs == {}
+
+    allow_dispatch_to_error.set()
+    dispatch_thread.join(timeout=5.0)
+
+    assert result == [[ACTION_FILE_ERROR_LINE]]
+    # The dispatch's own buffer was discarded on error -- still nothing
+    # on the shared list, and nothing was ever fed into the engine for
+    # this dispatch at all (`engine_state.ad_hoc_runs` above, asserted
+    # before the error even happened, already proves the stronger
+    # claim: not just "ends up empty" but "never had anything to lose").
+    assert console.pending_effector_writes == []
+
+
+def test_a_successful_dispatchs_write_commits_to_the_shared_list(
+    tmp_path: Path,
+) -> None:
+    """The success side of buffer-then-commit: a dispatch that calls
+    `effector.write` and returns cleanly (no later error) must have its
+    write land on `pending_effector_writes` once `_dispatch_rule`
+    returns, exactly as if it had been appended directly -- the buffer
+    is a staging area for the error case, not a behaviour change for
+    the ordinary one. Dispatched through the real `handle_command`/
+    `_dispatch_rule` path, since that is the only place a buffer is
+    opened at all."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_write_then_success", "x", "always", function(s)\n'
+        '  effector.write("observ", "on", "Observ on.")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    console = CrewConsole(store=ContactStore())
+    sandbox = RuleSandbox()
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        console.queue_effector_write("req-1", name, value, says)
+        return {"ok": True, "reason": None}
+
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    def rule_runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_set, token, slots, sandbox)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = rule_runner
+    console.set_enabled_rule_ids(frozenset({"probe_write_then_success"}))
+
+    lines = console.handle_command("probe_write_then_success", 0.0)
+
+    assert lines == []
+    assert [(w.effector, w.value, w.says) for w in console.pending_effector_writes] == [
+        ("observ", "on", "Observ on.")
+    ]
+
+
 # --- `queue_effector_write`: the one appender, and the one construction site ---
 #
 # `body.py`'s real `_request_effector_write` closure is nested inside `main()`,
 # which is untested by design (`body-layer/CLAUDE.md`'s module map: "`main()`'s
 # CLI wiring is untested by design -- the runners are tested against fakes"),
 # and cannot be exercised here without a live aircraft-layer/world-model setup.
-# The actual defect this follow-up closes -- a caller appending a bare
-# `PendingEffectorWrite` with no token, so the rollback above has nothing to
-# find -- is pinned two other ways instead: a direct test of what `queue_
-# effector_write` stamps, and a grep-enforced fence (the same shape `mission_
-# memory/store.py`'s own "single construction site" test already uses in this
-# codebase) proving `body.py` cannot reintroduce a hand-built `PendingEffector
-# Write` without failing a test.
+# The actual defect a prior follow-up closed -- a caller appending a bare
+# `PendingEffectorWrite` by hand, bypassing the one construction site -- is
+# pinned two other ways instead: a direct test of `queue_effector_write`'s own
+# buffer-or-direct-append behaviour, and a grep-enforced fence (the same shape
+# `mission_memory/store.py`'s own "single construction site" test already uses
+# in this codebase) proving `body.py` cannot reintroduce a hand-built
+# `PendingEffectorWrite` without failing a test.
 
 
-def test_queue_effector_write_stamps_the_current_dispatch_token() -> None:
-    """Outside any dispatch, `current_dispatch_token()` is `None`, so a
-    write queued there carries no token (nothing to roll back against,
-    which is correct -- there is no dispatch to roll back). Inside one
-    (simulated here by setting the thread-local directly, the same field
-    `_dispatch_rule` itself sets), the queued write carries that exact
-    token -- this is the one fact `body.py`'s real closure depends on to
-    participate in Stage 3d re-review Required Fix 4's rollback at all."""
+def test_queue_effector_write_buffers_inside_a_dispatch_and_appends_directly_outside_one() -> (
+    None
+):
+    """Outside any dispatch (`_dispatch_write_buffer_local` unset, its
+    ordinary state), `queue_effector_write` appends straight to the
+    shared `pending_effector_writes` -- there is no dispatch buffer to
+    stage the entry in, and none to roll back, so immediate visibility
+    is correct (this is the path `test_effector_write_queued_from_
+    background_thread_is_applied_on_next_poll_drain` above actually
+    exercises, via `run_rule` directly rather than `_dispatch_rule`).
+    Inside one (simulated here by setting the thread-local buffer
+    directly, the same field `_dispatch_rule` itself opens), the queued
+    write lands in that buffer instead -- not yet visible on the shared
+    list at all."""
     console = CrewConsole(store=ContactStore())
 
     console.queue_effector_write("req-1", "observ", "on", "Observ on.")
-    assert console.pending_effector_writes[-1].dispatch_token is None
+    assert len(console.pending_effector_writes) == 1
+    assert console.pending_effector_writes[-1].effector == "observ"
 
-    token = object()
-    console._dispatch_token_local.token = token
+    buffer: list[PendingEffectorWrite] = []
+    console._dispatch_write_buffer_local.buffer = buffer
     console.queue_effector_write("req-2", "weapons", "safe", "Weapons safe.")
-    assert console.pending_effector_writes[-1].dispatch_token is token
+    # Still just the one entry from before -- the new write went to the
+    # buffer, not the shared list.
+    assert len(console.pending_effector_writes) == 1
+    assert len(buffer) == 1
+    assert buffer[0].effector == "weapons"
 
 
 def test_pending_effector_write_is_constructed_in_exactly_one_place_in_crew_console_py() -> (
