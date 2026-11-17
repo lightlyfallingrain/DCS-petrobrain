@@ -306,6 +306,23 @@ pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-si
     </ul>
   </section>
 
+  <section class="card scope">
+    <h2>Before you fly — setup</h2>
+    <div class="block">
+      <div class="tag">1 &middot; Install the new dependency (Mac, once)</div>
+      <pre class="cmd"><span class="dir">from body-layer/</span>.venv/bin/pip install lupa==2.8</pre>
+    </div>
+    <p>Without it body-layer stops at startup with <code>No module named 'lupa'</code>.</p>
+    <div class="block">
+      <div class="tag">2 &middot; Restart audio-adapter from main</div>
+      <p>It has a new endpoint body-layer pushes the rules to. An adapter started before this merge rejects the push, and "turn left/right" stops working.</p>
+    </div>
+    <div class="block">
+      <div class="tag">3 &middot; Your seat-copilot.md has an empty row</div>
+      <p><code>body-layer/config/sequences/mi-24p/seat-copilot.md</code> (your commit from this morning) has one row with every cell empty. The loader rejects it as a malformed row. That disables that one file, and at startup Petrovich says "System error, bad sequence file". It has nothing to do with BL-17, but you will hear it on this flight. To fix it, delete the empty row or fill it in. I left the file alone because it is yours.</p>
+    </div>
+  </section>
+
   <section class="card verified">
     <h2>Already checked on the ground, no DCS needed</h2>
     <p class="verified-pill">&#10003; verified this pass</p>
