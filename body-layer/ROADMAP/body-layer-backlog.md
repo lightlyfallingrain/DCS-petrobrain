@@ -160,6 +160,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B119]] — effector sequence rows speak their `petrovich-says`; hard-coded observ/weapons readbacks removed (DoD-PASSED, merged `18f73b09`, `#needs-flight`)
 - [[BL-B121]] — same-poll pending-restart may speak a speaking sequence row's line twice; not reachable by any sequence shipped today, closes before a multi-row speaking sequence lands
 - [[BL-B122]] — a rejected/failed `ai_pilot_goal` write is marked sent and never retried; found in BL-16 Stage P2's security deep analysis, not blocking that merge
+- [[BL-B125]] — rule engine's instruction-count budget is counted in `debug.sethook` hook firings, ~1000× the real VM instruction count the named constants suggest; found in `[[BL-17]]` Stages 0/1b/2's security deep analysis, not blocking that merge
+- [[BL-B126]] — `PUT /rules`/`/transcribe` have no cap on body size or rule-list length; pre-existing posture inherited by a new endpoint; found in `[[BL-17]]` Stages 0/1b/2's security deep analysis, not blocking that merge
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
