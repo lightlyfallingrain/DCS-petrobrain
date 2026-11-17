@@ -156,6 +156,10 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
   > for the one ported rule in `review-stage1b-2.md` ("Turn left, 30." still matches; "turn left
   > thirty" falls to "say again", as the legacy handler did). Revisit before Stage 4+ ports
   > longer literal phrasing, where the fuzzy scorer's tolerance matters more.
+  >
+  > **User decision, same day:** *"near-miss wording should still match -> yes. STT is imperfect,
+  > we'll need some fuzzy matching."* Fuzzy rule matching is required, before or with the next
+  > porting stage (`body-layer/ROADMAP/BL-17.md`, "Near-miss wording must still match").
 - **D9 — The collision check, run by the adapter at `PUT` time, before anything is accepted.**
   1. Rule × rule: each rule's generated sample utterances (one per optional branch, slots filled
      with sample values from each type) are run against every other rule. A hit disables both.
