@@ -537,6 +537,11 @@ Belief — observation *consumption*:
   the two seats, read from `apw_seat` (`Export.lua`'s camera-based seat, `belief.ai_pilot_wheel.
   seat_change`): a change between two known seats only, never the mission's starting seat, and
   suppressed (re-baselined) while a mission (re)start resolves, same window as `takeoff`.
+  **`attack-run-start`/`attack-run-start-missiles`/`attack-run-stop`** (user, 2026-11-17) fire
+  on the edges of `runner.attack_run_state` (`body.attack_run_trigger_edges`): a start only when
+  no run was active, the missiles variant instead of the plain one, a stop on every end
+  (disengage, drop target, cancel, lost contact) but not a mission restart. Missile launch/impact
+  stay BL-B67's own `atgm-*` triggers.
 - `src/belief/altimeter_qnh_sync.py` (`[[BL-B118]]`, `plans/bl16-qnh-mission-start/plan.md`) —
   the operator (copilot) altimeter QNH sync: a self-calibrating secant loop on device 42/cmd
   3001/arg 834, armed by `body._maybe_start_altimeter_qnh_sync` at the same two moments
