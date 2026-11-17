@@ -50,13 +50,18 @@ def _console(**state_fields: object) -> CrewConsole:
     return console
 
 
-def _dispatching_console(**state_fields: object) -> CrewConsole:
+def _dispatching_console(
+    *, speech_client: object | None = None, **state_fields: object
+) -> CrewConsole:
     """Like `_console`, but wired for the **real** dispatch path
     (`handle_command` -> `_handle_rule`/`drain_pending_rule_dispatch` ->
     the category gate -> `_dispatch_rule` -> the real `run_rule` against
     the real shipped `flight.lua`) -- every Stage 4 gate/differential
     test below goes through this, not a direct `run_rule` call, so the
-    category gate is genuinely exercised rather than bypassed."""
+    category gate is genuinely exercised rather than bypassed.
+
+    `speech_client` (D19/U22's own tests, below) is optional and `None`
+    by default -- every pre-existing call site is unaffected."""
     console = _console(**state_fields)
     sandbox = RuleSandbox()
     ctx = ActionContext(console=console)
@@ -73,7 +78,29 @@ def _dispatching_console(**state_fields: object) -> CrewConsole:
         frozenset(rule_set.rules),
         {rid: r.category for rid, r in rule_set.rules.items()},
     )
+    if speech_client is not None:
+        console.speech_client = speech_client  # type: ignore[assignment]
     return console
+
+
+class _RecordingSpeechClient:
+    """A minimal `push_speech`-only double for D19/U22's own tests below
+    -- this file's own copy of `test_crew_console.py`'s
+    `FakeSpeechClient`, kept local rather than imported across test
+    files (no existing precedent for that in this subproject). Records
+    `(text, urgent)` pairs so a test can assert `bypass_gate` reached
+    `push_speech`'s `urgent` argument."""
+
+    def __init__(self) -> None:
+        self.pushed: list[tuple[str, bool]] = []
+
+    def push_speech(
+        self, text: str, urgent: bool, correlation_id: str | None = None
+    ) -> None:
+        self.pushed.append((text, urgent))
+
+    def stop(self) -> None:
+        pass
 
 
 def test_shipped_rule_files_load_with_zero_failures() -> None:
@@ -81,8 +108,9 @@ def test_shipped_rule_files_load_with_zero_failures() -> None:
     (D1: that is audio-adapter's job, over `PUT /rules`) -- every one of
     the 19 rules `flight.lua` declares loads cleanly here regardless of
     which ones the real adapter would later reject for a wording
-    collision (five, as of this stage -- see `plans/speech-rules/
-    implementation.md`'s own Stage 4 section for the full account)."""
+    collision (two, after the 2026-11-17 recalibration -- see
+    `plans/speech-rules/implementation.md`'s "Stage 4 follow-ups" section
+    for the full account)."""
     sandbox = RuleSandbox()
     ctx = ActionContext(console=CrewConsole(store=ContactStore()))
     rule_set = RuleSet.load(DEFAULT_RULES_DIR, sandbox, ACTION_NAMESPACES, ctx)
@@ -661,3 +689,100 @@ class TestTransitionsResetEachDispatch:
         assert console.ai_pilot_hvrt_transition is not None
         console.handle_command("radio_check", now_sim=0.1)
         assert console.ai_pilot_hvrt_transition is None
+
+
+class TestFlightReadbackUrgency:
+    """`[[BL-17]]` D19/U22 -- a flight-category rule's own readback may
+    cut off an in-flight routine callout (`CalloutScheduler.note_urgent`,
+    reused rather than a new mechanism), scoped to flight-category rules
+    while he actually has controls. `busy_until_sim` is pre-set to a
+    value far in the future to stand in for "a routine callout believed
+    still playing": `note_urgent` *resets* it down (the cutoff);
+    `note_reply` only ever *extends* it (`max`), so a dispatch that must
+    stay on the ordinary path leaves the pre-set value exactly as high,
+    never lower -- the negative-space half of each test below, proving
+    the mechanism can tell the two paths apart rather than merely not
+    crashing."""
+
+    _FAR_FUTURE_BUSY_UNTIL = 1000.0
+
+    def test_a_flight_rule_readback_cuts_off_the_callout_while_flying(self) -> None:
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(
+            speech_client=speech_client, parked_active=True, held_heading=10.0
+        )
+        console.scheduler.busy_until_sim = self._FAR_FUTURE_BUSY_UNTIL
+        console.handle_command(
+            "turn_heading_relative",
+            now_sim=0.0,
+            slots={"direction": "left", "degrees": 20},
+        )
+        assert speech_client.pushed == [("20 left.", True)]
+        assert console.scheduler.busy_until_sim < self._FAR_FUTURE_BUSY_UNTIL
+
+    def test_a_static_command_readback_never_cuts_off_the_callout(self) -> None:
+        """Counterfactual: `radio_check` is not a rule at all, so it must
+        keep the pre-existing `note_reply`/`max()` behaviour -- the
+        pre-set busy time is never lowered."""
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client, parked_active=True)
+        console.scheduler.busy_until_sim = self._FAR_FUTURE_BUSY_UNTIL
+        console.handle_command("radio_check", now_sim=0.0)
+        assert speech_client.pushed[0][1] is False
+        assert console.scheduler.busy_until_sim >= self._FAR_FUTURE_BUSY_UNTIL
+
+    def test_the_always_category_have_controls_rule_never_cuts_off_the_callout(
+        self,
+    ) -> None:
+        """`you_have_controls`/`i_have_controls` are rule ids too, but
+        category `"always"` -- excluded by the `.startswith("flight_
+        control")` check, not by an accident of dispatch order."""
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client, parked_active=True)
+        console.scheduler.busy_until_sim = self._FAR_FUTURE_BUSY_UNTIL
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        # Q7's own no-op: the handler speaks nothing, so there is no push
+        # to inspect -- the scheduler's own budget, untouched either way,
+        # is the only observable here.
+        assert lines == []
+        assert speech_client.pushed == []
+        assert console.scheduler.busy_until_sim >= self._FAR_FUTURE_BUSY_UNTIL
+
+    def test_an_unable_not_flying_readback_never_cuts_off_the_callout(self) -> None:
+        """A flight-category rule dispatched while he does *not* have
+        controls answers `UNABLE` -- still excluded, since the scoping
+        is "while `has_controls`," not "any flight-category rule.\""""
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client, parked_active=False)
+        console.scheduler.busy_until_sim = self._FAR_FUTURE_BUSY_UNTIL
+        lines = console.handle_command(
+            "turn_heading_relative",
+            now_sim=0.0,
+            slots={"direction": "left", "degrees": 20},
+        )
+        assert lines == ["Unable, not flying."]
+        assert speech_client.pushed == [("Unable, not flying.", False)]
+        assert console.scheduler.busy_until_sim >= self._FAR_FUTURE_BUSY_UNTIL
+
+    def test_a_held_timeout_unable_readback_cuts_off_the_callout(self) -> None:
+        """`drain_pending_rule_dispatch`'s own hold-timeout-elapsed
+        "unable" line gets the same scoping as the immediate dispatch
+        path -- `has_controls` was true throughout the hold (the gate
+        never holds otherwise, `rules.gates._require_controls`'s own
+        docstring), so this counts as "while flying" too."""
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(
+            speech_client=speech_client, parked_active=True, held_heading=None
+        )
+        console.handle_command(
+            "turn_heading_relative",
+            now_sim=0.0,
+            slots={"direction": "left", "degrees": 20},
+        )
+        assert console.pending_rule_dispatch is not None
+        speech_client.pushed.clear()
+        console.scheduler.busy_until_sim = self._FAR_FUTURE_BUSY_UNTIL
+        lines = console.drain_pending_rule_dispatch(now_sim=100.0)
+        assert lines == ["Unable, not ready."]
+        assert speech_client.pushed == [("Unable, not ready.", True)]
+        assert console.scheduler.busy_until_sim < self._FAR_FUTURE_BUSY_UNTIL

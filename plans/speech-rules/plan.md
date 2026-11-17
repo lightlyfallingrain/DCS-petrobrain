@@ -175,6 +175,22 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
   `feedback_new_verb_synonym_can_silently_widen_anchor_set`) into a load-time check instead of
   something a failing test discovers. It cannot catch a near-miss that only a real transcript
   produces. That case gets the runtime ambiguity answer (E3/E6), as alignment Finding 5 expected.
+
+  **Recalibrated 2026-11-17** (Stage 4 follow-up, `plans/speech-rules/implementation.md`'s own
+  section): points 1 and 2's "a hit disables" criterion above is what D13 left un-updated when it
+  made a rule's own match ratio something other than always `1.0` -- running the real 19-rule
+  flight-control set through it found five candidate collisions, three of which were only
+  *similar*, not *same*, wording (U10's own distinction, `body-layer/ROADMAP/BL-17.md` "Settled
+  after the goal check": *"Two rules claiming the same wording: both disabled"*). The check now
+  compares each sample's own rule's ratio against the competing resolution's ratio on that same
+  sample (`rule_patterns._is_genuine_collision`): a collision is an **exact tie** (both sides at a
+  clean `1.0` -- deterministic, the literal "same wording" case U10 names) or the other side
+  beating the sample's own rule by at least `SEPARATION_MIN`. A fuzzy near-tie under that gap,
+  with neither side at `1.0`, is left to the runtime confirm band (E3) rather than disabled at
+  load time, since it recurs only on an occasional mis-hearing, not on every utterance. Of the
+  five original candidates, `set_speed`/`altitude_step` and `level_off` are rescued; `straight`/
+  `hvrt_translate_right` remain rejected, both via one shared rule × rule collision (see the
+  implementation note for the exact ratios).
 - **D10 — The whisper prompt becomes dynamic.** `WhisperCliEngine` takes a prompt provider instead
   of a fixed string. The adapter rebuilds the prompt from the legacy words plus the active rule
   words on every accepted `PUT`. The 224-token cap stays a test for the shipped vocabulary. At

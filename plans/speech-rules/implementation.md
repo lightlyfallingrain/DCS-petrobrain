@@ -1870,3 +1870,144 @@ other module references `dispatch_token`/`current_dispatch_token`/`_dispatch_tok
 with `grep -rn` over `src/` and `tests/` before removing them; the only other hit,
 `tests/test_brain_reply.py::test_confirm_of_a_real_but_unoffered_dispatch_token_is_rejected`, is an
 unrelated confirm-band token with no connection to this mechanism).
+
+## Stage 4 follow-ups (2026-11-17)
+
+Two independent follow-up tasks on `feature/speech-rules-matching`, tip `6a6ce8e7` at the start of
+this work.
+
+### 1 — Recalibrating the collision check (audio-adapter)
+
+**What was wrong.** D9/D13's original collision check (`rule_patterns._rules_collide`/
+`_collides_with_legacy`) counted *any* sample resolving to a different rule/legacy command, at or
+above a floor, as a collision — a binary "did it match at all," correct back when every ratio was
+`1.0` (Stage 1b/2) but never updated once D13 made a rule's own ratio something other than always
+`1.0`. That is not the user's decision (`body-layer/ROADMAP/BL-17.md`, "Settled after the goal
+check": *"Two rules claiming the same wording: both disabled"* — U10, `plans/speech-rules/
+plan.md`) — the same wording, not merely similar wording.
+
+**The fix.** `rule_patterns._is_genuine_collision` (new) replaces the binary check with a
+comparison between the sample's own rule's ratio and the competing resolution's ratio on the same
+sample:
+
+- an **exact tie** (`own_ratio == other_ratio == 1.0`) — the clean, unperturbed sample parses with
+  zero fuzziness on *both* sides, so this exact wording is claimed, every time it is spoken, by two
+  different commands. This is the literal case U10 names, and it can only arise on a clean sample
+  (a perturbed one never scores `1.0` against its own generating rule, by construction);
+- the other side beating the sample's own rule by at least `SEPARATION_MIN` — saying the rule's own
+  wording would make Petrovich confidently act on the other command instead;
+- a **fuzzy near-tie** (gap under `SEPARATION_MIN`, neither side at `1.0`) is logged at `INFO` and
+  is **not** a collision — this is exactly the gap `command_matcher.match_transcript`/
+  `_match_rules` already turns into a confirm question at runtime (E3), a rare mis-hearing rather
+  than a deterministic clash on every utterance, so there is nothing left for load time to guard
+  against.
+
+`LegacyProbeResult` gained a `match_ratio: float` field (every call site updated: `server.py`'s
+`_legacy_probe`, `test_flight_rules_matching.py`'s `_real_legacy_probe`, and every direct
+`LegacyProbeResult(...)` construction in `test_rule_patterns.py`) so `_collides_with_legacy` has
+something to compare the rule's own ratio against.
+
+**Measured outcome on the real 19-rule flight set, before vs. after:**
+
+| rule | previously rejected? | now rejected? | why |
+|---|---|---|---|
+| `set_speed` | yes | **no — rescued** | own `1.0` (exact) vs. `altitude_step`'s `0.5` fuzzy word-set resolution, both directions — gap `0.5` |
+| `altitude_step` | yes | **no — rescued** | same pair, the other direction |
+| `level_off` | yes | **no — rescued** | own `1.0` vs. the existing `observe_off` legacy command's `0.75` — gap `0.25` |
+| `straight` | yes | **yes — still rejected** | `straight`'s own perturbed sample ("right," its `_best_probe_word` for "straight") matches `hvrt_translate_right` at ratio `1.0` (exact), clear of `straight`'s own `0.769` self-match on that same sample by `0.231` |
+| `hvrt_translate_right` | yes | **yes — still rejected** | taken down by the *same* rule x rule collision above (`compile_rules` disables both ids in a colliding pair); its own perturbed sample ("light") lands on a genuine `0.8`-vs-`0.8` near-tie against `point`'s "sight" verb, which alone is **not** a collision under the new check |
+
+The previous writeup's framing of `straight`/`hvrt_translate_right` as "straight vs sight" (the
+*clean* sample, 0.77 both directions) was the un-recalibrated check's own false positive — under
+the recalibrated check the clean sample is rescued (own `1.0` beats `0.77` clearly in both
+directions); the *perturbed* sample is the real, surviving cause, and it is a genuine
+confident-wrong collision, not a near-tie. `_EXPECTED_REJECTED_IDS` in
+`test_flight_rules_matching.py` is now `{"straight", "hvrt_translate_right"}`; its own module-level
+comment and `body-layer/tests/test_rules_flight_actions.py::test_shipped_rule_files_load_with_zero_
+failures`'s docstring (a cross-reference, not an assertion — body-layer's loader never runs this
+check) are both updated to the new count.
+
+**Tests added** (`audio-adapter/tests/test_rule_patterns.py`, `TestCompileRules`):
+- `test_legacy_probe_resolving_with_a_fuzzy_near_tie_is_not_a_collision` — a legacy resolution
+  within `SEPARATION_MIN` of the rule's own (perturbed) ratio, neither side at `1.0`, is accepted.
+- `test_legacy_probe_confidently_beating_a_perturbed_sample_is_still_rejected` — the counterfactual:
+  a legacy resolution beating the rule's own perturbed ratio by `>= SEPARATION_MIN` is still
+  rejected, even though the clean sample never collides.
+- `test_a_perturbed_sample_confidently_resolving_to_another_rule_is_rejected` — the same
+  counterfactual, rule x rule: `scan_rule`'s perturbed sample ("scam two zero," its own probe word
+  for "scan") matches a second rule whose literal is exactly "scam" at ratio `1.0`, clear of
+  `scan_rule`'s own `0.75`.
+- `test_rule_colliding_with_legacy_is_disabled` (existing, updated) now documents and exercises the
+  exact-tie case explicitly (`match_ratio=1.0` on both sides).
+
+`plans/speech-rules/plan.md`'s D9 entry gained a dated "Recalibrated 2026-11-17" paragraph citing
+U10 and this measurement.
+
+**Checks (audio-adapter, fresh `.venv` built from `/opt/homebrew/bin/python3.14`):**
+- `ruff format --check src tests`: pass (36 files)
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass, 17 source files, 0 issues
+- `.claude/scripts/fast-tests.sh --full audio-adapter`: 526 passed, 2 skipped
+
+### 2 — U22: flight-rule readbacks may cut off an in-flight routine callout (body-layer)
+
+D19 proposed, and U22 confirmed ("as recommended"), reusing `CalloutScheduler.note_urgent` — the
+same mechanism `!inject-urgent` already exercises — for a flight-category rule's own readback
+while Petrovich has controls, rather than building a second "skip the queue without killing what's
+playing" mechanism. Stage 4's own five numbered build steps never mentioned this, so it was left
+unbuilt there; built now as this follow-up.
+
+**What changed** (`body-layer/src/belief/crew_console.py`):
+- `handle_command`'s shared `_print` call at the bottom of the dispatch chain now takes a local
+  `bypass_gate` (default `False`), set `True` only inside the `elif token in self.enabled_rule_ids:`
+  branch when the matched rule's own category starts with `"flight_control"` *and*
+  `current_crew_state().has_controls` is true. `"always"`-category rules (`you_have_controls`/
+  `i_have_controls`) and every static (non-rule) token are unaffected.
+- `drain_pending_rule_dispatch`'s own two `_print` calls (the hold-and-retry path: a `PASS` that
+  flies late, an `UNABLE`/held-timeout line) get the identical scoping, computed from
+  `pending.category` and a fresh `current_crew_state()` read. `rules.gates._require_controls`
+  guarantees `has_controls` is true for as long as a category holds (an `UNABLE` replaces `HOLD`
+  the moment controls are lost), so the held-timeout-elapsed "unable, not ready" line is urgent too
+  when it was genuinely held while flying.
+- `_print`'s own docstring, which claimed "an injected urgent call is the only line that ever sets
+  [`bypass_gate`]," is corrected to name this second source — a claim this change would otherwise
+  have made false without anyone noticing.
+
+**Not touched, flagged for a future opportunistic pass**: `belief/speech_worker.py`'s
+`SpeechWorker.enqueue` docstring and `belief/callouts.py`'s `CalloutScheduler.note_urgent`
+docstring both still say "an injected urgent call" is the (implied: only) source reaching them —
+now incomplete, not wrong, since neither function's own code changed. Left alone per this role's
+"stay local to the block you are editing" rule rather than swept.
+
+**Tests added** (`body-layer/tests/test_rules_flight_actions.py`, `TestFlightReadbackUrgency`, plus
+a `_RecordingSpeechClient` double and an optional `speech_client` kwarg on the existing
+`_dispatching_console` helper):
+- `test_a_flight_rule_readback_cuts_off_the_callout_while_flying` — `turn_heading_relative` while
+  parked and settled: `push_speech` sees `urgent=True`, and a pre-set far-future
+  `scheduler.busy_until_sim` is reset *down* (`note_urgent`'s own behaviour), proving the cutoff.
+- `test_a_static_command_readback_never_cuts_off_the_callout` — counterfactual: `radio_check` (not
+  a rule at all) leaves the pre-set busy time exactly as high (`note_reply`'s `max()`).
+- `test_the_always_category_have_controls_rule_never_cuts_off_the_callout` — `you_have_controls` is
+  a rule id but category `"always"`, excluded by the category check, not dispatch order.
+- `test_an_unable_not_flying_readback_never_cuts_off_the_callout` — a flight rule dispatched while
+  `parked_active=False` answers `UNABLE`; excluded by the `has_controls` half of the scoping.
+- `test_a_held_timeout_unable_readback_cuts_off_the_callout` — `drain_pending_rule_dispatch`'s own
+  hold-timeout-elapsed "unable" line gets the same urgent treatment, since `has_controls` was true
+  throughout the hold.
+
+**Counterfactual run** (showing red, not just green): both "cuts off the callout" tests were
+confirmed to fail against the pre-fix code (`bypass_gate` forced `False` at both of
+`crew_console.py`'s new call sites) — `AssertionError: [('Unable, not ready.', False)] ==
+[('Unable, not ready.', True)]` and the equivalent for the immediate-dispatch test — while the
+three negative-space counterfactual tests stayed green throughout, confirming they were not
+tautological. Restored by `shasum` match (`f0c8614a...` before and after) rather than by eye.
+
+**Checks (body-layer, fresh `.venv` built from `/opt/homebrew/bin/python3.14`, `lupa==2.8`,
+editable `../world-model`):**
+- `ruff format --check src tests`: pass (223 files)
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass, 91 source files, 0 issues
+- `.claude/scripts/fast-tests.sh body-layer`: 1 failed (named pre-existing
+  `test_shipped_effector_config_loads_without_errors`), 2671 passed, 4 xfailed
+- `.claude/scripts/fast-tests.sh --full body-layer`: same single pre-existing failure, 3524 passed,
+  4 xfailed

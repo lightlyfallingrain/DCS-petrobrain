@@ -59,36 +59,57 @@ def _real_legacy_probe(text: str) -> LegacyProbeResult:
     legacy matcher, no `rules=` argument, so it is unaffected by
     whatever candidate rule is being checked."""
     result = match_transcript(text)
-    return LegacyProbeResult(token=result.token, verb_anchored=result.verb_anchored)
+    return LegacyProbeResult(
+        token=result.token,
+        verb_anchored=result.verb_anchored,
+        match_ratio=result.match_ratio,
+    )
 
 
-#: **Notable discovery, Stage 4** -- running the *real* flight rule set
-#: through the *real* collision check (D9), against the real legacy
-#: matcher and the real `FREE_SPEECH_GUARD`, surfaces five genuine,
-#: measured wording collisions this stage does not resolve by renaming
-#: anything (a product decision, not an Implementer's to make
-#: unilaterally -- see `implementation.md`'s own Stage 4 section for the
-#: full writeup and the exact ratios):
+#: **Notable discovery, Stage 4, recalibrated 2026-11-17** -- running the
+#: *real* flight rule set through the *real* collision check (D9) first
+#: surfaced five candidate wording collisions, all under D9/D13's
+#: original "any hit at or above the floor disables" criterion. That
+#: criterion did not distinguish *same* wording (U10's own words --
+#: `body-layer/ROADMAP/BL-17.md` "Settled after the goal check": "Two
+#: rules claiming the same wording: both disabled") from merely *similar*
+#: wording, so it over-fired -- `rule_patterns._is_genuine_collision`
+#: replaces it with a ratio/`SEPARATION_MIN`-aware comparison (own ratio
+#: vs. the competing resolution's own ratio on the same sample; see that
+#: function's own docstring for the exact three-way split). Re-measured
+#: against the recalibrated check, **three of the five are rescued**
+#: (own confidently outscores the competing resolution, so there is
+#: nothing for the runtime confirm band to need help with):
 #:
-#: - `set_speed` / `altitude_step` (rule x rule): "speed two zero zero"
-#:   fuzzy-resolves `altitude_step`'s own `<direction:climb|descend>`
-#:   word-set to "descend" at `ratio("speed", "descend") == 0.5`, exactly
-#:   `vocabulary._WORD_REPAIR_FLOOR` -- the word-set fuzz tolerance
-#:   (E12) applied to two rules this stage introduces together.
-#: - `level_off` / the existing `observ_off` command (rule x legacy):
-#:   `_phrase_match_ratio(("level","off"), ("observe","off")) == 0.75`,
-#:   comfortably above `MATCH_FLOOR` -- genuine, not a floor-boundary
-#:   artifact.
-#: - `straight` / the existing `point` command, and `straight` /
-#:   `hvrt_translate_right` (rule x legacy and rule x rule): "straight"
-#:   scores 0.77 against both "sight" (`point`'s own verb) and "right".
-#: - `hvrt_translate_right` / the existing `point` command (rule x
-#:   legacy, via the perturbed-sample probe): "right"'s own near-miss
-#:   probe word "light" resolves to `point` at `ratio("light", "sight")`
-#:   -- the *exact* collision `command_matcher._HVRT_BARE_WORD_TOKENS`'s
-#:   own comment already named as the reason that shortcut exists
-#:   (`ratio("right", "sight") == 0.8`); the shortcut protects an
-#:   *exact* "right," not a mis-transcribed "light" landing outside it.
+#: - `set_speed` / `altitude_step`: own `1.0` (exact) vs. the other
+#:   rule's `0.5` fuzzy word-set resolution, both directions -- gap
+#:   `0.5`, far clear of `SEPARATION_MIN` in `set_speed`'s favour.
+#: - `level_off` / the existing `observe_off` command: own `1.0` vs.
+#:   legacy's `0.75` -- gap `0.25`.
+#:
+#: **Two remain genuinely rejected**, both from *one* shared rule x rule
+#: collision (so `compile_rules` disables both ids together, the same
+#: pair the un-recalibrated check also caught, for a different reason):
+#: `straight`'s own `_perturbed_sample` probe word for "straight" is
+#: "right" (`_COLLISION_PROBE_WORDS`' own list, `ratio("right",
+#: "straight") == 0.769`) -- a real near-miss `straight` could plausibly
+#: be heard as. That perturbed sample ("right") matches
+#: `hvrt_translate_right`'s own bare-word pattern at ratio `1.0` (exact),
+#: clear of `straight`'s own `0.769` self-match on the same sample by
+#: `0.231`, well past `SEPARATION_MIN` -- saying a mis-heard "straight"
+#: would make Petrovich confidently translate the HVRT sight instead of
+#: levelling off. The *clean* "straight" sample, which scored `0.769`
+#: against `point`'s own "sight" verb and against `hvrt_translate_right`
+#: directly, is **not** this collision's cause under the new check (own
+#: `1.0` beats both clearly) -- the previous writeup's framing of this as
+#: "straight vs sight" was the un-recalibrated check's own false
+#: positive; the measured, surviving cause is the perturbed sample, not
+#: the clean one. `hvrt_translate_right`'s own perturbed sample ("light,"
+#: a near-miss of "right") lands on an exact `0.8`-vs-`0.8` tie against
+#: `point`'s own "sight" verb -- a genuine near-tie, correctly *not* a
+#: collision on its own -- so `hvrt_translate_right` is rejected only
+#: because `straight`'s collision takes it down too, not on its own
+#: account.
 #:
 #: These are real: `compile_rules`'s own rule x legacy check is fixed in
 #: this same stage to stop flagging a sample that resolves to the rule's
@@ -96,15 +117,13 @@ def _real_legacy_probe(text: str) -> LegacyProbeResult:
 #: found, affecting all seven HVRT bare-word rules before the fix) and
 #: `heading`'s own collision-probe sample moved off a value that
 #: coincided with `scan_bearing_deg`'s hardcoded example list -- both
-#: zero-behaviour-change fixes, already applied, not forcing these five
-#: through. `body.py`'s existing `_push_rules` already handles an
-#: adapter-rejected rule exactly like a load-time failure (D6): one
-#: stderr banner naming each id and reason, "Action file error." spoken
-#: once, and the id excluded from `enabled_rule_ids` -- graceful, not
-#: silent, degradation that needed no new code.
-_EXPECTED_REJECTED_IDS: frozenset[str] = frozenset(
-    {"set_speed", "altitude_step", "level_off", "straight", "hvrt_translate_right"}
-)
+#: zero-behaviour-change fixes, already applied. `body.py`'s existing
+#: `_push_rules` already handles an adapter-rejected rule exactly like a
+#: load-time failure (D6): one stderr banner naming each id and reason,
+#: "Action file error." spoken once, and the id excluded from
+#: `enabled_rule_ids` -- graceful, not silent, degradation that needed no
+#: new code.
+_EXPECTED_REJECTED_IDS: frozenset[str] = frozenset({"straight", "hvrt_translate_right"})
 
 
 def test_the_real_shipped_pattern_set_rejects_exactly_the_known_collisions() -> None:

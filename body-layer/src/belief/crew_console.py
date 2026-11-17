@@ -3307,19 +3307,28 @@ class CrewConsole:
         if pending is None:
             return []
         outcome = check_gate(pending.category, self.current_crew_state())
+        # D19/U22 -- same scoping as `handle_command`'s own rule branch:
+        # a flight-category rule's own readback may cut off an in-flight
+        # routine callout, but only while he actually has controls (an
+        # `UNABLE` verdict here means he lost them while held, so this
+        # stays `False` for that line).
+        bypass_gate = (
+            pending.category.startswith("flight_control")
+            and self.current_crew_state().has_controls
+        )
         if outcome.verdict == "hold":
             if now_sim - pending.held_since_sim < RULE_GATE_HOLD_TIMEOUT_S:
                 return []
             self.pending_rule_dispatch = None
             lines = [render_unable(outcome.reason or "NOT_READY").text]
-            self._print(lines, now_sim)
+            self._print(lines, now_sim, bypass_gate=bypass_gate)
             return lines
         self.pending_rule_dispatch = None
         if outcome.verdict == "unable":
             lines = [render_unable(outcome.reason or "NO_SUCH_COMMAND").text]
         else:
             lines = self._dispatch_rule(pending.rule_id, pending.slots)
-        self._print(lines, now_sim)
+        self._print(lines, now_sim, bypass_gate=bypass_gate)
         return lines
 
     def handle_command(
@@ -3410,6 +3419,11 @@ class CrewConsole:
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
             bearing_degrees = None
+        # `[[BL-17]]` D19/U22 -- set `True` only for a flight-category
+        # rule's own readback while flying (the `elif token in self.
+        # enabled_rule_ids` branch below); every other dispatch keeps the
+        # default `bypass_gate=False` this method has always used.
+        bypass_gate = False
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(
@@ -3525,6 +3539,23 @@ class CrewConsole:
             # this never fires for them; a brand-new rule-only id only
             # ever reaches here).
             lines = self._handle_rule(token, slots, now_sim)
+            # D19/U22 -- a flight-category rule's own readback may cut off
+            # an in-flight routine callout (`CalloutScheduler.note_urgent`,
+            # `_print`'s `bypass_gate` path): steering by voice is the one
+            # class of speech where lateness has a real cost, confirmed as
+            # a genuine behaviour change (U22). Scoped to flight-category
+            # rules (`"flight_control"`/`"flight_control_heading"`/
+            # `"_speed"`/`"_altitude"`/`"_any"`, never `"always"`'s "you/I
+            # have controls") while he actually has controls -- an
+            # `UNABLE("NOT_FLYING")`/held-timeout line is spoken with
+            # `has_controls=False`, so this check also keeps those on the
+            # ordinary, non-urgent path.
+            category = self.rule_categories.get(token, "always")
+            if (
+                category.startswith("flight_control")
+                and self.current_crew_state().has_controls
+            ):
+                bypass_gate = True
         elif token in self._ever_enabled_rule_ids:
             # D4 -- a rule id the adapter matched against a rule that has
             # since been dropped (a reload race, or a push rejection) --
@@ -3538,6 +3569,7 @@ class CrewConsole:
         self._print(
             lines,
             now_sim,
+            bypass_gate=bypass_gate,
             correlation_id=correlation_id,
             mentions=self._pending_mentions,
         )
@@ -6981,13 +7013,17 @@ class CrewConsole:
         raise and must not stop the remaining lines in this batch from being
         printed/pushed/spoken.
 
-        `bypass_gate` (True only for an injected urgent call, per `plans/
-        overlay-speech-callouts/plan.md`'s resolved decision) is threaded
-        straight through as `push_speech`'s
-        `urgent` argument (plan Decision 3/4: no new signal
-        invented -- an injected urgent call is the only line that ever
-        sets it, and the aircraft-layer's `AudioPlaybackSender` is what
-        actually preempts routine playback for it).
+        `bypass_gate` is threaded straight through as `push_speech`'s
+        `urgent` argument -- the aircraft-layer's `AudioPlaybackSender`
+        is what actually preempts routine playback for it. Originally
+        True only for an injected urgent call (`plans/
+        overlay-speech-callouts/plan.md`'s resolved decision, Decision
+        3/4: "no new signal invented"); `[[BL-17]]` D19/U22 added a
+        second source, `handle_command`'s own flight-rule dispatch
+        branches -- a flight-category rule's readback while he has
+        controls, confirmed as a real behaviour change (U22), reusing
+        this same mechanism rather than inventing a second "skip the
+        queue without killing what's playing" path.
 
         `now_sim` (`plans/callout-scheduling/plan.md`) is needed for
         exactly one thing here: when `bypass_gate` is True, this call is an

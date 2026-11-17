@@ -188,7 +188,11 @@ def _legacy_probe(text: str) -> LegacyProbeResult:
     import cycle `rule_patterns`'s own `LegacyProbeResult` docstring
     explains."""
     result = match_transcript(text)
-    return LegacyProbeResult(token=result.token, verb_anchored=result.verb_anchored)
+    return LegacyProbeResult(
+        token=result.token,
+        verb_anchored=result.verb_anchored,
+        match_ratio=result.match_ratio,
+    )
 
 
 def _make_handler(

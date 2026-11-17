@@ -166,7 +166,7 @@ class TestGenerateSamples:
 
 class TestCompileRules:
     def _no_legacy_hit(self, text: str) -> LegacyProbeResult:
-        return LegacyProbeResult(token=None, verb_anchored=False)
+        return LegacyProbeResult(token=None, verb_anchored=False, match_ratio=0.0)
 
     def test_a_valid_rule_is_accepted(self) -> None:
         accepted, rejected = compile_rules(
@@ -208,10 +208,21 @@ class TestCompileRules:
         assert {r.id for r in rejected} == {"a", "b"}
 
     def test_rule_colliding_with_legacy_is_disabled(self) -> None:
+        """An **exact tie**: the legacy probe resolves `new_rule`'s own
+        clean sample ("scan left") to a different existing command,
+        `match_ratio=1.0` -- the same wording, confidently, on both
+        sides (`[[BL-17]]` Stage 4 recalibration, `_is_genuine_
+        collision`'s own docstring: "own_ratio == other_ratio == 1.0" is
+        still a collision, not a near-tie the runtime confirm band can
+        safely absorb, since it recurs on *every* utterance of this
+        wording, not just an occasional mis-hearing)."""
+
         def legacy_hits_scan_left(text: str) -> LegacyProbeResult:
             if text == "scan left":
-                return LegacyProbeResult(token="scan_left", verb_anchored=True)
-            return LegacyProbeResult(token=None, verb_anchored=False)
+                return LegacyProbeResult(
+                    token="scan_left", verb_anchored=True, match_ratio=1.0
+                )
+            return LegacyProbeResult(token=None, verb_anchored=False, match_ratio=0.0)
 
         accepted, rejected = compile_rules(
             [("new_rule", "scan left")],
@@ -236,12 +247,76 @@ class TestCompileRules:
         accepted, rejected = compile_rules(
             [("hvrt_translate_left", "left")],
             legacy_probe=lambda text: LegacyProbeResult(
-                token="hvrt_translate_left", verb_anchored=True
+                token="hvrt_translate_left", verb_anchored=True, match_ratio=1.0
             ),
             free_speech_guard=(),
         )
         assert [r.id for r in accepted] == ["hvrt_translate_left"]
         assert rejected == []
+
+    def test_legacy_probe_resolving_with_a_fuzzy_near_tie_is_not_a_collision(
+        self,
+    ) -> None:
+        """`[[BL-17]]` Stage 4 recalibration -- a legacy resolution that
+        beats the rule's own ratio by less than `SEPARATION_MIN`, with
+        neither side at a clean `1.0`, is a fuzzy near-tie: the real
+        pipeline already answers it with a confirm question (E3), so load
+        time must not disable the rule over it. The perturbed sample
+        ("scam two zero," `_best_probe_word`'s own probe for "scan") is
+        what drives both ratios below `1.0` here -- `vocabulary.
+        _WORD_REPAIR_FLOOR`/`SEPARATION_MIN` import at module load, so a
+        drift in either would move the exact numbers used below."""
+        own_elements = parse_pattern("scan <degrees:angle>")
+        own_ratio = match_pattern_with_ratio(own_elements, _words("scam two zero"))
+        assert own_ratio is not None
+        _slots, measured_own_ratio, _ambiguous = own_ratio
+        # `measured_own_ratio` is `_literal_ratio("scam", "scan")` -- fixed
+        # by the two literal strings, not by `SEPARATION_MIN` itself, so a
+        # ratio just inside the gap is picked relative to the measured
+        # value rather than assumed.
+        near_tie_ratio = measured_own_ratio + (rule_patterns.SEPARATION_MIN / 2)
+
+        def legacy_near_tie(text: str) -> LegacyProbeResult:
+            if text == "scam two zero":
+                return LegacyProbeResult(
+                    token="some_other_command",
+                    verb_anchored=True,
+                    match_ratio=near_tie_ratio,
+                )
+            return LegacyProbeResult(token=None, verb_anchored=False, match_ratio=0.0)
+
+        accepted, rejected = compile_rules(
+            [("scan_rule", "scan <degrees:angle>")],
+            legacy_probe=legacy_near_tie,
+            free_speech_guard=(),
+        )
+        assert [r.id for r in accepted] == ["scan_rule"]
+        assert rejected == []
+
+    def test_legacy_probe_confidently_beating_a_perturbed_sample_is_still_rejected(
+        self,
+    ) -> None:
+        """`[[BL-17]]` Stage 4 recalibration -- the counterfactual for the
+        test above: a legacy resolution that beats the rule's own
+        (perturbed) ratio by at least `SEPARATION_MIN` is a genuine
+        confident-wrong collision and is still disabled, even though it
+        is the *perturbed* sample -- not the rule's clean wording --
+        that triggers it."""
+
+        def legacy_confidently_wrong(text: str) -> LegacyProbeResult:
+            if text == "scam two zero":
+                return LegacyProbeResult(
+                    token="some_other_command", verb_anchored=True, match_ratio=1.0
+                )
+            return LegacyProbeResult(token=None, verb_anchored=False, match_ratio=0.0)
+
+        accepted, rejected = compile_rules(
+            [("scan_rule", "scan <degrees:angle>")],
+            legacy_probe=legacy_confidently_wrong,
+            free_speech_guard=(),
+        )
+        assert accepted == []
+        assert rejected[0].id == "scan_rule"
 
     def test_rule_matching_a_free_speech_guard_sentence_is_disabled(self) -> None:
         accepted, rejected = compile_rules(
@@ -312,6 +387,31 @@ class TestCompileRules:
             assert match_pattern(team_rule.elements, sample.split()) is None
         for sample in generate_samples(team_rule):
             assert match_pattern(scan_rule.elements, sample.split()) is None
+
+    def test_a_perturbed_sample_confidently_resolving_to_another_rule_is_rejected(
+        self,
+    ) -> None:
+        """`[[BL-17]]` Stage 4 recalibration -- a rule x rule pairing
+        engineered so the *perturbed* sample is a genuine confident-wrong
+        collision, not a near-tie: `scan_rule`'s probe word for its own
+        "scan" is "scam" (`_COLLISION_PROBE_WORDS`' first qualifying
+        entry), which is `scam_rule`'s own literal **exactly** -- so
+        `scan_rule`'s perturbed sample ("scam two zero") matches
+        `scam_rule` at ratio `1.0`, clear of `scan_rule`'s own `0.75`
+        ratio on that same sample by more than `SEPARATION_MIN`. Both
+        rules are disabled, same as `test_a_rule_pair_colliding_only_
+        after_fuzzy_tolerance_is_caught` above, but for the "confidently
+        wrong," not "near-tie," reason."""
+        accepted, rejected = compile_rules(
+            [
+                ("scan_rule", "scan <degrees:angle>"),
+                ("scam_rule", "scam <degrees:angle>"),
+            ],
+            legacy_probe=self._no_legacy_hit,
+            free_speech_guard=(),
+        )
+        assert accepted == []
+        assert {r.id for r in rejected} == {"scan_rule", "scam_rule"}
 
 
 class TestLiteralFuzz:

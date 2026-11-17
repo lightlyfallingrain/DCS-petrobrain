@@ -82,6 +82,7 @@ today's behaviour unchanged -- this module has no reader of either yet).
 from __future__ import annotations
 
 import difflib
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -110,6 +111,8 @@ __all__ = [
     "rule_anchor_words",
     "rule_words",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class PatternError(Exception):
@@ -892,15 +895,19 @@ def rule_anchor_words(rules: tuple[CompiledRule, ...]) -> frozenset[str]:
 @dataclass(frozen=True)
 class LegacyProbeResult:
     """What the legacy matcher says about one collision-check probe
-    sentence -- `command_matcher`'s own `MatchResult` narrowed to the two
-    fields D9 needs, so this module never imports `command_matcher`
+    sentence -- `command_matcher`'s own `MatchResult` narrowed to the
+    three fields D9 needs, so this module never imports `command_matcher`
     (which imports *this* module for its own D8 rule-matching branch --
     importing it back here would be a real import cycle, not a style
     preference). `legacy_probe`, injected by the caller, is what actually
-    runs the real legacy pipeline."""
+    runs the real legacy pipeline. `match_ratio` (recalibration, 2026-11-17
+    -- see `_collides_with_legacy`'s own docstring) is the legacy
+    pipeline's own confidence in `token`, needed to compare against the
+    probed rule's own ratio on the same sample."""
 
     token: str | None
     verb_anchored: bool
+    match_ratio: float
 
 
 LegacyProbe = Callable[[str], LegacyProbeResult]
@@ -916,12 +923,94 @@ def _samples_with_perturbation(rule: CompiledRule) -> list[str]:
     return samples
 
 
+def _own_ratio(rule: CompiledRule, sample: str) -> float:
+    """`rule`'s own `match_pattern_with_ratio` score against one of its
+    *own* generated/perturbed samples -- always `1.0` for a clean sample
+    (every literal/word-set element matches its own canonical word
+    exactly) and always `< 1.0` for a perturbed one (`_best_probe_word`
+    only ever returns a candidate scoring below `1.0` against the
+    original word). `None` (the rule somehow does not match its own
+    sample -- not expected to happen given the floor the probe and the
+    rule's own fuzz share) is treated as `0.0`, the conservative
+    direction: anything else scoring at all then outranks it."""
+    result = match_pattern_with_ratio(rule.elements, sample.split())
+    return result[1] if result is not None else 0.0
+
+
+def _is_genuine_collision(
+    rule_id: str,
+    sample: str,
+    own_ratio: float,
+    other_id: str,
+    other_ratio: float,
+) -> bool:
+    """`[[BL-17]]` Stage 4 recalibration (2026-11-17), replacing D9's
+    original "any hit disables both" criterion -- settled after measuring
+    that it also disabled rules whose *own* wording was never genuinely
+    at risk (`plans/speech-rules/implementation.md` Stage 4's "five real
+    wording collisions"). User's decision was **"two rules claiming the
+    same wording: both disabled"** (`body-layer/ROADMAP/BL-17.md`,
+    U10/`plans/speech-rules/plan.md`) -- the same wording, not merely
+    similar wording, which is exactly what D9's un-recalibrated check
+    failed to tell apart once D13 made every rule's own ratio something
+    other than always `1.0`.
+
+    True when `sample` (one of `rule_id`'s own generated/perturbed
+    samples) is a genuine collision against `other_id`, in either of two
+    cases:
+
+    - an **exact tie** (`own_ratio == other_ratio == 1.0`) -- the clean,
+      unperturbed sample parses with zero fuzziness on *both* sides, so
+      this exact wording is claimed, every time it is spoken, by two
+      different commands. This is the literal case U10 names, and it can
+      only arise on a clean sample (a perturbed one, by construction,
+      never scores `1.0` against its own generating rule).
+    - `other_ratio` beats `own_ratio` by at least `SEPARATION_MIN` --
+      saying `rule_id`'s own wording would make Petrovich confidently
+      act on `other_id` instead.
+
+    A **fuzzy near-tie** (the gap is under `SEPARATION_MIN` and neither
+    side is a clean `1.0`) is logged at `INFO` and returns `False`: this
+    is exactly the gap `command_matcher.match_transcript`/`_match_rules`
+    already turns into a confirm question at runtime (E3), never a
+    silent wrong pick -- a rare mis-hearing, not a deterministic clash on
+    every utterance, so there is nothing left for load time to guard
+    against. `own_ratio` winning outright (clear of `SEPARATION_MIN`) is
+    `False` too, with no log -- the sample resolving to its own rule is
+    never a collision."""
+    if own_ratio >= 1.0 and other_ratio >= 1.0:
+        return True
+    gap = other_ratio - own_ratio
+    if gap >= SEPARATION_MIN:
+        return True
+    if gap > -SEPARATION_MIN:
+        logger.info(
+            "collision probe near-tie, not disabled (runtime confirm "
+            "band): rule=%s sample=%r own_ratio=%.3f other=%s "
+            "other_ratio=%.3f",
+            rule_id,
+            sample,
+            own_ratio,
+            other_id,
+            other_ratio,
+        )
+    return False
+
+
 def _rules_collide(rule_a: CompiledRule, rule_b: CompiledRule) -> bool:
     for sample in _samples_with_perturbation(rule_a):
-        if match_pattern(rule_b.elements, sample.split()) is not None:
+        other = match_pattern_with_ratio(rule_b.elements, sample.split())
+        if other is None:
+            continue
+        own_ratio = _own_ratio(rule_a, sample)
+        if _is_genuine_collision(rule_a.id, sample, own_ratio, rule_b.id, other[1]):
             return True
     for sample in _samples_with_perturbation(rule_b):
-        if match_pattern(rule_a.elements, sample.split()) is not None:
+        other = match_pattern_with_ratio(rule_a.elements, sample.split())
+        if other is None:
+            continue
+        own_ratio = _own_ratio(rule_b, sample)
+        if _is_genuine_collision(rule_b.id, sample, own_ratio, rule_a.id, other[1]):
             return True
     return False
 
@@ -936,11 +1025,20 @@ def _collides_with_legacy(rule: CompiledRule, legacy_probe: LegacyProbe) -> bool
     pushed at all, so `legacy_probe` reports a non-`None` token for every
     one of these samples even when there is no genuine ambiguity -- the
     legacy pipeline and the rule agree on what the command *is*, which is
-    the opposite of a collision. A probe resolving to some *other* token
-    is still a real collision, exactly as before."""
+    the opposite of a collision.
+
+    **Recalibrated 2026-11-17** (see `_is_genuine_collision`'s own
+    docstring): a probe resolving to some *other* token is no longer
+    automatically a collision -- it is one only when that resolution
+    beats, or exactly ties, `rule`'s own ratio on the same sample."""
     for sample in _samples_with_perturbation(rule):
-        token = legacy_probe(sample).token
-        if token is not None and token != rule.id:
+        probe = legacy_probe(sample)
+        if probe.token is None or probe.token == rule.id:
+            continue
+        own_ratio = _own_ratio(rule, sample)
+        if _is_genuine_collision(
+            rule.id, sample, own_ratio, probe.token, probe.match_ratio
+        ):
             return True
     return False
 
