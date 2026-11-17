@@ -118,6 +118,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import logging
 import shutil
 import sqlite3
@@ -168,6 +169,7 @@ from belief.effector_engine import AIRCRAFT as EFFECTOR_AIRCRAFT
 from belief.effector_engine import EffectorRunState, EffectorTrigger
 from belief.effector_engine import advance as advance_effectors
 from belief.effector_engine import fire_trigger as fire_effector_trigger
+from belief.effector_engine import request_write as request_effector_write
 from belief.effector_registry import (
     DEFAULT_SEQUENCES_DIR,
     EffectorDef,
@@ -6516,6 +6518,42 @@ def main() -> None:
         ),
         config_error_pending=had_config_errors,
     )
+    # `[[BL-17]]` D20 (`plans/speech-rules/plan.md` Stage 3d) --
+    # `ActionContext.request_effector_write`'s own closure, built here
+    # (not in `rules.actions`, same reasoning D4/D5 already give for
+    # `rule_runner`: keeps `rules.*` from importing `belief.effector_
+    # engine`/`belief.effector_registry` directly). Validates `name`/
+    # `value` against this runtime's own loaded registry; on success,
+    # mints a fresh request id and mutates `crew_runner.effector_state`
+    # in place (mirrors `fire_effector_trigger`'s own call shape above).
+    # `crew_runner.last_t_sim` is `None` only before the poll loop's
+    # first successful poll -- a request that arrives that early (the
+    # REPL thread, in principle, before telemetry exists) degrades to
+    # the same generic `reason=None` every other precondition-not-yet-
+    # met failure already uses, rather than inventing a new reason for
+    # an edge no shipped rule can reach yet (no rule calls `effector.
+    # write` in this stage).
+    _next_ad_hoc_request_id = itertools.count()
+
+    def _request_effector_write(
+        name: str, value_name: str, says: str | None
+    ) -> dict[str, object]:
+        effector_def = effector_registry_entries.get(name)
+        if effector_def is None or value_name not in effector_def.values:
+            return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+        if crew_runner.last_t_sim is None:
+            return {"ok": False, "reason": None}
+        request_id = f"rule-{next(_next_ad_hoc_request_id)}"
+        crew_runner.effector_state = request_effector_write(
+            crew_runner.effector_state,
+            request_id,
+            name,
+            value_name,
+            says,
+            crew_runner.last_t_sim,
+        )
+        return {"ok": True, "reason": None}
+
     # `[[BL-17]]` (`plans/speech-rules/plan.md`) -- loaded/pushed once
     # here, after `crew_console` exists (the action registry's `Action
     # Context` needs a live reference to close over, D5) but before the
@@ -6525,7 +6563,9 @@ def main() -> None:
     # directly on `crew_console` here, not passed as constructor kwargs
     # above, for exactly this ordering reason.
     rules_sandbox = RuleSandbox()
-    rules_ctx = ActionContext(console=crew_console)
+    rules_ctx = ActionContext(
+        console=crew_console, request_effector_write=_request_effector_write
+    )
     rule_runtime = RuleRuntime(
         sandbox=rules_sandbox,
         ctx=rules_ctx,

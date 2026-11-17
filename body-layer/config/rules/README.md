@@ -99,9 +99,11 @@ Every argument is validated in Python before the underlying code runs; a bad cal
 | call | params | effect |
 |---|---|---|
 | `flight.increment_heading(delta_deg)` | int, −359..359 | turns the AI-overlay heading hold by `delta_deg` relative to its current held value |
+| `effector.write(name, value, says)` | `name`/`value`: strings, checked against the loaded aircraft's own effector registry; `says` optional, free-text | queues a cockpit switch write; **says nothing when it returns** — `r.ok = true` only means the write was accepted, not that it happened yet (it may take several polls). If `says` was given, that text is spoken once the write actually lands, through the same path a sequence file's own `petrovich-says` cell uses. No shipped rule calls this yet — it exists so a later rule group can write effectors without a second mechanism. |
 
 Every action returns a table: `r.ok` (bool), `r.reason` (a reason key for `unable`, or `nil` on
-success).
+success). `effector.write`'s own failure reason is always `"UNKNOWN_EFFECTOR"` — an unknown
+`name`, or a `value` that effector does not know.
 
 ## Failures
 

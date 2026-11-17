@@ -207,7 +207,7 @@ def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> Non
     )
     sandbox = RuleSandbox()
 
-    def _invoke(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "reason": None}
 
     namespaces = {
@@ -237,7 +237,7 @@ def _probe_action_rule_set(tmp_path: Path, sandbox: RuleSandbox) -> RuleSet:
         encoding="utf-8",
     )
 
-    def _invoke(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "reason": None}
 
     namespaces = {

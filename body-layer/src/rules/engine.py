@@ -187,19 +187,37 @@ def _make_action_wrapper(
     sandbox: RuleSandbox, action: Action, ctx: ActionContext
 ) -> Any:
     """One Lua-callable per `Action` -- validates every positional
-    argument Lua passed (type and bounds, per that action's own `params`)
-    before `action.invoke` ever sees it (module docstring; security memory
+    argument Lua passed (type and bounds for `kind="int"`, type only for
+    `kind="str"` -- see `ActionParam`'s own docstring on why a string's
+    further legality is `action.invoke`'s job, not this wrapper's) before
+    `action.invoke` ever sees it (module docstring; security memory
     `project_ai_pilot_goal_lua_dispatch_missing_validation`), and converts
     the dict result to a genuine Lua table. A bad call (wrong arity, wrong
     type, out of bounds) answers `{ok=false, reason=nil}` rather than
     raising -- `unable(nil)` degrades to a plain "Unable." (`render_
-    unable`'s own graceful-degradation posture), not a crash."""
+    unable`'s own graceful-degradation posture), not a crash.
+
+    **Arity (D20)**: a trailing `optional` parameter (`ActionParam.
+    optional`) may be omitted from the Lua call entirely -- `required`
+    below is the count of non-optional parameters, and any call with
+    `required <= len(lua_args) <= len(action.params)` is in range. Every
+    parameter Lua did not supply (an outright omission, not an explicit
+    `nil`) is filled with `None` after the loop."""
+    required = sum(0 if param.optional else 1 for param in action.params)
 
     def wrapper(*lua_args: object) -> Any:
-        if len(lua_args) != len(action.params):
+        if not required <= len(lua_args) <= len(action.params):
             return sandbox.table_from({"ok": False, "reason": None})
-        args: dict[str, int] = {}
+        args: dict[str, object] = {}
         for param, value in zip(action.params, lua_args):
+            if value is None and param.optional:
+                args[param.name] = None
+                continue
+            if param.kind == "str":
+                if not isinstance(value, str):
+                    return sandbox.table_from({"ok": False, "reason": None})
+                args[param.name] = value
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 return sandbox.table_from({"ok": False, "reason": None})
             if isinstance(value, float) and not math.isfinite(value):
@@ -215,6 +233,8 @@ def _make_action_wrapper(
             if int_value != value or not (param.lo <= int_value <= param.hi):
                 return sandbox.table_from({"ok": False, "reason": None})
             args[param.name] = int_value
+        for omitted in action.params[len(lua_args) :]:
+            args[omitted.name] = None
         result = action.invoke(ctx, args)
         return sandbox.table_from(result)
 

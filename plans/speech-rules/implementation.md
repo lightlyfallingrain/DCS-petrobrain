@@ -1151,3 +1151,150 @@ collision/ambiguity/separation test in both files passed unchanged against the n
   files, parallel)
 - `pytest -q` (full suite): 525 passed, 2 skipped — 522 before this round, +3 net (4 new tests,
   1 fewer because the two flipped tests replace their old selves 1-for-1, not additions).
+
+### Stage 3d (this run) — effector-write action surface
+
+Builds D20 exactly as the plan's "Stage 3d" section lays it out: `_execute_switch_row` extracted
+from `advance`'s inline per-row block, a new `EffectorRunState.ad_hoc_runs` run kind processed by
+the *same* function (never a second write path), `effector_engine.request_write`, and `rules.
+actions`' widened `ActionParam`/`effector.write(name, value, says)`. No sequence file migrated, no
+shipped rule calls this — pure capability, proven by test. Prerequisite work first: confirmed the
+Stage 3b tip (`7b956918`) was already this worktree's `HEAD` (via `fc282270`, the prior merge
+chain's own tip) and strictly behind it — fast-forwarded with `git merge --ff-only 7b956918`, no
+conflicts.
+
+### Files Changed
+
+**body-layer**
+- `src/belief/effector_engine.py` — module docstring gains a paragraph on the second run kind;
+  `_effective_value` generalised from taking a `_RunCursor` to a bare `snapshot`/`snapshot_sim`
+  pair, so both run kinds can share it; new `_AdHocEffectorCursor` (mirrors `_RunCursor`, minus
+  `row_index` — a single target has no sequence of rows), `_RowResult`/`_RowOutcome`, and
+  `_execute_switch_row` (the condition check → self-check → `absolute_write` gate → write →
+  bookkeeping → spoken-line block, extracted verbatim from `advance`'s own per-row loop); new
+  `request_write` (mirrors `fire_trigger`'s "start if idle" shape); `advance`'s per-row loop
+  rewritten to call `_execute_switch_row` instead of the inline block, and gains a second pass
+  over `EffectorRunState.ad_hoc_runs` after the trigger-run loop, sharing `assumed_writes`/
+  `commanded_values`/`failed_effectors`/`spoken` with it in the same call; `EffectorRunState`
+  gains the `ad_hoc_runs` field.
+- `src/rules/actions.py` — `ActionParam` widened with `kind: Literal["int", "str"]` and
+  `optional: bool`; `Action.invoke`'s signature widened to `dict[str, object]`;
+  `Action.__post_init__` added (rejects a required parameter declared after an optional one);
+  `ActionContext` gains `request_effector_write: Callable[[str, str, str | None], dict[str,
+  object]] | None = None`; `_increment_heading` updated for the widened `args` type; new
+  `_write_effector`/`EFFECTOR_ACTIONS`; `ACTION_NAMESPACES` gains `"effector"`.
+- `src/rules/engine.py` — `_make_action_wrapper` widened: a `kind="str"` parameter is type-checked
+  (string) rather than bound-checked; a trailing `optional` parameter may be omitted from the Lua
+  call (arity check becomes a range, `required <= len(lua_args) <= len(params)`) or passed as an
+  explicit `nil`, either way landing as `None` in `invoke`'s `args`.
+- `src/body.py` — new `request_write` import (aliased `request_effector_write`); `_request_
+  effector_write` closure built in `main()` (validates `name`/`value` against the already-loaded
+  `effector_registry_entries`, mints a fresh request id via `itertools.count()`, mutates
+  `crew_runner.effector_state` in place); `rules_ctx`'s construction passes it to `ActionContext`.
+- `config/rules/README.md` — `effector.write` added to the Actions table, and a note on its
+  failure reason, since it is now a real part of the Lua API surface even though no shipped rule
+  calls it yet.
+
+### Tests Added
+
+**body-layer**
+- `tests/test_effector_engine.py` (8 new tests) — `request_write` enqueues an idle ad hoc run; a
+  second request for the same effector while one is pending is a no-op (plan's own wording —
+  dedup is by `.effector`, not `request_id`, see "Notable Discoveries" below); the ad hoc pass's
+  self-check match speaks and removes the run; a real write succeeds, speaks, and removes the
+  run; a write with no `says` speaks nothing; a failed write is silently retried then succeeds; an
+  unknown readback on a non-absolute effector is kept and retried with a fresh read next poll
+  (D20's own departure from a sequence row's "skip forever" behaviour); an ad hoc write and a
+  sequence row both targeting the same effector in the same poll share D9's same-poll collision
+  rule via `failed_effectors`.
+- `tests/test_rules_actions.py` (new, 5 tests) — `ACTION_NAMESPACES["effector"]` is registered;
+  `Action.__post_init__` rejects a required parameter after an optional one; `_write_effector`
+  degrades to `{"ok": false, "reason": "UNKNOWN_EFFECTOR"}` with no `request_effector_write`
+  wired (the standalone-load case); it calls the injected closure with validated args; it passes
+  the closure's own reason straight through.
+- `tests/test_rules_effector_action.py` (new, 5 tests) — the plan's own "small synthetic rule,
+  never shipped" end-to-end test: a Lua call to `effector.write` through the real sandbox →
+  the validated action → the injected closure → `request_write` → `advance` →
+  `EffectorRunState.spoken` → `CrewConsole.drain_effector_speech`, asserted against
+  `console.output.getvalue()`; an unknown effector and an illegal value name both never reach the
+  (intentionally assertion-raising) fake engine closure; `says` is optional in the Lua call; a
+  write that never gets a readback (fake client always raises) is silently retried, never
+  "Action file error.".
+- `tests/test_rules_engine.py` — two existing local `_invoke` helper functions' parameter type
+  changed from `dict[str, int]` to `dict[str, object]` (mechanical, required by `Action.invoke`'s
+  widened signature; zero behaviour change — see "Notable Discoveries").
+
+### Checks
+
+**body-layer** (fresh `.venv` built from `/opt/homebrew/bin/python3.14`, `pip install -e .` +
+`lupa==2.8` + `ruff`/`mypy`/`pytest`/`pytest-xdist`; no venv existed yet in this worktree):
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (CWD-only config discovery, run from inside `body-layer/`): pass, 91 source files, 0
+  issues
+- `.claude/scripts/fast-tests.sh body-layer`: 1 failed (the pre-existing, unrelated
+  `test_shipped_effector_config_loads_without_errors` — empty row in the user's own
+  `config/sequences/mi-24p/seat-copilot.md`, named as a known failure in this run's own task
+  brief), 2653 passed
+- `.claude/scripts/fast-tests.sh --full body-layer`: same single pre-existing failure, 3511
+  passed, 4 xfailed (up from Stage 3b's 3493 passed/4 xfailed by exactly the 18 tests this stage
+  adds)
+
+### Notable Discoveries
+
+- **The plan's own test-list wording for `request_write`'s dedup rule ("a second request for the
+  same effector while one is pending is a no-op") is more specific than D20's main-body
+  description ("mirrors `fire_trigger`'s own 'start if idle' shape"), and the two readings
+  diverge.** `fire_trigger` dedups by its own dict key (the trigger); a literal transcription of
+  that shape onto `ad_hoc_runs` (keyed by request id) would dedup by `request_id` — but every real
+  dispatch mints a *fresh* id (`body.py`'s `itertools.count()`), so a `request_id in state.ad_hoc_
+  runs` check would almost never fire and would not implement the test list's own stated rule at
+  all. Built to the test list's literal wording instead: `request_write` scans `ad_hoc_runs`'
+  existing `.effector` values and no-ops if any entry already names the same effector, regardless
+  of request id. Worth flagging per root `CLAUDE.md`'s "a plan's test-list example can contradict
+  its own stated invariant" risk, extended here to "a test-list sentence can specify a *different*
+  rule than the prose it is illustrating" — caught by writing the test from the test list's own
+  words first, then checking the implementation against it, rather than the other way round.
+- **`ActionParam`'s widened shape needed one more mechanical decision the plan did not spell out
+  at the Lua-call-arity level**: a trailing `optional` parameter (`says`) must be acceptable both
+  *omitted entirely* from the Lua call (`effector.write("x", "on")`, 2 positional args) and *passed
+  explicitly as `nil`* (`effector.write("x", "on", nil)`, 3 positional args, the third `None`) —
+  Lua does not pad a native-function call with trailing `nil`s the way it pads a Lua-defined
+  function's own formal parameters. `_make_action_wrapper`'s arity check became a range
+  (`required <= len(lua_args) <= len(params)`) and the per-parameter loop treats an explicit
+  `None` on an optional parameter the same as an omitted one; parameters past `len(lua_args)` are
+  filled with `None` after the loop. Covered by `test_effector_write_says_is_optional` (the
+  omitted-from-the-call case) and the Lua literal `nil` case is covered implicitly — every other
+  synthetic-rule test in `test_rules_effector_action.py` that supplies `says` explicitly is the
+  "present" side of the same arity check.
+- **`Action.__post_init__` is new, cheap, correctness hygiene, not asked for by the plan.** With a
+  tuple of `ActionParam`s and no mechanical check, a future action could declare a required
+  parameter after an optional one, and the "parameters past `len(lua_args)` are optional" slicing
+  assumption inside `_make_action_wrapper` would silently mis-attribute values to the wrong names
+  for certain call arities. One `ValueError` at `Action` construction time (i.e. at module import,
+  for every shipped action) catches this before it could ever reach a live dispatch. Reversible —
+  it is a pure addition with no behaviour change for any `Action` that was already ordering its
+  parameters correctly (every existing one does).
+- **The REPL thread can, in principle, dispatch a rule that calls `effector.write` concurrently
+  with the poll thread's own `advance_effectors` call, and both would mutate `crew_runner.
+  effector_state` — a genuine data race the existing `observ_transition`/`weapon_safety_
+  transition`-style one-shot fields never had**, because those are read and acted on *inside* the
+  poll loop itself (never touching `runner.effector_state` from any other thread), while D20's own
+  design (the plan's explicit words: the closure "calls a new `effector_engine.request_write(...)`
+  ... against `body.py`'s own runner-owned `EffectorRunState`") calls for the closure to mutate
+  `crew_runner.effector_state` directly, synchronously, at dispatch time — which can happen on the
+  REPL thread via `handle_line` → `handle_command`. Lupa's own per-runtime lock (R4) only serialises
+  the *Lua call itself*; it says nothing about a plain Python attribute read-modify-write outside
+  that call. Not fixed here: no shipped rule calls `effector.write` in this stage, so the race is
+  latent and unreachable in practice until Stage 5 ships the first real effector-writing rule —
+  but whoever builds that stage should read this note first, since the fix (routing the ad hoc
+  write request through a one-shot field the poll loop itself drains, the same shape `observ_
+  transition` already uses, rather than mutating `effector_state` from the dispatch call) is a
+  real design choice, not a one-line patch.
+- **`crew_runner.last_t_sim` can be `None`** at the moment a rule dispatches (before the poll
+  loop's first successful poll) — `_request_effector_write` degrades to the generic `{"ok":
+  False, "reason": None}` in that case (the same graceful-degradation shape `unable(nil)` already
+  has), rather than inventing a new closed reason for an edge no shipped rule can reach yet. Not
+  covered by a test (it needs a live `ConsolePerceptionRunner` with a real poll thread to exercise
+  meaningfully, which is `test_body.py`'s territory, not this stage's unit-level tests) — flagged
+  here rather than silently assumed.

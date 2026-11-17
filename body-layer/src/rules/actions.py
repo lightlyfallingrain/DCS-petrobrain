@@ -1,10 +1,10 @@
 """The allowlisted action registry (`plans/speech-rules/plan.md` D5) --
 what a rule handler may actually *do*, as opposed to what it may *say*
 (`engine.py`'s `say`/`unable`/`digits`). One namespace table per action
-family (`flight`, later `weapons`/`marks`/...), each action an explicit
-name with a bounded, typed parameter list -- the same shape `belief.
-tool_api.BrainTool`/`ParamSpec` already use for the brain's own tool
-surface (D5: "reuses `BrainTool`'s shape: name, typed `ParamSpec`, an
+family (`flight`, `effector`, later `weapons`/`marks`/...), each action an
+explicit name with a bounded, typed parameter list -- the same shape
+`belief.tool_api.BrainTool`/`ParamSpec` already use for the brain's own
+tool surface (D5: "reuses `BrainTool`'s shape: name, typed `ParamSpec`, an
 invoke over a body-bound context, and validation in Python of every value
 Lua passes in"), not reused directly (`TOOL_SET`/`BRAIN_TOOLS` are
 read-only brain-facing queries returning `{facts, summary,
@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from belief.crew_console import CrewConsole
@@ -43,21 +43,50 @@ class ActionContext:
     own fields in place (`reset_for_new_mission`) without replacing the
     object, so an action wrapper closed over this context at rule-load
     time stays valid across a restart without the rules needing to
-    reload."""
+    reload.
+
+    `request_effector_write` (`[[BL-17]]` D20, `plans/speech-rules/
+    plan.md` Stage 3d) is the one other collaborator this context carries
+    -- a closure built in `body.py` the same way `speech_log_sink`/
+    `rule_runner` already are, validating `effector.write`'s own `name`/
+    `value` against the live aircraft registry and, on success, enqueuing
+    a rule-originated write against `body.py`'s own runner-owned
+    `belief.effector_engine.EffectorRunState` (never called directly from
+    this module -- see `_write_effector`'s own docstring for why).
+    `None` for a bare `ActionContext` built with no live registry/runner
+    to close over (e.g. `--print-rules`'s own standalone load, which
+    never dispatches a rule) -- `_write_effector` degrades gracefully
+    rather than crashing in that case."""
 
     console: CrewConsole
+    request_effector_write: (
+        Callable[[str, str, str | None], dict[str, object]] | None
+    ) = None
 
 
 @dataclass(frozen=True)
 class ActionParam:
-    """One action parameter -- today, always a bounded integer (every
-    Stage 2 action's own slot values are already integers by the time a
-    rule pattern match hands them over). Widen this, not the invoke
-    signature, when a later action needs a different kind."""
+    """One action parameter. `kind="int"` (default, every Stage 2
+    action's own shape) is a bounded integer, checked against `lo`/`hi`.
+    `kind="str"` (`[[BL-17]]` D20) is a plain string -- type-checked
+    here, generically; whether a given string value is itself *legal*
+    (e.g. a known effector name) is the owning action's own job inside
+    `invoke`, which already returns a `reason` string of its own
+    choosing (D6) -- this keeps the generic wrapper below from needing to
+    know what any one action's strings mean, rather than growing a
+    second, dynamic vocabulary-lookup mechanism here.
+
+    `optional=True` (D20) marks a trailing parameter Lua may omit from
+    the call entirely, or pass as an explicit `nil` -- `invoke` then
+    receives `None` for it rather than the call being rejected for wrong
+    arity. Only ever the *last* parameter(s) in an `Action.params` tuple;
+    `Action.__post_init__` enforces that ordering."""
 
     name: str
-    lo: int
-    hi: int
+    kind: Literal["int", "str"] = "int"
+    lo: int = 0
+    hi: int = 0
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -65,19 +94,36 @@ class Action:
     """One callable action, named for its Lua call site (`flight.
     increment_heading`, the namespace plus this `name`). `invoke` receives
     already-validated arguments (every `params` entry checked against its
-    own bounds first) and returns a flat `{"ok": bool, "reason": str |
-    None, ...}`-shaped dict -- Lua's own `r.ok`/`r.reason` convention
-    (D5/D6), converted to a genuine Lua table by `engine.py` before it
-    reaches the handler, never handed over as a raw Python object
-    (`sandbox.py`'s module docstring)."""
+    own type/bounds first; an omitted optional trailing parameter arrives
+    as `None`) and returns a flat `{"ok": bool, "reason": str | None,
+    ...}`-shaped dict -- Lua's own `r.ok`/`r.reason` convention (D5/D6),
+    converted to a genuine Lua table by `engine.py` before it reaches the
+    handler, never handed over as a raw Python object (`sandbox.py`'s
+    module docstring)."""
 
     name: str
     params: tuple[ActionParam, ...]
-    invoke: Callable[[ActionContext, dict[str, int]], dict[str, object]]
+    invoke: Callable[[ActionContext, dict[str, object]], dict[str, object]]
+
+    def __post_init__(self) -> None:
+        seen_optional = False
+        for param in self.params:
+            if param.optional:
+                seen_optional = True
+            elif seen_optional:
+                raise ValueError(
+                    f"action {self.name!r}: required parameter {param.name!r} "
+                    "follows an optional one -- optional parameters must be "
+                    "the trailing ones"
+                )
 
 
-def _increment_heading(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
-    return ctx.console.increment_ai_heading(args["delta_deg"])
+def _increment_heading(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    delta_deg = args["delta_deg"]
+    assert isinstance(delta_deg, int)
+    return ctx.console.increment_ai_heading(delta_deg)
 
 
 #: `flight.increment_heading(delta_deg)` -- "turn left/right NN" (Stage 2,
@@ -94,6 +140,52 @@ FLIGHT_ACTIONS: tuple[Action, ...] = (
     ),
 )
 
+
+def _write_effector(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """`effector.write(name, value, says)` (`[[BL-17]]` D20) -- never
+    touches `belief.effector_engine`/`belief.effector_registry` directly
+    (D5's own "avoids a `belief` <-> `rules` import cycle" reasoning,
+    applied here the same way `increment_ai_heading` avoids it): the
+    real validation against the loaded aircraft's curated registry, and
+    the actual `effector_engine.request_write` call, both live inside
+    `ctx.request_effector_write`'s own closure, built in `body.py` where
+    the live registry and the runner-owned `EffectorRunState` already
+    are. An unknown effector name, an illegal value name for that
+    effector, or (defensively) a context built with no registry/runner
+    to close over all answer the same closed reason, `"UNKNOWN_EFFECTOR"`
+    -- the request never reaches the engine in any of those cases."""
+    name = args["name"]
+    value = args["value"]
+    says = args["says"]
+    assert isinstance(name, str)
+    assert isinstance(value, str)
+    assert says is None or isinstance(says, str)
+    if ctx.request_effector_write is None:
+        return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+    return ctx.request_effector_write(name, value, says)
+
+
+#: `effector.write(name, value, says)` (`[[BL-17]]` D20, Stage 3d) --
+#: built now, as foundation, before any command group is ported onto it:
+#: no sequence file is migrated and no shipped rule calls this yet (that
+#: is Stage 5's own job). `says` is optional/free-text, not a vocabulary
+#: check -- it is the eventual spoken confirmation text, the same role a
+#: sequence row's `petrovich-says` cell already plays.
+EFFECTOR_ACTIONS: tuple[Action, ...] = (
+    Action(
+        name="write",
+        params=(
+            ActionParam(name="name", kind="str"),
+            ActionParam(name="value", kind="str"),
+            ActionParam(name="says", kind="str", optional=True),
+        ),
+        invoke=_write_effector,
+    ),
+)
+
 #: namespace name -> the actions it exposes. `engine.py` builds one Lua
 #: table per entry and makes it a global visible to every rule file.
-ACTION_NAMESPACES: dict[str, tuple[Action, ...]] = {"flight": FLIGHT_ACTIONS}
+ACTION_NAMESPACES: dict[str, tuple[Action, ...]] = {
+    "flight": FLIGHT_ACTIONS,
+    "effector": EFFECTOR_ACTIONS,
+}
