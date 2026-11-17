@@ -1838,6 +1838,38 @@ def _resolve_expected_area_checks(
                 )
 
 
+def attack_run_trigger_edges(
+    *,
+    active_before: bool,
+    engaged_missiles: bool | None,
+    active_after_command: bool,
+    active_after_drain: bool,
+) -> tuple[EffectorTrigger, ...]:
+    """The attack-run effector triggers one poll fires (user, 2026-11-17),
+    from whether a run was active before this poll's command, after it,
+    and after `drain_attack_run`. `engaged_missiles` is `None` when no
+    `engage` was applied this poll, else whether it carried `missiles`.
+
+    A start fires only when no run was active before ("re-engaging
+    during a run: no"), and the missiles variant replaces the plain one
+    ("only the missile one"). A stop fires on any end ("all of them"):
+    a disengage, or `drain_attack_run` returning `None` (drop target,
+    cancel, lost contact) -- including a run that starts and ends in
+    the same poll, which fires both, start first."""
+    triggers: list[EffectorTrigger] = []
+    if engaged_missiles is not None and not active_before:
+        triggers.append(
+            EffectorTrigger.ATTACK_RUN_START_MISSILES
+            if engaged_missiles
+            else EffectorTrigger.ATTACK_RUN_START
+        )
+    if (active_before and not active_after_command) or (
+        active_after_command and not active_after_drain
+    ):
+        triggers.append(EffectorTrigger.ATTACK_RUN_STOP)
+    return tuple(triggers)
+
+
 def _sight_lock_seen(
     sight_head: SightHead, atgm_run_state: AtgmRunState | None
 ) -> bool:
@@ -4946,6 +4978,13 @@ def _run_crew_text_poll_loop(
                         # guidance line wins the tick by being drained
                         # first, deferring (never dropping) the
                         # scheduler's own candidates.
+                        # Attack-run effector triggers (user, 2026-11-17):
+                        # the run's state is sampled here, after the
+                        # command, and after `drain_attack_run` below;
+                        # `attack_run_trigger_edges` turns the three into
+                        # start/stop edges.
+                        run_active_before = runner.attack_run_state is not None
+                        engaged_missiles: bool | None = None
                         if crew_console.attack_run_transition == "engage":
                             runner.attack_run_state = AttackRunState()
                             crew_console.attack_run_transition = None
@@ -4969,10 +5008,12 @@ def _run_crew_text_poll_loop(
                                 if atgm_contact_id is not None
                                 else None
                             )
+                            engaged_missiles = atgm_contact_id is not None
                         elif crew_console.attack_run_transition == "disengage":
                             runner.attack_run_state = None
                             runner.atgm_run_state = None
                             crew_console.attack_run_transition = None
+                        run_active_after_command = runner.attack_run_state is not None
                         # `BL-B64` Stage 2, direction §6 -- the same
                         # one-shot-signal shape `attack_run_transition`
                         # just used: `_handle_observ_on`/`_handle_observ_
@@ -5192,6 +5233,17 @@ def _run_crew_text_poll_loop(
                         # attack run ends this way.
                         if runner.attack_run_state is None:
                             runner.atgm_run_state = None
+                        for attack_run_trigger in attack_run_trigger_edges(
+                            active_before=run_active_before,
+                            engaged_missiles=engaged_missiles,
+                            active_after_command=run_active_after_command,
+                            active_after_drain=runner.attack_run_state is not None,
+                        ):
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                attack_run_trigger,
+                                runner.last_t_sim,
+                            )
                         # `plans/atgm-run-sight-tracking/plan.md` -- "say
                         # 'Tracking.' when on target": fires exactly on
                         # the False->True edge of `_sight_lock_seen`

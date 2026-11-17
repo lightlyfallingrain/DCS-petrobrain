@@ -201,3 +201,13 @@
 
   Related: `[[BL-B64]]`, `[[BL-B66]]`, `[[BL-B65]]`, `[[BL-B63]]`, `[[BL-B62]]`, `[[BL-14]]`,
   `[[BL-B90]]`.
+
+  ## 2026-11-17 — missile launch/impact triggers are this entry's `atgm-*` ones
+
+  The user asked for effector triggers `missile-launch` and `missile-hit` alongside new
+  `attack-run-start`/`attack-run-start-missiles`/`attack-run-stop` (those three shipped on their
+  own, fired from attack-run edges). For the missile two: *"leave missile-* out for now, they are
+  same as the atgm-* ones"*. Asked whether `missile-hit` is the same moment as this entry's planned
+  `atgm-impact` (the missile's flight ended — the code cannot tell hit from miss): *"yes"*. So no
+  second set: Stage 6's `ATGM_IMPACT` is that trigger, and a launch trigger, if wanted, belongs with
+  Stage 5's `OwnWeaponTracker`.

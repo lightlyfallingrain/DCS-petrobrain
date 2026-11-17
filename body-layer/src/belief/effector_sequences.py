@@ -97,6 +97,18 @@ class EffectorTrigger(Enum):
     #: while a mission (re)start is still resolving.
     SEAT_PILOT = "seat-pilot"
     SEAT_COPILOT = "seat-copilot"
+    #: Added 2026-11-17 (user: "add the attack-run-* triggers"). Fired from
+    #: `body.py` on the edges of `runner.attack_run_state`
+    #: (`attack_run_trigger_edges`): a start only when no run was active
+    #: (re-engaging during a run fires nothing), the missiles variant
+    #: *instead of* the plain one when the engage carried `missiles`, and
+    #: a stop on every way a run ends -- disengage, drop target, cancel,
+    #: lost contact. Not on a mission (re)start: that drops every effector
+    #: run anyway (D11). Missile launch/impact are BL-B67's own
+    #: `atgm-*` triggers, not added here.
+    ATTACK_RUN_START = "attack-run-start"
+    ATTACK_RUN_START_MISSILES = "attack-run-start-missiles"
+    ATTACK_RUN_STOP = "attack-run-stop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +208,32 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
             "The player moves from the pilot seat to the copilot "
             "(operator) seat. Same reading and the same exclusions as "
             "seat-pilot."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.ATTACK_RUN_START: TriggerInfo(
+        description=(
+            'The pilot starts an attack run ("engage ...") with guns, '
+            "rockets or no weapon named, while no attack run is active. "
+            "Re-engaging during a run fires nothing. An engage naming "
+            "missiles fires attack-run-start-missiles instead, never both."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.ATTACK_RUN_START_MISSILES: TriggerInfo(
+        description=(
+            'The pilot starts an ATGM attack run ("engage ... missiles") '
+            "while no attack run is active. Fires instead of "
+            "attack-run-start, never with it."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.ATTACK_RUN_STOP: TriggerInfo(
+        description=(
+            "An attack run ends, however it ends: the pilot says "
+            '"disengage", drops the target or cancels, or the contact is '
+            "lost. Not on a mission (re)start, which drops every running "
+            "sequence anyway."
         ),
         cardinality="every_time",
     ),
