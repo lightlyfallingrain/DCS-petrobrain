@@ -18,7 +18,8 @@
   two exist; recorded here so the constraint on Fix A's design isn't lost before this becomes
   buildable.
 
-- **Detection under real world conditions — weather, light, vegetation.** Raised by the user
+- **Detection under real world conditions — weather, light, vegetation.** *(Given its own ID
+  2026-11-17: `[[BL-B124]]`, which points back here for the spec.)* Raised by the user
   2026-09-19, not started, no milestone assigned. **The framing matters more than the list:** every
   detection test so far has been flown in near-perfect visual conditions, which makes the current
   calibration *an upper bound on what is possible*, not a model of what usually happens. Conditions

@@ -47,13 +47,13 @@ Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUI
 
 ## Priority order
 
-**The user's own standing priority order lives in `todo/todo/X-T27.md`** (given 2026-10-16) and
-outranks the order this file's status table implies: reported bugs first, each one triaged by
-judgement rather than all explored by default; then the 9K113 chain — detection (done, awaiting a
-sortie), cockpit effectors, ATGM guidance; then the attack run's remaining halves, of which
-automatic optic selection is in progress and guns/rockets are done. That entry also records the one
-gate the order exposes — everything below 9K113 detection is behind a cockpit-write probe only the
-user can run — and what the order says by omission.
+**The user's own standing priority order lives in `todo/todo/X-T29.md`** (given 2026-11-17,
+superseding `X-T27`): `BL-17` (spoken commands as Lua rules), then `BL-16`'s raw-axes flight in
+`BL-17`'s config style, the pilot/copilot seats (`BL-B123`), light and weather on perception
+(`BL-B124`), offset marks (`BL-17`'s marks stage), the launcher (`X-B40`), Mi-24P gating
+(`BL-18`), Mission Interpreter wiring (`BL-15` Stage 2) and wingman recon (`X-B41`). Bugs the
+user brings back from flying keep `X-T27`'s rule: each is triaged by judgement, not all explored
+by default.
 
 ## Status by subproject
 

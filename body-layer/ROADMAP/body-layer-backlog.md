@@ -159,6 +159,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B120]] — `altimeter_qnh_sync`'s QNH clamp stays bounded for NaN/±Infinity only by accident of `min`/`max` argument order, not a designed `math.isfinite` guard — low probability/impact, found in `[[BL-B118]]`'s security deep analysis
 - [[BL-B119]] — effector sequence rows speak their `petrovich-says`; hard-coded observ/weapons readbacks removed (DoD-PASSED, merged `18f73b09`, `#needs-flight`)
 - [[BL-B121]] — same-poll pending-restart may speak a speaking sequence row's line twice; not reachable by any sequence shipped today, closes before a multi-row speaking sequence lands
+- [[BL-B123]] — pilot and copilot seats: Petrovich takes the other seat, with that seat's abilities (9K113 copilot only; no optic while he flies)
+- [[BL-B124]] — light level and weather change what Petrovich can perceive (own ID for the section filed inside BL-B22)
 - [[BL-B122]] — a rejected/failed `ai_pilot_goal` write is marked sent and never retried; found in BL-16 Stage P2's security deep analysis, not blocking that merge
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain

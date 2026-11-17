@@ -130,6 +130,7 @@ Ahead:
 - [[BL-14]] — Attack run: target selection and run guidance
 - [[BL-15]] — Mission start actions: clean slate, theatre, briefing
 - [[BL-16]] — Petrovich flies the helicopter (in progress 2026-11-15; parked mode via ED AI wheel first, raw axes second)
+- [[BL-18]] — Gate the Mi-24P specifics, so other helicopters can be supported later (BL-17 is on `feature/speech-rules`)
 
 ## Backlog (body-layer)
 
