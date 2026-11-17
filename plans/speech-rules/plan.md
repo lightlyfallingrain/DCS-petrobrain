@@ -969,9 +969,19 @@ supports it (U23).
      flying"), "binoculars" or "watch nearest" while flying (→ "unable, hands busy", once Stage 6
      ports it — recorded now anyway so the corpus does not need a second recording session later)
    - five ordinary non-command sentences already in `FREE_SPEECH_GUARD`, read for contrast
-   Run: `PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts` to get the exact
-   phrasing prompts, then `tools/record_corpus.py --out audio-adapter/tests/fixtures/corpus/bl17-stage3c/`
-   (or wherever the existing corpus lives — see that tool's own docstring for the exact flag names).
+   **Corrected at the DoD pass for Stages 3a/3b/3d/4 (2026-11-17), after running the command rather
+   than trusting this account**: `record_corpus.py` had neither `--list-prompts` nor `--out` — its
+   only interface was `--corpus-dir`/`--takes`/etc. over the fixed `vocabulary.PHRASES` table, which
+   does not contain any of this stage's phrases (the ported flight commands moved out of
+   `vocabulary.PHRASES` in Stages 2/4). Extended (light-path testing aid, no plan/review overhead)
+   with `--phrases-file PATH` (one phrase per line, `#`-comments/blank lines skipped, repeats
+   disambiguated by a numbered token suffix) and `--list-prompts` (prints without needing
+   `--corpus-dir` or `sox`). The exact phrase list above is committed at
+   `audio-adapter/tests/fixtures/corpus/bl17-stage3c-phrases.txt`. Run:
+   `PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt`
+   (from `audio-adapter/`) to see the prompts, then
+   `PYTHONPATH=src .venv/bin/python tools/record_corpus.py --corpus-dir tests/fixtures/corpus/bl17-stage3c/ --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt`
+   to record (both verified run in that DoD pass, not just read from the tool's `--help`).
 4. **Measurement**: `tools/stt_bench.py` run three times against the recorded corpus (full prompt /
    in-state-first / out-of-state-removed), reported as `research/2026-11-17-state-hint-bench.md`
    (dated Investigator-style research note, since this is reconnaissance on recognition behaviour,
