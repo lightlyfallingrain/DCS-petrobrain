@@ -29,6 +29,7 @@ from typing import Any, Final
 from belief.crew_console import CrewConsole
 from belief.speech import render_unable
 from rules.actions import Action, ActionContext
+from rules.gates import GATE_REGISTRY
 from rules.loader import RawRegistration, RuleLoadError, load_rules
 from rules.sandbox import RuleBudgetExceeded, RuleRuntimeError, RuleSandbox
 
@@ -65,13 +66,17 @@ class RuleOutcome:
 @dataclass(frozen=True)
 class CompiledLuaRule:
     """One rule that loaded cleanly. `handler` is the Lua function value
-    `when.speech`'s third argument captured -- opaque beyond "callable
-    with one table argument", called only from `run_rule`."""
+    `when.speech`'s fourth argument captured -- opaque beyond "callable
+    with one table argument", called only from `run_rule`. `category`
+    (D16/U19) is validated against `rules.gates.GATE_REGISTRY` before
+    this is ever constructed (`_build_when_table`'s `speech` closure
+    below) -- `_handle_rule`'s own gate lookup can trust it."""
 
     id: str
     pattern: str
     handler: Any
     file: str
+    category: str
 
 
 class _SinkHolder:
@@ -112,10 +117,13 @@ class RuleSet:
     #: of which `_SinkHolder` instance backs them.
     _sink_holder: _SinkHolder = field(repr=False, compare=False)
 
-    def ids_and_patterns(self) -> list[tuple[str, str]]:
-        """What `PUT /rules` sends -- `(id, pattern)` per accepted rule,
-        in no particular order (the adapter/`body.py` sort as needed)."""
-        return [(rule.id, rule.pattern) for rule in self.rules.values()]
+    def ids_and_patterns(self) -> list[tuple[str, str, str]]:
+        """What `PUT /rules` sends -- `(id, pattern, category)` per
+        accepted rule, in no particular order (the adapter/`body.py`
+        sort as needed). `category` rides along for D17's benefit
+        (Stage 3c) -- the gate check itself is entirely local to
+        body-layer and never reads this wire value back."""
+        return [(rule.id, rule.pattern, rule.category) for rule in self.rules.values()]
 
     @classmethod
     def load(
@@ -159,7 +167,11 @@ def _dedupe(
             continue
         reg = regs[0]
         rules[rule_id] = CompiledLuaRule(
-            id=reg.id, pattern=reg.pattern, handler=reg.handler, file=reg.file
+            id=reg.id,
+            pattern=reg.pattern,
+            handler=reg.handler,
+            file=reg.file,
+            category=reg.category,
         )
     return rules, failures
 
@@ -224,7 +236,32 @@ def _build_when_table(
     registrations: list[RawRegistration],
     failures: list[RuleLoadError],
 ) -> Any:
-    def speech(rule_id: object, pattern: object, handler: object) -> None:
+    def speech(*args: object) -> None:
+        """`when.speech(id, pattern, category, handler)` (D16/U19,
+        category required, no default -- a missing category is exactly
+        the kind of mistake a closed, visible load error should catch,
+        D6's own finest-grain-honest posture). Takes `*args` rather than
+        four named parameters so an old-arity call (three positionals,
+        the pre-D16 shape) degrades to an ordinary `RuleLoadError`
+        disabling this one rule -- never a bare Python `TypeError`,
+        which lupa propagates through the Lua call boundary unwrapped
+        (`research/2026-11-17-lupa-sandbox.md`'s own finding on
+        exceptions raised inside a Python callback) and would otherwise
+        escape `load_rules`'s `except (RuleCompileError, RuleRuntimeError,
+        RuleBudgetExceeded)` entirely, discarding the whole file instead
+        of just the one bad call."""
+        if len(args) != 4:
+            bad_id = args[0] if args and isinstance(args[0], str) else None
+            failures.append(
+                RuleLoadError(
+                    file_label,
+                    bad_id,
+                    "when.speech: expected 4 arguments (id, pattern, "
+                    f"category, handler), got {len(args)}",
+                )
+            )
+            return
+        rule_id, pattern, category, handler = args
         if not isinstance(rule_id, str) or not rule_id:
             failures.append(
                 RuleLoadError(file_label, None, "when.speech: id must be a string")
@@ -237,6 +274,15 @@ def _build_when_table(
                 )
             )
             return
+        if not isinstance(category, str) or category not in GATE_REGISTRY:
+            failures.append(
+                RuleLoadError(
+                    file_label,
+                    rule_id,
+                    f"when.speech: unknown category {category!r}",
+                )
+            )
+            return
         if not callable(handler):
             failures.append(
                 RuleLoadError(
@@ -246,7 +292,11 @@ def _build_when_table(
             return
         registrations.append(
             RawRegistration(
-                id=rule_id, pattern=pattern, handler=handler, file=file_label
+                id=rule_id,
+                pattern=pattern,
+                handler=handler,
+                file=file_label,
+                category=category,
             )
         )
 

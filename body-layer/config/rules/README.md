@@ -15,6 +15,7 @@ adapter accepted/rejected).
 
 ```lua
 when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle>",
+  "flight_control",
   function(s)
     local r = flight.increment_heading(s.direction == "left" and -s.degrees or s.degrees)
     if not r.ok then
@@ -25,14 +26,33 @@ when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle
   end)
 ```
 
-`when.speech(id, pattern, handler)`:
+`when.speech(id, pattern, category, handler)`:
 
 - `id` — the command token. Shown in `--speech-log`, the command-map, and (once ported) BR-2's
   brain allowlist.
 - `pattern` — the grammar below. One pattern per rule; two rules that could both match the same
   wording are both disabled at load/push time (see "Failures" below).
+- `category` — **required**, one of the names in "Categories" below. Decides, before this
+  handler ever runs, whether the rule may execute at all (e.g. "unable, not flying" when
+  Petrovich has no controls). A missing or unrecognised category is a bad `when.speech` call —
+  see "Failures" below.
 - `handler(s)` — called with one table `s`, keyed by each slot's own name. Calls `say`/`unable`
   to speak, and whatever actions it needs.
+
+## Categories
+
+Every rule belongs to one category, and that category's gate runs **before** the rule's handler
+— a rule whose gate says no never has its handler called at all, the same way the on-ground look
+gate already works for scan/watch commands.
+
+| category | gate |
+|---|---|
+| `always` | always runs — queries, describe, recall, and anything else not limited by seat or flight state |
+| `flight_control` | runs only while Petrovich has the aircraft's controls; while he is taking them over (the moment right after "Request Aircraft Control"), the command is understood and held briefly, then flown once controls settle — it is not refused |
+
+Declaring a category does not add a second check inside the handler — a rule's own action may
+still validate its *arguments* (D5), but the category already owns the seat/flight-state
+precondition, so an action extracted from a ported handler should not re-check it.
 
 ## Pattern grammar
 
@@ -86,8 +106,9 @@ success).
 ## Failures
 
 Any rule-file failure — a pattern clash with another rule or with an existing spoken command, a
-Lua syntax error, a bad `when.speech` call, an unknown slot type, a Lua error while a handler
-runs — is written to the standard error log (with the file and, where known, the rule id) and
+Lua syntax error, a bad `when.speech` call (including a missing or unrecognised `category`), an
+unknown slot type, a Lua error while a handler runs — is written to the standard error log (with
+the file and, where known, the rule id) and
 Petrovich says exactly **"Action file error."** once per load that has one. There is no
 per-cause spoken description; the log is where the detail lives.
 

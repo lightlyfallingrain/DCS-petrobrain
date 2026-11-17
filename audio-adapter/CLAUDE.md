@@ -330,9 +330,11 @@ consume.
   answering `500` if that raises `AudioDeliveryError`, `200 {"ok": true}` otherwise. This is what
   lets `body-layer`'s `stop_talking` token interrupt playback and say nothing, rather than needing
   to push a new audio line just to reach the interrupt mechanism. **`PUT /rules`**
-  (`plans/speech-rules/plan.md` D1/D2, `[[BL-17]]`) — body-layer pushes its full `(id, pattern)`
-  rule set (`{"version", "rules": [{"id", "pattern"}]}`); this handler parses and runs the
-  collision check (`rule_patterns.compile_rules`) and swaps the result into a shared
+  (`plans/speech-rules/plan.md` D1/D2, `[[BL-17]]`) — body-layer pushes its full `(id, pattern,
+  category)` rule set (`{"version", "rules": [{"id", "pattern", "category"}]}` — `category` added
+  D16/Stage 3b, a required field, same 400 shape as `id`/`pattern`); this handler parses and runs
+  the collision check (`rule_patterns.compile_rules`, which never reads `category` — it is
+  attached to each accepted `CompiledRule` afterward) and swaps the result into a shared
   `rule_patterns.RuleRegistry` with one assignment, answering `{"version", "accepted", "rejected"}`.
   `GET /transcripts/poll` gains an `X-Rules-Version` header (the registry's current `version`,
   absent until the first successful push) so body-layer can detect an adapter restart or a failed

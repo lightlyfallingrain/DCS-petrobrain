@@ -1,6 +1,6 @@
 ---
 name: generate-defaults-sentence-split-digit-period
-description: generate_defaults.py's first-sentence splitter never splits after a period preceded by a digit -- a #: comment whose intended first sentence ends in a numeral renders merged with the next sentence
+description: generate_defaults.py's first-sentence splitter never splits after a period preceded by a digit (merges two sentences) and has no abbreviation guard, so "e.g."/"i.e." mid-sentence splits too early (truncates one) -- two opposite failure modes, same fix
 metadata:
   type: reference
 ---
@@ -28,3 +28,16 @@ boundary lands on an ordinary word, then regenerate and *read* the
 rendered file before considering the constant done — same check this
 project's commit-quality gate already expects, just caught one step
 earlier.
+
+**The opposite failure, hit on BL-17 Stage 3b (`RULE_GATE_HOLD_TIMEOUT_S`):**
+the splitter has no abbreviation guard either, so a period that is *not*
+digit-adjacent still splits even when it isn't really a sentence boundary
+— "its category's gate said `HOLD`, e.g. the takeover-settle window)
+before giving up..." split at "e.g." (a period followed by a space, like
+any other sentence end), truncating the real first sentence mid-clause.
+Avoid any abbreviation ("e.g.", "i.e.", "etc.") or other embedded ". "
+inside the sentence you intend as the description — reword with "such
+as"/"that is"/"and so on" instead of hoping the tool special-cases it.
+Same remediation both ways: regenerate and read the rendered
+`defaults.toml` line itself, since a diff of the source comment reads as
+plausible in both failure directions.

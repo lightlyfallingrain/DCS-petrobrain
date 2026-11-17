@@ -102,7 +102,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO, cast
 
@@ -138,6 +138,7 @@ from belief.callouts import (
 )
 from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import ContactStore
+from belief.crew_state import CrewState
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
     BrainClient,
@@ -235,6 +236,7 @@ from perception.gaze import (
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
 from perception.optics import UNAIDED_OPTIC, Optic
 from perception.source import OwnshipState
+from rules.gates import check_gate
 
 #: Below this altitude AGL in metres, Petrovich is treated as on the
 #: ground: perception stops and a look command is refused rather than
@@ -1375,6 +1377,46 @@ ALTIMETER_QNH_TIMEOUT_LINE: Final[str] = "Unable, altimeter pressure not set."
 #: split `CONFIG_ERROR_LINE`'s own docstring describes for sequence files.
 ACTION_FILE_ERROR_LINE: Final[str] = "Action file error."
 
+#: `[[BL-17]]` D16/U20 -- how long Petrovich holds an understood but not
+#: yet actionable rule command, such as a flight command caught by the
+#: takeover-settle window, before giving up and speaking "unable" instead
+#: of flying it once ready. Raising it risks the pilot waiting through a
+#: long silence for a command that was never going to settle (a genuine
+#: fault, not a settle delay); lowering it risks "unable" on an ordinary
+#: takeover that would have settled a moment later. 5.0 s default: the
+#: ordinary settle is expected well under a second (one status push after
+#: handover) -- a generous margin that still fails fast, rather than
+#: leaving the pilot wondering for the ~14 s worst-case barometric-target
+#: correction can take (U20, "as recommended" -- needs confirming against
+#: a real takeover on the test card, same as every other timing constant
+#: in this feature family).
+RULE_GATE_HOLD_TIMEOUT_S: Final[float] = tuning.real(
+    "belief.crew_console.RULE_GATE_HOLD_TIMEOUT_S",
+    5.0,
+    lo=1.0,
+    hi=15.0,
+    status="agreed-guess",
+)
+
+
+@dataclass(frozen=True)
+class PendingRuleDispatch:
+    """One rule matched while its category's gate said `HOLD` (D16, the
+    takeover-settle vignette; Q12 "hold and fly when ready") -- re-
+    checked every poll by `CrewConsole.drain_pending_rule_dispatch`
+    against the *current* `CrewState`, not the one at match time. A
+    second command matched while one is already held replaces this
+    outright (`_handle_rule`'s own assignment, U21: "latest wins," the
+    same convention `AiPilotGoalRequest` already has for an outstanding
+    flight goal) -- nothing here needs to track "there was an earlier
+    one," because there never is more than one at a time."""
+
+    rule_id: str
+    slots: dict[str, int | str] | None
+    category: str
+    held_since_sim: float
+
+
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
 #: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
 #: way `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s `F10CommandQueue`
@@ -1953,7 +1995,13 @@ class CrewConsole:
     #: closure over its `RuleSandbox`/current `RuleSet`/`ActionContext`;
     #: `(token, slots) -> (lines, error)`. Deliberately a plain tuple, not
     #: a `rules.engine.RuleOutcome`, so this module imports nothing from
-    #: `rules.*` (D4's own "avoids a `belief` <-> `rules` import cycle").
+    #: `rules.engine`/`rules.actions`/`rules.loader` -- the handler
+    #: indirection D4 names (those three import `CrewConsole`, so this
+    #: module importing any of them back would be the real cycle).
+    #: `rules.gates` is a leaf module (depends only on `belief.crew_
+    #: state`) with no edge back here, so `_handle_rule`'s own category
+    #: gate check (D16) imports it directly -- D4's concern was always
+    #: the handler/engine indirection, not every module under `rules/`.
     #: `None` is every test/caller that builds a `CrewConsole` with no
     #: rule engine wired -- `enabled_rule_ids` is then always empty too,
     #: so `handle_command` never reaches `_handle_rule` in that case.
@@ -1968,6 +2016,16 @@ class CrewConsole:
     #: dropped) is removed from this set by `body.py`, so a stale
     #: transcript naming it answers `NO_SUCH_COMMAND` rather than running.
     enabled_rule_ids: frozenset[str] = field(default_factory=frozenset, repr=False)
+    #: `[[BL-17]]` D16 -- `rule_id -> category`, set alongside `enabled_
+    #: rule_ids` by every `set_enabled_rule_ids` call (same lifecycle:
+    #: reset to `{}` on mission restart, repopulated synchronously by
+    #: `body.py`'s own reload handler, same as `enabled_rule_ids` above).
+    #: `_handle_rule` falls back to `"always"` for a rule id this map
+    #: does not carry -- every real load always sets it (`rules.engine`
+    #: validates a rule's category at load time), so the fallback exists
+    #: only for a hand-built test fake that enables a rule id without
+    #: ever caring about gating.
+    rule_categories: dict[str, str] = field(default_factory=dict, repr=False)
     #: Every rule id this process has ever had enabled, union across every
     #: `set_enabled_rule_ids` call -- grows, never shrinks, never reset by
     #: `reset_for_new_mission` (same reasoning as `config_error_pending`:
@@ -1991,6 +2049,15 @@ class CrewConsole:
     #: `body.py`'s mission-restart handler recomputes it synchronously
     #: from the fresh reload, the same shape `enabled_rule_ids` above has.
     action_file_error_pending: bool = field(default=False, repr=False)
+    #: `[[BL-17]]` D16 -- one rule held pending its category's gate
+    #: (`PendingRuleDispatch`'s own docstring). `None` the overwhelming
+    #: majority of the time (every category this batch declares other
+    #: than `flight_control`'s `settling` window resolves to `PASS`/
+    #: `UNABLE` immediately, never `HOLD`). Reset to its declared default
+    #: (`None`) on a mission (re)start, same as every other one-shot
+    #: command-transition field -- a held command from the mission that
+    #: just ended must never be flown into the new one.
+    pending_rule_dispatch: PendingRuleDispatch | None = field(default=None, repr=False)
 
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
@@ -2018,7 +2085,8 @@ class CrewConsole:
         `weapon_safety_transition`, `where_is_it_slots`, `_referent_memory`,
         `_pending_mentions`, `on_ground`, `sight_ready`,
         `enrichment`, `refused`, `_positional_reply_overflow_
-        warned`, `altimeter_qnh_failed_pending`) resets to its declared
+        warned`, `altimeter_qnh_failed_pending`, `pending_rule_dispatch`)
+        resets to its declared
         default (`attack_run_weapon` among them, `[[BL-B67]]`'s own
         one-shot weapon slot) -- see `refused`'s own field docstring for
         why resetting it here is correct even though a mission (re)start
@@ -2048,15 +2116,16 @@ class CrewConsole:
         the closure itself is built once by `body.py` at process start,
         wrapping a holder that reload updates in place (D2's own re-push
         mechanism), so nothing needs to rebuild it per mission. `enabled_
-        rule_ids` deliberately resets to its declared default (empty) and
-        is **not** passed through -- unlike `rule_runner`, it names
-        *which* rules are currently enabled, and D2/U11 reload the rule
-        files at every mission (re)start; `body.py`'s mission-restart
-        handler re-populates it synchronously, in the same call, right
-        after this reset -- the same "resets to default, refreshed by the
-        very next thing that runs" shape `enrichment`/`sight_ready`
-        already have, not a window where a stale set could dispatch a
-        rule that no longer exists."""
+        rule_ids` **and `rule_categories` (D16)** deliberately reset to
+        their declared defaults (empty) and are **not** passed through --
+        unlike `rule_runner`, they name *which* rules are currently
+        enabled and what category each belongs to, and D2/U11 reload the
+        rule files at every mission (re)start; `body.py`'s mission-restart
+        handler re-populates both synchronously, in the same
+        `set_enabled_rule_ids` call, right after this reset -- the same
+        "resets to default, refreshed by the very next thing that runs"
+        shape `enrichment`/`sight_ready` already have, not a window where
+        a stale set could dispatch a rule that no longer exists."""
         if self.speech_worker is not None:
             self.speech_worker.interrupt()
         self.__init__(  # type: ignore[misc]
@@ -3040,37 +3109,129 @@ class CrewConsole:
         self.ai_pilot_hvrt_step_transition = None
         self._pending_mentions = None
 
-    def set_enabled_rule_ids(self, ids: frozenset[str]) -> None:
-        """The one writer of `enabled_rule_ids` -- `body.py` calls this
-        instead of assigning the field directly, so `_ever_enabled_rule_
-        ids` (that field's own docstring) always grows alongside it."""
+    def set_enabled_rule_ids(
+        self, ids: frozenset[str], categories: Mapping[str, str] | None = None
+    ) -> None:
+        """The one writer of `enabled_rule_ids`/`rule_categories` --
+        `body.py` calls this instead of assigning either field directly,
+        so `_ever_enabled_rule_ids` (that field's own docstring) always
+        grows alongside `enabled_rule_ids`. `categories` is `None` only
+        for a test that does not care about gating -- every real
+        `body.py` call site passes the same `rule_id -> category` map,
+        derived from the live `RuleSet`, on *every* call this reload
+        makes (including `_push_rules`'s own later, narrower call), so
+        the map is never half-updated between a reload's two calls."""
         self.enabled_rule_ids = ids
         self._ever_enabled_rule_ids |= ids
+        if categories is not None:
+            self.rule_categories = dict(categories)
+
+    def current_crew_state(self) -> CrewState:
+        """`[[BL-17]]` D16/D17 -- built fresh from `self.parked_flight_
+        state` on every call, never cached: the category gate
+        (`_handle_rule`/`drain_pending_rule_dispatch`) and (Stage 3c) the
+        decision to push `PUT /crew_state` must read the same computed
+        value within one poll (plan's "Co-moving Fields" table).
+        `seat`/`hands_free`/`eyes_free` are named stubs pending
+        `[[BL-B123]]` -- see `CrewState`'s own docstring for why."""
+        state = self.parked_flight_state
+        has_controls = state.parked_active
+        return CrewState(
+            has_controls=has_controls,
+            settling=has_controls and state.held_heading is None,
+            seat="copilot",
+            hands_free=not has_controls,
+            eyes_free=True,
+        )
+
+    def _dispatch_rule(
+        self, rule_id: str, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """The actual `rule_runner` call plus D6's error rollback --
+        shared by `_handle_rule`'s immediate `PASS` and `drain_pending_
+        rule_dispatch`'s later one, so the two dispatch paths can never
+        disagree about what a Lua error does. `rule_runner` is only ever
+        `None` in a test that builds a `CrewConsole` with no rule engine
+        wired -- a category gate can only reach `PASS` for a `token`
+        that is a member of `enabled_rule_ids` (empty by default), so
+        this is unreachable in that case; the `assert` documents that
+        rather than silently returning `[]`."""
+        assert self.rule_runner is not None
+        lines, error = self.rule_runner(rule_id, slots)
+        if error:
+            self._reset_one_shot_command_state()
+            return [ACTION_FILE_ERROR_LINE]
+        return lines
 
     def _handle_rule(
         self, token: str, slots: dict[str, int | str] | None, now_sim: float
     ) -> list[str]:
         """Dispatches a rule id (`[[BL-17]]`, `plans/speech-rules/
-        plan.md` D4) through the injected `rule_runner` closure
-        (`body.py` built it; see that field's own docstring for why this
-        class imports nothing from `rules.*` itself). `rule_runner` is
-        only ever `None` in a test that builds a `CrewConsole` with no
-        rule engine wired -- `token` can then never be a member of
-        `enabled_rule_ids` either (empty by default), so this method is
-        unreachable from `handle_command`'s own dispatch in that case; the
-        `assert` documents that rather than silently returning `[]`.
+        plan.md` D4/D16) -- looks up the matched rule's category and
+        runs its gate (`rules.gates.check_gate`) **before** the rule's
+        handler ever runs:
 
-        On a Lua error during dispatch (`error=True`), the reply is the
-        fixed `ACTION_FILE_ERROR_LINE` in place of any readback, and every
-        one-shot field this dispatch may have set is rolled back
-        (`_reset_one_shot_command_state`) -- so a rule that raises after
-        partially applying an effect never leaves that effect silently in
-        place with nothing said about it (D6/E7)."""
-        assert self.rule_runner is not None
-        lines, error = self.rule_runner(token, slots)
-        if error:
-            self._reset_one_shot_command_state()
-            return [ACTION_FILE_ERROR_LINE]
+        - `PASS` -- calls `_dispatch_rule` exactly as `_handle_rule`
+          always has.
+        - `UNABLE` -- speaks the gate's own reason and never calls the
+          runner at all (a spy runner in a test can assert zero calls).
+        - `HOLD` -- speaks nothing yet; records `pending_rule_dispatch`
+          for `drain_pending_rule_dispatch` to re-check on a later poll
+          (the takeover-settle vignette, Q12 "hold and fly when ready").
+          A rule id missing from `rule_categories` falls back to
+          `"always"` -- see that field's own docstring."""
+        category = self.rule_categories.get(token, "always")
+        outcome = check_gate(category, self.current_crew_state())
+        if outcome.verdict == "hold":
+            self.pending_rule_dispatch = PendingRuleDispatch(
+                rule_id=token,
+                slots=slots,
+                category=category,
+                held_since_sim=now_sim,
+            )
+            return []
+        if outcome.verdict == "unable":
+            return [render_unable(outcome.reason or "NO_SUCH_COMMAND").text]
+        return self._dispatch_rule(token, slots)
+
+    def drain_pending_rule_dispatch(self, now_sim: float) -> list[str]:
+        """`[[BL-17]]` D16's hold-and-retry. Called once per poll from
+        `body.py`, beside `drain_ai_pilot_wheel_speech`, after `advance_
+        parked_flight_state` has refreshed `parked_flight_state` this
+        poll -- so `current_crew_state()` here sees the same poll's
+        state `_handle_rule` would have. Re-checks the held category's
+        gate against the *current* `CrewState`, not the one at match
+        time:
+
+        - `PASS` -- the command happens now, exactly as if it had been
+          said at this later moment (never narrated as delayed, matching
+          this project's existing "never narrate settlement" posture).
+        - still `HOLD`, timeout not yet elapsed -- does nothing, waits
+          for the next poll.
+        - `UNABLE` (the player unparked while holding), or the timeout
+          elapsed while still `HOLD` -- speaks `render_unable(reason)`
+          once and clears the field.
+
+        A second rule matched while one is already held replaces it in
+        `_handle_rule` (latest wins, U21) -- this method only ever sees
+        the most recently held one."""
+        pending = self.pending_rule_dispatch
+        if pending is None:
+            return []
+        outcome = check_gate(pending.category, self.current_crew_state())
+        if outcome.verdict == "hold":
+            if now_sim - pending.held_since_sim < RULE_GATE_HOLD_TIMEOUT_S:
+                return []
+            self.pending_rule_dispatch = None
+            lines = [render_unable(outcome.reason or "NOT_READY").text]
+            self._print(lines, now_sim)
+            return lines
+        self.pending_rule_dispatch = None
+        if outcome.verdict == "unable":
+            lines = [render_unable(outcome.reason or "NO_SUCH_COMMAND").text]
+        else:
+            lines = self._dispatch_rule(pending.rule_id, pending.slots)
+        self._print(lines, now_sim)
         return lines
 
     def handle_command(
@@ -4597,10 +4758,18 @@ class CrewConsole:
         Returns an action result (`{"ok", "reason"}`, `rules.actions.
         ActionContext`'s own shape), never a readback -- the rule writes
         its own readback (D4/U4); this method only ever sets the one-shot
-        `ai_pilot_goal_transition` `body.py`'s poll loop applies."""
+        `ai_pilot_goal_transition` `body.py`'s poll loop applies.
+
+        **The old `current is None -> NOT_READY` branch is removed**
+        (D16/D18): `turn_heading_relative`'s `"flight_control"` category
+        gate now owns that precondition for the whole category, and by
+        the time the gate has let dispatch reach this far, `settling`
+        (`has_controls and held_heading is None`) was already false --
+        i.e. `held_heading is not None`. Leaving the branch in place
+        would read as a second source of truth for the same
+        precondition the gate now owns."""
         current = self.parked_flight_state.held_heading
-        if current is None:
-            return {"ok": False, "reason": "NOT_READY"}
+        assert current is not None
         target = (current + delta_deg) % 360.0
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="heading", heading_deg=target

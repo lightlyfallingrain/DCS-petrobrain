@@ -166,6 +166,11 @@ BRAIN_REPLY_MAX_AGE_S = 20.0
 # source: belief/crew_console.py:ON_GROUND_AGL_THRESHOLD_M
 ON_GROUND_AGL_THRESHOLD_M = 10.0
 
+# `[[BL-17]]` D16/U20 -- how long Petrovich holds an understood but not yet actionable rule command, such as a flight command caught by the takeover-settle window, before giving up and speaking "unable" instead of flying it once ready.
+# status: agreed-guess | range: 1.0 .. 15.0
+# source: belief/crew_console.py:RULE_GATE_HOLD_TIMEOUT_S
+RULE_GATE_HOLD_TIMEOUT_S = 5.0
+
 # `plans/brain-layer/plan.md` D8 -- how long an outstanding brain turn waits for a reply before Petrovich speaks "stand by" once, purely deterministically (no model involvement).
 # status: agreed-guess | range: 0.5 .. 10.0
 # source: belief/crew_console.py:STAND_BY_AFTER_S

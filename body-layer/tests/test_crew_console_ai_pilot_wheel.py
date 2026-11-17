@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from belief.ai_pilot_wheel import (
     AiPilotGoalRequest,
     AiPilotWheelGoal,
@@ -79,7 +81,10 @@ class TestIncrementAiHeading:
     `_handle_turn_heading_relative` readback/transition against the new
     rule end to end; these three are the unit-level equivalent of the
     `TestTurnHeadingRelative` class this replaced, now exercising the
-    extracted method rather than a dispatch token that no longer exists."""
+    extracted method rather than a dispatch token that no longer exists.
+    `[[BL-17]]` Stage 3b (D16) retired this method's own `NOT_READY`
+    branch -- the third test below now pins that calling it directly
+    without a held heading is a precondition violation, not a degrade."""
 
     def test_turns_right_from_the_held_heading(self) -> None:
         console = _console(held_heading=10.0)
@@ -97,11 +102,21 @@ class TestIncrementAiHeading:
             param="heading", heading_deg=350.0
         )
 
-    def test_unable_without_a_known_current_heading(self) -> None:
+    def test_asserts_the_precondition_the_gate_now_owns(self) -> None:
+        """`[[BL-17]]` Stage 3b (D16) supersedes the old `{"ok": False,
+        "reason": "NOT_READY"}` case this test used to pin: the
+        `current is None` check is gone from `increment_ai_heading`
+        itself -- it is dead code once the `"flight_control"` category
+        gate owns that precondition for the whole category (the gate
+        only ever reaches `PASS`, and thus calls this method at all,
+        once `held_heading is not None`). Calling this method directly
+        with no held heading, bypassing the gate the way this unit test
+        always has, is now a precondition violation the method asserts
+        rather than degrades -- the real "unable, not flying" case is
+        `test_rules_flight_actions.py`'s own gate-level tests."""
         console = _console()
-        result = console.increment_ai_heading(-20)
-        assert result == {"ok": False, "reason": "NOT_READY"}
-        assert console.ai_pilot_goal_transition is None
+        with pytest.raises(AssertionError):
+            console.increment_ai_heading(-20)
 
 
 class TestSetSpeed:

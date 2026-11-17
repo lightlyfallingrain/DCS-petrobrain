@@ -586,9 +586,19 @@ def match_pattern(
 
 @dataclass(frozen=True)
 class CompiledRule:
+    """`category` (`[[BL-17]]` D16/Stage 3b) rides along on `PUT /rules`'s
+    per-rule dict and is attached here by `server.py`'s `_handle_put_
+    rules` *after* `compile_rules` returns -- `compile_rules`'s own
+    matching/collision-check logic (id, pattern, elements only) is
+    unchanged, since nothing in this stage reads category for matching.
+    Defaults to `"always"` only so this module's own tests, which build
+    `CompiledRule` directly for matcher/collision fixtures that predate
+    categories, do not need to supply one."""
+
     id: str
     pattern: str
     elements: tuple[Element, ...]
+    category: str = "always"
 
     def first_literal(self) -> str | None:
         """The word that joins the verb-anchor set (D8) -- only when this

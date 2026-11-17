@@ -1,6 +1,6 @@
 ---
 name: project_lupa_sandbox_quirks_bl17_stage0
-description: lupa (Lua-in-Python) sandboxing gotchas found during BL-17 Stage 0's spike -- debug.sethook rejects bare Python callables, register_eval/register_builtins don't strip Lua stdlib, table assignment aliases not copies, LuaError has no structured file/line fields, no type stubs ship
+description: lupa (Lua-in-Python) sandboxing gotchas found during BL-17 Stage 0/3b -- debug.sethook rejects bare Python callables, register_eval/register_builtins don't strip Lua stdlib, table assignment aliases not copies, LuaError has no structured file/line fields, no type stubs ship, any Python global exposed to Lua propagates a raw Python TypeError on a wrong-arity call unwrapped
 metadata:
   type: project
 ---
@@ -38,6 +38,21 @@ repo:
    `import-untyped` and suggests the third-party `types-lupa` package — which is a second,
    unapproved dependency; the plan's own fallback (confine `# type: ignore[import-untyped]` to
    the one module that imports lupa) is what Stage 0 used.
+
+6. **Any Python function exposed as a Lua global propagates a raw Python exception through the
+   call boundary unwrapped — not just the `debug.sethook` callback from point 2.** Confirmed on
+   Stage 3b: `engine.py`'s `when.speech` registration function was widened from 3 named Python
+   parameters to 4 (`id, pattern, category, handler`); a stale Lua call site still using the old
+   3-argument shape raised a bare Python `TypeError: speech() missing 1 required positional
+   argument`, and that `TypeError` propagated straight out of `sandbox.run_with_budget`'s own
+   `except lua54.LuaError` clause (it only catches genuine Lua-raised errors, not a Python-side
+   argument-count mismatch) and out of `loader.load_rules`'s `except (RuleCompileError,
+   RuleRuntimeError, RuleBudgetExceeded)` too — discarding the whole file with an uncaught
+   exception instead of D6's intended "disable just the one bad rule." Fix: any Python function
+   registered as a Lua global that validates its own call shape (arity, types) should take
+   `*args`/`**kwargs` and check explicitly, converting a bad call into the project's own error
+   type (here, appending a `RuleLoadError` and returning) rather than trusting Python's own
+   `TypeError` to degrade gracefully through a Lua call.
 
 Also confirmed empirically (not just from docs): a single shared `LuaRuntime` safely serializes
 concurrent calls from multiple threads (lupa's own global per-runtime lock) — verified with a

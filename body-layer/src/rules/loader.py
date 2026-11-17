@@ -49,14 +49,23 @@ class RuleLoadError:
 
 @dataclass(frozen=True)
 class RawRegistration:
-    """One `when.speech(id, pattern, handler)` call that ran cleanly.
-    `handler` is the Lua function value, opaque to this module -- `engine.
-    py` is what calls it, with a slots table, at dispatch time."""
+    """One `when.speech(id, pattern, category, handler)` call that ran
+    cleanly (`category` added D16/U19). `handler` is the Lua function
+    value, opaque to this module -- `engine.py` is what calls it, with a
+    slots table, at dispatch time.
+
+    `category` defaults to `"always"` only so this module's own tests
+    (`test_rules_loader.py`), which exercise a deliberately simplified
+    fake env builder that predates categories and never constructs this
+    with one, do not need to supply it -- the real env builder
+    (`engine.py`'s `_build_when_table`) always sets it explicitly,
+    already validated against `rules.gates.GATE_REGISTRY`."""
 
     id: str
     pattern: str
     handler: Any
     file: str
+    category: str = "always"
 
 
 #: What `engine.py` passes in: given this file's own label plus the two

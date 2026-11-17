@@ -702,3 +702,219 @@ memory (`feedback_worktree_use_main_checkout_venv.md`), ran the main checkout's 
   alongside `anchor_words`; only the anchor-words and prompt caching (both genuinely
   recomputations of a derived value, not an ordering) needed the `RuleRegistry.swap`/
   `CachedRulePromptProvider` machinery.
+
+### Stage 3b (this run) — rule categories and dispatch gates
+
+Builds D16 exactly as the plan's "Stage 3b" section lays it out: `CrewState`, `GateOutcome`
+(`PASS`/`HOLD(reason)`/`UNABLE(reason)`), the closed `GATE_REGISTRY` (`"always"`/
+`"flight_control"`), the `when.speech(id, pattern, category, handler)` signature change, the
+hold-and-retry mechanism (`pending_rule_dispatch`/`drain_pending_rule_dispatch`/
+`RULE_GATE_HOLD_TIMEOUT_S`), `turn_heading_relative`'s migration to `category="flight_control"`,
+and `increment_ai_heading`'s dead-code removal. No new rules, no Stage 3c/3d/4 work.
+
+### Files Changed
+
+**body-layer**
+- `src/belief/crew_state.py` — new. `CrewState` (frozen dataclass): `has_controls`, `settling`,
+  `seat`/`hands_free`/`eyes_free` (named stubs pending `[[BL-B123]]`, per the plan's own wording).
+  A leaf module (depends on nothing from `belief.crew_console`/`rules.*`) so it can be imported
+  from either side with no cycle.
+- `src/rules/gates.py` — new. `GateOutcome`, `GateFn`, the closed `GATE_REGISTRY` (`_always`
+  always `PASS`; `_flight_control`: `UNABLE("NOT_FLYING")` if not `has_controls`, `HOLD("NOT_READY")`
+  if `settling`, else `PASS`), `check_gate` (an unregistered category degrades to
+  `UNABLE("NO_SUCH_COMMAND")`, defensive).
+- `src/rules/loader.py` — `RawRegistration` gains `category: str = "always"`. The default exists
+  only so `test_rules_loader.py`'s own deliberately simplified fake env builder (predates
+  categories, never supplies one) keeps working unmodified — the real env builder always sets it
+  explicitly.
+- `src/rules/engine.py` — `CompiledLuaRule` gains a required `category: str`; `_dedupe` carries
+  it through from `RawRegistration`. `_build_when_table`'s `speech` closure takes `*args` rather
+  than four named parameters (see "Plan departures" below) and validates arity, id, pattern,
+  category (against `GATE_REGISTRY`, imported from `rules.gates`) and handler, in that order,
+  before constructing `RawRegistration`. `RuleSet.ids_and_patterns()` widened to return
+  `(id, pattern, category)` triples (method name kept — the plan's own affected-files list did
+  not ask for a rename, and the three call sites this touches are the only callers).
+- `src/belief/crew_console.py` — imports `belief.crew_state.CrewState` and `rules.gates.
+  check_gate` (see "Plan departures" below on why this does not reopen D4's import-cycle
+  concern); `RULE_GATE_HOLD_TIMEOUT_S` (`tuning.real`, 5.0s, lo 1.0/hi 15.0, status
+  `"agreed-guess"`, U20); `PendingRuleDispatch` (frozen dataclass: `rule_id`/`slots`/`category`/
+  `held_since_sim`); new fields `rule_categories: dict[str, str]` and
+  `pending_rule_dispatch: PendingRuleDispatch | None`; `set_enabled_rule_ids` gains an optional
+  `categories` parameter (writes `rule_categories` alongside `enabled_rule_ids`, `None` meaning
+  "leave it alone" so a test fake that never cares about gating keeps working); `current_crew_
+  state()` (built fresh from `parked_flight_state` every call); `_dispatch_rule` (the actual
+  `rule_runner` call plus D6's error rollback, factored out so `_handle_rule`'s `PASS` and
+  `drain_pending_rule_dispatch`'s later `PASS` share it); `_handle_rule` now runs the gate before
+  ever calling the runner; new `drain_pending_rule_dispatch`; `reset_for_new_mission`'s docstring
+  updated (`rule_categories` joins `enabled_rule_ids`'s "resets, repopulated synchronously"
+  group; `pending_rule_dispatch` joins the plain-reset-to-default list — both auto-verified by
+  `test_mission_start_reset.py`'s existing field-enumeration test, no edit needed there);
+  `increment_ai_heading`'s `current is None -> NOT_READY` branch removed, replaced by `assert
+  current is not None` (D16/D18: dead code once the gate owns the precondition).
+- `src/belief/speech.py` — `_UNABLE_TEMPLATES` gains `"NOT_FLYING"`/`"HANDS_BUSY"` (declared now
+  per the plan item 6, even though `"HANDS_BUSY"` stays unreachable until a later stage).
+- `src/body.py` — new `_rule_categories(rule_set)` helper (`rule_id -> category`); all three
+  `set_enabled_rule_ids` call sites (mission-restart reload, `_push_rules`, `main()` startup) now
+  pass it; `_push_rules`'s docstring updated; `--print-rules` prints each rule's category;
+  `drain_pending_rule_dispatch(runner.last_t_sim)` called once per poll beside `drain_ai_pilot_
+  wheel_speech`, after `parked_flight_state` is refreshed.
+- `config/rules/flight.lua` — `turn_heading_relative`'s registration gains `"flight_control"` as
+  its third argument.
+- `config/rules/README.md` — `when.speech`'s signature line, the worked example, a new
+  "Categories" section (the `always`/`flight_control` table), and the "Failures" section mention
+  a missing/unrecognised category.
+- `config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`); carries
+  `RULE_GATE_HOLD_TIMEOUT_S`.
+- `src/belief/audio_client.py` — `put_rules`'s `rules` parameter widened to `list[tuple[str, str,
+  str]]` (`id, pattern, category`); payload gains `"category"` per rule.
+
+**audio-adapter**
+- `src/rule_patterns.py` — `CompiledRule` gains `category: str = "always"`. `compile_rules`'s own
+  signature and matching/collision logic are **unchanged** (see "Plan departures" below) —
+  category plays no part in matching in this stage.
+- `src/server.py` — `_handle_put_rules` parses and validates `category` per rule (same 400 shape
+  as a missing `id`/`pattern`), then attaches it to each accepted `CompiledRule` via
+  `dataclasses.replace` *after* `compile_rules` returns.
+- `CLAUDE.md` — the `PUT /rules` paragraph updated for the wire shape and validation change.
+
+### Plan departures (reversible, decided locally)
+
+- **`compile_rules`'s own signature stays `list[tuple[str, str]]` (id, pattern) — `category` is
+  attached to the accepted `CompiledRule`s afterward, in `server.py`, rather than threaded through
+  `compile_rules` itself.** The plan's own D16 text says category is "not yet read by anything in
+  this stage" on the adapter side, and `compile_rules`'s matching/collision-check logic genuinely
+  never needs it. Threading it through would have required rewriting all eight existing
+  `TestCompileRules` call sites in `test_rule_patterns.py` (2-tuples, none of which are about
+  categories) for no behavioural gain. Reversible: if a later stage needs category available
+  *inside* `compile_rules` itself (not just carried on the output), widening the signature then
+  costs the same rewrite either way.
+- **`when.speech`'s Python-side closure takes `*args` and validates arity itself, rather than four
+  named parameters.** Discovered while updating the shipped literal `when.speech(...)` calls in
+  `test_rules_engine.py`'s own fixtures: lupa propagates a Python exception raised inside a
+  callback Lua calls *unwrapped* (confirmed in `research/2026-11-17-lupa-sandbox.md`, "a Python
+  `RuntimeError`-derived exception raised inside the hook propagates"). A plain 4-parameter Python
+  function called from Lua with the old 3-argument shape would raise a bare `TypeError` that
+  `sandbox.run_with_budget`'s `except lua54.LuaError` clause does not catch and `loader.load_rules`'s
+  `except (RuleCompileError, RuleRuntimeError, RuleBudgetExceeded)` does not catch either — it
+  would propagate out of `load_rules` entirely, discarding the whole file (and crashing a bare
+  `RuleSet.load` call) instead of D6's own finest-grain "disable just the one bad rule." `*args` +
+  an explicit `len(args) != 4` check turns a wrong-arity call into an ordinary `RuleLoadError` the
+  same way a bad id/pattern/category/handler already is. This is implementation technique, not a
+  behaviour change — U19's own "a missing category is a load error, not a default" is unaffected.
+- **`CrewConsole` importing `rules.gates` is not a reopening of D4's import-cycle rule — it is a
+  narrowing of it.** D4's own stated reason ("avoids a `belief` <-> `rules` import cycle") is
+  about the *handler* indirection: `rules.engine`/`rules.actions`/`rules.loader` import
+  `belief.crew_console.CrewConsole` (to reach `increment_ai_heading`), so `crew_console.py`
+  importing any of those three back would be the real cycle. `rules.gates` imports only `belief.
+  crew_state.CrewState` — a leaf module with no edge back to `crew_console.py` — so `crew_console.
+  py` importing `rules.gates` directly creates no cycle. The plan's own D16 text already says
+  this explicitly ("`gates.check_gate(category, self.current_crew_state())`" called from
+  `_handle_rule`), so this is executing the plan as written, not a departure from it — flagged
+  here only because the `rule_runner` field's own pre-existing docstring overstated the rule as
+  "imports nothing from `rules.*`" and needed correcting (pruned in the same edit, per root
+  `CLAUDE.md`'s "Prune the comment you are standing next to").
+
+### Tests Added
+
+**body-layer**
+- `tests/test_rule_gates.py` (new, 6 tests) — pure-Python `rules.gates` tests, no Lua: `"always"`
+  passes regardless of state; `"flight_control"` is `UNABLE("NOT_FLYING")` with no controls,
+  `HOLD("NOT_READY")` while settling, `PASS` once flying and settled; an unregistered category
+  degrades to `UNABLE("NO_SUCH_COMMAND")`; the registry holds exactly the two categories this
+  batch declares.
+- `tests/test_rules_engine.py` (3 new tests, plus a category argument added to all 17 existing
+  `when.speech(...)` literal fixtures) — a valid category loads and is carried on the compiled
+  rule; an unrecognised category disables only that rule, the file's other rule is unaffected;
+  the pre-D16 three-argument shape degrades to a load error, not a crash (see "Plan departures").
+- `tests/test_crew_console_rules.py` (7 new tests, via a new `_flight_console_with_rule` helper)
+  — gate `PASS` runs the handler unchanged from today; `UNABLE` speaks the reason and never calls
+  the runner (a spy runner asserting zero calls); `HOLD` sets `pending_rule_dispatch` and speaks
+  nothing; `drain_pending_rule_dispatch` resolves to `PASS` on a later poll, not at dispatch time;
+  stays `HOLD` and is silently retried under the timeout; times out to `render_unable`; a second
+  held command replaces the first with no line spoken for the dropped one (U21).
+- `tests/test_rules_flight_actions.py` — **one existing test replaced**, not just added-to: see
+  "Notable Discoveries" below. Three new tests load the **real** shipped `flight.lua` through the
+  real dispatch path (`CrewConsole.handle_command`/`drain_pending_rule_dispatch`): `NOT_FLYING`
+  when `parked_active` is `False`; held-then-passed when `settling` resolves within the timeout
+  (the handler actually runs and speaks on the later poll, not at dispatch time); held-then-unable
+  once `RULE_GATE_HOLD_TIMEOUT_S` elapses while still `HOLD`.
+- `tests/test_crew_console_ai_pilot_wheel.py` — **one existing test replaced**: see "Notable
+  Discoveries" below.
+- `tests/test_audio_client.py` — the two existing `put_rules` call sites that named a concrete
+  rule gained a `"flight_control"` category argument and the expected payload gained the
+  `"category"` key; no new tests (the shape widening is exercised by the existing round-trip
+  assertions).
+
+**audio-adapter**
+- `tests/test_rules_api.py` — 2 new tests (`category` missing is a 400; `category` non-string is
+  a 400) plus `"category"` added to every existing rule dict that previously omitted it (five
+  call sites) so those tests keep exercising acceptance/collision logic rather than failing on
+  the newly-required field.
+
+### Checks
+
+**body-layer** (fresh `.venv` built from `/opt/homebrew/bin/python3.14`, `pip install -e .` +
+`lupa==2.8` + `ruff`/`mypy`/`pytest`/`pytest-xdist`; no editable install of `world-model` needed —
+confirmed by tracing `perception.association`'s/`query.describe`'s own import graph that body-layer
+only ever reaches `coordinates`/`query`/`store`/`geometry`/`projections`/`schema`/`models`, none of
+which import `osmium`/`pillow`/`scipy`, so body-layer's own declared `pyproj`/`numpy` are enough;
+`pythonpath = ["src", "../world-model/src"]` in `pyproject.toml` makes the source importable):
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (CWD-only config discovery, run from inside `body-layer/`): pass, 91 source files, 0
+  issues
+- `.claude/scripts/fast-tests.sh body-layer`: 1 failed (the pre-existing, unrelated
+  `test_shipped_effector_config_loads_without_errors` — empty row in the user's own
+  `config/sequences/mi-24p/seat-copilot.md`, named as a known failure in this run's own task
+  brief), 2635 passed
+- `.claude/scripts/fast-tests.sh --full body-layer`: same single pre-existing failure, 3493
+  passed, 4 xfailed
+
+**audio-adapter** (fresh `.venv`, same Python, `pip install -e .` + dev tools; this subproject
+declares no runtime dependencies):
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (the mandated command): pass, 17 source files, 0 issues. `mypy tests` surfaces 7
+  pre-existing errors in three files this stage never touches (`test_transcribe_api.py`'s
+  `_NullSink` missing `interrupt`, `test_rules_api.py`'s `body["..."]` indexing on `object`,
+  `test_ptt_source.py`'s `cast` argument) — confirmed pre-existing by running the same `mypy`
+  invocation against the `c97731c0` tip's copy of each file before this stage's edits.
+- `.claude/scripts/fast-tests.sh audio-adapter`: 467 passed, 2 skipped
+- `.claude/scripts/fast-tests.sh --full audio-adapter`: 521 passed, 2 skipped
+
+### Notable Discoveries
+
+- **The plan's own Stage 3b test list missed two existing tests it should have named** (root
+  `CLAUDE.md`'s own "the missing entry is the dangerous one" risk, realised twice in this run).
+  Removing `increment_ai_heading`'s `current is None -> NOT_READY` branch (explicitly instructed
+  by D16/D18) breaks any test that calls the method, or dispatches `turn_heading_relative`,
+  *directly* with no held heading — bypassing the new gate the same way these tests always
+  bypassed the old static dispatch branch:
+  - `tests/test_rules_flight_actions.py::test_unable_without_a_known_current_heading` — named in
+    the plan's own "Differential tests before deletion" precedent (Stage 2), so at least
+    plausible it would be touched; replaced with three new gate-level tests through the real
+    dispatch path (see "Tests Added" above) rather than left pinning dead code.
+  - `tests/test_crew_console_ai_pilot_wheel.py::TestIncrementAiHeading::
+    test_unable_without_a_known_current_heading` — **not named anywhere in the plan**, found only
+    by running the fast-tests full-suite check after the rest of Stage 3b was green; it calls
+    `console.increment_ai_heading(-20)` directly with a bare `_console()` (default `ParkedFlight
+    State`, `held_heading=None`) and asserted the old `{"ok": False, "reason": "NOT_READY"}`
+    result. After the dead-code removal this now raises `AssertionError` (the precondition the
+    gate owns is violated) — replaced with `pytest.raises(AssertionError)`, documenting that the
+    contract changed rather than silently working around it. This is exactly the "coverage
+    disappears without a failing build" risk the role instructions name: a `grep` for `NOT_READY`
+    across `tests/` before starting would have found it in under a minute, and is worth doing
+    before any future `increment_*`-shaped action gains a similar gate.
+- **`lupa` genuinely propagates a raw Python exception through a Lua call boundary, confirmed
+  against real code, not just the Stage 0 research note's own probe.** Updating the 17 literal
+  `when.speech(...)` Lua fixtures in `test_rules_engine.py` to the new 4-argument shape would have
+  been purely mechanical (`sed`) had the old 3-argument shape not needed graceful handling too —
+  see "Plan departures" above for why `*args` was the fix rather than accepting the crash.
+- **The `#:` tuning comment's first sentence broke the generator's own sentence-splitter on
+  "e.g."** `RULE_GATE_HOLD_TIMEOUT_S`'s first draft read "...gate said `HOLD`, e.g. the
+  takeover-settle window) before giving up..." — `generate_defaults.py`'s `_first_sentence` splits
+  on any period not adjacent to a digit, with no abbreviation guard, so "e.g. the" split the
+  rendered description mid-clause. Caught by reading the **rendered** `config/defaults.toml`
+  itself, per root `CLAUDE.md`'s own instruction on this exact failure mode, not by re-reading the
+  source comment. Fixed by rewording to avoid any embedded ". " in the first sentence at all
+  ("such as" in place of "e.g.") rather than teaching the generator about abbreviations.

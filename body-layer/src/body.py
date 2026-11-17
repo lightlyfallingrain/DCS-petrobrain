@@ -3590,7 +3590,10 @@ def _check_for_new_mission(
             crew_console.action_file_error_pending = bool(
                 rule_runtime.rule_set.failures
             )
-            crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+            crew_console.set_enabled_rule_ids(
+                frozenset(rule_runtime.rule_set.rules),
+                _rule_categories(rule_runtime.rule_set),
+            )
         if audio_client is not None and crew_console is not None:
             _push_rules(rule_runtime, audio_client, crew_console)
     # Assigned explicitly after the reset, same pattern as `runner.
@@ -4219,14 +4222,24 @@ def _load_rules(rules_dir: Path, sandbox: RuleSandbox, ctx: ActionContext) -> Ru
     return rule_set
 
 
+def _rule_categories(rule_set: RuleSet) -> dict[str, str]:
+    """`rule_id -> category` for every rule this load accepted (`[[BL-17]]`
+    D16) -- the one place that reads `CompiledLuaRule.category`, so both
+    `set_enabled_rule_ids` call sites below pass the same map on every
+    call this reload makes, never a half-updated one."""
+    return {rule.id: rule.category for rule in rule_set.rules.values()}
+
+
 def _push_rules(
     rule_runtime: RuleRuntime,
     audio_client: AudioAdapterClient,
     crew_console: CrewConsole,
 ) -> None:
     """`PUT /rules` (D1/D2) -- pushes `rule_runtime.rule_set`'s full
-    `(id, pattern)` set, updates `rule_runtime.adapter_accepted_version`
-    and `crew_console.enabled_rule_ids` (loaded cleanly **and** accepted,
+    `(id, pattern, category)` set (`category` added D16, for Stage 3c's
+    benefit -- the gate check itself never reads it back off the wire),
+    updates `rule_runtime.adapter_accepted_version` and `crew_console.
+    enabled_rule_ids`/`rule_categories` (loaded cleanly **and** accepted,
     D4) from the response, and -- if the adapter rejected anything (a
     collision, bad grammar, an unknown slot type, D9) -- prints the same
     banner shape `_load_rules` does and sets `crew_console.action_file_
@@ -4247,7 +4260,8 @@ def _push_rules(
     rule_runtime.adapter_accepted_version = result.version
     rejected_ids = {rule_id for rule_id, _ in result.rejected}
     crew_console.set_enabled_rule_ids(
-        frozenset(rule_runtime.rule_set.rules) - rejected_ids
+        frozenset(rule_runtime.rule_set.rules) - rejected_ids,
+        _rule_categories(rule_runtime.rule_set),
     )
     if result.rejected:
         lines = [f"{rule_id}: {reason}" for rule_id, reason in result.rejected]
@@ -4765,6 +4779,11 @@ def _run_crew_text_poll_loop(
                             runner, crew_console, aircraft_client
                         )
                         crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
+                        # `[[BL-17]]` D16 -- same spot, after `parked_
+                        # flight_state` has been refreshed this poll
+                        # (just above), so `current_crew_state()` inside
+                        # this call sees this poll's own state.
+                        crew_console.drain_pending_rule_dispatch(runner.last_t_sim)
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
                         )
@@ -6219,8 +6238,8 @@ def main() -> None:
         rules_ctx = ActionContext(console=CrewConsole(store=ContactStore()))
         rule_set = _load_rules(args.rules_dir, rules_sandbox, rules_ctx)
         print(f"loaded {len(rule_set.rules)} rule(s) from {args.rules_dir}:")
-        for rule_id, pattern in sorted(rule_set.ids_and_patterns()):
-            print(f"  {rule_id}: {pattern}")
+        for rule_id, pattern, category in sorted(rule_set.ids_and_patterns()):
+            print(f"  {rule_id} [{category}]: {pattern}")
         for failure in rule_set.failures:
             where = (
                 f" (rule {failure.rule_id!r})" if failure.rule_id is not None else ""
@@ -6514,7 +6533,9 @@ def main() -> None:
         rule_set=_load_rules(args.rules_dir, rules_sandbox, rules_ctx),
     )
     crew_console.action_file_error_pending = bool(rule_runtime.rule_set.failures)
-    crew_console.set_enabled_rule_ids(frozenset(rule_runtime.rule_set.rules))
+    crew_console.set_enabled_rule_ids(
+        frozenset(rule_runtime.rule_set.rules), _rule_categories(rule_runtime.rule_set)
+    )
 
     def _run_rule_token(
         token: str, slots: dict[str, int | str] | None
