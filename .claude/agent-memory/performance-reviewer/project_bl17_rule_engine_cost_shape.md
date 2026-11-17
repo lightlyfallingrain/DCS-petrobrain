@@ -1,8 +1,30 @@
 ---
 name: bl17-rule-engine-cost-shape
-description: BL-17 Stages 0-2 (Lua rule engine for spoken commands) measured hot-path costs -- all negligible against whisper's own transcription latency, but two per-call recomputations worth caching once rule count actually grows toward ~80-100 (U6).
+description: BL-17 Stages 0-2 (Lua rule engine for spoken commands) measured hot-path costs -- all negligible against whisper's own transcription latency. SUPERSEDED IN PART by [[bl17-stage3-4-cost-shape]] -- the two caching fixes named below shipped in Stage 3a (D15) and are confirmed fixed, but the "a rule hit stays cheap, 10-40us" line is now STALE (D13 removed the early-return this depended on) and the collision check gained a real, un-mitigated 66-107x regression. Read the superseding file first.
 metadata:
   type: project
+---
+
+**UPDATE 2026-11-17 (Stage 3-4 batch review): two of this file's own claims are now stale.** See
+`[[bl17-stage3-4-cost-shape]]` for the corrected numbers and the one real regression found in this
+batch. Specifically:
+- The "transcript that *does* hit a rule stays cheap throughout (10-40 us even at 200 rules)"
+  claim below (bullet 1) no longer holds -- D13 (Stage 3a) removed the early-return on a rule hit,
+  so a hit now pays the same ~1-2ms the free-speech/legacy-hit cases already paid. Still negligible
+  against whisper-cli, just not for the reason originally stated.
+- The "`rule_patterns.compile_rules`'s rule x rule collision check (D9) is confirmed super-linear
+  but bounded" claim (bullet 4, 42ms @ 100 rules, 118ms @ 200) is also stale -- D13's own
+  perturbed-sample mechanism, added in the same stage this file predates, made it 66-107x worse
+  (2.8-3.1s @ 100, 12.6s @ 200) via an avoidable per-pair recomputation, now flagged NOW/Required
+  Fix in `plans/speech-rules/performance-stage3-4.md`.
+- The two caching fixes this file names as "cheap fix when it's worth doing" (bullets 2 and 3 --
+  `rule_anchor_words` at the `RuleRegistry.swap` point, and the whisper prompt keyed on
+  `registry.version`) **did ship**, in Stage 3a (D15), and are confirmed fixed by direct test, not
+  just by reading the docstring that claims it.
+
+Original text below, unmodified except for this update block (a correction sweep, not a rewrite --
+the original numbers were real measurements of the code as it stood at `1f5fa7ae`, before D13).
+
 ---
 
 Measured 2026-11-17, `feature/speech-rules` @ `1f5fa7ae` (Stages 0-2), fresh venvs
