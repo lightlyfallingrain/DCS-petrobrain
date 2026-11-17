@@ -17,7 +17,11 @@ from typing import cast
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
-from belief.crew_console import CrewConsole, PendingEffectorWrite
+from belief.crew_console import (
+    ACTION_FILE_ERROR_LINE,
+    CrewConsole,
+    PendingEffectorWrite,
+)
 from belief.effector_engine import EffectorRunState, advance, request_write
 from belief.effector_registry import EffectorDef
 from rules.actions import ACTION_NAMESPACES, ActionContext
@@ -342,3 +346,182 @@ def test_a_write_that_never_gets_a_readback_is_silently_retried(
     engine_state = advance(engine_state, 0.0, client, {}, _REGISTRY)
     assert engine_state.spoken == ()
     assert engine_state.ad_hoc_runs["req-1"].status == "failed_write"
+
+
+def test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back(
+    tmp_path: Path,
+) -> None:
+    """Stage 3d re-review Required Fix 4 (`plans/speech-rules/
+    review-stage3d.md`), test (1), the basic case: a rule that calls
+    `effector.write` and then raises later in the *same* dispatch must
+    have that write rolled back out of `pending_effector_writes` -- the
+    switch must never move, and no confirmation must ever be spoken, for
+    an action whose own dispatch just reported "Action file error."
+    Dispatched through the real `handle_command`/`_dispatch_rule` path,
+    not `run_rule` directly, since the gate/category/rollback plumbing
+    this is testing only exists on that path."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_write_then_error", "x", "always", function(s)\n'
+        '  effector.write("observ", "on", "Observ on.")\n'
+        '  digits("not_a_number")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    console = CrewConsole(store=ContactStore())
+    sandbox = RuleSandbox()
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        console.pending_effector_writes.append(
+            PendingEffectorWrite(
+                request_id="req-1",
+                effector=name,
+                value=value,
+                says=says,
+                dispatch_token=console.current_dispatch_token(),
+            )
+        )
+        return {"ok": True, "reason": None}
+
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    def rule_runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_set, token, slots, sandbox)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = rule_runner
+    console.set_enabled_rule_ids(frozenset({"probe_write_then_error"}))
+
+    lines = console.handle_command("probe_write_then_error", 0.0)
+
+    assert lines == [ACTION_FILE_ERROR_LINE]
+    assert console.pending_effector_writes == []
+
+
+def test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone(
+    tmp_path: Path,
+) -> None:
+    """Stage 3d re-review Required Fix 4, test (2): the concurrency-
+    safety case the length-based shape the dispatching brief suggested
+    ("snapshot the queue length at dispatch start, truncate on error")
+    would fail -- a second, real background thread's own unrelated
+    `effector.write` call, queued while the first dispatch is still
+    mid-flight (already past its own `effector.write` call, not yet at
+    the error that rolls it back), must still be present in `pending_
+    effector_writes` after that rollback runs.
+
+    Uses two independent `RuleSandbox`es (two separate `LuaRuntime`s),
+    one per dispatch, rather than sharing one sandbox between the two
+    threads -- lupa's own per-runtime lock serializes every call into a
+    *single* shared runtime (`research/2026-11-17-lupa-sandbox.md` R4),
+    which would force the two dispatches to run one after the other and
+    never actually overlap. What is under test here is `CrewConsole`'s
+    own token-based rollback over the *shared* `pending_effector_writes`
+    list -- a field on `CrewConsole`, not on either sandbox -- so two
+    independent Lua runtimes feeding the same `CrewConsole` is a faithful
+    way to get real overlap without fighting a lock this test has
+    nothing to do with."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "r.lua").write_text(
+        'when.speech("probe_a_write_then_error", "x", "always", function(s)\n'
+        '  effector.write("observ", "on", "Observ on.")\n'
+        '  digits("not_a_number")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "r.lua").write_text(
+        'when.speech("probe_b_write", "x", "always", function(s)\n'
+        '  effector.write("weapons", "safe", "Weapons safe.")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+
+    console = CrewConsole(store=ContactStore())
+    a_queued = threading.Event()
+    allow_a_to_proceed = threading.Event()
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        console.pending_effector_writes.append(
+            PendingEffectorWrite(
+                request_id=f"req-{name}",
+                effector=name,
+                value=value,
+                says=says,
+                dispatch_token=console.current_dispatch_token(),
+            )
+        )
+        if name == "observ":
+            # Rule A's own write -- pause here, still holding rule A's
+            # own dispatch token on *this* thread, so the test can run
+            # rule B's whole dispatch to completion before letting A's
+            # error (and rollback) happen.
+            a_queued.set()
+            assert allow_a_to_proceed.wait(timeout=5.0)
+        return {"ok": True, "reason": None}
+
+    sandbox_a = RuleSandbox()
+    ctx_a = ActionContext(
+        console=console, request_effector_write=request_effector_write
+    )
+    rule_set_a = RuleSet.load(tmp_path / "a", sandbox_a, ACTION_NAMESPACES, ctx_a)
+    assert rule_set_a.failures == ()
+
+    sandbox_b = RuleSandbox()
+    ctx_b = ActionContext(
+        console=console, request_effector_write=request_effector_write
+    )
+    rule_set_b = RuleSet.load(tmp_path / "b", sandbox_b, ACTION_NAMESPACES, ctx_b)
+    assert rule_set_b.failures == ()
+
+    def rule_runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        if token == "probe_a_write_then_error":
+            outcome = run_rule(rule_set_a, token, slots, sandbox_a)
+        else:
+            outcome = run_rule(rule_set_b, token, slots, sandbox_b)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = rule_runner
+    console.set_enabled_rule_ids(
+        frozenset({"probe_a_write_then_error", "probe_b_write"})
+    )
+
+    a_result: list[list[str]] = []
+    thread_a = threading.Thread(
+        target=lambda: a_result.append(
+            console.handle_command("probe_a_write_then_error", 0.0)
+        )
+    )
+    thread_a.start()
+    assert a_queued.wait(timeout=5.0)
+
+    thread_b = threading.Thread(
+        target=lambda: console.handle_command("probe_b_write", 0.0)
+    )
+    thread_b.start()
+    thread_b.join(timeout=5.0)
+
+    # Both entries coexist while A is still paused, mid-dispatch, before
+    # its own rollback has run -- a `del pending_effector_writes[0:]`
+    # truncate here would wrongly discard rule B's entry too.
+    assert [(w.effector, w.value) for w in console.pending_effector_writes] == [
+        ("observ", "on"),
+        ("weapons", "safe"),
+    ]
+
+    allow_a_to_proceed.set()
+    thread_a.join(timeout=5.0)
+
+    assert a_result == [[ACTION_FILE_ERROR_LINE]]
+    assert [(w.effector, w.value) for w in console.pending_effector_writes] == [
+        ("weapons", "safe")
+    ]

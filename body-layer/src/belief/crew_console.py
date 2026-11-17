@@ -101,6 +101,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
@@ -1377,12 +1378,28 @@ class PendingEffectorWrite:
     `observ_transition`. `request_id` is minted by `body.py`'s closure
     at dispatch time (either thread -- `itertools.count.__next__` is
     GIL-atomic, so concurrent dispatches still mint distinct ids), not
-    here."""
+    here.
+
+    `dispatch_token` (Stage 3d re-review Required Fix 4) identifies
+    *which* `_dispatch_rule` call queued this entry -- `None` for every
+    direct-construction test and for a write queued outside a dispatch
+    (neither case this field's rollback use needs to find). `_dispatch_
+    rule` stamps the current thread's live token (`CrewConsole.
+    current_dispatch_token`) onto a write at append time via `body.py`'s
+    closure, then -- on a Lua error raised later in that same dispatch --
+    filters `pending_effector_writes` by this field to roll back exactly
+    this dispatch's own entries. Identity, not a length/count snapshot of
+    the shared list: `pending_effector_writes` is appended to from either
+    thread without a lock (GIL-atomic `list.append`), so a position-based
+    truncate would also discard whatever the *other* thread legitimately
+    queued in the same window (`feedback_rollback_on_lockfree_queue_must_
+    use_identity_not_length.md`)."""
 
     request_id: str
     effector: str
     value: str
     says: str | None
+    dispatch_token: object | None = None
 
 
 #: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
@@ -1567,6 +1584,18 @@ class CrewConsole:
     #: itself is dropped wholesale then too (D11) -- a pre-restart request
     #: would otherwise apply against the wrong mission's state.
     pending_effector_writes: list[PendingEffectorWrite] = field(default_factory=list)
+    #: Thread-local holding the calling thread's own in-flight `_dispatch_
+    #: rule` token (Stage 3d re-review Required Fix 4) -- `object()`,
+    #: minted fresh per dispatch and read by `body.py`'s `_request_
+    #: effector_write` closure (via `current_dispatch_token`) so it can
+    #: stamp `PendingEffectorWrite.dispatch_token` at append time. Thread-
+    #: local, not a plain field, because the poll thread and the REPL
+    #: thread each run their own `_dispatch_rule` call independently and
+    #: must never see or overwrite each other's token. `.token` is unset
+    #: (reads as `None` via `getattr`) outside any dispatch.
+    _dispatch_token_local: threading.local = field(
+        default_factory=threading.local, repr=False, compare=False
+    )
     #: BL-16 mode 2 Stage P2a's own one-shot signal to `body.py`'s poll
     #: loop (`plans/flight-control/plan.md`, "Stage P2 ready to build")
     #: -- the same division `observ_transition`'s own docstring states:
@@ -3142,6 +3171,14 @@ class CrewConsole:
             eyes_free=True,
         )
 
+    def current_dispatch_token(self) -> object | None:
+        """The calling thread's own in-flight `_dispatch_rule` token, or
+        `None` outside one -- `body.py`'s `_request_effector_write`
+        closure reads this to stamp `PendingEffectorWrite.dispatch_token`
+        at append time (Stage 3d re-review Required Fix 4). Thread-local:
+        see `_dispatch_token_local`'s own docstring for why."""
+        return getattr(self._dispatch_token_local, "token", None)
+
     def _dispatch_rule(
         self, rule_id: str, slots: dict[str, int | str] | None
     ) -> list[str]:
@@ -3153,11 +3190,39 @@ class CrewConsole:
         wired -- a category gate can only reach `PASS` for a `token`
         that is a member of `enabled_rule_ids` (empty by default), so
         this is unreachable in that case; the `assert` documents that
-        rather than silently returning `[]`."""
-        assert self.rule_runner is not None
-        lines, error = self.rule_runner(rule_id, slots)
+        rather than silently returning `[]`.
+
+        Mints a fresh dispatch token (Stage 3d re-review Required Fix 4)
+        before calling `rule_runner`, so any `effector.write` the
+        handler makes -- possibly more than one -- is stamped with it via
+        `current_dispatch_token`. On a Lua error, D6's rollback must also
+        undo those queued writes, not just the one-shot transition
+        fields `_reset_one_shot_command_state` already clears: a switch
+        must not move, and no confirmation must be spoken, for an action
+        whose own dispatch just reported "Action file error." The filter
+        is by this token's identity, never a length/count snapshot of
+        `pending_effector_writes` -- that field is shared and appended to
+        from either thread without a lock, so a position-based truncate
+        would also discard whatever the *other* thread legitimately
+        queued in the same window. This does not cover D20's own
+        already-accepted case: an ad hoc write that queues cleanly here
+        and only fails on a *later* poll, after this dispatch has already
+        returned -- that is not a dispatch-time error at all, and stays
+        unrolled-back exactly as D20 decided."""
+        token = object()
+        self._dispatch_token_local.token = token
+        try:
+            assert self.rule_runner is not None
+            lines, error = self.rule_runner(rule_id, slots)
+        finally:
+            self._dispatch_token_local.token = None
         if error:
             self._reset_one_shot_command_state()
+            self.pending_effector_writes = [
+                write
+                for write in self.pending_effector_writes
+                if write.dispatch_token is not token
+            ]
             return [ACTION_FILE_ERROR_LINE]
         return lines
 

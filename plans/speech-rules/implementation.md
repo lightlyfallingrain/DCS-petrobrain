@@ -1597,3 +1597,98 @@ U22 is explicitly scheduled, but not assumed here.
 6. Comment pruned: `belief/speech.py`'s `NOT_FLYING`/`HANDS_BUSY` comment block, stale the moment
    this stage shipped more than one `flight_control*` rule (it said "the one rule in this category
    until Stage 4 ports the rest" — true when written, false now).
+
+### Stage 3d re-review Required Fix 4 (2026-11-17) — D6 rollback closed over queued effector writes
+
+`plans/speech-rules/review-stage3d.md`'s "Re-review — 2026-11-17" section, Required Fix 4: the gap
+Required Fix 1 above flagged and deliberately left open ("not asked for by the review") is now
+closed — a rule that calls `effector.write` and then raises later in the *same* dispatch (Lua
+error → `_dispatch_rule`'s D6 rollback → `ACTION_FILE_ERROR_LINE`) no longer leaves that write
+sitting in `pending_effector_writes` to be applied on the next poll drain. D20's own carve-out
+("D6 rollback does not apply here") is unchanged and still stands for the *other* case — an ad hoc
+write that queues cleanly and only fails on a later poll, after the dispatch has already returned
+"queued" — the code comment on `_dispatch_rule` says so explicitly.
+
+**Mechanism: identity (a dispatch-scoped token), not a length/count snapshot.** The review's own
+required shape, and the reason: `pending_effector_writes` is shared and appended to from either
+thread without a lock (`list.append` is GIL-atomic — the entire premise Required Fix 1 relies on),
+so a `del pending_effector_writes[before:]`-style truncate would also discard whatever the *other*
+thread legitimately queued in the same window — exactly the class of bug Required Fix 1 exists to
+prevent, reintroduced by the fix for a different bug. Concretely:
+
+- `PendingEffectorWrite` (`belief/crew_console.py`) gains a fourth field, `dispatch_token: object |
+  None = None` — defaulting to `None` so every existing direct-construction test is unaffected.
+- `CrewConsole` gains `_dispatch_token_local: threading.local` (a new field, `repr=False,
+  compare=False`) and `current_dispatch_token() -> object | None`, reading `getattr(self.
+  _dispatch_token_local, "token", None)`. Thread-local, not a plain field, because the poll thread
+  and the REPL thread each run their own `_dispatch_rule` call independently and must never see or
+  overwrite each other's token — a plain instance attribute would have one thread's token clobber
+  the other's mid-dispatch.
+- `_dispatch_rule` mints a fresh `object()` at the start of every dispatch, stores it on the
+  calling thread's own `_dispatch_token_local.token` for the duration of the `rule_runner` call
+  (cleared in a `finally`), and — on error — filters `pending_effector_writes` by `write.
+  dispatch_token is not token` rather than slicing by position.
+- `body.py`'s real `_request_effector_write` closure stamps `dispatch_token=crew_console.
+  current_dispatch_token()` onto every `PendingEffectorWrite` it appends, so an entry always
+  carries the token of whichever dispatch queued it.
+
+**Why a filter-and-reassign is the accepted shape here, not a further lock.** The review's required
+fix explicitly asks for "filtering `pending_effector_writes` to drop exactly the entries carrying
+this dispatch's token," which is what this is — a list comprehension iterating the *live* list
+object (so a concurrent append landing mid-iteration is still seen and correctly kept, since
+Python's list iterator rechecks the current length each step) followed by one attribute
+reassignment. The remaining theoretical window — a concurrent append landing between the
+comprehension's iterator exhausting and the reassignment executing — is the same few-bytecode
+window Required Fix 1's own already-approved swap-to-drain (`pending_writes, crew_console.
+pending_effector_writes = crew_console.pending_effector_writes, []`) already carries and was
+reviewed as safe; this is not a new category of risk introduced here, and the review did not ask
+for a lock.
+
+**Lua-level concurrency note, confirmed before writing the concurrency test, not assumed.**
+`research/2026-11-17-lupa-sandbox.md`'s R4 measured that a single shared `LuaRuntime` serializes
+every call via its own global per-runtime lock — two threads dispatching through the *same*
+`RuleSandbox` never actually overlap at the Lua-execution level, only at the plain-Python level
+(the gap between one dispatch's `rule_runner()` return and its own rollback filter running, during
+which another thread can acquire the now-free lock and run its own dispatch to completion). The
+concurrency test below uses two independent `RuleSandbox` instances (two separate `LuaRuntime`s)
+feeding the same `CrewConsole`, specifically to get real, deterministic overlap on the thing
+actually under test — `CrewConsole`'s own token-based filter over the shared list — without
+depending on winning a narrow, OS-scheduling-dependent race for lupa's lock.
+
+**Tests added** (`test_rules_effector_action.py`):
+
+- `test_a_write_then_a_later_error_in_the_same_dispatch_is_rolled_back` — the basic case (1):
+  dispatched through the real `handle_command`/`_dispatch_rule` path (not `run_rule` directly,
+  unlike the Required-Fix-1 test, since the gate/rollback plumbing only exists on that path).
+  Asserts `pending_effector_writes` is empty and the returned line is `ACTION_FILE_ERROR_LINE`
+  after a rule that queues an `effector.write` then calls `digits("not_a_number")` (raises
+  `RuleRuntimeError`).
+- `test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone` — the concurrency-safety
+  case (2), the one that actually exercises the reason a length-based truncate is wrong. Rule A
+  (its own `RuleSandbox`) queues an `effector.write`, then blocks (via a `threading.Event` inside
+  the shared `request_effector_write` closure) before reaching its own erroring `digits()` call;
+  while blocked, rule B (a second, independent `RuleSandbox`, on a second real background thread)
+  dispatches its own unrelated `effector.write` to completion. Asserts both entries coexist in
+  `pending_effector_writes` at that point (proving the window is real), then releases rule A,
+  letting it error and roll back, and asserts only rule B's entry survives.
+  **Counterfactual run**: temporarily replaced the token-filter with the rejected
+  "`del pending_effector_writes[before:]`" shape (a `len()` snapshot taken at dispatch start,
+  truncated on error) — this test failed for the stated reason (`assert [] ==
+  [('weapons', 'safe')]`, rule B's entry discarded alongside rule A's), confirming the test can
+  tell the difference. Restored the real implementation afterward; `shasum -a 256` before and
+  after the probe matched.
+
+**Files changed**: `belief/crew_console.py` (`PendingEffectorWrite.dispatch_token`,
+`CrewConsole._dispatch_token_local`/`current_dispatch_token`, `_dispatch_rule`'s token
+mint/rollback), `tests/test_rules_effector_action.py` (import `ACTION_FILE_ERROR_LINE`, the two
+tests above).
+
+**Checks.** `.venv` already built from the prior review round; `ruff format --check`, `ruff check`,
+`mypy --strict src` (91 source files) all clean. `fast-tests.sh body-layer`: 2660 passed, 1 failed
+(`test_shipped_effector_config_loads_without_errors` — the same named pre-existing, unrelated
+`seat-copilot.md` empty-row failure, untouched by this change), 4 xfailed. Also ran
+`test_rules_effector_action.py` directly (9 tests, all pass).
+
+**Notable discovery**: the project's own tuning-constants rule does not apply to anything added
+here — no new bare numeric literal was introduced; `object()` tokens and `threading.local` carry
+no magic number to tune.
