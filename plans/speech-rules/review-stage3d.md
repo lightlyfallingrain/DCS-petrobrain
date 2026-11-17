@@ -305,3 +305,181 @@ by tracing `_dispatch_rule`/`_reset_one_shot_command_state`'s actual field list 
 value — the two are about different failure windows, and the text of D20's carve-out does not
 cover the gap the implementer flagged. Did not independently re-derive Stage 3a/3b (out of scope,
 unchanged by this commit) or re-review audio-adapter (untouched).
+
+---
+
+## Re-review (Fix 4) — 2026-11-17
+
+Branch `feature/speech-rules-matching`, fast-forwarded cleanly onto this worktree's prior tip
+(`fc282270`) to `078e0b04` — no conflicts, no snapshot fallback needed. Scoped to Required Fix 4
+only: the fix commit (`28baf690`) plus the same-day follow-up (`078e0b04`) that caught and closed
+its own production gap. Stage 4 (flight-control port, `04217983`/`f67b332c`/`6a6ce8e7`) sits below
+these on the branch and is out of scope here, per the task brief.
+
+### Required Fix 4's own rollback (basic + concurrent-dispatch) — VERIFIED FIXED, not taken on faith
+
+`28baf690` mints a fresh `object()` token per `_dispatch_rule` call, stores it on a new
+`threading.local` (`_dispatch_token_local`) for the duration of the `rule_runner` call, stamps it
+onto every `PendingEffectorWrite` queued during that call, and — on a Lua error — filters
+`pending_effector_writes` by `is not token`, never by a length/count snapshot. This is exactly the
+identity-based shape the prior round required, for exactly the stated reason (a shared,
+lock-free, append-only list, appended to from either thread without a lock).
+
+I did not take the implementer's own counterfactual claim on faith — I reproduced it myself: with
+the real `.venv`, I temporarily replaced the token-filter with the rejected
+`del self.pending_effector_writes[_before_len:]` shape (a `len()` snapshot before `rule_runner`,
+a truncate after) and reran the two new tests. `test_rollback_leaves_a_concurrent_dispatchs_own_
+queued_write_alone` failed exactly as claimed (`assert [] == [('weapons', 'safe')]`, rule B's
+unrelated entry discarded alongside rule A's) and `test_a_write_then_a_later_error_in_the_same_
+dispatch_is_rolled_back` still passed (the single-dispatch case does not distinguish the two
+shapes) — confirming the second test, not the first, is the one actually exercising the reason a
+length-based truncate is wrong, same conclusion the implementer's own write-up draws. Restored the
+real filter afterward; `git status --porcelain` and `git diff --stat` both confirmed a clean
+revert, and the full `pending_effector_writes`-touching test file (12 tests) passed again
+afterward.
+
+### Follow-up (`body.py`'s closure never stamped the token) — VERIFIED FIXED, grep fences mutation-tested
+
+`078e0b04` adds `CrewConsole.queue_effector_write` as the one appender (stamps `dispatch_token=
+self.current_dispatch_token()` itself) and routes `body.py`'s real `_request_effector_write`
+closure and every test closure through it instead of constructing `PendingEffectorWrite` by hand.
+This closes a real production gap the first commit left open: before this follow-up, the
+*rollback* was correct but the one caller that matters in flight never stamped a token, so it had
+nothing to find.
+
+I mutation-tested both new grep-fence tests rather than reading them and trusting they'd fire:
+
+- Reintroduced a hand-built, bare `PendingEffectorWrite(...)` append inside `body.py`'s closure
+  (via an aliased import, `from belief.crew_console import PendingEffectorWrite as _PEW`, to rule
+  out the fence matching only the literal unaliased name) — `test_body_py_never_constructs_
+  pending_effector_write_directly` failed for the stated reason, catching the alias too (it
+  asserts the bare substring `"PendingEffectorWrite"` is absent, not just the call form).
+- Added a second, harmless `PendingEffectorWrite(...)` construction elsewhere in
+  `crew_console.py` — `test_pending_effector_write_is_constructed_in_exactly_one_place_in_crew_
+  console_py` failed for the stated reason (`2 == 1`).
+
+Both mutations reverted; `git status --porcelain` clean afterward, both tests pass again.
+
+### New finding — Required Fix 4's own guarantee is still defeatable, by a different interleaving than either test covers
+
+**Required**, for the same reason Required Fix 1 and Required Fix 4 itself were each required
+over "low probability" — this project's own stated bar, set twice already in this review, does
+not get relaxed a third time.
+
+Required Fix 4's stated guarantee is unconditional: *"a switch must not move, and no confirmation
+must be spoken, for an action whose own dispatch just reported 'Action file error.'"* That holds
+against the two interleavings already tested (a single dispatch; two concurrent *dispatches* each
+queuing their own write). It does **not** hold against a third interleaving neither test
+exercises: **Required Fix 1's own poll-thread drain step racing against an in-flight REPL-thread
+dispatch's still-open rollback window.**
+
+`handle_line` → `handle_command` → `_handle_rule` → `_dispatch_rule` runs **entirely on the REPL
+thread** when the command is typed (`_run_crew_text_repl`, confirmed by reading the call chain —
+this is the *same* foreground REPL `_run_crew_text_repl`'s own docstring describes as "every
+player-issued report command," not a dev-only shell; `--crew-text` is unconditional, `BL-B96`).
+Nothing in `_dispatch_rule` prevents the **poll thread** — running independently, on its own
+1 Hz-default cycle (`_DEFAULT_POLL_INTERVAL_S`), with no lock anywhere in `body.py` or
+`crew_console.py` — from executing its own unconditional per-poll drain
+(`pending_writes, crew_console.pending_effector_writes = crew_console.pending_effector_writes,
+[]`, `body.py` ~line 5089, Required Fix 1's own mechanism) **while** a REPL-thread dispatch is
+still open: past its own `effector.write` call (which has already appended to the shared list),
+not yet at the later statement in the same handler that raises. If the poll thread's drain lands
+in that window, it removes the entry from `pending_effector_writes` and feeds it into
+`effector_state` (where it starts actually executing) **before** the REPL dispatch's own
+token-filter rollback ever runs. The filter then finds nothing carrying that token — not because
+nothing was queued, but because it was already drained by an unrelated step — and the write
+proceeds to completion: the switch moves, and if `says` was given, the confirmation is eventually
+spoken, despite "Action file error." having already been returned for that exact dispatch.
+
+This is a different bug than the one either new test targets. Test (2)
+(`test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone`) proves the token filter
+correctly leaves a *second dispatch's* concurrently-queued entry alone — it never drives the
+*poll thread's own drain* during the window, because neither of its two threads ever calls the
+drain code (both just append via `request_effector_write`/`queue_effector_write`). Nothing in this
+round's diff, and nothing in the implementer's "Lua-level concurrency note," addresses this
+interleaving — that note is about two *dispatches'* Lua execution never truly overlapping
+(lupa's per-runtime lock), which is a fact about the window's *shape*, not about whether something
+*else* (the poll thread, not bound by that lock at all, since it never touches a `RuleSandbox`)
+can act inside it.
+
+**Demonstrated, not just argued.** I wrote a standalone probe (reproducing the exact
+`test_rollback_leaves_a_concurrent_dispatchs_own_queued_write_alone`-style rule, but simulating
+the poll thread's own drain — `pending_writes, console.pending_effector_writes = console.
+pending_effector_writes, []`, body.py's exact line — from the test harness itself, during the
+dispatch's open window instead of a second dispatch) against the real, unmodified code:
+
+```
+drained by 'poll thread' while dispatch still open: [PendingEffectorWrite(request_id='req-1',
+  effector='observ', value='on', says='Observ on.', dispatch_token=<object object at ...>)]
+dispatch result: [['Action file error.']]
+pending_effector_writes after rollback: []
+```
+
+The entry is drained away intact — carrying the correct token, correctly stamped — and the
+rollback's own filter (now running against an empty list) has nothing left to remove. `effector_
+state` would receive it on the very next `request_effector_write` call inside that same drain,
+and the switch would proceed exactly as if the dispatch had never errored.
+
+**Why this is in scope for Fix 4, not a pre-existing Fix-1-only gap.** Required Fix 1's drain is
+correct *in isolation* — it is what makes "the write progresses even when queued from the REPL
+thread" possible at all, and that's the point of the field being a plain list rather than a
+one-shot slot (`feedback_cross_thread_one_shot_queue_vs_single_slot.md`: "an entry queued by an
+earlier dispatch this poll has not yet drained must survive"). The gap is specifically in Fix 4's
+own added guarantee: a rollback that identifies entries by a token stamped *after* they are
+already visible on the shared list can always lose a race to anything else that reads that same
+shared list before the rollback runs — and the poll thread's drain is exactly such a reader,
+already in this codebase, already required to run unconditionally and without a lock (Fix 1's own
+constraint). Fix 4 added a second consumer of the same list (a rollback) without reconciling it
+against the first consumer (the drain) that was already reading from it independently.
+
+**What the right fix shape looks like** (for the Implementer to build, not prescribed in detail
+here): the queuing side needs to make an entry invisible to the poll thread's drain until the
+dispatch that queued it has already decided whether to keep or discard it — i.e., buffer-then-
+commit rather than append-then-maybe-roll-back. Concretely, `_dispatch_rule` could collect writes
+requested during its own call in a **thread-local** buffer (not the shared `pending_effector_
+writes` list) — `queue_effector_write` would append there instead, only visible to the calling
+thread — and `_dispatch_rule` itself extends the shared list with that buffer's contents on
+success, or discards the buffer entirely on error, after `rule_runner` returns. Nothing partial is
+ever visible to the poll thread, so there is nothing for its drain to race against, and the
+`dispatch_token` field/filter machinery built in `28baf690` is no longer needed at all (this would
+be a simplification, not an addition). A lock around the drain is **not** the right fix — it would
+reintroduce exactly the kind of cross-thread blocking Required Fix 1 was built to avoid, and would
+also defeat D20's own "a voice-dispatched write starts progressing this same poll" requirement for
+the one thread (poll) where same-poll progression is actually wanted.
+
+**Required test coverage for whatever shape is built**: a test that opens a REPL-style dispatch
+(blocked mid-handler, after its own `effector.write` call, before its own error), runs the poll
+thread's real drain code against the shared list *during* that window, then lets the dispatch
+error — and asserts `effector_state`/`ad_hoc_runs` received **nothing** from that dispatch (not
+just that `pending_effector_writes` ends up empty, which is true either way and would pass even
+against the current, still-racy code once the entry has already been drained).
+
+### Verdict
+
+CHANGES REQUIRED — Required Fix 4's own rollback and its same-day follow-up are both correctly
+built and tested for the interleavings they target (verified above by independent mutation, not
+taken on faith). One new required fix remains: the rollback can still be defeated by Required Fix
+1's own poll-thread drain racing a REPL-thread dispatch's open window, demonstrated above with an
+unmodified-code probe. This must close before this stage merges, on the same "no shipped rule
+reaches it yet does not bound the window" reasoning this review has already applied twice in this
+same stage (Required Fix 1's original race, and Required Fix 4 itself).
+
+### Review Confidence
+
+Full read of `28baf690` and `078e0b04`'s diffs against their own commit messages and
+`implementation.md`'s account. Built a fresh `.venv` (none existed in this worktree), ran
+`ruff format --check`, `ruff check`, `mypy --strict src` (all clean, 91 source files) and
+`fast-tests.sh body-layer` myself (2671 passed, 1 failed — the same named pre-existing
+`test_shipped_effector_config_loads_without_errors`, 4 xfailed — matching the task brief's stated
+known failure exactly), plus the touched test file directly (12/12 pass). Independently mutated
+and reverted, rather than trusting either account: the rollback filter itself (swapped for the
+rejected length-based truncate, confirmed the concurrency test is the one that tells the
+difference), and both new grep-fence tests (reintroduced a direct construction via an aliased
+import in `body.py`, and a second construction site in `crew_console.py`; both fences fired for
+the stated reason). The new finding was reached by asking, for each of Required Fix 4's two
+threads, "what else reads or mutates `pending_effector_writes` independently of this call stack,"
+not by re-reading the diff alone — `body.py`'s own per-poll drain block (Required Fix 1's
+mechanism, unchanged by this round) is the answer, and I demonstrated the resulting race with a
+standalone probe against the real, unmodified code rather than arguing it from the call graph
+alone. Did not re-review Stage 4 (flight-control port, out of scope per the task brief) or
+audio-adapter (untouched by either commit).
