@@ -3899,6 +3899,48 @@ def _lookup_memory_entry_fn(
     return lookup
 
 
+#: A union slot's own tagged-table value (`speed_target`'s `{"kind":
+#: "max"}` / `{"kind": "number", "value": N}`, `audio-adapter`'s
+#: `rule_patterns._consume_speed_target`) never carries more than two
+#: keys today; this is generous headroom over that, not a tight fit --
+#: bounding an external process's own wire shape, never Petrovich's
+#: behaviour, so a plain literal rather than a `tuning.*` declaration.
+#: `plans/speech-rules/security-stage3-4.md` Required Fix 1.
+_MAX_SLOT_DICT_KEYS: Final[int] = 4
+
+
+def _is_bounded_slot_dict(value: object) -> bool:
+    """One level deep, `str` keys, `int`/`str` (`bool` excluded) values,
+    at most `_MAX_SLOT_DICT_KEYS` keys -- exactly the tagged-table shape
+    a union slot (`speed_target`, and D7's own planned `direction`/
+    `origin`) resolves to, never an arbitrary dict wholesale.
+    `audio-adapter` is a separate process over this project's own named
+    threat surfaces (a compromised dependency, or a malfunctioning
+    process); bounding depth/shape at this validation boundary, rather
+    than trusting the sender to keep producing only the tagged-table
+    shape, is the cheaper place to hold the invariant."""
+    if not isinstance(value, dict) or len(value) > _MAX_SLOT_DICT_KEYS:
+        return False
+    for key, inner in value.items():
+        if not isinstance(key, str):
+            return False
+        if not isinstance(inner, (int, str)) or isinstance(inner, bool):
+            return False
+    return True
+
+
+def _is_valid_slot_value(value: object) -> bool:
+    """A scalar (`int`/`str`, `bool` excluded) or a union slot's own
+    bounded tagged table (`_is_bounded_slot_dict`) -- anything else (an
+    unbounded or nested dict, a list, ...) is rejected exactly like a
+    malformed scalar value already was."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, str)):
+        return True
+    return _is_bounded_slot_dict(value)
+
+
 def _poll_transcripts(
     audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
 ) -> str | None:
@@ -3918,6 +3960,8 @@ def _poll_transcripts(
     watch-reporting/plan.md` Decision 2b-i, replacing the earlier
     single-purpose `bearing_degrees` field) is threaded straight through,
     `None` allowed -- populated only for tokens that take a parsed slot.
+    A slot value is either a scalar or a union slot's own bounded tagged
+    table (`_is_valid_slot_value`); anything else drops the whole item.
 
     `correlation_id` (`plans/voice-latency-instrumentation/plan.md` Stage 3)
     is the ninth field `TranscriptEvent.to_dict` now carries -- threaded
@@ -3981,9 +4025,16 @@ def _poll_transcripts(
             continue
         slots: dict[str, int | str] | None = None
         if slots_raw is not None:
+            # `plans/speech-rules/security-stage3-4.md` Required Fix 1 --
+            # widened from `isinstance(value, (int, str))` alone, which
+            # silently dropped the whole transcript for any union slot
+            # (`set_speed`'s `speed_target`): "speed max"/"speed two
+            # hundred" did nothing and said nothing. A dict value is now
+            # admitted, but only in `_is_bounded_slot_dict`'s own narrow
+            # shape -- an unbounded/nested dict is rejected exactly like
+            # any other malformed value, not passed through wholesale.
             if not isinstance(slots_raw, dict) or not all(
-                isinstance(value, (int, str)) and not isinstance(value, bool)
-                for value in slots_raw.values()
+                _is_valid_slot_value(value) for value in slots_raw.values()
             ):
                 continue
             slots = slots_raw

@@ -1475,9 +1475,16 @@ Stage 1b/2 shipped, nor Stage 3a/3b's own tests, had ever exercised:
    against to `int | str | dict[str, object]` (`command_matcher.SlotValue`, `MatchResult.slots`
    and `transcript_queue.TranscriptEvent.slots` both become `Mapping[str, SlotValue]`, `Mapping`
    rather than `dict` so every pre-existing `_parse_*_slots` branch's own `dict[str, int | str]`
-   construction needs no change — mypy's own covariance suggestion) and widening `body.py`'s own
+   construction needs no change — mypy's own covariance suggestion) ~~and widening `body.py`'s own
    validator's `isinstance` check (one level of nesting, matching the tagged-table shape exactly,
-   never arbitrary recursion). Confirmed via `nested dict -> lupa table_from` probes that the
+   never arbitrary recursion)~~. **Correction, 2026-11-17 (security deep analysis,
+   `plans/speech-rules/security-stage3-4.md` Required Fix 1): the strikethrough clause above was
+   wrong.** `body.py`'s own `/transcripts/poll` row validator was never touched by this stage —
+   `git diff c309092b..1e5ddd5e -- body-layer/src/body.py` showed zero lines changed in that
+   block, confirmed independently by a probe feeding it the exact wire shape "speed two hundred"
+   produces (`console.calls == []`, the item silently dropped). The adapter-side fix above (1) did
+   land; the body-layer-side half of the same fix did not, until the Required Fix 1 pass described
+   under "Security fix (stages 3-4)" below. Confirmed via `nested dict -> lupa table_from` probes that the
    nested dict crosses into Lua correctly (`s.speed_target.kind`) under the real sandbox's real
    `attribute_filter` — `sandbox.py`'s own `_deny_all_attributes` docstring already documents that
    a plain `dict` (never a custom object) is tolerated as "userdata" for exactly this reason.
@@ -2086,3 +2093,87 @@ exact-number match.)
 - `cd audio-adapter && .venv/bin/mypy --strict src`: pass, 17 source files, 0 issues
 - `.venv/bin/python -m pytest tests -q` (full suite, not just fast-tests): 526 passed, 2 skipped
 - `.claude/scripts/fast-tests.sh audio-adapter`: 472 passed, 2 skipped
+
+### Security fix (stages 3-4) — 2026-11-17
+
+`plans/speech-rules/security-stage3-4.md` Required Fix 1: `body.py`'s own `_poll_transcripts`
+slot-value filter was never actually widened for the union-slot case (see the correction inserted
+above, in the "Two genuine bugs found and fixed" section) — `isinstance(value, (int, str))` alone
+still silently dropped any slots dict carrying `set_speed`'s `speed_target` tagged table
+(`{"kind": "max"}` / `{"kind": "number", "value": N}`), so "speed max"/"speed two hundred" over the
+real audio-adapter → body-layer wire did nothing and said nothing, with no existing test crossing
+that specific boundary to catch it.
+
+Fixed in `body-layer/src/body.py`: two new module-level helpers immediately above
+`_poll_transcripts`, `_is_bounded_slot_dict` (one level deep, `str` keys, `int`/`str`-not-`bool`
+values, at most `_MAX_SLOT_DICT_KEYS` (4) keys — generous headroom over the 1-2 keys
+`_consume_speed_target` ever actually produces, not a tight fit) and `_is_valid_slot_value` (a
+scalar or a bounded dict; anything else — an unbounded/nested dict, a list, ... — rejected exactly
+like a malformed scalar already was). `_poll_transcripts`'s own validation loop now calls
+`_is_valid_slot_value` per slot value instead of the old bare `isinstance(value, (int, str))`
+check. `_MAX_SLOT_DICT_KEYS` is a plain `Final` literal, not a `tuning.*` declaration — it bounds
+an external process's own wire shape, never Petrovich's behaviour (root `CLAUDE.md`'s inclusion
+test for the tuning mechanism).
+
+**Deliberately scoped to `body.py` alone** — `crew_console.py`'s `handle_transcript`/
+`handle_command`/`_handle_rule`/`_dispatch_rule` and `rules.engine.run_rule` all keep their
+existing `dict[str, int | str] | None` slot type unchanged. The real `slots_raw` value entering
+`_poll_transcripts` is `Any` (`AudioAdapterClient.get_transcripts() -> tuple[list[dict[str, Any]],
+...]`), so assigning a dict that may itself hold a bounded nested dict to a locally-declared
+`dict[str, int | str] | None` variable, and passing that straight through every downstream
+signature declaring the same narrower type, type-checks under `mypy --strict` without a `cast` —
+`Any` absorbs the mismatch at the one point it is introduced, same as it already did before this
+fix. Widening every signature on the full dispatch path (`handle_transcript` through to
+`run_rule`) was considered and rejected: `handle_command`'s own `slots` parameter is shared by
+every token branch, including roughly a dozen unrelated handlers (`_handle_follow`,
+`_handle_select_target`, `_handle_mark_target`, `_handle_step`, `_handle_engage`,
+`_handle_where_is_it`, `_handle_point`, `_handle_slotted_report`, `_handle_greeting`, ...) that
+never see a dict-valued slot in practice — widening it would have cascaded into every one of
+those signatures (and transitively into the dataclass fields some of them write, e.g.
+`PendingPointRequest.slots`) for zero behavioural gain, which is well past Required Fix 1's own
+scope. The one place a dict value is ever actually read apart (`rules.engine.run_rule`'s
+`sandbox.table_from(slots)`) already accepts it correctly at runtime regardless of the static
+type given to it, confirmed by the new end-to-end test below.
+
+**Tests added** (`body-layer/tests/test_body.py`):
+- `test_poll_transcripts_threads_a_dict_valued_slot_into_handle_transcript` — the mirror of the
+  pre-existing `test_poll_transcripts_threads_slots_into_handle_transcript`, for a `speed_target`
+  tagged-table value: asserts the dict reaches `handle_transcript` intact rather than being
+  dropped.
+- `test_poll_transcripts_skips_items_with_an_oversized_slot_dict` — a 5-key dict (over
+  `_MAX_SLOT_DICT_KEYS`) is rejected.
+- `test_poll_transcripts_skips_items_with_a_nested_slot_dict` — a dict whose own value is itself a
+  dict (two levels deep) is rejected, not recursively admitted.
+- `test_poll_transcripts_drives_a_real_speed_two_hundred_wire_item_to_set_speed` — the one
+  end-to-end test the security finding asked for: a real wire-shaped "speed two hundred" item
+  driven through the real `_poll_transcripts` → `handle_transcript` → `handle_command` →
+  `_handle_rule` → `_dispatch_rule` → `rules.engine.run_rule` → the real shipped `flight.lua`'s
+  `set_speed` rule (no doubles anywhere on that path, mirroring
+  `test_rules_flight_actions.py`'s own `_dispatching_console` wiring, kept local rather than
+  imported across test files per that file's own stated precedent); asserts
+  `console.ai_pilot_goal_transition == AiPilotGoalRequest(param="speed", speed_kmh=200.0)`.
+  Updated the pre-existing `test_poll_transcripts_skips_items_with_a_malformed_slot_value`'s own
+  docstring (it asserted "a slots value must be `int | str`," no longer accurate on its own).
+
+**Counterfactual run (showing red, not just green)**: restored the pre-fix validator
+(`isinstance(value, (int, str)) and not isinstance(value, bool)`, dropping the new
+`_is_valid_slot_value` call) and re-ran the four new tests. The two threading tests
+(`test_poll_transcripts_threads_a_dict_valued_slot_into_handle_transcript` and
+`test_poll_transcripts_drives_a_real_speed_two_hundred_wire_item_to_set_speed`) failed for the
+stated reason (`console.calls == []` / `console.ai_pilot_goal_transition` stayed `None`); the two
+rejection tests (oversized/nested dict) stayed green throughout, confirming they are not
+tautological — both the old and the new code reject those shapes, so they would only ever go red
+if a future change admitted too much, not too little. Restored by `shasum` match (`f0af0ae5...`
+before and after) rather than by eye.
+
+**Checks (body-layer, same `.venv` as above):**
+- `ruff format --check src tests`: pass (224 files, `test_body.py` reformatted once for the new
+  tests' import ordering)
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass, 91 source files, 0 issues
+- `pytest tests/test_body.py -k poll_transcripts -v`: 17 passed (13 pre-existing + 4 new), every
+  one confirmed by name, not by a `-k` count alone
+- `pytest tests/test_body.py -q`: 1 failed (the same pre-existing, unrelated
+  `test_shipped_effector_config_loads_without_errors`), 227 passed
+- `.claude/scripts/fast-tests.sh body-layer`: 1 failed (same pre-existing failure), 2681 passed,
+  4 xfailed
