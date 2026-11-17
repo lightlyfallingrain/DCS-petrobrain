@@ -130,7 +130,7 @@ Ahead:
 - [[BL-14]] — Attack run: target selection and run guidance
 - [[BL-15]] — Mission start actions: clean slate, theatre, briefing
 - [[BL-16]] — Petrovich flies the helicopter (in progress 2026-11-15; parked mode via ED AI wheel first, raw axes second)
-- [[BL-17]] — Spoken commands as Lua rules (in progress 2026-11-17; engine + one or two ported rules first, then a flight)
+- [[BL-17]] — Spoken commands as Lua rules (in progress; Stages 0/1b/2 merged 2026-11-17 — engine + "turn left/right NN" ported; Stage 3 flight `#needs-flight` on `main`; rename paused, remaining ~80 commands re-planned next)
 
 ## Backlog (body-layer)
 

@@ -80,3 +80,18 @@
   (`plans/flight-control/implementation.md`, Stage P2a/P2b Notable Discoveries, 2026-11-16).
 
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.
+
+- **A new fixed-pattern matcher introduced beside an existing fuzzy one does not have to inherit
+  the fuzzy matcher's tolerance on day one, but the choice has a measurable shelf life.**
+  `[[BL-17]]`'s rule-pattern grammar ships as full-consumption, exact-literal matching (no
+  character-level tolerance on a rule's own words), a deliberate scope-down from the plan's
+  original design of reusing the legacy fuzzy word-sequence scorer. Verified acceptable for the
+  one shipped rule by running real transcripts through it: filler words and punctuation are
+  already stripped before a rule sees the text, and the rule's own literals ("turn"/"left"/
+  "right") are short, common words the whisper prompt already biases toward. The gap is real
+  but narrow today — a single mis-transcribed literal word (not a filler insertion, not a digit
+  format issue) has no tolerance at all. The tradeoff gets worse as literal phrasing gets longer
+  and more varied (the scan/report/watch commands queued for later porting stages), so this is
+  exactly the kind of scope decision that needs to be re-measured, not just re-approved, once the
+  phrase length changes materially — "it worked for one short rule" is not evidence it works for
+  the next eighty.
