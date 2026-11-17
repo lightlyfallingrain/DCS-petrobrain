@@ -516,12 +516,10 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # answer this exact phrase.
     "NOT_READY": "Unable, not ready.",
     # `[[BL-17]]` D16/Stage 3b -- the `"flight_control"` category gate's
-    # own `UNABLE` reason (`not state.has_controls`). Declared here even
-    # though it is not reachable until Stage 4 ports the rest of the
-    # flight commands (`turn_heading_relative` is the only rule in this
-    # category today, and the goal check's own Q9 names this exact
-    # wording). `"HANDS_BUSY"` is declared alongside it for the same
-    # reason -- a future naked-eye/hands-busy category's own gate, not
+    # own `UNABLE` reason (`not state.has_controls`), reachable today
+    # through `turn_heading_relative`, the one rule in this category until
+    # Stage 4 ports the rest; the wording is the goal check's Q9.
+    # `"HANDS_BUSY"` is declared ahead of use -- a future naked-eye/hands-busy category's own gate, not
     # reachable until Stage 6 -- so that stage needs no `speech.py`
     # change of its own. `"PILOT_SEAT"` (9K113-while-in-pilot-seat) is
     # deliberately **not** declared yet: it names a seat distinction

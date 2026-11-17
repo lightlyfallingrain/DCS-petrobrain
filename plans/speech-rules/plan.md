@@ -305,7 +305,7 @@ feature branch directly — not repeated verbatim here beyond what each decision
   coordinator's own instruction** — `body-layer/src/belief/crew_state.py`, `CrewState` (frozen
   dataclass): `has_controls: bool` (`ParkedFlightState.parked_active`), `settling: bool`
   (`has_controls and held_heading is None` — the takeover-settle window, the same proxy every
-  flight handler already checks today, promoted to one place), `seat: Literal["pilot",
+  flight handler already checks today, promoted to one place [**corrected below**]), `seat: Literal["pilot",
   "copilot"]` (today always `"copilot"` — `[[BL-B123]]` is unbuilt, so this field is a named stub,
   not a guess: it exists so a gate can read it once BL-B123 lands, and today's gates that would
   depend on it simply never see anything but `"copilot"`), `hands_free: bool`/`eyes_free: bool`
@@ -313,6 +313,15 @@ feature branch directly — not repeated verbatim here beyond what each decision
   already implies `hands_free=False` for the flying case, which is all this batch needs).
   `CrewConsole.current_crew_state()` computes it fresh each poll from fields already read
   (`parked_flight_state`), never a second source of truth.
+
+  > **Corrected 2026-11-17 (`review-stage3b.md`, Required Fix 1):** "the same proxy every flight
+  > handler already checks" is false. Only `turn_heading_relative` checks `held_heading`;
+  > `_handle_speed_step` checks `held_speed`, `_handle_altitude_step`/`_handle_hold_altitude`
+  > check `held_altitude`, `_handle_level_flight` checks all three, and the absolute-set handlers
+  > check nothing. **Stage 4 must not delete those per-handler checks on the strength of the shared
+  > gate.** Either the gate's settle test becomes per-parameter (the rule declares which `held_*`
+  > it needs) or each action keeps its own readiness check and maps it to HOLD; Stage 4's
+  > implementer picks one and records it. A `None` must never reach the arithmetic.
 
   **`GateOutcome`** (`body-layer/src/rules/gates.py`) is one of three verdicts, not two:
   - `PASS` — run the handler now.
