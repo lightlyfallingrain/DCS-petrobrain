@@ -8606,6 +8606,22 @@ def _start_seat_poll_loop(
     threading.Event,
     threading.Thread,
 ]:
+    aircraft_client, runner, _console, stop_event, poll_thread = (
+        _start_effector_poll_loop(tmp_path, _effector_config_with_seat_sequences())
+    )
+    return aircraft_client, runner, stop_event, poll_thread
+
+
+def _start_effector_poll_loop(
+    tmp_path: Path,
+    effector_config: tuple[dict[tuple[str, str, str], Any], dict[str, Any]],
+) -> tuple[
+    FakeConsoleAircraftClient,
+    ConsolePerceptionRunner,
+    CrewConsole,
+    threading.Event,
+    threading.Thread,
+]:
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -8617,7 +8633,7 @@ def _start_seat_poll_loop(
     aircraft_client.ai_pilot_wheel_state = _seat_sample("pilot")
     runner = _settled_mission_start_runner(aircraft_client)
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
-    sequences, registry = _effector_config_with_seat_sequences()
+    sequences, registry = effector_config
     stop_event = threading.Event()
     poll_thread = threading.Thread(
         target=_run_crew_text_poll_loop,
@@ -8634,7 +8650,7 @@ def _start_seat_poll_loop(
     )
     poll_thread.start()
     assert _wait_for(lambda: runner.parked_flight_state.player_seat == "pilot")
-    return aircraft_client, runner, stop_event, poll_thread
+    return aircraft_client, runner, crew_console, stop_event, poll_thread
 
 
 def test_seat_changes_fire_seat_copilot_then_seat_pilot(tmp_path: Path) -> None:
@@ -8691,3 +8707,146 @@ def test_a_seat_read_across_a_mission_restart_fires_nothing(tmp_path: Path) -> N
         poll_thread.join(timeout=5.0)
     assert not poll_thread.is_alive()
     assert aircraft_client.cockpit_switch_writes == writes_before
+
+
+# -- Attack-run triggers (user, 2026-11-17: "add the attack-run-*
+# triggers"). The edge logic is a pure function; one test runs it through
+# the real poll loop. ------------------------------------------------------
+
+
+def test_engage_with_no_run_active_fires_attack_run_start() -> None:
+    assert body_module.attack_run_trigger_edges(
+        active_before=False,
+        engaged_missiles=False,
+        active_after_command=True,
+        active_after_drain=True,
+    ) == (EffectorTrigger.ATTACK_RUN_START,)
+
+
+def test_engage_missiles_fires_only_the_missiles_start() -> None:
+    assert body_module.attack_run_trigger_edges(
+        active_before=False,
+        engaged_missiles=True,
+        active_after_command=True,
+        active_after_drain=True,
+    ) == (EffectorTrigger.ATTACK_RUN_START_MISSILES,)
+
+
+def test_re_engaging_during_a_run_fires_nothing() -> None:
+    for missiles in (False, True):
+        assert (
+            body_module.attack_run_trigger_edges(
+                active_before=True,
+                engaged_missiles=missiles,
+                active_after_command=True,
+                active_after_drain=True,
+            )
+            == ()
+        )
+
+
+def test_disengage_during_a_run_fires_attack_run_stop() -> None:
+    assert body_module.attack_run_trigger_edges(
+        active_before=True,
+        engaged_missiles=None,
+        active_after_command=False,
+        active_after_drain=False,
+    ) == (EffectorTrigger.ATTACK_RUN_STOP,)
+
+
+def test_a_run_ending_in_drain_fires_attack_run_stop() -> None:
+    """Drop target, cancel or a lost contact: `drain_attack_run` returns
+    `None` with no command this poll."""
+    assert body_module.attack_run_trigger_edges(
+        active_before=True,
+        engaged_missiles=None,
+        active_after_command=True,
+        active_after_drain=False,
+    ) == (EffectorTrigger.ATTACK_RUN_STOP,)
+
+
+def test_disengage_with_no_run_and_a_quiet_poll_fire_nothing() -> None:
+    assert (
+        body_module.attack_run_trigger_edges(
+            active_before=False,
+            engaged_missiles=None,
+            active_after_command=False,
+            active_after_drain=False,
+        )
+        == ()
+    )
+    assert (
+        body_module.attack_run_trigger_edges(
+            active_before=True,
+            engaged_missiles=None,
+            active_after_command=True,
+            active_after_drain=True,
+        )
+        == ()
+    )
+
+
+def test_a_run_that_starts_and_ends_in_one_poll_fires_start_then_stop() -> None:
+    assert body_module.attack_run_trigger_edges(
+        active_before=False,
+        engaged_missiles=False,
+        active_after_command=True,
+        active_after_drain=False,
+    ) == (EffectorTrigger.ATTACK_RUN_START, EffectorTrigger.ATTACK_RUN_STOP)
+
+
+def _effector_config_with_attack_run_sequences() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    sequences, registry = _fixture_effector_config()
+    merged = dict(sequences)
+    for trigger, effector, value, arg in (
+        (EffectorTrigger.ATTACK_RUN_START, "observ", "on", 886),
+        (EffectorTrigger.ATTACK_RUN_STOP, "weapon_safety", "armed", 673),
+    ):
+        merged[(AIRCRAFT, PETROVICH_ROLE, trigger.value)] = SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=trigger.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector=effector,
+                    value=value,
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path(f"fake-{trigger.value}.md"),
+            read_args=frozenset({arg}),
+        )
+    return merged, registry
+
+
+def test_engage_with_no_target_fires_start_then_stop_through_the_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """An engage with no attack-target task: the poll's command block
+    starts a run and `drain_attack_run` ends it at once, so the real poll
+    loop fires `ATTACK_RUN_START` and then `ATTACK_RUN_STOP`."""
+    aircraft_client, _runner, crew_console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_attack_run_sequences()
+        )
+    )
+    try:
+        time.sleep(0.05)
+        assert aircraft_client.cockpit_switch_writes == []
+        crew_console.attack_run_transition = "engage"
+        assert _wait_for(
+            lambda: _SEAT_PILOT_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [
+        _SEAT_COPILOT_WRITE,  # attack-run-start: observ on
+        _SEAT_PILOT_WRITE,  # attack-run-stop: weapon_safety armed
+    ]
