@@ -431,7 +431,10 @@ types, so there are no existing construction sites. The Implementer greps `RuleS
 - **R6:** the meaning of `scan_bearing_deg` changes; old speech logs read differently.
 - **R7 (marks stage):** the transcript row's `t_wall` may be enqueue time, not PTT release. E9
   needs release time, and `correlation_id` is minted at release, so the adapter may have to carry
-  the timestamp.
+  the timestamp. *Plan check:* confirmed — `server.py:395` stamps `t_wall=time.time()` at match
+  completion; but `t_ptt_release_wall` is already minted at release and already sent to
+  `POST /transcribe` (`transcribe_client.py:54`), used only for `_log_latency`. Stage 8 needs only
+  the wiring into `TranscriptEvent`.
 - **R8 (marks stage):** "waypoint 1" needs `--mission-understanding`'s route
   (`mission_phase.CompactRoutePoint`). With none loaded, the answer is unable. Route numbering
   (whether it starts at 0, and what the HSI or F10 shows) must match what the pilot reads.
