@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -189,6 +190,15 @@ def _make_action_wrapper(
         for param, value in zip(action.params, lua_args):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 return sandbox.table_from({"ok": False, "reason": None})
+            if isinstance(value, float) and not math.isfinite(value):
+                # A rule's own arithmetic can produce `nan`/`inf` (e.g. a
+                # division by a slot-derived zero) with no stdlib needed --
+                # `int()` on either raises a bare `ValueError`/
+                # `OverflowError`, never a `LuaError`, which would escape
+                # this wrapper uncaught (security Required Fix 1,
+                # `plans/speech-rules/security-stage0-2.md`). Reject the
+                # same way as any other out-of-contract value.
+                return sandbox.table_from({"ok": False, "reason": None})
             int_value = int(value)
             if int_value != value or not (param.lo <= int_value <= param.hi):
                 return sandbox.table_from({"ok": False, "reason": None})
@@ -245,6 +255,27 @@ def _build_when_table(
     return when
 
 
+def _digits_readback(n: object) -> str:
+    """`digits`'s own validation boundary -- every `WordSetElement` slot
+    (e.g. `s.direction`) is a Lua string, not a number, and a rule's own
+    arithmetic can hand this a `nan`/`inf` float, so this cannot assume
+    `n` is already a finite int/float the way the pre-rules Python code
+    that called `_digit_readback` directly could. Degrades to the plain
+    "Unable." readback (`render_unable`'s own graceful-degradation
+    posture, same as `_make_action_wrapper`'s reject branch) rather than
+    letting a bare `ValueError`/`TypeError` escape this Lua-callable
+    global uncaught (security Required Fix 1, `plans/speech-rules/
+    security-stage0-2.md`). `""` is not one of D11's closed reason
+    tokens -- it is deliberately not one, so `render_unable` falls
+    through to its own unrecognised-reason default rather than reading
+    as a real `ACTION_FILE_ERROR_LINE`-style reason."""
+    if isinstance(n, bool) or not isinstance(n, (int, float)):
+        return render_unable("").text
+    if isinstance(n, float) and not math.isfinite(n):
+        return render_unable("").text
+    return CrewConsole._digit_readback(int(n))
+
+
 def _make_env_builder(
     sandbox: RuleSandbox,
     action_namespaces: dict[str, tuple[Action, ...]],
@@ -254,7 +285,7 @@ def _make_env_builder(
     shared: dict[str, object] = {
         "say": sink_holder.say,
         "unable": lambda reason: render_unable(reason).text,
-        "digits": lambda n: CrewConsole._digit_readback(int(n)),
+        "digits": _digits_readback,
     }
     for namespace, actions in action_namespaces.items():
         shared[namespace] = _build_action_table(sandbox, actions, ctx)

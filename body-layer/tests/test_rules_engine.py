@@ -170,3 +170,84 @@ def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> Non
     outcome = run_rule(rule_set, "bad_call", None, sandbox)
     assert outcome.lines == ["Unable."]
     assert outcome.error is False
+
+
+def _probe_action_rule_set(tmp_path: Path, sandbox: RuleSandbox) -> RuleSet:
+    """Shared fixture for the security Required Fix 1 tests below -- one
+    bound action whose only job is to echo whether the wrapper accepted
+    its argument, same `probe.one` shape as the out-of-bounds test above."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("nan_call", "x", function(s)\n'
+        "  local r = probe.one(0/0)\n"
+        "  if not r.ok then say(unable(r.reason)) end\n"
+        "end)\n"
+        'when.speech("inf_call", "x", function(s)\n'
+        "  local r = probe.one(1/0)\n"
+        "  if not r.ok then say(unable(r.reason)) end\n"
+        "end)\n",
+        encoding="utf-8",
+    )
+
+    def _invoke(ctx: ActionContext, args: dict[str, int]) -> dict[str, object]:
+        return {"ok": True, "reason": None}
+
+    namespaces = {
+        "probe": (
+            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
+        )
+    }
+    return RuleSet.load(tmp_path, sandbox, namespaces, _ctx())
+
+
+def test_action_wrapper_rejects_nan_instead_of_raising(tmp_path: Path) -> None:
+    """Security Required Fix 1: `0/0` is a Lua float `nan`, which `int()`
+    cannot convert -- the wrapper must reject it the same way as any
+    other out-of-contract argument (D6's outcome), not raise a bare
+    Python `ValueError` that would escape `run_rule` unwrapped."""
+    sandbox = RuleSandbox()
+    rule_set = _probe_action_rule_set(tmp_path, sandbox)
+    outcome = run_rule(rule_set, "nan_call", None, sandbox)
+    assert outcome.lines == ["Unable."]
+    assert outcome.error is False
+
+
+def test_action_wrapper_rejects_infinity_instead_of_raising(tmp_path: Path) -> None:
+    """Security Required Fix 1, the `inf` twin of the `nan` test above --
+    `1/0` is a Lua float `inf`; `int()` on it raises `OverflowError`,
+    which must not escape the wrapper either."""
+    sandbox = RuleSandbox()
+    rule_set = _probe_action_rule_set(tmp_path, sandbox)
+    outcome = run_rule(rule_set, "inf_call", None, sandbox)
+    assert outcome.lines == ["Unable."]
+    assert outcome.error is False
+
+
+def test_digits_rejects_a_string_slot_instead_of_raising(tmp_path: Path) -> None:
+    """Security Required Fix 1: `digits` is a bare global every rule can
+    call with anything, and a `WordSetElement` slot is always a Lua
+    string -- `digits(s.direction)` must degrade to "Unable." rather than
+    `int("left")`'s bare `ValueError` escaping uncaught."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("spell_word", "x", function(s) say(digits(s.direction)) end)',
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+    rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
+    outcome = run_rule(rule_set, "spell_word", {"direction": "left"}, sandbox)
+    assert outcome.lines == ["Unable."]
+    assert outcome.error is False
+
+
+def test_digits_rejects_nan_instead_of_raising(tmp_path: Path) -> None:
+    """Security Required Fix 1, the `digits` twin of the action-wrapper
+    `nan` test above -- `int(nan)` raises `ValueError`, not a `LuaError`,
+    with no stdlib needed to produce the `nan` in the first place."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("spell_nan", "x", function(s) say(digits(0/0)) end)',
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+    rule_set = RuleSet.load(tmp_path, sandbox, {}, _ctx())
+    outcome = run_rule(rule_set, "spell_nan", None, sandbox)
+    assert outcome.lines == ["Unable."]
+    assert outcome.error is False

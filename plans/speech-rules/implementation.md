@@ -435,3 +435,46 @@ Moved `turn_heading_relative` off its static `handle_command` token onto a rule,
 
 Stages 3+ (the test flight, and the remaining ~80 commands) are explicitly out of this run's
 scope per the checkpoint already recorded in `body-layer/ROADMAP/BL-17.md`.
+
+### Security fix (Required Fix 1, `plans/speech-rules/security-stage0-2.md`)
+
+Security's deep analysis (tip `262d5c9d`) flagged two Lua→Python `int(...)` conversions that
+checked type and bounds but not finiteness, so a Lua `nan`/`inf` value (trivial via `0/0`/`1/0`,
+no stdlib needed) raised a bare `ValueError`/`OverflowError` — not a `lupa.lua54.LuaError` —
+that escapes `run_rule`'s own `except (RuleRuntimeError, RuleBudgetExceeded)` uncaught and would
+crash the crew-text REPL main thread.
+
+- **`engine.py:_make_action_wrapper`** — added `isinstance(value, float) and not
+  math.isfinite(value)` to the existing reject branch, before `int(value)` runs. A rejected call
+  now answers `{ok=false, reason=nil}`, same shape as every other out-of-contract argument this
+  wrapper already rejects (wrong arity, wrong type, out of bounds).
+- **`engine.py:_make_env_builder`'s `digits` global** — replaced the bare
+  `lambda n: CrewConsole._digit_readback(int(n))` with a named module-level function,
+  `_digits_readback`, that validates `n` (bool/non-numeric/non-finite-float) before calling
+  `int()`, degrading to `render_unable("").text` ("Unable.") on rejection — the same graceful-
+  degradation posture `_make_action_wrapper` already uses. `""` is deliberately not one of D11's
+  closed reason tokens (it reads as "no specific reason," not a fabricated `ACTION_FILE_ERROR_
+  LINE`-style token). Named rather than a lambda so it carries its own docstring and is callable
+  from a test without going through Lua.
+- **Checked for the same shape elsewhere in `body-layer/src/rules/`** — `engine.py` and
+  `loader.py` have no other `int(...)`/`float(...)` conversion of a Lua-supplied value;
+  `sandbox.py` performs none (it never receives rule-author-controlled values, only trusted
+  module-level setup); `actions.py` has no conversion of its own — its one `Action.invoke`
+  (`_increment_heading`) receives an already-validated `int` from `_make_action_wrapper`.
+  `audio-adapter/src/rule_patterns.py`'s `int()` calls (`_consume_digit_run`/`_consume_angle`/
+  `_consume_heading`/`_consume_oclock`) were out of scope for this fix (Security's own table
+  marked them "None" — each is preceded by an explicit digit-membership check on the exact
+  string converted).
+
+**Tests added** (`body-layer/tests/test_rules_engine.py`): `test_action_wrapper_rejects_nan_
+instead_of_raising`, `test_action_wrapper_rejects_infinity_instead_of_raising` (both via a
+`probe.one` action and `0/0`/`1/0`), `test_digits_rejects_a_string_slot_instead_of_raising`
+(`digits(s.direction)` with a string slot), `test_digits_rejects_nan_instead_of_raising`. All
+four were confirmed red against the pre-fix `engine.py` (bare `ValueError`/`OverflowError`
+propagating out of `run_rule`, not caught as `RuleRuntimeError`) before the fix was restored, per
+this project's counterfactual-evidence convention.
+
+**Checks** (body-layer): `ruff format --check`, `ruff check`, `.venv/bin/mypy --strict src` all
+pass; `.claude/scripts/fast-tests.sh body-layer` (73 targeted files, parallel) — 2737 passed, 4
+xfailed (pre-existing, unrelated); `test_rules_engine.py` run individually by name, unfiltered
+`-v` — 15 passed, including all four new tests.
