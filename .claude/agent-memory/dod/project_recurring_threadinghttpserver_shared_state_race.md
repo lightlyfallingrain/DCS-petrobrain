@@ -1,6 +1,6 @@
 ---
 name: recurring-threadinghttpserver-shared-state-race
-description: Shared mutable state crossing a ThreadingHTTPServer/background-thread boundary with no lock has now recurred across 5+ features, usually caught at Reviewer (sometimes later) rather than designed in from the start — process debt worth a check earlier in the sequence
+description: Shared mutable state crossing a thread boundary (ThreadingHTTPServer/background-worker, or body-layer's poll-thread/REPL-thread pair) with no lock has now recurred across 6+ features, usually caught at Reviewer (sometimes later) rather than designed in from the start — process debt worth a check earlier in the sequence
 metadata:
   type: project
 ---
@@ -28,12 +28,32 @@ found in agent memory as of this note (2026-11-16):
   `ThreadingHTTPServer` request threads and the background `WarmupScheduler` thread; Reviewer
   reproduced a real `FileNotFoundError` crash (31/3200 writes) with a direct stress test, not by
   reading the code — required fix, fixed with one `threading.Lock`, re-reviewed and approved.
+- **BL-17 (speech-rules, 2026-11-17)** — `CrewConsole.pending_effector_writes`, a shared
+  lock-free list, is written by the REPL thread (voice-dispatched rule handlers) and drained
+  unconditionally, without a lock, by the poll thread every poll (deliberately, per
+  `feedback_cross_thread_one_shot_queue_vs_single_slot.md` — a one-shot slot would lose a second
+  concurrently-queued entry). Required Fix 4's first pass added a rollback (identify-by-token,
+  filter-on-error) that handled two *dispatches* racing each other, but Reviewer found — by
+  writing a standalone probe against the real, unmodified code, not by reading the diff — a third
+  interleaving neither new test covered: the poll thread's own drain could win the race and start
+  executing an entry before the REPL-thread dispatch that queued it had decided to roll it back.
+  **Different shape from the other entries here** (no `ThreadingHTTPServer`, no missing lock to
+  add) — the fix was architectural, not a lock: buffer-then-commit (queue into a thread-local
+  buffer, extend the shared list only on success) removes the race structurally instead of a lock
+  trying to win it, which also avoids reintroducing the cross-thread blocking the shared-list
+  design exists to avoid. Caught at Reviewer's *second* re-review round of the same Required Fix,
+  not the first — three rounds total before this specific sub-defect closed.
 
-**Why this is process debt, not just code debt.** Five-plus independent features have shipped
+**Why this is process debt, not just code debt.** Six-plus independent features have shipped
 this same shape of defect at implementation time, and the catch has landed at Reviewer (or later)
 in most of them — meaning each one cost a full extra review round-trip that a design-time check
 could have prevented. The one counter-example (MI-2) was caught by the implementer itself, by
-writing a real multi-threaded test early rather than trusting the design.
+writing a real multi-threaded test early rather than trusting the design. BL-17 widens the pattern
+slightly: the fix is not always "add a `threading.Lock`" — a shared lock-free list by deliberate
+design (to avoid blocking the poll thread) needed a buffer-then-commit *protocol* instead, once a
+second independent reader (the drain) of the same list was identified. The standing checklist item
+below should ask "what is this object's synchronization strategy and has it been verified against
+every independent reader/writer," not just "is there a lock."
 
 **Recommendation for whoever reads this next**: the project's architect/implementer role files
 could gain a standing checklist item — "does this design put a background thread and a

@@ -95,3 +95,34 @@
   exactly the kind of scope decision that needs to be re-measured, not just re-approved, once the
   phrase length changes materially — "it worked for one short rule" is not evidence it works for
   the next eighty.
+
+- **The predicted shelf life above was reached at the very next porting stage, and running the
+  real collision check (not reasoning about it) found collisions a rename cannot cleanly fix.**
+  `[[BL-17]]` Stage 3a added near-miss tolerance to a rule's own literal words (D13); Stage 4's
+  18-rule flight-control port then ran the real `compile_rules` collision check against the real
+  pattern set and found **five genuine, measured collisions**, not zero: `set_speed`/
+  `altitude_step` collide because "speed two zero zero" fuzzy-resolves `altitude_step`'s own
+  `<direction:climb|descend>` word-set to "descend" at exactly the repair floor (`ratio("speed",
+  "descend") == 0.5`); `level_off`/`straight` each collide with an *existing legacy* command
+  (`observ_off`, `point`/`hvrt_translate_right`) at 0.75–0.8. None of the five are an artifact of
+  this stage's own code — they are real properties of the shipped vocabulary once fuzzy tolerance
+  is added to it — and three of the five require a product decision (rename or accept) rather
+  than a code fix, which is exactly why the Implementer correctly declined to rename anything
+  unilaterally and left them for whoever picks up the next stage. The existing degrade-gracefully
+  mechanism (`PUT /rules` collision rejection → "Action file error." spoken, D6) already handles
+  all five with no new code. Lesson: a documented tradeoff with a "this will need re-measuring"
+  caveat should be re-measured with the real checker the moment the next stage makes it
+  reachable, not re-estimated from the first stage's numbers — the five collisions here were
+  invisible until the real 18-rule set was actually run through `compile_rules`.
+
+- **Fuzzy tolerance divides along closed-set-vs-open-ended, not along slot-vs-literal.** `[[BL-17]]`
+  D13 (literal fuzz) plus the Stage 3a review's E12 correction extended near-miss tolerance to a
+  rule's *directive* words too ("turn left" / "scan ahead" — the base command plus the handful of
+  words that form a short, almost-fixed phrase with it), while a slot's *value* (a number, a
+  distance, a landmark) stays exact, never fuzzy-repaired. The dividing line the user drew is not
+  "is this a `WordSetElement`/literal vs. a `SlotElement`" (an implementation detail two element
+  types happen to have today) but "is this one of a small, closed set of alternatives, or an open,
+  arbitrary value" — unit-class words ("armor", "truck") got the same closed-set fuzzy treatment
+  for the same reason, as a one-line declared list feeding matching, the STT hint, and the
+  readback together. A new slot type inherits exactness by default; fuzziness is opted into only
+  when the value really is drawn from a small named set.

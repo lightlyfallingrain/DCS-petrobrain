@@ -51,3 +51,18 @@ stale-section report for "nothing to check" on the stage actually shipping.
 
 **Second fix worth making**: match the *last* "Decisions Requiring User Input" heading in the
 file, or the one nearest a line containing "answered"/"ready to build", rather than the first.
+
+**Third shape, reconfirmed at the BL-17 Stages 3a/3b/3d/4 DoD pass (2026-11-17), a different plan
+file.** `plans/speech-rules/plan.md`'s Revision 2 renamed its own later section to "### Revision
+2's own open decisions (U19–U24)" rather than reusing the literal heading "Decisions Requiring
+User Input" — the script's `awk` never matches that string at all, so it silently reports zero
+findings for U19–U24 rather than a false negative on a section it did find. This is exactly
+`reviewer/feedback_ledger_misses_a_renamed_decisions_heading.md`'s own third shape, first caught
+by Reviewer on this same plan file (`review-stage4.md`'s Optional Refinements), now independently
+reconfirmed one stage later at DoD — the two roles hit the identical gap on the identical plan
+without either reading the other's note first, which is itself a signal: this failure mode is
+common enough (two shapes already on `flight-control/plan.md`, a third now hit on two different
+roles' passes of `speech-rules/plan.md`) that fixing the script (match the *last* heading, or any
+heading containing "Decisions Requiring User Input" as a substring rather than requiring an exact
+match) is worth doing once, rather than each role re-discovering and re-describing it by hand on
+every living plan with more than one such section.

@@ -130,7 +130,10 @@ Ahead:
 - [[BL-14]] — Attack run: target selection and run guidance
 - [[BL-15]] — Mission start actions: clean slate, theatre, briefing
 - [[BL-16]] — Petrovich flies the helicopter (in progress 2026-11-15; parked mode via ED AI wheel first, raw axes second)
-- [[BL-17]] — Spoken commands as Lua rules (in progress; Stages 0/1b/2 merged 2026-11-17 — engine + "turn left/right NN" ported; Stage 3 flight `#needs-flight` on `main`; rename paused, remaining ~80 commands re-planned next)
+- [[BL-17]] — Spoken commands as Lua rules (in progress; Stages 0/1b/2 + 3a/3b/3d/4 merged
+  2026-11-17 — fuzzy/number-word matching, category gates, effector-write action surface, 18
+  flight-control commands ported; both merges `#needs-flight` on `main`; Stage 3c (corpus-measured
+  STT hint) and Stages 5-10 next; rename paused)
 - [[BL-18]] — Gate the Mi-24P specifics, so other helicopters can be supported later
 
 ## Backlog (body-layer)
