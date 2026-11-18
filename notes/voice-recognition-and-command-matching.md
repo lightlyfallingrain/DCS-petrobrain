@@ -115,6 +115,50 @@
   reachable, not re-estimated from the first stage's numbers — the five collisions here were
   invisible until the real 18-rule set was actually run through `compile_rules`.
 
+- **A self-match check built from a rule's own stated primitives cannot catch an error shared
+  between the primitive and the code that accepts it.** `[[BL-B129]]` D6 found `flight.lua`'s real
+  `turn_heading` pattern needed the literal word "heading" twice to match at all — once from the
+  pattern's own grammar, once more inside the `heading` slot type's own `consume`. `check_rules.py`'s
+  self-match step (`generate_samples`/`_expand` → `match_pattern`) never caught this because the bug
+  was internally consistent: the slot's own `sample()` lambda baked in the same "needs its own
+  'heading' word" assumption the buggy `consume` required, so every generated self-test sample
+  matched the buggy grammar it was generated from. A self-match check has no independent oracle for
+  "what a human would actually say" — only "is this rule consistent with its own declared
+  primitives." Closing this needs a source of realistic utterances outside the rule's own grammar
+  (a bench corpus), not a better self-match algorithm.
+
+- **A digit-word homophone fuzzy fallback is unsafe at the matcher's existing character-ratio
+  floor, because ordinary rule words sitting next to a numeric slot clear that floor too.**
+  `[[BL-B129]]` D3 measured the shared `_WORD_REPAIR_FLOOR` (0.5) against the real vocabulary before
+  shipping a general char-ratio fallback for mis-heard numbers: `"degrees"` (the angle slot's own
+  name) scores 0.5 against "three", `"down"` 0.57, `"level"`/`"speed"` 0.6, `"flight"` 0.73,
+  `"right"` 0.8 — any of these sitting beside a numeric slot would fuzzy-repair into a wrong digit.
+  Shipped a small deterministic homophone table instead (to/too→two, for/fore→four, etc.), scoped to
+  fire only inside an already-anchored numeric slot's own digit run. General lesson: a fuzzy-repair
+  floor tuned for one word class (literals) is not automatically safe to reuse for a different word
+  class (digits) without re-measuring it against the words that will actually sit next to the new
+  slot.
+
+- **Removing a word from the whisper prompt bias and removing it from the matcher's own tolerance
+  are two independent levers, and fixing one does not touch the other.** `[[BL-B129]]` D1 dropped
+  "alt" from `rule_words()` (the whisper prompt text) so STT stops being biased toward hearing it —
+  but `LiteralElement`'s own fuzzy repair still accepts "alt" as a mis-hearing of "altitude"
+  (`_char_ratio("alt", "altitude") == 0.545`, clear of the 0.5 floor), so a heard "alt" still
+  matches the rule after the fix. The prompt-bias table and the grammar's own tolerance are
+  separate mechanisms that happen to look like the same "do we accept this word" question; a fix
+  to one needs its own test, not an assumption that the other moved with it.
+
+- **Filler-word stripping and a word's role as a meaningful token inside an anchored slot can
+  conflict, and the fix has to be scoped per call site, not applied globally.** `[[BL-B129]]` D3's
+  digit-homophone table maps "to"→"two", but "to" is also an existing filler word stripped from the
+  transcript before the rule matcher ever sees it — so "heading to seven zero" lost its "to" before
+  `_consume_digit_run` could turn it into a 2. Fixed with an optional `preserve` set on
+  `strip_filler`, passed only on the rule-matching path (`frozenset(_DIGIT_WORD_HOMOPHONES) &
+  FILLER_WORDS`), leaving the legacy pipeline's own fully-stripped word list untouched. When two
+  independent text-normalization passes both claim the same word for different reasons, the fix is
+  scoping one pass's effect to the call site that needs the exception, not changing the shared
+  table everyone reads.
+
 - **Fuzzy tolerance divides along closed-set-vs-open-ended, not along slot-vs-literal.** `[[BL-17]]`
   D13 (literal fuzz) plus the Stage 3a review's E12 correction extended near-miss tolerance to a
   rule's *directive* words too ("turn left" / "scan ahead" — the base command plus the handful of

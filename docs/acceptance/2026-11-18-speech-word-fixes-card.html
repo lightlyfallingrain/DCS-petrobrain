@@ -1,0 +1,476 @@
+<!doctype html>
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Speech Word Fixes</title>
+<style>
+/* Layout: sticky amber masthead (branch/checkout), stacked numbered do/expect/record
+   blocks each with a persistent checkbox, a "verified text-level" chip per block, a
+   boxed callout for the digits-only number rule, and a bring-back rail at the end. */
+:root {
+  --bg: #0b0f14;
+  --panel: #121820;
+  --panel-2: #182029;
+  --rule: #26323e;
+  --fg: #e8edf2;
+  --fg-dim: #9aacba;
+  --amber: #f0a830;
+  --amber-dim: #8a6324;
+  --green: #5fb87a;
+  --red: #e06a5f;
+  --mono-bg: #060a0e;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f3f1ea;
+    --panel: #ffffff;
+    --panel-2: #ebe7dc;
+    --rule: #d8d2c2;
+    --fg: #1c1a16;
+    --fg-dim: #5c564a;
+    --amber: #a86a0e;
+    --amber-dim: #d8b97a;
+    --green: #2f7a4a;
+    --red: #a8382a;
+    --mono-bg: #e9e4d6;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f3f1ea;
+  --panel: #ffffff;
+  --panel-2: #ebe7dc;
+  --rule: #d8d2c2;
+  --fg: #1c1a16;
+  --fg-dim: #5c564a;
+  --amber: #a86a0e;
+  --amber-dim: #d8b97a;
+  --green: #2f7a4a;
+  --red: #a8382a;
+  --mono-bg: #e9e4d6;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: 48px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+h1, h2, .display {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  text-wrap: balance;
+}
+code, .mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+
+header {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: linear-gradient(180deg, var(--bg) 85%, transparent);
+  padding: 14px 0 10px;
+  margin: 0 -16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--rule);
+}
+header .eyebrow {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: var(--amber);
+  margin: 0 0 2px;
+}
+header h1 {
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  font-weight: 700;
+  margin: 0 0 8px;
+  line-height: 1.05;
+}
+.branch-box {
+  background: var(--mono-bg);
+  border: 1px solid var(--amber-dim);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.branch-box code {
+  font-size: 0.85rem;
+  color: var(--amber);
+  overflow-wrap: anywhere;
+}
+.branch-box .label {
+  font-size: 0.72rem;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+main { padding-top: 14px; }
+
+.lede {
+  color: var(--fg-dim);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 18px;
+}
+.lede strong { color: var(--fg); }
+
+.verified-note {
+  background: var(--panel-2);
+  border-left: 3px solid var(--amber);
+  border-radius: 0 6px 6px 0;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: var(--fg-dim);
+  margin-bottom: 18px;
+}
+.verified-note strong { color: var(--fg); }
+
+.block {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+  position: relative;
+}
+.block-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.block-num {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--amber);
+  min-width: 1.6em;
+  line-height: 1.3;
+}
+.chk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.chk input[type=checkbox] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--amber);
+  flex-shrink: 0;
+}
+.chk label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+.row { margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.row .tag {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-dim);
+  min-width: 4.5em;
+}
+.row .say {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.row .say code {
+  background: var(--mono-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--amber);
+}
+.row .exp { font-size: 0.92rem; color: var(--fg); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 50%, transparent);
+  white-space: nowrap;
+}
+.chip::before { content: "✓"; }
+.note {
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.record-line {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  font-size: 0.88rem;
+  color: var(--fg);
+}
+.record-line .tag { color: var(--red); }
+
+.digits-box {
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 20px 0;
+}
+.digits-box h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+  color: var(--amber);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.digits-box p { font-size: 0.9rem; margin: 0 0 8px; color: var(--fg); }
+.digits-box .ex { font-size: 0.88rem; color: var(--fg-dim); }
+.digits-box code { color: var(--amber); }
+
+section.unverified {
+  margin: 22px 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--red);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--red) 8%, var(--panel));
+}
+section.unverified h2 {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+  color: var(--red);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+section.unverified p { font-size: 0.88rem; color: var(--fg-dim); margin: 0; line-height: 1.5; }
+
+.bring-back {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 2px solid var(--amber-dim);
+}
+.bring-back h2 {
+  font-size: 1.3rem;
+  margin: 0 0 10px;
+  color: var(--amber);
+}
+.bring-back ul { margin: 0; padding-left: 1.3em; }
+.bring-back li { margin-bottom: 8px; font-size: 0.92rem; line-height: 1.4; }
+.bring-back .prize {
+  font-weight: 700;
+  color: var(--fg);
+}
+
+footer {
+  margin-top: 28px;
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+  text-align: center;
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+
+<header>
+  <p class="eyebrow">BL-B129 · acceptance sortie</p>
+  <h1>Speech Word Fixes</h1>
+  <div class="branch-box">
+    <span class="label">Checkout</span>
+    <code>git checkout main &amp;&amp; git pull</code>
+  </div>
+</header>
+
+<main>
+  <p class="lede">
+    Six fixes to the flight voice commands, found by bench-testing the real recognizer against
+    recordings of <strong>your own voice</strong>. Say each phrase below exactly as written and
+    check it against the expected result.
+  </p>
+
+  <div class="verified-note">
+    <strong>What "verified" means on this card:</strong> every phrase below was run through the
+    real matching code with this exact text — not spoken, not through a microphone, not through
+    whisper. What that proves: the logic is correct for this text. What it does <em>not</em>
+    prove: that saying it out loud produces this text. That part is yours to find out.
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">1</span>
+      <div class="chk"><input type="checkbox" data-k="b1"><label for="">altitude hold</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>altitude three hundred</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">holds 300 m, reads back "300 meters"</span></div>
+    <div class="record-line"><span class="tag">Record —</span> did he hold 300, or say "say again"?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">2</span>
+      <div class="chk"><input type="checkbox" data-k="b2"><label for="">hold altitude</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>hold altitude</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">holds current altitude, "Holding N meters"</span></div>
+    <div class="note">This is the exact defect D1 fixed — "hold alt" used to get heard as "hold out" 2 times in 4 on the bench.</div>
+    <div class="record-line"><span class="tag">Record —</span> held, or misheard again?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">3</span>
+      <div class="chk"><input type="checkbox" data-k="b3"><label for="">relative turn, digits</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>turn left three zero</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">30° left turn, "30 left"</span></div>
+    <div class="note">Not "turn left thirty" — digit words only. See the digits box below.</div>
+    <div class="record-line"><span class="tag">Record —</span> 30° left?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">4</span>
+      <div class="chk"><input type="checkbox" data-k="b4"><label for="">absolute heading</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>turn heading two seven zero</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">turns to heading 270, "Heading 270"</span></div>
+    <div class="note">The D6 fix — the real shipped rule used to silently require "heading" twice ("turn heading heading two seven zero"). This exact phrase failed before today.</div>
+    <div class="record-line"><span class="tag">Record —</span> turned to 270, or "say again"?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">5</span>
+      <div class="chk"><input type="checkbox" data-k="b5"><label for="">heading, "to" for "two"</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>turn heading to seven zero</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">same as above — heading 270</span></div>
+    <div class="note">Deliberately say "to" instead of "two" — the D3 homophone fix, for when whisper hears "to" where you said "two".</div>
+    <div class="record-line"><span class="tag">Record —</span> "to" resolved to 270, or rejected?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">6</span>
+      <div class="chk"><input type="checkbox" data-k="b6"><label for="">HVRT right</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>right</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">translates right, "Right." (operator seat, AI hover active)</span></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">7</span>
+      <div class="chk"><input type="checkbox" data-k="b7"><label for="">"alright" = right</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>alright</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">same as #6 — translates right, "Right."</span></div>
+    <div class="note">The D4 fix — before it, "alright" was the one wrong-command case on the bench: it fired the legacy <code>point</code> command instead.</div>
+    <div class="record-line"><span class="tag">Record —</span> same as "right", or did it do something else (point)?</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">8</span>
+      <div class="chk"><input type="checkbox" data-k="b8"><label for="">bare direction + number</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>right four five</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">"say again" — never a silent command</span></div>
+    <div class="note">The D5 fix. Before it, a dropped "turn" (a real whisper failure, not hypothetical) made this silently fire <code>point</code> with no sign anything went wrong.</div>
+    <div class="record-line"><span class="tag">Record —</span> "say again", or did something silently happen? (worth checking belief/attention state)</div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <span class="block-num">9</span>
+      <div class="chk"><input type="checkbox" data-k="b9"><label for="">heading without the verb</label></div>
+      <span class="chip">text-verified</span>
+    </div>
+    <div class="row"><span class="tag">Say</span><span class="say"><code>heading two seven zero</code></span></div>
+    <div class="row"><span class="tag">Expect</span><span class="exp">not a turn — falls through to the legacy bearing-report path</span></div>
+    <div class="note">No "turn"/"fly" in front — the verb is required now (D6).</div>
+    <div class="record-line"><span class="tag">Record —</span> did the aircraft actually turn (wrong) or just report/do nothing flight-wise (right)?</div>
+  </div>
+
+  <div class="digits-box">
+    <h2>Numbers — say digits, not words</h2>
+    <p>"Thirty", "forty-five" and other composed number words are <strong>not</strong> recognized.
+    A prompt experiment to fix that (D2) was tried and measured worse on every count, so it
+    shipped as-is: say numbers digit by digit.</p>
+    <p class="ex"><code>three zero</code> for 30 · <code>two seven zero</code> for 270 · <code>four five</code> for 45</p>
+  </div>
+
+  <section class="unverified">
+    <h2>Unverified by this pass</h2>
+    <p>Every phrase above was checked against the real matcher with the exact text typed in — never
+    spoken, never through a microphone, never through whisper. Whether saying these words aloud
+    actually produces this text is what today's flight is for.</p>
+  </section>
+
+  <div class="bring-back">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Any phrase that didn't do what's expected — say exactly what you said and what happened.</li>
+      <li class="prize">Did "to" (#5) and "alright" (#7) feel natural to say, or like you were performing for the matcher rather than talking normally?</li>
+      <li>Anything that surprises you is worth more than anything on this list.</li>
+    </ul>
+  </div>
+</main>
+
+<footer>plans/speech-word-fixes/plan.md · docs/acceptance/2026-11-18-speech-word-fixes.md</footer>
+
+<script>
+(function(){
+  try {
+    const KEY = 'speech-word-fixes-2026-11-18';
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function(){
+        try {
+          const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>
