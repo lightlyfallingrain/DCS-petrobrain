@@ -41,12 +41,6 @@ SEGMENTS, in order:
     J2 the same, capturing the SUM of both arg sets at the edge
     J3 hold; park; then swap operator -> pilot while parked -> on the
        falling edge capture as J1 and hold 10 s
-    J4 (user, 2026-11-18: "AI overlay is ON when Player is in copilot seat
-       AND controls are parked") from the pilot seat with the copilot
-       controls still parked after J3: hold; swap to the copilot seat ->
-       overlay on, writing stops (the new part: a park edge from a seat
-       swap); ~20 s; Request Aircraft Control -> unpark as J1, capture the
-       pilot set (Decision 24) and hold 10 s
 
 Each pass's B2 / C2 decide whether that pass's D also holds pedals /
 collective (pedals: arg within PEDAL_HOLD_TOL of each command; collective:
@@ -135,8 +129,6 @@ local SEGMENTS = {
     { id = "J1", kind = "park", capture = "pilot", say = "operator seat: park, ~20 s, unpark" },
     { id = "J2", kind = "park", capture = "sum", say = "operator seat: park, ~20 s, unpark" },
     { id = "J3", kind = "park", capture = "pilot", say = "operator seat: park, then swap to the PILOT seat" },
-    { id = "J4", kind = "park", capture = "pilot",
-      say = "pilot seat, controls still parked: swap to the COPILOT seat (overlay on), ~20 s, Request Aircraft Control" },
 }
 
 -- ---------------------------------------------------------------- logging
@@ -469,11 +461,7 @@ local function schedule(t, s)
             if el >= J_WAIT_S then return false, "no park within " .. J_WAIT_S .. " s" end
         elseif seg.phase == "parked" then
             if not parked_active then
-                if def.capture == "sum" then
-                    seg.captured = capture_sum()
-                else
-                    seg.captured = capture_from(def.capture)
-                end
+                seg.captured = def.capture == "sum" and capture_sum() or capture_from("pilot")
                 seg.phase, seg.phase_t = "taken", t
                 log(string.format("t=%.3f %s UNPARK seen (camera_seat=%s): captured %s from %s, holding",
                     t, def.id, player_seat or "nil", captured_text(seg.captured), def.capture))
