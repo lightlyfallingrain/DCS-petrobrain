@@ -290,7 +290,13 @@ local triggers = {
     pilot = { arg = ARG_PILOT_PTT, peak = 0.0, pressed = false },
     operator = { arg = ARG_OPERATOR_PTT, peak = 0.0, pressed = false },
 }
+-- First segment to run. "J1" since 2026-11-18 (user: "change it so that it
+-- only runs J"); A-D are flown. Set to "A1" to run everything again.
+local START_AT = "J1"
 local next_index = 1
+for i, def in ipairs(SEGMENTS) do
+    if def.id == START_AT then next_index = i end
+end
 local seg = nil       -- {def=, seat=, t0=, captured=, sent=, ...}
 local last_t = nil
 local last_idle_row_t = nil
