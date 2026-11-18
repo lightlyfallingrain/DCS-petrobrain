@@ -2472,6 +2472,29 @@ flying. Checked against the plan and the code:
   same day**: *"not possible in DCS"*. So the only park edge is Request Aircraft Control from the
   copilot seat. The M0-J4 row briefly added for that case was removed. Row 8 needs no seat-swap
   park path.
+- **Refined by the user later on 2026-11-18**, after flight 8 measured a false 3-frame
+  `parked_active` on a pilot → operator swap with the copilot controls unparked. The camera arrives
+  before arg 852 finishes its ~0.3 s stow animation:
+
+  > *"The false park signal -> need a small delay then. The AI overlay is off since I've not
+  > pressed the 'request control' key. There's two settings in the DCS Mi-24 for AI handover.
+  > Eihter AI takes control immediately on jump to copilot seat or it only takes control when
+  > player presses the 'request control' key. I have it on setting where I explicitly set AI
+  > control, but it is possible that the setting is on automatic control. Therefore, allow that
+  > inial small delay so that the control either unparks or remains parked, then read state and
+  > that determines whether AI has controls and therefore if Petrovich has controls."*
+
+  So:
+  - **A seat-swap park edge exists under DCS's automatic AI-handover setting.** "Not possible"
+    held for the user's own setting (explicit request).
+  - **After a camera seat change, `parked_active` is not re-evaluated until a short settle delay
+    has passed.** During it the previous value holds. Then 852 is read: still stowed with the
+    player in the copilot seat means the AI took the controls (automatic setting), a park edge;
+    unstowed means the player flies.
+  - This lives in `ai_pilot_wheel.lua`, where `ai_pilot_parked_active` is computed, so mode 2 and
+    mode 1 (which reads only `M.is_parked()`) both get it.
+  - It is being fixed on `main` as its own bug branch, `fix/apw-seat-swap-settle`, because the
+    false edge already reaches mode 2's takeover sequence today.
 
 #### U6, U7, U8 as answered
 
