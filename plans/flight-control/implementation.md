@@ -1876,3 +1876,175 @@ carries no comment of its own to prune.
   this project wants `invariant-check`-style coverage for "the same safety-margin ceiling, declared
   in three languages/layers, stays in step" more generally — `arm_lease_s` is the first instance of
   that specific shape in this codebase.
+
+## Mode 2, Stages P3+P4 (CBTM align/align-for-launch/break/break-away, recovery), 2026-11-19
+
+Implements `plans/flight-control/plan.md`, "Revised 2026-11-18 -- Stages P3+P4 ready to build",
+narrowed by its own "Amendment 2026-11-18 (main loop, after the plan check)" to **mode 2 only** --
+mode-1 break turn/break away (`BREAK_TURN_BANK_DEG`/`turn_bank_override_deg`) is explicitly
+withdrawn from this batch and not built here; mode 1 answers "unable" to all four new commands
+instead (permanently for align/align-for-launch, temporarily for break/break-away).
+
+### Files Changed
+
+**aircraft-layer:**
+- `src/schema/ai_pilot_wheel.py` -- `AiPilotWheelState.cbtm_status`/`cbtm_seq`, optional fields,
+  same "an older Export.lua still parses cleanly" posture as every other Stage addition on this
+  schema.
+- `src/collector/command_sender.py` -- `CommandSender.send_ai_pilot_goal` gains `cbtm_action`/
+  `cbtm_seq`, new sibling one-shot fields on the same wire message `hvrt_step` already travels on.
+- `src/api/server.py` -- `POST /command/ai_pilot_goal` validates the two new fields (closed
+  vocabulary for `cbtm_action`, the same `goal_seq` bound reused for `cbtm_seq`) and forwards them.
+- `dcs-export/Petrobrain/ai_pilot_wheel.lua` -- the CBTM one-shot channel: `LONG_PRESS_HOLD_S`/
+  `BREAK_AWAY_GAP_S` constants; the `ai_pilot_cbtm` state table and `AI_PILOT_CBTM_PRESS_CMD` press
+  map; a **third** pending-release pair (`ai_wheel_cbtm_pending_cmd`/`_release_t`), mirroring the
+  existing two (takeover, goal channel) rather than sharing either; `ai_pilot_cbtm_mode_ready`/
+  `ai_pilot_cbtm_finish`/`ai_pilot_cbtm_tick` (mode-cycle-then-press dispatcher, same bounded-retry
+  shape the goal channel's own mode-cycle already has); a CBTM-pause guard added to the top of
+  `ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt` (mirrors the existing HVRT-pause guard); `handle_
+  ai_pilot_goal_command` parses `cbtm_action`/`cbtm_seq` and starts a fresh run on a distinct seq,
+  releasing whatever press the previous run left open; `run_ai_pilot_wheel` gains the third
+  release-deadline check (decides gap-vs-finish for `break_away`'s two presses) and releases/resets
+  the channel on unpark; `on_stop` releases/resets it too (same `AC-B13`-class proactive-close
+  reasoning the goal channel's own reset already has); `push_ai_pilot_wheel_state` sends
+  `apw_cbtm_status`/`apw_cbtm_seq`.
+
+**body-layer:**
+- `src/belief/ai_pilot_wheel.py` -- `AlignPhase`/`CbtmAction` type aliases; `FlightSnapshot`
+  (the typed replacement for the old `Any`-typed `pre_align_snapshot` stub); `ParkedFlightState`
+  gains `lua_cbtm_status`/`lua_cbtm_seq` (Lua mirrors), `cbtm_action_sent` (this side's own record
+  of the last CBTM trigger, not a Lua mirror), `payload_station_counts_last_seen`; `advance_parked_
+  flight_state` also reads `GET /payload/latest` each poll (launch detection) and mirrors the two
+  new CBTM status fields; `payload_count_dropped`, `capture_flight_snapshot`, `cbtm_apply_align`,
+  `cbtm_apply_align_for_launch` (Fix 1's own re-entry branch), `seed_recovery_goal` (Decision 26's
+  priority seeding, renamed from a private `_seed_recovery` once `body.py` needed to call it too);
+  `decide_ai_pilot_wheel` gains `payload_count_dropped`/`agl_m`/`ias_kmh` parameters and three new
+  steps (F-P7 break-wins, the three recovery triggers, recovery's own end condition), plus a guard
+  suppressing the slice-timer rotation while `"recovering"`.
+- `src/belief/crew_console.py` -- `ai_pilot_cbtm_transition` one-shot field (reset alongside the
+  other `ai_pilot_*` ones); `level_flight()` now reports `leveling_off` (true while aborting a
+  `"launch_aligned"` run) so the rule can choose its own readback; `level_off()`'s docstring
+  corrected (F-P8 settled it as "stop turn" only, in every `align_phase` -- the stale "Stage P4's
+  own addition, not built here" sentence this docstring carried was pruned); four new actions
+  (`cbtm_align`/`cbtm_align_for_launch`/`cbtm_break`/`cbtm_break_away`), each a trivial one-shot
+  setter -- the actual `align_phase`/wire-send mechanics live in `body.py`.
+- `src/body.py` -- imports the five new `belief.ai_pilot_wheel` names; `_apply_ai_pilot_wheel_goal`
+  gains a `previous_payload_counts` parameter (default `None`, so every pre-existing call site in
+  the test suite keeps working unchanged) and now: applies F-P6 (a fresh heading/altitude/speed
+  command ends `"aligning"`/`"launch_aligned"`, never `"recovering"`) before dispatching the goal
+  request; applies the `level_flight` abort (Q0 -- heading frozen at current, then straight into
+  `seed_recovery_goal`'s own targets while `"launch_aligned"`, or a plain end while `"aligning"`);
+  applies `cbtm_align`/`cbtm_align_for_launch` directly (the "external (voice, ...)" writer the plan
+  names) and leaves the two breaks' own align/goal mutation to `decide_ai_pilot_wheel` (keyed off
+  the newly-written `cbtm_action_sent`); computes `agl_m`/`ias_kmh`/`payload_count_dropped` for the
+  `decide_ai_pilot_wheel` call; sends the CBTM wire message as its own one-shot trigger (`cbtm_seq`,
+  its own distinct sequence space, bumped from `runner.ai_pilot_cbtm_last_sent_seq`) whenever `ai_
+  pilot_cbtm_transition` is set, reusing (not bumping) the last-sent ordinary `goal_seq` on that same
+  message -- safe, since `Export.lua` only dedupes the FLT/HVR goal fields on a *change* to `.param`,
+  never on `goal_seq` moving, so an unchanged `goal_seq` carrying unchanged `param`/targets is a
+  no-op for that half of the message; the main poll loop captures `previous_payload_counts` before
+  `advance_parked_flight_state` overwrites it, so the launch-detection comparison has something to
+  compare against.
+- `src/rules/actions.py` -- `_cbtm_align`/`_cbtm_align_for_launch`/`_cbtm_break`/`_cbtm_break_away`
+  wrapper functions; `_axes_cbtm_align_unready` (`AI_OVERLAY`, permanent, E-P20) and `_axes_cbtm_
+  break_unready` (`NOT_READY`, temporary until the mode-1 batch); four new `_by_mode`-wrapped
+  `Action`s registered in `FLIGHT_ACTIONS`.
+- `config/rules/flight.lua` -- `level_flight`'s own pattern widened to `"level <form:flight|off>"`
+  (F-P8: "level off" is a second wording for the same command, never a second meaning on `level_
+  off`), its handler now branches on `r.leveling_off`; four new rules (`cbtm_align`/`cbtm_align_for_
+  launch`/`cbtm_break`/`cbtm_break_away`), category `"flight_control"` (has-controls only, same as
+  the HVRT rules), readbacks the user's own words verbatim.
+- `config/defaults.toml` -- regenerated (`tools/generate_defaults.py --write`) for the two new
+  tunables below; rendered output read directly, not the source comment, per this project's own
+  "the generator emits only the first sentence" caveat.
+
+### Behaviour constants
+
+| Constant | Default | Where | Why |
+|---|---|---|---|
+| `AI_PILOT_RECOVER_AGL_DROP_M` | 40.0 | body-layer `tuning.py` | the Q-P3-2 relative floor |
+| `AI_PILOT_RECOVER_IAS_CEILING_KMH` | 280.0 | body-layer `tuning.py` | the absolute overspeed ceiling |
+| `LONG_PRESS_HOLD_S` | 0.7 | `Export.lua` constants block | the CBTM long-press duration |
+| `BREAK_AWAY_GAP_S` | 2.0 | `Export.lua` constants block | the gap between `break_away`'s two presses |
+
+### Tests Added
+
+- `body-layer/tests/test_ai_pilot_wheel.py` -- `TestPayloadCountDropped` (no-previous/drop/rise-
+  while-another-drops/new-station/no-change, matching the plan's own test-strategy list verbatim),
+  `TestCaptureFlightSnapshot` (prefers an outstanding goal target over the held value, falls back to
+  held values, `None` when a parameter has neither, `None` when AGL is unknown), `TestCbtmApplyAlign`,
+  `TestCbtmApplyAlignForLaunch` (Fix 1's own re-entry case, from both `"recovering"` and
+  `"launch_aligned"`), `TestSeedRecoveryGoal` (altitude active/speed queued; a previously-active
+  heading is re-queued, not dropped), `TestDecideAiPilotWheelCbtm` (the break-wins heading-drop for
+  both an active and a queued heading goal; an `"align"` trigger does *not* run the break logic;
+  each of the three recovery triggers independently and two firing at once still enters `"recovering"`
+  exactly once; recovery promotes strictly on `settled_param`, confirmed by holding `now_sim` well
+  past `AI_PILOT_GOAL_SLICE_S` and showing altitude stays active regardless; recovery ends once both
+  parameters have cleared; a fresh `request_goal` call for one recovering parameter during recovery
+  leaves the other's own target untouched -- Q6/the table's own row, exercised at the level `set_
+  parked_altitude`/`set_parked_heading` actually call through).
+- `body-layer/tests/test_rules_flight_actions.py` -- `test_shipped_rule_files_load_with_zero_
+  failures`'s enumerated rule-id set extended with the four new ids (pre-existing test, necessarily
+  updated -- it asserts the exact shipped set by name).
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py` -- `TestOnStop.test_open_cbtm_press_is_released`
+  (new); the three existing `TestOnStop` tests, plus the four harness-builder functions shared by
+  `TestTakeoverSequence`/`TestSeatGate`/`TestAiPilotGoalTick`/`TestHandleAiPilotGoalCommand`/
+  `TestAiPilotGoalTickHvrt`/`TestPushAiPilotWheelStateJson`, all needed their fake preamble state
+  extended with `ai_pilot_cbtm`/the third pending-release pair (and, for the one harness that calls
+  `update_ai_pilot_wheel_overlay`, `AI_PILOT_CBTM_PRESS_CMD` plus the three new functions) -- these
+  are pre-existing tests whose *inline hand-mirrored* module state (this file's own stated
+  convention, not an extraction) no longer matched what the real, now-modified functions read and
+  wrote; none of their own assertions changed except where noted.
+- `aircraft-layer/tests/test_ai_pilot_goal.py`/`test_ai_pilot_wheel_api.py` -- the `_RecordingCommand
+  Sender` double and every `sender.sent == [...]`/`to_api_dict()` assertion updated for the two new
+  trailing fields; mechanical, no assertion's *meaning* changed.
+
+### Checks
+
+- **aircraft-layer**: `ruff format --check` -- 85 files; `ruff check` -- all checks passed;
+  `mypy src` -- 28 files, no issues; `luac5.1 -p` on `ai_pilot_wheel.lua` -- pass; the bytecode
+  global-safety check (`luac5.1 -l -p ... | grep GETGLOBAL`) -- every name is a genuine DCS API,
+  stdlib, or an existing cross-module helper, none of this round's own new names; full `tests/` --
+  961 passed.
+- **body-layer**: `ruff format --check` -- 227 files; `ruff check` -- all checks passed; `mypy src`
+  -- 92 files, no issues (`mypy src tests` surfaces ~330 pre-existing errors across unrelated test
+  files from a `replace(ParkedFlightState(), **dict[str, object])` helper pattern that predates this
+  round and from several other files entirely outside this round's diff -- not this subproject's
+  own `mypy` command, which is `src`-only, so not fixed here); targeted run (`test_ai_pilot_wheel.py`
+  + `test_body_ai_pilot_wheel.py` + `test_crew_console_ai_pilot_wheel.py` + `test_flight_control.py`
+  + `test_body_flight_control.py` + `test_rules_flight_actions.py` + `test_voice_commands.py` +
+  `test_tuning_defaults_toml.py` + `test_rule_gates.py`, `-m "not slow"`) -- 249 passed; `tests
+  --collect-only` over the whole suite (the smoke check) -- 3649 collected, no import errors.
+  The full suite was not run in this round (no `.venv` in this worktree to drive `fast-tests.sh`,
+  and the full suite is DoD's own job per root `CLAUDE.md`'s "Tests" note) -- flagged here rather
+  than silently claimed.
+
+### Notable discoveries and deliberate simplifications (flagged, not hidden)
+
+- **`decide_ai_pilot_wheel`'s F-P7 break-wins check reads `state.cbtm_action_sent` (this side's own
+  record of the last trigger), not the plan's literal "`lua_cbtm_status` not yet `"idle"` for this
+  `cbtm_seq`" condition.** The simpler check runs every poll `cbtm_action_sent` names a break and is
+  idempotent (nothing left to drop/clear after the first poll it fires), so it is safe, but it does
+  not reproduce the plan's own nuance of only acting while Lua specifically reports the break still
+  in flight. Re-entering `"aligning"`/`"launch_aligned"` after a break correctly stops triggering it,
+  since a later `cbtm_align`/`cbtm_align_for_launch` overwrites `cbtm_action_sent` to a non-break
+  value as part of the same dispatch.
+- **`seed_recovery_goal` re-queues a previously-active heading goal rather than the plan's own
+  wording ("altitude becomes active, speed queued") implying heading is untouched.** Reasoned
+  through in this round's own docstring: while `"aligning"`/`"launch_aligned"`, Lua's CBTM-pause
+  guard means no heading press is actually in flight regardless of what `active_param` says, so this
+  is defensive (preventing an orphaned target with no queue slot) rather than a behaviour the user
+  asked for or that should ever actually matter live.
+- **`cbtm_align()`'s action unconditionally restarts a plain alignment from any prior `align_phase`
+  (including mid-recovery)** -- not explicitly specified by the plan (which only states Fix 1's
+  re-entry rule for `cbtm_align_for_launch`); read as the natural counterpart, flagged for the
+  Reviewer to confirm against the user's own intent if this matters.
+- **The `level_flight` abort's "first level at current, then start recovery" (Q0) is implemented as
+  heading frozen at the current held value plus altitude/speed jumping straight to `seed_recovery_
+  goal`'s own pre-align targets**, not as a literal two-step freeze-then-climb sequence -- the
+  "level at current" wording is read as describing the aircraft's own transient physical state at
+  the moment recovery starts (wherever it currently is), not a distinct goal step this code needs to
+  model, since the very next decide-call already drives toward the recovery targets regardless.
+- **No live DCS flight test was possible or attempted this round** (no Windows box in this
+  environment) -- every check above is static/unit-level; the plan's own "Flight test steps" section
+  remains the acceptance gate for this batch and needs a real sortie before the mode-1 batch begins.

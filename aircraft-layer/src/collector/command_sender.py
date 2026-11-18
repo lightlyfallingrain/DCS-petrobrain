@@ -240,6 +240,13 @@ class CommandSender:
         speed_target_kmh: float | None,
         hvrt_direction: Literal["left", "right", "forward", "back"] | None,
         hvrt_step: Literal["up", "down"] | None = None,
+        cbtm_action: (
+            Literal[
+                "align", "align_for_launch", "break_left", "break_right", "break_away"
+            ]
+            | None
+        ) = None,
+        cbtm_seq: int | None = None,
     ) -> None:
         """Send `{"op": "ai_pilot_goal", "goal_seq": ..., "param": ...,
         "heading_target_deg": ..., "altitude_target_m": ...,
@@ -288,7 +295,17 @@ class CommandSender:
         `send_cockpit_switch`'s own docstring: `api.server`'s `POST
         /command/ai_pilot_goal` handler validates shape before this
         method is ever called, and `Export.lua`'s own dispatch
-        (`handle_ai_pilot_goal_command`) validates a third time."""
+        (`handle_ai_pilot_goal_command`) validates a third time.
+
+        `cbtm_action`/`cbtm_seq` are Stage P3+P4's own addition (`plans/
+        flight-control/plan.md`, "Revised 2026-11-18 -- Stages P3+P4
+        ready to build", "The CBTM one-shot wire channel") -- new
+        sibling one-shot fields on this same message, the same "a
+        pending one-shot trigger travels with the ordinary goal message"
+        shape `hvrt_step` above already uses. `Export.lua` acts on
+        `cbtm_action` exactly once per distinct `cbtm_seq` it has not
+        already seen; the caller (`body.py`) bumps `cbtm_seq` on every
+        call that carries a new, non-`None` `cbtm_action`."""
         if self._socket is None:
             self.open()
         sock = self._socket
@@ -305,6 +322,8 @@ class CommandSender:
                 "speed_target_kmh": speed_target_kmh,
                 "hvrt_direction": hvrt_direction,
                 "hvrt_step": hvrt_step,
+                "cbtm_action": cbtm_action,
+                "cbtm_seq": cbtm_seq,
             }
         ).encode("utf-8")
         try:

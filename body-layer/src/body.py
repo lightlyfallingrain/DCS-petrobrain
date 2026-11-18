@@ -139,10 +139,14 @@ from belief.ai_pilot_wheel import (
     ParkedFlightState,
     advance_parked_flight_state,
     altitude_ref_from_letter,
+    cbtm_apply_align,
+    cbtm_apply_align_for_launch,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
     goal_param_for_wire,
+    payload_count_dropped,
     seat_change,
+    seed_recovery_goal,
     set_hvrt_direction,
     set_parked_altitude,
     set_parked_heading,
@@ -553,6 +557,12 @@ class ConsolePerceptionRunner:
     #: mission reset, same "ordinary init field" reasoning `watch_args_
     #: last_sent_sim`'s own docstring gives.
     ai_pilot_goal_last_sent_seq: int | None = None
+
+    #: Stage P3+P4's own "send on change" cursor for the CBTM channel
+    #: (`write_ai_pilot_goal`'s `cbtm_action`/`cbtm_seq` fields) -- the
+    #: same shape as `ai_pilot_goal_last_sent_seq` immediately above,
+    #: on this channel's own distinct sequence space.
+    ai_pilot_cbtm_last_sent_seq: int | None = None
 
     #: The effector-sequence engine's own run state (`belief.
     #: effector_engine.EffectorRunState`, `plans/effector-sequences/
@@ -3341,24 +3351,33 @@ def _apply_ai_pilot_wheel_goal(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
     aircraft_client: AircraftLayerClient,
+    previous_payload_counts: Mapping[int, int] | None = None,
 ) -> None:
-    """BL-16 mode 2 Stage P2a/P2b (`plans/flight-control/plan.md`,
-    "Stage P2 ready to build") -- applies `crew_console`'s one-shot
-    transition fields to `runner.parked_flight_state.goal`, runs the
-    rotation mechanism (`decide_ai_pilot_wheel`), and sends `Export.lua`
-    a fresh `ai_pilot_goal` message whenever the resulting `goal_seq`
-    has moved since the last one actually posted (`runner.ai_pilot_goal_
-    last_sent_seq`) -- the same "send on change" posture `write_sight_
+    """BL-16 mode 2 Stage P2a/P2b/P3+P4 (`plans/flight-control/plan.md`,
+    "Stage P2 ready to build", "Revised 2026-11-18 -- Stages P3+P4 ready
+    to build") -- applies `crew_console`'s one-shot transition fields to
+    `runner.parked_flight_state.goal`/`align_phase`/`pre_align_snapshot`,
+    runs the rotation mechanism (`decide_ai_pilot_wheel`), and sends
+    `Export.lua` a fresh `ai_pilot_goal`/CBTM message whenever the
+    resulting `goal_seq`/`cbtm_seq` has moved since the last one actually
+    posted (`runner.ai_pilot_goal_last_sent_seq`/`ai_pilot_cbtm_last_
+    sent_seq`) -- the same "send on change" posture `write_sight_
     target`'s own call site note describes. Called once per poll, right
     after `advance_parked_flight_state` has refreshed `runner.parked_
     flight_state` this poll, before `crew_console.drain_ai_pilot_wheel_
     speech` (which reads the same state this leaves behind).
+    `previous_payload_counts` is the caller's own copy of `runner.
+    parked_flight_state.payload_station_counts_last_seen` taken *before*
+    that same refresh -- this function cannot recover it itself, since
+    by the time it runs the field already holds this poll's fresh read.
 
     **E-P10 (unpark drops everything, nothing resumes on the next
     park)**: while not parked, `goal` is forced back to `None` and the
-    send cursor cleared, so a park that follows starts from a clean
+    send cursors cleared, so a park that follows starts from a clean
     goal exactly as the Lua side already does on its own unpark
-    branch.
+    branch. Stage P3+P4 extends this to `align_phase`/`pre_align_
+    snapshot`/`cbtm_action_sent` -- an unpark ends an alignment/break/
+    recovery exactly as it ends a goal, same reasoning.
 
     **BL-16 mode 1 Co-moving row 11 fix**: the three `ai_pilot_*`
     one-shot transition fields (`ai_pilot_goal_transition`/`ai_pilot_
@@ -3372,12 +3391,22 @@ def _apply_ai_pilot_wheel_goal(
     overlay command spoken just before an unpark is now a realistic way
     to strand one, to fire on the next park."""
     if not runner.parked_flight_state.parked_active:
-        if runner.parked_flight_state.goal is not None:
-            runner.parked_flight_state = replace(runner.parked_flight_state, goal=None)
+        if runner.parked_flight_state.goal is not None or (
+            runner.parked_flight_state.align_phase != "none"
+        ):
+            runner.parked_flight_state = replace(
+                runner.parked_flight_state,
+                goal=None,
+                align_phase="none",
+                pre_align_snapshot=None,
+                cbtm_action_sent=None,
+            )
         runner.ai_pilot_goal_last_sent_seq = None
+        runner.ai_pilot_cbtm_last_sent_seq = None
         crew_console.ai_pilot_goal_transition = None
         crew_console.ai_pilot_level_flight_transition = False
         crew_console.ai_pilot_hvrt_transition = None
+        crew_console.ai_pilot_cbtm_transition = None
         return
     if runner.last_t_sim is None:
         # No ownship sample yet this session -- nothing this function
@@ -3386,28 +3415,59 @@ def _apply_ai_pilot_wheel_goal(
         # block in this loop.
         return
     now_sim = runner.last_t_sim
+    agl_m = (
+        runner.last_ownship_state.alt_agl_m
+        if runner.last_ownship_state is not None
+        else None
+    )
 
     state = runner.parked_flight_state
     goal = state.goal if state.goal is not None else AiPilotWheelGoal()
+    align_phase = state.align_phase
+    pre_align_snapshot = state.pre_align_snapshot
 
     if crew_console.ai_pilot_level_flight_transition:
         if state.held_heading is not None:
             goal = set_parked_heading(goal, now_sim, state.held_heading)
-        if state.held_altitude is not None:
-            current_ref = altitude_ref_from_letter(state.held_altitude_ref)
-            goal, _ = set_parked_altitude(
-                goal,
-                now_sim,
-                state.held_altitude,
-                current_ref,
-                current_ref,
-            )
-        if state.held_speed is not None:
-            goal, _ = set_parked_speed(goal, now_sim, state.held_speed)
+        # Stage P3+P4, F-P8/Q0: "level off"/"level flight" is the
+        # spoken abort of an alignment -- while `"launch_aligned"`, it
+        # enters `"recovering"` and seeds the recovery queue (altitude/
+        # speed head to the pre-align snapshot, never the current held
+        # values below); while `"aligning"`, there is nothing to
+        # recover from (Q1's own reasoning), so it simply ends and the
+        # ordinary freeze below still applies.
+        if align_phase == "launch_aligned" and pre_align_snapshot is not None:
+            align_phase = "recovering"
+            goal = seed_recovery_goal(goal, pre_align_snapshot, now_sim)
+        else:
+            if align_phase == "aligning":
+                align_phase = "none"
+                pre_align_snapshot = None
+            if state.held_altitude is not None:
+                current_ref = altitude_ref_from_letter(state.held_altitude_ref)
+                goal, _ = set_parked_altitude(
+                    goal,
+                    now_sim,
+                    state.held_altitude,
+                    current_ref,
+                    current_ref,
+                )
+            if state.held_speed is not None:
+                goal, _ = set_parked_speed(goal, now_sim, state.held_speed)
         crew_console.ai_pilot_level_flight_transition = False
 
     request = crew_console.ai_pilot_goal_transition
     if request is not None:
+        # Stage P3+P4, F-P6: any voice heading/altitude/speed command
+        # always ends whichever `align_phase` is running and is always
+        # flown -- never queued behind it. `"recovering"` is
+        # deliberately **not** included here: a fresh command for one
+        # of its own two parameters just replaces that parameter's
+        # target via the ordinary "latest wins" path below (Q6), and
+        # the other recovering parameter keeps recovering untouched.
+        if align_phase in ("aligning", "launch_aligned"):
+            align_phase = "none"
+            pre_align_snapshot = None
         if request.param == "heading" and request.heading_deg is not None:
             goal = set_parked_heading(goal, now_sim, request.heading_deg)
         elif request.param == "altitude" and request.altitude_m is not None:
@@ -3431,23 +3491,81 @@ def _apply_ai_pilot_wheel_goal(
         )
         crew_console.ai_pilot_hvrt_transition = None
 
-    runner.parked_flight_state = replace(runner.parked_flight_state, goal=goal)
+    # Stage P3+P4's own CBTM one-shot trigger -- `cbtm_align`/`cbtm_
+    # align_for_launch` decide `align_phase`/`pre_align_snapshot`
+    # directly here (the plan's "external (voice, ...)" writer, same
+    # division of labour `ai_pilot_level_flight_transition` above has);
+    # the two breaks carry no state of their own to apply -- F-P7's own
+    # heading-drop/align-clear logic lives in `decide_ai_pilot_wheel`
+    # below, keyed off `cbtm_action_sent`, so a break's own "when" is
+    # never duplicated here.
+    cbtm_transition = crew_console.ai_pilot_cbtm_transition
+    if cbtm_transition is not None:
+        if cbtm_transition == "align":
+            new_state = cbtm_apply_align(
+                replace(
+                    state,
+                    align_phase=align_phase,
+                    pre_align_snapshot=pre_align_snapshot,
+                )
+            )
+        elif cbtm_transition == "align_for_launch":
+            new_state = cbtm_apply_align_for_launch(
+                replace(
+                    state,
+                    align_phase=align_phase,
+                    pre_align_snapshot=pre_align_snapshot,
+                ),
+                goal,
+                agl_m,
+            )
+        else:
+            new_state = replace(
+                state, align_phase=align_phase, pre_align_snapshot=pre_align_snapshot
+            )
+        align_phase = new_state.align_phase
+        pre_align_snapshot = new_state.pre_align_snapshot
+
+    runner.parked_flight_state = replace(
+        runner.parked_flight_state,
+        goal=goal,
+        align_phase=align_phase,
+        pre_align_snapshot=pre_align_snapshot,
+        cbtm_action_sent=(
+            cbtm_transition
+            if cbtm_transition is not None
+            else runner.parked_flight_state.cbtm_action_sent
+        ),
+    )
 
     # The rotation mechanism reads `Export.lua`'s own goal_progress
     # report to know when the active parameter has settled, or when an
     # open HVRT press has released on its own safety timeout -- both
-    # are Lua-reported facts, never decided here.
+    # are Lua-reported facts, never decided here. Stage P3+P4 adds the
+    # three recovery triggers (payload count drop, the Q-P3-2 AGL-
+    # relative floor, the absolute IAS ceiling) -- `payload_count_
+    # dropped` is this poll's own comparison, taken here rather than
+    # inside `decide_ai_pilot_wheel` (which has no "previous poll's
+    # reading" to compare against once `advance_parked_flight_state`
+    # has already overwritten it this poll).
     lua_progress = runner.parked_flight_state.lua_goal_progress
     settled_param = (
         goal.active_param
         if lua_progress == "settled" and goal.active_param is not None
         else None
     )
+    dropped = payload_count_dropped(
+        previous_payload_counts,
+        runner.parked_flight_state.payload_station_counts_last_seen or {},
+    )
     runner.parked_flight_state = decide_ai_pilot_wheel(
         runner.parked_flight_state,
         now_sim,
         settled_param=settled_param,
         hvrt_released_timeout=(lua_progress == "released_timeout"),
+        payload_count_dropped=dropped,
+        agl_m=agl_m,
+        ias_kmh=runner.last_ias_kmh,
     )
 
     final_goal = runner.parked_flight_state.goal
@@ -3500,6 +3618,32 @@ def _apply_ai_pilot_wheel_goal(
             )
         runner.ai_pilot_goal_last_sent_seq = bumped_seq
         crew_console.ai_pilot_hvrt_step_transition = None
+
+    # Stage P3+P4's own CBTM wire send -- a one-shot trigger, same
+    # "always its own send with a freshly-bumped seq" shape `hvrt_step`
+    # above already has, on this channel's own distinct `cbtm_seq`
+    # space (never `goal_seq`).
+    if cbtm_transition is not None:
+        bumped_cbtm_seq = (runner.ai_pilot_cbtm_last_sent_seq or 0) + 1
+        try:
+            aircraft_client.write_ai_pilot_goal(
+                final_goal.goal_seq if final_goal is not None else 0,
+                goal_param_for_wire(final_goal) if final_goal is not None else None,
+                final_goal.heading_target_deg if final_goal is not None else None,
+                final_goal.altitude_target_m if final_goal is not None else None,
+                final_goal.altitude_target_ref if final_goal is not None else None,
+                final_goal.speed_target_kmh if final_goal is not None else None,
+                final_goal.hvrt_direction if final_goal is not None else None,
+                None,
+                cbtm_transition,
+                bumped_cbtm_seq,
+            )
+        except AircraftLayerError:
+            logger.warning(
+                "ai-pilot-goal cbtm_action write failed (continuing)", exc_info=True
+            )
+        runner.ai_pilot_cbtm_last_sent_seq = bumped_cbtm_seq
+        crew_console.ai_pilot_cbtm_transition = None
 
 
 def _apply_flight_control(
@@ -5043,6 +5187,13 @@ def _run_crew_text_poll_loop(
                         # read (`GET /ai_pilot_wheel/latest`), not derived
                         # from `readback_args`.
                         previous_seat = runner.parked_flight_state.player_seat
+                        # Stage P3+P4's own launch-detection input --
+                        # captured before this poll's refresh overwrites
+                        # it, so `_apply_ai_pilot_wheel_goal` can compare
+                        # "last poll's reading" against "this poll's".
+                        previous_payload_counts = (
+                            runner.parked_flight_state.payload_station_counts_last_seen
+                        )
                         try:
                             runner.parked_flight_state = advance_parked_flight_state(
                                 runner.parked_flight_state, aircraft_client
@@ -5053,7 +5204,10 @@ def _run_crew_text_poll_loop(
                             )
                         crew_console.parked_flight_state = runner.parked_flight_state
                         _apply_ai_pilot_wheel_goal(
-                            runner, crew_console, aircraft_client
+                            runner,
+                            crew_console,
+                            aircraft_client,
+                            previous_payload_counts,
                         )
                         crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
                         # BL-16 mode 1 Stage M1 -- same "refresh, apply

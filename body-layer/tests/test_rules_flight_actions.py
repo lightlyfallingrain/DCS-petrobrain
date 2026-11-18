@@ -109,11 +109,13 @@ class _RecordingSpeechClient:
 def test_shipped_rule_files_load_with_zero_failures() -> None:
     """Body-layer's own loader never runs the adapter's collision check
     (D1: that is audio-adapter's job, over `PUT /rules`) -- every one of
-    the 19 rules `flight.lua` declares loads cleanly here regardless of
+    the 23 rules `flight.lua` declares loads cleanly here regardless of
     which ones the real adapter would later reject for a wording
     collision (two, after the 2026-11-17 recalibration -- see
     `plans/speech-rules/implementation.md`'s "Stage 4 follow-ups" section
-    for the full account)."""
+    for the full account). The four `cbtm_*` rules are BL-16 mode 2
+    Stage P3+P4's own addition (`plans/flight-control/plan.md`, "Revised
+    2026-11-18 -- Stages P3+P4 ready to build")."""
     sandbox = RuleSandbox()
     ctx = ActionContext(console=CrewConsole(store=ContactStore()))
     rule_set = RuleSet.load(DEFAULT_RULES_DIR, sandbox, ACTION_NAMESPACES, ctx)
@@ -128,6 +130,10 @@ def test_shipped_rule_files_load_with_zero_failures() -> None:
         "altitude_step",
         "hold_altitude",
         "level_off",
+        "cbtm_align",
+        "cbtm_align_for_launch",
+        "cbtm_break",
+        "cbtm_break_away",
         "hvrt_translate_left",
         "hvrt_translate_right",
         "hvrt_translate_forward",

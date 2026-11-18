@@ -30,6 +30,16 @@ AI_PILOT_GOAL_SLICE_S = 3.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_HEADING_TOLERANCE_DEG
 AI_PILOT_HEADING_TOLERANCE_DEG = 5.0
 
+# `plans/flight-control/plan.md`, "Revised 2026-11-18 -- Stages P3+P4 ready to build", "F-P9 / Q-P3-2 -- the AGL floor, answered": the user's own original 40 m figure, now read as a *drop* below the AGL recorded at the moment "align for launch" was spoken, not an absolute floor -- a shot started at 30 m AGL is legal; recovery fires once the aircraft has sunk this far below *that* starting height.
+# status: agreed-guess | range: 5.0 .. 200.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_RECOVER_AGL_DROP_M
+AI_PILOT_RECOVER_AGL_DROP_M = 40.0
+
+# Same plan section, Q5 -- an absolute IAS ceiling (there is no "starting IAS" to measure a drop against; an overspeed is an overspeed wherever the dive started), unchanged from the original plan's own figure.
+# status: agreed-guess | range: 100.0 .. 400.0
+# source: belief/ai_pilot_wheel.py:AI_PILOT_RECOVER_IAS_CEILING_KMH
+AI_PILOT_RECOVER_IAS_CEILING_KMH = 280.0
+
 # The wheel's own discrete speed steps, km/h IAS -- corrected from the original table's `(0, 60, 120, 160, 200, 250)`: Stage P0's re-fly measured `120 -> 150 -> 200 -> 250 -> MAX`, not 160. The low end (0/60) stays the user's own unmeasured figures (flagged in the plan's Risks section).
 # status: agreed-guess
 # source: belief/ai_pilot_wheel.py:AI_PILOT_SPEED_STEPS_KMH

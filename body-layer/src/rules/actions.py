@@ -321,6 +321,58 @@ def _axes_hvrt_unready(
     return {"ok": False, "reason": "NOT_READY"}
 
 
+def _cbtm_align(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.cbtm_align()
+
+
+def _cbtm_align_for_launch(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.cbtm_align_for_launch()
+
+
+def _cbtm_break(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.cbtm_break(cast(Literal[-1, 1], _int_arg(args, "sign")))
+
+
+def _cbtm_break_away(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.cbtm_break_away()
+
+
+def _axes_cbtm_align_unready(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    """BL-16 mode 2 Stage P3+P4, main-loop amendment (2026-11-18): "align"/
+    "align for launch" are mode-2-only, **permanently** (E-P20, the
+    user's own answer -- the 9K113 is gated behind the CPG view, which
+    is gated behind mode 2; mode 1 could only ever reach this if ED
+    itself allowed the CPG view without AI flight control). `AI_OVERLAY`
+    is the existing closed reason `turn_continuous` already uses for
+    "this concept does not exist outside the AI overlay" -- same
+    wording, same meaning, here extended to the two align commands."""
+    return {"ok": False, "reason": "AI_OVERLAY"}
+
+
+def _axes_cbtm_break_unready(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    """BL-16 mode 2 Stage P3+P4, main-loop amendment: unlike the two
+    align commands above, mode 1's own "break turn"/"break away" are
+    **not** permanently unreachable (the standing direction landed the
+    same day: "all other flight commands from Mode 2 must also be
+    available in Mode 1... except aligning to 9K113") -- they are
+    withdrawn from *this* batch only (mode-1 scope split, "continue now
+    with Mode 2... when Mode 2 is done, continue with Mode 1") and land
+    in the next one. `NOT_READY` reads correctly either way ("unable,
+    not ready") and is this project's own existing reason for "heard
+    and understood, not doable yet" (`speech.py`'s own `_UNABLE_
+    TEMPLATES` comment on `GUIDANCE_NOT_READY`) -- replace this body
+    with the real mode-1 break mechanism (60-80 deg bank, pedal into
+    the turn, rotor-RPM-aware collective) once that batch lands,
+    without a new reason string."""
+    return {"ok": False, "reason": "NOT_READY"}
+
+
 def _turn_continuous(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     """BL-16 mode 1 Decision 21's `flight.turn_continuous` -- "turn
     left/right" with no degrees heard. **Not** `_by_mode`-wrapped: mode
@@ -380,6 +432,14 @@ def _release_controls(ctx: ActionContext, args: dict[str, object]) -> dict[str, 
 #: combinator replaces a 17-way-repeated branch). `turn_continuous`/
 #: `take_controls`/`release_controls` are new actions with no mode-2
 #: counterpart to wrap -- see each one's own docstring for why.
+#:
+#: **BL-16 mode 2 Stage P3+P4** (`plans/flight-control/plan.md`, "Revised
+#: 2026-11-18 -- Stages P3+P4 ready to build", main-loop amendment): the
+#: four `cbtm_*` actions are also `_by_mode`-wrapped, but their `axes=`
+#: bodies are refusals, not real mode-1 behaviour -- `cbtm_align`/`cbtm_
+#: align_for_launch` permanently (`AI_OVERLAY`, E-P20), `cbtm_break`/
+#: `cbtm_break_away` only until the next (mode-1) batch (`NOT_READY`) --
+#: see each `_axes_cbtm_*_unready` body's own docstring.
 FLIGHT_ACTIONS: tuple[Action, ...] = (
     Action(
         name="increment_heading",
@@ -438,6 +498,26 @@ FLIGHT_ACTIONS: tuple[Action, ...] = (
         name="turn_continuous",
         params=(ActionParam(name="sign", lo=-1, hi=1),),
         invoke=_turn_continuous,
+    ),
+    Action(
+        name="cbtm_align",
+        params=(),
+        invoke=_by_mode(overlay=_cbtm_align, axes=_axes_cbtm_align_unready),
+    ),
+    Action(
+        name="cbtm_align_for_launch",
+        params=(),
+        invoke=_by_mode(overlay=_cbtm_align_for_launch, axes=_axes_cbtm_align_unready),
+    ),
+    Action(
+        name="cbtm_break",
+        params=(ActionParam(name="sign", lo=-1, hi=1),),
+        invoke=_by_mode(overlay=_cbtm_break, axes=_axes_cbtm_break_unready),
+    ),
+    Action(
+        name="cbtm_break_away",
+        params=(),
+        invoke=_by_mode(overlay=_cbtm_break_away, axes=_axes_cbtm_break_unready),
     ),
     Action(
         name="hvrt_translate_left",

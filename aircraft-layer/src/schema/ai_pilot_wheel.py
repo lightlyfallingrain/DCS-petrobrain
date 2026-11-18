@@ -40,7 +40,15 @@ echoes the sequence number of the goal message it is reporting against,
 so `belief.ai_pilot_wheel`'s own poll can tell which goal a `"settled"`/
 `"mode_blocked"` report belongs to rather than assuming it is the latest
 one sent. Both optional on the wire, same "an older Export.lua still
-parses cleanly" reasoning as the takeover-revision fields above."""
+parses cleanly" reasoning as the takeover-revision fields above.
+
+`cbtm_status`/`cbtm_seq` are Stage P3+P4's own additions (`plans/
+flight-control/plan.md`, "Revised 2026-11-18 -- Stages P3+P4 ready to
+build", "The CBTM one-shot wire channel") -- `Export.lua`'s own report
+of the one-shot align/break channel (`"idle"`/`"running"`/`"done"`) and
+the `cbtm_seq` it is reporting against, same "echo the sequence number
+being reported on" shape as `goal_progress`/`goal_seq` above. Both
+optional on the wire, same old-Export.lua-still-parses reasoning."""
 
 from __future__ import annotations
 
@@ -76,6 +84,8 @@ class AiPilotWheelState:
     cam_fwd_m: float | None
     goal_progress: str | None = None
     goal_seq: int | None = None
+    cbtm_status: str | None = None
+    cbtm_seq: int | None = None
 
     @staticmethod
     def from_dict(
@@ -108,6 +118,7 @@ class AiPilotWheelState:
             "apw_correction_path",
             "apw_seat",
             "apw_goal_progress",
+            "apw_cbtm_status",
         ):
             raw = data.get(field)
             if raw is None:
@@ -146,6 +157,17 @@ class AiPilotWheelState:
         else:
             goal_seq = raw_goal_seq
 
+        raw_cbtm_seq = data.get("apw_cbtm_seq")
+        if raw_cbtm_seq is None:
+            cbtm_seq: int | None = None
+        elif isinstance(raw_cbtm_seq, bool) or not isinstance(raw_cbtm_seq, int):
+            raise AiPilotWheelParseError(
+                "field 'apw_cbtm_seq' must be a whole number or null, got "
+                f"{type(raw_cbtm_seq).__name__}"
+            )
+        else:
+            cbtm_seq = raw_cbtm_seq
+
         return AiPilotWheelState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -164,6 +186,8 @@ class AiPilotWheelState:
             cam_fwd_m=optional_numbers["apw_cam_fwd_m"],
             goal_progress=optional_strings["apw_goal_progress"],
             goal_seq=goal_seq,
+            cbtm_status=optional_strings["apw_cbtm_status"],
+            cbtm_seq=cbtm_seq,
         )
 
     @staticmethod
@@ -198,4 +222,6 @@ class AiPilotWheelState:
             "apw_cam_fwd_m": self.cam_fwd_m,
             "apw_goal_progress": self.goal_progress,
             "apw_goal_seq": self.goal_seq,
+            "apw_cbtm_status": self.cbtm_status,
+            "apw_cbtm_seq": self.cbtm_seq,
         }
