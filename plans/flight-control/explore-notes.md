@@ -888,3 +888,14 @@ rather than serialised behind overlay presses.
   blade stall are things to avoid in any Mode 1 state, whatever we are doing. High collective leads
   to RPM drop, more so at slower speeds and more so if collective is increased fast. High blade
   angle (=collective) and high speed lead to reatreating blade stall."*
+- **Mode-1 break, speed (user, 2026-11-18, verbatim):** *"also do not let speed to slow fast.
+  Increasing collective and pulling back on cyclic in a bank makes the helicopter turn fast, but
+  also slow down fast. Keep the speed up at about what is was when starting the break, fluctuation
+  is allowed."*
+- **Rotor RPM source (user, 2026-11-18, verbatim):** *"use engine RPM as proxy for rotor RPM for
+  now and add a reminder at next flight to check how to read rotor RPM, it should be a simple
+  change then."*
+- **Scope (user, 2026-11-18):** *"Yes, split it. Write the notes, then continue now with Mode 2.
+  Finish that first. When Mode 2 is done, continue with Mode 1."* — this batch is mode 2 P3+P4
+  only; the mode-1 break turn, break away and the mode-1 rotor envelope (RPM floor, retreating
+  blade stall) are the next batch. Until it lands, mode 1 answers "unable" to the break commands.

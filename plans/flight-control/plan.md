@@ -3782,3 +3782,36 @@ transition:
   mode-1 "break away" could just as well be `break_turn` composed with itself by the player saying
   it twice, or a dedicated `turn <180>` — low cost either way, so deferring avoids guessing at a
   form nobody asked for yet.
+
+### Amendment 2026-11-18 (main loop, after the plan check) — scope split, two fixes
+
+*Written by the main loop, not Architect; the user's words are quoted from `explore-notes.md`.*
+
+**Scope — this batch is mode 2 only.** User, verbatim: *"Yes, split it. Write the notes, then
+continue now with Mode 2. Finish that first. When Mode 2 is done, continue with Mode 1."* The
+section "Mode 1 — 'break turn left/right' is a tight 90°, on raw axes" above is **superseded and
+moved to the next batch** (mode-1 break turn + break away + the mode-1 rotor envelope), whose
+inputs are the 2026-11-18 explore notes ("Recovery heading, and the mode-1 break / rotor
+envelope"; "Mode 1 carries mode 2's command set"). Its `BREAK_TURN_BANK_DEG` / 30° /
+`turn_bank_override_deg` design is withdrawn — the user wants 60–80° bank, pedal into the turn,
+collective managed against rotor RPM, speed held near the entry speed, ≤ ~100 m height loss and
+never below 40 m AGL. **U11 is answered**: mode 1 gets break away too (standing direction: every
+mode-2 flight command except the 9K113 aligns exists in mode 1).
+
+**What this batch builds for mode 1:** only the `_by_mode` axes bodies for the new actions,
+raising unable — `cbtm_align`/`cbtm_align_for_launch`: *"Unable, AI overlay."*-shaped refusal
+meaning "only in the AI overlay" (permanent, E-P20); `cbtm_break`/`cbtm_break_away`: unable for
+now (temporary, until the mode-1 batch). Wording of both reasons is the Implementer's to propose,
+in the same style as the existing `turn_continuous` refusal.
+
+**Fix 1 (plan check) — a second "align for launch" keeps the first snapshot.** In
+`cbtm_align_for_launch`, when `align_phase` is `"launch_aligned"` or `"recovering"` and
+`pre_align_snapshot` is not `None`, keep it — do not re-capture from a half-restored recovery or
+a dive in progress. The AGL-relative floor's reference height is likewise the first snapshot's.
+Capture fresh only from `"none"`/`"aligning"`. User: mid-recovery "align for launch" = *"command
+align for launch"* — so it re-enters `"launch_aligned"` and re-issues the CBTM long-up.
+
+**Fix 2 — recovery heading confirmed.** User, verbatim: *"keep aligned heading"*. Recovery's
+`pending_order` stays `("altitude", "speed")`; heading is not restored. Decision 26's "altitude,
+heading, speed" is read as press order for whatever recovery commands, and a voice heading
+command during the climb is flown at once (F-P6).
