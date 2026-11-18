@@ -166,6 +166,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B126]] — `PUT /rules`/`/transcribe` have no cap on body size or rule-list length; pre-existing posture inherited by a new endpoint; found in `[[BL-17]]` Stages 0/1b/2's security deep analysis, not blocking that merge
 - [[BL-B127]] — `effector.write` is not coupled to the calling rule's category/seat; deferred by the user (rule writer's responsibility for now); found in `[[BL-17]]` Stages 3a–4 security analysis
 - [[BL-B128]] — `drain_pending_rule_dispatch`'s unconditional clear can drop a concurrent REPL-thread hold; low probability, the pilot repeats; found in `[[BL-17]]` Stages 3a–4 security analysis
+- [[BL-B129]] — Speech word fixes from the Stage 3c corpus bench: altitude-only wording, numbers, fuzzy numeric slots, "alright" → "right" (in progress 2026-11-18)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

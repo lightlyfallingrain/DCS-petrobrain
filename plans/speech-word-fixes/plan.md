@@ -1,0 +1,85 @@
+# Speech word fixes from the Stage 3c corpus bench (`[[BL-B129]]`)
+
+**Written by the main loop from the user's own direction, 2026-11-18** — not an Architect pass: the
+behaviour is fully specified by the user's four answers below, and the change is local to the
+matcher, the prompt and one rule file. Goal-aligner skipped for the same reason (the user stated
+the expected behaviour directly). Explore happened in conversation: the bench was run, shown, and
+these answers came back.
+
+Evidence: `audio-adapter/research/2026-11-18-state-hint-bench.md` (today's full prompt, 164 clips:
+141 ok, 22 "say again", 1 wrong command). Bench tool: `audio-adapter/tools/phrase_bench.py`.
+Corpus: `audio-adapter/data/corpus/bl17-stage3c/` (git-ignored, on the Mac).
+
+## The user's direction (verbatim, 2026-11-18)
+
+> - "alt" -> use "altitude" that's what I'll say
+> - numbers as words -> either get whisper to STT the to numbers ditecly or then we use individual
+>   digits like "three zero" to say 30.
+> - when numeric input is expected (heading <number>, speed <number>, etc) fuzzy match the part
+>   after the verb to numbers since that is expected there.
+> - "alright" is not a word we use -> map to "right"
+
+## Decisions
+
+**D1 — "alt" goes; "altitude" is the word.** `body-layer/config/rules/flight.lua`:
+`set_altitude`'s `<verb:alt|altitude>` and `hold_altitude`'s `hold <verb:altitude|alt>` lose
+`alt`. Any readback or handler code reading `s.verb` for these two rules is adjusted. The rule file
+is the user's config — change only these two patterns and what depends on them. The prompt follows
+automatically (`rule_words`). Bench evidence: "hold alt" heard as "hold out" 2/4.
+
+**D2 — numbers: try numerals from whisper first, digits-by-digit is the fallback.** Measured gap:
+"turn left thirty" 0/4 (whisper drops "thirty"); "turn left three zero" 3/4. Composed number words
+are deliberately absent from the prompt (`rule_patterns.rule_words` docstring, user 2026-11-17).
+
+1. Try a prompt change that makes whisper write composed numbers as numerals — e.g. numeral
+   examples in the prompt's framing sentence (`vocabulary._PROMPT_FRAMING`/`to_prompt`), not a
+   list of number words. Measure with `phrase_bench.py` (A_full row) before and after.
+2. **Ship it only if** "turn left thirty"-type phrases improve and the bench shows **no new wrong
+   command** and no drop on any other phrase. Respect the 224-token prompt cap
+   (`server.py`'s warning; `test_vocabulary.py`'s cap test).
+3. Otherwise, no prompt change: the spoken form for numbers is individual digits ("three zero"),
+   which already works. Record that in the research note and the plan, and say so in the report —
+   the user then knows to say digits.
+
+**D3 — a numeric slot fuzzy-matches what follows the verb to digits.** Where a pattern expects a
+number (`angle`, `quantity`, `speed_target`'s numeric form, `heading`), words in that slot position
+that are not digits or number words are matched to digit words by sound/spelling, because a number
+is what is expected there. Measured cases: "heading **to** seven zero" (×3) → 270, "altitude 3
+**to** 0 radar" → 320, "turn left three **free**/**show**", "**for**ty five". A small explicit
+homophone table (to/too → two, for/fore → four, free/tree → three, won → one, ate → eight, niner →
+nine, oh → zero …) plus, if needed, the existing char-ratio fuzz against the digit words with a
+cutoff. Constraints:
+
+- **Only inside a numeric slot, after the verb/literal has matched.** Never anywhere else — "to"
+  and "for" are ordinary words.
+- The slot's existing bounds still apply (heading three digits 000–359, etc.); a fuzzed value that
+  falls outside bounds is a miss, never clamped.
+- The readback already speaks the value, so a wrong fuzz is audible; the fuzz must still not turn
+  a "say again" into a wrong command on the corpus (bench WRONG count must not rise).
+
+**D4 — "alright" means "right".** Normalise "alright"/"all right" to "right" before matching
+(`vocabulary.normalize_for_match` or the matcher's own normalisation step — wherever the existing
+word-mapping lives; reuse it rather than adding a second). Bench: `right_3` "alright" matched
+`point` — the only wrong command under today's prompt. After the fix it must reach the HVRT bare
+"right". Check that "all right" in a non-command sentence does not now fire a command where it
+previously fell through — if the HVRT bare-word path would fire on any sentence containing
+"right", report it rather than widen it.
+
+## Out of scope
+
+- "speed max" heard as "speed maximum"/"speed x", "forward" as "from what", "level flight" as
+  "pilot flight" — not in the user's list; leave.
+- The corpus's "heading three one five" and "level off" clips predate the user's 13:53 wording
+  change ("turn/fly heading", "stop turn"); not re-recorded, not re-mapped.
+- Stage 3c's hint narrowing (deferred).
+
+## Acceptance
+
+- Unit tests for D1 (the two patterns), D3 (each homophone in each numeric slot type, bounds,
+  never outside a slot), D4 ("alright" → right; a free-speech sentence with "all right" unchanged).
+- `phrase_bench.py` re-run on the corpus with the branch's matcher, rules and prompt: A_full row
+  correct count up, WRONG count not up; the before/after table appended to
+  `audio-adapter/research/2026-11-18-state-hint-bench.md`.
+- `tools/check_rules.py` (body-layer) passes on the edited `flight.lua`.
+- Flight: `#needs-flight` — say "altitude three hundred", "hold altitude", "turn left three zero",
+  "heading two seven zero" (as "turn heading two seven zero"), "right".
