@@ -147,8 +147,37 @@ the command changed:
   on and with them off; the arg span itself, −1..+1, was swept in both.
 - Sign −1 and scale 1 are confirmed a second time.
 
+## Flight 5: C1 and C2, pilot seat, airborne
+
+User, 2026-11-18: *"C, hopefully now"*. This run started 14:51:38 and was the first with the
+updated probe (`pedals=-1`, radio press skips phases). An earlier attempt at 14:43:46 ran the old
+probe and recorded only A1/A2. Conditions were about 470–550 m AGL and 52–55 m/s IAS.
+
+- **M0-C read side (C1) passes.** Arg 1102 sweeps the full −1..+1, and vertical speed follows it
+  (−14..+9.7 m/s).
+- **M0-C write side (C2) fails: `LoSetCommand(2004)` does not move the collective.** The probe
+  sent 2004 every frame at captured, captured ±0.02 and back, 11 s in all. Arg 1102 stayed at
+  −0.1728 to four decimals the whole time. Vertical speed drifted from −0.1 to −0.7 m/s with no
+  step at any command change. The user, before seeing the log: *"Collective did not move in write
+  phase"*.
+- The probe's own verdict said "D holds collective: true" because its auto-abort covered only a
+  jump and a wrong-way move, not no movement. That is fixed: no movement on the first step now
+  aborts C2 and keeps the collective out of D.
+- **Reading.** ED's command list (`Scripts/Export.lua`, the reference copy in
+  `win-mac-sync/from-windows/`) names 2004 "joystick thrust (both engines)". It predates helicopter
+  axes. On the Mi-24P it most likely drives the engine throttles, and the collective axis has its
+  own helicopter command ID. **The Mi-24P input bindings on the DCS machine decide this**
+  (`Mods/aircraft/Mi-24P/Input/.../joystick/default.lua`, the collective axis `action`, and where
+  that action's number is defined). An earlier note (`mi24p-command-surface.md` §8) listed 2004
+  as "thrust / collective". That was ED's fixed-wing wording read as a fact, and is wrong for this
+  module.
+- **M0-C stays open.** Altitude and speed hold in mode 1 need the collective, and are blocked until
+  the right command is found and C2 is re-flown with it.
+
 ### Still owed
 
-- The HSI headings (A1, A2, A4).
+- The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
+  true and magnetic. Steady on an exact HSI number and half-press.
+- The Mi-24P collective axis command ID, then C2 again.
 - The airborne yaw response to a pedal step (M0-E).
 - B, C and D in both seats, and J1–J3.

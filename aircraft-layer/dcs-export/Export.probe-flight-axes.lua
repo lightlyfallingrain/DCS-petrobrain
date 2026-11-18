@@ -448,6 +448,12 @@ local function schedule(t, s)
                 return false, string.format("arg moved %s against command (expected sign of %s): SIGN.collective wrong",
                     fmt(moved), fmt(expected))
             end
+            -- Flight 5 (2026-11-18): 2004 left the arg exactly where it was
+            -- and that read as a pass. No movement is a failure too.
+            if math.abs(moved) < C2_SIGN_MIN_MOVE then
+                return false, string.format("arg did not move (%s) on a %s step: command %d has no effect on the collective",
+                    fmt(moved), fmt(C2_STEPS[2][1]), CMD.collective)
+            end
         end
         return { collective = clamp(SIGN.collective * c.collective + step[1]) }
     elseif def.kind == "hold" then
