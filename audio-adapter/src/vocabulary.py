@@ -902,6 +902,18 @@ def normalize_for_match(text: str) -> str:
     typographic apostrophes, hyphenated or split compass words, and
     digits written where this vocabulary spells number words.
 
+    **Deliberately does NOT fold "alright"/"all right" onto "right"**
+    (`[[BL-B129]]` D4's own mechanism lives in `command_matcher.py`
+    instead, scoped to the bare-word case only) -- see
+    `command_matcher._BARE_WORD_ALIASES`'s own docstring for why a
+    global fold here was tried and reverted: it would feed the HVRT
+    bare-word shortcut's own measured collision
+    (`SequenceMatcher("right", "sight") == 0.8`) to every sentence
+    *starting* with "alright", not just the single bare word the bench
+    actually measured ("alright then let's go" -> `point`, a real new
+    false command, found by running the counterfactual rather than
+    assuming the fold was safe).
+
     **The digit case is the one that matters.** Without it every
     `report_clock_*` clip scores as a miss while having been heard
     perfectly, which on a bench report is indistinguishable from a

@@ -72,12 +72,27 @@ picking one.
 **`heading`/`bearing` (user direction, 2026-11-17, mid-Stage-1b):**
 *"Until I provide decisions about how to handle 'bearing', treat
 'heading' as the unit we mainly use. It is always a world compass three
-digit number in degrees 000-360."* So `heading` is built now (word
-"heading" + exactly 3 digits, 0-359, 360 normalises to 0, no checksum);
-`bearing` stays unbuilt. Neither rename nor change the meaning of any
-*existing* spoken command (`"scan bearing"`/`"report bearing"` keep
-today's behaviour unchanged -- this module has no reader of either yet).
-"""
+digit number in degrees 000-360."* So `heading` is built now (exactly 3
+digits, 0-359, 360 normalises to 0, no checksum); `bearing` stays
+unbuilt. Neither rename nor change the meaning of any *existing* spoken
+command (`"scan bearing"`/`"report bearing"` keep today's behaviour
+unchanged -- this module has no reader of either yet).
+
+**`heading` is pure digits, not its own anchor word (`[[BL-B129]]` D6,
+main-loop decision 2026-11-18, correcting this slot type's original
+build):** the first version required the literal word "heading" inside
+the slot's own `consume`, duplicating the anchor a pattern author
+already writes as a literal in the grammar
+(`"<verb:turn|fly> heading <heading_deg:heading>"` in `flight.lua`) --
+the real shipped rule needed "turn heading **heading** three one five"
+to match at all, a defect found while implementing D3's digit-homophone
+fix and not before. `rule_words` walks a pattern's own
+`LiteralElement`/`WordSetElement` words for the whisper prompt bias
+(D10); an anchor word living only inside a slot type's `consume` never
+reached it either way -- this slot type's own entry in that function's
+docstring already named the hidden anchor as a wart, not a feature.
+The anchor belongs in the pattern, as a literal, like every other
+command's own anchor word."""
 
 from __future__ import annotations
 
@@ -156,13 +171,53 @@ Element = LiteralElement | SlotElement | WordSetElement | OptionalElement
 # below.
 # ---------------------------------------------------------------------------
 
+#: Homophones for the ten digit words, resolved **only** inside an
+#: already-anchored numeric slot's own digit run (`[[BL-B129]]` D3, user
+#: direction 2026-11-18: *"when numeric input is expected (heading
+#: <number>, speed <number>, etc) fuzzy match the part after the verb to
+#: numbers since that is expected there."*). Deterministic, not
+#: ratio-based: each of these *is* a genuine homophone of the digit word
+#: it maps to, found on the bench corpus, not merely similar-sounding.
+#: Bench evidence: "heading **to** seven zero" (x3) -> 270, "altitude 3
+#: **to** 0 radar" -> 320 -- both the one measured homophone, "to" for
+#: "two"; the rest of this table is the plan's own named set, unmeasured
+#: on this corpus but the same kind of substitution.
+#:
+#: **D3's own "existing char-ratio fuzz... with a cutoff" fallback is
+#: deliberately NOT implemented.** Measured directly: at the shared
+#: `_WORD_REPAIR_FLOOR` (0.5), ordinary words that appear right next to a
+#: numeric slot in the real rule set score at or above it against a
+#: digit word -- `_char_ratio("degrees", "three") == 0.5` (the angle
+#: slot's own name, which a pilot saying "turn left two zero degrees"
+#: could plausibly speak), `_char_ratio("down", "one") == 0.571`,
+#: `_char_ratio("level", "seven") == 0.6`, `_char_ratio("speed", "seven")
+#: == 0.6`, `_char_ratio("flight", "eight") == 0.727`,
+#: `_char_ratio("right", "eight") == 0.8`. A blind fallback would have
+#: turned "turn left two zero degrees" (today: unconsumed trailing word,
+#: no match, "say again") into angle 203 -- a wrong command, not a
+#: forgiven mishearing. Flagged rather than shipped; the deterministic
+#: table above already covers every case the bench actually measured.
+_DIGIT_WORD_HOMOPHONES: dict[str, str] = {
+    "to": "two",
+    "too": "two",
+    "for": "four",
+    "fore": "four",
+    "free": "three",
+    "tree": "three",
+    "won": "one",
+    "ate": "eight",
+    "niner": "nine",
+    "oh": "zero",
+}
+
 
 def _consume_digit_run(
     words: list[str], idx: int, min_digits: int, max_digits: int
 ) -> tuple[str, int] | None:
     """Consumes consecutive digit tokens starting at `idx` -- a digit
-    word ("three") or a whole numeral string ("315") each contribute
-    their own digit characters to one concatenated run, mirroring
+    word ("three"), a whole numeral string ("315"), or (D3) a known
+    homophone (`_DIGIT_WORD_HOMOPHONES`) each contribute their own digit
+    characters to one concatenated run, mirroring
     `vocabulary._read_digits_after`'s own number-collapse convention
     ("315" = "3 1 5" = "three one five"), but also returning how many
     *words* were consumed (that function only returns the integer).
@@ -177,6 +232,9 @@ def _consume_digit_run(
             i += 1
         elif word.isdigit():
             digits.append(word)
+            i += 1
+        elif word in _DIGIT_WORD_HOMOPHONES:
+            digits.append(_WORD_DIGITS[_DIGIT_WORD_HOMOPHONES[word]])
             i += 1
         else:
             break
@@ -366,12 +424,16 @@ def _consume_speed_target(words: list[str], idx: int) -> tuple[object, int] | No
 
 
 def _consume_heading(words: list[str], idx: int) -> tuple[object, int] | None:
-    """The word "heading" + exactly 3 digits, 0-360 inclusive (360
-    normalises to 0) -- user direction, 2026-11-17 (module docstring).
-    No checksum."""
-    if idx >= len(words) or words[idx] != "heading":
-        return None
-    result = _consume_digit_run(words, idx + 1, 3, 3)
+    """Exactly 3 digits, 0-360 inclusive (360 normalises to 0), no
+    checksum -- user direction, 2026-11-17 (module docstring). **Pure
+    digits, no anchor word of its own** (`[[BL-B129]]` D6, module
+    docstring): the anchor "heading" is a `LiteralElement` in the
+    pattern itself (`flight.lua`'s own `"<verb:turn|fly> heading
+    <heading_deg:heading>"`), not consumed here -- this function used
+    to also require the literal word "heading" at `idx`, which meant
+    the real shipped rule needed it twice ("turn heading heading three
+    one five") to ever match at all."""
+    result = _consume_digit_run(words, idx, 3, 3)
     if result is None:
         return None
     digit_str, next_idx = result
@@ -442,7 +504,13 @@ SLOT_TYPES: dict[str, SlotType] = {
     # scored it a 0.6 collision against the real legacy `scan_bearing_deg`
     # command (caught by this stage's own differential test against the
     # real collision check). 200 is not in that list.
-    "heading": SlotType("heading", _consume_heading, lambda: "heading two zero zero"),
+    #
+    # `[[BL-B129]]` D6: the sample is pure digits now, no leading
+    # "heading" word -- the slot itself no longer consumes one (see
+    # `_consume_heading`'s own docstring); a pattern using this slot
+    # supplies its own "heading" literal, which `_sample_elements`
+    # already renders separately.
+    "heading": SlotType("heading", _consume_heading, lambda: "two zero zero"),
     "oclock": SlotType("oclock", _consume_oclock, lambda: "three o'clock"),
     "quantity": SlotType("quantity", _consume_quantity, lambda: "two zero zero"),
     "speed_target": SlotType(
@@ -1106,13 +1174,18 @@ def rule_words(rule: CompiledRule) -> list[str]:
     already parses whatever whisper hands back -- `test_whole_number`
     (`tests/test_rule_patterns.py`) pins this for a bare "45". So D14's
     word grammar stays a parser-level fallback, intentionally unbiased.
-    A slot type's one fixed anchor word, where it has one (`heading`'s
-    "heading"), is a `LiteralElement` in nobody's pattern string today
-    (it lives inside the slot type's own `consume`, not the grammar), so
-    it is not picked up here either -- a later stage that ships a rule
-    using `heading` should add that one word by hand to whichever rule
-    file's own bias list needs it, the same way any other fixed
-    vocabulary word is added."""
+    **`heading`'s own anchor word, "heading", used to live inside the
+    slot type's own `consume` rather than the grammar, and this
+    paragraph used to say it was therefore never picked up here.** That
+    was wrong on both counts, corrected by `[[BL-B129]]` D6: `flight.lua`
+    already writes "heading" as an ordinary `LiteralElement` in its
+    pattern (`"<verb:turn|fly> heading <heading_deg:heading>"`), which
+    this function's own `_words_in` call picks up exactly like any other
+    literal -- D6 also removed the slot's own hidden, duplicate copy of
+    that same word, which had made the real shipped rule need "heading"
+    twice to match at all. A pattern using this slot supplies the anchor
+    itself, as a literal, the same way any other command's anchor word
+    is added."""
     return _words_in(rule.elements)
 
 

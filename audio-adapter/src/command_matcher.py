@@ -90,8 +90,15 @@ import difflib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from rule_patterns import CompiledRule, match_pattern_with_ratio, rule_anchor_words
+from rule_patterns import (
+    _DIGIT_WORD_HOMOPHONES,
+    CompiledRule,
+    match_pattern_with_ratio,
+    rule_anchor_words,
+)
 from vocabulary import (
+    _RANGE_NUMBER_WORDS,
+    _RANGE_UNIT_WORDS,
     _WORD_REPAIR_FLOOR,
     PHRASES,
     SEPARATION_MIN,
@@ -252,7 +259,20 @@ FILLER_WORDS: frozenset[str] = frozenset(
 )
 
 
-def strip_filler(normalized: str) -> str:
+#: Every `rule_patterns._DIGIT_WORD_HOMOPHONES` entry that is also a
+#: `FILLER_WORDS` member (`[[BL-B129]]` D3) -- today exactly `{"to"}` --
+#: passed as `strip_filler`'s own `preserve` for the rule-matching word
+#: list in `match_transcript`, so a rule's numeric slot still sees "to"
+#: to fuzzy-resolve as "two" rather than losing it to filler-stripping
+#: before `_consume_digit_run` ever runs. Derived, not hand-copied, so a
+#: future homophone addition that happens to collide with a filler word
+#: is caught here automatically rather than silently going dead the same
+#: way "to" originally did (found by running the real pipeline end to
+#: end, not assumed from the grammar alone).
+_RULE_FILLER_PRESERVE: frozenset[str] = frozenset(_DIGIT_WORD_HOMOPHONES) & FILLER_WORDS
+
+
+def strip_filler(normalized: str, preserve: frozenset[str] = frozenset()) -> str:
     """Drop `FILLER_WORDS`, unless that would empty the transcript.
 
     Worth stating why this helps as much as it does: `_phrase_match_ratio`
@@ -267,8 +287,23 @@ def strip_filler(normalized: str) -> str:
     of nothing but "okay" would otherwise normalise to the empty string
     and take a different path through the matcher than an unmatched word
     does. Leaving it intact keeps it an ordinary no-match.
-    """
-    kept = [word for word in normalized.split() if word not in FILLER_WORDS]
+
+    `preserve` (`[[BL-B129]]` D3) keeps a named word that would otherwise
+    be dropped -- the one real conflict is `"to"`: it is both this
+    module's own filler word (the comment above, "scan to the right")
+    and `rule_patterns._DIGIT_WORD_HOMOPHONES`' only entry that overlaps
+    `FILLER_WORDS`. Stripping it before a rule's own digit-run parsing
+    ever runs would silently defeat D3's bench-measured fix ("heading
+    **to** seven zero" -> 270) -- `match_transcript`'s own call for the
+    rule-matching word list passes `preserve=_RULE_FILLER_PRESERVE`
+    (every digit homophone that is also a filler word) for exactly this
+    reason, while every other caller's default empty set keeps today's
+    behaviour, including the pinned `"scan to the right"` legacy case."""
+    kept = [
+        word
+        for word in normalized.split()
+        if word not in FILLER_WORDS or word in preserve
+    ]
     return " ".join(kept) if kept else normalized
 
 
@@ -393,6 +428,24 @@ _GREETING_VERB = "good"
 #: (e.g. "the tanks are on the right") never reaches this check at all --
 #: `len(words) == 1` guards it -- so `point`'s own fuzzy behaviour for
 #: an actual sentence is unchanged.
+#: Alternate bare-word spellings of one of `_HVRT_BARE_WORD_TOKENS`'s own
+#: exact keys (`[[BL-B129]]` D4, user direction 2026-11-18: *"'alright'
+#: is not a word we use -> map to 'right'"*). Keyed by the *whole*
+#: transcript's own word tuple, not a per-word fold -- a global
+#: normalisation fold (in `vocabulary.normalize_for_match`) was tried and
+#: reverted: it turned the whole transcript into one beginning with
+#: "right", which exposed this shortcut's own documented "right"~"sight"
+#: 0.8 collision (comment above) to every sentence *starting* with
+#: "alright"/"all right", not just the single bare word the bench
+#: actually measured -- "alright then let's go" resolved to `point`
+#: before this was narrowed, measured directly rather than assumed safe.
+#: Scoping the alias to the exact bare-word transcript keeps the fix to
+#: what the bench found broken, without widening the collision's reach.
+_BARE_WORD_ALIASES: dict[tuple[str, ...], str] = {
+    ("alright",): "right",
+    ("all", "right"): "right",
+}
+
 _HVRT_BARE_WORD_TOKENS: dict[str, str] = {
     "left": "hvrt_translate_left",
     "right": "hvrt_translate_right",
@@ -952,6 +1005,52 @@ def _parse_watch_slots(text: str) -> dict[str, int | str] | None:
     return {"referent": True}
 
 
+#: Tens words `_RANGE_NUMBER_WORDS` does not carry (that table tops out
+#: at "twenty", the range slot's own 1-20 bound) -- widened here only
+#: for D5's own "is this word a number at all" check below, never for
+#: parsing a value out of it.
+_TENS_WORDS_FOR_NUMBER_DETECTION: frozenset[str] = frozenset(
+    {"thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"}
+)
+
+
+def _has_unaccounted_number(words: list[str]) -> bool:
+    """`[[BL-B129]]` D5 -- `True` if any word is a digit or a recognised
+    number word that is not immediately followed by a distance unit
+    (`_RANGE_UNIT_WORDS`) or by `"o'clock"`.
+
+    Every legitimate numeric word in a `point` phrase pairs with one of
+    those two markers (`"two o'clock"`, `"three kilometres"`) --
+    `_parse_point_slots`'s own four parsers each scan the whole
+    transcript independently rather than requiring full consumption
+    (unlike `rule_patterns`'s grammar), so a direction word plus a bare,
+    unmarked number ("right 45", "right forty five" -- whisper dropping
+    "turn" from "turn right forty five") previously resolved to `point`
+    on the `relative` slot alone, silently ignoring the number as
+    leftover. Found on the main-branch Stage 3c-sibling model sweep
+    (`research/2026-11-18-whisper-model-sweep-flight-corpus.md`): base.en
+    and medium.en both produced this exact drop.
+
+    Deliberately checked only here, at the two `point`/`"what"` call
+    sites, not folded into `_parse_point_slots` itself -- that function
+    is a pure "did any of the four slots fire" parser reused nowhere
+    else that has this failure mode, and this is a matching decision
+    (what to do about an unaccounted number), not a parsing one."""
+    for index, word in enumerate(words):
+        is_number = (
+            word.isdigit()
+            or word in _RANGE_NUMBER_WORDS
+            or (word in _TENS_WORDS_FOR_NUMBER_DETECTION)
+        )
+        if not is_number:
+            continue
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        if next_word in _RANGE_UNIT_WORDS or next_word == "o'clock":
+            continue
+        return True
+    return False
+
+
 def _where_slot_count(slots: dict[str, int | str]) -> int:
     """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
     transcript named the direction twice in incompatible frames
@@ -1015,9 +1114,16 @@ def match_transcript(
     # branch, including the verb-anchor early-out just below. See
     # `_HVRT_BARE_WORD_TOKENS`'s own comment for the measured collision
     # this sidesteps ("right" fuzzy-anchoring onto `_POINT_VERBS`).
-    if len(words) == 1 and words[0] in _HVRT_BARE_WORD_TOKENS:
+    # `_BARE_WORD_ALIASES` (D4) resolves an "alright"/"all right"
+    # whole-transcript spelling onto its own canonical key first; a
+    # plain `len(words) == 1` transcript falls back to its own one word,
+    # exactly as before D4.
+    bare_word = _BARE_WORD_ALIASES.get(tuple(words))
+    if bare_word is None and len(words) == 1:
+        bare_word = words[0]
+    if bare_word is not None and bare_word in _HVRT_BARE_WORD_TOKENS:
         return MatchResult(
-            token=_HVRT_BARE_WORD_TOKENS[words[0]],
+            token=_HVRT_BARE_WORD_TOKENS[bare_word],
             match_ratio=1.0,
             verb_anchored=True,
         )
@@ -1030,7 +1136,22 @@ def match_transcript(
     # a legacy verb -- e.g. "turn" -- is not cut off before it is ever
     # tried). No longer an early return (D13): the legacy pipeline below
     # still runs so the two can be compared.
-    rule_match = _match_rules(active_rules, words) if active_rules else None
+    #
+    # **Its own word list, not the shared `words` above** (`[[BL-B129]]`
+    # D3): `strip_filler`'s `preserve=_RULE_FILLER_PRESERVE` keeps "to"
+    # (the one digit homophone that doubles as a filler word) so a
+    # rule's numeric slot can still fuzzy-resolve it to "two" --
+    # dropping it before `_consume_digit_run` ever ran was measured to
+    # silently defeat D3's own bench-measured fix ("heading **to** seven
+    # zero" -> 270) entirely. The legacy pipeline keeps the ordinary
+    # fully-stripped `words` unchanged -- its own pinned "scan to the
+    # right" -> `scan_right` case depends on "to" staying gone there.
+    rule_words = (
+        strip_filler(normalize_for_match(text), preserve=_RULE_FILLER_PRESERVE).split()
+        if active_rules
+        else words
+    )
+    rule_match = _match_rules(active_rules, rule_words) if active_rules else None
 
     widened_anchor_words = (
         VERB_ANCHOR_WORDS
@@ -1236,7 +1357,7 @@ def _match_legacy(
     ):
         point_slots = _parse_point_slots(text)
         if point_slots is not None:
-            if _where_slot_count(point_slots) > 1:
+            if _where_slot_count(point_slots) > 1 or _has_unaccounted_number(words):
                 return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
             return MatchResult(
                 token="point", match_ratio=1.0, verb_anchored=True, slots=point_slots
@@ -1252,7 +1373,7 @@ def _match_legacy(
     if difflib.SequenceMatcher(None, verb, _WHAT_VERB).ratio() >= VERB_FLOOR:
         what_slots = _parse_point_slots(text)
         if what_slots is not None:
-            if _where_slot_count(what_slots) > 1:
+            if _where_slot_count(what_slots) > 1 or _has_unaccounted_number(words):
                 return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
             return MatchResult(
                 token="point", match_ratio=1.0, verb_anchored=True, slots=what_slots

@@ -69,3 +69,119 @@ truncation. The misses above are taken on as targeted fixes instead.
 > - when numeric input is expected (heading <number>, speed <number>, etc) fuzzy match the part
 >   after the verb to numbers since that is expected there.
 > - "alright" is not a word we use -> map to "right"
+
+## `[[BL-B129]]` implementation: before/after bench
+
+Re-run `tools/phrase_bench.py`, same corpus (`data/corpus/bl17-stage3c/`, `ggml-small.en`), on the
+same 18 `flight.lua` rules before and after D1/D3/D4/D5's matcher/rule-file changes (D2 shipped no
+code change, see below). "Before" is the matcher/rules at this plan's own base commit (`c59087f8`);
+"after" is the implementation branch.
+
+| prompt | ok (before → after) | miss (before → after) | WRONG (before → after) |
+|---|---|---|---|
+| A — today's full prompt | 141 → 139 | 22 → 25 | **1 → 0** |
+| B — flight words first | 138 → 136 | 24 → 26 | 2 → 2 |
+| C — out-of-state words removed | 129 → 128 | 32 → 34 | 3 → 2 |
+
+**WRONG drops to 0 on A_full** (`right_3`'s "alright" → `point` is fixed by D4) and C_full's own
+WRONG drops by one too (`altitude_three_two_zero_radar_1`'s "altitude 3 to 0 radar" now parses to
+the *correct* value, 320, via D3's "to"→"two" homophone, rather than a wrong one).
+
+**A_full's own `ok` count drops by 2, not up** — traced clip by clip (`bench_before.json`/
+`bench_after.json`, not committed, see this implementer's report for the exact diff): every
+kind-change (`ok`↔`miss`↔`WRONG`) between the two runs is one of —
+
+- `right_3`: `WRONG` → `ok` (D4's own fix).
+- `heading_three_one_five_0`: `miss` → `ok`; `forward_0`: `ok` → `miss`. Both clips' own spoken
+  words are untouched by this plan — the *only* difference in `A_full`'s prompt text between the
+  two runs is "alt" dropped from `set_altitude`/`hold_altitude`'s own `rule_words` (D1's own
+  mechanism: the prompt bias follows the grammar automatically). Whisper's prompt-conditioned
+  decoding is sensitive to the whole prompt, not just the words relevant to a given clip, so
+  removing one word measurably shifts decoding on *unrelated* audio too — a known property of this
+  mechanism (`vocabulary.to_prompt`'s own docstring already measures a similar effect from
+  reordering), not a defect in D1.
+- `hold_alt_0`, `hold_alt_2`, `alt_one_five_zero_3`: `ok` → `miss`. All three are recordings of the
+  deprecated "alt" phrasing D1 explicitly retires (the user: *"'alt' -> use 'altitude' that's what
+  I'll say"*) — losing ground on a phrasing the plan deliberately stops biasing the recogniser
+  toward is the intended, foreseen cost of D1, not a regression to fix. These clips no longer
+  represent the spoken form the user commits to using.
+
+Net: the two `ok` count drops and the two `ok` count gains cancel except for a net -2, entirely
+attributable to the three deprecated-"alt" clips (partially offset by the unrelated prompt-shift
+noise, which washes out to zero here). **Flagged rather than silently reported as "ok count up"**,
+since the plan's own acceptance line names that direction and this run does not meet it literally
+— the three-clip loss is the direct, intended consequence of D1, not a new defect introduced
+alongside it.
+
+## D2: no prompt change shipped
+
+Tried the prompt experiment per D2 step 1 — `_PROMPT_FRAMING` widened to `"Helicopter crew
+intercom, pilot to gunner. Numbers are read as numerals, for example 270, 30, 320."` — and
+re-benched (`A_full`: 136 ok / 27 miss / 1 WRONG, worse on every count than the unmodified "after"
+136→139/27→25/1→0, and `turn_left_thirty` stayed 0/4, "thirty" still dropped every time: one clip's
+heard text changed slightly, "turn left at 30.", but still an unconsumed extra word with no match).
+**Fails D2's own ship condition** ("improve... and no drop on any other phrase") on both halves —
+no improvement on the targeted phrase, and a drop elsewhere. **No prompt change shipped.** The
+spoken form for composed numbers stays individual digits ("three zero" for 30), which already
+scores 3/4 on this corpus and is unaffected by anything in this plan — the user should keep saying
+digits rather than "thirty"-style number words.
+
+## D5: added mid-implementation (user-approved 2026-11-18, "as recommended")
+
+`research/2026-11-18-whisper-model-sweep-flight-corpus.md` (on `main`) found a bare direction word
+plus a number ("right 45"/"right forty five", from whisper dropping "turn") resolving to `point` on
+`base.en`/`medium.en` -- the same mechanism as `right_3`'s "alright" → `point` above, generalised:
+`_parse_point_slots`'s four parsers each scan the whole transcript independently, so a `relative`
+slot resolving on its own left a trailing, unaccounted-for number unchecked. Fixed by
+`command_matcher._has_unaccounted_number` (a number not immediately followed by its own unit
+marker, "km"/"kilometres"/"o'clock", blocks the `point`/`"what"` branches from resolving) --
+verified against this corpus (A_full unaffected, `small.en` does not exhibit this specific drop
+here) and against `right 45`/`right forty five`/`left 30` directly (now `token=None`, "say again"),
+with a counterfactual confirming a legitimate `relative`+distance phrase ("look right 5
+kilometres") still resolves.
+
+## D6: added mid-implementation (main-loop decision, 2026-11-18)
+
+Found while implementing D3: the real shipped `turn_heading` pattern,
+`"<verb:turn|fly> heading <heading_deg:heading>"`, needed the literal word "heading" **twice** to
+match at all -- once from the pattern grammar, once more from inside `rule_patterns.
+_consume_heading`'s own `consume`, which also required that literal before reading the three
+digits. "turn heading three one five" (what a pilot actually says) never matched the real rule;
+only "turn heading heading three one five" did.
+
+Fix: `heading` is pure digits now (exactly 3, 0-360, 360→0, same homophone table as D3), and the
+anchor word moved into the pattern as an ordinary literal -- `flight.lua`'s own pattern string
+needed no change, since it already wrote "heading" correctly; only the slot type's `consume`/
+sample, the bare-slot tests, and the `rule_words` docstring (which incorrectly claimed no pattern
+used a literal "heading" -- it was wrong on both counts) needed correcting.
+
+Re-ran `phrase_bench.py` on the same corpus after D6: **zero change** from the D1-D5 "after" numbers
+(A_full 139/25/0, unchanged clip for clip). Expected and confirmed by a clip-by-clip diff: this
+corpus's own `heading_*` clips ("heading three one five", "heading two seven zero", "heading zero
+nine zero") all say "heading …" **without** "turn"/"fly", so they resolve via the legacy
+`scan_bearing_deg`/`report_bearing_deg` path (per this file's own "Caveats" section above, predating
+the user's wording change to "turn/fly heading") and were never affected by `turn_heading`'s bug or
+its fix. D6's own new tests (`turn heading three one five`, `fly heading 0 9 0`, `turn heading to
+seven zero`, the double-"heading" rejection, bare "heading 315" rejection) are unit/integration
+tests against the real pattern directly, not bench clips -- there is no recorded clip saying "turn
+heading <digits>" in this corpus.
+
+### `tools/check_rules.py`'s self-match step, and why it missed this
+
+`check_rules.py` (body-layer) does have a self-match step, via audio-adapter's
+`tools/check_rule_patterns.py`: `_expand` generates every concrete word sequence a rule's own
+grammar can produce (one alternative per word-set position, each slot's own `SlotType.sample()`),
+and `_samples` calls `match_pattern` on each, keeping only the ones that match. This ran cleanly on
+`turn_heading` both before and after D6 -- **not because the check is broken, but because the
+pre-D6 bug was self-consistent**: the `heading` slot type's own `sample()` lambda returned
+`"heading two zero zero"` (baking the same "needs its own 'heading' word" assumption into the test
+data that `consume` required), so `_expand` always produced `["turn", "heading", "heading", "two",
+"zero", "zero"]` -- a sample that *did* match the buggy grammar, because both the sample generator
+and the acceptor shared the identical wrong assumption. A self-match check built from a rule's own
+stated primitives cannot catch an error where the primitive itself (what one slot type's sample
+"should" look like) encodes the same mistake as the code that accepts it -- it has no independent
+oracle for "what a human would actually say," only "is this rule internally consistent with its own
+declared grammar." Not fixed here: closing this class of gap in general would need an independent
+source of realistic utterances (the bench corpus is exactly that, but is not run by `check_rules.py`
+itself), which is a bigger change than "small and local" — noted as a follow-up in
+`plans/speech-word-fixes/implementation.md` rather than grown into this plan's scope.

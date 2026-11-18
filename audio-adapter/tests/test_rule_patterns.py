@@ -102,33 +102,192 @@ class TestAngleSlot:
 
 
 class TestHeadingSlot:
-    def test_requires_the_anchor_word(self) -> None:
-        elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("three one five")) is None
+    """`[[BL-B129]]` D6: pure digits, no anchor word of its own any more
+    -- the previous version required the literal word "heading" inside
+    the slot's own `consume`, which is what duplicated the anchor a
+    pattern author already writes in the grammar (see
+    `TestHeadingSlotWithPatternAnchor` below for the real shipped shape,
+    `flight.lua`'s own `"<verb:turn|fly> heading <heading_deg:heading>"`,
+    and the defect this fix closes)."""
 
     def test_exactly_three_digits(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three one five")) == {"deg": 315}
+        assert match_pattern(elements, _words("three one five")) == {"deg": 315}
 
     def test_two_digits_does_not_match(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three two")) is None
+        assert match_pattern(elements, _words("three two")) is None
 
     def test_leading_zero(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading zero one five")) == {"deg": 15}
+        assert match_pattern(elements, _words("zero one five")) == {"deg": 15}
 
     def test_360_normalises_to_0(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three six zero")) == {"deg": 0}
+        assert match_pattern(elements, _words("three six zero")) == {"deg": 0}
 
     def test_361_is_rejected(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three six one")) is None
+        assert match_pattern(elements, _words("three six one")) is None
 
     def test_no_checksum_any_three_digit_value_accepted(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading one two three")) == {"deg": 123}
+        assert match_pattern(elements, _words("one two three")) == {"deg": 123}
+
+    def test_no_anchor_word_of_its_own(self) -> None:
+        """A bare `<deg:heading>` pattern has nothing to consume the
+        word "heading" with any more -- unlike before D6, where the
+        slot itself swallowed it."""
+        elements = parse_pattern("<deg:heading>")
+        assert match_pattern(elements, _words("heading three one five")) is None
+
+
+class TestHeadingSlotWithPatternAnchor:
+    """The real shipped shape (`flight.lua`'s own
+    `"<verb:turn|fly> heading <heading_deg:heading>"`) -- `[[BL-B129]]`
+    D6's own fix target. Before D6, this exact pattern needed "heading"
+    said *twice* ("turn heading heading three one five") to match at
+    all, because the slot's own hidden `consume`-level anchor duplicated
+    the pattern's own literal; "turn heading three one five" -- what a
+    pilot actually says -- never matched."""
+
+    _PATTERN = "<verb:turn|fly> heading <heading_deg:heading>"
+
+    def test_turn_heading_resolves(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("turn heading three one five")) == {
+            "verb": "turn",
+            "heading_deg": 315,
+        }
+
+    def test_fly_heading_with_digits_resolves(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("fly heading 0 9 0")) == {
+            "verb": "fly",
+            "heading_deg": 90,
+        }
+
+    def test_double_heading_no_longer_matches(self) -> None:
+        """The defect D6 closes: this was the *only* wording the
+        pre-D6 grammar accepted, and it is rejected now -- unconsumed
+        extra "heading", same as any other leftover word."""
+        elements = parse_pattern(self._PATTERN)
+        assert (
+            match_pattern(elements, _words("turn heading heading three one five"))
+            is None
+        )
+
+    def test_heading_alone_without_the_verb_does_not_match(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("heading three one five")) is None
+
+
+class TestDigitWordHomophones:
+    """`[[BL-17]]`/`[[BL-B129]]` D3 -- a numeric slot's own digit run
+    fuzzy-resolves a small, deterministic set of homophones
+    (`rule_patterns._DIGIT_WORD_HOMOPHONES`), scoped to each slot type
+    that consumes a digit run (`angle`/`quantity`/`heading`), never
+    anywhere else. Bench evidence: "heading **to** seven zero" (x3) ->
+    270, "altitude 3 **to** 0 radar" -> 320 (both the one measured
+    homophone, "to")."""
+
+    @pytest.mark.parametrize(
+        ("word", "digit"),
+        [
+            ("to", "2"),
+            ("too", "2"),
+            ("for", "4"),
+            ("fore", "4"),
+            ("free", "3"),
+            ("tree", "3"),
+            ("won", "1"),
+            ("ate", "8"),
+            ("niner", "9"),
+            # "oh" (-> "0") is deliberately excluded here: a bare angle of
+            # 0 is rejected by `_consume_angle`'s own 1-359 range check
+            # regardless of how the digit was heard -- `test_a_fuzzed_
+            # value_outside_bounds_is_still_a_miss_not_clamped` below pins
+            # exactly this ("the slot's existing bounds still apply").
+        ],
+    )
+    def test_angle_slot_resolves_each_homophone(self, word: str, digit: str) -> None:
+        elements = parse_pattern("turn <direction:left|right> <degrees:angle>")
+        assert match_pattern(elements, _words(f"turn left {word}")) == {
+            "direction": "left",
+            "degrees": int(digit),
+        }
+
+    @pytest.mark.parametrize(
+        ("word", "digit"),
+        [
+            ("to", "2"),
+            ("for", "4"),
+            ("free", "3"),
+            ("won", "1"),
+            ("ate", "8"),
+            ("niner", "9"),
+            ("oh", "0"),
+        ],
+    )
+    def test_quantity_slot_resolves_each_homophone_inside_a_run(
+        self, word: str, digit: str
+    ) -> None:
+        elements = parse_pattern("<n:quantity>")
+        assert match_pattern(elements, _words(f"three {word} zero")) == {
+            "n": int(f"3{digit}0")
+        }
+
+    def test_heading_slot_resolves_a_homophone_mid_run(self) -> None:
+        """The bench's own measured case: "heading to seven zero" -> 270.
+        `[[BL-B129]]` D6 moved the "heading" anchor word out of the
+        slot's own `consume` and into the pattern as a literal
+        (`TestHeadingSlotWithPatternAnchor`), so this test now uses the
+        real shipped pattern shape rather than a bare `<deg:heading>`."""
+        elements = parse_pattern("heading <deg:heading>")
+        assert match_pattern(elements, _words("heading to seven zero")) == {"deg": 270}
+
+    def test_speed_target_numeric_form_resolves_a_homophone(self) -> None:
+        elements = parse_pattern("speed <target:speed_target>")
+        assert match_pattern(elements, _words("speed to zero zero")) == {
+            "target": {"kind": "number", "value": 200}
+        }
+
+    def test_a_fuzzed_value_outside_bounds_is_still_a_miss_not_clamped(self) -> None:
+        """D3's own constraint: the slot's existing bounds still apply,
+        never clamped. "turn left oh" resolves the homophone to digit
+        "0" cleanly, but `angle`'s own 1-359 range check (unaffected by
+        D3) rejects a bare 0 exactly as it already rejects a literal
+        "turn left zero" (`TestAngleSlot.test_zero_is_rejected`) -- the
+        fuzz does not relax the bound, it only widens what reaches it."""
+        elements = parse_pattern("turn <direction:left|right> <degrees:angle>")
+        assert match_pattern(elements, _words("turn left oh")) is None
+
+    def test_a_fuzzed_digit_count_still_fails_headings_exact_three_rule(self) -> None:
+        """Same constraint, the other bound: `heading` needs exactly
+        three digits -- a homophone does not relax that count, so a
+        2-digit homophone run still fails to match at all. Uses the
+        real shipped pattern shape (`[[BL-B129]]` D6's own anchor-in-
+        pattern form, `TestHeadingSlotWithPatternAnchor`) so the
+        rejection is genuinely about the digit count, not the now-
+        separate "heading" literal failing to match -- counterfactual
+        checked: `match_pattern(elements, _words("heading to seven
+        zero"))` (3 digits) resolves to `{"deg": 270}` in the sibling
+        test above, using this identical pattern string."""
+        elements = parse_pattern("heading <deg:heading>")
+        assert match_pattern(elements, _words("heading to zero")) is None
+
+    def test_homophone_fuzz_never_fires_outside_a_numeric_slot(self) -> None:
+        """D3's own constraint: only inside a numeric slot, after the
+        verb/literal has matched -- never anywhere else, structurally:
+        `_DIGIT_WORD_HOMOPHONES` is read only from inside
+        `_consume_digit_run`, which only `angle`/`quantity`/`heading`/
+        `speed_target` call. A `WordSetElement`'s own fuzzy resolution
+        (`_resolve_word_set`) is a completely separate mechanism with no
+        access to this table: "to" is a digit homophone but has a low
+        character ratio against either alternative here, so it resolves
+        to neither, exactly as it would have before D3 existed."""
+        elements = parse_pattern("<direction:left|right>")
+        assert match_pattern(elements, _words("to")) is None
 
 
 class TestOclockSlot:
@@ -446,7 +605,7 @@ class TestCompileRules:
             ("turn_heading_relative", "turn <direction:left|right> <degrees:angle>"),
             ("level_flight", "level flight"),
             ("set_speed", "speed <speed_target:speed_target>"),
-            ("hold_altitude", "hold <verb:altitude|alt>"),
+            ("hold_altitude", "hold altitude"),
         ]
         accepted, rejected = compile_rules(
             raw, legacy_probe=self._no_legacy_hit, free_speech_guard=()
@@ -556,16 +715,22 @@ class TestLiteralFuzz:
         assert ambiguous is True
 
     def test_slot_value_is_never_fuzzy_repaired(self) -> None:
-        """Same pin, for a `SlotElement` rather than a `WordSetElement`:
-        "free" scores 0.667 against "three" -- well inside the fuzzy
-        band a `LiteralElement`/`WordSetElement` would accept -- but a
-        digit run only recognises an exact member of `_WORD_DIGITS`/a
-        numeral, with no character-ratio fallback at all, so it is
-        simply not a digit and the slot fails to parse, not "forgiven"
-        into 3. `SlotElement` carries an open/arbitrary value (E12's
-        revision) -- there is no closed set to fuzzy-match against."""
+        """Same pin, for a `SlotElement` rather than a `WordSetElement`
+        -- narrowed by `[[BL-B129]]` D3, which is a deliberate, named
+        exception, not a reopening of this test's own claim. **D3 adds
+        a small, deterministic homophone *table*
+        (`_DIGIT_WORD_HOMOPHONES`, `TestDigitWordHomophones` above),
+        never a character-ratio fallback** -- "free" used to be this
+        test's own example precisely because it scored 0.667 against
+        "three" with nothing to forgive it; D3's own table now maps
+        "free" to "three" by name (the plan's own homophone list), so
+        it is no longer a case of "not a digit at all." "degrees" is
+        not in that table and scores only 0.5 against "three" (the same
+        ballpark "free" used to sit in) -- it still fails to parse,
+        pinning that a digit run has no *general* ratio-based fallback,
+        only the one named table D3 ships."""
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading free one five")) is None
+        assert match_pattern(elements, _words("heading degrees one five")) is None
 
     def test_no_literal_at_all_defaults_to_ratio_1_0(self) -> None:
         elements = parse_pattern("<degrees:angle>")
