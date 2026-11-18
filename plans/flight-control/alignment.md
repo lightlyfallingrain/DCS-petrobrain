@@ -1088,3 +1088,75 @@ handover rules, both consistent with the re-cut's own account of what exists bef
 - U8 (restated from the plan) — is "never confirm" the right floor for *taking* controls too (as
   it already is for giving them back), or should "you have controls" keep a confidence floor
   below which he asks?
+
+## Plan check — 2026-11-18, amendment (U5–U10, seat rule)
+
+**Verdict:** ALIGNED
+
+Checked `plans/flight-control/plan.md`'s "Amended 2026-11-18 — the user's answers to U5–U8, and
+the seat rule" (Decisions 24 and 25), the U9/U10 entries under "Decisions Requiring User Input
+(mode 1 re-cut)", and the "What changed" table's seat-rule correction (M0-J4 removed), against:
+the 2026-10-31 goal check's E1–E10 above (not re-derived); `explore-notes.md`'s page 1 ("maintain
+current state", "stops writing axis values... can use the optics again" on "I have controls",
+"must be ignored" for the physical stick) and settled point 2 ("Handover is spoken only");
+`body-layer/ROADMAP/BL-16.md`'s "Mode 1" section, which restates the same answers and explicitly
+records the prior CONCERNS (U6) as closed; and the live tree, confirming no dangling `M0-J4`
+reference survives the removal (`grep -n M0-J4 plans/flight-control/plan.md` returns one hit, the
+prose explaining the removal itself, and the M0 table at line 2894 runs J1–J3 only).
+
+This is a re-check, not a fresh pass: the previous entry's single CONCERNS item (U6, which framed
+an already-settled "no optics while flying" as a fresh 50/50 choice) is closed — **U6 answered
+"yes"**, built in M1 for both modes, confirmed by this amendment's own text and by `BL-16.md`
+line 301 ("Plan check `alignment.md` 2026-11-18: CONCERNS about U6 only, closed by the answer
+below"). The rest of the previous pass's table (E1–E8, E10, the five open assumptions) is
+unaffected by this amendment and stands.
+
+| expectation / item | stage | status |
+|---|---|---|
+| E9 (no optics while flying) | M1, row 17 (`flying == CrewState.has_controls`) | **met** — U6 answered yes; no longer deferred |
+| E2/E3 maintained across park and unpark (new ground, from U5) | Decision 24 (`armed`, same-frame unpark take, M0-J) | met |
+| E6 ("I have controls" acts at once, never "confirm?") — for mode 1 itself | M1, row 6, Decision 13 | met, unaffected |
+| "Handover is spoken only" (settled point 2) vs. the silent park/unpark mode switches | Decision 24's framing: park/unpark change *mode*, never *who holds the controls* | met — the silent events move between Petrovich's two mechanisms, never between Petrovich and the player; the one exception is forced and named below |
+| **U5 — unpark no longer hands the stick to the player** | Decision 24; disclosed in Risks ("The test card says it in those words") and `BL-16.md` | met — Flight M-A step 9 ("unpark: he keeps flying in mode 1; then 'I have controls'") is the disclosure in the test card's own words, not just the plan's prose |
+| **U9 — "I have controls" in the overlay** | row 9c; "Unable, AI overlay.", nothing remembered | met — matches the user's verbatim answer exactly; Flight M-A step 11 exercises it |
+| **U10 — the arm lease** | `ARM_LEASE_S = 3.0`, re-sent every poll, Decision 2 unchanged for an *active* mode 1 | met — closes the park→unpark escape route U5 would otherwise remove, without adding a watchdog nobody asked for |
+| **Forced "You have controls!" on an unpark outside the envelope** | row 9a; state diagram `OVL --> PLAYER: unpark when mode 1 cannot take` | met, with the tension named, not hidden — see below |
+| Seat rule (never gated on seat) | Decision 25 | met |
+| Seat-swap park-edge correction (M0-J4 removed) | "What changed" table, seat-rule bullet | met — no dangling reference, M0 table has only J1–J3 |
+
+### Findings
+
+None that change the verdict. Two items are worth recording as confirmed-consistent rather than
+silent, since the task brief asked for them by name:
+
+1. **The forced handover is the one place "player command only" does not hold, and the plan says
+   so itself, in those words, twice.** Lens: whose job / the non-obvious case.
+   - The Risks section states it directly: *"(U5) Forced handovers... This is the only place
+     'player command only' is not met, and it is physical, not a choice."* The reason is
+     structural, not a design shortcut: mode 1 is forward-flight only (Decision 3) and explicitly
+     excludes hover for this first build, so an unpark in a hover or below `MIN_IAS_KMH` leaves
+     nobody to fly the aircraft if Petrovich does not take it. The existing urgent "You have
+     controls!" line (already used for the Lua self-release, row 7) is reused rather than a new
+     string invented for the case.
+   - This is not a gap the plan introduced and failed to notice — it is the plan naming its own
+     exception against the rule it just adopted, with the reason, in the same section a reader
+     would check. Nothing to ask the user; recorded here because the task named it as a thing to
+     verify, not because it was found wanting.
+
+2. **U9's "unable, don't remember" answer is a genuine, disclosed narrowing of the original E6,
+   not a silent one.** Lens: purpose.
+   - E6 (2026-10-31) reads "'I have controls' gives the aircraft back at once, including in an
+     emergency," written before mode 2 (the AI overlay) existed as a destination. U9 answers the
+     overlay-specific case the original E6 could not have anticipated: while parked, the player's
+     stick is physically dead regardless of Petrobrain (DCS itself ignores `LoSetCommand` while
+     parked, per probe v2), so "at once" cannot mean "flying resumes this instant" there — it can
+     only mean "answered this instant," which is what "Unable, AI overlay." does. The player's
+     actual escape (unpark, then "I have controls") is two deliberate steps, both disclosed in the
+     test card (Flight M-A step 11) and in `BL-16.md`. This is the user's own explicit answer
+     against two offered options, not an assumption the plan filled in, so it is not re-litigated
+     here — recorded so a later reader does not mistake the narrowing for an oversight.
+
+### Questions for the user
+
+None. U5–U10 and the seat rule are all answered on the record; nothing in this amendment opens a
+new question the main loop would need to carry to the user.
