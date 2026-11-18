@@ -24,7 +24,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NoReturn
 
 from belief.crew_console import CrewConsole
 from belief.speech import render_unable
@@ -219,12 +219,12 @@ def _make_action_wrapper(
     `nil`) is filled with `None` after the loop."""
     required = sum(0 if param.optional else 1 for param in action.params)
 
-    def reject(why: str) -> Any:
+    def reject(why: str) -> NoReturn:
         raise RuleRuntimeError(f"bad call to {action.name}(): {why}")
 
     def wrapper(*lua_args: object) -> Any:
         if not required <= len(lua_args) <= len(action.params):
-            return reject(
+            reject(
                 f"takes {required}..{len(action.params)} argument(s), "
                 f"got {len(lua_args)}"
             )
@@ -235,11 +235,11 @@ def _make_action_wrapper(
                 continue
             if param.kind == "str":
                 if not isinstance(value, str):
-                    return reject(f"{param.name} must be a string, got {value!r}")
+                    reject(f"{param.name} must be a string, got {value!r}")
                 args[param.name] = value
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                return reject(f"{param.name} must be a number, got {value!r}")
+                reject(f"{param.name} must be a number, got {value!r}")
             if isinstance(value, float) and not math.isfinite(value):
                 # A rule's own arithmetic can produce `nan`/`inf` (e.g. a
                 # division by a slot-derived zero) with no stdlib needed --
@@ -248,10 +248,10 @@ def _make_action_wrapper(
                 # this wrapper uncaught (security Required Fix 1,
                 # `plans/speech-rules/security-stage0-2.md`). Reject the
                 # same way as any other out-of-contract value.
-                return reject(f"{param.name} must be finite, got {value!r}")
+                reject(f"{param.name} must be finite, got {value!r}")
             int_value = int(value)
             if int_value != value or not (param.lo <= int_value <= param.hi):
-                return reject(
+                reject(
                     f"{param.name} must be a whole number in "
                     f"{param.lo}..{param.hi}, got {value!r}"
                 )

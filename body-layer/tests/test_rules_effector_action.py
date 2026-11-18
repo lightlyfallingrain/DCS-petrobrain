@@ -659,6 +659,54 @@ def test_a_successful_dispatchs_write_commits_to_the_shared_list(
     ]
 
 
+def test_a_write_before_a_failed_action_still_commits(tmp_path: Path) -> None:
+    """User, 2026-11-18: a failed action ends the handler with "unable",
+    and nothing it already did is undone. `run_rule` reports that as a
+    non-error outcome, so `_dispatch_rule` commits the buffered write
+    rather than discarding it as it does on a Lua error (the test above
+    this one's error twin). Pins that two-file interaction through the
+    real `handle_command`/`_dispatch_rule` path."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("probe_write_then_unable", "x", "always", function(s)\n'
+        '  say("Observ on.")\n'
+        '  effector.write("observ", "on")\n'
+        '  effector.write("no_such_effector", "on")\n'
+        '  say("never")\n'
+        "end)\n",
+        encoding="utf-8",
+    )
+    console = CrewConsole(store=ContactStore())
+    sandbox = RuleSandbox()
+
+    def request_effector_write(
+        name: str, value: str, says: str | None
+    ) -> dict[str, object]:
+        if name != "observ":
+            return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
+        console.queue_effector_write("req-1", name, value, says)
+        return {"ok": True, "reason": None}
+
+    ctx = ActionContext(console=console, request_effector_write=request_effector_write)
+    rule_set = RuleSet.load(tmp_path, sandbox, ACTION_NAMESPACES, ctx)
+    assert rule_set.failures == ()
+
+    def rule_runner(
+        token: str, slots: dict[str, int | str] | None
+    ) -> tuple[list[str], bool]:
+        outcome = run_rule(rule_set, token, slots, sandbox)
+        return outcome.lines, outcome.error
+
+    console.rule_runner = rule_runner
+    console.set_enabled_rule_ids(frozenset({"probe_write_then_unable"}))
+
+    lines = console.handle_command("probe_write_then_unable", 0.0)
+
+    assert lines == ["Observ on.", "Unable."]
+    assert [(w.effector, w.value) for w in console.pending_effector_writes] == [
+        ("observ", "on")
+    ]
+
+
 # --- `queue_effector_write`: the one appender, and the one construction site ---
 #
 # `body.py`'s real `_request_effector_write` closure is nested inside `main()`,
