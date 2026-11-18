@@ -122,7 +122,8 @@ def test_an_unregistered_category_degrades_to_unable_no_such_command() -> None:
 
 def test_registry_has_exactly_the_categories_this_batch_declares() -> None:
     """A closed registry -- a later stage adds an entry here deliberately,
-    never by accident."""
+    never by accident. BL-16 mode 1 Stage M1 (Decision 22) adds
+    `flight_handover`, the two handover rules' own category."""
     assert set(GATE_REGISTRY) == {
         "always",
         "flight_control",
@@ -130,4 +131,5 @@ def test_registry_has_exactly_the_categories_this_batch_declares() -> None:
         "flight_control_speed",
         "flight_control_altitude",
         "flight_control_any",
+        "flight_handover",
     }

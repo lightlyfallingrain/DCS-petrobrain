@@ -608,6 +608,15 @@ class FakeConsoleAircraftClient:
         #: latest` call, so a test can assert the per-poll GET only fires
         #: while `config_error_pending` is actually set.
         self.spu8_state_requests = 0
+        #: BL-16 mode 1 Stage M1 -- `None` (the default) means no `GET /
+        #: flight_control/latest` sample has arrived yet, same "not an
+        #: error" posture as `ai_pilot_wheel_state` above.
+        self.flight_control_state: dict[str, Any] | None = None
+        #: Stage M1 -- every `write_flight_control` call this fake has
+        #: recorded, oldest first, same shape as `sight_target_writes`.
+        self.flight_control_writes: list[
+            tuple[int, str, dict[str, float], dict[str, object] | None]
+        ] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -718,6 +727,18 @@ class FakeConsoleAircraftClient:
 
     def get_ai_pilot_wheel_latest(self) -> dict[str, Any] | None:
         return self.ai_pilot_wheel_state
+
+    def get_flight_control_latest(self) -> dict[str, Any] | None:
+        return self.flight_control_state
+
+    def write_flight_control(
+        self,
+        seq: int,
+        cmd: str,
+        limits: dict[str, float],
+        goal: dict[str, object] | None,
+    ) -> None:
+        self.flight_control_writes.append((seq, cmd, limits, goal))
 
 
 #: A frozen copy of `config/sequences/` (one `mi-24p/` subdirectory),
@@ -4566,7 +4587,7 @@ def test_crew_text_poll_loop_survives_a_raising_poll_and_keeps_going(
     # poll-count spin loop is exactly the shape that goes flaky under load.
     recovered = threading.Event()
 
-    def flaky_run_once() -> None:
+    def flaky_run_once(flying: bool = False) -> None:
         calls.append(len(calls))
         if len(calls) == 1:
             raise RuntimeError("simulated dispatch failure inside the poll body")
@@ -4886,7 +4907,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
         phase=OpticPhase.GLASSING, phase_started_sim=0.0, guidance_optic=None
     )
     runner.attack_run_state = AttackRunState()
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
 
     captured: dict[str, object] = {}
     done = threading.Event()
@@ -4970,7 +4991,7 @@ def _run_one_atgm_poll(
     monkeypatch: pytest.MonkeyPatch,
     done: threading.Event,
 ) -> None:
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
     stop_event = threading.Event()
     poll_thread = threading.Thread(
         target=_run_crew_text_poll_loop,
@@ -5187,7 +5208,7 @@ def _drive_where_is_it_spy(
     conn = open_for_build(db_path)
     conn.close()
 
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
     calls: list[object] = []
     done = threading.Event()
 
@@ -5334,7 +5355,7 @@ def test_crew_text_poll_loop_resets_belief_on_mission_restart(
     )
     assert runner.tasks.tasks  # pre-condition: not already empty
 
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -5808,7 +5829,7 @@ def test_crew_text_poll_loop_warns_on_the_live_los_coverage_gap_once(
     calls: list[int] = []
     second_poll_done = threading.Event()
 
-    def counting_run_once() -> list[Observation]:
+    def counting_run_once(flying: bool = False) -> list[Observation]:
         result = real_run_once()
         calls.append(len(calls))
         if len(calls) >= 2:

@@ -100,8 +100,9 @@ MIN_IAS_KMH: Final[float] = tuning.real(
 #: 2's own Q5 ceiling (280 km/h), reused as a judgement call the same way
 #: `belief.ai_pilot_wheel.AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M`'s docstring
 #: already reuses a mode-2 figure elsewhere. Declared fresh here (not
-#: imported from a mode-2 module) per the plan's own instruction quoted
-#: on `FLOOR_AGL_M` above.
+#: imported from a mode-2 module) since that module never declared it
+#: either (the plan's own "P4 is unbuilt... mode 1 declares its own
+#: constants with those defaults" instruction).
 MAX_IAS_KMH: Final[float] = tuning.real(
     "belief.flight_control.MAX_IAS_KMH",
     280.0,
