@@ -78,17 +78,19 @@ local ARG_STICK_PARK = 852
 local ARG_PEDALS_PARK = 952
 local AI_PILOT_PARK_THRESHOLD = 0.9   -- production's value
 
--- Collective: NOT 2004 (flight 5: 2004 left arg 1102 untouched). The Mi-24P
--- binds "Flight Control Collective" to `iCommandPlaneCollective` (both seats'
--- Input/*/joystick/default.lua), whose number is not in any shipped Lua file.
--- LuaExportStart reads it from the global if Export.lua's environment has it;
--- otherwise collective writes are refused (nil), never guessed.
-local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = nil }
+-- Collective is 2087, NOT 2004. The user's own Mi-24P binding file
+-- (Saved Games\DCS\Config\Input\Mi-24P_pilot\joystick\*.diff.lua) keys
+-- "Flight Control Collective" as "a2087cdnil" (iCommandPlaneCollective);
+-- 2004 is "Throttle (Collective)", the engine throttle, which is why flight 5
+-- saw arg 1102 untouched. The global, if Export.lua's environment ever has
+-- it, still overrides at start.
+local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2087 }
 local COLLECTIVE_CMD_NAME = "iCommandPlaneCollective"
 -- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals proven -1
--- (flight 3 B2, 2026-11-18: 2003 = +0.05 held arg 1103 at -0.050 exactly);
--- collective -1 from ED's comment, C2 tests it.
-local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
+-- (flight 3 B2, 2026-11-18: 2003 = +0.05 held arg 1103 at -0.050 exactly).
+-- Collective 2087: UNPROVEN, +1 assumed (ED's "inverted" note was about
+-- 2004). C2's capture-jump check aborts within about 0.1 s if wrong.
+local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = 1.0 }
 
 local B2_STEPS = { 0.0, 0.05, -0.05, 0.10, -0.10, 0.0 }
 local B2_STEP_S = 3.0
@@ -604,7 +606,8 @@ function LuaExportStart()
         CMD.collective = coll
         log(string.format("  collective writes use %s = %d", COLLECTIVE_CMD_NAME, coll))
     else
-        log("  collective command unknown: C2 will refuse to write, D holds no collective")
+        log(string.format("  collective writes use %d (from the user's Mi-24P binding file), SIGN %+.0f unproven",
+            CMD.collective, SIGN.collective))
     end
     header()
     started = true

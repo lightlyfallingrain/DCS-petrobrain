@@ -173,6 +173,21 @@ probe and recorded only A1/A2. Conditions were about 470–550 m AGL and 52–55
   module.
 - **M0-C stays open.** Altitude and speed hold in mode 1 need the collective, and are blocked until
   the right command is found and C2 is re-flown with it.
+- **The right command is 2087.** It was found the same day from the user's own binding file,
+  `Saved Games\DCS\Config\Input\Mi-24P_pilot\joystick\LEFT VPC Rotor TCS PLUS {…}.diff.lua`:
+  - `"a2087cdnil"` is "Flight Control Collective". The Input `default.lua` files of both seats bind
+    that to `iCommandPlaneCollective`.
+  - `"a2004cdnil"` is "Throttle (Collective)", the engine throttle. That explains flight 5.
+  - `"a2001cdnil"`, `"a2002cdnil"` and `"a2003cdnil"` are cyclic pitch, cyclic roll and yaw
+    (pedals), which confirms the other three.
+
+  The number is not in any shipped Lua file. The user's whole-install grep found nothing, and
+  Export.lua's environment has no `iCommand*` globals (the probe logged all six as `nil`). **The
+  binding diff key `a<id>cd…` is how to read an axis command's number** for any module whose axis
+  you have bound.
+
+  The sign of 2087 is not measured yet. The probe assumes +1, and C2's capture-jump check aborts
+  within about 0.1 s if that is wrong.
 
 ### Still owed
 
