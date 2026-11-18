@@ -306,6 +306,58 @@ print(written[2001] == nil)
         assert nothing_written == "true"
 
 
+class TestReleaseClearsHeldGoalsAcrossRetake:
+    def test_release_then_retake_reports_no_held_goal(self) -> None:
+        """review-m1.md Required Fix 1: a held heading/altitude/speed
+        goal from a prior session must not survive into the next take --
+        `current_crew_state`'s HOLD-until-known gates rely on `held_*`
+        reading `None` until a fresh goal is commanded this activation."""
+        driver = """
+pilot_args.pitch = 0.1
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},'
+    .. '"heading_deg":90.0,"alt_m":500.0,"alt_ref":"baro","ias_kmh":150.0}', 0.1)
+flight_control.run_flight_control(0.2)
+flight_control.push_flight_control_state(0.2)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":3,"cmd":"release","limits":{}}', 0.3)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":4,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.4)
+flight_control.run_flight_control(0.4)
+flight_control.push_flight_control_state(0.4)
+print(sent_lines[#sent_lines - 2])
+print(sent_lines[#sent_lines - 1])
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        held_line, released_line, retaken_line = lines[0], lines[1], lines[2]
+        # Before release: the goal is held.
+        assert _field(held_line, "fc_goal_heading") == "90.00000"
+        assert _field(held_line, "fc_goal_altitude") == "500.00000"
+        assert _field(held_line, "fc_goal_altitude_ref") == "baro"
+        assert _field(held_line, "fc_goal_speed") == "150.00000"
+        # After release: every goal field clears, matching `on_stop`.
+        assert _field(released_line, "fc_mode") == "off"
+        assert _field(released_line, "fc_goal_heading") is None
+        assert _field(released_line, "fc_goal_altitude") is None
+        assert _field(released_line, "fc_goal_altitude_ref") is None
+        assert _field(released_line, "fc_goal_speed") is None
+        # After the fresh re-take, with no goal commanded yet: still
+        # None, not the previous session's stale values.
+        assert _field(retaken_line, "fc_mode") == "active"
+        assert _field(retaken_line, "fc_goal_heading") is None
+        assert _field(retaken_line, "fc_goal_altitude") is None
+        assert _field(retaken_line, "fc_goal_altitude_ref") is None
+        assert _field(retaken_line, "fc_goal_speed") is None
+
+
 class TestBadBoundRejectsWholeMessage:
     def test_an_out_of_bounds_limit_rejects_the_whole_message(self) -> None:
         driver = """

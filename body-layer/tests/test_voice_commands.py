@@ -324,3 +324,92 @@ def test_attack_run_destroying_tokens_are_in_the_cancel_set() -> None:
     floor` above already asserts the *behaviour* for every member of
     this set generically; this pins the *membership*)."""
     assert {"drop_target", "disengage"} <= CANCEL_TOKENS
+
+
+def test_i_have_controls_acts_at_every_confidence() -> None:
+    """BL-16 mode 1 Decision 13: `i_have_controls` acts unconditionally --
+    unlike every other token, it never checks `confidence` against any
+    floor and never lands in "confirm"/"say_again", at any confidence
+    from the lowest possible value up to certainty."""
+    for confidence in (0.0, CONFIRM_FLOOR / 2, CONFIRM_FLOOR, 0.99, 1.0):
+        decision = classify_response(
+            token="i_have_controls",
+            match_ratio=1.0,
+            confidence=confidence,
+            verb_anchored=True,
+            ambiguous=False,
+        )
+        assert decision == BandDecision(disposition="act", token="i_have_controls"), (
+            confidence
+        )
+
+
+def test_you_have_controls_acts_from_confirm_floor_up() -> None:
+    """Decision 13: `you_have_controls` acts once `confidence >=
+    CONFIRM_FLOOR` -- unlike an ordinary token, it never has a "confirm"
+    band of its own (there is no floor above `CONFIRM_FLOOR` that would
+    route it to "confirm" instead), so everything from the floor up to
+    certainty acts and everything below it says again."""
+    for confidence in (CONFIRM_FLOOR, (CONFIRM_FLOOR + 1.0) / 2, 1.0):
+        decision = classify_response(
+            token="you_have_controls",
+            match_ratio=1.0,
+            confidence=confidence,
+            verb_anchored=True,
+            ambiguous=False,
+        )
+        assert decision == BandDecision(disposition="act", token="you_have_controls"), (
+            confidence
+        )
+
+
+def test_you_have_controls_says_again_below_confirm_floor_never_confirms() -> None:
+    """The floor's other side, and the "never answers confirm?" half of
+    Decision 13: below `CONFIRM_FLOOR`, `you_have_controls` says again --
+    it does not fall into "confirm" the way an ordinary sub-`ACT_FLOOR`
+    token would."""
+    for confidence in (0.0, CONFIRM_FLOOR / 2):
+        decision = classify_response(
+            token="you_have_controls",
+            match_ratio=1.0,
+            confidence=confidence,
+            verb_anchored=True,
+            ambiguous=False,
+        )
+        assert decision == BandDecision(disposition="say_again"), confidence
+
+
+def test_ambiguous_handover_pair_releases_while_flying_at_every_confidence() -> None:
+    """Decision 13's ambiguous-pair branch: when the best candidate is
+    one of `HANDOVER_TOKENS` and the match is ambiguous, `has_controls`
+    (not confidence) decides -- `has_controls=True` always resolves to
+    an `i_have_controls` act (the release), at every confidence, never
+    the ordinary ambiguous-always-confirms behaviour other tokens get."""
+    for confidence in (0.0, 0.5, 1.0):
+        decision = classify_response(
+            token="you_have_controls",
+            match_ratio=1.0,
+            confidence=confidence,
+            verb_anchored=True,
+            ambiguous=True,
+            has_controls=True,
+        )
+        assert decision == BandDecision(disposition="act", token="i_have_controls"), (
+            confidence
+        )
+
+
+def test_ambiguous_handover_pair_says_again_when_not_flying() -> None:
+    """The `has_controls=False` half of the same branch: with nobody
+    flying axes, the ambiguous handover pair says again rather than
+    acting or confirming, at every confidence."""
+    for confidence in (0.0, 0.5, 1.0):
+        decision = classify_response(
+            token="i_have_controls",
+            match_ratio=1.0,
+            confidence=confidence,
+            verb_anchored=True,
+            ambiguous=True,
+            has_controls=False,
+        )
+        assert decision == BandDecision(disposition="say_again"), confidence

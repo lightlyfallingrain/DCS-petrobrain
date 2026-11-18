@@ -441,6 +441,16 @@ local function handle_flight_control_command(data, t)
         fc_captured = {}
         fc_release_reason = "stop"
         fc_refuse_cause = nil
+        -- Clear every held goal, same as `on_stop` -- otherwise a stale
+        -- value from this session survives into the next take and the
+        -- HOLD-until-known gates (`rules/gates.py`) see a non-nil
+        -- "held" value immediately instead of waiting for a fresh one
+        -- (review-m1.md, Required Fix 1).
+        fc_goal_heading_deg = nil
+        fc_goal_turn = nil
+        fc_goal_alt_m = nil
+        fc_goal_alt_ref = nil
+        fc_goal_ias_kmh = nil
         return
     end
     if cmd == "take" then

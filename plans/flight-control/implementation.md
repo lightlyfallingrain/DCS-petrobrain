@@ -1242,3 +1242,78 @@ Two more coordinator corrections arrived after the section above was written, bo
   control_command`'s `"release"` branch already does nothing but stop calling `write_outputs()` —
   it never reads the physical stick or holds a value on purpose, so there was nothing for this
   finding to invalidate. Pitch/roll/pedals' own M0-F measurement is still owed.
+
+---
+
+## Review-fix round, 2026-11-18 (`plans/flight-control/review-m1.md`, NEEDS REVISION)
+
+Both Required Fixes.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — **Required Fix 1**: the `"release"`
+  branch of `handle_flight_control_command` now clears `fc_goal_heading_deg`/`fc_goal_turn`/
+  `fc_goal_alt_m`/`fc_goal_alt_ref`/`fc_goal_ias_kmh`, matching what `on_stop` already does for a
+  mission restart — a stale goal from a prior take no longer survives into the next one.
+- `aircraft-layer/tests/test_flight_control_lua.py` — new `TestReleaseClearsHeldGoalsAcrossRetake`:
+  take, command a heading/altitude/speed goal, release, take again, and check `push_flight_
+  control_state`'s wire line at each step — the goal is held before release, every `fc_goal_*`
+  field reads `null` immediately after release, and still `null` on the fresh re-take before any
+  new goal is commanded.
+- `body-layer/tests/test_voice_commands.py` — **Required Fix 2**: five new tests on
+  `classify_response`'s `HANDOVER_TOKENS` branch (Decision 13), named directly after the plan's own
+  "at every confidence" wording: `i_have_controls` acts at every confidence from `0.0` to `1.0`;
+  `you_have_controls` acts from `CONFIRM_FLOOR` up; `you_have_controls` says again (never confirms)
+  below the floor; the ambiguous handover pair resolves on `has_controls` alone, at every
+  confidence, both the `has_controls=True` (acts `i_have_controls`) and `has_controls=False`
+  (says again) directions.
+
+### Checked, no code change needed
+
+- **The body-layer side of Required Fix 1's leak.** `FlightControlState.held_heading`/`held_
+  altitude`/`held_altitude_ref`/`held_speed` are not an independent cache — `advance_flight_
+  control_state` replaces them wholesale from the latest wire sample every poll
+  (`replace(state, held_heading=_as_optional_float(sample.get("fc_goal_heading")), ...)`, no
+  previous-state carry-through for these four fields), and `CrewConsole.flight_control_state`
+  holds no separate copy either (confirmed by reading both — `crew_console.py`'s own field is
+  populated from `advance_flight_control_state`'s return value, nothing else writes it). So once
+  Lua's `fc_goal_*` clears on release, the mirror clears on the very next poll with no second fix
+  needed on this side — the leak was Lua-only, and the review's own "check the body-layer side"
+  came back negative.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p` on `flight_control.lua`/`ai_pilot_wheel.lua`/`commands.lua`/`Export.lua`: pass.
+- `GETGLOBAL` audit (`luac5.1 -l -p flight_control.lua | grep GETGLOBAL`, the only touched `.lua`
+  file this round): every name stdlib, a genuine DCS API, or a cross-module global already named
+  in the module's own docstring — nothing new.
+- `ruff format --check src tests`: pass (84 files). `ruff check src tests`: pass.
+- `mypy src`: pass, no issues (28 source files).
+- `pytest tests -q` (full subproject suite): **933 passed** (932 + the new
+  `TestReleaseClearsHeldGoalsAcrossRetake` test).
+
+**body-layer/**
+- `ruff format --check src tools tests`: pass (241 files; `ruff format` auto-wrapped one new test's
+  long signature on the first run, re-checked clean, and the function was renamed shorter rather
+  than left with the wrapped `-> (\n    None\n)` shape).
+- `ruff check src tools tests`: pass.
+- `mypy src`: pass, no issues (92 source files).
+- `pytest tests/test_voice_commands.py -q -v`: **29 passed** (24 + 5 new, confirmed by name in
+  unfiltered `-v` output).
+- `pytest tests/test_flight_control.py tests/test_body_flight_control.py tests/
+  test_rules_flight_actions.py -q`: **97 passed** (the modules review-m1.md's Required Fixes
+  touch most directly).
+- `pytest tests -q -n auto -m "not slow"` (full subproject suite, parallel): **3586 passed, 4
+  xfailed** (3581 + 5 new; the 4 xfailed are pre-existing, unrelated).
+
+A counterfactual was run on Required Fix 1's own new test before trusting it: reverted the
+`"release"` branch's new five-line clear, re-ran `TestReleaseClearsHeldGoalsAcrossRetake` alone,
+confirmed it failed for the stated reason (`fc_goal_heading` read back `"90.00000"` instead of
+`None` immediately after release), restored the fix, confirmed the file's `sha256` matched the
+pre-mutation value exactly before re-running the full suites above.
+
+### Notable Discoveries
+
+- None beyond the "checked, no code change needed" item above — this round is a narrow fix plus
+  the two named tests, no scope beyond review-m1.md's Required Fixes.
