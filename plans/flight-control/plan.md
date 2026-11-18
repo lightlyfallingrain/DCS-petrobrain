@@ -2358,7 +2358,6 @@ stateDiagram-v2
   M1 --> PLAYER: "I have controls" (acts at once)
   M1 --> PLAYER: forced - envelope, NaN, dead: urgent "You have controls!"
   OVL --> PLAYER: unpark when mode 1 cannot take - urgent "You have controls!"
-  OVL --> PLAYER: unpark after "I have controls" in overlay - U9 option B only, silent
 ```
 
 **What counts as the player's command, per state.** No cockpit press is ever "the player takes
@@ -2368,12 +2367,14 @@ control" any more. Every press of Request Aircraft Control is a mode switch.
 |---|---|---|---|
 | player flies, unparked | mode-1 take (Decision 22) | silent no-op | park: Petrovich flies through the overlay (2026-11-17 answer), silent |
 | Petrovich, mode 1 | silent no-op (already his) | **release, at once** (Decision 13) | park: overlay, he keeps the controls (U5), silent |
-| Petrovich, overlay | silent no-op (Q7) | **U9** (A: silent no-op; B: silent, takes effect at the unpark) | unpark: mode 1, he keeps the controls (U5), silent |
+| Petrovich, overlay | silent no-op (Q7) | **"Unable, AI overlay." (U9, answered 2026-11-18); nothing remembered** | unpark: mode 1, he keeps the controls (U5), silent, unaffected by a prior "I have controls" |
 
 So the tension the brief named dissolves: a park from "player flies" and a park while he flies in
 mode 1 both end in the same state, Petrovich flying through the overlay. They differ only in
-whether he already had the controls, and neither speaks. **The one thing the words do not settle is
-"I have controls" said in the overlay**, which is U9.
+whether he already had the controls, and neither speaks. **"I have controls" said in the overlay is
+now settled (U9, answered 2026-11-18): it answers "Unable, AI overlay." and changes nothing — the
+next unpark still hands the controls to mode 1 per Decision 24, and the player handles getting them
+back with "I have controls" at that point.**
 
 **Forced handovers, which the user's "player command only" cannot avoid.** Two physical facts make
 some transitions to the player involuntary:
@@ -2428,7 +2429,7 @@ settled point 3. So:
   unpark-take enable flag), because body-layer is a second away. A refusal leaves Lua `off` with
   `fc_release_reason=refused` and `fc_refuse_cause`, and body-layer speaks the forced-handover line.
 - **`release` disarms.** Mission restart, `LuaExportStop` and ownship death reset `armed` to `off`.
-- **The arm needs a lease (U10).**
+- **The arm needs a lease (U10, answered 2026-11-18: approved as recommended).**
 
 #### Decision 25 — mode 1 is never gated on seat
 
@@ -2586,12 +2587,19 @@ Two new actions:
   - If the ack times out or Lua refuses, the drain speaks "Unable, not ready." (existing reason).
 - **`flight.release_controls()`**
   - In `TAKING` or `ACTIVE`: sends `release` that poll and returns `acted=true`.
-  - In `OVERLAY` (amended 2026-11-18, U9): under option A, `acted=false` and nothing else. Under
-    option B, it clears `unpark_take` and sends `release` (Lua disarms), still `acted=false`, so
-    nothing is spoken (Q7's "say nothing"); the player then gets the controls at the unpark.
+  - In `OVERLAY` (**U9, answered 2026-11-18**: *"respond 'unable' when in AI overlay mode. Don't
+    remember, Player will handle."*): raises unable, reason `AI_OVERLAY` — the same closed reason
+    `turn_continuous` uses in overlay mode (Decision 21), rendering "Unable, AI overlay." This
+    reaches the player through the same path as every other refusal in this series: the action
+    raises `RuleUnable`, `run_rule` catches it and speaks `unable(reason)` (Decision 22's failure
+    shape, the shape merged on main 2026-11-18, `85272e9d`). Nothing is remembered — `unpark_take`
+    and Lua's `armed` state are untouched — so the next unpark still takes per Decision 24, and the
+    player gets the controls back by saying "I have controls" again once unparked. **This supersedes
+    the 2026-11-17 Q7 "silent no-op" for "I have controls" in the overlay only.**
   - Otherwise: `acted=false`, silent; the player already has the controls.
-- **`flight.take_controls` in `OVERLAY`** stays the silent no-op above. Under U9 option B it also
-  re-arms (`unpark_take` true, `arm` sent), still silently.
+- **`flight.take_controls` in `OVERLAY`** stays the silent no-op above (the 2026-11-17 Q7 answer,
+  "'you have controls' is no-op, say nothing"). U9 does not touch it — there is no re-arming, no
+  bool to flip, and this remains silent.
 
 ```lua
 when.speech("you_have_controls", "you have controls", "flight_handover", function(s)
@@ -2987,8 +2995,8 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
    stick still ignored); then "I have controls".
 9. Park from "player flies", unpark: he keeps flying in mode 1; then "I have controls".
 10. Park, then unpark below 80 km/h (hover): urgent "You have controls!".
-11. U9's case: in the overlay say "I have controls", then unpark (option A: he keeps flying; option
-    B: you fly).
+11. U9's case: in the overlay say "I have controls" — "Unable, AI overlay."; then unpark — he keeps
+    flying in mode 1 (Decision 24, unaffected); then "I have controls" takes it back.
 12. Pause.
 
 **Pass** is judged on the trace: smooth, into the band, no ringing, the stick ignored, and every line
@@ -3062,8 +3070,8 @@ externally (voice, park, seat) and some internally (Lua envelope, body-layer ref
 | 8b | `fc.phase`, `unpark_take`; Lua `fc_mode` | external (park) | park while `PILOT` (the 2026-11-17 handover; **new**) | Body: `OVERLAY`, `unpark_take` true, `arm` sent that poll; nothing spoken. Lua: `off` → `armed` on the `arm` |
 | 9 | Lua `fc_mode`, capture, shapers; `fc.phase`; mode-2 goal | external (unpark: `parked_active` falls, including a seat swap operator → pilot) | unpark while Lua `armed`, lease fresh, preconditions met (**REVISED 2026-11-18, U5**; was: still `PILOT`) | Lua: takes **in that frame**, capture from the pilot set (M0-J), row 13's rules; `fc_mode=active`, `fc_take_origin=unpark`. Body: `OVERLAY` → `TAKING` → `ACTIVE` from the status, `has_controls` true throughout; nothing spoken; mode-2 goal dropped (E-P10's mechanism, unchanged) |
 | 9a | Lua `fc_mode`; `fc.phase` | external (unpark) / internal (Lua checks) | unpark while `armed` but IAS < min, on ground, NaN, `UNPARK_TAKE_ENABLED` off, or lease stale | Lua: `off`, `refused` with `fc_refuse_cause`, nothing written. Body: `PILOT`; urgent "You have controls!" once (a forced handover, Decision 24) — except cause `lease`, where body-layer is the thing that is gone |
-| 9b | `fc.phase` | external (unpark) | unpark while not armed (U9 option B after "I have controls", or Lua never got an `arm`) | Lua: `off`, nothing written. Body: `PILOT`; nothing spoken (today's E-P10 unpark) |
-| 9c | `unpark_take`; Lua `fc_mode` | external (voice) | "I have controls" in `OVERLAY` (**U9**) | A: nothing changes. B: `unpark_take` false, `release` sent (Lua `armed` → `off`), nothing spoken; "you have controls" in `OVERLAY` reverses it, silently |
+| 9b | `fc.phase` | external (unpark) | unpark while not armed (Lua never got an `arm` — a race in row 8b; **U9's branch no longer reaches this row**, see 9c) | Lua: `off`, nothing written. Body: `PILOT`; nothing spoken (today's E-P10 unpark) |
+| 9c | — | external (voice) | "I have controls" in `OVERLAY` (**U9, answered 2026-11-18**: *"unable", don't remember*) | unchanged: raises unable `AI_OVERLAY` ("Unable, AI overlay."), caught by `run_rule` (Decision 22's shape, `85272e9d`); `unpark_take` and Lua `fc_mode` untouched; the next unpark still takes, exactly as row 9 |
 | 10 | `fc.phase`, Lua `fc_mode`, goals, shapers | external (player) | seat swap while unparked and `ACTIVE` | all **unchanged**; writes continue (Decision 17; `LoSetCommand` is global; M0-I checks there is no jump) |
 | 11 | `ai_pilot_goal_transition`, `ai_pilot_level_flight_transition`, `ai_pilot_hvrt_transition`; `flight_control_transition` | internal (actions) / external (park, unpark) | any `flight.*` action while `flight_mode() == "axes"`; **and (REVISED 2026-11-18) any park or unpark** | the three `ai_pilot_*` remain `None` in axes mode. **Today they persist while unparked:** `body._apply_ai_pilot_wheel_goal` returns before clearing them. Under U5 an overlay command spoken just before an unpark is now a realistic way to strand one, to fire on the next park. **Fix, in M1:** the unparked branch clears all three; `_apply_flight_control` clears `flight_control_transition` while parked. Tests: both directions (M1 tests). |
 | 12 | goal, `goal_seq`; Lua targets | external (voice) | a new goal | `goal_seq`+1; sent that poll; Lua applies it only if seq > last; **shaper states unchanged**, only the targets move |
@@ -3258,10 +3266,13 @@ not flying. Just so that it does not get gated on which seat Petrovich is on."*
 
 - **U5 → Decision 24** (the recommendation below was **not** taken). **U6 → built in M1**, both
   modes. **U7 → accepted as recommended**, plus M0-J in sortie 1. **U8 → accepted as recommended.**
-  **Seat rule → Decision 25.** All five are owed in M1/M2's `implementation.md`. U9 and U10 below
-  are open.
+  **Seat rule → Decision 25.** All seven are owed in M1/M2's `implementation.md`.
 
-- **U9 (new, from U5): "I have controls" said while he flies through the overlay.**
+- **U9 (new, from U5): "I have controls" said while he flies through the overlay.** **ANSWERED
+  2026-11-18, against both options below:** *"respond 'unable' when in AI overlay mode. Don't
+  remember, Player will handle."* — see the `flight.release_controls()` `OVERLAY` branch above and
+  Co-moving row 9c. It supersedes the 2026-11-17 Q7 "silent no-op" for "I have controls" in the
+  overlay only; "you have controls" in the overlay stays silent under Q7, untouched.
   - **The conflict:** Q7 (2026-11-17) made it a silent no-op because the overlay toggle gave the
     stick back. U5 took that away: an unpark now leaves him flying in mode 1. So under Q7 as it
     stands, a player who says "I have controls" in the overlay hears nothing, unparks, and finds the
@@ -3269,11 +3280,16 @@ not flying. Just so that it does not get gated on which seat Petrovich is on."*
   - **Recommendation: B.** It stays silent when said (Q7's "say nothing"), but it is remembered: he
     keeps flying through the overlay, which is all he can do, and at the unpark he does not take,
     so the player flies. "You have controls" in the overlay reverses it, also silently.
-  - **Why:** "Transition to player control on player command only" — this is the player's command,
-    and B is the only way it is not lost. It costs one bool and one Co-moving row (9c).
+  - **Why (not taken):** "Transition to player control on player command only" — this is the
+    player's command, and B is the only way it is not lost. It costs one bool and one Co-moving row
+    (9c). The user's answer instead has the player handle the unpark explicitly, with an audible
+    "unable" rather than a silently remembered state.
   - **The alternative, A:** keep Q7 literally. The way back from the overlay is always unpark, then
     "I have controls".
-- **U10 (new, from U5 with Decision 2): a lease on the unpark take.**
+- **U10 (new, from U5 with Decision 2): a lease on the unpark take.** **ANSWERED 2026-11-18:
+  approved.** The recommendation stands as designed — `ARM_LEASE_S` = 3 s (the Behaviour constants
+  table), body-layer re-sends `arm` every poll while armed, and there is no watchdog on an active
+  mode 1 (Decision 2 stands).
   - **Recommendation:** yes. Lua takes at an unpark only if body-layer has re-sent `arm` within
     `ARM_LEASE_S` (3 s); otherwise the unpark gives the player the stick, as today.
   - **Why:** Decision 2 (no watchdog) relied, without saying so, on park-then-unpark as the escape
