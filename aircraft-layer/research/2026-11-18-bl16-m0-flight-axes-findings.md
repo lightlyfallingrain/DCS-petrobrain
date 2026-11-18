@@ -115,15 +115,40 @@ under a second each. C1 was started but the log ends before it ends.
   is the mirror of the pedals' own position. The probe's own B2 verdict ("worst 0.200, D holds
   pedals: false") is an artefact of the same wrong sign guess (+1), not a failure. `SIGN.pedals`
   is now −1 in the probe.
-- **The pedal follows the command with a lag, with the damper on.** After a step it reaches 87%
-  (0.05 step) or 73% (0.10 step) in 0.5 s and is settled within about 1.0 s. The fraction reached
-  depends on step size, so it is rate-limited rather than a pure first-order lag. Damper OFF is
-  not measured yet. M2's pedal loop must allow for about 1 s to settle.
+- **The pedal follows the command with a lag of about 1 s.** See flight 4 for the measured
+  shape. *Corrected 2026-11-18:* this bullet first said "rate-limited" (87% vs 73% at 0.5 s). Those
+  samples were on a 0.5 s grid that was not aligned to the step times. Measured from each step,
+  the fraction is the same for every step size, so the lag is first-order.
 - Yaw response on the ground is small (≤ 0.15°/s per 0.1 of pedal), as expected with the wheels
   down. The airborne yaw response is still owed (M0-E).
+
+## Flight 4: B1 and B2, on the ground, adjustable stops OFF, pedal damper OFF
+
+User, 2026-11-18: *"B with damper off and adjustable steps off"*. The run started 14:33:23. The
+uploaded log is cumulative (DCS appends), so it also holds flights 3 and 3a. The deployed probe
+still had `SIGN.pedals = +1`, so its own "worst 0.200" verdict is the same sign artefact as before.
+B1 again covers −1..+1.
+
+**Pedal arg response to a 2003 step**, as the fraction of the step reached, measured from the frame
+the command changed:
+
+| after | damper ON (flight 3) | damper OFF (flight 4) |
+|---|---|---|
+| 0.1 s | 32–40% | 42–49% |
+| 0.2 s | 53–60% | 60–63% |
+| 0.3 s | 70–73% | 73–77% |
+| 0.5 s | 85–89% | 88–91% |
+| 1.0 s | 98–99% | 98–99% |
+
+- **The lag is first-order**, with τ ≈ 0.25 s with the damper on and ≈ 0.2 s with it off. The
+  fraction reached is the same for 0.05, 0.10, 0.15 and 0.20 steps, so it is not rate-limited.
+  The damper makes only a small difference.
+- **The adjustable stops did not limit the write.** The ±0.10 commands were reached with the stops
+  on and with them off; the arg span itself, −1..+1, was swept in both.
+- Sign −1 and scale 1 are confirmed a second time.
 
 ### Still owed
 
 - The HSI headings (A1, A2, A4).
-- B2 airborne, with the damper off for comparison.
+- The airborne yaw response to a pedal step (M0-E).
 - B, C and D in both seats, and J1–J3.
