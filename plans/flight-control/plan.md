@@ -3370,3 +3370,415 @@ not flying. Just so that it does not get gated on which seat Petrovich is on."*
     acts.
   - **The alternative** is to act at any confidence, like "I have controls". Only choose that if you
     meant A3 to cover both directions equally.
+
+## Revised 2026-11-18 — Stages P3+P4 ready to build
+
+Architect pass on `feature/bl16-p3p4-cbtm` (tip `9b70f2e1`), built from the goal check
+(`plans/flight-control/alignment.md`, "Goal check — 2026-11-18 (mode 2, Stages P3 + P4)",
+CONCERNS — both settled below) and the user's own answers across three rounds of
+`explore-notes.md` ("Stage P3 explore", "Follow-up", "Answers to the goal check's concerns and
+Q-P3-0..6", and the mid-task amendment on recovery order). **This section supersedes the
+original Stage P3/P4 text above (`## Revised 2026-11-15`, "Stage P3"/"Stage P4") wherever they
+disagree** — that text is marked superseded in place below, not deleted, per `docs/PROCESS.md`'s
+"Superseding a decision." It also adds one thing the user asked for in the same batch that is
+**not** CBTM: "break turn left/right" in mode 1 (raw axes), a tight 90° turn — unrelated to
+align/recovery mechanically, bundled here because the user asked for both together.
+
+### Why this batch is one build, not two
+
+Restated from the goal check: a missile run from the operator seat should take only the player's
+voice and the sight. "Align for launch" without the recovery that follows it is not a usable
+feature — ED's own `ALIGN FOR LAUNCH` dives into the ground once engaged, with or without a
+missile fired, so shipping P3 without P4 would let a player kill himself with a voice command that
+reads back as safe ("Aligning for launch."). The user agreed P3+P4 must land together (Stage P3
+explore, answer 1).
+
+### What changed since the goal check, and why
+
+**F-P6 — a command spoken during an alignment must never be read back and then silently
+withheld.** The original plan's Co-moving row for `goal` held a voice goal unissued whenever
+`align_phase != "none"`, with no exit transition for plain `"aligning"` at all. The user's answer
+4 (Stage P3 explore) settles the exit: a plain "align" is held until the player "commands
+something else" — any heading/altitude/speed command ends it. Combined with answer F-P6 (2026-11-18,
+Q&A round) — "yes, any new flight command ends align" — and Q6 (2026-11-18) — "altitude 200" during
+`launch_aligned` aborts and the **spoken value replaces that parameter's own restore target**, not
+the pre-align snapshot's. So: **every voice heading/altitude/speed command always ends whichever
+`align_phase` is running and is always flown**, never queued behind it. This closes F-P6 for both
+`"aligning"` and `"launch_aligned"`.
+
+**F-P7 — a break must never be cut short or undone by a goal that was already running.** The
+original plan had no break rows in the Co-moving table at all. The user's answer (2026-11-18,
+F-P7: "yes, as proposed") confirms: a break supersedes any outstanding heading goal and any
+alignment, the same way a fresh heading goal already supersedes an older one (E-P4, "latest
+wins"). Concretely: `cbtm_break`/`cbtm_break_away` **clear** `pending_order`/`active_param` for
+the `heading` parameter (dropping an outstanding heading goal outright, not queuing it for after
+the break — there is nothing to resume to) and end `align_phase` outright (Q1: "hold what break
+leaves... no restore after a break").
+
+**F-P8 — the abort word moved.** The original vocabulary table (line ~112, superseded below)
+named a `level_off` token with the words "straight"/"level off" as the spoken abort gated on
+`align_phase`. On the tip, `level_off`'s own rule pattern is "stop turn" and "straight" was
+dropped from the vocabulary entirely (`body-layer/config/rules/flight.lua`, `level_off`/
+`level_flight` rules as they now exist). The user's 2026-11-18 answer (Stage P3 explore, answer
+2) moves the abort onto **`level_flight`'s own rule gaining a second spoken form, "level off"** —
+not a second meaning on `level_off`. So: `level_off` ("stop turn") is never an abort, in any
+`align_phase`; `level_flight`'s two forms ("level flight" / "level off") are the abort whenever
+`align_phase != "none"`, and today's freeze/stabilise behaviour otherwise (confirmed, Follow-up:
+"it is a command to fly straight and level, regardless of when it was called" for "level off"
+with no alignment running).
+
+**F-P9 / Q-P3-2 — the AGL floor, answered.** "Do align, but make the floor a drop below the
+starting height" (user). So `AI_PILOT_RECOVER_AGL_FLOOR_M` is **not** an absolute AGL gate during
+`launch_aligned` — it is relative to the AGL recorded in `pre_align_snapshot` at the moment
+`cbtm_align_for_launch` was spoken. A shot started at 30 m AGL is legal; recovery fires when the
+aircraft has dropped `AI_PILOT_RECOVER_AGL_DROP_M` below *that* starting height, not when it
+crosses the global 40 m figure. The IAS ceiling stays absolute (280 km/h, Q5) — there is no
+"starting IAS" to measure a drop against, and an overspeed is an overspeed regardless of where the
+dive started.
+
+### Mid-task amendment — recovery order is command (press) order, not settle order
+
+**Decision 26 (user, 2026-11-18, verbatim):** *"do not wait for the aircraft to reach set params
+before setting the next one. This order is about what is commanded first via overlay, so that
+altitude recovery starts first, but heading change can happen while climbing."* Speed still steps
+back one step at a time (2026-11-15).
+
+This corrects a reading risk in the original Stage P4 text (and in Q7/Q8 as first summarised):
+"wait for `settled_param` before promoting the next parameter" could be misread as "wait for the
+*aircraft* to physically reach the target" — it never meant that. `settled_param` (Lua's
+`goal_progress == "settled"`) already fires once the **overlay's displayed target value** reaches
+what was commanded (the long-press is released), not once the real-world altitude/speed is
+achieved — the explore notes' own description of the altitude press ("keep pressed until desired
+value reached... alt value does not need to be exact") is about the *displayed* value. Once a
+press is released, DCS's own AI pursues that target on its own, so a later parameter's press can
+be issued immediately after without waiting for the earlier one's real-world progress — the two
+converge concurrently in the real world, by construction, because only the *press*, not the
+*flight*, is serialised.
+
+**What this changes concretely**: recovery's queue is **priority order, not FIFO or fair
+rotation**. `decide_ai_pilot_wheel`'s existing `AI_PILOT_GOAL_SLICE_S` fairness rotation (built for
+arbitrating between unrelated spoken goals, where body-layer has no reason to prefer one) does
+**not** govern recovery — recovery seeds `pending_order` explicitly as `("altitude", "speed")`
+(heading excluded, per Q7, unless a fresh voice heading goal is already outstanding — see below)
+and promotes strictly on `settled_param`, never on the slice timer. A fresh voice heading/altitude/
+speed command arriving mid-recovery (F-P6) is **not** queued behind the recovery's own altitude/
+speed goals either — it ends the alignment/recovery per F-P6 and is flown as the single active
+param from then on, dropping whatever recovery was still restoring (the spoken value *is* the new
+restore target for that parameter, per Q6; the other parameter, if still mid-recovery, keeps
+going — recovery is per-parameter, not an atomic unit).
+
+### `AlignPhase` and `FlightSnapshot` — the typed replacements for the stub fields
+
+`ParkedFlightState.align_phase: str` and `.pre_align_snapshot: Any | None` (both stubs, declared
+in Stage P1, never written) become:
+
+```python
+AlignPhase = Literal["none", "aligning", "launch_aligned", "recovering"]
+
+@dataclass(frozen=True, slots=True)
+class FlightSnapshot:
+    heading_deg: float
+    altitude_m: float
+    altitude_ref: AiPilotAltitudeRef
+    speed_kmh: float
+    agl_m: float  # for the Q-P3-2 relative floor; AGL at the moment of capture, not a goal field
+```
+
+`pre_align_snapshot: FlightSnapshot | None`. Captured from the **current goal if one is
+outstanding, else the current held values** — "a goal already in flight is what's restored"
+(original plan text, kept). `agl_m` comes from the ownship sample at the same poll (`runner.
+last_agl_m` or equivalent — whatever `advance_parked_flight_state`'s caller already has for the
+radar-cap-vs-AGL reasoning elsewhere in this module), not from the AI wheel's own readback, since
+the wheel has no AGL field.
+
+### Launch detection — implemented, reusing only the payload feed
+
+Confirms the original plan's reasoning (F-P3: a role swap, not a variant of `belief/atgm_run.py`,
+never imported) and makes it concrete against the actual client method. `AircraftLayerClient.
+get_payload_latest()` returns `{"stations": {<step>: <count>}, ...}`
+(`aircraft-layer/src/schema/payload.py`). A new field on `ParkedFlightState`,
+`payload_station_counts_last_seen: Mapping[int, int] | None` (mirrored each poll like every other
+read-only field here), feeds a pure helper:
+
+```python
+def payload_count_dropped(previous: Mapping[int, int] | None, current: Mapping[int, int]) -> bool:
+    """Any station's count lower than it was last poll. `previous is None` (first
+    read) is never a drop."""
+```
+
+Called once per poll, only consulted by `decide_ai_pilot_wheel` while `align_phase ==
+"launch_aligned"`. Q-P3-5 (whether anything other than a 9K113 launch can drop a station count
+while parked — AAA damage, the user says, "let's ignore that case for now") stays a named risk,
+not a gate: E-P16 already makes the count drop one of three independent recovery triggers (drop,
+AGL-relative floor, IAS ceiling), so a false-positive drop from damage just starts a recovery the
+floor/ceiling would likely have started moments later anyway, never a false *negative*.
+
+### The CBTM one-shot wire channel
+
+`cbtm_align`/`cbtm_align_for_launch`/`cbtm_break`/`cbtm_break_away` are discrete, run-to-completion
+Lua actions (cycle to CBTM if needed, then one fixed press shape), the same "Lua owns per-frame
+press timing, body-layer owns what Petrovich wants" split the Architecture decision above already
+set for the goal channel — reused, not re-argued. They do **not** fit the existing `AiPilotWheelGoal`
+shape (no target value, no rotation, no "settled" concept — a break either has run or has not).
+**New sibling one-shot fields on the existing `POST /command/ai_pilot_goal` message**, alongside
+`hvrt_direction`/`hvrt_step` (same wire endpoint, not a new one — this is the same "a pending
+one-shot trigger travels with the ordinary goal message" shape `hvrt_step` already uses):
+
+- `cbtm_action: "align" | "align_for_launch" | "break_left" | "break_right" | "break_away" | None`
+- `cbtm_seq: int` — bumped on every new trigger, same "act once per distinct seq" contract
+  `hvrt_step`'s own `goal_seq` bump already has.
+
+`Export.lua`'s `ai_pilot_wheel.lua` gains one more per-frame tick function, `ai_pilot_cbtm_tick`,
+run alongside `ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt` (never concurrently with either — a
+CBTM action and a goal/HVRT press both ultimately drive `AI_WHEEL_*` presses, so `cbtm_action`
+non-`None` pauses the goal/HVRT ticks the same way an outstanding HVRT direction already pauses
+the goal tick, mirroring the existing mutual-exclusion guard rather than inventing a second one).
+It mode-cycles to CBTM (bounded by `MODE_CYCLE_MAX_ATTEMPTS`, same cooldown/retry shape as the
+goal channel's own cycle), then:
+
+- `"align"` — short-up, release.
+- `"align_for_launch"` — long-press-up, held `LONG_PRESS_HOLD_S`, release (a discrete action, not
+  an open hold — matches the original P3 text).
+- `"break_left"`/`"break_right"` — long-press left/right, no hold.
+- `"break_away"` — long-press left, release, wait `BREAK_AWAY_GAP_S`, long-press left again,
+  release.
+
+Reports back `apw_cbtm_status: "idle" | "running" | "done"` and `apw_cbtm_seq` on the 5 Hz status
+line, mirrored into `ParkedFlightState.lua_cbtm_status`/`lua_cbtm_seq` the same way `lua_goal_
+progress`/`lua_goal_seq` already mirror the goal channel's own report. Body-layer's `_apply_ai_
+pilot_wheel_goal` (extended, not forked — one function still owns "what gets sent this poll") sends
+a fresh `cbtm_action`/`cbtm_seq` whenever `crew_console`'s new one-shot field
+(`ai_pilot_cbtm_transition`, same shape as `ai_pilot_hvrt_transition`) is set, exactly like the
+`hvrt_step` branch already does.
+
+### `decide_ai_pilot_wheel` — the align/break/recovery "when," added to the existing function
+
+Still the one "when" apart from the actions (root `CLAUDE.md`). New inputs: `payload_count_
+dropped: bool`, `agl_m: float | None`, `ias_kmh: float | None`, `lua_cbtm_status: str | None`,
+plus the existing `settled_param`/`hvrt_released_timeout`. New logic, run **before** the existing
+goal-rotation logic (a break or a recovery trip pre-empts whatever the rotation would otherwise
+do, consistent with F-P7's "break wins over anything already running"):
+
+1. **A break request, reported `"running"` or freshly sent (`lua_cbtm_status` not yet `"idle"`
+   for this `cbtm_seq`)**: drop the `heading` target/queue entry from `goal` outright (F-P7);
+   if `align_phase != "none"`, set it to `"none"` and clear `pre_align_snapshot` (Q1 — no
+   restore after a break). Nothing is re-promoted into `active_param` for `heading` until a
+   fresh voice command asks for one.
+2. **While `align_phase == "launch_aligned"`**: check, in order, (a) `payload_count_dropped`,
+   (b) `agl_m is not None and pre_align_snapshot is not None and pre_align_snapshot.agl_m - agl_m
+   >= AI_PILOT_RECOVER_AGL_DROP_M` (the Q-P3-2 relative floor), (c) `ias_kmh is not None and
+   ias_kmh >= AI_PILOT_RECOVER_IAS_CEILING_KMH`. Any one true: `align_phase = "recovering"`,
+   speak *"leveling off"* once (a new one-shot speech field, same pattern as every other spoken
+   line this module drains), mode-cycle to FLT, and seed `goal.pending_order = ("altitude",
+   "speed")` with their targets set to `pre_align_snapshot`'s own values (Decision 26's priority
+   order, not the general rotation).
+3. **A spoken abort (`level_flight`'s action, called while `align_phase != "none"`)**: same as
+   step 2's recovery entry, triggered by the action itself rather than a condition checked here —
+   see "Mode-2 action bodies" below.
+4. **Recovery promotion**: once `"recovering"`, promote `altitude` → `speed` strictly on `settled_
+   param` (never the `AI_PILOT_GOAL_SLICE_S` timer — Decision 26). When both have cleared (no
+   target, not active, nothing pending), `align_phase = "none"`, `pre_align_snapshot = None`.
+5. **Everything else is unchanged** — the general rotation (slice-timer fairness) still governs
+   ordinary voice goals when no break/recovery is in play, and a goal spoken during plain
+   `"aligning"`/`"launch_aligned"` still ends that `align_phase` the moment it is spoken (F-P6,
+   action-side — see below), not here.
+
+### Mode-2 action bodies (new, `belief/ai_pilot_wheel.py`)
+
+- `cbtm_align()` / `cbtm_align_for_launch()` — no refusal branch (U1: CBTM is always reachable by
+  left press). `cbtm_align_for_launch` captures `pre_align_snapshot` from the current goal/held
+  values plus the current AGL reading; `cbtm_align` does not (nothing to restore from a plain
+  align, per Q1/the "hold what break leaves" reading extended to plain align too — there is no
+  recovery path for `"aligning"` at all, only an exit to FLT when a goal command ends it).
+- `cbtm_break()` / `cbtm_break_away()` — same no-refusal posture.
+- **Every voice heading/altitude/speed action (`set_parked_heading`/`set_parked_altitude`/
+  `set_parked_speed`, already existing) gains one new line at its top**: if `align_phase !=
+  "none"`, set `align_phase = "none"` and `pre_align_snapshot = None` first (F-P6) — for
+  `launch_aligned` specifically, this *is* the abort (step 3 above), with the spoken value
+  becoming that one parameter's new target rather than the snapshot's (Q6); the other two
+  parameters, if the snapshot had queued a recovery for them already, keep recovering under step
+  4's own logic independently. This is a small, shared precondition, not a duplicated branch —
+  factor it into `request_goal` itself (the one function all three voice actions already route
+  through) rather than each of the three callers.
+- `recover_to_level(reason)` stays internal-only, called from `decide_ai_pilot_wheel` steps 2/3,
+  never reachable from voice (unchanged from the original plan).
+
+### Mode 1 — "break turn left/right" is a tight 90°, on raw axes, unrelated machinery
+
+**Q-P3-3, answered**: *"break in mode 1 is a tight 90 degree turn"* — a real mode-1 behaviour, not
+"unable" (unlike align/align-for-launch, which stay "unable, AI overlay" in mode 1 per E-P20/
+answer 5 — 9K113 is gated behind CPG view, which is gated behind mode 2). This has **no**
+relationship to CBTM, `ParkedFlightState`, or the wire channel above — it is a new `flight.*`
+action pair on the existing mode-1/mode-2 `_by_mode` surface (`rules/actions.py`), reusing mode
+1's own heading-goal/turn-shaper mechanism, the same way `turn_heading_relative` already does.
+
+- **New action `break_turn(sign)`**, `_by_mode`-wrapped:
+  - **overlay (mode 2) body**: `_cbtm_break` → `ctx.console.cbtm_break(direction)` (the new
+    action above).
+  - **axes (mode 1) body**: `_axes_break_turn` → `ctx.console.axes_break_turn(sign)`:
+    `FlightControlGoalRequest(turn_heading=current ± 90, turn_bank_override_deg=BREAK_TURN_
+    BANK_DEG)`, where `current` is `_axes_current_heading()` (held-or-measured, computed once —
+    same posture `increment_heading` already has). The heading channel's own convergence/roll-out
+    logic (unchanged) flies it and levels out at the target, exactly like any other heading goal —
+    no new state machine, because a break is just a heading goal flown at a steeper bank.
+  - **One rule, `cbtm_break`** (not two — "break turn left" and "break turn right" share a pattern
+    the same way `turn_heading_relative` does): `"break turn <direction:left|right>"`, saying
+    "Breaking left."/"Breaking right.".
+  - **`BREAK_AWAY_GAP_S`-shaped "break away" stays mode-2-only** (Q-P3-3 only answered for the
+    single break; a mode-1 180° is not asked for here, and ED's own asymmetric-yaw-authority
+    reasoning behind "turn left twice" does not obviously carry over to a controller that already
+    tracks both directions evenly — flagged as **U11** below rather than assumed either way).
+- **New constant `BREAK_TURN_BANK_DEG`**, default equal to `MAX_BANK_DEG` (30°, the hard envelope
+  limit) — steeper than `MAX_TURN_BANK_DEG` (20°, the ordinary "turn left 30" bank), which is what
+  makes it read as "tight" against an ordinary turn. `turn_bank_override_deg` is a new optional
+  field on `FlightControlGoalRequest`/the wire's `goal` object (not a raw axis value — it is a
+  limit parameter, same category as `max_bank_deg`/`max_turn_bank_deg` already in `limits`); when
+  present, `Export.lua`'s heading shaper (`law_turn_rate_at_bank`) uses it instead of `MAX_TURN_
+  BANK_DEG` for that one goal's convergence, falling back to the ordinary constant once the goal
+  settles (so a later plain "turn left 20" is not left flying at the break's bank).
+- **Readback**: "Breaking left."/"Breaking right." — same wording mode 2's own break uses
+  (E-P21), so the player hears one phrase regardless of which mode he is in.
+
+### Co-moving Fields (extends the Stage P1/P2 table above with align/break/recovery rows)
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `align_phase` | external (voice, `cbtm_align`) | "align" | `"aligning"`; Lua issues `cbtm_action="align"`; `pre_align_snapshot` stays `None` |
+| `align_phase` | external (voice, `cbtm_align_for_launch`) | "align for launch" | `"launch_aligned"`; `pre_align_snapshot` captured (current goal/held values + AGL); Lua issues `cbtm_action="align_for_launch"` |
+| `align_phase` | external (voice, any heading/altitude/speed command) | F-P6 — a new flight goal arrives while `!= "none"` | `"none"` immediately, in the **same** call that applies the new goal (`request_goal`'s own top, not a separate step) — never a tick later, and the new goal is always flown, never queued behind the old alignment |
+| `align_phase` | external (voice, `level_flight`'s two forms) while `!= "none"` | the spoken abort (F-P1/F-P8) | `"recovering"` (if it was `"launch_aligned"`) or `"none"` (if it was `"aligning"` — nothing to recover from); *"leveling off"* spoken only in the recovering case |
+| `align_phase` | external (voice, `cbtm_break`/`cbtm_break_away`) while `!= "none"` | F-P7 — a break always wins | `"none"`; `pre_align_snapshot = None`; no recovery issued (Q1 — hold what the break leaves) |
+| `align_phase` | internal (`decide_ai_pilot_wheel`) | launch detected / AGL-relative floor / IAS ceiling, while `"launch_aligned"` | `"recovering"`; *"leveling off"* spoken once; `goal.pending_order` seeded `("altitude", "speed")` in that order (Decision 26), targets from `pre_align_snapshot` |
+| `align_phase` | internal | both recovery parameters cleared (`settled_param` promotion reaches the end of the queue, never the slice timer) | `"none"`; `pre_align_snapshot = None` |
+| `goal` (`heading` only) | internal (`decide_ai_pilot_wheel`, break branch) | a break fires while a heading target/queue entry exists | the `heading` entry is dropped from `pending_order`/`active_param` outright — not demoted, not queued for resume (F-P7; distinct from the original table's "latest wins" row, which is about a *new* goal replacing an old one, not a goal being discarded with nothing to replace it) |
+| `goal` (`altitude`/`speed`) | internal, during `"recovering"` | a fresh voice command for the *same* parameter arrives (F-P6/Q6) | that parameter's target becomes the spoken value, not `pre_align_snapshot`'s; the *other* recovering parameter is unaffected and keeps promoting under step 4 |
+| `lua_cbtm_status`/`lua_cbtm_seq` | external (Lua, per-frame) | a CBTM action starts/finishes | mirrors `Export.lua`'s own `apw_cbtm_status`/`apw_cbtm_seq`, same read-only-mirror posture as `lua_goal_progress`/`lua_goal_seq` |
+| mode-cycle attempt count (Lua, CBTM tick) | internal (Lua) | `MODE_CYCLE_MAX_ATTEMPTS` exhausted while cycling for a CBTM action | same "not dropped, retried, `mode_blocked` reported" shape the goal channel's own row already has — no second bound invented |
+
+### Superseded in place
+
+- **"Amended 2026-11-15" vocabulary table, row `level_off`**: the `"Straight" / "level off"` row
+  and its note ("one token, two meanings gated by `align_phase`") are **superseded** by this
+  section's "F-P8" finding — the abort moved to `level_flight`, and "straight" is not in the
+  vocabulary on the tip at all. The table's other rows (heading/speed/altitude/HVRT) stand
+  unchanged.
+- **"Stage P3"/"Stage P4" bullet lists** (`## Revised 2026-11-15`, immediately above the E-P
+  traceability table): **superseded** by this section's "Mode-2 action bodies," "`decide_ai_pilot_
+  wheel`," and "The CBTM one-shot wire channel" subsections above — the mode-cycle-then-press
+  shape for align/break they describe stands, but the refusal posture ("each refusing... outside
+  the states where CBTM is reachable") is wrong per U1 (already flagged superseded in the original
+  text itself) and the recovery trigger list/sequencing is now fully specified rather than
+  sketched.
+- **E-P traceability table, E-P7/E-P8/E-P9 rows**: stand unchanged (still closed by the stages
+  named), now with this section's own concrete mechanism behind each.
+
+### Behaviour constants (new, this batch)
+
+| Constant | Default | Where | Why |
+|---|---|---|---|
+| `AI_PILOT_RECOVER_AGL_DROP_M` | 40.0 (reused from the user's own original 40 m figure, now read as a *drop*, not an absolute floor — Q-P3-2) | body-layer `tuning.py` | the relative floor: recovery fires once the aircraft has sunk this far below the AGL recorded at `cbtm_align_for_launch` |
+| `AI_PILOT_RECOVER_IAS_CEILING_KMH` | 280.0 (unchanged, absolute, Q5) | body-layer `tuning.py` | over-speed avoidance, same source as the original plan |
+| `LONG_PRESS_HOLD_S` | 0.7 (unchanged, carried from the original plan's table) | Export.lua constants block | `align_for_launch`'s long press |
+| `BREAK_AWAY_GAP_S` | 2.0 (unchanged, user, verbatim) | Export.lua constants block | the gap between `break_away`'s two left presses |
+| `BREAK_TURN_BANK_DEG` | 30.0, equal to `MAX_BANK_DEG` | body-layer `tuning.py` (mode 1) | the tight-turn bank mode 1's "break turn" flies at — architect's own default (not user-specified beyond "tight"); flag for retune after the first flight |
+
+### Test strategy
+
+- **Pure-function tests** (`belief/ai_pilot_wheel.py`, no DCS): `payload_count_dropped` (no
+  previous → false; a drop on any one station; a rise on one station while another drops → true);
+  the F-P6 "any voice goal clears `align_phase`" precondition in `request_goal`, across all three
+  of `"aligning"`/`"launch_aligned"`/`"none"`; `decide_ai_pilot_wheel`'s three recovery triggers
+  independently and in combination (e.g. AGL-relative floor crossed one poll after a count drop —
+  the recovery fires once, not twice); the F-P7 break-clears-heading-goal branch, including the
+  case where `heading` was `active_param` versus only queued; recovery's own `pending_order` seed
+  order (`("altitude", "speed")`, never slice-rotated); a fresh voice command for one recovering
+  parameter leaving the other's recovery untouched (Q6/the table's own row).
+- **Rule-level tests** (`config/rules/flight.lua` against the Lua sandbox, `tests/
+  test_rules_flight_actions.py`'s existing shape): `cbtm_align`/`cbtm_align_for_launch`/`cbtm_break`/
+  `cbtm_break_away` readbacks; `level_flight`'s two spoken forms both reaching the same action;
+  `level_off` ("stop turn") never touching `align_phase`; the new mode-1 `break_turn` rule and its
+  `_by_mode` dispatch (overlay → `cbtm_break`, axes → the new axes body), mirroring `turn_
+  continuous`'s own differential-test shape.
+- **Wire/schema tests** (`aircraft-layer`): `cbtm_action`/`cbtm_seq` round-trip through
+  `write_ai_pilot_goal`'s extended signature and `handle_ai_pilot_goal_command`; `apw_cbtm_status`/
+  `apw_cbtm_seq` parsed by `advance_parked_flight_state`; `turn_bank_override_deg` validated and
+  rejected the same way every other `limits`/`goal` field already is (`[[AC-B14]]`'s own lesson —
+  shape-check here, hard-ceiling re-check in `Export.lua`).
+- **No automated test for the Lua press sequencing itself** (mode-cycle timing, the long-press
+  duration, the break-away gap) — same posture every other `Export.lua` mechanism in this project
+  has; validated live, per the flight steps below.
+
+### Flight test steps
+
+1. **Align/align-for-launch, no recovery trigger**: from the operator seat, parked, say "align" —
+   confirm the nose swings to the 9K113's azimuth and holds it with no further words; say a
+   heading command — confirm it is flown at once and "Aligning." is not repeated. Say "align for
+   launch" at a safe height — confirm the dive, and that no recovery fires while well above the
+   floor and below the ceiling.
+2. **Each recovery trigger independently**: align for launch and let it cross the AGL-relative
+   drop without firing a missile — confirm "Leveling off.", the altitude-then-speed restoration
+   order (watch the overlay's own ALT/SPD boxes tick in that order), and that heading is left
+   alone (holds whatever FLT adopted at the recovery moment, per Q7). Repeat for the IAS ceiling.
+   Repeat with an actual launch — confirm the missile stays guidable through the pull-out (sight
+   worked by the player, untouched by Petrovich, per F-P3).
+3. **The two overrides**: say "level flight"/"level off" mid-dive — confirm it behaves exactly like
+   a recovery (F-P1/F-P8). Say "altitude 200" mid-dive — confirm the abort and that the climb
+   target is 200 m, not the pre-align altitude (Q6).
+4. **Breaks**: say "break turn left"/"break turn right"/"break away" from level flight with a
+   heading goal outstanding — confirm the turn starts immediately, is not cut short, and the old
+   heading goal does not reassert afterward (F-P7). Repeat from inside "align"/"align for launch" —
+   confirm the break cancels the alignment with no recovery sequence following it (Q1).
+5. **Mode 1 break**: unparked, flying on raw axes, say "break turn left"/"break turn right" —
+   confirm a visibly steeper roll-in and a faster turn to the new heading than an ordinary "turn
+   left 90", and that it levels out and holds, same as any heading goal.
+6. **CPG-view exit while aligned**: enter the sight view while aligned, then leave it — confirm
+   `Export.lua`'s CBTM tick re-reads the live mode and re-presses left to get back to CBTM if DCS
+   dropped it to FLT/HVR on exit (see "Q-P3-4, answered" below) — this is a mechanism check, not
+   a question the flight needs to settle.
+
+### Q-P3-4, answered — read the live mode every time, never trust a cached "we are in CBTM"
+
+**User, 2026-11-18, verbatim**: *"I think it does, but then it does not matter. Petrobrain must
+always read the current wheel mode and change it if necessary to give commands. We must never
+assume it is in the mode we would like it to be. Changing mode is one left press, so just do it
+when needed."*
+
+This closes Q-P3-4 outright — whether DCS drops CBTM on CPG-view exit no longer matters, because
+nothing in this design ever assumes a mode persists. It also **generalises past align/break** to
+every CBTM-reaching and FLT/HVR-reaching action in this batch and in the existing Stage P1/P2
+mechanism: the mode-cycle-then-press shape already in the plan (`ai_pilot_goal_tick`'s own
+`ai_pilot_goal_mode_ready` check, "read the mode every tick, never assume" — cited as covering the
+CPG-view-exit uncertainty as far back as the "Amended 2026-11-15" note) is confirmed as the
+standing rule for every press this batch adds, not a defensive fallback for one uncertain
+transition:
+
+- `ai_pilot_cbtm_tick` (new, this section) re-reads `ai_pilot_mode_text` **every frame it has a
+  pending `cbtm_action`**, including while the action is already `"running"` — if the mode is not
+  CBTM (whatever the last status report said, however many frames ago), it left-presses toward it
+  before issuing the actual align/break press, exactly like `ai_pilot_goal_tick`'s own mode-cycle
+  branch already does for the FLT/HVR goal channel. No field anywhere in `ParkedFlightState` or
+  the Lua-side `ai_pilot_cbtm`/`ai_pilot_goal` tables is read as "the mode we are in" without a
+  fresh readback backing it, in this poll or the current frame.
+  `MODE_CYCLE_MAX_ATTEMPTS`/`MODE_BLOCKED_RETRY_S` bound and retry this exactly as they already
+  do for the goal channel — no new bound invented.
+  - **Consequence for `cbtm_break`/`cbtm_break_away` specifically**: because the mode is re-checked
+    on every frame of a running break, a mode drop mid-turn (the CPG-view-exit case, or any other
+    DCS-driven change) causes a left-press to CBTM before the break's own next press, which could
+    insert a frame of mode-cycling between the two halves of a `break_away`'s double press. This
+    is accepted as a rare, self-correcting delay (the gap timer, `BREAK_AWAY_GAP_S`, already
+    tolerates some slack) rather than a reason to cache the mode — caching is exactly what this
+    decision rules out.
+- The same rule already governed `ai_pilot_goal_tick`'s FLT/HVR presses and `ai_pilot_goal_tick_
+  hvrt`'s HVRT presses before this batch; this section states it once, explicitly, as the standing
+  design rule for the whole module rather than leaving it implicit in one tick function's own
+  comment.
+
+### Decisions Requiring User Input (this batch)
+
+- **U11 — does mode 1's "break turn" ever need a 180° ("break away") form?** Q-P3-3 only answered
+  the single 90° turn for mode 1. **Recommend: not in this batch.** Mode 1 flies on a continuous
+  heading-goal controller that tracks both turn directions evenly, unlike ED's AI wheel (whose own
+  asymmetric left/right turn speed is *why* mode 2's break-away is two lefts, not one 180); a
+  mode-1 "break away" could just as well be `break_turn` composed with itself by the player saying
+  it twice, or a dedicated `turn <180>` — low cost either way, so deferring avoids guessing at a
+  form nobody asked for yet.
