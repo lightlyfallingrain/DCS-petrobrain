@@ -133,8 +133,8 @@ Ahead:
 - [[BL-17]] — Spoken commands as Lua rules (parked 2026-11-18; Stages 0/1b/2 + 3a/3b/3d/4 and
   the rule checker merged — fuzzy/number-word matching, category gates, effector-write action
   surface, 18 flight-control commands ported; both merges `#needs-flight` on `main`; Stage 3c
-  corpus recording ready for the user; Stages 1a/10 (bearing/heading rename) rejected; 3c build
-  and Stages 5-9 left)
+  corpus recorded and benched, 3c deferred (no gain); Stages 1a/10 (bearing/heading rename)
+  rejected; Stages 5-9 left)
 - [[BL-18]] — Gate the Mi-24P specifics, so other helicopters can be supported later
 
 ## Backlog (body-layer)
