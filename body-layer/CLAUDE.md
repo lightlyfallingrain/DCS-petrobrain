@@ -417,6 +417,30 @@ break without noticing.
 - **Module independence**: the world-model seam is an in-process import and is the sole sanctioned
   one. `belief/audio_client.py` is this subproject's own copy of a client shape rather than an
   import from `audio-adapter/`, and it stays that way.
+- **No LAN message to the aircraft layer ever carries a raw flight-axis value** (`[[BL-16]]` mode
+  1, Decision 23). `Export.lua`'s own `flight_control.lua` module derives every `LoSetCommand`
+  write locally, from a per-frame captured cockpit arg plus the always-on wobble; body-layer only
+  ever sends bounded goals and limits (`POST /command/flight_control`). Mirrors the `cockpit_
+  switch`/`sight_target`/`ai_pilot_goal` channels' own posture, extended to the one case where the
+  temptation to compute and send a stick position directly would be strongest.
+- **Neither handover token ("you/i have controls") ever asks "confirm?"** (Decision 13, U8). A
+  false takeover means Petrovich ignores the player's own physical stick; the recovery is one
+  phrase that always acts (`voice_commands.HANDOVER_TOKENS`'s own floor, checked ahead of the
+  ordinary `ACT_FLOOR`/`CONFIRM_FLOOR` comparison), never a second question.
+- **An `axes_*` goal action never writes one of mode 2's `ai_pilot_*` one-shot transition fields,
+  and vice versa.** The two modes share one `flight.*` action surface (`rules.actions._by_mode`)
+  but each mode's own one-shot fields are a separate namespace on `CrewConsole`
+  (`flight_control_goal_transition` vs. `ai_pilot_goal_transition`/`ai_pilot_level_flight_
+  transition`/`ai_pilot_hvrt_transition`) — Co-moving row 11's leak (a stranded mode-2 one-shot
+  surviving an unpark, found once mode 1 widened `has_controls` to make it reachable) is the
+  worked example of what crossing that line costs; `body._apply_ai_pilot_wheel_goal`'s unparked
+  branch and `body._apply_flight_control`'s own `OVERLAY` branch each clear only their own mode's
+  fields, in both directions.
+- **Park and unpark change the *mode* Petrovich flies through, never *who* has the controls**
+  (Decision 24, U5). The only way the player gets the controls back is "I have controls," or one
+  of the two forced handovers named on it (an unpark mode 1 physically cannot fly, or Lua's own
+  envelope self-release) — never a bare park or unpark by itself. `belief/flight_control.py`'s own
+  module-map entry above has the mechanism.
 
 ### Module map
 
@@ -565,8 +589,28 @@ Belief — observation *consumption*:
   (`body._apply_ai_pilot_wheel_goal`). **Arbitration is latest-command-wins, nothing lost** (a
   main-loop decision, `plans/flight-control/implementation.md` "Review-fix round, 2026-11-16"):
   a translate pauses queued goals, "hold" resumes them, a new goal ends the translate. Unparking
-  drops the goal; nothing resumes on the next park. Known gap: a failed write is still marked sent
-  (`[[BL-B122]]`).
+  drops the goal; nothing resumes on the next park -- **except, since BL-16 mode 1 Stage M1
+  landed, an unpark with the unpark-take enabled and leased hands him to mode 1 instead of the
+  player (Decision 24, U5); only then does Petrovich keep flying.** Known gap: a failed write is
+  still marked sent (`[[BL-B122]]`).
+- `src/belief/flight_control.py` (`[[BL-16]]` mode 1, Stage M1, `plans/flight-control/plan.md`,
+  "Revised 2026-11-18") — Petrovich flying on the raw cyclic/collective/pedal axes.
+  `FlightControlState` (single construction site, `advance_flight_control_state`) mirrors
+  `Export.lua`'s own per-frame status; `take_controls`/`release_controls` are the two handover
+  actions, as pure functions; `decide_flight_control` is the one "when" apart from those two
+  (park/unpark edges, the ack timeout, Lua's own self-release, a refused unpark take). **Park and
+  unpark change the *mode*, never *who has the controls*** (Decision 24, U5) — a park while
+  flying mode 1 silently switches him to the overlay (mode 2), keeping the controls; an unpark
+  while flying through the overlay silently switches him back, taken by Lua in the same frame so
+  nothing jumps. Only "I have controls" (and the two forced handovers — an unpark mode 1 cannot
+  fly, or Lua's own envelope self-release) ever hand the controls back to the player. **The
+  invariants this module and its wire keep**: no LAN message ever carries a raw axis value
+  (`Export.lua`'s own per-frame capture+wobble derives every `LoSetCommand` write locally; body-
+  layer only ever sends bounded goals/limits); neither handover token ever asks "confirm?"
+  (Decision 13); the `axes_*` goal actions never write the `ai_pilot_*` one-shots mode 2 owns
+  (Co-moving row 11's own leak fix is the cautionary tale for why this one matters).
+  `CrewConsole.flight_mode()` is the one place `rules.actions._by_mode` reads to decide which of
+  the 16 shared `flight.*` actions' two bodies runs.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 
