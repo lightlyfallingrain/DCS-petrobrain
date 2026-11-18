@@ -208,10 +208,47 @@ User, 2026-11-18: *"C again"*. The run started 15:13:40, with `collective writes
 - `SIGN.collective` is now −1 in the probe. **C2 is still owed with the right sign**, to measure
   the collective's lag and its VS response per step.
 
+## Flight 7: C2 and D1/D2, pilot seat, airborne
+
+User, 2026-11-18: *"C2 and D. D pedals did not hold, cyclic and collective did"*. The run started
+15:22:28 with `collective=-1`. C1 was ended after 1.2 s, and B was skipped with a radio press.
+Conditions were about 300 m AGL and 50 m/s IAS, in a steady climb of about 5 m/s.
+
+**M0-C write side (C2) passes.** Command 2087 = −arg 1102, sign −1 and scale 1, as flight 6
+showed:
+
+| after a step | fraction of the 0.02 step reached |
+|---|---|
+| 0.1 s | 55–63% |
+| 0.2 s | 76–82% |
+| 0.3 s | 88–93% |
+| 0.5 s | 97–98% |
+| 1.0 s | 100% |
+
+- The lag is first-order with τ ≈ 0.1 s, faster than the pedals (0.2–0.25 s).
+- Vertical speed responds to a 0.02 collective step (1% of travel) by about 0.15–0.3 m/s over 2 s,
+  superimposed on the climb already in progress. It is small and slow: altitude control will need
+  steps well above 0.02, and an integrator.
+- There was no jump at capture.
+
+**M0-D (the go/no-go) passes for cyclic and collective.**
+- **D1, dither 1e-3, 25.8 s:** pitch, roll and collective args stayed within 0.0020 of the command
+  while the user stirred. That is exactly the dither, so the physical stick and lever had **no
+  effect at all**. The user: *"cyclic and collective did"* hold. Attitude stayed inside pitch
+  −2.9..−2.3° and bank −3.5..+2.6°. The bank movement is yaw-roll coupling from the stirred, unheld
+  pedals.
+- **D2, dither 1e-4, 8.2 s:** held within 0.0002 as well. **A 1e-4 dither is enough**, so the
+  smallest wobble tested holds. D2 was stopped early by the user.
+- **The pedals were not held because the probe never wrote them.** The log reads
+  `holds pedals=false`: B was skipped, and the probe enabled D's pedal hold only after a passing B2
+  in the same pass. The user's stirred pedals moved the arg across −0.26..+0.24 and the yaw rate
+  ±5.6°/s. **So the pedal half of M0-D is untested, not failed.** The probe now holds pedals and
+  collective in D by default; a B2/C2 that runs and fails still turns them off.
+
 ### Still owed
 
+- **M0-D for the pedals**: D again, with the pedals held. This is the last part of the go/no-go.
 - The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
   true and magnetic. Steady on an exact HSI number and half-press.
-- C2 with SIGN −1.
 - The airborne yaw response to a pedal step (M0-E).
 - B, C and D in both seats, and J1–J3.

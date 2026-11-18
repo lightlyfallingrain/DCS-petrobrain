@@ -293,7 +293,10 @@ local last_t = nil
 local last_idle_row_t = nil
 local dither_sign = 1.0
 local stats = nil     -- per-segment change counts
-local hold_pedals, hold_collective = false, false
+-- Default ON now that both signs are proven (pedals flights 3-4, collective
+-- flights 6-7): D holds them even when B/C were skipped (flight 7 skipped B,
+-- so D left the pedals free). A B2/C2 that runs and fails still turns them off.
+local hold_pedals, hold_collective = true, true
 local b2_worst = 0.0
 local prev_parked, prev_seat = nil, nil
 local edge_until_t = nil
@@ -389,7 +392,7 @@ local function start_segment(t, seat)
         return
     end
     next_index = next_index + 1
-    if def.pass_start then hold_pedals, hold_collective = false, false end
+    if def.pass_start then hold_pedals, hold_collective = true, true end
     seg = { def = def, seat = seat, t0 = t, sent = {}, captured = capture_from(seat), phase = "holding" }
     stats = { changes = {}, prev = {}, frames = 0 }
     if def.kind == "pedals" then b2_worst = 0.0 end
