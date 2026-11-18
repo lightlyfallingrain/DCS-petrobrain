@@ -3550,8 +3550,28 @@ def _apply_flight_control(
     once Lua confirms `ACTIVE` (symmetric with the `held_*` gates'
     already-stated "wait for a law to exist" intent). If the take itself
     fails instead (ack timeout -> `PILOT`), the goal is dropped: there
-    is no law, and will be no law for this `take_seq`, to apply it to."""
+    is no law, and will be no law for this `take_seq`, to apply it to.
+
+    **`wire_seq` reconciliation against `fc_last_cmd_seq` (security-m1-
+    m2.md Finding A, change-request round)**: runs first, unconditional
+    on anything sending this poll. `wire_seq` resets to 0 on a body-
+    layer process restart; `Export.lua`'s own `fc_last_cmd_seq` (mirrored
+    as `state.lua_last_cmd_seq`) does not, including across a mission
+    restart -- so a restart while mode 1 is anywhere but `off` would
+    otherwise leave every later `seq` this process sends stuck below it,
+    silently dropped by Lua's own `seq <= fc_last_cmd_seq` check for the
+    rest of the DCS session. Catching `wire_seq` up to `lua_last_cmd_
+    seq` here (never past it) means the very next send's `wire_seq + 1`
+    is accepted; a genuine duplicate/stale resend within one body-layer
+    session is still rejected exactly as before, since this only ever
+    raises `wire_seq`, never lowers it below what this process has
+    itself already sent."""
     state = crew_console.flight_control_state
+    if state.lua_last_cmd_seq is not None and state.lua_last_cmd_seq > state.wire_seq:
+        crew_console.flight_control_state = replace(
+            state, wire_seq=state.lua_last_cmd_seq
+        )
+        state = crew_console.flight_control_state
     limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
 
     if state.phase == "OVERLAY":

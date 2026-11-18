@@ -419,6 +419,59 @@ print(sent_lines[#sent_lines])
         assert _field(lines[0], "fc_mode") == "active"
 
 
+class TestLastCmdSeqEchoSurvivesOnStop:
+    def test_fc_last_cmd_seq_echoes_and_outlives_on_stop(self) -> None:
+        """security-m1-m2.md Finding A, change-request round:
+        `fc_last_cmd_seq` is echoed on the status push (added so body-
+        layer can reconcile its own `wire_seq` against it after a
+        restart) and must survive `on_stop` exactly like the rest of
+        this module's "a stale, pre-restart command must still be seen
+        as stale" posture -- `on_stop`'s own docstring already states
+        this for the underlying counter; this is the first test that
+        checks it via the wire echo a restarted body-layer would
+        actually read."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":47,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
+flight_control.push_flight_control_state(0.1)
+-- `on_stop` (mission restart / LuaExportStop) must NOT reset the
+-- counter -- a fresh body-layer process's own first send, reconciled
+-- above it, must still be seen as newer than anything this session
+-- already accepted.
+flight_control.on_stop()
+flight_control.push_flight_control_state(0.2)
+-- A simulated reconciled resend (body-layer caught `wire_seq` up to
+-- 47 from this same echo, so its next send is 48) must be accepted.
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":48,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.3)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines - 2])
+print(sent_lines[#sent_lines - 1])
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        after_goal_line, after_stop_line, after_resend_line = (
+            lines[0],
+            lines[1],
+            lines[2],
+        )
+        assert _field(after_goal_line, "fc_last_cmd_seq") == "47.00000"
+        # on_stop resets fc_mode but not the staleness counter.
+        assert _field(after_stop_line, "fc_mode") == "off"
+        assert _field(after_stop_line, "fc_last_cmd_seq") == "47.00000"
+        # The reconciled seq=48 is accepted -- strictly greater than
+        # the never-reset counter -- and advances it in turn.
+        assert _field(after_resend_line, "fc_mode") == "active"
+        assert _field(after_resend_line, "fc_last_cmd_seq") == "48.00000"
+
+
 class TestReleaseStopsWritesSameFrame:
     def test_release_stops_writing_in_the_same_frame(self) -> None:
         driver = """

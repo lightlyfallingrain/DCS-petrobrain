@@ -207,11 +207,18 @@ HEADING_BAND_DEG: Final[float] = tuning.real(
 #: closing the park-then-unpark escape route a same-frame unpark take
 #: would otherwise remove from a dead Petrobrain (Decision 2 stands for
 #: an *active* mode 1; this is what keeps the *armed* escape open).
+#: `hi` is deliberately narrower than this constant's own old range
+#: (security-m1-m2.md Finding B, change-request round): this value is
+#: itself a safety margin, not an ordinary flight-behaviour knob, and
+#: must stay at or below `Export.lua`'s own `FC_LIMIT_BOUNDS.arm_
+#: lease_s` and the HTTP layer's `_FLIGHT_CONTROL_LIMITS_BOUNDS` (both
+#: 10.0) -- a user override above either would be silently rejected
+#: whole-message at the wire rather than applied.
 ARM_LEASE_S: Final[float] = tuning.real(
     "belief.flight_control.ARM_LEASE_S",
     3.0,
     lo=0.5,
-    hi=30.0,
+    hi=10.0,
     status="judgement",
 )
 
@@ -279,6 +286,22 @@ class FlightControlState:
     collide (an intervening goal send bumping what a take confirmation
     is compared against) if conflated into one field.
 
+    **`lua_last_cmd_seq` mirrors `Export.lua`'s own `fc_last_cmd_seq`
+    directly (security-m1-m2.md Finding A, change-request round)** --
+    unlike every other `lua_*` mirror, `_apply_flight_control` reads it
+    to *reconcile* `wire_seq`, not just to display it: `wire_seq` resets
+    to 0 on a body-layer process restart but `fc_last_cmd_seq` does not
+    (deliberately, across a mission restart too -- `on_stop`'s own
+    docstring), so a restart while mode 1 is anywhere but `off` would
+    otherwise leave `wire_seq` permanently behind it, and every later
+    `take`/`release`/`goal`/`arm` this process ever sends would be
+    silently dropped as stale for the rest of the DCS session. The
+    reconciliation (`wire_seq = max(wire_seq, lua_last_cmd_seq)`, so the
+    next send's `wire_seq + 1` clears it) happens once, lazily, right
+    before the next send -- never in `advance_flight_control_state`
+    itself, which stays a pure mirror refresh per this field's own
+    opening sentence.
+
     `held_heading`/`held_altitude`/`held_altitude_ref`/`held_speed`
     mirror `Export.lua`'s own `fc_goal_*` fields -- the goal mode 1 is
     holding on the wire, `None` until a goal has ever been commanded
@@ -314,6 +337,7 @@ class FlightControlState:
     measured_speed: float | None = None
     lua_mode: str | None = None
     lua_take_seq: int | None = None
+    lua_last_cmd_seq: int | None = None
     lua_take_origin: str | None = None
     lua_release_reason: str | None = None
     lua_refuse_cause: str | None = None
@@ -377,6 +401,7 @@ def advance_flight_control_state(
         if isinstance(sample.get("fc_mode"), str)
         else None,
         lua_take_seq=_as_optional_int(sample.get("fc_take_seq")),
+        lua_last_cmd_seq=_as_optional_int(sample.get("fc_last_cmd_seq")),
         lua_take_origin=(
             sample.get("fc_take_origin")
             if isinstance(sample.get("fc_take_origin"), str)

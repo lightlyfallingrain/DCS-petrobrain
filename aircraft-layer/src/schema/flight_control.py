@@ -17,7 +17,16 @@ stage -- that is not a defect to chase, it is M1's own honest "nothing to
 report yet".
 
 This layer carries the raw status and decides nothing, same rule every
-other schema here follows."""
+other schema here follows.
+
+**`fc_last_cmd_seq`** (security-m1-m2.md Finding A, change-request round)
+echoes `Export.lua`'s own strictly-increasing staleness counter, bumped
+on every accepted `flight_control` command of any `cmd` kind and never
+reset across a mission restart -- unlike `fc_take_seq`/`fc_goal_seq`,
+which `on_stop` clears. It exists so `belief.flight_control` can
+reconcile its own `wire_seq` (which *does* reset to 0 on a body-layer
+process restart) back above it, rather than being silently and
+permanently stuck below it for the rest of the DCS session."""
 
 from __future__ import annotations
 
@@ -42,6 +51,7 @@ class FlightControlState:
     fc_mode: str
     take_seq: int | None
     goal_seq: int | None
+    last_cmd_seq: int | None
     take_origin: str | None
     takeover_mode: str | None
     goal_heading_deg: float | None
@@ -145,6 +155,7 @@ class FlightControlState:
             fc_mode=fc_mode,
             take_seq=_optional_int("fc_take_seq"),
             goal_seq=_optional_int("fc_goal_seq"),
+            last_cmd_seq=_optional_int("fc_last_cmd_seq"),
             take_origin=_optional_str("fc_take_origin"),
             takeover_mode=_optional_str("fc_takeover_mode"),
             goal_heading_deg=_optional_number("fc_goal_heading"),
@@ -186,6 +197,7 @@ class FlightControlState:
             "fc_mode": self.fc_mode,
             "fc_take_seq": self.take_seq,
             "fc_goal_seq": self.goal_seq,
+            "fc_last_cmd_seq": self.last_cmd_seq,
             "fc_take_origin": self.take_origin,
             "fc_takeover_mode": self.takeover_mode,
             "fc_goal_heading": self.goal_heading_deg,

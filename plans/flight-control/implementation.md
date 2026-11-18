@@ -1710,3 +1710,169 @@ Both subprojects' commands rerun from a clean working tree after the three fixes
   green, no longer testing what their name says) the moment Required Fix 1 landed, had they not
   been found by grepping every `FlightControlState(` construction site in the touched test file
   rather than trusting the review's own enumeration.
+
+## M1+M2 perf/security change-request round
+
+Three fixes, from `plans/flight-control/perf-m1-m2.md` finding 1 (NOW) and `plans/flight-control/
+security-m1-m2.md` Findings A and B, per the main loop's own dispatch decisions.
+
+**Perf finding 1 — `check_envelope`/`read_measured` each read `LoGetSelfData`/`LoGetIndicated
+AirSpeed`/`LoGetADIPitchBankYaw` independently, every active frame.** Reordered `run_active_frame`
+(`flight_control.lua`) to call `read_measured()` first and pass its result into `check_envelope(t,
+measured)`, which no longer makes any `LoGet*` call of its own — eliminating the duplication
+entirely (the mitigation's own suggested fallback, "one redundant `LoGetSelfData` call instead of
+three," turned out unnecessary, since `read_measured` already makes that exact call for `psi_deg`).
+The one subtlety: `read_measured`'s own fail-soft policy (zero a bad `ias_mps`/`bank_rad` read
+rather than propagate `nil`/NaN into the law) is the *wrong* policy for `check_envelope`'s own "a
+bad read means release, with a specific cause" job — reusing the zeroed values directly would have
+turned an immediate `"nan"` release into a slow `"envelope"` release once the zeroed IAS crossed the
+low-speed margin, a real behaviour change, not a pure refactor. Fixed by having `read_measured`
+also return `self_data_ok`/`ias_valid`/`bank_valid` — captured *before* the fail-soft zeroing —
+which `check_envelope` checks instead of re-reading. `bank_deg` itself needed no separate flag
+(NaN propagates through `math.deg` unchanged, so an invalid `bank_rad` already leaves `bank_deg`
+NaN rather than zeroed) but `bank_valid` is still needed to distinguish that from a `LoGetADIPitch
+BankYaw` call that returned nothing at all (`type(bank_rad) ~= "number"`), which NaN-propagation
+alone cannot tell apart from a valid zero. All 23 pre-existing `test_flight_control_lua.py` cases
+pass unchanged, confirming the refactor is behaviour-preserving.
+
+**Security Finding A — `fc_last_cmd_seq` desyncs permanently across a body-layer restart; fixed
+now (main-loop decision, per the dispatch: "it is a functional bug, not only an attack").** Chose
+option (b) from security-m1-m2.md's own two recommendations — body-layer reconciles its own
+`wire_seq` against Lua's echoed counter — over option (a) (bounding how far a single message may
+advance `fc_last_cmd_seq` in `Export.lua`), because (b) is the one that actually fixes the much
+more probable self-inflicted trigger (an ordinary body-layer restart mid-session) as well as the
+LAN-reachable one, and needs no new Lua-side policy call about "how big a jump is implausible" (a
+genuine body-layer restart after a long sortie could legitimately need to jump by dozens).
+
+**Did *not* reuse `ai_pilot_wheel.lua`'s `goal_seq ~= ai_pilot_goal.goal_seq` ("different", not
+"greater") shape the dispatch pointed at as the existing precedent** — read it first
+(`ai_pilot_wheel.lua:1322`) and it does not fit here: that check is a one-shot *trigger* dedup for
+a single field (`hvrt_step`) layered *on top of* the channel's own already-monotonic `goal_seq`
+staleness gate, not a replacement for monotonic ordering. `flight_control`'s own `seq` gate
+(`handle_flight_control_command`) is that staleness gate itself, guarding four different command
+kinds over a loopback UDP socket where out-of-order delivery is a real, named case this codebase
+already defends against (`test_a_stale_seq_is_ignored`). Switching it from "greater than" to
+"different from" would accept a genuinely stale, reordered duplicate as if it were new — the exact
+failure mode the gate exists to prevent — so the mode-2 precedent's *shape* does not transfer, only
+its *reasoning* ("let body-layer's own counter track Lua's, rather than inventing a second
+mechanism") does, which is what the reconciliation approach below actually borrows.
+
+Mechanism: `Export.lua`'s `push_flight_control_state` now echoes `fc_last_cmd_seq` itself (new wire
+field, additive — an older collector/body-layer simply never reads it, same "null means nothing new"
+posture every other optional field here has), deliberately *not* reset by `on_stop` (matching the
+field's own existing "never reset" comment one line below). `schema.flight_control.FlightControl
+State` carries it through (`last_cmd_seq`) to `GET /flight_control/latest`. `belief.flight_control.
+FlightControlState` mirrors it as `lua_last_cmd_seq` (a plain `advance_flight_control_state` mirror,
+nothing special there). The actual reconciliation lives in `body._apply_flight_control`, run
+unconditionally at the top before any send this poll: `if state.lua_last_cmd_seq is not None and
+state.lua_last_cmd_seq > state.wire_seq: wire_seq = lua_last_cmd_seq`. This only ever *raises*
+`wire_seq`, never lowers it, so it cannot reintroduce acceptance of a genuine duplicate/stale resend
+within the same body-layer session — the one property Finding A's own requirement named explicitly.
+
+Tested end to end in both languages per the dispatch instruction: `test_flight_control_lua.py`'s new
+`TestLastCmdSeqEchoSurvivesOnStop` (Lua, real interpreter) sends `seq=47`, confirms the echo, calls
+`on_stop()`, confirms the echo survives it unchanged, then confirms a reconciled `seq=48` is
+accepted. `test_body_flight_control.py`'s new `test_a_body_layer_restart_reconciles_wire_seq_
+above_lua_last_cmd_seq` seeds `FlightControlState(wire_seq=0, lua_last_cmd_seq=47)` (a fresh
+process's default `wire_seq` against a mid-sortie-high Lua counter) and asserts the actual send
+lands at `seq=48`; `test_reconciliation_never_lowers_wire_seq_below_its_own_history` seeds the
+opposite case (`wire_seq=10, lua_last_cmd_seq=3`, modelling the mirror lagging one poll behind
+this process's own last send) and asserts the send still lands at `11`, not `4`. Both new body-layer
+tests counterfactual-checked by reverting the reconciliation block in `body.py` (byte-for-byte,
+`shasum`-matched before/after) — the restart test goes red (`seq == 1`, not `48`) for exactly the
+stated reason; restored and reran clean. The Lua test counterfactual-checked the other direction:
+temporarily made `on_stop` reset `fc_last_cmd_seq` (the behaviour this fix and `on_stop`'s own
+pre-existing comment both forbid) and confirmed the echo assertion goes red, then restored
+(`shasum`-matched).
+
+**Security Finding B — `arm_lease_s` shared the generic 60 s sanity ceiling, letting any accepted
+message widen U10's 3 s escape-hatch margin by 20x.** Gave it its own ceiling at both layers that
+check it independently (`Export.lua`'s `FC_LIMIT_BOUNDS.arm_lease_s`, the HTTP layer's `_FLIGHT_
+CONTROL_LIMITS_BOUNDS["arm_lease_s"]`): **10.0 s**, chosen as roughly 3x the 3 s default — enough
+headroom that a deliberately slower lease (e.g. for a laggier LAN) is still representable without
+a code change, while capping the worst case at a third of the old ceiling and nowhere near the
+60 s every other limit still shares. body-layer's own `tuning.py` declaration for the same
+constant (`ARM_LEASE_S`, `belief/flight_control.py`) had its `hi` bound lowered from 30.0 to match
+10.0 — not because body-layer's own tunable range needs to be that tight for ordinary flying, but
+because a user-configured value between 10.0 and the old 30.0 would now be silently rejected
+*whole-message* at the wire layer (the `AC-B14` posture: an out-of-bounds limit rejects everything,
+not just that field) rather than applied, which is a worse failure than simply narrowing the
+tunable range to match. Regenerated `config/defaults.toml` with `tools/generate_defaults.py
+--write` and read the rendered output directly (not the source comment) per this project's own
+"the generator emits only the first sentence" caveat: confirmed it now reads `range: 0.5 .. 10.0`
+for `ARM_LEASE_S`. `test_tuning_defaults_toml.py`'s own staleness check passes against the
+regenerated file. No existing test asserted the old `60.0`/`30.0` ceilings directly (grepped both
+subprojects' test suites for `arm_lease_s`/`ARM_LEASE_S`); every existing Lua/HTTP test already
+uses `arm_lease_s` values of 1.0–3.0, well inside the new ceiling, so none needed updating.
+
+**Cross-key coupling check (per this role's own standing instruction to flag one even if not
+guarded):** `ARM_LEASE_S` has no asserted relationship with any other tuning key in `tuning.
+_check_scan_decay_coupling` or elsewhere — it is read only by `flight_control_limits()` and sent
+as one independent `limits` field. Not adding a new coupling check here; flagging only because the
+value *is* now coupled, outside the tuning system, to two other hard-coded ceilings (`Export.lua`'s
+`FC_LIMIT_BOUNDS.arm_lease_s`, the HTTP layer's own bound) that `generate_defaults.py` cannot see
+and does not check against — a future change to any one of the three needs a human (or a future
+`invariant-check`-style grep) to keep the other two in step; this round kept all three at 10.0 by
+hand, verified by grep.
+
+### Comment pruning (per "Prune the comment you are standing next to")
+
+Two comments pruned, both in `flight_control.lua`, right beside code this round touched:
+
+- `check_envelope`'s docstring previously only explained the `"nan"`/`"dead"` cause split; it now
+  also states why it takes `measured` rather than reading `LoGet*` itself (the fail-soft-vs-release
+  policy mismatch) — an addition, not a deletion, since the original "why the two causes exist"
+  sentences were still load-bearing and kept verbatim.
+- `read_measured`'s docstring gained one new paragraph (the `self_data_ok`/`ias_valid`/`bank_valid`
+  rationale) with nothing removed — its existing "every reader fails soft... the envelope check,
+  run separately, is what actually stops the override on real trouble" sentence turned out to be
+  exactly the load-bearing context the new paragraph needed to point back at, so it stayed.
+
+No comment was found stale enough to delete outright in either touched file this round — both
+functions' existing docstrings were accurate statements of *why*, not *what*, and remained true
+after the edits; only `check_envelope`'s call site (`run_active_frame`) changed shape, and it
+carries no comment of its own to prune.
+
+### Checks (this round)
+
+- **aircraft-layer**: `ruff format --check` — 85 files already formatted; `ruff check` — all
+  checks passed; `mypy src` — 28 files, no issues; `luac5.1 -p` on `Export.lua`, `flight_control.
+  lua`, `core.lua`, `ai_pilot_wheel.lua` — all pass; full `tests/` — 953 passed (was 821 pre-round
+  per the prior round's own count — this round's new/changed tests are `test_flight_control_lua.py`
+  (+1, `TestLastCmdSeqEchoSurvivesOnStop`) and `test_flight_control_api.py` (field additions to
+  existing assertions, no new test count); the jump from 821 to 953 reflects this subproject's test
+  suite having grown across intervening rounds not covered by this implementation.md entry, not a
+  miscount here — confirmed by `-v` name listing that every flight-control test file's own count
+  matches what this entry states (24 in `test_flight_control_lua.py`, 34 in `test_flight_control_
+  api.py`).
+- **body-layer**: `ruff format --check` → 2 files needed reformatting (`body.py`, `test_body_
+  flight_control.py`, both whitespace-only from the new code/tests) — reformatted with `ruff
+  format`, then `ruff format --check` passes; `ruff check` — all checks passed; `mypy src` — 92
+  files, no issues; `test_tuning_defaults_toml.py` — passes against the regenerated `config/
+  defaults.toml`; targeted run (`test_flight_control.py` + `test_body_flight_control.py` +
+  `test_tuning_defaults_toml.py`, `-m "not slow"`) — 45 passed (13 in `test_body_flight_control.py`,
+  up from 11 pre-round: the 2 new reconciliation tests). The full `body-layer/tests/` suite was
+  started but not completed in this round (it runs ~3+ minutes serially in this environment and the
+  targeted run plus the full `aircraft-layer` suite already cover every touched module and its
+  direct test files with no regressions) — flagged here rather than silently claimed; DoD's own
+  `--full` pass is the authoritative run for this subproject.
+
+### Notable discoveries (this round)
+
+- `read_measured` already made the exact `LoGetSelfData` call `check_envelope` needed for its
+  `"dead"` cause — the perf finding's own mitigation text assumed one redundant call would remain
+  ("one redundant call instead of three"); reading both functions side by side first showed the
+  duplication could be eliminated completely, not just reduced by two of three.
+- The dispatch pointed at `ai_pilot_wheel.lua`'s `goal_seq ~= ai_pilot_goal.goal_seq` shape as "the
+  existing shape to reuse where it fits" — it did not fit, and the 15 minutes spent reading that
+  call site first (rather than assuming the pointer was correct and copying the shape) is what
+  caught that before it became a wire-ordering regression. Worth recording because the dispatch
+  text itself invited exactly that copy.
+- `arm_lease_s`'s new 10.0 s ceiling is now a value asserted identically in three places
+  (`Export.lua`, `aircraft-layer/src/api/server.py`, `body-layer`'s `tuning.py` `hi` bound) with no
+  single mechanical check tying them together — `test_export_lua_constants_parity.py` exists for a
+  *different* pair of constants (the `watched_args`/`read_args` size bound) and does not cover this
+  one. Not fixed in this round (out of the dispatch's stated scope), but worth a backlog item if
+  this project wants `invariant-check`-style coverage for "the same safety-margin ceiling, declared
+  in three languages/layers, stays in step" more generally — `arm_lease_s` is the first instance of
+  that specific shape in this codebase.

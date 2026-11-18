@@ -219,3 +219,45 @@ class TestApplyFlightControl:
         _apply_flight_control(console, client)  # type: ignore[arg-type]  # must not raise
 
         assert console.flight_control_transition is None
+
+    def test_a_body_layer_restart_reconciles_wire_seq_above_lua_last_cmd_seq(
+        self,
+    ) -> None:
+        """security-m1-m2.md Finding A: a fresh process has `wire_seq ==
+        0` (the dataclass default), but Lua's own `fc_last_cmd_seq` --
+        mirrored here as `lua_last_cmd_seq` -- never resets, so a restart
+        while mode 1 was active mid-sortie leaves it well above 0 (47,
+        here, standing in for "whatever this DCS session already
+        accepted"). Without reconciliation the next send would be
+        `seq=1`, which `seq <= fc_last_cmd_seq` rejects forever -- this
+        asserts the actual send lands at `48`, strictly above Lua's own
+        counter, so Lua accepts it."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(wire_seq=0, lua_last_cmd_seq=47))
+        console.flight_control_transition = "take"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        seq, cmd, _limits, _goal = client.flight_control_calls[0]
+        assert seq == 48
+        assert cmd == "take"
+        assert console.flight_control_state.wire_seq == 48
+
+    def test_reconciliation_never_lowers_wire_seq_below_its_own_history(
+        self,
+    ) -> None:
+        """The mirror update that refreshes `lua_last_cmd_seq` each poll
+        lags one poll behind whatever this process itself last sent
+        (Lua processes the write before body-layer's own `GET /flight_
+        control/latest` poll catches up to it) -- reconciliation must
+        never *lower* `wire_seq`, or a genuine duplicate/stale resend
+        within this same session would start being accepted again."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(wire_seq=10, lua_last_cmd_seq=3))
+        console.flight_control_transition = "release"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        seq, _cmd, _limits, _goal = client.flight_control_calls[0]
+        assert seq == 11
+        assert console.flight_control_state.wire_seq == 11

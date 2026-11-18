@@ -218,7 +218,17 @@ local FC_LIMIT_BOUNDS = {
     min_ias_kmh = { lo = 0.0, hi = 500.0 },
     max_ias_kmh = { lo = 0.0, hi = 500.0 },
     on_ground_agl_threshold_m = { lo = 0.0, hi = 100.0 },
-    arm_lease_s = { lo = 0.0, hi = 60.0 },
+    -- security-m1-m2.md Finding B, change-request round: this limit IS
+    -- a safety margin (U10's park-then-unpark escape window for a dead
+    -- Petrobrain), not a flight-behaviour tuning knob like every other
+    -- entry here -- it gets its own tight ceiling rather than sharing
+    -- the generous 60 s sanity bound, so any accepted message (LAN or
+    -- body-layer's own restart-time resend) can widen the 3 s default
+    -- by at most ~3x, never to a full minute. Must match body-layer's
+    -- own `tuning.py` `ARM_LEASE_S` `hi` bound exactly, or a legitimate
+    -- user override there would be silently rejected whole-message at
+    -- this layer instead of applied.
+    arm_lease_s = { lo = 0.0, hi = 10.0 },
     max_bank_deg = { lo = 0.0, hi = 90.0 },
     max_turn_bank_deg = { lo = 0.0, hi = 60.0 },
     max_climb_vs_mps = { lo = 0.0, hi = 20.0 },
@@ -853,18 +863,24 @@ end
 -- the closest proxy available to a real weight-on-wheels/death sensor,
 -- which does not exist anywhere in this codebase (see `ON_GROUND_AGL_
 -- THRESHOLD_M`'s own docstring on body-layer's side for the same gap).
-local function check_envelope(t)
-    local self_data = safe_call(LoGetSelfData)
-    if type(self_data) ~= "table" then
+--
+-- Takes `measured` -- `read_measured()`'s own result for this frame --
+-- instead of reading `LoGetSelfData`/`LoGetIndicatedAirSpeed`/
+-- `LoGetADIPitchBankYaw` a second time (perf-m1-m2.md finding 1: both
+-- functions independently crossed the Lua->DCS-engine boundary for the
+-- same three values, every active frame). `measured.self_data_ok`/
+-- `ias_valid`/`bank_valid` are `read_measured`'s own liveness/NaN flags
+-- from *before* its fail-soft zeroing -- using `measured.ias_mps`/
+-- `bank_deg` directly would silently swallow a bad read as a stale
+-- zero instead of this function's own distinct "nan" cause.
+local function check_envelope(t, measured)
+    if not measured.self_data_ok then
         return false, "dead"
     end
-    local ias_mps = safe_call(LoGetIndicatedAirSpeed)
-    local _, bank_rad = safe_call(LoGetADIPitchBankYaw)
-    if type(ias_mps) ~= "number" or ias_mps ~= ias_mps
-        or type(bank_rad) ~= "number" or bank_rad ~= bank_rad then
+    if not measured.ias_valid or not measured.bank_valid then
         return false, "nan"
     end
-    local ias_kmh = ias_mps * 3.6
+    local ias_kmh = measured.ias_mps * 3.6
     if ias_kmh < (fc_limits.min_ias_kmh - ENV_IAS_MARGIN_KMH) then
         if fc_env_low_ias_since_t == nil then
             fc_env_low_ias_since_t = t
@@ -874,7 +890,7 @@ local function check_envelope(t)
     else
         fc_env_low_ias_since_t = nil
     end
-    local bank_deg = math.abs(math.deg(bank_rad))
+    local bank_deg = math.abs(measured.bank_deg)
     if bank_deg > (fc_limits.max_bank_deg + ENV_BANK_MARGIN_DEG) then
         return false, "envelope"
     end
@@ -928,17 +944,32 @@ end
 -- single missing sample is worse than one that briefly runs on a stale
 -- zero (the envelope check, run separately, is what actually stops the
 -- override on real trouble).
+--
+-- `self_data_ok`/`ias_valid`/`bank_valid` are kept alongside the fail-
+-- soft values for `check_envelope`'s own use (perf-m1-m2.md finding
+-- 1) -- recorded *before* `ias_mps` is zeroed below, since the law's
+-- own "stale zero is fine" tolerance and the envelope's own "a bad
+-- read means release" are different policies over the same read.
+-- `bank_deg` needs no separate capture: NaN propagates through
+-- `math.deg` unchanged, so an invalid `bank_rad` already leaves
+-- `bank_deg` NaN rather than zeroed -- `bank_valid` instead records
+-- whether the *type* was even a number, which NaN-propagation alone
+-- cannot distinguish from a `LoGetADIPitchBankYaw` call that returned
+-- nothing at all.
 local function read_measured()
     local pitch_rad, bank_rad = safe_call(LoGetADIPitchBankYaw)
+    local bank_valid = type(bank_rad) == "number" and bank_rad == bank_rad
     local pitch_deg = (type(pitch_rad) == "number") and math.deg(pitch_rad) or 0.0
     local bank_deg = (type(bank_rad) == "number") and math.deg(bank_rad) or 0.0
     local self_data = safe_call(LoGetSelfData)
+    local self_data_ok = type(self_data) == "table"
     local psi_deg = 0.0
-    if type(self_data) == "table" and type(self_data.Heading) == "number" then
+    if self_data_ok and type(self_data.Heading) == "number" then
         psi_deg = law_wrap360(math.deg(self_data.Heading))
     end
     local ias_mps = safe_call(LoGetIndicatedAirSpeed)
-    if type(ias_mps) ~= "number" or ias_mps ~= ias_mps then ias_mps = 0.0 end
+    local ias_valid = type(ias_mps) == "number" and ias_mps == ias_mps
+    if not ias_valid then ias_mps = 0.0 end
     local v_t_mps = safe_call(LoGetTrueAirSpeed)
     if type(v_t_mps) ~= "number" or v_t_mps ~= v_t_mps then v_t_mps = ias_mps end
     local w_mps = safe_call(LoGetVerticalVelocity)
@@ -974,6 +1005,9 @@ local function read_measured()
         p_deg_s = p_deg_s,
         q_deg_s = q_deg_s,
         r_deg_s = r_deg_s,
+        self_data_ok = self_data_ok,
+        ias_valid = ias_valid,
+        bank_valid = bank_valid,
     }
 end
 
@@ -1156,7 +1190,8 @@ local function run_active_frame(t, dt, just_took)
         write_outputs(fc_last_command, nil)
         return
     end
-    local ok, reason = check_envelope(t)
+    local measured = read_measured()
+    local ok, reason = check_envelope(t, measured)
     if not ok then
         fc_mode = "off"
         fc_captured = {}
@@ -1166,7 +1201,6 @@ local function run_active_frame(t, dt, just_took)
         fc_last_command = nil
         return
     end
-    local measured = read_measured()
     if just_took then
         local command = {
             pitch = axis_command(fc_captured, "pitch"),
@@ -1398,6 +1432,14 @@ local function push_flight_control_state(t)
         .. ',"fc_mode":"' .. fc_mode .. '"'
         .. ',"fc_take_seq":' .. fmt_num_or_null(fc_take_seq)
         .. ',"fc_goal_seq":' .. fmt_num_or_null(fc_goal_seq)
+        -- security-m1-m2.md Finding A: echoes the one counter every
+        -- `handle_flight_control_command` accept bumps, across every
+        -- `cmd` kind, so body-layer can reconcile its own `wire_seq`
+        -- against it after a restart (`wire_seq` resets to 0 per
+        -- process; this does not, same as `fc_last_cmd_seq` itself
+        -- never resetting on `on_stop`) instead of being silently
+        -- stuck below it for the rest of the DCS session.
+        .. ',"fc_last_cmd_seq":' .. fmt_num_or_null(fc_last_cmd_seq)
         .. ',"fc_take_origin":' .. text_or_null(fc_take_origin)
         .. ',"fc_takeover_mode":' .. text_or_null(fc_takeover_mode)
         .. ',"fc_goal_heading":' .. fmt_num_or_null(goal_heading)

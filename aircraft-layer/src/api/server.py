@@ -493,7 +493,13 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     "min_ias_kmh": (0.0, 500.0),
     "max_ias_kmh": (0.0, 500.0),
     "on_ground_agl_threshold_m": (0.0, 100.0),
-    "arm_lease_s": (0.0, 60.0),
+    # security-m1-m2.md Finding B, change-request round: `arm_lease_s`
+    # is itself a safety margin (U10's park-then-unpark escape window),
+    # not a flight-behaviour knob, so it gets a tight ceiling of its
+    # own rather than the generous sanity bound every other limit here
+    # shares -- must match `Export.lua`'s own `FC_LIMIT_BOUNDS.arm_
+    # lease_s` and body-layer's `tuning.py` `ARM_LEASE_S` `hi` exactly.
+    "arm_lease_s": (0.0, 10.0),
     "max_bank_deg": (0.0, 90.0),
     # M2 additions (`Export.lua`'s own `FC_LIMIT_BOUNDS`, matched here
     # key-for-key -- a field this dict does not name is silently

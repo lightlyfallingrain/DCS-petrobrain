@@ -37,6 +37,7 @@ from schema import FlightControlParseError, FlightControlState
 
 _LINE = (
     '{"t":12.5,"fc_mode":"active","fc_take_seq":3,"fc_goal_seq":1,'
+    '"fc_last_cmd_seq":5,'
     '"fc_take_origin":"voice","fc_takeover_mode":"heading",'
     '"fc_goal_heading":270.0,"fc_goal_altitude":null,'
     '"fc_goal_altitude_ref":null,"fc_goal_speed":null,'
@@ -58,6 +59,7 @@ class TestFlightControlState:
         assert sample.fc_mode == "active"
         assert sample.take_seq == 3
         assert sample.goal_seq == 1
+        assert sample.last_cmd_seq == 5
         assert sample.take_origin == "voice"
         assert sample.takeover_mode == "heading"
         assert sample.goal_heading_deg == pytest.approx(270.0)
@@ -122,6 +124,7 @@ class TestFlightControlState:
         sample = FlightControlState.from_json_line(line, received_wall_clock_s=0.0)
         assert sample.take_seq is None
         assert sample.goal_seq is None
+        assert sample.last_cmd_seq is None
         assert sample.take_origin is None
         assert sample.release_reason is None
         assert sample.limit_hit is False
@@ -134,6 +137,7 @@ class TestFlightControlState:
             "fc_mode": "active",
             "fc_take_seq": 3,
             "fc_goal_seq": 1,
+            "fc_last_cmd_seq": 5,
             "fc_take_origin": "voice",
             "fc_takeover_mode": "heading",
             "fc_goal_heading": pytest.approx(270.0),
