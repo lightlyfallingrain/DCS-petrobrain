@@ -874,3 +874,17 @@ Consequences for P3+P4: "break turn left/right" **and "break away"** exist in mo
 yes); align / align for launch are the only mode-2-only commands ("unable" in mode 1); "level
 off" means the same straight-and-level in both. In mode 1, several goals are applied at once
 rather than serialised behind overlay presses.
+
+### Recovery heading, and the mode-1 break / rotor envelope (user, 2026-11-18, verbatim)
+
+- **Recovery heading:** *"keep aligned heading"* — recovery restores altitude and speed only.
+- **Mode-1 break turn:** *"no set number, aim for fast turn rate. What that needs depends on flight
+  state. Moderate altitude drop allowed (~100 m, but never below 40 m AGL). Steep bank in any case,
+  I'd say 60 to 80 degrees. Pedal to direction of turn, plenty of collective to create lift but not
+  so much that rotor RPM drops or to cause retreating blade stall. -> need to monitor rotor RPM and
+  speed. retreating blade stall comes an issue to watch for at near or over 250 km/h. Rotor RPM min
+  allowed value to configurable param, set to 85% initially."*
+- **Mode-1 envelope, all states (standing):** *"the rotor rpm drop below minimum and retreating
+  blade stall are things to avoid in any Mode 1 state, whatever we are doing. High collective leads
+  to RPM drop, more so at slower speeds and more so if collective is increased fast. High blade
+  angle (=collective) and high speed lead to reatreating blade stall."*
