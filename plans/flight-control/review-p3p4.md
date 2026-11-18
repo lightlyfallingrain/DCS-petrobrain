@@ -145,3 +145,109 @@ global-safety check clean, 961 aircraft-layer tests passed including the new `Te
 the project's own standing posture that Lua press-timing mechanics are validated live, never by
 static review. No live DCS flight was possible from this environment, consistent with the
 implementation log's own note and the plan's "Flight test steps" remaining the acceptance gate.
+
+---
+
+### Re-review (2026-11-19) -- review-fix round, commit `6e0421e3`
+
+Scope: `6e0421e3` only (`body-layer/tests/test_body_ai_pilot_wheel.py`,
+`body-layer/tests/test_rules_flight_actions.py`, and `implementation.md`'s "Review-fix round
+(2026-11-19)" note), judged against this file's own Required Fixes 1/2. Fast-forwarded cleanly
+from `59192cfa` to `6e0421e3` (`d5eaee9b` in between is the Reviewer commit this round answers).
+No `src/` file changed -- confirmed from `git show --stat 6e0421e3` (two test files plus the plan
+note, 585 insertions, 5 deletions) and from reading `body.py`/`ai_pilot_wheel.py`/
+`actions.py` directly: untouched by this commit.
+
+**Required Fix 1 -- CLOSED.** `test_body_ai_pilot_wheel.py` gained `TestCbtmTransitions`,
+`TestFlightCommandEndsAlignment`, `TestLevelFlightAbortRecovery`, `TestRecoveryTriggerWiring`
+(20 new tests). Read each class against the four bullets this fix named, not just the class
+names: `TestCbtmTransitions` drives all four `cbtm_*` transitions through
+`_apply_ai_pilot_wheel_goal` itself and asserts `align_phase`/`cbtm_action_sent`/the bumped
+`cbtm_seq` wire send (via a `_cbtm_send` helper that filters on the `cbtm_action` field rather
+than asserting a brittle total-call count -- see the next finding); `TestFlightCommandEndsAlignment`
+covers F-P6 for both `"aligning"` and `"launch_aligned"`, plus the `"recovering"`-is-excluded
+negative case; `TestLevelFlightAbortRecovery` covers the F-P8/Q0 abort from both `"launch_aligned"`
+(recovery seeded from the snapshot, heading frozen at the *held* value, not the snapshot's) and
+`"aligning"` (nothing to recover); `TestRecoveryTriggerWiring` drives the payload-drop, AGL-floor,
+and (read past the excerpt but present in the file) IAS-ceiling triggers from `runner`'s own live
+state (`last_ownship_state.alt_agl_m`, `last_ias_kmh`, a real `previous_payload_counts` diff), not
+the pure function's direct arguments. This is exactly what the fix asked for, not a decorative
+pass -- every test asserts real post-call state, none merely exercises a code path without
+checking its effect.
+
+**Required Fix 2 -- CLOSED.** `test_rules_flight_actions.py` gained `TestCbtmActions` (10 tests),
+dispatching all four `cbtm_*` rules through `_dispatching_console`/`handle_command` against the
+real shipped `flight.lua`: each rule's overlay readback and `ai_pilot_cbtm_transition` value, the
+coarse "not flying" gate taking priority over either mode body, and both mode-1 "unable" reasons
+(`AI_OVERLAY` for align/align-for-launch, `NOT_READY` for the two breaks). Matches
+`TestHandoverActions`/`TestSeatNeverGatesMode1`'s own shape exactly, as the fix asked.
+
+**The implementer's own flagged "extra null-param goal message on first poll" -- judged genuinely
+harmless, not a required fix.** Traced by hand against both sides of the wire rather than taking
+the docstring's account on its word:
+- On the body-layer side (`body.py`'s `_apply_ai_pilot_wheel_goal`), the unconditional
+  `goal=goal` write-back (the function's own closing `replace(...)` call) only produces a
+  all-`None` `AiPilotWheelGoal()` when `state.goal` was `None` *and* nothing in this same poll's
+  transition handling touched it -- true only for a bare CBTM/`hvrt_step` trigger with no prior
+  goal, confirmed by reading every branch above it (heading/altitude/speed/HVRT requests all call
+  a `set_parked_*`/`set_hvrt_direction` helper that bumps `goal_seq` and fills a real field,
+  so they never hit this gap). **This is not new to CBTM** -- `hvrt_step` (Stage P2b) already had
+  the identical shape, so CBTM reuses an existing gap rather than opening a new one, exactly as
+  the implementer's note claims (confirmed by reading `hvrt_step`'s own branch, not assumed).
+- On the Lua side (`ai_pilot_wheel.lua`'s `handle_ai_pilot_goal_command`), the blank message
+  (`param=nil`, `goal_seq=0`, `cbtm_action=nil`) arrives first, strictly before the CBTM-carrying
+  second message (both are synchronous, blocking HTTP POSTs from the same function call, so
+  arrival order is guaranteed). On that first message: `param == ai_pilot_goal.param` already
+  holds (`ai_pilot_goal.param` is reset to `nil` by the unpark branch, line 1385, and starts `nil`
+  at table construction, line 372) -- so `ai_pilot_goal_release_hold()` and the mode-cycle-reset
+  block are **not** triggered; `progress` is set to `"idle"`, which it already was. The second,
+  CBTM-carrying message then runs its own branch unaffected -- `cbtm_seq` has its own comparison,
+  untouched by the first message. Read for the one case that would make this unsafe (a *stale*
+  non-`nil` `ai_pilot_goal.param` on the Lua side at the moment a `None`-state activation starts on
+  the body side) and found none: the unpark branch clears it, and `_apply_ai_pilot_wheel_goal`'s
+  own unparked branch resets `runner.ai_pilot_goal_last_sent_seq` to `None` in lockstep, so the two
+  sides cannot disagree about "no goal yet" at the point this fires.
+- Net effect confirmed: one extra, no-op `POST /command/ai_pilot_goal` per CBTM (or bare
+  `hvrt_step`) activation that starts with no prior goal -- no state change, no spoken side
+  effect, self-correcting the next poll. **Agreeing with the implementer's own verdict**: not a
+  behavioural defect, correctly left as test-coverage-only scope for this round, and correctly
+  not silently hidden (flagged in both the implementation log and the test module's own
+  docstring). Not escalated to a required fix. One optional note: this is a real, if harmless,
+  double-send on the wire and would cost nothing to file as a one-line backlog item for future
+  reference (its own "why this exists" is now only in a test docstring, which a later refactor
+  of `_apply_ai_pilot_wheel_goal` could silently invalidate without anyone reading it) -- the
+  user's call, not a blocker.
+
+**Checks reproduced independently, not taken on the implementation log's word**:
+`ruff format --check .` -- clean on every file this commit touches (the 2 files flagged
+reformattable, `research/2026-10-05-security-audit.md` and one other, are pre-existing and
+untouched by this commit -- unrelated markdown-embedded code snippets, not this round's own);
+`ruff check .` -- all checks passed; `mypy src` -- 92 files, no issues; the exact nine-file
+targeted run (`test_ai_pilot_wheel.py` + `test_body_ai_pilot_wheel.py` +
+`test_crew_console_ai_pilot_wheel.py` + `test_flight_control.py` + `test_body_flight_control.py` +
+`test_rules_flight_actions.py` + `test_voice_commands.py` + `test_tuning_defaults_toml.py` +
+`test_rule_gates.py`, `-m "not slow"`) -- **275 passed**, matching the implementation log exactly
+(up from 249 by exactly the 26 new tests, 20 + 10 - 4 reused-helper overlap aside, consistent with
+the log's own 29/69 per-file breakdown); `tests --collect-only` (smoke) -- **3675 collected**, up
+from 3649 by exactly 26, no import errors. `aircraft-layer` untouched by this commit (no files
+under `aircraft-layer/` in the diff) -- correctly not re-run.
+
+#### Verdict (re-review)
+
+**APPROVED.** Both Required Fixes are closed with real, non-decorative test coverage that
+matches what each fix asked for; the one flagged "extra null-param goal message" is independently
+confirmed harmless (traced through both the body-layer write-back logic and the Lua command
+handler, not taken on trust) and correctly left outside this round's scope. No production code
+changed. Ready for Security's deep-analysis pass and DoD; DoD's own "Flight test steps" live
+sortie remains the acceptance gate, unchanged by this round.
+
+#### Review Confidence (re-review)
+
+Full read of `6e0421e3`'s diff (both test files, in full, and the implementation-log note) against
+both Required Fixes; traced the flagged null-param-message claim by hand through
+`body.py`'s `_apply_ai_pilot_wheel_goal` and `ai_pilot_wheel.lua`'s `handle_ai_pilot_goal_command`
+rather than accepting the docstring's account; independently reran every check this round's log
+reports (`ruff format --check`, `ruff check`, `mypy src`, the nine-file targeted run, the
+whole-suite collect-only smoke) rather than trusting the logged numbers. Not re-run: the full,
+non-`-m "not slow"` suite and any `aircraft-layer` check (neither touched by this commit); no live
+DCS flight was possible from this environment, consistent with every prior pass on this feature.
