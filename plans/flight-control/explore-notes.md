@@ -899,3 +899,18 @@ rather than serialised behind overlay presses.
   Finish that first. When Mode 2 is done, continue with Mode 1."* — this batch is mode 2 P3+P4
   only; the mode-1 break turn, break away and the mode-1 rotor envelope (RPM floor, retreating
   blade stall) are the next batch. Until it lands, mode 1 answers "unable" to the break commands.
+
+### Mode 1: rates as settable flight parameters (user, 2026-11-18, verbatim — for the mode-1 batch)
+
+> *"It would be good to have turn rate as one flight parameter that can be set and mode 1 flies to
+> it. That'd get us different turns easily. Then the control logic for the axises would aim to get
+> that desired param. That'd be useful for any turn. Climb rate similarly , and acceleration."*
+
+Main-loop note on what exists: the merged mode-1 law (plan.md "Revised 2026-11-18 — mode 1")
+already runs on rate references internally — r_ref (turn rate, capped by the rate at
+`TURN_BANK_DEG`), vertical speed, dV_ref (capped by `MAX_ACCEL_MPS2`) — and `turn_continuous` /
+`level_off` already set a turn-rate goal. What is new is making **turn rate, climb rate and
+acceleration goals that commands set**, so a break is "turn rate high, hold speed, ≤100 m loss"
+rather than its own law, and an ordinary turn, a gentle turn and a break differ only in the
+requested rates. The rotor envelope (RPM floor, retreating blade stall) then limits what any
+requested rate can actually get.
