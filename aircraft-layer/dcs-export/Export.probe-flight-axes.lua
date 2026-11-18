@@ -94,7 +94,10 @@ local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 local B2_STEPS = { 0.0, 0.05, -0.05, 0.10, -0.10, 0.0 }
 local B2_STEP_S = 3.0
-local PEDAL_SETTLE_S = 0.5
+-- 1.5 s, not 0.5: the pedal lag is first-order, tau ~0.25 s (flights 3-4),
+-- so a 0.2 step is still 0.024 short at 0.5 s and failed the tolerance in
+-- flight 8 although it settled exactly.
+local PEDAL_SETTLE_S = 1.5
 local PEDAL_HOLD_TOL = 0.02
 
 local C2_STEPS = { { 0.0, 3.0 }, { 0.02, 2.0 }, { 0.0, 2.0 }, { -0.02, 2.0 }, { 0.0, 2.0 } }

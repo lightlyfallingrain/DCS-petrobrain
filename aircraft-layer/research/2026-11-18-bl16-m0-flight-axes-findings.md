@@ -252,6 +252,42 @@ the same mechanism that held cyclic and collective against stirring in flight 7.
 M0-D are therefore answered, and U7's merge gate for M1+M2 is met.** The first Flight M-A still
 watches the pedals under stirring, and a failure there reopens this.
 
+## Flight 8: B, C and D from the operator (copilot) seat, copilot controls unparked, on the ground
+
+User, 2026-11-18: *"B,C,D from copilot seat"*. The run started 15:29:49, triggered from the
+operator stick (856), with camera seat `operator`. It was flown on the ground: AGL 2 m, IAS 10.5 m/s
+from wind. The segments ran as B1…D1 (the pilot-pass ids, after a radio skip from A), with capture
+from the operator set because the trigger seat chooses it. This is the seat rule's case,
+amendment change 1.
+
+- **With the player in the operator seat, the operator args 1110–1113 carry the controls and the
+  pilot args 1100–1103 read 0**, the mirror of the pilot-seat flights. B1 swept 1113 across
+  −0.999..+0.999 and C1 swept 1112 across −1..+1.
+- **2003 and 2087 drive the controls from the operator seat with the same sign (−1), scale (1) and
+  lag** as from the pilot seat. The pedal 1113 reaches 87% of a step at 0.5 s, so τ ≈ 0.25 s, and
+  settles exactly. The collective 1112 reaches 98% at 0.5 s, so τ ≈ 0.1 s. Both settled to four
+  decimals. **LoSetCommand is global; nothing about the writes depends on the seat**, as Decision 25
+  assumes.
+- The probe's B2 verdict ("worst 0.0392 -> D holds pedals: false") is **a probe artefact, not a
+  failure.** Its 0.5 s settle window is too short for τ ≈ 0.25 s on 0.15–0.20 steps. The window is
+  now 1.5 s. Because of the artefact, D1 did not hold the pedals here either: the stirred operator
+  pedals moved 1113 across −0.25..+0.12.
+- **D1 (5.7 s, ended early): cyclic and collective held within the dither (≤ 0.0018) against
+  stirring from the operator seat**, the same as from the pilot seat. On the ground, so no
+  attitude effect could be seen.
+- **A false park edge on a pilot → operator swap with the copilot controls unparked. It is
+  confirmed and it is real.** At 17.301 s the camera reached the operator seat while arg 852 still
+  read 0.963 (stowed, because the player had been in the pilot seat). 852 then animated down,
+  through 0.930, 0.893, 0.853 … to 0.624 at +94 ms. **`parked_active` was true for 3 frames
+  (24 ms).** This is exactly the case amendment change 3 / M0-I's criterion describes.
+  - Under U5 it would read as a park and then an unpark within three frames: mode 1 `armed`, then
+    a same-frame unpark take capturing the pilot set.
+  - In shipped mode 2, `ai_pilot_park_rising` would see a park rising edge and could start the P1
+    takeover sequence (wheel presses) with nobody's AI flying.
+  - The fix is a short debounce, or a requirement that 852 is not falling, before a park edge
+    counts. The animation runs about 0.3 s, so a hold of about 0.1 s past the camera seat change
+    is ample. Reported to the M1 review; it also touches mode 2.
+
 ### Still owed
 - The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
   true and magnetic. Steady on an exact HSI number and half-press.
