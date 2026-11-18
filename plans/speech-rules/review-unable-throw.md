@@ -133,3 +133,50 @@ Full read. Every changed file was read in full against the diff; the lupa-propag
 buffer-commit claims were verified by running the real test suite and, for the untested
 interaction, by executing the real code path directly (not just by reading) before writing the
 required fix above.
+
+## Re-review (`ce9ca307`)
+
+Re-checked only the two changes this commit makes (`body-layer/src/rules/engine.py`,
+`body-layer/tests/test_rules_effector_action.py`).
+
+- **New test `test_a_write_before_a_failed_action_still_commits` actually pins the interaction.**
+  It builds a real rule file (`effector.write("observ", "on")` then `effector.write("no_such_
+  effector", "on")`, the second answering `ok=false`), wires `console.rule_runner` to the real
+  `run_rule`, and drives it through `console.handle_command` — i.e. the real `_handle_rule` →
+  `_dispatch_rule` path, not `run_rule` called directly, matching the pattern this review's
+  Required Fix asked for and mirroring `test_a_successful_dispatchs_write_commits_to_the_shared_
+  list`. Verified by mutation, not just by reading:
+  - Forcing `run_rule`'s `except RuleUnable` branch to also set `error = True` (what "`run_rule`
+    returned `error=True` on unable" means) turns the asserted `lines` from `["Observ on.",
+    "Unable."]` into `["Action file error."]` — the test fails, red confirmed, reverted.
+  - Making `_dispatch_rule` discard the write buffer unconditionally instead of extending it onto
+    `pending_effector_writes` (what "`_dispatch_rule` discarded on unable" means) turns the
+    asserted write list from `[("observ", "on")]` into `[]` — the test fails, red confirmed,
+    reverted.
+  Both hypotheticals in the brief are real regressions this test catches, and neither is caught
+  by any other existing test (the write-then-`RuleRuntimeError` tests exercise the opposite,
+  rollback branch and would not notice either mutation).
+- **`NoReturn` change is correct.** `reject()`'s only body is `raise RuleRuntimeError(...)`, so
+  `-> NoReturn` is the accurate annotation, and all five call sites (`src/rules/engine.py:227,
+  238, 242, 251, 254`) now call `reject(...)` as a bare statement with no leftover `return`.
+  `mypy src` (strict, run from `body-layer/`) reports no issues across 91 files, confirming mypy
+  accepts a bare-statement call to a `NoReturn` function at every site and sees no now-unreachable
+  code it needed to flag.
+- **Checks** (`body-layer/`, `.venv` from `/Users/sg/Code/DCS-petrobrain/body-layer/.venv/bin/`):
+  `ruff check .` — all checks passed. `ruff format --check .` — 2 pre-existing findings in
+  `research/2026-10-05-security-audit.md` and `research/2026-11-17-lupa-sandbox.md` (embedded
+  Python fences in Markdown), both untouched by this commit and already noted in the original
+  review — not in scope here. `mypy src` — success, no issues in 91 source files.
+  `pytest tests/test_rules_engine.py tests/test_rules_effector_action.py
+  tests/test_check_rules_tool.py` — 41 passed.
+
+### Re-review Verdict
+
+**APPROVED.** Both items from the original Required Fix / Optional Refinement are correctly
+addressed; the new test is a real pin, demonstrated by mutation in both directions the brief
+asked about, and the `NoReturn` change is accurate and mypy-clean. No further action needed.
+
+### Re-review Confidence
+
+Full read of the diff, plus mutation testing of both failure hypotheses named in the task brief
+(not just reading the test and reasoning about it).
