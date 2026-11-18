@@ -384,6 +384,8 @@ def test_write_ai_pilot_goal_posts_to_command_endpoint(
             "speed_target_kmh": None,
             "hvrt_direction": None,
             "hvrt_step": None,
+            "cbtm_action": None,
+            "cbtm_seq": None,
         }
     ]
 

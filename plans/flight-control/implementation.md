@@ -2110,3 +2110,32 @@ to reach `flight_mode() == "axes"`).
   `body-layer` as CWD, per the dispatch instruction; the full suite remains DoD's own job.
 - **aircraft-layer**: untouched this round -- no files under `aircraft-layer/` changed, so its own
   checks were not re-run (review-p3p4.md's own pass already covers the tip this round built on).
+
+### DoD fix round (`dod-p3p4.md`, test-only, no production change)
+
+Two of `dod-p3p4.md`'s required fixes, both test doubles/literals, not `src/` changes:
+
+1. `tests/test_body.py`'s `FakeConsoleAircraftClient` gained `get_payload_latest`, returning
+   `None` -- the same "not an error, no sample yet" default every other `get_*_latest` method on
+   that fake already uses (`ai_pilot_wheel_state`/`flight_control_state`/`sight_servo_state`/
+   `spu8_state`). `advance_parked_flight_state` calls this unconditionally every poll (this
+   batch's launch-detection read); the fake had no such method, so the real poll loop's own
+   `except Exception` was swallowing an `AttributeError` before any of that function's `replace()`
+   calls ran -- the three `test_body.py` failures DoD found. Grepped every other `class Fake.*
+   Client` in `tests/` (`test_body.py`'s other `FakeAircraftClient`, `FakeSpeechInputClient`;
+   `test_crew_console.py`'s `FakeSpeechClient`; `test_detection_trace.py`/`test_emission_pipeline.
+   py`/`test_hybrid_source.py`/`test_naked_eye_source.py`/`test_player_bubble.py`'s own
+   `FakeAircraftClient`s) -- none of the others are driven through `_run_crew_text_poll_loop`
+   (confirmed: none of them define `get_ai_pilot_wheel_latest`/`get_flight_control_latest` either,
+   and none call that function), so none needed the same fix.
+2. `tests/test_aircraft_client.py::test_write_ai_pilot_goal_posts_to_command_endpoint`'s expected
+   payload dict gained `"cbtm_action": None, "cbtm_seq": None` -- `AircraftLayerClient.write_
+   ai_pilot_goal`'s two new trailing optional params (this batch's own CBTM one-shot wire fields,
+   always included in the POSTed dict) weren't reflected in this pre-existing test's literal.
+
+**Checks**: `body-layer` -- `ruff format --check .` (2 pre-existing files would reformat,
+`research/2026-10-05-security-audit.md`/`research/2026-11-17-lupa-sandbox.md`, both untouched by
+this fix and already noted in `review-p3p4.md`'s re-review); `ruff check .` -- all checks passed;
+`mypy src` -- 92 files, no issues; full suite `pytest -n auto -q` -- **3671 passed, 4 xfailed, 0
+failed** (up from 3667 passed/4 failed before this round's two fixes). `aircraft-layer` untouched,
+not re-run.
