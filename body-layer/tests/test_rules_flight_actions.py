@@ -439,14 +439,20 @@ class TestSpeedStep:
 
 class TestSetAltitude:
     """Differential pin against the deleted `TestSetAltitude`. Category
-    `"flight_control"` -- no held value needed for the absolute form."""
+    `"flight_control"` -- no held value needed for the absolute form.
+
+    `slots` below carries no `"verb"` key, matching `[[BL-B129]]` D1:
+    `set_altitude`'s own `<verb:alt|altitude>` word-set is now the plain
+    literal "altitude", so the real matcher never produces a `"verb"`
+    slot for this rule any more (neither handler ever read it before D1
+    either, which is why D1 could drop "alt" as a pure pattern edit)."""
 
     def test_a_reachable_radar_request_is_honoured(self) -> None:
         console = _dispatching_console(parked_active=True, held_altitude_ref="B")
         lines = console.handle_command(
             "set_altitude",
             now_sim=0.0,
-            slots={"verb": "altitude", "altitude_m": 300, "reference": "radar"},
+            slots={"altitude_m": 300, "reference": "radar"},
         )
         assert lines == ["300 meters."]
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
@@ -458,14 +464,14 @@ class TestSetAltitude:
         lines = console.handle_command(
             "set_altitude",
             now_sim=0.0,
-            slots={"verb": "altitude", "altitude_m": 900, "reference": "radar"},
+            slots={"altitude_m": 900, "reference": "radar"},
         )
         assert lines == ["900 meters barometric."]
 
     def test_no_reference_spoken_keeps_the_current_one(self) -> None:
         console = _dispatching_console(parked_active=True, held_altitude_ref="R")
         lines = console.handle_command(
-            "set_altitude", now_sim=0.0, slots={"verb": "alt", "altitude_m": 300}
+            "set_altitude", now_sim=0.0, slots={"altitude_m": 300}
         )
         assert lines == ["300 meters."]
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
@@ -512,15 +518,17 @@ class TestAltitudeStep:
 
 class TestHoldAltitude:
     """Differential pin against the deleted `TestHoldAltitude`. Category
-    `"flight_control_altitude"`."""
+    `"flight_control_altitude"`.
+
+    `slots={}` below (`[[BL-B129]]` D1): `hold_altitude`'s pattern is
+    now a plain two-literal phrase with no slot at all, so the real
+    matcher never produces a `"verb"` key for this rule any more."""
 
     def test_freezes_at_the_held_value_and_reference(self) -> None:
         console = _dispatching_console(
             parked_active=True, held_altitude=300.0, held_altitude_ref="B"
         )
-        lines = console.handle_command(
-            "hold_altitude", now_sim=0.0, slots={"verb": "altitude"}
-        )
+        lines = console.handle_command("hold_altitude", now_sim=0.0, slots={})
         assert lines == ["Holding 300 meters."]
         assert console.ai_pilot_goal_transition == AiPilotGoalRequest(
             param="altitude", altitude_m=300.0, altitude_ref="barometric"

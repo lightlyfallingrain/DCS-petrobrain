@@ -131,6 +131,104 @@ class TestHeadingSlot:
         assert match_pattern(elements, _words("heading one two three")) == {"deg": 123}
 
 
+class TestDigitWordHomophones:
+    """`[[BL-17]]`/`[[BL-B129]]` D3 -- a numeric slot's own digit run
+    fuzzy-resolves a small, deterministic set of homophones
+    (`rule_patterns._DIGIT_WORD_HOMOPHONES`), scoped to each slot type
+    that consumes a digit run (`angle`/`quantity`/`heading`), never
+    anywhere else. Bench evidence: "heading **to** seven zero" (x3) ->
+    270, "altitude 3 **to** 0 radar" -> 320 (both the one measured
+    homophone, "to")."""
+
+    @pytest.mark.parametrize(
+        ("word", "digit"),
+        [
+            ("to", "2"),
+            ("too", "2"),
+            ("for", "4"),
+            ("fore", "4"),
+            ("free", "3"),
+            ("tree", "3"),
+            ("won", "1"),
+            ("ate", "8"),
+            ("niner", "9"),
+            # "oh" (-> "0") is deliberately excluded here: a bare angle of
+            # 0 is rejected by `_consume_angle`'s own 1-359 range check
+            # regardless of how the digit was heard -- `test_a_fuzzed_
+            # value_outside_bounds_is_still_a_miss_not_clamped` below pins
+            # exactly this ("the slot's existing bounds still apply").
+        ],
+    )
+    def test_angle_slot_resolves_each_homophone(self, word: str, digit: str) -> None:
+        elements = parse_pattern("turn <direction:left|right> <degrees:angle>")
+        assert match_pattern(elements, _words(f"turn left {word}")) == {
+            "direction": "left",
+            "degrees": int(digit),
+        }
+
+    @pytest.mark.parametrize(
+        ("word", "digit"),
+        [
+            ("to", "2"),
+            ("for", "4"),
+            ("free", "3"),
+            ("won", "1"),
+            ("ate", "8"),
+            ("niner", "9"),
+            ("oh", "0"),
+        ],
+    )
+    def test_quantity_slot_resolves_each_homophone_inside_a_run(
+        self, word: str, digit: str
+    ) -> None:
+        elements = parse_pattern("<n:quantity>")
+        assert match_pattern(elements, _words(f"three {word} zero")) == {
+            "n": int(f"3{digit}0")
+        }
+
+    def test_heading_slot_resolves_a_homophone_mid_run(self) -> None:
+        """The bench's own measured case: "heading to seven zero" -> 270,
+        mirroring `TestHeadingSlot`'s own exact-3-digit tests."""
+        elements = parse_pattern("<deg:heading>")
+        assert match_pattern(elements, _words("heading to seven zero")) == {"deg": 270}
+
+    def test_speed_target_numeric_form_resolves_a_homophone(self) -> None:
+        elements = parse_pattern("speed <target:speed_target>")
+        assert match_pattern(elements, _words("speed to zero zero")) == {
+            "target": {"kind": "number", "value": 200}
+        }
+
+    def test_a_fuzzed_value_outside_bounds_is_still_a_miss_not_clamped(self) -> None:
+        """D3's own constraint: the slot's existing bounds still apply,
+        never clamped. "turn left oh" resolves the homophone to digit
+        "0" cleanly, but `angle`'s own 1-359 range check (unaffected by
+        D3) rejects a bare 0 exactly as it already rejects a literal
+        "turn left zero" (`TestAngleSlot.test_zero_is_rejected`) -- the
+        fuzz does not relax the bound, it only widens what reaches it."""
+        elements = parse_pattern("turn <direction:left|right> <degrees:angle>")
+        assert match_pattern(elements, _words("turn left oh")) is None
+
+    def test_a_fuzzed_digit_count_still_fails_headings_exact_three_rule(self) -> None:
+        """Same constraint, the other bound: `heading` needs exactly
+        three digits -- a homophone does not relax that count, so a
+        2-digit homophone run still fails to match at all."""
+        elements = parse_pattern("<deg:heading>")
+        assert match_pattern(elements, _words("heading to zero")) is None
+
+    def test_homophone_fuzz_never_fires_outside_a_numeric_slot(self) -> None:
+        """D3's own constraint: only inside a numeric slot, after the
+        verb/literal has matched -- never anywhere else, structurally:
+        `_DIGIT_WORD_HOMOPHONES` is read only from inside
+        `_consume_digit_run`, which only `angle`/`quantity`/`heading`/
+        `speed_target` call. A `WordSetElement`'s own fuzzy resolution
+        (`_resolve_word_set`) is a completely separate mechanism with no
+        access to this table: "to" is a digit homophone but has a low
+        character ratio against either alternative here, so it resolves
+        to neither, exactly as it would have before D3 existed."""
+        elements = parse_pattern("<direction:left|right>")
+        assert match_pattern(elements, _words("to")) is None
+
+
 class TestOclockSlot:
     def test_one_through_twelve(self) -> None:
         elements = parse_pattern("<hour:oclock>")
@@ -446,7 +544,7 @@ class TestCompileRules:
             ("turn_heading_relative", "turn <direction:left|right> <degrees:angle>"),
             ("level_flight", "level flight"),
             ("set_speed", "speed <speed_target:speed_target>"),
-            ("hold_altitude", "hold <verb:altitude|alt>"),
+            ("hold_altitude", "hold altitude"),
         ]
         accepted, rejected = compile_rules(
             raw, legacy_probe=self._no_legacy_hit, free_speech_guard=()
@@ -556,16 +654,22 @@ class TestLiteralFuzz:
         assert ambiguous is True
 
     def test_slot_value_is_never_fuzzy_repaired(self) -> None:
-        """Same pin, for a `SlotElement` rather than a `WordSetElement`:
-        "free" scores 0.667 against "three" -- well inside the fuzzy
-        band a `LiteralElement`/`WordSetElement` would accept -- but a
-        digit run only recognises an exact member of `_WORD_DIGITS`/a
-        numeral, with no character-ratio fallback at all, so it is
-        simply not a digit and the slot fails to parse, not "forgiven"
-        into 3. `SlotElement` carries an open/arbitrary value (E12's
-        revision) -- there is no closed set to fuzzy-match against."""
+        """Same pin, for a `SlotElement` rather than a `WordSetElement`
+        -- narrowed by `[[BL-B129]]` D3, which is a deliberate, named
+        exception, not a reopening of this test's own claim. **D3 adds
+        a small, deterministic homophone *table*
+        (`_DIGIT_WORD_HOMOPHONES`, `TestDigitWordHomophones` above),
+        never a character-ratio fallback** -- "free" used to be this
+        test's own example precisely because it scored 0.667 against
+        "three" with nothing to forgive it; D3's own table now maps
+        "free" to "three" by name (the plan's own homophone list), so
+        it is no longer a case of "not a digit at all." "degrees" is
+        not in that table and scores only 0.5 against "three" (the same
+        ballpark "free" used to sit in) -- it still fails to parse,
+        pinning that a digit run has no *general* ratio-based fallback,
+        only the one named table D3 ships."""
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading free one five")) is None
+        assert match_pattern(elements, _words("heading degrees one five")) is None
 
     def test_no_literal_at_all_defaults_to_ratio_1_0(self) -> None:
         elements = parse_pattern("<degrees:angle>")

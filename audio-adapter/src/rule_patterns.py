@@ -156,13 +156,53 @@ Element = LiteralElement | SlotElement | WordSetElement | OptionalElement
 # below.
 # ---------------------------------------------------------------------------
 
+#: Homophones for the ten digit words, resolved **only** inside an
+#: already-anchored numeric slot's own digit run (`[[BL-B129]]` D3, user
+#: direction 2026-11-18: *"when numeric input is expected (heading
+#: <number>, speed <number>, etc) fuzzy match the part after the verb to
+#: numbers since that is expected there."*). Deterministic, not
+#: ratio-based: each of these *is* a genuine homophone of the digit word
+#: it maps to, found on the bench corpus, not merely similar-sounding.
+#: Bench evidence: "heading **to** seven zero" (x3) -> 270, "altitude 3
+#: **to** 0 radar" -> 320 -- both the one measured homophone, "to" for
+#: "two"; the rest of this table is the plan's own named set, unmeasured
+#: on this corpus but the same kind of substitution.
+#:
+#: **D3's own "existing char-ratio fuzz... with a cutoff" fallback is
+#: deliberately NOT implemented.** Measured directly: at the shared
+#: `_WORD_REPAIR_FLOOR` (0.5), ordinary words that appear right next to a
+#: numeric slot in the real rule set score at or above it against a
+#: digit word -- `_char_ratio("degrees", "three") == 0.5` (the angle
+#: slot's own name, which a pilot saying "turn left two zero degrees"
+#: could plausibly speak), `_char_ratio("down", "one") == 0.571`,
+#: `_char_ratio("level", "seven") == 0.6`, `_char_ratio("speed", "seven")
+#: == 0.6`, `_char_ratio("flight", "eight") == 0.727`,
+#: `_char_ratio("right", "eight") == 0.8`. A blind fallback would have
+#: turned "turn left two zero degrees" (today: unconsumed trailing word,
+#: no match, "say again") into angle 203 -- a wrong command, not a
+#: forgiven mishearing. Flagged rather than shipped; the deterministic
+#: table above already covers every case the bench actually measured.
+_DIGIT_WORD_HOMOPHONES: dict[str, str] = {
+    "to": "two",
+    "too": "two",
+    "for": "four",
+    "fore": "four",
+    "free": "three",
+    "tree": "three",
+    "won": "one",
+    "ate": "eight",
+    "niner": "nine",
+    "oh": "zero",
+}
+
 
 def _consume_digit_run(
     words: list[str], idx: int, min_digits: int, max_digits: int
 ) -> tuple[str, int] | None:
     """Consumes consecutive digit tokens starting at `idx` -- a digit
-    word ("three") or a whole numeral string ("315") each contribute
-    their own digit characters to one concatenated run, mirroring
+    word ("three"), a whole numeral string ("315"), or (D3) a known
+    homophone (`_DIGIT_WORD_HOMOPHONES`) each contribute their own digit
+    characters to one concatenated run, mirroring
     `vocabulary._read_digits_after`'s own number-collapse convention
     ("315" = "3 1 5" = "three one five"), but also returning how many
     *words* were consumed (that function only returns the integer).
@@ -177,6 +217,9 @@ def _consume_digit_run(
             i += 1
         elif word.isdigit():
             digits.append(word)
+            i += 1
+        elif word in _DIGIT_WORD_HOMOPHONES:
+            digits.append(_WORD_DIGITS[_DIGIT_WORD_HOMOPHONES[word]])
             i += 1
         else:
             break

@@ -12,7 +12,13 @@ from __future__ import annotations
 
 import command_matcher
 from command_matcher import match_transcript
-from rule_patterns import CompiledRule, LegacyProbeResult, compile_rules, parse_pattern
+from rule_patterns import (
+    CompiledRule,
+    LegacyProbeResult,
+    compile_rules,
+    parse_pattern,
+    rule_words,
+)
 from vocabulary import FREE_SPEECH_GUARD
 
 
@@ -32,10 +38,10 @@ _FLIGHT_RULE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("speed_step", "<verb:slow|speed> <direction:down|up>"),
     (
         "set_altitude",
-        "<verb:alt|altitude> <altitude_m:quantity> [<reference:radar|barometric>]",
+        "altitude <altitude_m:quantity> [<reference:radar|barometric>]",
     ),
     ("altitude_step", "<direction:climb|descend> <amount_m:quantity>"),
-    ("hold_altitude", "hold <verb:altitude|alt>"),
+    ("hold_altitude", "hold altitude"),
     ("level_off", "level off"),
     ("hvrt_translate_left", "left"),
     ("hvrt_translate_right", "right"),
@@ -219,18 +225,24 @@ class TestSpeedStep:
 
 
 class TestSetAltitude:
-    """Differential pin against the deleted `parse_altitude_value`."""
+    """Differential pin against the deleted `parse_altitude_value`.
 
-    def test_alt_without_reference(self) -> None:
-        result = match_transcript("alt three zero zero", rules=_FLIGHT_RULES)
+    **"alt" dropped (`[[BL-B129]]` D1)** -- `set_altitude`'s verb slot was
+    a `<verb:alt|altitude>` word-set; it is now the plain literal
+    "altitude", so `result.slots` no longer carries a `"verb"` key at
+    all. The former `test_alt_without_reference` pinned exactly the
+    wording this decision removes, so it is gone, not reworded -- "alt"
+    is no longer a legal way to say this command."""
+
+    def test_altitude_without_reference(self) -> None:
+        result = match_transcript("altitude three zero zero", rules=_FLIGHT_RULES)
         assert result.token == "set_altitude"
-        assert result.slots == {"verb": "alt", "altitude_m": 300}
+        assert result.slots == {"altitude_m": 300}
 
     def test_altitude_with_radar(self) -> None:
         result = match_transcript("altitude three zero zero radar", rules=_FLIGHT_RULES)
         assert result.token == "set_altitude"
         assert result.slots == {
-            "verb": "altitude",
             "altitude_m": 300,
             "reference": "radar",
         }
@@ -241,10 +253,28 @@ class TestSetAltitude:
         )
         assert result.token == "set_altitude"
         assert result.slots == {
-            "verb": "altitude",
             "altitude_m": 900,
             "reference": "barometric",
         }
+
+    def test_alt_still_fuzzy_repairs_onto_the_literal(self) -> None:
+        """`[[BL-B129]]` D1 drops "alt" from the *grammar* (no longer a
+        `WordSetElement` alternative) -- measured here: `_char_ratio("alt",
+        "altitude") == 0.5454...`, clear of `LiteralElement`'s own
+        `_WORD_REPAIR_FLOOR` (0.5), so a heard "alt" still repairs onto
+        the literal "altitude" and the rule still matches. D1's actual
+        mechanism is upstream of matching, not here: dropping "alt" from
+        `rule_words()` (`RuleRegistry.anchor_words`/the whisper prompt
+        bias, see `test_rule_words_omits_alt`) stops whisper from being
+        biased toward hearing "alt" at all -- the bench problem was "hold
+        alt" misheard as "hold out" wholesale, not this grammar accepting
+        "alt" when correctly heard. This test exists so a future change
+        to `_WORD_REPAIR_FLOOR` does not silently flip this without
+        anyone noticing the repair, now pinned to the real character
+        ratio rather than assumed."""
+        result = match_transcript("alt three zero zero", rules=_FLIGHT_RULES)
+        assert result.token == "set_altitude"
+        assert result.slots == {"altitude_m": 300}
 
     def test_no_anchor_word_does_not_match(self) -> None:
         result = match_transcript("three zero zero", rules=_FLIGHT_RULES)
@@ -253,6 +283,16 @@ class TestSetAltitude:
     def test_anchor_with_nothing_numeric_after_it_does_not_match(self) -> None:
         result = match_transcript("altitude radar", rules=_FLIGHT_RULES)
         assert result.token is None
+
+    def test_rule_words_omits_alt(self) -> None:
+        """D1's actual mechanism (see `test_alt_still_fuzzy_repairs_onto_
+        the_literal`'s own docstring): "alt" is gone from `set_altitude`'s
+        pattern entirely, so `rule_words` -- what `server.py` feeds into
+        the whisper prompt bias (D10) -- no longer carries it, and
+        whisper is no longer biased toward hearing "alt" at all."""
+        set_altitude = next(r for r in _FLIGHT_RULES if r.id == "set_altitude")
+        assert "alt" not in rule_words(set_altitude)
+        assert "altitude" in rule_words(set_altitude)
 
 
 class TestAltitudeStep:
@@ -286,9 +326,19 @@ class TestAltitudeStep:
 
 class TestPlainPhrases:
     def test_hold_altitude(self) -> None:
+        """`[[BL-B129]]` D1: `hold_altitude`'s own "alt" is dropped the
+        same way -- it is now a plain two-literal pattern with no slot
+        at all. `MatchResult.slots` is `None` for an empty slots dict
+        (`_match_rules`'s own `typed_slots or None`), not `{}` and not
+        `{"verb": "altitude"}`."""
         result = match_transcript("hold altitude", rules=_FLIGHT_RULES)
         assert result.token == "hold_altitude"
-        assert result.slots == {"verb": "altitude"}
+        assert result.slots is None
+
+    def test_hold_altitude_rule_words_omits_alt(self) -> None:
+        hold_altitude = next(r for r in _FLIGHT_RULES if r.id == "hold_altitude")
+        assert "alt" not in rule_words(hold_altitude)
+        assert "altitude" in rule_words(hold_altitude)
 
     def test_level_off(self) -> None:
         assert match_transcript("level off", rules=_FLIGHT_RULES).token == "level_off"

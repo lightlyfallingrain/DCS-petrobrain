@@ -213,3 +213,41 @@ def test_omitting_anchor_words_falls_back_to_rebuilding_it(
     result = match_transcript("turn left two zero", rules=(_TURN_RULE,))
     assert result.token == "turn_heading_relative"
     assert len(calls) == 1
+
+
+class TestDigitHomophoneFillerConflict:
+    """`[[BL-B129]]` D3's own "to" vs. `FILLER_WORDS` conflict
+    (`command_matcher._RULE_FILLER_PRESERVE`'s own docstring): "to" is
+    both a digit homophone (resolves to "two" inside a numeric slot) and
+    this module's own filler word (dropped so "scan to the right"
+    resolves to `scan_right`). Found by running the real pipeline end to
+    end, not assumed safe from the grammar alone -- the naive
+    implementation silently dropped "to" before `_consume_digit_run`
+    ever saw it, making D3's own bench-measured fix a no-op for the one
+    case it was built for."""
+
+    _HEADING_RULE = _rule("turn_heading", "<heading_deg:heading>")
+    _ALTITUDE_RULE = _rule(
+        "set_altitude", "altitude <altitude_m:quantity> [<reference:radar|barometric>]"
+    )
+
+    def test_to_resolves_as_a_digit_inside_a_rule_numeric_slot(self) -> None:
+        """Bench evidence: "heading to seven zero" (x3) -> 270."""
+        result = match_transcript("heading to seven zero", rules=(self._HEADING_RULE,))
+        assert result.token == "turn_heading"
+        assert result.slots == {"heading_deg": 270}
+
+    def test_to_resolves_mid_run_too(self) -> None:
+        """Bench evidence: "altitude 3 to 0 radar" -> 320."""
+        result = match_transcript("altitude 3 to 0 radar", rules=(self._ALTITUDE_RULE,))
+        assert result.token == "set_altitude"
+        assert result.slots == {"altitude_m": 320, "reference": "radar"}
+
+    def test_legacy_scan_to_the_right_is_unaffected(self) -> None:
+        """The pinned legacy case (`test_command_matcher.py::
+        test_filler_words_do_not_cost_a_match`'s own "scan to the right"
+        assertion, repeated here with a rule active) -- the legacy
+        pipeline keeps using the fully filler-stripped word list
+        regardless of what rule-matching's own preserved list does."""
+        result = match_transcript("scan to the right", rules=(self._HEADING_RULE,))
+        assert result.token == "scan_right"

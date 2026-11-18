@@ -93,12 +93,15 @@ when.speech("speed_step",
     end
   end)
 
--- "alt[itude] <value> [radar/barometric]" -- the readback always names
+-- "altitude <value> [radar/barometric]" -- the readback always names
 -- the reference actually about to be pursued (the 700 m radar cap),
--- never the one the player said.
+-- never the one the player said. "alt" dropped (`[[BL-B129]]` D1, user
+-- direction 2026-11-18: "altitude" is the word actually said) -- bench
+-- evidence showed "hold alt" heard as "hold out" 2/4; "altitude" has no
+-- such homophone collision.
 when.speech(
     "set_altitude",
-    "<verb:alt|altitude> <altitude_m:quantity> [<reference:radar|barometric>]",
+    "altitude <altitude_m:quantity> [<reference:radar|barometric>]",
     "flight_control",
   function(s)
     local ref_code = 0
@@ -132,11 +135,13 @@ when.speech("altitude_step",
     end
   end)
 
--- "hold alt[itude]" -- freezes the goal at the current held altitude.
+-- "hold altitude" -- freezes the goal at the current held altitude.
 -- Never names a reference in the readback (unlike `set_altitude`/
 -- `altitude_step`), matching the pre-rules handler's own text exactly.
+-- "alt" dropped (`[[BL-B129]]` D1) -- "hold alt" was heard as "hold out"
+-- 2/4 on the bench; "altitude" is the word the user actually says.
 when.speech("hold_altitude",
-    "hold <verb:altitude|alt>",
+    "hold altitude",
     "flight_control_altitude",
   function(s)
     local r = flight.hold_altitude()

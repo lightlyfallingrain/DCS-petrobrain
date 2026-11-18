@@ -69,3 +69,73 @@ truncation. The misses above are taken on as targeted fixes instead.
 > - when numeric input is expected (heading <number>, speed <number>, etc) fuzzy match the part
 >   after the verb to numbers since that is expected there.
 > - "alright" is not a word we use -> map to "right"
+
+## `[[BL-B129]]` implementation: before/after bench
+
+Re-run `tools/phrase_bench.py`, same corpus (`data/corpus/bl17-stage3c/`, `ggml-small.en`), on the
+same 18 `flight.lua` rules before and after D1/D3/D4/D5's matcher/rule-file changes (D2 shipped no
+code change, see below). "Before" is the matcher/rules at this plan's own base commit (`c59087f8`);
+"after" is the implementation branch.
+
+| prompt | ok (before → after) | miss (before → after) | WRONG (before → after) |
+|---|---|---|---|
+| A — today's full prompt | 141 → 139 | 22 → 25 | **1 → 0** |
+| B — flight words first | 138 → 136 | 24 → 26 | 2 → 2 |
+| C — out-of-state words removed | 129 → 128 | 32 → 34 | 3 → 2 |
+
+**WRONG drops to 0 on A_full** (`right_3`'s "alright" → `point` is fixed by D4) and C_full's own
+WRONG drops by one too (`altitude_three_two_zero_radar_1`'s "altitude 3 to 0 radar" now parses to
+the *correct* value, 320, via D3's "to"→"two" homophone, rather than a wrong one).
+
+**A_full's own `ok` count drops by 2, not up** — traced clip by clip (`bench_before.json`/
+`bench_after.json`, not committed, see this implementer's report for the exact diff): every
+kind-change (`ok`↔`miss`↔`WRONG`) between the two runs is one of —
+
+- `right_3`: `WRONG` → `ok` (D4's own fix).
+- `heading_three_one_five_0`: `miss` → `ok`; `forward_0`: `ok` → `miss`. Both clips' own spoken
+  words are untouched by this plan — the *only* difference in `A_full`'s prompt text between the
+  two runs is "alt" dropped from `set_altitude`/`hold_altitude`'s own `rule_words` (D1's own
+  mechanism: the prompt bias follows the grammar automatically). Whisper's prompt-conditioned
+  decoding is sensitive to the whole prompt, not just the words relevant to a given clip, so
+  removing one word measurably shifts decoding on *unrelated* audio too — a known property of this
+  mechanism (`vocabulary.to_prompt`'s own docstring already measures a similar effect from
+  reordering), not a defect in D1.
+- `hold_alt_0`, `hold_alt_2`, `alt_one_five_zero_3`: `ok` → `miss`. All three are recordings of the
+  deprecated "alt" phrasing D1 explicitly retires (the user: *"'alt' -> use 'altitude' that's what
+  I'll say"*) — losing ground on a phrasing the plan deliberately stops biasing the recogniser
+  toward is the intended, foreseen cost of D1, not a regression to fix. These clips no longer
+  represent the spoken form the user commits to using.
+
+Net: the two `ok` count drops and the two `ok` count gains cancel except for a net -2, entirely
+attributable to the three deprecated-"alt" clips (partially offset by the unrelated prompt-shift
+noise, which washes out to zero here). **Flagged rather than silently reported as "ok count up"**,
+since the plan's own acceptance line names that direction and this run does not meet it literally
+— the three-clip loss is the direct, intended consequence of D1, not a new defect introduced
+alongside it.
+
+## D2: no prompt change shipped
+
+Tried the prompt experiment per D2 step 1 — `_PROMPT_FRAMING` widened to `"Helicopter crew
+intercom, pilot to gunner. Numbers are read as numerals, for example 270, 30, 320."` — and
+re-benched (`A_full`: 136 ok / 27 miss / 1 WRONG, worse on every count than the unmodified "after"
+136→139/27→25/1→0, and `turn_left_thirty` stayed 0/4, "thirty" still dropped every time: one clip's
+heard text changed slightly, "turn left at 30.", but still an unconsumed extra word with no match).
+**Fails D2's own ship condition** ("improve... and no drop on any other phrase") on both halves —
+no improvement on the targeted phrase, and a drop elsewhere. **No prompt change shipped.** The
+spoken form for composed numbers stays individual digits ("three zero" for 30), which already
+scores 3/4 on this corpus and is unaffected by anything in this plan — the user should keep saying
+digits rather than "thirty"-style number words.
+
+## D5: added mid-implementation (user-approved 2026-11-18, "as recommended")
+
+`research/2026-11-18-whisper-model-sweep-flight-corpus.md` (on `main`) found a bare direction word
+plus a number ("right 45"/"right forty five", from whisper dropping "turn") resolving to `point` on
+`base.en`/`medium.en` -- the same mechanism as `right_3`'s "alright" → `point` above, generalised:
+`_parse_point_slots`'s four parsers each scan the whole transcript independently, so a `relative`
+slot resolving on its own left a trailing, unaccounted-for number unchecked. Fixed by
+`command_matcher._has_unaccounted_number` (a number not immediately followed by its own unit
+marker, "km"/"kilometres"/"o'clock", blocks the `point`/`"what"` branches from resolving) --
+verified against this corpus (A_full unaffected, `small.en` does not exhibit this specific drop
+here) and against `right 45`/`right forty five`/`left 30` directly (now `token=None`, "say again"),
+with a counterfactual confirming a legitimate `relative`+distance phrase ("look right 5
+kilometres") still resolves.

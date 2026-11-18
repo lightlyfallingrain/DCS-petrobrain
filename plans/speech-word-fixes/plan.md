@@ -65,6 +65,20 @@ word-mapping lives; reuse it rather than adding a second). Bench: `right_3` "alr
 previously fell through — if the HVRT bare-word path would fire on any sentence containing
 "right", report it rather than widen it.
 
+**D5 — a bare direction followed by a number never becomes `point`.** Added mid-implementation,
+user-approved 2026-11-18 ("as recommended"). Evidence:
+`audio-adapter/research/2026-11-18-whisper-model-sweep-flight-corpus.md` (on `main`) -- when
+whisper drops "turn" from "turn right forty five", the remainder "right forty five"/"right 45"
+resolves to the legacy `point` command (base.en x2, medium.en x1; small.en's one wrong command,
+"alright" -> `point`, is the same path -- D4 above fixes that specific instance, this generalises
+the guard). `command_matcher.py`'s `point`/`"what"` branches call `_parse_point_slots`, which scans
+the whole transcript for each of four slots independently rather than requiring full consumption;
+a `relative` slot ("right") resolving on its own, with a trailing bare number never checked by
+anything, is the mechanism. Required: "right 45", "right forty five", "left 30" (direction word +
+number, no "turn") must not match `point`; a miss ("say again") is correct -- never invent "turn"
+to complete it into `turn_heading_relative`. Fix must not regress real `point` phrasings that
+legitimately pair a number with its own unit marker ("two o'clock", "three kilometres").
+
 ## Out of scope
 
 - "speed max" heard as "speed maximum"/"speed x", "forward" as "from what", "level flight" as
@@ -76,7 +90,9 @@ previously fell through — if the HVRT bare-word path would fire on any sentenc
 ## Acceptance
 
 - Unit tests for D1 (the two patterns), D3 (each homophone in each numeric slot type, bounds,
-  never outside a slot), D4 ("alright" → right; a free-speech sentence with "all right" unchanged).
+  never outside a slot), D4 ("alright" → right; a free-speech sentence with "all right" unchanged),
+  D5 ("right 45"/"right forty five"/"left 30" never match `point`; a legitimate relative+distance
+  phrase, e.g. "look right 5 kilometres", still does).
 - `phrase_bench.py` re-run on the corpus with the branch's matcher, rules and prompt: A_full row
   correct count up, WRONG count not up; the before/after table appended to
   `audio-adapter/research/2026-11-18-state-hint-bench.md`.

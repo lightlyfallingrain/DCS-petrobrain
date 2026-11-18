@@ -1432,6 +1432,33 @@ class TestPointSlots:
         assert result.token == "point"
         assert result.slots == {"sector": "north"}
 
+    def test_a_bare_direction_followed_by_a_number_never_becomes_point(self) -> None:
+        """`[[BL-B129]]` D5 -- evidence: `research/2026-11-18-whisper-
+        model-sweep-flight-corpus.md`. Whisper dropping "turn" from
+        "turn right forty five" leaves "right forty five"/"right 45",
+        which used to resolve to `point` on the `relative` slot alone,
+        silently ignoring the trailing number as leftover. The correct
+        outcome is a miss ("say again"), not a silently invented
+        `turn_heading_relative` -- that rule needs the literal "turn",
+        which whisper already dropped, so nothing here may add it back."""
+        for text in ("right 45", "right forty five", "left 30", "look right 45"):
+            result = match_transcript(text)
+            assert result.token is None, text
+            assert result.verb_anchored is True, text
+
+    def test_a_bare_number_does_not_block_a_legitimate_distance_phrase(self) -> None:
+        """The counterfactual for the guard above: a number immediately
+        followed by its own unit marker ("kilometres"/"o'clock") is
+        exactly what a real `point` phrase looks like and must still
+        resolve -- `test_sight_clock_and_distance_resolves_with_expected_
+        slots` above already pins the clock+distance combination; this
+        pins the bare `relative` + distance form specifically, which the
+        D5 guard's own accounting (a number followed by a unit is
+        "accounted for") must not catch."""
+        result = match_transcript("look right 5 kilometres")
+        assert result.token == "point"
+        assert result.slots == {"relative": "right", "distance_km": 5}
+
 
 # --- `[[BL-B102]]` -- "that"/"it" referent resolution
 # (plans/that-it-referent/plan.md) ---
@@ -1613,10 +1640,38 @@ class TestHvrtBareWordShortcut:
         result = match_transcript("the tanks are on the right")
         assert result.token is None
 
+    def test_alright_and_all_right_resolve_to_hvrt_translate_right(self) -> None:
+        """`[[BL-B129]]` D4, user direction 2026-11-18: *"'alright' is not
+        a word we use -> map to 'right'"* -- bench evidence: `right_3`'s
+        "alright" fuzzy-anchored onto `point` (`SequenceMatcher("right",
+        "sight") == 0.8`) instead of resolving here, the corpus's one
+        wrong command. `_BARE_WORD_ALIASES` fixes the bare-word case
+        exactly."""
+        assert match_transcript("alright").token == "hvrt_translate_right"
+        assert match_transcript("all right").token == "hvrt_translate_right"
+        assert match_transcript("Alright!").token == "hvrt_translate_right"
+
+    def test_alright_inside_a_free_speech_sentence_still_falls_through(self) -> None:
+        """`_BARE_WORD_ALIASES` is keyed on the *whole* transcript's own
+        word tuple, not a per-word fold -- a global fold in
+        `vocabulary.normalize_for_match` was tried and reverted (see that
+        function's own docstring): it exposed this shortcut's own
+        "right"~"sight" collision to every sentence *starting* with
+        "alright", measured directly ("alright then let's go" resolved
+        to `point` before this was narrowed). These must still fall
+        through to no command, exactly as before D4."""
+        for sentence in (
+            "it's all right with me",
+            "that was alright I guess",
+            "alright then lets go",
+        ):
+            result = match_transcript(sentence)
+            assert result.token is None, sentence
+
     def test_hold_altitude_and_bare_hold_resolve_to_different_tokens(self) -> None:
         """ "hold altitude" (two words, now `hold_altitude`'s own rule
         pattern) and "hold" (one word, the bare-word shortcut's
         `hvrt_hold`) must not collapse onto the same token."""
-        rules = (_rule("hold_altitude", "hold <verb:altitude|alt>"),)
+        rules = (_rule("hold_altitude", "hold altitude"),)
         assert match_transcript("hold altitude", rules=rules).token == "hold_altitude"
         assert match_transcript("hold", rules=rules).token == "hvrt_hold"
