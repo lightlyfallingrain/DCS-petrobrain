@@ -855,3 +855,9 @@ Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch."
   overlay, so that altitude recovery starts first, but heading change can happen while
   climbing"* — the order is the order the overlay commands are issued, back to back; no waiting
   for one parameter to settle before commanding the next.
+- **Wheel mode is always read, never assumed (user, 2026-11-18, verbatim, answering Q4):** *"I
+  think it does, but then it does not matter. Petrobrain must always read the current wheel mode
+  and change it if necessary to give commands. We must never assume it is in the mode we would
+  like it to be. Changing mode is one left press, so just do it when needed."* — Q4 is not a
+  test-flight item; every command (align, break, goal, recovery) reads the live mode and
+  left-presses to the mode it needs before pressing.
