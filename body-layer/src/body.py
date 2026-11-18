@@ -3589,9 +3589,9 @@ def _apply_flight_control(
                     "flight-control goal write failed (continuing)", exc_info=True
                 )
         # else: the take that was in progress when this goal was
-        # commanded has already failed (phase fell to PILOT/OVERLAY by
-        # the time this poll ran) -- dropped, there is nothing left to
-        # apply it to.
+        # commanded has already failed (ack timeout moved phase to
+        # PILOT before this poll ran -- OVERLAY was already cleared,
+        # above) -- dropped, there is nothing left to apply it to.
 
     if state.phase == "OVERLAY" and state.unpark_take:
         next_seq = state.wire_seq + 1
