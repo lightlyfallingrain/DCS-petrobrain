@@ -1,6 +1,6 @@
 ---
 name: project_untested_wiring_pattern_caught_at_reviewer_not_dod
-description: 5th occurrence (2026-10-23, BL-B90 Stages 1-2/effector-sequences) of "a branch/condition that reads as tested but isn't" — caught at Reviewer each time, never reaching DoD as a live defect; the two most recent occurrences are a distinct sub-shape (sibling-gate masking, not leaf/wiring-gap) but share the same root cause and the same place in the sequence where it gets caught
+description: 6th occurrence (2026-11-18, BL-17/refactor-rule-action-unable-throw) of "a branch/condition that reads as tested but isn't" — caught at Reviewer each time, never reaching DoD as a live defect; now three distinct sub-shapes (leaf/wiring-gap, sibling-gate masking, new-case-into-existing-gate) sharing the same root cause and the same place in the sequence where it gets caught
 metadata:
   type: project
 ---
@@ -62,3 +62,30 @@ is a stronger signal than four that this may want a mechanical check (e.g. a Rev
 requirement to show, for any newly-added gate/condition, the specific test phase where every
 *other* gate is held open/satisfied so this one's own contribution is isolated) rather than relying
 on each reviewer's own mutation-testing diligence to catch it project-wide.
+
+**Occurrence 6, BL-17 `refactor/rule-action-unable-throw`, 2026-11-18 — a third sub-shape: a new
+outcome type added to an existing union feeding one shared boolean-gated mechanism.** The refactor
+made a failed rule action raise `RuleUnable` instead of returning `{ok=false}`; `run_rule` catches
+it with `error=False`, which `CrewConsole._dispatch_rule`'s pre-existing commit-or-discard buffer
+reads to decide whether a dispatch's queued `effector.write` calls land. The behaviour was correct
+(confirmed by the reviewer running it directly against the real sandbox before writing anything
+up), but zero tests in the diff exercised *this* combination — the symmetric case
+(write-then-`RuleRuntimeError`) had three dedicated tests inherited from three earlier BL-17 review
+rounds on this exact mechanism, and the new case had none. Reviewer's Required Fix added one test,
+then re-reviewed it by mutation in both directions named in the brief (forcing `RuleUnable` to set
+`error=True`, and forcing the dispatcher to discard unconditionally) — both mutations turned the
+new test red, confirming it actually pins the interaction rather than just existing near it. Saved
+as its own generalized reviewer memory:
+`.claude/agent-memory/reviewer/feedback_new_exception_type_feeding_an_existing_boolean_gated_mechanism.md`.
+**Why this still belongs in this file**: same root cause (a branch that reads as covered because a
+sibling case is covered, but isn't itself exercised) and same catch point (Reviewer, via mutation,
+before DoD — the sequence held, DoD found nothing live here). Three sub-shapes now share this
+outer pattern: (a) a leaf module's wiring into its consuming site has no test, (b) two gates share
+one test and one gate's window is always shadowed by the other's, (c) a new case added to an
+existing outcome union has no test for the new-case × existing-mechanism combination specifically.
+Six occurrences of the outer shape, all caught at Reviewer and none reaching DoD live, is a
+process signal worth a mechanical check earlier (e.g. an Implementer/Reviewer checklist item: "for
+a new outcome/case added to code that already branches on existing outcomes of the same kind, is
+there a test naming the new case specifically, not just inferred from symmetry with the old one?")
+rather than continuing to rely on each individual reviewer's own diligence catching it by hand,
+mutation-tested, every time.
