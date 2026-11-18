@@ -60,8 +60,38 @@ on the ground and the user took off before A1. Conditions were about 180 km/h IA
 - **The operator args 1110–1113 read 0 throughout** with the player in the pilot seat, as in probe
   v2.
 
+## Flight 2: A1–A4, pilot seat, SAU on, flown with the trimmers
+
+User, 2026-11-18: *"A1-A4 SAU on, using trimmers (cyclic and pedal trim)"*. The log started
+14:15:54. Conditions were about 196 km/h IAS (42–64 m/s) and 280–460 m AGL. The frame rate was
+about 150 fps; `dt` had a median of 6–7 ms and never exceeded 11 ms, so this flight had no stalls.
+
+The read-side answers from flight 1 hold unchanged: every getter updates per frame, the args at
+about 25 Hz, the same units, axes and heading relations.
+
+**A1 (60 s level) compared with flight 1:**
+
+| | SAU off, hand-flown | SAU on, trimmed |
+|---|---|---|
+| bank range | −5.3°..+2.9° | −1.2°..+1.0° |
+| roll rate (wx) | ±0.065 rad/s | ±0.03 rad/s |
+| pitch range | 2.7° wide (−4.9..−2.2°) | 1.0° wide (−1.3..−0.3°) |
+| yaw rate (wy) | ±0.016 rad/s | ±0.005 rad/s |
+| IAS spread | 3.2 m/s | 0.6 m/s |
+| VS range | −0.8..+1.4 m/s | −1.3..+0.8 m/s |
+
+- **With the SAU on and the aircraft trimmed, attitude holds about 3× tighter on every axis.**
+  Vertical speed does not improve. This fits the user's 2026-10-26 account: the SAU holds
+  pitch, bank and yaw well and altitude poorly. M4's question (should mode 1 run with the SAU on)
+  now has a reason to answer yes for the steady state. M0-H settles whether the SAU fights the
+  loop's commanded changes.
+- **The trimmed control args sit still.** Feet off with the pedals trimmed, the pedal arg held at
+  0.213–0.216 for the whole of A1. Hand-flown in flight 1 it wandered 0.03–0.13. The cyclic pitch
+  arg sat at 0.11–0.14, against 0.19–0.25 untrimmed in flight 1. **So the args read the trimmed
+  control position, not raw hand input.** A capture taken after trimming picks up the trim. M0-G
+  still owes the jump at capture with the Trimmer held off-centre.
+
 ### Still owed
 
 - The HSI headings (A1, A2, A4).
-- A1–A4 with the SAU on (the user's next flight).
 - B, C and D in both seats, and J1–J3.
