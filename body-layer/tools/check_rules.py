@@ -17,9 +17,11 @@ message carries the line number):
 4. **Handlers, by dry run** -- every handler is called with sample slot
    values from step 3 (each directive alternative, each slot form),
    against the real actions on a throwaway `CrewConsole` that is flying
-   (and, separately, hovering), and once more with every action failing,
-   so the "unable" path runs too (an action failing is a normal outcome,
-   not a finding). Catches a
+   through the AI overlay (and, separately, hovering, and separately
+   flying on the raw axes -- BL-16 mode 1, so the `_by_mode`-wrapped
+   actions' own axes bodies run too, not just the overlay ones), and
+   once more with every action failing, so the "unable" path runs too
+   (an action failing is a normal outcome, not a finding). Catches a
    misspelt action, a wrong argument, `nil` arithmetic, a `digits()` of a
    string, and an `effector.write` naming an effector or value the
    registry does not have. A branch none of the samples reaches is not
@@ -56,6 +58,7 @@ from belief.effector_registry import (
     aircraft_dir_name,
     load_registries_by_aircraft,
 )
+from belief.flight_control import FlightControlState
 from rules.actions import ACTION_NAMESPACES, Action, ActionContext
 from rules.engine import (
     RULE_DISPATCH_INSTRUCTION_BUDGET,
@@ -81,10 +84,29 @@ _FLYING = ParkedFlightState(
     held_altitude_ref="R",
     held_speed=150.0,
 )
-_SCENARIOS: tuple[tuple[str, ParkedFlightState, bool], ...] = (
-    ("flying", _FLYING, False),
-    ("hovering", replace(_FLYING, ai_mode="HVRT"), False),
-    ("every action fails", _FLYING, True),
+#: Never parked -- `console.parked_flight_state` for every scenario that
+#: is not flying through the AI overlay (the two mode-1 scenarios below).
+_NOT_PARKED = ParkedFlightState()
+#: BL-16 mode 1 Stage M1 -- `_AXES_FLYING` puts a dry run through
+#: `CrewConsole.flight_mode() == "axes"` (`phase="ACTIVE"`) with every
+#: held value known, so the `_by_mode`-wrapped actions' own axes bodies
+#: (`axes_set_heading`/`axes_step_speed`/...) actually run, not just the
+#: unchanged overlay ones every pre-existing scenario already covered.
+_AXES_FLYING = FlightControlState(
+    phase="ACTIVE",
+    held_heading=120.0,
+    held_altitude=300.0,
+    held_altitude_ref="agl",
+    held_speed=150.0,
+    measured_heading=120.0,
+    measured_altitude=300.0,
+    measured_speed=150.0,
+)
+_SCENARIOS: tuple[tuple[str, ParkedFlightState, FlightControlState, bool], ...] = (
+    ("flying", _FLYING, FlightControlState(), False),
+    ("hovering", replace(_FLYING, ai_mode="HVRT"), FlightControlState(), False),
+    ("axes flying", _NOT_PARKED, _AXES_FLYING, False),
+    ("every action fails", _FLYING, FlightControlState(), True),
 )
 
 
@@ -197,7 +219,7 @@ def _dry_run(
             return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
         return {"ok": True, "reason": None}
 
-    for label, state, all_fail in _SCENARIOS:
+    for label, state, axes_state, all_fail in _SCENARIOS:
         console = CrewConsole(store=ContactStore())
         sandbox = RuleSandbox()
         ctx = ActionContext(
@@ -211,6 +233,7 @@ def _dry_run(
             current["file"], current["rule"] = rule.file, rule.id
             for utterance, slots in _slot_sets(rule, samples):
                 console.parked_flight_state = state
+                console.flight_control_state = axes_state
                 sink.lines = []
                 try:
                     lua_slots = sandbox.table_from(slots) if slots else sandbox.table()

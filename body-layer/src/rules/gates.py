@@ -51,9 +51,20 @@ GateFn = Callable[[CrewState], GateOutcome]
 
 
 def _always(state: CrewState) -> GateOutcome:
-    """Queries, describe, recall, the "you/I have controls" no-op --
-    none of these are gated by seat or state (`BL-17.md`'s "always
-    expected" layer)."""
+    """Queries, describe, recall -- none of these are gated by seat or
+    state (`BL-17.md`'s "always expected" layer)."""
+    return GateOutcome("pass")
+
+
+def _flight_handover(state: CrewState) -> GateOutcome:
+    """BL-16 mode 1 Decision 22 -- the two handover rules' own category.
+    Always `PASS`: what "you/I have controls" means depends on state
+    (overlay flying, already his, nobody's), and each action reads that
+    state itself rather than a precondition on the whole category being
+    able to express it (`take_controls`/`release_controls`'s own
+    docstrings). Exists apart from `"always"` for D19's urgent-readback
+    bypass and D17's speech-to-text hint -- see `rules.gates`'s own
+    module docstring on why those two things need a category at all."""
     return GateOutcome("pass")
 
 
@@ -139,6 +150,7 @@ GATE_REGISTRY: dict[str, GateFn] = {
     "flight_control_speed": _flight_control_speed,
     "flight_control_altitude": _flight_control_altitude,
     "flight_control_any": _flight_control_any,
+    "flight_handover": _flight_handover,
 }
 
 

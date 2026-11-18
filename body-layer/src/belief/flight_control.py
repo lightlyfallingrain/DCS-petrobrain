@@ -165,8 +165,9 @@ class FlightControlGoalRequest:
     """One goal-channel message's worth of fields, built by a `CrewConsole.
     axes_*` action and carried by the one-shot `flight_control_goal_
     transition` field until `body.py`'s `_apply_flight_control` sends it
-    and bumps the local `goal_seq`. Every field `None` means "omit it" on
-    the wire (`Export.lua`'s own "a null field means keep yours")."""
+    and bumps `FlightControlState.wire_seq`. Every field `None` means
+    "omit it" on the wire (`Export.lua`'s own "a null field means keep
+    yours")."""
 
     heading_deg: float | None = None
     turn: Literal[-1, 0, 1] | None = None
@@ -179,11 +180,23 @@ class FlightControlGoalRequest:
 @dataclass(frozen=True)
 class FlightControlState:
     """Petrovich's belief about mode 1. `phase`/`take_seq`/`pending_
-    take_says`/`unpark_take`/`goal_seq` are body-layer's own authoritative
+    take_says`/`unpark_take`/`wire_seq` are body-layer's own authoritative
     fields (never overwritten by `advance_flight_control_state`, which
     only refreshes the `lua_*`/`held_*`/`measured_*` mirrors below).
     `took_at_sim` is the sim time the current `TAKING` phase was entered,
     `None` otherwise -- `decide_flight_control`'s own ack-timeout clock.
+
+    **`wire_seq` vs. `take_seq`**: `wire_seq` is the one strictly-
+    increasing counter every message's own `"seq"` field carries
+    (`Export.lua`'s `fc_last_cmd_seq` applies it across every `cmd` kind
+    alike -- a `goal` message is dropped exactly as stale as a `take` if
+    sent out of order against it), bumped by `_apply_flight_control` on
+    every send regardless of kind. `take_seq` is the *semantic* id of
+    the current (or most recent) takeover -- what Lua echoes back on
+    `fc_take_seq` to say "this specific take is now active" -- and only
+    ever changes on an actual take, voice or unpark. The two would
+    collide (an intervening goal send bumping what a take confirmation
+    is compared against) if conflated into one field.
 
     `held_heading`/`held_altitude`/`held_altitude_ref`/`held_speed`
     mirror `Export.lua`'s own `fc_goal_*` fields -- the goal mode 1 is
@@ -201,7 +214,7 @@ class FlightControlState:
     pending_take_says: str | None = None
     took_at_sim: float | None = None
     unpark_take: bool = False
-    goal_seq: int = 0
+    wire_seq: int = 0
     held_heading: float | None = None
     held_altitude: float | None = None
     held_altitude_ref: AltitudeRef | None = None
@@ -245,7 +258,7 @@ def advance_flight_control_state(
     mutate, a `None` sample leaves `state` unchanged" shape `belief.
     ai_pilot_wheel.advance_parked_flight_state` already uses. Only the
     `lua_*`/`held_*`/`measured_*` mirrors move; `phase`/`take_seq`/
-    `pending_take_says`/`took_at_sim`/`unpark_take`/`goal_seq` are
+    `pending_take_says`/`took_at_sim`/`unpark_take`/`wire_seq` are
     body-layer's own fields and are carried through unchanged -- this
     function never decides the handover phase, `decide_flight_control`
     does, from the mirrors this function just refreshed."""
@@ -261,7 +274,9 @@ def advance_flight_control_state(
         measured_heading=_as_optional_float(sample.get("fc_measured_heading")),
         measured_altitude=_as_optional_float(sample.get("fc_measured_altitude")),
         measured_speed=_as_optional_float(sample.get("fc_measured_speed")),
-        lua_mode=sample.get("fc_mode") if isinstance(sample.get("fc_mode"), str) else None,
+        lua_mode=sample.get("fc_mode")
+        if isinstance(sample.get("fc_mode"), str)
+        else None,
         lua_take_seq=_as_optional_int(sample.get("fc_take_seq")),
         lua_take_origin=(
             sample.get("fc_take_origin")
@@ -408,7 +423,9 @@ def decide_flight_control(
                 state,
                 phase="ACTIVE",
                 take_seq=(
-                    state.lua_take_seq if state.lua_take_seq is not None else state.take_seq
+                    state.lua_take_seq
+                    if state.lua_take_seq is not None
+                    else state.take_seq
                 ),
                 unpark_take=True,
             )
@@ -421,10 +438,15 @@ def decide_flight_control(
         # Still waiting for Lua to report the unpark's own outcome.
         return state, None
 
-    if state.phase == "ACTIVE" and state.lua_mode == "off" and state.lua_release_reason in (
-        "envelope",
-        "nan",
-        "dead",
+    if (
+        state.phase == "ACTIVE"
+        and state.lua_mode == "off"
+        and state.lua_release_reason
+        in (
+            "envelope",
+            "nan",
+            "dead",
+        )
     ):
         new_state = replace(state, phase="PILOT", pending_take_says=None)
         return new_state, FlightControlDecision(says="You have controls!", urgent=True)
@@ -445,7 +467,9 @@ def decide_flight_control(
             new_state = replace(
                 state, phase="PILOT", pending_take_says=None, took_at_sim=None
             )
-            return new_state, FlightControlDecision(says="Unable, not ready.", urgent=False)
+            return new_state, FlightControlDecision(
+                says="Unable, not ready.", urgent=False
+            )
 
     return state, None
 

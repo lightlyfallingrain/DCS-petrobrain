@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 if TYPE_CHECKING:
     from belief.crew_console import CrewConsole
@@ -131,12 +131,52 @@ class Action:
                 )
 
 
+def _by_mode(
+    *,
+    overlay: Callable[[ActionContext, dict[str, object]], dict[str, object]],
+    axes: Callable[[ActionContext, dict[str, object]], dict[str, object]],
+) -> Callable[[ActionContext, dict[str, object]], dict[str, object]]:
+    """BL-16 mode 1 Decision 21 -- one combinator replacing an if-branch
+    that would otherwise be repeated in every one of the 16 shipped
+    flight actions it wraps below. `CrewConsole.flight_mode()` is the
+    one place that decides which mode is live (that method's own
+    docstring); `overlay` keeps today's mode-2 body unchanged, `axes` is
+    the new mode-1 counterpart. `flight_mode() is None` (nobody flying)
+    routes to `overlay` too -- defensive, not reachable in practice: the
+    category gate (`rules.gates`) already refused before any `_by_mode`-
+    wrapped action's `invoke` is ever called, so `flight_mode()` is
+    never `None` here; this is the same safe default mode 2 already had
+    before mode 1 existed, not a new behaviour.
+
+    **Why not separate mode-1 rules, or a branch inside each `CrewConsole`
+    method** -- the two alternatives considered and why they lose: a
+    second rule per command would duplicate the wording (D9's collision
+    check would then disable both copies), and a branch inside each
+    method would scatter the mode decision across 17 places instead of
+    this one."""
+
+    def invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+        if ctx.console.flight_mode() == "axes":
+            return axes(ctx, args)
+        return overlay(ctx, args)
+
+    return invoke
+
+
 def _increment_heading(
     ctx: ActionContext, args: dict[str, object]
 ) -> dict[str, object]:
     delta_deg = args["delta_deg"]
     assert isinstance(delta_deg, int)
     return ctx.console.increment_ai_heading(delta_deg)
+
+
+def _axes_increment_heading(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    delta_deg = args["delta_deg"]
+    assert isinstance(delta_deg, int)
+    return ctx.console.axes_increment_heading(delta_deg)
 
 
 def _int_arg(args: dict[str, object], name: str) -> int:
@@ -151,20 +191,44 @@ def _set_heading(ctx: ActionContext, args: dict[str, object]) -> dict[str, objec
     return ctx.console.set_heading(_int_arg(args, "deg"))
 
 
+def _axes_set_heading(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.axes_set_heading(_int_arg(args, "deg"))
+
+
 def _level_flight(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.level_flight()
+
+
+def _axes_level_flight(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.axes_level_flight()
 
 
 def _set_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.set_speed(_int_arg(args, "value"))
 
 
+def _axes_set_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.axes_set_speed(_int_arg(args, "value"))
+
+
 def _set_speed_max(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.set_speed_max()
 
 
+def _axes_set_speed_max(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.axes_set_speed_max()
+
+
 def _step_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.step_speed(_int_arg(args, "sign"))
+
+
+def _axes_step_speed(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.axes_step_speed(_int_arg(args, "sign"))
 
 
 def _set_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
@@ -173,16 +237,40 @@ def _set_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, obje
     )
 
 
+def _axes_set_altitude(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.axes_set_altitude(
+        _int_arg(args, "m"), _int_arg(args, "reference_code")
+    )
+
+
 def _step_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.step_altitude(_int_arg(args, "delta_m"))
+
+
+def _axes_step_altitude(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.axes_step_altitude(_int_arg(args, "delta_m"))
 
 
 def _hold_altitude(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.hold_altitude()
 
 
+def _axes_hold_altitude(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    return ctx.console.axes_hold_altitude()
+
+
 def _level_off(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
     return ctx.console.level_off()
+
+
+def _axes_level_off(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    return ctx.console.axes_level_off()
 
 
 def _hvrt_translate_left(
@@ -221,6 +309,46 @@ def _hvrt_step_down(ctx: ActionContext, args: dict[str, object]) -> dict[str, ob
     return ctx.console.hvrt_step("down")
 
 
+def _axes_hvrt_unready(
+    ctx: ActionContext, args: dict[str, object]
+) -> dict[str, object]:
+    """BL-16 mode 1 Decision 21's shared axes body for every `hvrt_*`
+    action -- "Mode 1 is forward flight only (Decision 3), so the hover
+    words have no meaning here," always `NOT_READY`. Shared by all five
+    (`hvrt_translate_*` x4, `hvrt_hold`, `hvrt_step_*` x2 -- the same
+    "one zero-argument action per bare word, sharing one body" shape the
+    overlay versions already use) since the response never varies."""
+    return {"ok": False, "reason": "NOT_READY"}
+
+
+def _turn_continuous(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """BL-16 mode 1 Decision 21's `flight.turn_continuous` -- "turn
+    left/right" with no degrees heard. **Not** `_by_mode`-wrapped: mode
+    2 has no overlay body to dispatch to at all (there is no "continuous
+    turn" concept on the AI-pilot wheel), so this checks `flight_mode()`
+    itself rather than taking an `overlay=` callable that would have
+    nothing to call. In overlay mode this is the one closed-reason
+    change to mode 2 the plan names: "'turn left' with no degrees used
+    to fall through as an unmatched command" -- now answers "Unable, AI
+    overlay." instead."""
+    sign = _int_arg(args, "sign")
+    if ctx.console.flight_mode() == "axes":
+        return ctx.console.axes_turn_continuous(cast(Literal[-1, 0, 1], sign))
+    return {"ok": False, "reason": "AI_OVERLAY"}
+
+
+def _take_controls(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """BL-16 mode 1 Decision 22's `flight.take_controls(says)`."""
+    says = args["says"]
+    assert isinstance(says, str)
+    return ctx.console.take_controls(says)
+
+
+def _release_controls(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """BL-16 mode 1 Decision 22's `flight.release_controls()`."""
+    return ctx.console.release_controls()
+
+
 #: `[[BL-17]]` Stage 4 (`plans/speech-rules/plan.md` D18) -- one action per
 #: extracted flight handler. Every numeric bound is generous for the
 #: grammar that feeds it (never domain-tight): the action's own job is to
@@ -244,28 +372,44 @@ def _hvrt_step_down(ctx: ActionContext, args: dict[str, object]) -> dict[str, ob
 #: slot to carry a value at all (the same "one enumerated token per word"
 #: shape `crew_console.py`'s own `hvrt_translate`/`hvrt_step` methods'
 #: docstrings describe) -- sharing one Python method, not duplicating it.
+#:
+#: **BL-16 mode 1 Decision 21** (`plans/flight-control/plan.md`, "Revised
+#: 2026-11-18"): every one of the sixteen pre-existing actions below is
+#: now `_by_mode`-wrapped -- `overlay=` is the unchanged mode-2 body,
+#: `axes=` is the new mode-1 one (`_by_mode`'s own docstring on why one
+#: combinator replaces a 17-way-repeated branch). `turn_continuous`/
+#: `take_controls`/`release_controls` are new actions with no mode-2
+#: counterpart to wrap -- see each one's own docstring for why.
 FLIGHT_ACTIONS: tuple[Action, ...] = (
     Action(
         name="increment_heading",
         params=(ActionParam(name="delta_deg", lo=-359, hi=359),),
-        invoke=_increment_heading,
+        invoke=_by_mode(overlay=_increment_heading, axes=_axes_increment_heading),
     ),
     Action(
         name="set_heading",
         params=(ActionParam(name="deg", lo=0, hi=359),),
-        invoke=_set_heading,
+        invoke=_by_mode(overlay=_set_heading, axes=_axes_set_heading),
     ),
-    Action(name="level_flight", params=(), invoke=_level_flight),
+    Action(
+        name="level_flight",
+        params=(),
+        invoke=_by_mode(overlay=_level_flight, axes=_axes_level_flight),
+    ),
     Action(
         name="set_speed",
         params=(ActionParam(name="value", lo=0, hi=9999),),
-        invoke=_set_speed,
+        invoke=_by_mode(overlay=_set_speed, axes=_axes_set_speed),
     ),
-    Action(name="set_speed_max", params=(), invoke=_set_speed_max),
+    Action(
+        name="set_speed_max",
+        params=(),
+        invoke=_by_mode(overlay=_set_speed_max, axes=_axes_set_speed_max),
+    ),
     Action(
         name="step_speed",
         params=(ActionParam(name="sign", lo=-1, hi=1),),
-        invoke=_step_speed,
+        invoke=_by_mode(overlay=_step_speed, axes=_axes_step_speed),
     ),
     Action(
         name="set_altitude",
@@ -273,22 +417,69 @@ FLIGHT_ACTIONS: tuple[Action, ...] = (
             ActionParam(name="m", lo=0, hi=9999),
             ActionParam(name="reference_code", lo=0, hi=2),
         ),
-        invoke=_set_altitude,
+        invoke=_by_mode(overlay=_set_altitude, axes=_axes_set_altitude),
     ),
     Action(
         name="step_altitude",
         params=(ActionParam(name="delta_m", lo=-9999, hi=9999),),
-        invoke=_step_altitude,
+        invoke=_by_mode(overlay=_step_altitude, axes=_axes_step_altitude),
     ),
-    Action(name="hold_altitude", params=(), invoke=_hold_altitude),
-    Action(name="level_off", params=(), invoke=_level_off),
-    Action(name="hvrt_translate_left", params=(), invoke=_hvrt_translate_left),
-    Action(name="hvrt_translate_right", params=(), invoke=_hvrt_translate_right),
-    Action(name="hvrt_translate_forward", params=(), invoke=_hvrt_translate_forward),
-    Action(name="hvrt_translate_back", params=(), invoke=_hvrt_translate_back),
-    Action(name="hvrt_hold", params=(), invoke=_hvrt_hold),
-    Action(name="hvrt_step_up", params=(), invoke=_hvrt_step_up),
-    Action(name="hvrt_step_down", params=(), invoke=_hvrt_step_down),
+    Action(
+        name="hold_altitude",
+        params=(),
+        invoke=_by_mode(overlay=_hold_altitude, axes=_axes_hold_altitude),
+    ),
+    Action(
+        name="level_off",
+        params=(),
+        invoke=_by_mode(overlay=_level_off, axes=_axes_level_off),
+    ),
+    Action(
+        name="turn_continuous",
+        params=(ActionParam(name="sign", lo=-1, hi=1),),
+        invoke=_turn_continuous,
+    ),
+    Action(
+        name="hvrt_translate_left",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_translate_left, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_translate_right",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_translate_right, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_translate_forward",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_translate_forward, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_translate_back",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_translate_back, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_hold",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_hold, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_step_up",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_step_up, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="hvrt_step_down",
+        params=(),
+        invoke=_by_mode(overlay=_hvrt_step_down, axes=_axes_hvrt_unready),
+    ),
+    Action(
+        name="take_controls",
+        params=(ActionParam(name="says", kind="str"),),
+        invoke=_take_controls,
+    ),
+    Action(name="release_controls", params=(), invoke=_release_controls),
 )
 
 
