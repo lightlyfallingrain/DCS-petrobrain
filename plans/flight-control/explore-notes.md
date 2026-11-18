@@ -790,3 +790,31 @@ wheel is the command menu (`ShowMenu`, the one with the option labels) and the p
 off. So the "cosmetic HUD change" worry in P0-1 is moot — the readback overlay is there anyway.
 P0-1 narrows to: does `list_indication(6)` carry the readback text with the right (command) wheel
 closed. Expected yes, since the texts belong to the always-drawn left overlay.
+
+## Stage P3 explore (user, 2026-11-18) — CBTM align, align for launch, breaks
+
+Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch." → long up;
+"Break turn left." → "Breaking left." (long left); "Break away." → "Breaking away." (long left,
+2 s, long left); P4 "Leveling off." on recovery. Answers, verbatim:
+
+1. **Build P3 and P4 together?** *"yes"* — "align for launch" never reaches `main` without the
+   P4 recovery that stops the post-launch dive.
+2. **The abort word.** *"there's "level flight" as well. That could be changed to "level
+   flight/off", both do pretty much the same thing."* — so the existing `level_flight` rule
+   (`body-layer/config/rules/flight.lua`) takes "level off" as a second form; that is the spoken
+   abort of an alignment. ("stop turn" stays the turn-stop; "Straight" from the 2026-11-15 table
+   is not carried forward.)
+3. **Readbacks.** *""Aligning for launch" is the only correction. As this goes to rules, it'll be
+   easy to change."* — so: "Aligning.", "Aligning for launch.", "Breaking left/right.",
+   "Breaking away.", "Leveling off." — in the Lua rules, where the user edits them.
+4. **After aligning.** *"once aligned, keep that until I command something else. No need to
+   change mode, unless there is need to change one of the flight params in FLT/HVR/HVRT mode."*
+   — stay in CBTM holding the alignment; only a heading/altitude/speed goal (which needs
+   FLT/HVR/HVRT) cycles out. Matches U3/always-reassert for the goal's own mode.
+5. **Mode 1.** *"Align for missile launch is not possible in Mode 1, because 9K113 is gated in AI
+   overlay flight and therefore Mode 2. Align and align for launch are usefull commands only when
+   player is using the CPG view and that is Mode 2 only. Mode 1 alignment can only be possbile if
+   ED ever makes it possible to use CPG view without AI flight control or with other helicopters
+   like Gazelle, but that is much further along."* — align/align-for-launch/breaks are mode-2-only;
+   in mode 1 they answer "unable" (the existing `_by_mode` "Unable, AI overlay." shape, mirrored).
+   No mode-1 alignment is planned.
