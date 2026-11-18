@@ -322,8 +322,8 @@ pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-si
   <section class="card skip">
     <h2>Not in this flight</h2>
     <ul>
-      <li>The bearing/heading rename and Stage 1a — still paused, unaffected.</li>
-      <li>Stage 3c (the narrowed speech-recognition hint) — not built yet. See the recording card near the bottom: you can record its test corpus today, in this same session, but there is nothing to <em>fly</em> for it yet.</li>
+      <li>The bearing/heading rename (Stages 1a and 10) — rejected 2026-11-18; existing wording stays.</li>
+      <li>Stage 3c (the narrowed speech-recognition hint) — not built yet. Its corpus recording has its own card now (see the bottom of this one); there is nothing to <em>fly</em> for it.</li>
       <li>The five wording collisions a mid-build check once found among these 18 rules (<code>set_speed</code>/<code>altitude_step</code>, <code>level_off</code>/"straight"/<code>hvrt_translate_right</code>) — all resolved before this merge (a matching-check fix, then dropping "straight" outright). Verified on the ground, zero rules rejected when pushed. Nothing to check for this on the flight either, though if any command below behaves strangely, say so regardless.</li>
       <li>Copilot-seat commands (9K113/sight) and anything requiring hands/eyes-busy refusals — none of that is in this rule category yet.</li>
     </ul>
@@ -561,24 +561,8 @@ adapter accepted: [all 18 ids] -- <strong>zero rejected</strong></pre>
   </section>
 
   <section class="card record-stage">
-    <h2>Also in this session — recording Stage 3c's test corpus</h2>
-    <p>Stage 3c (a speech-recognition hint that narrows by what Petrovich is doing) isn't built yet, but recording its test corpus doesn't need to wait — and the tool to do it didn't actually work until this pass (its <code>--list-prompts</code>/<code>--out</code> flags in the plan never existed; fixed and verified this pass, not just assumed).</p>
-    <div class="block">
-      <div class="tag">1 &middot; See the phrase list</div>
-      <pre class="cmd"><span class="dir">from audio-adapter/</span>PYTHONPATH=src .venv/bin/python tools/record_corpus.py --list-prompts \
-  --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt</pre>
-    </div>
-    <div class="block">
-      <div class="tag">2 &middot; Record it (needs sox and your flying headset plugged in)</div>
-      <pre class="cmd"><span class="dir">from audio-adapter/</span>PYTHONPATH=src .venv/bin/python tools/record_corpus.py \
-  --corpus-dir tests/fixtures/corpus/bl17-stage3c/ \
-  --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt</pre>
-    </div>
-    <div class="block">
-      <div class="tag">What to say, and when</div>
-      <p>Space starts/stops each take, same as before. The list is mostly ordinary flight phrases. Four lines near the end are deliberately refusal cases, and the two pairs need <strong>opposite</strong> states — the tool has no way to know your aircraft state, so get each into the state the plan calls for yourself: "turn left thirty" and "turn left 30" (each said a second time, as the refusal case — the list repeats both on purpose) should be said <strong>on the ground, not flying</strong> (expect "unable, not flying" once this is live — not yet, since Stage 3c itself isn't built). "watch nearest" and "binoculars" should be said <strong>while flying</strong> (expect "unable, hands busy" once Stage 6 ports that reason — recorded now so the corpus doesn't need a second session later). Everything else can be said in whatever state is natural.</p>
-    </div>
-    <p style="color:var(--fg-dim); font-size:0.9rem; margin:8px 0 0;">This is ground work, not something to do mid-flight. Do it before or after, whenever convenient in this same session.</p>
+    <h2>Stage 3c's corpus recording moved to its own card</h2>
+    <p>The recording instructions that were here are superseded (2026-11-18): the phrase list was revised, aircraft state no longer matters, and the clips go to <code>data/corpus/</code>, not <code>tests/fixtures/</code>. Use the "BL-17 Corpus Recording" card instead; it's a desk job, not part of this flight.</p>
   </section>
 
 </main>
