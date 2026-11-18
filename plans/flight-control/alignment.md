@@ -1361,3 +1361,94 @@ it would never be flown (F-P6). Each step follows the plan's rules as written.
 - **Q-P3-6** — "Altitude 200" (or a heading or speed) said during "align for launch": abort and
   fly to 200 rather than to the pre-align altitude? (Recommended: yes. It ends the alignment
   either way, F-P6.)
+
+## Plan check — 2026-11-18
+
+**Verdict:** CONCERNS — two missing items, both fixable before build without a new user decision:
+a second "align for launch" during recovery re-snapshots the half-restored state instead of
+keeping the first (an open assumption the goal check and the user both settled, that the plan's
+mechanism does not implement), and mode-1 "break away" is absent, which a standing direction
+landed after the plan (`1659a54d`) now requires. Everything else traces cleanly, including two
+points worth checking that turned out sound (recovery's `pending_order`, and the mode-1 break
+bank angle).
+
+Scope: same batch as the goal check above, `feature/bl16-p3p4-cbtm`, now at tip `1659a54d` (merged
+in during this check — `959af986` Architect, then `1659a54d` "mode 1 carries mode 2's flight
+command set"). Checked against `plans/flight-control/plan.md`, "## Revised 2026-11-18 — Stages
+P3+P4 ready to build" (~L3374 onward), and `explore-notes.md`'s three 2026-11-18 rounds plus the
+new "Mode 1 carries mode 2's command set" section at the file's end.
+
+| expectation | stage | status |
+|---|---|---|
+| E-P12 (align points nose, holds) | Mode-2 action bodies, Co-moving table `align_phase`/`cbtm_align` row | met |
+| E-P13 (align for launch, dive to boresight) | same + F-P9 floor/ceiling | met |
+| E-P14 (post-launch recovery, heading held, climb+step) | `decide_ai_pilot_wheel` step 2, Co-moving table | met |
+| E-P15 (level flight/off = abort) | `level_flight`'s two forms, step 3 | met |
+| E-P16 (never crosses limits unannounced) | F-P9: AGL-relative drop, not absolute | met, narrowed → Q-P3-2 (user changed "40 m AGL floor" to "40 m drop below the align-for-launch starting height") |
+| E-P17 (break turn, full 90°, not cut short) | `decide_ai_pilot_wheel` step 1 (drops heading goal) + Q-P3-4 (mode re-read every frame) | met |
+| E-P18 (break away, two lefts 2 s apart) | `cbtm_break_away` Lua tick | met |
+| E-P19 (flight command always flown, never swallowed) | F-P6 fix: `request_goal`'s shared precondition | met |
+| E-P20 (mode-1 "unable" for align/breaks) | align/align-for-launch "unable" in mode 1; breaks are real mode-1 behaviour | met, narrowed → Q-P3-3 (breaks were the open half of E-P20's own wording, now answered as a real tight turn, not "unable") |
+| E-P21 (readbacks editable in flight.lua) | `cbtm_align`/etc. rules, "Breaking left."/"Breaking right." note | met |
+| E-P22 (new, 1659a54d: mode 1 carries mode 2's command set except 9K113 align) | — | **missing** — mode-1 "break away" is not built. The plan's own text (L3627-3630) keeps it mode-2-only and raises **U11**, recommending *against* building it this batch "because deferring avoids guessing at a form nobody asked for yet." `1659a54d` (committed after the Architect pass, same day) answers exactly that: *"all other flight commands from Mode 2 must also be available in Mode 1 ... except aligning to 9K113."* Break turn already has a mode-1 body (`axes_break_turn`); break away does not. U11's recommendation is now overruled by a standing rule, not an open question — the fix is a mode-1 `break_turn` composed twice with the gap, or a dedicated mechanism, Architect's call, but it has to exist. Everything else mode-2-only in this batch (`cbtm_align`, `cbtm_align_for_launch`) is correctly excluded — the direction's own exception. |
+| F-P6 (goal read back, never flown) | `request_goal` precondition, Co-moving table | met — resolved |
+| F-P7 (always-reassert cuts a break short) | step 1 (drop heading goal outright) + Q-P3-4 (re-read mode every frame, "rare self-correcting delay" accepted for break-away's second press) | met — resolved |
+| F-P8 (abort word that no longer exists) | `level_flight` gains "level off" | met — resolved |
+| F-P9 (below-floor starts) | AGL-relative drop (Q-P3-2) | met — resolved |
+
+### Open assumption not settled in the mechanism
+
+- **A second "align for launch" during recovery.** The goal check named this explicitly: *"serves
+  the why: re-enter `launch_aligned` and keep the first pre-align snapshot ... would not:
+  re-snapshotting a recovery's half-restored altitude and speed."* The user's follow-up answered
+  it directly — *"command align for launch" — a fresh align for launch, not ignored* — confirming
+  the behaviour is wanted, not deferred. But `cbtm_align_for_launch()`'s body (L3588-3591) and the
+  Co-moving table's own `cbtm_align_for_launch` row (L3647) both capture `pre_align_snapshot` from
+  "the current goal/held values" unconditionally — no branch for `align_phase == "recovering"`.
+  Said mid-recovery, this re-snapshots whatever altitude/speed the climb-back has reached *so
+  far*, not the original pre-align values — the exact "would not" case the goal check warned
+  against. This is a **Finding**, not a question: the user already answered what should happen;
+  the plan's mechanism just doesn't implement it. Fix: `cbtm_align_for_launch`'s snapshot capture
+  needs a branch — if `align_phase == "recovering"`, keep the existing `pre_align_snapshot`
+  (whose altitude/speed targets are already the pre-align values) rather than re-capturing from
+  the in-progress recovery goal; only capture fresh when `align_phase == "none"`.
+
+### Findings
+
+1. **A second "align for launch" mid-recovery loses the original snapshot.** Lens: the non-obvious
+   case. See above — missing, not deferred, because the user already settled the intended
+   behaviour and the mechanism doesn't carry it.
+2. **Mode-1 "break away" is absent, and the plan's own U11 recommends not building it — now
+   overruled by `1659a54d`.** Lens: purpose/standing rule. See E-P22 above. The direction landed
+   the same day as the Architect pass but after it, so this is not a flaw in the Architect's
+   reasoning at the time — U11's "recommend: not in this batch" was reasonable against what was
+   known when it was written. It is wrong now, against the standing rule, and needs a fix before
+   Implementer builds from this section as written.
+
+### Two suspicions checked — both resolved, no finding
+
+- **(a) `pending_order` seeds `("altitude", "speed")`, excluding heading, "per Q7."** The terse
+  2026-11-18 answer "altitude, heading, speed" (explore-notes L826) reads, in isolation, like
+  heading belongs in the recovery queue — which would contradict Q7 ("holds current," no
+  swing-back, already settled in the original goal check's own open-assumption text). But the
+  same user, same session, immediately clarifies (explore-notes L853-857, quoted in full as
+  "Decision 26" in the plan): *"altitude recovery starts first, but heading change can happen
+  while climbing."* That sentence names a *fresh voice heading command* not being serialised
+  behind the climb — not a restored heading step. The plan's F-P6 mechanism (a fresh command for
+  one parameter doesn't block the other's recovery) delivers exactly that reading. **Agree with
+  the plan**: the clarification is the later, fuller statement from the same answer and
+  supersedes the terse one: heading correctly stays out of `pending_order`.
+- **(b) `BREAK_TURN_BANK_DEG` defaults to 30° = `MAX_BANK_DEG` — is that "tight"?** The plan states
+  its own comparison: ordinary "turn left 30" flies at `MAX_TURN_BANK_DEG` (20°); 30° is the
+  envelope's hard ceiling, used here instead. Turn radius scales with `1/tan(bank)`, so 30° vs 20°
+  is roughly a 35-40% tighter radius at the same airspeed — a real, perceptible difference, and it
+  is literally the steepest bank the aircraft is ever allowed to fly, so "tight" is the correct
+  word for what the envelope can give. The plan already flags it as an architect default "for
+  retune after the first flight," which is the right posture for a number the user didn't
+  specify beyond "tight" — not something to escalate further.
+
+### Questions for the user
+
+None beyond the plan's own Q-P3-1..6, already open above (unchanged by this check). The two
+Findings are mechanism fixes, not decisions — Architect/Implementer can close both without
+further input.
