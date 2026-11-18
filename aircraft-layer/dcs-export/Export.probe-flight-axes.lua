@@ -402,7 +402,16 @@ local function start_segment(t, seat)
     end
     next_index = next_index + 1
     if def.pass_start then hold_pedals, hold_collective = true, true end
-    seg = { def = def, seat = seat, t0 = t, sent = {}, captured = capture_from(seat), phase = "holding" }
+    -- Capture the LIVE set, not the trigger seat's (flight 9: in the operator
+    -- seat before requesting control the operator set read 0 while the pilot
+    -- set held the live inputs; capturing the seat wrote zeros).
+    local live = seat
+    local cs = capture_from(seat)
+    if (cs.pitch or 0) == 0 and (cs.roll or 0) == 0 and (cs.pedals or 0) == 0 then
+        live = seat == "pilot" and "operator" or "pilot"
+        cs = capture_from(live)
+    end
+    seg = { def = def, seat = live, t0 = t, sent = {}, captured = cs, phase = "holding" }
     stats = { changes = {}, prev = {}, frames = 0 }
     if def.kind == "pedals" then b2_worst = 0.0 end
     log(string.format("t=%.3f START %s (%s) trigger_seat=%s camera_seat=%s parked=%s captured %s | holds pedals=%s collective=%s",

@@ -288,6 +288,28 @@ amendment change 1.
     counts. The animation runs about 0.3 s, so a hold of about 0.1 s past the camera seat change
     is ample. Reported to the M1 review; it also touches mode 2.
 
+## Flight 9: J1–J3 (park and unpark while writing), operator seat
+
+User, 2026-11-18: *"J"*. The run started 15:47:48 with the probe starting at J1. Airborne.
+
+**M0-J: the same-frame unpark take works, but its capture moment is wrong by one or two frames.**
+
+| row | capture at the edge | AI's set just before | attitude in the next 1.5 s |
+|---|---|---|---|
+| J1 (pilot set) | p .2315 r .086 c −.113 | p .234 r .133 c −.116 | pitch steady; **bank −0.5 → −4.6°** |
+| J2 (sum of both sets) | p .253 r .160 c −.118 | p .233 r .125 c −.118 | pitch steady; **bank −0.6 → +3.3°** |
+| J3 (swap op → pilot while parked) | p .243 r .222 c .398 | the same | continuous; it carried on the AI's own pitch-up from −12° |
+
+- **Why J1 and J2 rolled.** The `parked_active` falling edge comes when 852 crosses 0.9. By then 852 is already animating (0.85 at the edge frame), and the two arg sets have started their ~1.5 s cross-fade. The pilot set is already shrinking (roll 0.133 → 0.086), and the operator set is rising.
+  - "Pilot set at the edge" undershoots; "sum at the edge" overshoots.
+  - **The fix is to capture the pilot set from the last frame on which 852 read fully stowed (≥ 0.99),** that is, track it while parked and use that value on the edge. One frame before the edge, J1's pilot set was exactly the AI's 0.234/0.133/−0.116.
+  - Pitch and collective barely changed across the fade, so they took no visible error. Roll and pedals did.
+- **J3, the operator → pilot swap while parked:** 852 stays at 1.0 (no fade; the edge comes from the seat gate), so the edge capture is exact. The pedal arg then drifted from 0.062 to 0.123 over 1 s. That is not explained yet; watch it in Flight M-A.
+- **A capture-source bug, in the probe and in M1's rule.** At J1's start the player sat in the operator seat without having requested control (explicit-handover setting). **The operator set 1110–1113 read 0, and the pilot set held the live inputs** (0.229, 0.139, …). The probe captured the trigger seat's set and so wrote zeros. For 1.4 s, until the user parked, that pitched the aircraft from −1.2° to −8.2° and banked it from −1.4° to −5.0°. **The capture must take the live set, the one that is non-zero, not the player's camera seat.** The probe now does. Decision 25's "voice take → the player's seat set" is wrong for this state.
+- **Request Aircraft Control from the copilot seat, without having requested control first, parks immediately.** 852 rose from 0 to 0.94 in 0.5 s and the AI flew. That is the overlay coming on (U5: a silent switch to mode 2).
+
+**Verdict for M0-J: pass with a capture fix.** Enable `UNPARK_TAKE_ENABLED` once M1 captures the pilot set from the last fully-stowed frame.
+
 ### Still owed
 - The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
   true and magnetic. Steady on an exact HSI number and half-press.
