@@ -26,3 +26,13 @@ transition than the one in the bug report (e.g., the reverse direction, or a rac
 supposed to absorb)? If so, and no test exercises it, that absence is a reportable gap even when
 the production code looks correct by inspection — flag it as a required fix (test-only) rather than
 silently approving on "the reasoning holds."
+
+**Confirmed working, `fix/apw-seat-swap-settle` (2026-11-18):** this exact file's seat gate grew a
+settle window for the pilot→operator direction, and the fix explicitly judged the reverse
+(operator→pilot) should stay immediate rather than symmetric. This time the gap this memory warns
+about did not recur — the debug report named the asymmetry and cited the pre-existing
+reverse-direction tests as proof of no regression, and the Reviewer pass mutation-checked the new
+settle-window tests directly (forced `settling = false`, confirmed 3 of 4 affected tests went red,
+reverted) rather than accepting the reasoning by inspection. Keep doing both halves: checking that
+the reverse direction has its own test, and mutating the new test rather than trusting it reads
+right.
