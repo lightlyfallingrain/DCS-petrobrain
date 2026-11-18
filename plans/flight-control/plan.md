@@ -3038,7 +3038,13 @@ m AGL, cruise speeds, both seats. Acceptance is the bands, not tight tracking (D
 - M0-J decides whether the same-frame unpark take is enabled (rows 8b, 9, 9a); a failure disables
   it and does not block mode 1.
 - M1 and M2 are written now and **do not merge until M0-B, M0-C and M0-D are answered** (U7,
-  accepted).
+  accepted). **Met 2026-11-18**, from the probe flights in
+  `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`:
+  - M0-B pedals 2003, sign −1;
+  - M0-C collective **2087**, not 2004, sign −1;
+  - M0-D held for cyclic and collective under stirring, at a dither of 1e-4.
+  - The pedal half of M0-D is accepted by user direction: *"Assume pedals hold as well, if the arg
+    is correct, it'll behave as the other axis."*
 - M1 also starts only after `refactor/rule-action-unable-throw` is on main (Decision 22's failure
   shape).
 
