@@ -236,7 +236,7 @@ ALT_BAND_FRAC = 0.1
 # source: belief/flight_control.py:ALT_BAND_MIN_M
 ALT_BAND_MIN_M = 10.0
 
-# U10's lease: Lua takes at an unpark only if body-layer has re-sent `arm` within this many seconds -- about three missed ~1 Hz polls, closing the park-then-unpark escape route a same-frame unpark take would otherwise remove from a dead Petrobrain (Decision 2 stands for an *active* mode 1; this is what keeps the *armed* escape open).
+# U10's lease: Lua takes at an unpark only if body-layer has re-sent `arm` within this many seconds (a safety margin; keep it at or below 10 s, the ceiling `Export.lua` and the HTTP layer also enforce, or the whole flight-control message is rejected at the wire).
 # status: judgement | range: 0.5 .. 10.0
 # source: belief/flight_control.py:ARM_LEASE_S
 ARM_LEASE_S = 3.0

@@ -203,11 +203,13 @@ HEADING_BAND_DEG: Final[float] = tuning.real(
 )
 
 #: U10's lease: Lua takes at an unpark only if body-layer has re-sent
-#: `arm` within this many seconds -- about three missed ~1 Hz polls,
-#: closing the park-then-unpark escape route a same-frame unpark take
-#: would otherwise remove from a dead Petrobrain (Decision 2 stands for
-#: an *active* mode 1; this is what keeps the *armed* escape open).
-#: `hi` is deliberately narrower than this constant's own old range
+#: `arm` within this many seconds (a safety margin; keep it at or below
+#: 10 s, the ceiling `Export.lua` and the HTTP layer also enforce, or the
+#: whole flight-control message is rejected at the wire). About three
+#: missed ~1 Hz polls, closing the park-then-unpark escape route a
+#: same-frame unpark take would otherwise remove from a dead Petrobrain
+#: (Decision 2 stands for an *active* mode 1; this is what keeps the
+#: *armed* escape open). `hi` is deliberately narrower than this constant's own old range
 #: (security-m1-m2.md Finding B, change-request round): this value is
 #: itself a safety margin, not an ordinary flight-behaviour knob, and
 #: must stay at or below `Export.lua`'s own `FC_LIMIT_BOUNDS.arm_
