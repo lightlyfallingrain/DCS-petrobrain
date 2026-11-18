@@ -1,6 +1,6 @@
 ---
 name: project-bl16-mode1-dispatch-by-mode
-description: BL-16 mode 1 re-cut (2026-11-18) — one BL-17 rule set dispatched by flight mode; mode-2 one-shot transition fields are NOT cleared while unparked, a latent leak once has_controls widens; confirmed readbacks reuse effector.write's `says`-on-landing contract
+description: BL-16 mode 1 re-cut (2026-11-18) — one BL-17 rule set dispatched by flight mode; U5 made control persist across park/unpark (Lua armed state, same-frame take, lease); mode-2 one-shot transition fields are NOT cleared while unparked, a latent leak once has_controls widens; confirmed readbacks reuse effector.write's `says`-on-landing contract
 metadata:
   type: project
 ---
@@ -28,6 +28,17 @@ actions write, and check where it is cleared. Do not assume the gate keeps it de
 (Lua says "active"), pass the line as a `says` argument that is spoken on landing. This is the
 precedent set by `effector.write`'s `says` (speech-rules D20). It keeps wording in the rule file
 rather than in a code-side drain.
+
+**U5 answered 2026-11-18 against my recommendation:** the user wanted "Petrovich has the controls"
+to persist across park/unpark (mode switch only), which is A8/Decision 17's original spirit that my
+re-cut had dropped. Lesson: when a cockpit event switches mechanisms, the user's default is
+continuity of *who flies*, not a handback. Consequences worth reusing:
+
+- A handover that must survive a ~1 Hz body-layer poll needs a Lua-side armed state and a
+  same-frame take (probe v2 showed the stale/physical input lands at once on unpark).
+- A "no watchdog" decision (Decision 2) can silently rely on an escape route (park→unpark). Any
+  change that auto-retakes control closes that route; check for it and lease the auto-take.
+- Capture source after an AI period is the AI's arg set (pilot 1100–1103), not the player's seat.
 
 **Also:** from 2026-11-18, rule actions *raise* unable instead of returning `{ok=false}`, so rule
 handlers carry no `r.ok` checks (`refactor/rule-action-unable-throw`).

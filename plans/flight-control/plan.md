@@ -2302,17 +2302,19 @@ budget"*. So the open facts are probe rows in M0, not assumptions.
 
 | # | Change | Consequence here |
 |---|---|---|
-| 1 | Two modes were settled on 2026-11-14 (`body-layer/ROADMAP/BL-16.md`). Parked means ED's AI flies through the wheel, which is mode 2 (P1 and P2 are built). Probe v2 showed `LoSetCommand` is ignored while parked (`aircraft-layer/research/2026-11-01-bl16-command-hold-probe-findings.md`, finding 2). | There is **one** raw-axis effector. Effector P, the S0-P block, Decision 16's mechanism and Decision 20's per-state effector are superseded. Mode 1 never writes while parked, and it stops when a park happens (U5). |
+| 1 | Two modes were settled on 2026-11-14 (`body-layer/ROADMAP/BL-16.md`). Parked means ED's AI flies through the wheel, which is mode 2 (P1 and P2 are built). Probe v2 showed `LoSetCommand` is ignored while parked (`aircraft-layer/research/2026-11-01-bl16-command-hold-probe-findings.md`, finding 2). | There is **one** raw-axis effector. Effector P, the S0-P block, Decision 16's mechanism and Decision 20's per-state effector are superseded. Mode 1 never writes while parked, and it stops when a park happens; under U5's answer it waits `armed` and takes again at the unpark (Decision 24). |
 | 2 | The 2026-11-17 handover answers (`BL-17.md`, "Answers to the second goal check"): in AI-overlay mode *"you/I have controls" is no-op. Say nothing*, and *Treat "Request Aircraft Control" as alternative to "you have controls"*. | **D-e is closed.** The two handover rules act only when the overlay is not flying. |
 | 3 | BL-17's rule surface: wording and readbacks live in `config/rules/flight.lua`, actions in `src/rules/actions.py`, and category gates in `src/rules/gates.py`. | Goals get no new wording. The 17 shipped flight rules keep their wording and readbacks, and their actions dispatch by mode (Decision 21). Stage 4's audio-adapter vocabulary work is superseded, because rules reach the adapter through `PUT /rules` and the whisper prompt is dynamic (speech-rules D10). |
 | 4 | User rule, 2026-11-17: a broken rule or config fails loud. | Lua rejects a bad message whole and logs it. Body-layer logs it too. There is no fallback, retry or rollback path in this series. |
 | 5 | Flight feedback, 2026-11-16 (`docs/acceptance/2026-11-16-ai-wheel-pilot-seat-feedback.md`): *"AI never flies when player is in pilot seat"*. The seat is read from the camera (`apw_seat`). | Mode 1 reuses `ai_pilot_wheel.lua`'s parked flag and seat through two read-only getters. It does not build a second detector. |
-| 6 | `[[BL-B123]]` (priority 3) owns "no optic while Petrovich flies, in either mode". | The optics-off half of Decision 15 is now U6. |
+| 6 | `[[BL-B123]]` (priority 3) owns "no optic while Petrovich flies, in either mode". | The optics-off half of Decision 15 is now U6 (answered yes 2026-11-18: built in M1, both modes). |
 | 7 | Heading/bearing terminology (user, 2026-11-18). | Every new name in this series says *heading*, meaning the direction flown or wanted. Nothing new is called a bearing. |
 
 **Effort/value, said once.** The key case that justified the old pass was the player on the 9K113
-while Petrovich flies (A7). That case is now mode 2. Mode 1 serves the pilot-seat hands-off case
-(A7's other half: lookout, map, radios, navigation). It is also the controller that `[[BL-B95]]`'s
+while Petrovich flies (A7). That case is now mode 2. Mode 1 serves the hands-off case in **either
+seat** whenever ED's AI is not flying (A7's other half: lookout, map, radios, navigation; widened
+2026-11-18, Decision 25), and under U5 it is also what Petrovich flies on whenever the player
+unparks while he has the controls. It is also the controller that `[[BL-B95]]`'s
 manoeuvres and pilot-Petrovich would run on while unparked. The cost is not the code. It is the
 tuning flights against an unmeasured plant. The work proceeds under the user's direction, with two
 limits:
@@ -2320,10 +2322,161 @@ limits:
 - The first build is held to the vocabulary that already exists: no manoeuvres and no hover.
 - M0 can stop the whole mode cheaply if the stick override fails.
 
+### Amended 2026-11-18 — the user's answers to U5–U8, and the seat rule
+
+**Answered 2026-11-18 (user, verbatim):**
+
+> *"This also applies when I'm in copilot seat and Petrovich in pilot seat, but copilot controls
+> \*are not\* parked. In code controlling behaves the same way regardless of Petrovich seat, when ED
+> AI is not flying. Just so that it does not get gated on which seat Petrovich is on."*
+>
+> *"U5 - silent transition to AI overlay mode, Petrovich still has controls but operates through the
+> AI overlay. Also silent transition from AI overaly mode to mode 1 when controls are unparked,
+> Petrovich still has control. Transition to Player control on player command only."*
+> *"U6 - yes"*
+> *"U7 - accepted"*
+> *"U8 - as recommended"*
+
+This subsection is the design those answers produce. Where it disagrees with anything below it in
+this "Revised 2026-11-18" section, this wins; the places it changes carry a pointer back here.
+
+#### Decision 24 — "Petrovich has the controls" is one state, and park/unpark only change the mode
+
+U5 replaces the re-cut's recommendation (park ends mode 1, unpark leaves the player flying). It also
+restores, in substance, the old Decision 17 sentence the re-cut had superseded: *"a park or unpark
+never changes `phase`"* — A8's *"Petrovich flying must remain Petrovich flying"*.
+
+```mermaid
+stateDiagram-v2
+  PLAYER: Player flies (ED AI not flying)
+  M1: Petrovich flies - mode 1 (axes)
+  OVL: Petrovich flies - mode 2 (AI overlay)
+  PLAYER --> M1: "you have controls" (readback on Lua confirm)
+  PLAYER --> OVL: park (Request Aircraft Control) - 2026-11-17, silent
+  M1 --> OVL: park - U5, silent
+  OVL --> M1: unpark - U5, silent, Lua takes in the same frame
+  M1 --> PLAYER: "I have controls" (acts at once)
+  M1 --> PLAYER: forced - envelope, NaN, dead: urgent "You have controls!"
+  OVL --> PLAYER: unpark when mode 1 cannot take - urgent "You have controls!"
+  OVL --> PLAYER: unpark after "I have controls" in overlay - U9 option B only, silent
+```
+
+**What counts as the player's command, per state.** No cockpit press is ever "the player takes
+control" any more. Every press of Request Aircraft Control is a mode switch.
+
+| state | "you have controls" | "I have controls" | Request Aircraft Control |
+|---|---|---|---|
+| player flies, unparked | mode-1 take (Decision 22) | silent no-op | park: Petrovich flies through the overlay (2026-11-17 answer), silent |
+| Petrovich, mode 1 | silent no-op (already his) | **release, at once** (Decision 13) | park: overlay, he keeps the controls (U5), silent |
+| Petrovich, overlay | silent no-op (Q7) | **U9** (A: silent no-op; B: silent, takes effect at the unpark) | unpark: mode 1, he keeps the controls (U5), silent |
+
+So the tension the brief named dissolves: a park from "player flies" and a park while he flies in
+mode 1 both end in the same state, Petrovich flying through the overlay. They differ only in
+whether he already had the controls, and neither speaks. **The one thing the words do not settle is
+"I have controls" said in the overlay**, which is U9.
+
+**Forced handovers, which the user's "player command only" cannot avoid.** Two physical facts make
+some transitions to the player involuntary:
+
+- Mode 1 is forward flight only (Decision 3), and ED's AI stops flying the moment the controls
+  unpark. An unpark in a hover, below `MIN_IAS_KMH`, on the ground, outside the envelope, or with
+  mode 1's unpark take disabled (M0-J failed) leaves nobody else to fly. He says the existing urgent
+  **"You have controls!"** once, the same line as a Lua self-release (row 7). It is not "Unable,
+  …": nobody asked for anything.
+- The Lua envelope release (row 7) is unchanged.
+
+**Maintain current state across a mode switch; goals do not carry.** Each mode's own takeover
+already defines "current state", and both are the user's rule (settled point 3):
+
+- **Mode 1 → overlay:** mode 2's P1 takeover, unchanged. It snapshots the handover altitude in the
+  frame 852 crosses, corrects ED's target to it, and the AI holds its own heading. Probe v2
+  (finding 2) shows ED's AI rolls wings level on park, so a turn in progress ends; that is ED's
+  takeover, the same as a park from the player today.
+- **Overlay → mode 1:** mode 1's take rules (Decision 1 REVISED, row 13): under 5° of bank he holds
+  the heading, otherwise the turn continues; a climb levels off at its stopping height; the IAS is
+  held.
+- **Goals in progress are dropped, in both directions.** Why: (1) "maintain current state" is the
+  settled rule for every takeover; (2) the two modes' goals do not mean the same thing — mode 2's
+  altitude keeps the current reference and is capped at 700 m on radar, mode 1's defaults to AGL
+  (Decision 9 REVISED), and mode 2's speed moves in ~50 km/h wheel steps — so a carried goal would
+  be a translation, not a carry; (3) the switch is the player's deliberate press, and the same words
+  work at once in the new mode (Decision 21). **Mode 2's "unparking drops the goal; nothing resumes
+  on the next park"** therefore stays exactly as built (`body._apply_ai_pilot_wheel_goal`'s
+  unparked branch, Lua's unpark branch). What changes is only who flies after the unpark.
+- **E-P10 is superseded by U5** for the aircraft-handback half (*"Unparking gives the aircraft back
+  at once"*): once mode 1's unpark take is merged and enabled, the unpark keeps Petrovich flying.
+  Its other half (presses released, goal dropped, nothing resumes) stands. Until mode 1 merges, or
+  if M0-J disables the unpark take, the unpark behaves exactly as today.
+
+**The unpark must be taken in Lua, in the same frame.** Body-layer polls at about 1 Hz. Probe v2
+(finding 2) shows that at an unpark the arg sets cross-fade back to the player's over ~1.3 s and
+"the held command takes effect again at once". If body-layer had to notice the unpark and send a
+`take`, the player's physical stick would fly the aircraft for one to two seconds — a jump, against
+settled point 3. So:
+
+- **Lua gains a fourth mode, `armed`**: Petrovich holds the controls through the overlay. Nothing
+  is written while parked (writes are ignored anyway, finding 2).
+- **Entering `armed`:** a mode-1 `active`/`taking` Lua goes to `armed` by itself on the park edge
+  (it already had the controls). From `off`, only a body-layer `arm` message arms it — body-layer
+  sends `arm` on the poll that first sees the park while the player had the controls (the
+  2026-11-17 handover).
+- **On the unpark falling edge while `armed`**, Lua takes in that frame. The capture source is the
+  arg set that is live at that moment — the pilot set 1100–1103, which carries the AI's control
+  positions while parked (finding 3) — so the first written frame equals what the AI was holding.
+  Whether that, or the sum of the two cross-fading sets, gives no jump is M0-J. Lua checks the take
+  preconditions itself (IAS ≥ `MIN_IAS_KMH`, AGL above `ON_GROUND_AGL_THRESHOLD_M`, no NaN, the
+  unpark-take enable flag), because body-layer is a second away. A refusal leaves Lua `off` with
+  `fc_release_reason=refused` and `fc_refuse_cause`, and body-layer speaks the forced-handover line.
+- **`release` disarms.** Mission restart, `LuaExportStop` and ownship death reset `armed` to `off`.
+- **The arm needs a lease (U10).**
+
+#### Decision 25 — mode 1 is never gated on seat
+
+The user's rule: mode 1 behaves the same whichever seat Petrovich is in, whenever ED's AI is not
+flying. Checked against the plan and the code:
+
+- **Activation and refusals:** `take_controls`' refusals are `ON_GROUND`, `TOO_SLOW`,
+  `ATTACK_RUN_ENGAGED` (Decision 22). None reads a seat. `rules/gates.py`'s flight gate reads
+  `has_controls` only. `CrewState.seat` is a fixed `"copilot"` stub pending `[[BL-B123]]` and no
+  gate reads it.
+- **`flight_mode()`** reads `parked_active` and the axes phase. `parked_active` is Lua's
+  `ai_pilot_parked_active`, which is *852 stowed **and** the player in the operator seat*
+  (`ai_pilot_wheel.lua`, "Seat gate"). That conjunction is DCS's own definition of "ED's AI is
+  flying" — in the pilot seat 852 reads stowed with nobody but the player flying — so it is the
+  user's "when ED AI is not flying", not a gate on Petrovich's seat. **`M.is_parked()` must return
+  `ai_pilot_parked_active`, never 852 alone**: 852 alone would self-release mode 1 the moment it
+  started with the player in the pilot seat. Named so the Implementer cannot pick the wrong one.
+- **Export.lua write path:** `LoSetCommand` 2001–2004 is the player's input channel and drives the
+  aircraft from either seat when unparked (probe v2, finding 1). Nothing in Decision 23 reads a seat
+  before writing.
+- **The one seat read that stays: the capture source.** The arg sets are per seat (1100–1103 pilot,
+  1110–1113 operator), so capture must read the set that is live. **Corrected here:** the re-cut's
+  "the live seat's control args, from `ai_pilot_wheel.player_seat()`" is right for a voice take
+  while unparked (the player's seat is the live set, finding 5), wrong for an unpark take (the live
+  set is the AI's pilot set, finding 3), and must not block when the seat is unknown. The rule: on a
+  voice take, the player's seat set; on an unpark take, the pilot set; seat unknown → the non-zero
+  set (finding 5). The seat chooses which args to *read*, never whether mode 1 runs.
+- **A seat swap while parked** (operator → pilot) drops `parked_active` through the seat gate, so it
+  is an unpark (Decision 24) and mode 1 takes. M0-J3 measures it.
+
+#### U6, U7, U8 as answered
+
+- **U6 yes:** "no optics while Petrovich flies", both modes, is built in M1 (the `optic_policy`
+  `flying` input and `write_sight_target` skipped while flying). This closes plan-aligner's 2026-11-18
+  Finding 1 and E9.
+- **U7 accepted:** M0 sortie 1 is flown first. M1 and M2 are written in parallel and **do not merge
+  until M0-B, M0-C and M0-D are answered.** M0-J flies in the same sortie (below). If M0-J fails,
+  mode 1 can still merge with the unpark take disabled by its Lua flag, and the unpark then behaves
+  as today.
+- **U8 as recommended:** "you have controls" never asks "confirm?". It acts from `CONFIRM_FLOOR` up
+  and answers "say again" below it. Decision 13's `HANDOVER_TOKENS` branch carries both tokens.
+
 ### Goal (mode 1)
 
-On "you have controls", while the AI overlay is not flying, Petrovich takes the cyclic, collective
-and pedals from where the player left them. He keeps doing what the aircraft was doing:
+On "you have controls", while the AI overlay is not flying and from whichever seat (Decision 25),
+Petrovich takes the cyclic, collective and pedals from where the player left them. He also takes
+them, silently and in the same frame, when the player unparks while he flies through the overlay
+(Decision 24). He keeps doing what the aircraft was doing:
 
 - under 5° of bank he holds the heading, otherwise the turn continues;
 - a climb or descent levels off at the height where it stops;
@@ -2331,10 +2484,11 @@ and pedals from where the player left them. He keeps doing what the aircraft was
 
 He then flies the shipped BL-17 flight commands with smooth, converging, non-ringing corrections,
 within about ±10%. Throughout, he ignores the player's physical controls and holds an AGL terrain
-floor. It ends on one of three events:
+floor. Mode 1 ends on one of three events:
 
-- "I have controls", which acts at once;
-- a park, which hands over to mode 2 (U5);
+- "I have controls", which acts at once and is the only way the player gets the controls back;
+- a park, which switches silently to mode 2 **with Petrovich keeping the controls** (U5,
+  Decision 24);
 - his own envelope release, announced by an urgent "You have controls!".
 
 ### Decision 21 — one wording, one action set, dispatched by mode
@@ -2343,7 +2497,9 @@ floor. It ends on one of three events:
 `src/rules/actions.py`, every `FLIGHT_ACTIONS` entry keeps its name and params. Its `invoke` becomes
 `_by_mode(overlay=<today's function>, axes=<new function>)`. **`CrewConsole.flight_mode() ->
 Literal["overlay", "axes"] | None` is the one place that decides which mode is live.** If both are
-live, overlay wins; the U5 park row keeps that overlap to a single poll.
+live, overlay wins; the park row (8, U5) keeps that overlap to a single poll. With U5 answered,
+`flight_mode()` is `"overlay"` whenever `parked_active`, `"axes"` whenever the axes phase is
+`TAKING` or `ACTIVE`, and `None` otherwise; it reads no seat (Decision 25).
 
 - The overlay bodies (`CrewConsole.set_heading` and the rest) are **unchanged**.
 - `_by_mode` replaces an if-branch that would otherwise be repeated in 17 actions. That duplication
@@ -2417,8 +2573,12 @@ Two new actions:
   - If the ack times out or Lua refuses, the drain speaks "Unable, not ready." (existing reason).
 - **`flight.release_controls()`**
   - In `TAKING` or `ACTIVE`: sends `release` that poll and returns `acted=true`.
-  - Otherwise: `acted=false`, silent. Either the player already has the controls, or the overlay is
-    flying (the no-op).
+  - In `OVERLAY` (amended 2026-11-18, U9): under option A, `acted=false` and nothing else. Under
+    option B, it clears `unpark_take` and sends `release` (Lua disarms), still `acted=false`, so
+    nothing is spoken (Q7's "say nothing"); the player then gets the controls at the unpark.
+  - Otherwise: `acted=false`, silent; the player already has the controls.
+- **`flight.take_controls` in `OVERLAY`** stays the silent no-op above. Under U9 option B it also
+  re-arms (`unpark_take` true, `arm` sent), still silently.
 
 ```lua
 when.speech("you_have_controls", "you have controls", "flight_handover", function(s)
@@ -2453,12 +2613,17 @@ mistaken for precedent.
 - an ambiguous pair releases while Petrovich flies, and says "say again" otherwise;
 - neither token ever answers "confirm?".
 
-The floor for `you_have_controls` is U8. **Decision 19 stands:** neither handover token, and no
+The floor for `you_have_controls` is U8, answered 2026-11-18 as recommended: act from
+`CONFIRM_FLOOR` up, "say again" below, never "confirm?". **Decision 19 stands:** neither handover token, and no
 mode-1 action, is added to `BRAIN_COMMANDS`.
 
 **`CrewState` in mode 1.** It still has one construction site, `CrewConsole.current_crew_state()`.
 
-- `has_controls` = `parked_active` **or** axes phase ∈ {`TAKING`, `ACTIVE`}.
+- `has_controls` = `parked_active` **or** axes phase ∈ {`TAKING`, `ACTIVE`}. Under Decision 24 this
+  stays true continuously through a park or unpark while he flies: the park edge moves the phase to
+  `OVERLAY` in the poll that sees `parked_active`, and the unpark poll moves it to `TAKING`/`ACTIVE`
+  from Lua's same-frame take. The phases are `PILOT`, `TAKING`, `ACTIVE`, `OVERLAY`, plus one bool,
+  `unpark_take` (armed), in `FlightControlState`.
 - In axes mode the `held_*` fields come from Lua's reported goal values. They are `None` until Lua's
   first `active` status, so the per-parameter gates HOLD through the takeover window. This is mode 2's
   "hold and fly when ready" (Q12) reused.
@@ -2528,7 +2693,7 @@ The work splits across the layers like this:
 | h | AGL (radar when valid, else DCS AGL), or barometric altitude, depending on the goal's reference |
 | β | slip ball |
 | a_x, a_z | along-track and vertical acceleration (filtered dV/dt and dw/dt, or `LoGetAccelerationUnits` if M0-A shows it is per-frame) |
-| u_* | the live seat's control args. The seat comes from `ai_pilot_wheel.player_seat()`, and the args set is the non-zero one per probe v2 finding 5. |
+| u_* | the live arg set: on a voice take, the player's seat set (`ai_pilot_wheel.player_seat()`); on an unpark take, the pilot set 1100–1103 (the AI's, finding 3); seat unknown → the non-zero set (finding 5). Read-only; never gates (Decision 25, amended 2026-11-18). |
 
 1. **Shape the goals into S-curves.** Each channel gets a reference value and rate. A critically
    damped second-order filter drives them toward the goal:
@@ -2582,10 +2747,13 @@ The work splits across the layers like this:
    - IAS below `MIN_IAS_KMH − margin` for longer than `ENV_HOLD_S`;
    - |φ| > `MAX_BANK_DEG` + margin;
    - any NaN;
-   - ownship dead;
-   - **parked**, from `ai_pilot_wheel.is_parked()`.
+   - ownship dead.
 
-**At take**:
+   **A park is not an envelope release** (amended 2026-11-18, Decision 24): on
+   `ai_pilot_wheel.is_parked()` (= `ai_pilot_parked_active`, never 852 alone) Lua stops writing in
+   that frame and goes to `armed`, not `off`.
+
+**At take** (a voice take and an unpark take alike, Decision 24):
 
 - **Takeover mode.** Heading mode if |φ| < `TAKEOVER_LEVEL_BANK_DEG` (Decision 1 REVISED), with the
   goal ψ at the stopping heading. Otherwise turn mode, with `r_goal` = the measured r.
@@ -2623,10 +2791,14 @@ The toy plant proves the shaper and the wiring. The flights tune.
 
 **`POST /command/flight_control`** → op `flight_control` →
 `flight_control.handle_flight_control_command`. The message is
-`{"seq", "cmd": "take"|"release"|"goal", "limits": {...}, "goal": {...}}`.
+`{"seq", "cmd": "take"|"release"|"goal"|"arm", "limits": {...}, "goal": {...}}`.
 
-- **`limits` travels in every message.** It carries the bands, `TAKEOVER_LEVEL_BANK_DEG` and
-  `FLOOR_AGL_M`.
+- **`arm`** (amended 2026-11-18, Decision 24) tells Lua that Petrovich holds the controls through
+  the overlay, so the next unpark is a same-frame take. `release` disarms. While `OVERLAY` and
+  `unpark_take`, body-layer re-sends `arm` every poll, which is the lease (U10).
+- **`limits` travels in every message.** It carries the bands, `TAKEOVER_LEVEL_BANK_DEG`,
+  `FLOOR_AGL_M`, and (for the unpark take's own checks) `MIN_IAS_KMH` and
+  `ON_GROUND_AGL_THRESHOLD_M`.
 - **`goal` fields are `heading_deg | turn (-1|0|1) | level_off | alt_m + alt_ref ("agl"|"baro") |
   ias_kmh`.** A `null` field means "keep yours". This matters during `TAKING`, when body-layer does
   not yet know the values Lua captured.
@@ -2636,13 +2808,16 @@ The toy plant proves the shaper and the wiring. The flights tune.
 
 **`GET /flight_control/latest`** at 5 Hz carries:
 
-- `fc_mode` (`off|taking|active`), `fc_take_seq`, `fc_goal_seq`;
+- `fc_mode` (`off|taking|active|armed`), `fc_take_seq`, `fc_goal_seq`;
+- `fc_take_origin` (`voice|unpark`); an unpark take reports the last `arm`'s seq as `fc_take_seq`;
 - `fc_takeover_mode`;
 - the goal values Lua is flying (`fc_goal_heading` is null in turn mode);
 - the measured heading;
 - `fc_in_band_*`;
 - `fc_agl_source`;
-- `fc_release_reason` (`parked|envelope|nan|dead|stop|refused`);
+- `fc_release_reason` (`envelope|nan|dead|stop|refused`; `parked` is gone, a park now
+  reports `fc_mode=armed`), and `fc_refuse_cause` (`too_slow|on_ground|disabled|lease`) for a refused
+  unpark take;
 - `fc_limit_hit`;
 - `fc_axes_enabled`.
 
@@ -2664,8 +2839,25 @@ rather than building it.
 - **Summary:** distinct values per second for each getter (the per-frame check).
 - **Flight conditions:** air start, straight and level, about 150 km/h and 200 m AGL, over flat
   ground.
-- **Sorties:** sortie 1 is rows A–D and gates everything. Sortie 2 is rows E–I and may be flown
-  separately.
+- **Sorties:** sortie 1 is rows A–D **and J** and gates everything. Sortie 2 is rows E–I and may be
+  flown separately.
+
+**M0 changes, amended 2026-11-18 for U5 and the seat rule** (listed so a probe already being built
+from the earlier spec can fold them in):
+
+1. **M0-B, M0-C and M0-D are flown in both seats.** First from the pilot seat, then repeated from
+   the operator seat **with the copilot controls unparked** (the seat rule's case: Petrovich in the
+   pilot seat, the player's operator stick stirred). Probe v2 showed pitch and roll writes from the
+   operator seat; pedal, collective and the moving-stick override there are unmeasured. Log
+   1110–1113 as well as 1100–1103 in both.
+2. **New row M0-J, park and unpark while writing** (sortie 1). It needs the probe to compute
+   `parked_active` exactly as production does (852 ≥ 0.9 **and** camera seat = operator; copy
+   `ai_pilot_seat_from_camera`, do not re-derive).
+3. **M0-I adds one pass criterion:** with the copilot controls unparked, a pilot → operator swap
+   while holding never shows `parked_active` true for any frame (no false park edge from 852's
+   animation; per frame, 852 and the camera seat).
+4. **Logging:** every frame from 1 s before to 3 s after any change in `parked_active` or the camera
+   seat, whatever segment is running.
 
 | row | what | pass | decides |
 |---|---|---|---|
@@ -2677,7 +2869,8 @@ rather than building it.
 | M0-F | release with the stick held deliberately off-centre: does control snap to the stick, or wait for the next move? | recorded only | nothing (Decision 4) |
 | M0-G | the user trims with the Trimmer off-centre, then the probe captures and holds | jump size and sign recorded | whether the capture is absolute (probe v2 saw no trim offset) or the arg minus trim |
 | M0-H | SAU: with K/H/T on, hold and then make a 0.05 pitch step: is it fought or followed? Press Trimmer while held off-attitude: does it re-reference? Then engage one channel from code (`performClickableAction`, device 10). | each one documented | M4's branch |
-| M0-I | seat swap while holding (pilot ↔ operator); then Request Aircraft Control from the operator seat | no jump at the swap; writes ignored once parked; 852 and the camera seat flip as `apw_seat` already reads them | Co-moving rows 8 and 10 |
+| M0-I | seat swap while holding (pilot ↔ operator); then Request Aircraft Control from the operator seat | no jump at the swap; writes ignored once parked; 852 and the camera seat flip as `apw_seat` already reads them; **no false `parked_active` frame on a pilot → operator swap with the copilot controls unparked** (change 3) | Co-moving rows 8 and 10 |
+| **M0-J** park/unpark while writing (**new**, sortie 1) | Operator seat, copilot controls unparked, probe holding captured + wobble. **J1:** the user presses Request Aircraft Control; the probe stops writing on the `parked_active` rising edge and logs per frame. After ~20 s of ED's AI flying, the user presses it again; on the falling edge the probe captures **the pilot set 1100–1103** in that frame and holds it. **J2:** the same, capturing **the sum of both sets** at the edge. **J3:** park, then swap operator → pilot while parked; on the seat-gate falling edge the probe captures as J1 and holds. | per frame through each edge: 852, camera seat, both arg sets, attitude, p/q/r, VS. Pass: on the unpark, the first written frame lands (args show it) and attitude and VS show no step beyond what ED's AI was already doing; frames between the Request press and `parked_active` rising are recorded with what our writes did in them | **Decision 24's same-frame unpark take and its capture source** (J1 vs J2); whether J3's swap behaves as an unpark. **Fail → the unpark take is disabled by its Lua flag** and the unpark behaves as today; mode 1 is not blocked |
 
 **M1 — seam and handover (Mac-buildable now).** M1 holds the captured controls only, with output =
 captured + wobble. M2's law plugs into the same output stage. **It is reviewed and flown together
@@ -2687,8 +2880,12 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
 - **aircraft-layer:**
   - `Petrobrain/flight_control.lua` (new): handler, `run_flight_control`, `push_flight_control_state`,
     `on_stop`, trace, the Mi-24P table, and a per-axis enable flag that defaults **off** for pedal and
-    collective until M0-B and M0-C.
-  - `ai_pilot_wheel.lua`: `M.is_parked()` and `M.player_seat()`, read-only.
+    collective until M0-B and M0-C. **Amended 2026-11-18:** the `armed` mode, the `arm` command, the
+    same-frame unpark take with its own precondition checks and capture source, the arm lease (U10),
+    and an `UNPARK_TAKE_ENABLED` flag (off until M0-J passes). If `ai_pilot_wheel` failed to load,
+    `is_parked()` is unknown and mode 1 refuses to take.
+  - `ai_pilot_wheel.lua`: `M.is_parked()` (returns `ai_pilot_parked_active`, never 852 alone,
+    Decision 25) and `M.player_seat()`, read-only.
   - `commands.lua`: registers the handler.
   - `Export.lua`: loads the module, adds `LuaExportBeforeNextFrame`, adds `on_stop` and the 5 Hz push,
     and bumps `EXPORT_SCRIPT_VERSION`.
@@ -2702,7 +2899,8 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
   - `src/belief/flight_control.py` (new). `FlightControlState` is frozen, with a single construction
     site, `advance_flight_control_state` (mode 2's shape). It also holds the actions as pure functions
     and `decide_flight_control`, which is the one "when": refusals, ack timeout, Lua-release handling,
-    park.
+    and (amended 2026-11-18) the `OVERLAY` phase, `unpark_take`, sending `arm` on a park, and the
+    forced-handover line on a refused unpark take.
   - `crew_console.py`:
     - `flight_mode()`;
     - a `flight_control_state` mirror;
@@ -2716,10 +2914,14 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
   - `speech.py`: the `TOO_SLOW` and `AI_OVERLAY` reasons, and the urgent self-release line.
   - `aircraft_client.py`: `write_flight_control` and `get_flight_control_latest`.
   - `body.py`: `_apply_flight_control`, called right after `_apply_ai_pilot_wheel_goal` (the same
-    send-on-seq-change shape, memory `project_bl16_goal_channel_pattern`).
-  - `optic_policy.py`, only if U6 is accepted: a `flying` input derived from `CrewState.has_controls`,
+    send-on-seq-change shape, memory `project_bl16_goal_channel_pattern`), plus the `arm` re-send
+    each poll while armed. **Also the row-11 fix:** `_apply_ai_pilot_wheel_goal`'s unparked
+    early-return branch clears `ai_pilot_goal_transition`, `ai_pilot_level_flight_transition` and
+    `ai_pilot_hvrt_transition` (a small change to mode-2 code, made here because U5 makes it
+    reachable), and `_apply_flight_control` clears `flight_control_transition` while parked.
+  - `optic_policy.py` (U6, answered yes): a `flying` input derived from `CrewState.has_controls`,
     not an `OpticState` field (memory `project_lua_loop_body_limits_split`). `write_sight_target` is
-    skipped while flying.
+    skipped while flying. Covers both modes.
   - `config/rules/flight.lua` and its README: the handover rules, the `turn` pattern, the new actions
     and the new category.
   - `tools/check_rules.py`: an "axes flying" sample state.
@@ -2727,7 +2929,10 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
   - `body-layer/CLAUDE.md`: the module map, and these invariants:
     - no LAN message carries an axis value;
     - handover tokens never ask "confirm?";
-    - axes actions never write the `ai_pilot_*` one-shots.
+    - axes actions never write the `ai_pilot_*` one-shots;
+    - park and unpark change the mode, never who has the controls (U5); only "I have controls" (and
+      the forced handovers) give them back. The mode-2 paragraph's "Unparking drops the goal;
+      nothing resumes on the next park" stays, with "Petrovich keeps flying in mode 1" added.
   - `/command-map` is redrawn, because the vocabulary changed.
 - **Tests:**
   - every Co-moving row;
@@ -2735,9 +2940,16 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
     using the real `flight.lua`);
   - Decision 13 at every confidence;
   - `says` spoken exactly once, and only for the matching `take_seq`;
-  - row 11's leak test;
+  - row 11's leak test, both directions (a mode-2 one-shot written just before an unpark, and an axes
+    one-shot just before a park, are both `None` afterwards);
+  - Decision 25: the differential `flight_mode()`/`take_controls` results are identical with
+    `player_seat` = pilot, operator and `None`;
+  - the optics `flying` input in both modes (U6);
   - Lua: capture is bit-exact, a bad bound rejects the whole message, release stops writes in the same
-    frame, park causes a self-release with reason `parked`, and the pause row holds.
+    frame, **a park moves `active` to `armed` with no write that frame, an unpark while `armed` takes
+    in the same frame from the pilot set, an unpark while `armed` with a stale lease or below
+    `MIN_IAS_KMH` refuses with its cause, an unpark while `off` writes nothing**, and the pause row
+    holds.
 
 **M2 — the controller (Mac-buildable now; its flight is blocked on M0-A, M0-E and M1).**
 
@@ -2755,8 +2967,16 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
 5. Say "heading 3 1 5", "turn left 30", "alt 200", "speed 2 0 0", then "turn right" (continuous) and
    "level off".
 6. Swap seats while he flies.
-7. From the operator seat, press Request Aircraft Control (U5).
-8. Pause.
+7. **From the operator seat, copilot controls unparked, hand over and repeat 1, 2 and 5** (the seat
+   rule, Decision 25).
+8. **While he flies in mode 1, press Request Aircraft Control** (silent switch to the overlay, he
+   keeps the controls, U5); wait 30 s; **press it again** (silent switch back to mode 1, no jump,
+   stick still ignored); then "I have controls".
+9. Park from "player flies", unpark: he keeps flying in mode 1; then "I have controls".
+10. Park, then unpark below 80 km/h (hover): urgent "You have controls!".
+11. U9's case: in the overlay say "I have controls", then unpark (option A: he keeps flying; option
+    B: you fly).
+12. Pause.
 
 **Pass** is judged on the trace: smooth, into the band, no ringing, the stick ignored, and every line
 in order. `sortie-log-triage` gains a flight-trace section reporting time-to-band, time-in-band and
@@ -2794,7 +3014,10 @@ m AGL, cruise speeds, both seats. Acceptance is the bands, not tight tracking (D
 - M0-A and M0-E feed M2's gains and inputs, and M3's τ.
 - M0-H decides M4.
 - M0-I confirms rows 8 and 10.
-- M1 and M2 can be written now. Whether they may merge before M0-D is U7.
+- M0-J decides whether the same-frame unpark take is enabled (rows 8b, 9, 9a); a failure disables
+  it and does not block mode 1.
+- M1 and M2 are written now and **do not merge until M0-B, M0-C and M0-D are answered** (U7,
+  accepted).
 - M1 also starts only after `refactor/rule-action-unable-throw` is on main (Decision 22's failure
   shape).
 
@@ -2822,16 +3045,21 @@ externally (voice, park, seat) and some internally (Lua envelope, body-layer ref
 | 5 | `fc.phase`, `pending_take_says` | internal (timeout) / Lua `refused` | ack timeout, or refused for this `take_seq` | `PILOT`; `release` sent (idempotent); "Unable, not ready."; pending cleared |
 | 6 | `fc.phase`, `pending_take_says`, `flight_control_transition` | external (voice) | "I have controls" in `TAKING` or `ACTIVE` | `PILOT`; `release` sent **that poll**; "You have controls." spoken as urgent; pending cleared, so a late `active` for the old `take_seq` speaks nothing; transition cleared |
 | 7 | `fc.phase` | external (Lua) | `fc_mode=off`, reason ∈ {envelope, nan, dead} while `ACTIVE` | `PILOT`; urgent "You have controls!" once |
-| 8 | Lua `fc_mode`; `fc.phase`; `flight_control_transition` | external (park: 852 stowed **and** operator seat) | park while `TAKING` or `ACTIVE` | Lua: `off`, reason `parked`, no write that frame or after. Body: `PILOT` **silently** (U5); mode 2 starts from its own 852 edge; transition cleared; the `ai_pilot_*` one-shots are still `None` (row 11) |
-| 9 | `fc.phase` | external | unpark after row 8 | still `PILOT`; nothing resumes (U5) |
+| 8 | Lua `fc_mode`; `fc.phase`, `unpark_take`, `pending_take_says`, goal; `flight_control_transition` | external (park: `parked_active`, i.e. 852 stowed **and** operator seat) | park while `TAKING` or `ACTIVE` (**REVISED 2026-11-18, U5**; was: Lua `off`, body `PILOT`) | Lua: `armed`, no write that frame or after. Body: `OVERLAY`, `unpark_take` true, **`has_controls` true throughout**, nothing spoken; mode-1 goal dropped and `pending_take_says` cleared (mode 2's P1 takeover holds the current state, Decision 24); transition cleared; the `ai_pilot_*` one-shots `None` (row 11) |
+| 8b | `fc.phase`, `unpark_take`; Lua `fc_mode` | external (park) | park while `PILOT` (the 2026-11-17 handover; **new**) | Body: `OVERLAY`, `unpark_take` true, `arm` sent that poll; nothing spoken. Lua: `off` → `armed` on the `arm` |
+| 9 | Lua `fc_mode`, capture, shapers; `fc.phase`; mode-2 goal | external (unpark: `parked_active` falls, including a seat swap operator → pilot) | unpark while Lua `armed`, lease fresh, preconditions met (**REVISED 2026-11-18, U5**; was: still `PILOT`) | Lua: takes **in that frame**, capture from the pilot set (M0-J), row 13's rules; `fc_mode=active`, `fc_take_origin=unpark`. Body: `OVERLAY` → `TAKING` → `ACTIVE` from the status, `has_controls` true throughout; nothing spoken; mode-2 goal dropped (E-P10's mechanism, unchanged) |
+| 9a | Lua `fc_mode`; `fc.phase` | external (unpark) / internal (Lua checks) | unpark while `armed` but IAS < min, on ground, NaN, `UNPARK_TAKE_ENABLED` off, or lease stale | Lua: `off`, `refused` with `fc_refuse_cause`, nothing written. Body: `PILOT`; urgent "You have controls!" once (a forced handover, Decision 24) — except cause `lease`, where body-layer is the thing that is gone |
+| 9b | `fc.phase` | external (unpark) | unpark while not armed (U9 option B after "I have controls", or Lua never got an `arm`) | Lua: `off`, nothing written. Body: `PILOT`; nothing spoken (today's E-P10 unpark) |
+| 9c | `unpark_take`; Lua `fc_mode` | external (voice) | "I have controls" in `OVERLAY` (**U9**) | A: nothing changes. B: `unpark_take` false, `release` sent (Lua `armed` → `off`), nothing spoken; "you have controls" in `OVERLAY` reverses it, silently |
 | 10 | `fc.phase`, Lua `fc_mode`, goals, shapers | external (player) | seat swap while unparked and `ACTIVE` | all **unchanged**; writes continue (Decision 17; `LoSetCommand` is global; M0-I checks there is no jump) |
-| 11 | `ai_pilot_goal_transition`, `ai_pilot_level_flight_transition`, `ai_pilot_hvrt_transition` | internal (actions) | any `flight.*` action while `flight_mode() == "axes"` | all three remain `None`. **Today they persist while unparked:** `body._apply_ai_pilot_wheel_goal` returns before clearing them, so a stray write would fire on the next park. The test: an axes action, then a park, leaves the mode-2 goal `None`. |
+| 11 | `ai_pilot_goal_transition`, `ai_pilot_level_flight_transition`, `ai_pilot_hvrt_transition`; `flight_control_transition` | internal (actions) / external (park, unpark) | any `flight.*` action while `flight_mode() == "axes"`; **and (REVISED 2026-11-18) any park or unpark** | the three `ai_pilot_*` remain `None` in axes mode. **Today they persist while unparked:** `body._apply_ai_pilot_wheel_goal` returns before clearing them. Under U5 an overlay command spoken just before an unpark is now a realistic way to strand one, to fire on the next park. **Fix, in M1:** the unparked branch clears all three; `_apply_flight_control` clears `flight_control_transition` while parked. Tests: both directions (M1 tests). |
 | 12 | goal, `goal_seq`; Lua targets | external (voice) | a new goal | `goal_seq`+1; sent that poll; Lua applies it only if seq > last; **shaper states unchanged**, only the targets move |
 | 13 | Lua `fc_out_*`, shaper refs, trims `T_*`, integrators, `fc_takeover_mode`, altitude goal | external (`take`) | take | first written frame `fc_out == captured`, bit-exact; refs = measured value and rate; `T_*` solved for continuity; integrators 0; mode is heading iff \|φ\| < threshold; altitude goal = stopping height (AGL) |
 | 14 | Lua heading goal; body `held_heading` | internal | `level_off` roll-out reaches `r_ref = 0` | heading mode with `ψ_goal = ψ_ref` (the stop point, never the heading at the moment it was spoken); the body mirror follows the next status |
-| 15 | every Lua `fc_*`; `fc.phase` | internal | mission restart, `LuaExportStop`, ownship dead | Lua reset to `off`; body `PILOT` via `reset_for_new_mission`; nothing spoken on a restart |
+| 15 | every Lua `fc_*`; `fc.phase`, `unpark_take` | internal | mission restart, `LuaExportStop`, ownship dead | Lua reset to `off` (also from `armed`); body `PILOT`, `unpark_take` false, via `reset_for_new_mission`; nothing spoken on a restart |
 | 16 | Lua outputs, shapers, integrators | internal | pause (`dt ≤ 0`) or `dt > DT_CAP` | outputs rewritten unchanged with wobble (the override must not lapse); everything else frozen |
-| 17 | `flying` (U6) | derived | any row above | `== CrewState.has_controls`, recomputed each poll; never stored on `OpticState` |
+| 17 | `flying` (U6, answered yes) | derived | any row above | `== CrewState.has_controls`, recomputed each poll; never stored on `OpticState`; stays true through rows 8, 8b and 9 |
+| 18 | Lua arm timestamp | external (`arm` each poll) | no `arm` for `ARM_LEASE_S` while `armed` (**U10, new**) | still `armed` (nothing to release while parked), but the next unpark refuses with cause `lease` (row 9a) and the player flies, as today |
 
 ### Behaviour constants
 
@@ -2863,6 +3091,7 @@ message. Lua bounds-checks them against hard ceilings of its own.
 | `SPEED_BAND_FRAC` / `ALT_BAND_FRAC` / `ALT_BAND_MIN_M` / `HEADING_BAND_DEG` | 0.10 / 0.10 / 10 / 5 | user (A9); 5° per D-c |
 | `SPEED_STEP_KMH` | 20 | judgement; mode 2's wheel step is ~50, so this is the one to revisit after Flight M-A |
 | `HANDOVER_ACK_TIMEOUT_S` | 2.0 | judgement |
+| `ARM_LEASE_S` | 3.0 | judgement (U10); about three missed polls; sent in `limits` |
 
 **Lua constants block** in `flight_control.lua`, commented, *"would want the X-T26 mechanism"*:
 
@@ -2886,14 +3115,16 @@ message. Lua bounds-checks them against hard ceilings of its own.
 | E6 "I have controls" at once, never "confirm?" | M1 (Decision 13, urgent readback, row 6) |
 | E7 he says when he can't or won't | M1 (refusals, row 7), M3 (terrain call); a goal that is not reached gets no call (Decision 14) |
 | E8 never into the ground from current height | M3 |
-| E9 no optics while flying | U6 (M1 if accepted, otherwise `[[BL-B123]]`) |
+| E9 no optics while flying | M1 (U6 answered yes 2026-11-18; both modes, row 17) |
+| E2/E3 across park and unpark (U5) | Decision 24; M1 (`armed`, same-frame unpark take); M0-J |
 | E10 no model latency | M1 (rule path; nothing brain-callable, Decision 19) |
 
 ### What the old series still governs
 
 - **Stands:** Decisions 1 REVISED, 3, 4, 5, 6 REVISED, 7, 8, 9 REVISED, 10, 11, 12, 13, 14, 18 and 19.
-- **Stands for seat swaps:** Decision 17. Its sentence "a park or unpark never changes `phase`" is
-  superseded by U5.
+- **Stands for seat swaps:** Decision 17. Its sentence "a park or unpark never changes `phase`" was
+  superseded by the re-cut's U5 recommendation, and is **restored in substance by U5's answer**
+  (Decision 24): a park or unpark changes the mode, never who has the controls.
 - **Superseded:**
   - Decision 16's mechanism: parked is mode 2.
   - Decision 20: there is one effector.
@@ -2903,6 +3134,8 @@ message. Lua bounds-checks them against hard ceilings of its own.
   - The old second-order claim that launch alignment runs on this controller. The player on the
     9K113 is parked, which is mode 2.
 - **Superseded by U6:** Decision 15's optic mechanics.
+- **Mode 2's E-P10, handback half:** superseded by U5 once the unpark take is merged and enabled
+  (Decision 24). Its "release presses, drop the goal, nothing resumes" half stands.
 - **Closed:**
   - **D-a**: readback names the value flown (Decision 21).
   - **D-b**: answered by the 2026-11-15 vocabulary, where "level off" means heading only and "level
@@ -2932,8 +3165,28 @@ message. Lua bounds-checks them against hard ceilings of its own.
   the channels off on take.
 - **Asymmetric yaw and the small right-pedal margin.** These are handled by the direction-dependent
   limit and the collective-rate interlock. They are untested until Flight M-A.
-- **Transition-field leak (row 11).** This is latent in today's code and becomes reachable only once
-  `has_controls` is true while unparked, so it must be tested before M1 merges.
+- **Transition-field leak (row 11).** This is latent in today's code. U5 makes it reachable two
+  ways (has_controls true while unparked, and an overlay command just before an unpark), so M1
+  fixes it rather than only testing it.
+- **(U5) The unpark no longer gives the stick back.** A player who parks for a 9K113 shot and
+  unparks to fly will find Petrovich still flying until "I have controls". That is what U5 says,
+  and it changes shipped mode-2 behaviour (E-P10). The test card says it in those words, and until
+  mode 1 merges with the unpark take enabled nothing changes.
+- **(U5) The unpark take is unmeasured.** Probe v2 shows the stale-command jump it must avoid, not
+  that a same-frame capture of the AI's set avoids it. M0-J measures it; a failure disables the
+  take, it does not block mode 1.
+- **(U5) Forced handovers.** An unpark in a hover or below 80 km/h hands the player the controls
+  with an urgent call, because nobody else can fly. This is the only place "player command only"
+  is not met, and it is physical, not a choice.
+- **(U5 with Decision 2) A dead Petrobrain must not hold the stick.** Decision 2 has no watchdog,
+  and before U5 the player's escape from a mode 1 whose body-layer had died was a park then an
+  unpark. With a same-frame unpark take, that escape would re-take with nobody to hear "I have
+  controls". U10's lease keeps the escape open. ACTIVE itself still has no watchdog (Decision 2).
+- **(Seat) A false park edge on a seat swap.** If 852's stow animation outlasts the camera's seat
+  change on a pilot → operator swap with the copilot controls unparked, `parked_active` would read
+  true for a few frames. Under U5 that is a spurious overlay switch (Lua `armed`, mode 2's P1
+  takeover presses the wheel menu) and an immediate re-take. M0-I change 3 measures it; a debounce
+  would be its fix and is not designed until it is seen.
 - **Widening `CrewState`** could change mode-2 gate behaviour by accident. The differential test pins
   today's results with axes inactive.
 - **New callback and frame cost.** `LuaExportBeforeNextFrame` is a new callback in production, and
@@ -2952,8 +3205,10 @@ message. Lua bounds-checks them against hard ceilings of its own.
 
 ### Second-order effect (mode 1 re-cut)
 
-- **`[[BL-B123]]`** gets `has_controls` covering both modes for free. If U6 is accepted, it also
-  inherits a working "no optic while flying" input to generalise into the hands resource.
+- **`[[BL-B123]]`** gets `has_controls` covering both modes for free, and (U6 answered yes) a
+  working "no optic while flying" input to generalise into the hands resource.
+- **(U5) Mode 2's unpark now depends on mode 1.** P3 (align/launch) and any later mode-2 work
+  should assume the unpark leaves Petrovich flying in mode 1, not the player.
 - **`[[BL-B95]]`.** The axes-mode actions are its first flight catalogue. "Break left" needs only a
   shaper limit, not a new controller.
 - **`[[BL-18]]`.** The one Mi-24P table in `flight_control.lua` is the mapping seam.
@@ -2970,13 +3225,53 @@ are:
 - the two handover rules move to `flight_handover` and get real handlers that stay silent in overlay
   mode;
 - `turn left` with no degrees now answers "Unable, AI overlay." in mode 2 instead of falling through.
+- (amended 2026-11-18) **an unpark leaves Petrovich flying, in mode 1** (U5), once the unpark take
+  is enabled;
+- (amended 2026-11-18) `_apply_ai_pilot_wheel_goal`'s unparked branch clears its three one-shots
+  (row 11);
+- (amended 2026-11-18) optics stop while he flies through the overlay too (U6).
 
 ### Decisions Requiring User Input (mode 1 re-cut)
 
 These are numbered from U5, because U1–U4 are mode 2's (above).
 
+**Answered 2026-11-18 (user, verbatim):** *"U5 - silent transition to AI overlay mode, Petrovich
+still has controls but operates through the AI overlay. Also silent transition from AI overaly mode
+to mode 1 when controls are unparked, Petrovich still has control. Transition to Player control on
+player command only."* *"U6 - yes"* *"U7 - accepted"* *"U8 - as recommended"* — and the seat rule:
+*"This also applies when I'm in copilot seat and Petrovich in pilot seat, but copilot controls \*are
+not\* parked. In code controlling behaves the same way regardless of Petrovich seat, when ED AI is
+not flying. Just so that it does not get gated on which seat Petrovich is on."*
+
+- **U5 → Decision 24** (the recommendation below was **not** taken). **U6 → built in M1**, both
+  modes. **U7 → accepted as recommended**, plus M0-J in sortie 1. **U8 → accepted as recommended.**
+  **Seat rule → Decision 25.** All five are owed in M1/M2's `implementation.md`. U9 and U10 below
+  are open.
+
+- **U9 (new, from U5): "I have controls" said while he flies through the overlay.**
+  - **The conflict:** Q7 (2026-11-17) made it a silent no-op because the overlay toggle gave the
+    stick back. U5 took that away: an unpark now leaves him flying in mode 1. So under Q7 as it
+    stands, a player who says "I have controls" in the overlay hears nothing, unparks, and finds the
+    stick dead until they say it again.
+  - **Recommendation: B.** It stays silent when said (Q7's "say nothing"), but it is remembered: he
+    keeps flying through the overlay, which is all he can do, and at the unpark he does not take,
+    so the player flies. "You have controls" in the overlay reverses it, also silently.
+  - **Why:** "Transition to player control on player command only" — this is the player's command,
+    and B is the only way it is not lost. It costs one bool and one Co-moving row (9c).
+  - **The alternative, A:** keep Q7 literally. The way back from the overlay is always unpark, then
+    "I have controls".
+- **U10 (new, from U5 with Decision 2): a lease on the unpark take.**
+  - **Recommendation:** yes. Lua takes at an unpark only if body-layer has re-sent `arm` within
+    `ARM_LEASE_S` (3 s); otherwise the unpark gives the player the stick, as today.
+  - **Why:** Decision 2 (no watchdog) relied, without saying so, on park-then-unpark as the escape
+    from a mode 1 whose Petrobrain had died. A same-frame unpark take would close that escape. The
+    lease keeps it open and adds no release of a mode 1 that is flying (Decision 2 stands for that).
+  - **The alternative:** no lease. Then a Petrobrain crash while he flies leaves no way to get the
+    stick back short of a mission restart.
+
 - **U5: What happens when you park while Petrovich flies in mode 1 (Request Aircraft Control from the
-  operator seat), and again when you unpark?**
+  operator seat), and again when you unpark?** **ANSWERED 2026-11-18, against the recommendation:
+  he keeps the controls across both — see Decision 24.**
   - **Recommendation:** the park ends mode 1 silently and mode 2 takes over by its own existing
     mechanism. His mode-1 goals are not carried into the wheel. Unparking leaves you flying, the same
     as mode 2's E-P10, and mode 1 does not resume.
@@ -2985,7 +3280,8 @@ These are numbered from U5, because U1–U4 are mode 2's (above).
     is extra work for a transition you make deliberately.
   - **The alternative** is to carry the heading, altitude and speed goals into mode 2 as wheel goals.
     That is buildable later on the existing goal channel.
-- **U6: Build "no optics while Petrovich flies" now, for both modes, as part of M1?**
+- **U6: Build "no optics while Petrovich flies" now, for both modes, as part of M1?** **ANSWERED
+  2026-11-18: yes.**
   - **Recommendation:** yes. One derived input to `optic_policy.decide` from
     `CrewState.has_controls`, and `write_sight_target` skipped while flying.
   - **Why:** Decision 15 is settled for mode 1, mode 2 currently lets him glass while flying, which
@@ -2993,12 +3289,13 @@ These are numbered from U5, because U1–U4 are mode 2's (above).
     into the hands resource rather than building it.
   - **The alternative** is to leave it wholly to `[[BL-B123]]` (priority 3). Mode 1 would then ship
     with optics live while he flies.
-- **U7: Build order relative to the probe.**
+- **U7: Build order relative to the probe.** **ANSWERED 2026-11-18: accepted.**
   - **Recommendation:** fly M0 sortie 1 (rows A–D) first. Write M1+M2 in parallel on the Mac, but do
     not merge them until M0-D (moving stick), M0-B and M0-C are answered.
   - **Why:** M0-D failing blocks mode 1 entirely. A merged mode 1 would then be code reachable by
     voice that cannot do its job. DoD-pass auto-merge would otherwise land it the same day.
-- **U8 (the old D-d): The confidence floor for "you have controls".**
+- **U8 (the old D-d): The confidence floor for "you have controls".** **ANSWERED 2026-11-18: as
+  recommended.**
   - **Recommendation:** never ask "confirm?". Act from `CONFIRM_FLOOR` up, and "say again" below
     that.
   - **Why:** a false takeover makes him ignore your stick, and the recovery is one phrase that always
