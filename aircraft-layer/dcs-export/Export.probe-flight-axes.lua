@@ -76,9 +76,10 @@ local ARG_PEDALS_PARK = 952
 local AI_PILOT_PARK_THRESHOLD = 0.9   -- production's value
 
 local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2004 }
--- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals unproven;
--- collective -1 from ED's comment. B2/C2 test these.
-local SIGN = { pitch = 1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
+-- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals proven -1
+-- (flight 3 B2, 2026-11-18: 2003 = +0.05 held arg 1103 at -0.050 exactly);
+-- collective -1 from ED's comment, C2 tests it.
+local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 local B2_STEPS = { 0.0, 0.05, -0.05, 0.10, -0.10, 0.0 }
 local B2_STEP_S = 3.0

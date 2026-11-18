@@ -91,7 +91,39 @@ about 25 Hz, the same units, axes and heading relations.
   control position, not raw hand input.** A capture taken after trimming picks up the trim. M0-G
   still owes the jump at capture with the Trimmer held off-centre.
 
+## Flight 3: B1 and B2, pilot seat, on the ground, adjustable stops ON, pedal damper ON
+
+User, 2026-11-18: *"B with adjustable stops ON and pedal damper ON. A skipped the A parts"*. The
+log started 14:29:15 (one aborted start at 14:26:47 before it). It was flown on the ground: AGL
+1.8 m, collective fully down (arg −1), IAS 10.5 m/s from wind. A1–A4 were clicked through in
+under a second each. C1 was started but the log ends before it ends.
+
+- **M0-B read side (B1) passes.** Arg 1103 follows the pedals across the full −1..+1 range,
+  smoothly, and the operator arg 1113 stays at 0. Probe v2's "pedal did not hold" was not the read
+  side.
+- **M0-B write side (B2) passes. The sign is −1 and the scale is 1:**
+
+  | 2003 sent | arg 1103 settles at |
+  |---|---|
+  | +0.05 | −0.0500 |
+  | −0.05 | +0.0500 |
+  | +0.10 | −0.1000 |
+  | −0.10 | +0.1000 |
+  | 0 | 0.0000 |
+
+  Each value holds exactly once settled. This explains probe v2's drift: v2 sent `+captured`, which
+  is the mirror of the pedals' own position. The probe's own B2 verdict ("worst 0.200, D holds
+  pedals: false") is an artefact of the same wrong sign guess (+1), not a failure. `SIGN.pedals`
+  is now −1 in the probe.
+- **The pedal follows the command with a lag, with the damper on.** After a step it reaches 87%
+  (0.05 step) or 73% (0.10 step) in 0.5 s and is settled within about 1.0 s. The fraction reached
+  depends on step size, so it is rate-limited rather than a pure first-order lag. Damper OFF is
+  not measured yet. M2's pedal loop must allow for about 1 s to settle.
+- Yaw response on the ground is small (≤ 0.15°/s per 0.1 of pedal), as expected with the wheels
+  down. The airborne yaw response is still owed (M0-E).
+
 ### Still owed
 
 - The HSI headings (A1, A2, A4).
+- B2 airborne, with the damper off for comparison.
 - B, C and D in both seats, and J1–J3.
