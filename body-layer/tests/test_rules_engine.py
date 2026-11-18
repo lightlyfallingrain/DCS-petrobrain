@@ -197,109 +197,110 @@ def test_a_reload_picks_up_an_edited_file(tmp_path: Path) -> None:
     assert run_rule(rule_set_2, "greet", None, sandbox).lines == ["second"]
 
 
-def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> None:
+def _probe_rule_set(
+    tmp_path: Path, body: str, result: dict[str, object] | None = None
+) -> tuple[RuleSet, RuleSandbox]:
+    """One rule, `probe_rule`, whose handler is `body`, over one bound
+    action `probe.one(n)` (`n` in 0..10) answering `result`."""
     (tmp_path / "r.lua").write_text(
-        'when.speech("bad_call", "x", "always", function(s)\n'
-        "  local r = probe.one(99999)\n"
-        "  if not r.ok then say(unable(r.reason)) end\n"
-        "end)",
+        f'when.speech("probe_rule", "x", "always", function(s)\n{body}\nend)',
         encoding="utf-8",
     )
+    answer = result if result is not None else {"ok": True, "reason": None, "n": 7}
+
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+        return answer
+
+    namespaces = {
+        "probe": (
+            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
+        )
+    }
     sandbox = RuleSandbox()
-
-    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
-        return {"ok": True, "reason": None}
-
-    namespaces = {
-        "probe": (
-            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
-        )
-    }
-    rule_set = RuleSet.load(tmp_path, sandbox, namespaces, _ctx())
-    outcome = run_rule(rule_set, "bad_call", None, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert outcome.error is False
+    return RuleSet.load(tmp_path, sandbox, namespaces, _ctx()), sandbox
 
 
-def test_a_rejected_call_is_reported_to_on_rejected_call(tmp_path: Path) -> None:
-    """The rule checker's hook (`tools/check_rules.py`): a refused call
-    names the action and why, and the rule still gets `ok = false`."""
-    (tmp_path / "r.lua").write_text(
-        'when.speech("bad_call", "x", "always", function(s)\n'
-        '  local r = probe.one("ten")\n'
-        "  if not r.ok then say(unable(r.reason)) end\n"
-        "end)",
-        encoding="utf-8",
+def test_a_successful_action_returns_its_result_table(tmp_path: Path) -> None:
+    rule_set, sandbox = _probe_rule_set(
+        tmp_path, '  local r = probe.one(3)\n  say("got " .. r.n)'
     )
-    sandbox = RuleSandbox()
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=["got 7"], error=False)
 
-    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
-        return {"ok": True, "reason": None}
 
-    namespaces = {
-        "probe": (
-            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
-        )
-    }
-    rejected: list[tuple[str, str]] = []
-    ctx = ActionContext(
-        console=CrewConsole(store=ContactStore()),
-        on_rejected_call=lambda name, why: rejected.append((name, why)),
+def test_a_failed_action_ends_the_handler_and_says_unable(tmp_path: Path) -> None:
+    """User, 2026-11-18: rules do not check `r.ok`. A failed action ends
+    the handler; lines already said stay, and `unable(reason)` follows.
+    Not an error."""
+    rule_set, sandbox = _probe_rule_set(
+        tmp_path,
+        '  say("Arming.")\n  probe.one(3)\n  say("never")',
+        {"ok": False, "reason": "NOT_READY"},
     )
-    rule_set = RuleSet.load(tmp_path, sandbox, namespaces, ctx)
-    outcome = run_rule(rule_set, "bad_call", None, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert rejected == [("one", "n must be a number, got 'ten'")]
-
-
-def _probe_action_rule_set(tmp_path: Path, sandbox: RuleSandbox) -> RuleSet:
-    """Shared fixture for the security Required Fix 1 tests below -- one
-    bound action whose only job is to echo whether the wrapper accepted
-    its argument, same `probe.one` shape as the out-of-bounds test above."""
-    (tmp_path / "r.lua").write_text(
-        'when.speech("nan_call", "x", "always", function(s)\n'
-        "  local r = probe.one(0/0)\n"
-        "  if not r.ok then say(unable(r.reason)) end\n"
-        "end)\n"
-        'when.speech("inf_call", "x", "always", function(s)\n'
-        "  local r = probe.one(1/0)\n"
-        "  if not r.ok then say(unable(r.reason)) end\n"
-        "end)\n",
-        encoding="utf-8",
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(
+        lines=["Arming.", "Unable, not ready."], error=False
     )
 
-    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
-        return {"ok": True, "reason": None}
 
-    namespaces = {
-        "probe": (
-            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
-        )
-    }
-    return RuleSet.load(tmp_path, sandbox, namespaces, _ctx())
+def test_a_failed_action_with_no_reason_says_plain_unable(tmp_path: Path) -> None:
+    rule_set, sandbox = _probe_rule_set(
+        tmp_path, "  probe.one(3)", {"ok": False, "reason": None}
+    )
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=["Unable."], error=False)
 
 
-def test_action_wrapper_rejects_nan_instead_of_raising(tmp_path: Path) -> None:
+def test_a_rule_cannot_catch_a_failed_action(tmp_path: Path) -> None:
+    """No `pcall` in the sandbox: a rule trying to catch the failure
+    itself is a Lua error, not a recovery."""
+    rule_set, sandbox = _probe_rule_set(
+        tmp_path,
+        '  local ok = pcall(probe.one, 3)\n  say("caught")',
+        {"ok": False, "reason": "NOT_READY"},
+    )
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome.error is True
+    assert outcome.lines == []
+
+
+def test_an_out_of_bounds_argument_is_a_rule_error(tmp_path: Path) -> None:
+    """A bad call is a bug in the rule file (user, 2026-11-18: rules are
+    fixed, not recovered from): "Action file error.", never a closed
+    "unable" reason."""
+    rule_set, sandbox = _probe_rule_set(tmp_path, "  probe.one(99999)")
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=[], error=True)
+
+
+def test_a_wrong_argument_type_is_a_rule_error(tmp_path: Path) -> None:
+    rule_set, sandbox = _probe_rule_set(tmp_path, '  probe.one("ten")')
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=[], error=True)
+
+
+def test_a_wrong_argument_count_is_a_rule_error(tmp_path: Path) -> None:
+    rule_set, sandbox = _probe_rule_set(tmp_path, "  probe.one(1, 2)")
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=[], error=True)
+
+
+def test_nan_argument_is_a_rule_error_not_a_bare_exception(tmp_path: Path) -> None:
     """Security Required Fix 1: `0/0` is a Lua float `nan`, which `int()`
-    cannot convert -- the wrapper must reject it the same way as any
-    other out-of-contract argument (D6's outcome), not raise a bare
-    Python `ValueError` that would escape `run_rule` unwrapped."""
-    sandbox = RuleSandbox()
-    rule_set = _probe_action_rule_set(tmp_path, sandbox)
-    outcome = run_rule(rule_set, "nan_call", None, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert outcome.error is False
+    cannot convert -- the wrapper must reject it before `int()` raises a
+    bare `ValueError`."""
+    rule_set, sandbox = _probe_rule_set(tmp_path, "  probe.one(0/0)")
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=[], error=True)
 
 
-def test_action_wrapper_rejects_infinity_instead_of_raising(tmp_path: Path) -> None:
-    """Security Required Fix 1, the `inf` twin of the `nan` test above --
-    `1/0` is a Lua float `inf`; `int()` on it raises `OverflowError`,
-    which must not escape the wrapper either."""
-    sandbox = RuleSandbox()
-    rule_set = _probe_action_rule_set(tmp_path, sandbox)
-    outcome = run_rule(rule_set, "inf_call", None, sandbox)
-    assert outcome.lines == ["Unable."]
-    assert outcome.error is False
+def test_infinite_argument_is_a_rule_error_not_a_bare_exception(
+    tmp_path: Path,
+) -> None:
+    """The `inf` twin: `int(inf)` raises `OverflowError`."""
+    rule_set, sandbox = _probe_rule_set(tmp_path, "  probe.one(1/0)")
+    outcome = run_rule(rule_set, "probe_rule", None, sandbox)
+    assert outcome == type(outcome)(lines=[], error=True)
 
 
 def test_digits_rejects_a_string_slot_as_a_dispatch_error(tmp_path: Path) -> None:

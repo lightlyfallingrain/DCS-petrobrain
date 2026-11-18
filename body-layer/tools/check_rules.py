@@ -17,8 +17,9 @@ message carries the line number):
 4. **Handlers, by dry run** -- every handler is called with sample slot
    values from step 3 (each directive alternative, each slot form),
    against the real actions on a throwaway `CrewConsole` that is flying
-   (and, separately, hovering), and once more with every action answering
-   `ok = false`, so both branches of `if not r.ok then ...` run. Catches a
+   (and, separately, hovering), and once more with every action failing,
+   so the "unable" path runs too (an action failing is a normal outcome,
+   not a finding). Catches a
    misspelt action, a wrong argument, `nil` arithmetic, a `digits()` of a
    string, and an `effector.write` naming an effector or value the
    registry does not have. A branch none of the samples reaches is not
@@ -60,6 +61,7 @@ from rules.engine import (
     RULE_DISPATCH_INSTRUCTION_BUDGET,
     CompiledLuaRule,
     RuleSet,
+    RuleUnable,
 )
 from rules.loader import DEFAULT_RULES_DIR
 from rules.sandbox import RuleSandbox
@@ -195,16 +197,12 @@ def _dry_run(
             return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
         return {"ok": True, "reason": None}
 
-    def on_rejected_call(action: str, why: str) -> None:
-        report(f"bad call to {action}(): {why}")
-
     for label, state, all_fail in _SCENARIOS:
         console = CrewConsole(store=ContactStore())
         sandbox = RuleSandbox()
         ctx = ActionContext(
             console=console,
             request_effector_write=request_effector_write,
-            on_rejected_call=on_rejected_call,
         )
         namespaces = _failing_namespaces() if all_fail else ACTION_NAMESPACES
         rule_set = RuleSet.load(rules_dir, sandbox, namespaces, ctx)
@@ -218,6 +216,8 @@ def _dry_run(
                     lua_slots = sandbox.table_from(slots) if slots else sandbox.table()
                     with sandbox.run_with_budget(RULE_DISPATCH_INSTRUCTION_BUDGET):
                         rule.handler(lua_slots)
+                except RuleUnable:
+                    pass
                 except Exception as exc:  # noqa: BLE001 -- report every failure
                     message = _first_line(exc)
                     if (rule.id, message) not in reported:

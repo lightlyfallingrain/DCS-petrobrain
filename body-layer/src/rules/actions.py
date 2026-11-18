@@ -74,11 +74,6 @@ class ActionContext:
     request_effector_write: (
         Callable[[str, str, str | None], dict[str, object]] | None
     ) = None
-    #: Called with the action name and why, each time a rule's call is
-    #: refused for a bad argument (count, type or range) before the action
-    #: runs. `None` in flight -- the rule just gets `ok = false`. Set only
-    #: by `tools/check_rules.py`, which reports such a call as a rule bug.
-    on_rejected_call: Callable[[str, str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -113,10 +108,11 @@ class Action:
     already-validated arguments (every `params` entry checked against its
     own type/bounds first; an omitted optional trailing parameter arrives
     as `None`) and returns a flat `{"ok": bool, "reason": str | None,
-    ...}`-shaped dict -- Lua's own `r.ok`/`r.reason` convention (D5/D6),
-    converted to a genuine Lua table by `engine.py` before it reaches the
-    handler, never handed over as a raw Python object (`sandbox.py`'s
-    module docstring)."""
+    ...}`-shaped dict (D5/D6). On `ok = false`, `engine.py` raises
+    `RuleUnable(reason)` and the handler never sees the dict (user,
+    2026-11-18); on success it is converted to a genuine Lua table before
+    it reaches the handler, never handed over as a raw Python object
+    (`sandbox.py`'s module docstring)."""
 
     name: str
     params: tuple[ActionParam, ...]
