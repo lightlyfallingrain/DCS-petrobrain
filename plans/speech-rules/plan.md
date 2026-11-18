@@ -955,6 +955,11 @@ this in this stage**; it is pure capability, proven by test rather than by a liv
 
 ### Stage 3c — state-dependent speech-to-text hint
 
+**Deferred 2026-11-18 (user), after the measurement in step 4 was run first:** the narrowed hint
+gains nothing on the recorded corpus and both narrowing variants add wrong commands
+(`audio-adapter/research/2026-11-18-state-hint-bench.md`). Steps 1–2 are not built. It may be
+needed once the vocabulary outgrows whisper's 224-token prompt cap.
+
 Builds D17, on top of 3b's `CrewState`/`category`. The corpus and the measurement are this stage's
 own deliverable, not a separate stage — the narrowing code does not ship until the measurement
 supports it (U23).
