@@ -200,9 +200,17 @@ def _make_action_wrapper(
     `nil`) is filled with `None` after the loop."""
     required = sum(0 if param.optional else 1 for param in action.params)
 
+    def reject(why: str) -> Any:
+        if ctx.on_rejected_call is not None:
+            ctx.on_rejected_call(action.name, why)
+        return sandbox.table_from({"ok": False, "reason": None})
+
     def wrapper(*lua_args: object) -> Any:
         if not required <= len(lua_args) <= len(action.params):
-            return sandbox.table_from({"ok": False, "reason": None})
+            return reject(
+                f"takes {required}..{len(action.params)} argument(s), "
+                f"got {len(lua_args)}"
+            )
         args: dict[str, object] = {}
         for param, value in zip(action.params, lua_args):
             if value is None and param.optional:
@@ -210,11 +218,11 @@ def _make_action_wrapper(
                 continue
             if param.kind == "str":
                 if not isinstance(value, str):
-                    return sandbox.table_from({"ok": False, "reason": None})
+                    return reject(f"{param.name} must be a string, got {value!r}")
                 args[param.name] = value
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                return sandbox.table_from({"ok": False, "reason": None})
+                return reject(f"{param.name} must be a number, got {value!r}")
             if isinstance(value, float) and not math.isfinite(value):
                 # A rule's own arithmetic can produce `nan`/`inf` (e.g. a
                 # division by a slot-derived zero) with no stdlib needed --
@@ -223,10 +231,13 @@ def _make_action_wrapper(
                 # this wrapper uncaught (security Required Fix 1,
                 # `plans/speech-rules/security-stage0-2.md`). Reject the
                 # same way as any other out-of-contract value.
-                return sandbox.table_from({"ok": False, "reason": None})
+                return reject(f"{param.name} must be finite, got {value!r}")
             int_value = int(value)
             if int_value != value or not (param.lo <= int_value <= param.hi):
-                return sandbox.table_from({"ok": False, "reason": None})
+                return reject(
+                    f"{param.name} must be a whole number in "
+                    f"{param.lo}..{param.hi}, got {value!r}"
+                )
             args[param.name] = int_value
         for omitted in action.params[len(lua_args) :]:
             args[omitted.name] = None

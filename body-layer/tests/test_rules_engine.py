@@ -221,6 +221,37 @@ def test_action_wrapper_rejects_an_out_of_bounds_argument(tmp_path: Path) -> Non
     assert outcome.error is False
 
 
+def test_a_rejected_call_is_reported_to_on_rejected_call(tmp_path: Path) -> None:
+    """The rule checker's hook (`tools/check_rules.py`): a refused call
+    names the action and why, and the rule still gets `ok = false`."""
+    (tmp_path / "r.lua").write_text(
+        'when.speech("bad_call", "x", "always", function(s)\n'
+        '  local r = probe.one("ten")\n'
+        "  if not r.ok then say(unable(r.reason)) end\n"
+        "end)",
+        encoding="utf-8",
+    )
+    sandbox = RuleSandbox()
+
+    def _invoke(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+        return {"ok": True, "reason": None}
+
+    namespaces = {
+        "probe": (
+            Action(name="one", params=(ActionParam("n", lo=0, hi=10),), invoke=_invoke),
+        )
+    }
+    rejected: list[tuple[str, str]] = []
+    ctx = ActionContext(
+        console=CrewConsole(store=ContactStore()),
+        on_rejected_call=lambda name, why: rejected.append((name, why)),
+    )
+    rule_set = RuleSet.load(tmp_path, sandbox, namespaces, ctx)
+    outcome = run_rule(rule_set, "bad_call", None, sandbox)
+    assert outcome.lines == ["Unable."]
+    assert rejected == [("one", "n must be a number, got 'ten'")]
+
+
 def _probe_action_rule_set(tmp_path: Path, sandbox: RuleSandbox) -> RuleSet:
     """Shared fixture for the security Required Fix 1 tests below -- one
     bound action whose only job is to echo whether the wrapper accepted
