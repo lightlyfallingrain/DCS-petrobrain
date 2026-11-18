@@ -18,13 +18,27 @@ wire carries it and `GET /flight_control/latest` can echo it back (the
 into the same output stage this module already writes through.
 
 Depends on `core` (loaded first, `safe_call`/`debug_log`/the JSON
-extract helpers) and, read-only, `ai_pilot_wheel.is_parked`/`player_seat`
-(Decision 25) -- never writes into that module's own state. If `ai_pilot_
-wheel` itself failed to load, `is_parked()` is unknown and this module
-never takes (named in the plan so the Implementer cannot pick the wrong
+extract helpers) and, read-only, `ai_pilot_wheel.is_parked`/`stick_park_
+raw` -- never writes into that module's own state. If `ai_pilot_wheel`
+itself failed to load, `is_parked()` is unknown and this module never
+takes (named in the plan so the Implementer cannot pick the wrong
 default): a park/unpark edge can only be detected by comparing against a
 known previous state, so "unknown" is treated the same as "stay off",
 never as a licence to assume unparked.
+
+**Capture source, corrected after M0-J (flight 9,
+`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`)**:
+neither a voice take nor an unpark take reads the camera seat
+(`ai_pilot_wheel.player_seat`) at all any more -- Decision 25's own
+"the player's seat set" wording for a voice take is wrong (the camera
+seat can read a seat whose arg set is all zero, while the other seat's
+args hold the live inputs, before an explicit handover). A voice take
+captures whichever seat's args are actually non-zero, falling back to
+the last steady (non-cross-faded) set if both are; an unpark take
+captures the pilot set from the last frame `stick_park_raw()` read
+fully stowed, tracked continuously while `armed`, since the two arg
+sets have already begun a ~1.5 s cross-fade by the time `is_parked()`'s
+own edge fires.
 
 **The Mi-24P arg/cmd/sign table below is partly measured, partly still
 unverified.** 1100-1103/1110-1113 are read-only cockpit animation args
@@ -105,10 +119,29 @@ local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 -- (safe), never written with a guessed sign/scale.
 local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = true, collective = false }
 
--- `UNPARK_TAKE_ENABLED` -- off until M0-J passes (plan, Decision 24/U7).
--- While off, an unpark from `armed` always refuses (`fc_refuse_cause =
--- "disabled"`) and the player keeps the stick, exactly as today.
-local UNPARK_TAKE_ENABLED = false
+-- `UNPARK_TAKE_ENABLED` -- on by default now that M0-J passes with the
+-- last-fully-stowed capture fix below (flight 9). While off, an unpark
+-- from `armed` always refuses (`fc_refuse_cause = "disabled"`) and the
+-- player keeps the stick, exactly as before M0-J -- kept as a flag, not
+-- removed, so a live regression can still be switched off without a
+-- redeploy.
+local UNPARK_TAKE_ENABLED = true
+
+-- An arg reading at or above this is "fully stowed" -- the threshold
+-- the unpark-take capture tracks against (M0-J, flight 9), distinct
+-- from `ai_pilot_wheel`'s own, lower `AI_PILOT_PARK_THRESHOLD` (0.9)
+-- that decides `is_parked()` itself. The two arg sets are already
+-- cross-fading for ~1.5 s by the time the lower threshold's edge fires,
+-- so capturing at the edge reads a partly-faded pilot set; this
+-- threshold is deliberately close to fully stowed (1.0) so the tracked
+-- capture is taken well before the fade starts.
+local STOWED_THRESHOLD = 0.99
+
+-- Below this, a seat's summed axis magnitude reads as "centred/idle",
+-- not "live" -- the voice-take capture rule (M0-J, flight 9) uses it to
+-- tell a genuinely-flown seat from one reading exact/near-zero because
+-- nobody has requested control there yet.
+local LIVE_SEAT_ZERO_EPS = 0.01
 
 -- The 9K113's own invisibility bound (`plans/9k113-sight-pointing/
 -- plan.md`, `SERVO_WOBBLE`), reused here per the plan's own Decision 6
@@ -184,6 +217,24 @@ local fc_goal_ias_kmh = nil
 -- The frozen, captured raw per-axis values (`fc_captured.pitch` etc).
 local fc_captured = {}
 
+-- M0-J (flight 9) capture fixes -- never consulted as an active control
+-- source, only snapshotted at a take.
+--
+-- The pilot set from the last frame `armed` saw `stick_park_raw() >=
+-- STOWED_THRESHOLD` -- the unpark-take's own capture source, tracked
+-- continuously while armed (reset to `nil` on entering `armed` fresh
+-- and on leaving it, so a stale snapshot from a previous park session
+-- never survives into the next one -- the same leak class as `fc_goal_*`
+-- across a release/re-take, review-m1.md Required Fix 1).
+local fc_last_stowed_pilot_capture = nil
+
+-- The most recent captured values read while exactly one seat's axis
+-- magnitude was live and the other read idle -- the voice-take capture
+-- rule's fallback for a cross-fade in progress (both seats live at
+-- once). Tracked every frame regardless of `fc_mode`, since a take can
+-- be commanded on any frame.
+local fc_last_steady_values = nil
+
 local fc_wobble_parity = false
 local fc_last_frame_t = nil
 local fc_env_low_ias_since_t = nil
@@ -219,19 +270,6 @@ local function axis_magnitude(seat)
     return total
 end
 
--- Decision 25: on a voice take, the player's own seat; seat unknown ->
--- the non-zero set. (The unpark-take path never calls this -- it always
--- captures the pilot set directly, per Decision 24.)
-local function resolve_capture_seat(hint)
-    if hint == "pilot" or hint == "operator" then
-        return hint
-    end
-    if axis_magnitude("operator") > axis_magnitude("pilot") then
-        return "operator"
-    end
-    return "pilot"
-end
-
 -- Reads every enabled axis from one seat's arg set. `nil` on any read
 -- failure (NaN or a failed `get_argument_value`) -- the caller decides
 -- what that means (stay "taking" and retry, or refuse the unpark take).
@@ -247,6 +285,58 @@ local function capture_from_seat(seat)
         end
     end
     return values
+end
+
+-- Updates `fc_last_steady_values` -- called every frame regardless of
+-- `fc_mode` (M0-J, flight 9: a take can land on any frame, so the "last
+-- steady" snapshot must already be current by then). A seat is
+-- "steady" exactly when its own magnitude reads live and the other
+-- seat's reads idle -- during an actual cross-fade both read live at
+-- once, and this function leaves the previous snapshot alone rather
+-- than overwriting it with a now-ambiguous read.
+local function update_live_seat_tracking()
+    local mag_pilot = axis_magnitude("pilot")
+    local mag_operator = axis_magnitude("operator")
+    local pilot_live = mag_pilot > LIVE_SEAT_ZERO_EPS
+    local operator_live = mag_operator > LIVE_SEAT_ZERO_EPS
+    if pilot_live and not operator_live then
+        fc_last_steady_values = capture_from_seat("pilot")
+    elseif operator_live and not pilot_live then
+        fc_last_steady_values = capture_from_seat("operator")
+    end
+end
+
+-- The voice-take capture rule (M0-J, flight 9, correcting Decision 25's
+-- own "the player's seat set" wording): the camera seat is not read at
+-- all -- the operator set can read all-zero while the player sits
+-- there, before an explicit handover, with the pilot set holding the
+-- live inputs throughout. Captures whichever seat currently reads live
+-- and the other idle; if both read live at once (a cross-fade already
+-- in progress), uses the last steady snapshot instead of either set's
+-- current, partly-faded values; if neither has ever been steady, falls
+-- back to the higher-magnitude seat (the old Decision-25 default) so a
+-- take is never refused outright on this account.
+local function resolve_capture_values()
+    local mag_pilot = axis_magnitude("pilot")
+    local mag_operator = axis_magnitude("operator")
+    local pilot_live = mag_pilot > LIVE_SEAT_ZERO_EPS
+    local operator_live = mag_operator > LIVE_SEAT_ZERO_EPS
+    if pilot_live and not operator_live then
+        return capture_from_seat("pilot")
+    end
+    if operator_live and not pilot_live then
+        return capture_from_seat("operator")
+    end
+    if pilot_live and operator_live and fc_last_steady_values ~= nil then
+        return fc_last_steady_values
+    end
+    if fc_last_steady_values ~= nil then
+        return fc_last_steady_values
+    end
+    if mag_operator > mag_pilot then
+        return capture_from_seat("operator")
+    end
+    return capture_from_seat("pilot")
 end
 
 -- Decision 1 REVISED/24's takeover-mode pick, snapshotted once at take
@@ -451,6 +541,10 @@ local function handle_flight_control_command(data, t)
         fc_goal_alt_m = nil
         fc_goal_alt_ref = nil
         fc_goal_ias_kmh = nil
+        -- Same reasoning, for the M0-J tracked capture (above): a
+        -- release received while `armed` must not leave a stale
+        -- snapshot for a later armed session to inherit.
+        fc_last_stowed_pilot_capture = nil
         return
     end
     if cmd == "take" then
@@ -512,6 +606,30 @@ local function run_flight_control(t)
         is_parked = safe_call(ai_pilot_wheel.is_parked)
     end
 
+    -- M0-J (flight 9): track the voice-take capture's "last steady"
+    -- fallback every frame, regardless of mode -- a take can land on
+    -- any frame.
+    update_live_seat_tracking()
+
+    -- M0-J (flight 9): while armed (parked), track the unpark-take's
+    -- own capture source -- the pilot set from the last frame the stow
+    -- arg read fully stowed, before the two sets' cross-fade begins.
+    -- Left untouched on every other frame, including the unpark frame
+    -- itself (by then the arg has already fallen well below the
+    -- threshold), so it keeps the last good snapshot through the fade.
+    if fc_mode == "armed" then
+        local stowed_raw = nil
+        if ai_pilot_wheel ~= nil then
+            stowed_raw = safe_call(ai_pilot_wheel.stick_park_raw)
+        end
+        if type(stowed_raw) == "number" and stowed_raw >= STOWED_THRESHOLD then
+            local tracked = capture_from_seat("pilot")
+            if tracked ~= nil then
+                fc_last_stowed_pilot_capture = tracked
+            end
+        end
+    end
+
     -- Self-arm on the park edge while he already has the controls
     -- (Decision 24: a mode-1 active/taking Lua goes to armed by itself).
     if is_parked == true and (fc_mode == "active" or fc_mode == "taking") then
@@ -519,6 +637,10 @@ local function run_flight_control(t)
         fc_pending_take_seq = nil
         fc_mode = "armed"
         fc_arm_last_t = t
+        -- Fresh armed session: forget whatever the previous one tracked
+        -- (the same "stale leak across a session boundary" the `fc_goal_
+        -- *` fix above guards against).
+        fc_last_stowed_pilot_capture = nil
         return
     end
 
@@ -530,12 +652,14 @@ local function run_flight_control(t)
             fc_mode = "off"
             fc_release_reason = "refused"
             fc_refuse_cause = "disabled"
+            fc_last_stowed_pilot_capture = nil
             return
         end
         if not lease_fresh then
             fc_mode = "off"
             fc_release_reason = "refused"
             fc_refuse_cause = "lease"
+            fc_last_stowed_pilot_capture = nil
             return
         end
         local ok, cause = check_unpark_preconditions()
@@ -543,12 +667,21 @@ local function run_flight_control(t)
             fc_mode = "off"
             fc_release_reason = "refused"
             fc_refuse_cause = cause
+            fc_last_stowed_pilot_capture = nil
             return
         end
-        -- Decision 24/25: the capture source for an unpark take is
-        -- always the pilot set (1100-1103) -- the AI's own held
-        -- values, never the live seat.
-        local values = capture_from_seat("pilot")
+        -- Decision 24, capture source corrected by M0-J (flight 9): the
+        -- pilot set (1100-1103) from the last frame it read fully
+        -- stowed, tracked above while armed -- never a fresh read at
+        -- the edge itself, which is already partway through the two
+        -- sets' cross-fade. Falls back to a fresh read only if armed
+        -- was entered and exited again before any frame ever reached
+        -- the threshold (should not happen outside a test harness).
+        local values = fc_last_stowed_pilot_capture
+        if values == nil then
+            values = capture_from_seat("pilot")
+        end
+        fc_last_stowed_pilot_capture = nil
         if values == nil then
             fc_mode = "off"
             fc_release_reason = "refused"
@@ -568,12 +701,7 @@ local function run_flight_control(t)
     end
 
     if fc_mode == "taking" then
-        local seat_hint = nil
-        if ai_pilot_wheel ~= nil then
-            seat_hint = safe_call(ai_pilot_wheel.player_seat)
-        end
-        local seat = resolve_capture_seat(seat_hint)
-        local values = capture_from_seat(seat)
+        local values = resolve_capture_values()
         if values == nil then
             -- else: stays "taking", retries next frame.
             return
@@ -721,6 +849,8 @@ local function on_stop()
     fc_goal_ias_kmh = nil
     fc_last_frame_t = nil
     fc_env_low_ias_since_t = nil
+    fc_last_stowed_pilot_capture = nil
+    fc_last_steady_values = nil
     -- `fc_last_cmd_seq` deliberately NOT reset -- a stale, pre-restart
     -- command replayed after a reconnect must still be seen as stale,
     -- same "seq never goes backwards" posture the rest of this module

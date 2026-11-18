@@ -1317,3 +1317,105 @@ pre-mutation value exactly before re-running the full suites above.
 
 - None beyond the "checked, no code change needed" item above — this round is a narrow fix plus
   the two named tests, no scope beyond review-m1.md's Required Fixes.
+
+---
+
+## M0-J capture-rule fixes, 2026-11-18 (coordinator, flight 9 findings)
+
+From `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md` (branch `probe/bl16-
+flight-axes`), "Flight 9": two capture-timing bugs, both confirmed and fixed in the same round as
+the review-fix work above, plus `UNPARK_TAKE_ENABLED` flipped on now that M0-J passes.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua` — new read-only getter
+  `M.stick_park_raw()` (mirrors `ai_pilot_takeover.raw_arg852`, already tracked every frame by
+  `run_ai_pilot_wheel`). `M.player_seat`'s own docstring corrected in place — it documented itself
+  as read by `flight_control.lua`'s capture-source rule, which this round's fix 2 removes; the
+  function and its export are unchanged (kept for diagnostics), only the now-false claim in the
+  comment was pruned.
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua`:
+  - **Finding 1 (unpark-take capture timing)**: new `STOWED_THRESHOLD` (0.99) and
+    `fc_last_stowed_pilot_capture`, tracked every frame while `fc_mode == "armed"` — overwritten
+    only on a frame `stick_park_raw() >= STOWED_THRESHOLD`, left alone otherwise (so it survives
+    through the ~1.5 s cross-fade `is_parked()`'s own lower, 0.9 edge fires inside). The unpark-take
+    branch reads this tracked snapshot instead of a fresh `capture_from_seat("pilot")` at the edge;
+    falls back to a fresh read only if no frame ever reached the threshold this armed session.
+    Cleared (same "stale leak across a session boundary" class as review-m1.md Required Fix 1) on:
+    entering `armed` fresh (self-arm), every unpark-take refusal branch, a successful unpark-take
+    (consumed), `"release"`, and `on_stop`.
+  - **Finding 2 (voice-take capture source)**: `resolve_capture_seat(hint)` (Decision 25's
+    "the player's seat set") replaced outright by `resolve_capture_values()` — the camera seat is
+    never read for this decision any more. New `LIVE_SEAT_ZERO_EPS` (0.01) and
+    `update_live_seat_tracking()` (called every frame regardless of `fc_mode`, since a take can
+    land on any frame) track `fc_last_steady_values`, the captured set from the last frame exactly
+    one seat read live and the other idle. `resolve_capture_values()` captures whichever seat
+    currently reads live alone; if both read live at once (an actual cross-fade), returns the
+    tracked steady snapshot instead of either set's own partly-faded current value; falls back to
+    the higher-magnitude seat (the old default) only if neither has ever been steady.
+  - **`UNPARK_TAKE_ENABLED` flipped from `false` to `true`** (coordinator direction) — M0-J passes
+    with the capture-timing fix above. Kept as a named flag, not removed, so a live regression can
+    still disable the unpark take without a redeploy; its own refusal branch and `fc_refuse_cause =
+    "disabled"` are untouched.
+  - Module docstring updated: the `ai_pilot_wheel` dependency list now names `stick_park_raw`
+    instead of `player_seat` (no longer read), and a new paragraph states both corrected capture
+    rules up front, citing the finding by name rather than re-deriving it.
+- `aircraft-layer/tests/test_flight_control_lua.py`:
+  - Preamble: `ai_pilot_wheel` mock gained `stick_park_raw = function() return ap_stick_park_raw
+    end`, mirroring `ap_parked`/`ap_seat`'s existing driver-settable-global convention.
+  - `TestCaptureIsBitExact.test_unpark_take_is_refused_disabled_in_stage_m1` → rewritten as
+    `test_unpark_take_succeeds_with_the_flag_on_by_default` (the flag's default flipped; the old
+    test's own premise — the unpark take cannot be exercised through this module's public interface
+    — is exactly what this round changes). Per the escalation rule on rewriting existing tests: this
+    is the approved coordinator change, not an improvisation, named here rather than left silent in
+    the diff.
+  - `TestUnparkTakeRefusals`'s two existing tests updated: both previously asserted
+    `fc_refuse_cause == "disabled"` (the flag masking every other precondition); now assert the
+    precondition's own real cause (`"too_slow"`, `"lease"`) since the flag no longer masks them.
+    New `test_refusal_still_available_via_the_flag` pins that the `"disabled"` cause and the `true`
+    default both still exist in the source, since the constant has no exported test seam and should
+    not get one for a one-line kill-switch.
+  - New `TestUnparkTakeCaptureTiming` (3 tests): the tracked last-fully-stowed capture is used
+    rather than the faded edge-frame read; a seat-gate edge (no fade) needs no special case and gets
+    the same tracked value; the tracked capture does not leak into a later armed session that never
+    itself reached the threshold.
+  - New `TestVoiceTakeLiveSeatCapture` (2 tests): the live pilot set is captured with the camera in
+    the operator seat (the measured flight-9 scenario, operator set at 0, pilot set live); a
+    cross-fade at the exact moment of take resolves to the last steady set, not either set's own
+    partly-faded current read.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p` on `flight_control.lua`/`ai_pilot_wheel.lua`/`commands.lua`/`Export.lua`: pass.
+- `GETGLOBAL` audit on both touched files: every name stdlib, a genuine DCS API, or an existing
+  cross-module global (`ai_pilot_wheel`, `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON`) — nothing new.
+- `ruff format --check src tests`: pass (84 files). `ruff check src tests`: pass.
+- `mypy src`: pass, no issues (28 source files).
+- `pytest tests/test_flight_control_lua.py tests/test_ai_pilot_wheel_lua.py tests/
+  test_ai_pilot_wheel_api.py -q`: **124 passed**.
+- `pytest tests -q` (full subproject suite): **939 passed** (933 + 6 net new: the two
+  `TestUnparkTakeRefusals` tests kept their names and gained one sibling, plus 3 +
+  2 new classes).
+
+Not re-run: body-layer (no body-layer file touched this round; `UNPARK_TAKE_ENABLED` is a pure
+Lua-side flag and `fc_refuse_cause`'s body-layer handling is generic over whatever string Lua
+sends, confirmed by reading `decide_flight_control` and `test_flight_control.py`'s own
+`lua_refuse_cause="disabled"` fixture, which is illustrative, not testing the Lua default).
+
+Two counterfactuals were run before trusting the new tests: (1) reverted the unpark-take branch to
+read `capture_from_seat("pilot")` directly (dropping the tracked snapshot), re-ran
+`test_captures_the_last_fully_stowed_frame_not_the_faded_edge` alone, confirmed it failed for the
+stated reason (`0.085` instead of `0.133`); (2) reverted the `"taking"` branch to the old
+hint-first capture (`capture_from_seat(seat_hint or "pilot")`), re-ran `TestVoiceTakeLiveSeatCapture`
+alone, confirmed both tests failed for the stated reason (`0.149`/`0.151` instead of the live/steady
+values). Both reverts restored by hand and `sha256` confirmed to match the pre-mutation value
+exactly before re-running the full suite above.
+
+### Notable Discoveries
+
+- **`M.player_seat` (`ai_pilot_wheel.lua`) is now unread by any in-process Lua caller** — confirmed
+  by `grep -rn "player_seat" aircraft-layer/dcs-export` after this round's change: the only call
+  site was `flight_control.lua`'s own old `resolve_capture_seat`, now gone. Kept exported rather
+  than removed (diagnostics / a future caller), with its docstring corrected rather than deleted —
+  judgement call, flagged for review to confirm or remove outright.

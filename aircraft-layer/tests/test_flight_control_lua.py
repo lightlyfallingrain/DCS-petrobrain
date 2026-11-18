@@ -159,6 +159,7 @@ ai_pilot_wheel = {
         return ap_parked
     end,
     player_seat = function() return ap_seat end,
+    stick_park_raw = function() return ap_stick_park_raw end,
 }
 
 client = {
@@ -273,17 +274,16 @@ print(string.format("%.6f", written[2003]))
         lines = _run(driver)
         assert abs(float(lines[0]) - (-0.4)) <= 0.0011
 
-    def test_unpark_take_is_refused_disabled_in_stage_m1(self) -> None:
-        """`UNPARK_TAKE_ENABLED` defaults off until M0-J passes (plan,
-        Decision 24/U7) -- so in Stage M1's own shipped state an unpark
-        from `armed` always refuses with cause `"disabled"` and writes
-        nothing, whatever seat the player is in or which set holds a
-        non-zero value. Decision 24/25's own capture-source rule (the
-        unpark path always reads the **pilot** set, 1100-1103, never the
-        live seat) is therefore not exercisable through this module's
-        public interface while the flag is off; it is deferred to the
-        live M0-J probe, per the plan's own "fail -> disables the
-        unpark take, does not block mode 1" posture."""
+    def test_unpark_take_succeeds_with_the_flag_on_by_default(self) -> None:
+        """`UNPARK_TAKE_ENABLED` now defaults **on** -- M0-J (flight 9)
+        passed with the last-fully-stowed capture fix below -- so an
+        unpark from `armed` takes rather than refusing. The driver here
+        never holds a frame at `stick_park_raw() >= STOWED_THRESHOLD`
+        before unparking, so there is no tracked snapshot yet and the
+        take falls back to a fresh read of the pilot set (1100-1103),
+        never the operator set the camera happens to be in -- `TestM0J
+        CaptureFixes` below covers the tracked-snapshot and cross-fade
+        cases this fallback exists for."""
         driver = """
 pilot_args.pitch = 0.42
 operator_args.pitch = -0.9
@@ -297,13 +297,15 @@ ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.push_flight_control_state(0.2)
 print(sent_lines[#sent_lines])
-print(written[2001] == nil)
+print(string.format("%.6f", written[2001]))
 """
         lines = _run(driver)
-        status_line, nothing_written = lines[0], lines[1]
-        assert _field(status_line, "fc_mode") == "off"
-        assert _field(status_line, "fc_refuse_cause") == "disabled"
-        assert nothing_written == "true"
+        status_line, pitch_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_refuse_cause") is None
+        # Captured the pilot set (0.42), never the operator set (-0.9)
+        # the camera happened to be in.
+        assert abs(float(pitch_written) - 0.42) <= 0.0011
 
 
 class TestReleaseClearsHeldGoalsAcrossRetake:
@@ -459,14 +461,10 @@ print(sent_lines[#sent_lines])
         lines = _run(driver)
         status_line = lines[0]
         assert _field(status_line, "fc_mode") == "off"
-        # UNPARK_TAKE_ENABLED is off in Stage M1, so "disabled" wins
-        # over every other precondition (checked first in `run_flight_
-        # control`'s own unpark-take branch) -- the IAS-specific "too_
-        # slow" cause is not reachable through this module's public
-        # interface until M0-J flips the flag on; see `test_unpark_
-        # take_is_refused_disabled_in_stage_m1`'s own docstring for the
-        # same gap on the capture-source side.
-        assert _field(status_line, "fc_refuse_cause") == "disabled"
+        # `UNPARK_TAKE_ENABLED` now defaults on (M0-J passed), so the
+        # ordinary preconditions are reachable again: below `min_ias_
+        # kmh` refuses with cause "too_slow".
+        assert _field(status_line, "fc_refuse_cause") == "too_slow"
 
     def test_refused_with_a_stale_lease(self) -> None:
         driver = """
@@ -484,7 +482,190 @@ print(sent_lines[#sent_lines])
         lines = _run(driver)
         status_line = lines[0]
         assert _field(status_line, "fc_mode") == "off"
-        assert _field(status_line, "fc_refuse_cause") == "disabled"
+        assert _field(status_line, "fc_refuse_cause") == "lease"
+
+    def test_refusal_still_available_via_the_flag(self) -> None:
+        """The `UNPARK_TAKE_ENABLED` kill-switch itself is kept, not
+        deleted (coordinator direction, 2026-11-18) -- this pins that the
+        "disabled" cause still exists as a value `fc_refuse_cause` can
+        take, by reading it straight off the module source rather than
+        through a test seam (the constant is a true Lua local, with no
+        exported setter, and none should be added for a one-line flag
+        this project may want to flip back from live DCS evidence
+        without a deploy)."""
+        source = _FLIGHT_CONTROL_LUA.read_text(encoding="utf-8")
+        assert 'fc_refuse_cause = "disabled"' in source
+        assert re.search(r"local UNPARK_TAKE_ENABLED\s*=\s*true", source) is not None
+
+
+class TestUnparkTakeCaptureTiming:
+    """M0-J (flight 9): the `parked_active` falling edge arrives after
+    the two arg sets have already begun their ~1.5 s cross-fade, so a
+    capture taken at the edge itself (or a sum of both sets at the
+    edge) rolls/pitches the aircraft -- flight 9's J1/J2. The fix tracks
+    the pilot set every frame while armed and only overwrites the
+    tracked snapshot on a frame reading fully stowed (`stick_park_raw()
+    >= STOWED_THRESHOLD`); the unpark-take reads that snapshot, never a
+    fresh capture at the edge."""
+
+    def test_captures_the_last_fully_stowed_frame_not_the_faded_edge(self) -> None:
+        driver = """
+pilot_args.roll = 0.133
+ap_seat = "pilot"
+ap_parked = true
+ap_stick_park_raw = 1.0
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"arm",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+-- A frame fully stowed: tracked.
+flight_control.run_flight_control(0.1)
+-- The fade begins: the arg set and the raw stow value both fall
+-- together, exactly as flight 9 measured (roll 0.133 -> 0.086, raw
+-- 1.0 -> 0.85) -- and the edge (`is_parked() == false`) lands here.
+pilot_args.roll = 0.086
+ap_stick_park_raw = 0.85
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.push_flight_control_state(0.2)
+print(sent_lines[#sent_lines])
+print(string.format("%.6f", written[2002]))
+"""
+        lines = _run(driver)
+        status_line, roll_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_refuse_cause") is None
+        # The tracked 0.133, not the faded 0.086 read at the edge frame.
+        assert abs(float(roll_written) - 0.133) <= 0.0011
+
+    def test_a_seat_gate_edge_has_no_fade_and_gets_the_same_value(self) -> None:
+        """J3: a seat-gate edge (operator -> pilot while parked) has no
+        fade -- `stick_park_raw()` stays at 1.0 throughout, so the
+        tracked snapshot and an edge-frame read are the same value. No
+        special-case code exists for this; this pins that the one
+        tracking mechanism already covers it."""
+        driver = """
+pilot_args.roll = 0.222
+ap_seat = "pilot"
+ap_parked = true
+ap_stick_park_raw = 1.0
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"arm",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+-- No fade -- raw852 stays at 1.0 through the edge.
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.push_flight_control_state(0.2)
+print(sent_lines[#sent_lines])
+print(string.format("%.6f", written[2002]))
+"""
+        lines = _run(driver)
+        status_line, roll_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        assert abs(float(roll_written) - 0.222) <= 0.0011
+
+    def test_tracked_capture_does_not_leak_into_the_next_armed_session(self) -> None:
+        """The same leak class `fc_goal_*`'s release fix guards against
+        (review-m1.md Required Fix 1): a stale stowed-pilot snapshot
+        from one armed session must not survive into the next one that
+        never itself reached the stowed threshold."""
+        driver = """
+pilot_args.roll = 0.5
+ap_seat = "pilot"
+ap_parked = true
+ap_stick_park_raw = 1.0
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"arm",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+-- Release, then re-arm without ever reaching the stowed threshold this
+-- session -- and the player has since moved the stick.
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"release","limits":{}}', 0.3)
+flight_control.run_flight_control(0.3)
+pilot_args.roll = 0.9
+ap_parked = true
+ap_stick_park_raw = 0.5
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":3,"cmd":"arm",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.4)
+flight_control.run_flight_control(0.4)
+ap_parked = false
+flight_control.run_flight_control(0.5)
+flight_control.push_flight_control_state(0.5)
+print(sent_lines[#sent_lines])
+print(string.format("%.6f", written[2002]))
+"""
+        lines = _run(driver)
+        status_line, roll_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        # The fresh read (0.9), never the first session's tracked 0.5.
+        assert abs(float(roll_written) - 0.9) <= 0.0011
+
+
+class TestVoiceTakeLiveSeatCapture:
+    """M0-J (flight 9): the camera seat is not the live-controls seat --
+    the operator set can read zero while the player sits there, before
+    requesting control, with the pilot set holding the live inputs. The
+    fix captures the live (non-zero) set regardless of camera seat, and
+    the last steady set if both read live (a cross-fade)."""
+
+    def test_captures_the_live_pilot_set_with_the_camera_in_the_operator_seat(
+        self,
+    ) -> None:
+        driver = """
+pilot_args.pitch = 0.229
+operator_args.pitch = 0.0
+ap_seat = "operator"
+ap_parked = false
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+print(string.format("%.6f", written[2001]))
+"""
+        lines = _run(driver)
+        status_line, pitch_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        # The live pilot set (0.229), never the all-zero operator set
+        # the camera happened to be in.
+        assert abs(float(pitch_written) - 0.229) <= 0.0011
+
+    def test_a_cross_fade_at_the_moment_of_take_uses_the_last_steady_set(self) -> None:
+        """Both seats read live at once (a cross-fade in progress) --
+        uses the last frame exactly one of them was live, not either
+        set's own partly-faded current value."""
+        driver = """
+pilot_args.pitch = 0.3
+operator_args.pitch = 0.0
+ap_seat = "pilot"
+ap_parked = false
+-- A steady frame: only the pilot set is live. Tracked.
+flight_control.run_flight_control(0.0)
+-- Now both read live at once (the fade in progress) and the take lands
+-- on this very frame.
+pilot_args.pitch = 0.15
+operator_args.pitch = 0.2
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.1)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+print(string.format("%.6f", written[2001]))
+"""
+        lines = _run(driver)
+        status_line, pitch_written = lines[0], lines[1]
+        assert _field(status_line, "fc_mode") == "active"
+        # The last steady pilot value (0.3), neither of this frame's
+        # own partly-faded reads (0.15/0.2).
+        assert abs(float(pitch_written) - 0.3) <= 0.0011
 
 
 class TestUnparkWhileOffWritesNothing:
