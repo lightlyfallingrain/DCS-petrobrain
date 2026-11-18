@@ -490,6 +490,13 @@ class AircraftLayerClient:
         speed_target_kmh: float | None,
         hvrt_direction: Literal["left", "right", "forward", "back"] | None,
         hvrt_step: Literal["up", "down"] | None = None,
+        cbtm_action: (
+            Literal[
+                "align", "align_for_launch", "break_left", "break_right", "break_away"
+            ]
+            | None
+        ) = None,
+        cbtm_seq: int | None = None,
     ) -> None:
         """`POST /command/ai_pilot_goal` -> sends BL-16 mode 2's goal
         channel message (`plans/flight-control/plan.md`, "Stage P2 ready
@@ -508,7 +515,13 @@ class AircraftLayerClient:
         ai_pilot_goal`'s own docstring), so `body.py`'s own call site
         must bump `goal_seq` on every call that carries one, even if
         nothing else changed -- `Export.lua` acts on it exactly once per
-        distinct `goal_seq`."""
+        distinct `goal_seq`.
+
+        `cbtm_action`/`cbtm_seq` are Stage P3+P4's own sibling one-shot
+        fields (plan, "Revised 2026-11-18 -- Stages P3+P4 ready to
+        build", "The CBTM one-shot wire channel") -- same message, this
+        channel's own distinct sequence space, same "act once per
+        distinct seq" contract as `hvrt_step`."""
         self._post_json(
             "/command/ai_pilot_goal",
             {
@@ -520,6 +533,8 @@ class AircraftLayerClient:
                 "speed_target_kmh": speed_target_kmh,
                 "hvrt_direction": hvrt_direction,
                 "hvrt_step": hvrt_step,
+                "cbtm_action": cbtm_action,
+                "cbtm_seq": cbtm_seq,
             },
         )
 

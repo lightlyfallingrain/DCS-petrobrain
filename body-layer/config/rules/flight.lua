@@ -55,15 +55,25 @@ when.speech("turn_heading",
     say("Heading " .. digits(r.heading_deg) .. ".")
   end)
 
--- "Level flight" -- freezes heading, altitude and speed at their current
--- held values. `"flight_control_any"`: held while *none* of the three is
--- known yet, passes once any one of them is.
+-- "Level flight" / "level off" -- freezes heading, altitude and speed
+-- at their current held values. `"flight_control_any"`: held while
+-- *none* of the three is known yet, passes once any one of them is.
+-- Stage P3+P4 (F-P8): "level off" is a second wording for this same
+-- command, not a second meaning on `level_off` ("stop turn," below,
+-- never touches an alignment) -- both wordings call this one action,
+-- which speaks "Leveling off." instead of "Level flight." exactly when
+-- it is aborting an "align for launch" dive (`r.leveling_off`, Q0's
+-- "first level at current, then start recovery").
 when.speech("level_flight",
-    "level flight",
+    "level <form:flight|off>",
     "flight_control_any",
   function(s)
-    flight.level_flight()
-    say("Level flight.")
+    local r = flight.level_flight()
+    if r.leveling_off then
+      say("Leveling off.")
+    else
+      say("Level flight.")
+    end
   end)
 
 -- "Speed <value>" / "speed max" -- `speed_target` is a union slot (D14):
@@ -176,6 +186,55 @@ when.speech("level_off",
   function(s)
     local r = flight.level_off()
     say("Heading " .. digits(r.heading_deg) .. ".")
+  end)
+
+-- CBTM align/align-for-launch/break/break-away -- BL-16 mode 2 Stage
+-- P3+P4 (`plans/flight-control/plan.md`, "Revised 2026-11-18 -- Stages
+-- P3+P4 ready to build"). Category "flight_control": has-controls is
+-- the whole precondition here, same as the HVRT rules below -- align/
+-- align-for-launch answer "Unable, AI overlay." in mode 1 (permanent,
+-- E-P20); break/break-away answer "Unable, not ready." in mode 1 for
+-- now (temporary, until the mode-1 batch). Readbacks are the user's
+-- own words (Stage P3 explore, answer 3): "Aligning.", "Aligning for
+-- launch.", "Breaking left."/"Breaking right.", "Breaking away.".
+when.speech("cbtm_align",
+    "align",
+    "flight_control",
+  function(s)
+    flight.cbtm_align()
+    say("Aligning.")
+  end)
+
+when.speech("cbtm_align_for_launch",
+    "align for launch",
+    "flight_control",
+  function(s)
+    flight.cbtm_align_for_launch()
+    say("Aligning for launch.")
+  end)
+
+when.speech("cbtm_break",
+    "break turn <direction:left|right>",
+    "flight_control",
+  function(s)
+    local sign = -1
+    if s.direction == "right" then
+      sign = 1
+    end
+    flight.cbtm_break(sign)
+    if s.direction == "left" then
+      say("Breaking left.")
+    else
+      say("Breaking right.")
+    end
+  end)
+
+when.speech("cbtm_break_away",
+    "break away",
+    "flight_control",
+  function(s)
+    flight.cbtm_break_away()
+    say("Breaking away.")
   end)
 
 -- HVRT translate/hold/step -- bare single-word commands. The adapter

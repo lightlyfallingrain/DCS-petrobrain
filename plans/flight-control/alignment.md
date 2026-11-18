@@ -1160,3 +1160,295 @@ silent, since the task brief asked for them by name:
 
 None. U5–U10 and the seat rule are all answered on the record; nothing in this amendment opens a
 new question the main loop would need to carry to the user.
+
+## Goal check — 2026-11-18 (mode 2, Stages P3 + P4: CBTM align, breaks, recovery)
+
+**Verdict:** CONCERNS — two, both about what a spoken command does while an alignment, a break or
+a recovery is running (F-P6, F-P7). Each is grounded in the user's own words plus the plan's
+written state machine, and each settles in a line. The rest is open questions.
+
+Scope: P3 ("align", "align for launch", "break turn left/right", "break away") and P4 (recovery
+after launch, spoken abort, AGL floor, IAS ceiling) as one batch on `feature/bl16-p3p4-cbtm`,
+tip `80fceb32`. Inputs: explore-notes "Stage P3 explore (user, 2026-11-18)" and the 2026-11-15
+CBTM notes and Q1–Q8 answers; plan.md vocabulary table, Stages P3/P4, Co-moving Fields,
+"Launch detection", U1/U2; `body-layer/config/rules/flight.lua` on the tip. E-P1, E-P3–E-P11
+and F-P1–F-P3 stand as they are. Below, E-P12 onward are new and F-P6 onward are new findings.
+
+### Why
+
+The player sits in the operator seat working the 9K113 sight. Parked, nobody flies but ED's AI,
+and the only route to the attack-and-evade manoeuvres ED gives it is the CBTM wheel, which he
+cannot work while his hands and eyes are on the sight. Why does that matter? Because **a missile
+run from the operator seat should take only the player's voice and the sight**: Petrovich points
+the aircraft at the target and puts the boresight on it for the shot. He also gets the aircraft out
+of the dive that ED's ALIGN FOR LAUNCH would otherwise fly into the ground, and he turns it hard on
+the player's word when a threat appears.
+
+### Player expectations
+
+- **E-P12: "Align" points the nose at what the sight looks at, and it stays there.** Within a few
+  seconds of "Align." → "Aligning.", the heading swings to the 9K113's azimuth. The aircraft holds
+  that heading without further words, until the player commands something else (user,
+  2026-11-18, answer 4). There is no dive, because only the heading moves.
+- **E-P13: "Align for launch" puts the boresight on the sight vector for the shot**, read back
+  "Aligning for launch.". The nose goes onto the target and the launch can be made. The player
+  knows the dive starts here, and the floor and ceiling (E-P16) are what stop it ending in the
+  ground.
+- **E-P14: After the missile leaves, the nose comes up within a second or two**, with one
+  "Leveling off." and no word needed from the player. The aircraft holds the heading it had at
+  that moment, so the target stays in the sight (Q7). It then climbs smoothly back to the altitude
+  it had before "align for launch", and steps back to that speed one step at a time (Q8). The
+  missile stays guidable throughout. This refines E-P8: "without a spoken word" there means the
+  player need not speak; Petrovich does say "Leveling off.".
+- **E-P15: "Level flight" or "level off", said during "align for launch", is the abort.** It does
+  exactly what E-P14 does ("Leveling off.", pull out, restore), whether or not a missile was
+  fired. Said with no alignment running, both words keep doing what "level flight" does today:
+  freeze the current heading, altitude and speed.
+- **E-P16: In "align for launch", the aircraft never goes below 40 m AGL or above 280 km/h IAS
+  unannounced.** Crossing either limit starts E-P14's recovery, spoken once. It works the same
+  whether a missile is in flight or not (Q5), and both limits are tunables.
+- **E-P17: "Break turn left/right" turns a full 90° that way, now.** "Breaking left." The turn
+  starts within a press-and-mode-cycle of the word, whatever the aircraft was doing: cruising
+  under a heading goal, aligned, or recovering. It is not cut short, and it is not undone
+  afterwards by a goal that was already running. It is an evasion, so it beats anything the
+  aircraft was being steered toward.
+- **E-P18: "Break away" is a 180° to the left**: two left breaks about 2 s apart (the user's design,
+  because the Mi-24 turns left faster), ending roughly reciprocal to the heading the turn started
+  on. "Breaking away." It never takes ED's own BREAK 180, whose direction is undetermined.
+- **E-P19: A heading, altitude or speed command is always flown**, including one spoken during
+  an alignment or a recovery. It is read back as today (E-P3), the needed mode is cycled to, and it
+  is never silently held back behind a phase the player cannot see.
+- **E-P20: In mode 1, "align", "align for launch" and the breaks answer "unable"** with a reason,
+  in the shape of the existing "Unable, AI overlay.". Nothing is pressed (user, 2026-11-18, answer
+  5, for align; for the breaks see Q-P3-3).
+- **E-P21: The readbacks are the user's own, in `config/rules/flight.lua`**: "Aligning.",
+  "Aligning for launch.", "Breaking left/right.", "Breaking away.", "Leveling off.". Each is
+  editable there, like every other flight readback.
+
+### Open assumptions
+
+- **Which word aborts.** Serves the why: the abort is the `level_flight` rule, which gains the
+  second form "level off" (user, 2026-11-18, answer 2). Would not: plan.md's vocabulary table
+  (line ~112) and Stage P4 text, which still name the `level_off` token and the words
+  "straight"/"level off" as the abort. On the tip, that rule's pattern is now "stop turn" (main's
+  2026-11-18 wording edit), and "straight" was not carried forward. A planner building from the
+  plan text would wire the abort to "stop turn". See F-P8.
+- **What "level flight/off" does depending on phase.** Serves the why: during `launch_aligned`,
+  it is E-P14's recovery. During plain "align" (no dive, nothing to restore), it leaves CBTM for
+  FLT, holding the current heading (Q7), altitude and speed, which is today's "level flight". With
+  nothing running, it is today's freeze. Would not: freezing *current* altitude and speed during
+  "align for launch". The aircraft would then hold the bottom of the dive at the overspeed it had
+  reached, and the user asked for a restore (2026-11-15 table: *"does what is done when
+  recovering from launch attitude"*). The readback is "Leveling off." when it is an abort and
+  "Level flight." otherwise; the user can change either in the rule.
+- **What recovery restores, and in what order.** Serves the why, as Q7/Q8 and the plan's
+  Co-moving table already have it: FLT first, keeping the heading and altitude at that moment; then
+  the pre-align altitude by a smooth climb, interleaved with speed one step at a time. Would not:
+  re-issuing the pre-align *heading* (F-P2's swing-back). The plan already gets this right; it is
+  listed so the batch keeps it.
+- **A second "align for launch" during recovery.** Serves the why: re-enter `launch_aligned`
+  and keep the *first* pre-align snapshot, so the next recovery climbs back to the cruise the
+  player was in before the attack began. Would not: re-snapshotting a recovery's half-restored
+  altitude and speed. Low stakes, because recovery is already steering the goal toward the old
+  snapshot, but it should be stated.
+- **Launch detection.** Serves the why: a payload count drop while `launch_aligned`, the
+  floor/ceiling as the backstop when a drop is missed or late, and the drop as the only trigger
+  that fires before any limit is reached. Would not: treating launch detection as the only safety.
+  E-P16 makes it one trigger of three, which is why its reliability is not a gate. Only the
+  operator fires parked, so a count drop is his shot; Q-P3-5 asks whether anything else the
+  operator can release could drop a count.
+- **The AGL floor when "align for launch" is said already below 40 m** (a hover shot from behind
+  cover). Serves the why: only the user can say (Q-P3-2). Would not, either way: a level check
+  answers the player's "Aligning for launch." with "Leveling off." at once and makes a low hover
+  shot impossible. An edge check ("crossing") would give no protection at all to an alignment
+  started at 30 m.
+- **What a break does to an alignment or a recovery that is running.** Serves the why: the break
+  ends the alignment, because the player has abandoned the shot and his evasion wins. Would not:
+  leaving `align_phase` at `launch_aligned`, so that a later count drop or a floor crossing starts a
+  recovery in the middle of the evasion. Whether the pre-align altitude and speed are still
+  restored after the break is Q-P3-1.
+- **The CPG-view exit during an alignment.** DCS may switch CBTM→FLT/HVR when the player leaves
+  the sight view; the user was not sure it does. Serves the why: treat it as the alignment ending,
+  with no re-press of ALIGN. Would not: the always-reassert loop cycling back to CBTM, which would
+  land in CBTM *without* the alignment while `align_phase` still says aligned. Rare, because a
+  player taking a shot stays on the sight. Q-P3-4.
+
+### Findings
+
+1. **F-P6: A command spoken during an alignment can be read back and then never flown.** Lens:
+   crew sense and the non-obvious case. Breaks E-P19 (and E-P3/E-P4).
+   - Assumption: the plan's Co-moving Fields row for `goal` reads *"if `align_phase != "none"`,
+     the goal is recorded but **not** issued to Lua until recovery reaches `"none"`"*.
+   - In the plan: `"aligning"` (plain "align") has **no exit transition**. Only `launch_aligned`
+     moves to `recovering`, and only `recovering` reaches `"none"`. The user has now said that after
+     "align" he stays in CBTM *"until I command something else. No need to change mode, unless
+     there is need to change one of the flight params"* (2026-11-18, answer 4). So the "something
+     else" (a heading, altitude or speed) is exactly the command that must end the alignment.
+   - The pilot would see: "Align." → "Aligning." Nose on target. "Altitude 150." → "150 meters."
+     The aircraft stays where it is, at the old altitude, indefinitely. The readback said one
+     thing and the aircraft did another. That is the "say again" vs "unable" honesty this project
+     holds to.
+   - Grounded in: the user's answer 4 above; plan.md Co-moving Fields table and the
+     `align_phase` row set.
+   - Suggests: a flight-parameter command ends a plain "align" (cycle to FLT, fly the command). In
+     `launch_aligned`, the same command is an abort with the spoken parameter replacing that
+     parameter's restore target: "altitude 200" in the dive pulls out and climbs to 200, not to the
+     pre-align altitude. Whether the user wants that last part is Q-P3-6; the "never silently
+     swallowed" part is not a question.
+
+2. **F-P7: The always-reassert loop can cut a break short or turn the aircraft back into the
+   threat.** Lens: purpose, because a break is an evasion. Breaks E-P17/E-P18.
+   - Assumption: a break is one more discrete press. `decide_ai_pilot_wheel` keeps reasserting
+     the mode the *current goal or recovery* needs (U3, always reassert).
+   - In the sim, from the user's model: breaks need CBTM, while heading/altitude/speed goals and
+     recovery need FLT/HVR. If a heading goal is outstanding, or a recovery is restoring altitude
+     and speed, the loop cycles back to FLT right after the break press. Two things then go wrong.
+     First, leaving CBTM mid-turn may stop the break wherever it has got to (FLT adopts the current
+     heading, Q7). Second, a still-pending heading goal turns the aircraft back toward where it was
+     going, which is toward the threat it just broke from. Break away is worse: its second press
+     comes 2 s later and must still find CBTM.
+   - The pilot would see: "Break turn left." → "Breaking left." The nose starts left, stops at
+     about 40°, and swings back to the heading he set a minute ago.
+   - Grounded in: the user's mode model (2026-11-15: breaks require CBTM, flight params require
+     FLT/HVR, *"we can only set one parameter/command at a time"*); U3 always-reassert; the plan's
+     Co-moving table, which has no break rows at all. **Whether leaving CBTM truncates a break in
+     progress is the agent's inference**, so it is put as part of Q-P3-1. The heading-goal half
+     needs no DCS fact: a still-pending goal is reasserted by design.
+   - Suggests: a break supersedes any outstanding heading goal and any alignment, the way "latest
+     wins" already supersedes goals (E-P4). Nothing cycles out of CBTM until the break (or both
+     presses of break away) has had time to complete. Architect decides how.
+
+3. **F-P8: The plan names the abort word that no longer exists.** Lens: purpose. Informational,
+   with E-P15 at stake only if the plan text is followed literally.
+   - plan.md (vocabulary row `level_off`, Stage P4 body-layer bullet) says the abort is the
+     `level_off` token, "straight"/"level off", with one token carrying two meanings gated by
+     `align_phase`. On the tip, `level_off`'s pattern is "stop turn". The user's 2026-11-18 answer
+     moves "level off" onto `level_flight` instead, and drops "straight". So the abort is
+     `level_flight`'s two forms, and "stop turn" during an alignment is not an abort. Architect
+     should rewrite those two passages rather than plan from them.
+
+4. **F-P9: Below-floor starts are a real case for this weapon** (lens: the envelope), so the AGL
+   floor's semantics need the user (Q-P3-2), not a planner's default. The project's normal envelope
+   is 50–800 m AGL. A 9K113 shot from a low hover behind a ridge sits at the bottom edge of it,
+   though, and it is a shot a DCS Mi-24 player takes. Whether ED's ALIGN FOR LAUNCH dives at all
+   from a hover is something only the user knows.
+
+Vignette walked (off the happy path). The player is at 120 m AGL, 220 km/h, with "heading 090"
+still turning. He enters the sight; DCS goes to CBTM. "Align for launch." → "Aligning for
+launch." The snapshot takes the goal (120 m, 220 km/h). The nose drops. He sees a ZSU traversing
+toward him: "Break turn left." → "Breaking left." Under the plan as written, `align_phase` is
+still `launch_aligned`. The break's descent takes the aircraft through 40 m AGL mid-turn, the
+floor fires "Leveling off.", and recovery cycles to FLT. The break stops partway round. Recovery
+then holds that heading while the pending "heading 090" sits recorded, waiting for "none", and
+when it arrives, it turns him back toward the ZSU (F-P7). Change one step: he says "altitude 200"
+instead of breaking. The same row records it and does not issue it. If he had said plain "align",
+it would never be flown (F-P6). Each step follows the plan's rules as written.
+
+### Questions for the user
+
+- **Q-P3-1** — After a break from "align for launch" (shot abandoned), should Petrovich then
+  restore the pre-align altitude and speed as in a recovery, or just hold what the break leaves?
+  And does ED's break stop short if the wheel leaves CBTM before the turn is done?
+- **Q-P3-2** — "Align for launch" said below 40 m AGL (a hover shot): does ED's AI dive from there?
+  Should Petrovich refuse ("unable, too low"), allow it with the floor measured as a drop below
+  where it started, or pull out at once?
+- **Q-P3-3** — In mode 1 (Petrovich on the raw axes), should "break turn left/right" and "break
+  away" answer "unable" for now like align, or are they wanted there later as evasion commands?
+- **Q-P3-4** — If you leave the sight view while aligned, and DCS drops out of CBTM, should
+  Petrovich treat the alignment as ended, or re-align?
+- **Q-P3-5** — From the operator seat parked, can anything other than a 9K113 launch make a
+  payload count drop (anything else the operator can release or jettison)?
+- **Q-P3-6** — "Altitude 200" (or a heading or speed) said during "align for launch": abort and
+  fly to 200 rather than to the pre-align altitude? (Recommended: yes. It ends the alignment
+  either way, F-P6.)
+
+## Plan check — 2026-11-18
+
+**Verdict:** CONCERNS — two missing items, both fixable before build without a new user decision:
+a second "align for launch" during recovery re-snapshots the half-restored state instead of
+keeping the first (an open assumption the goal check and the user both settled, that the plan's
+mechanism does not implement), and mode-1 "break away" is absent, which a standing direction
+landed after the plan (`1659a54d`) now requires. Everything else traces cleanly, including two
+points worth checking that turned out sound (recovery's `pending_order`, and the mode-1 break
+bank angle).
+
+Scope: same batch as the goal check above, `feature/bl16-p3p4-cbtm`, now at tip `1659a54d` (merged
+in during this check — `959af986` Architect, then `1659a54d` "mode 1 carries mode 2's flight
+command set"). Checked against `plans/flight-control/plan.md`, "## Revised 2026-11-18 — Stages
+P3+P4 ready to build" (~L3374 onward), and `explore-notes.md`'s three 2026-11-18 rounds plus the
+new "Mode 1 carries mode 2's command set" section at the file's end.
+
+| expectation | stage | status |
+|---|---|---|
+| E-P12 (align points nose, holds) | Mode-2 action bodies, Co-moving table `align_phase`/`cbtm_align` row | met |
+| E-P13 (align for launch, dive to boresight) | same + F-P9 floor/ceiling | met |
+| E-P14 (post-launch recovery, heading held, climb+step) | `decide_ai_pilot_wheel` step 2, Co-moving table | met |
+| E-P15 (level flight/off = abort) | `level_flight`'s two forms, step 3 | met |
+| E-P16 (never crosses limits unannounced) | F-P9: AGL-relative drop, not absolute | met, narrowed → Q-P3-2 (user changed "40 m AGL floor" to "40 m drop below the align-for-launch starting height") |
+| E-P17 (break turn, full 90°, not cut short) | `decide_ai_pilot_wheel` step 1 (drops heading goal) + Q-P3-4 (mode re-read every frame) | met |
+| E-P18 (break away, two lefts 2 s apart) | `cbtm_break_away` Lua tick | met |
+| E-P19 (flight command always flown, never swallowed) | F-P6 fix: `request_goal`'s shared precondition | met |
+| E-P20 (mode-1 "unable" for align/breaks) | align/align-for-launch "unable" in mode 1; breaks are real mode-1 behaviour | met, narrowed → Q-P3-3 (breaks were the open half of E-P20's own wording, now answered as a real tight turn, not "unable") |
+| E-P21 (readbacks editable in flight.lua) | `cbtm_align`/etc. rules, "Breaking left."/"Breaking right." note | met |
+| E-P22 (new, 1659a54d: mode 1 carries mode 2's command set except 9K113 align) | — | **missing** — mode-1 "break away" is not built. The plan's own text (L3627-3630) keeps it mode-2-only and raises **U11**, recommending *against* building it this batch "because deferring avoids guessing at a form nobody asked for yet." `1659a54d` (committed after the Architect pass, same day) answers exactly that: *"all other flight commands from Mode 2 must also be available in Mode 1 ... except aligning to 9K113."* Break turn already has a mode-1 body (`axes_break_turn`); break away does not. U11's recommendation is now overruled by a standing rule, not an open question — the fix is a mode-1 `break_turn` composed twice with the gap, or a dedicated mechanism, Architect's call, but it has to exist. Everything else mode-2-only in this batch (`cbtm_align`, `cbtm_align_for_launch`) is correctly excluded — the direction's own exception. |
+| F-P6 (goal read back, never flown) | `request_goal` precondition, Co-moving table | met — resolved |
+| F-P7 (always-reassert cuts a break short) | step 1 (drop heading goal outright) + Q-P3-4 (re-read mode every frame, "rare self-correcting delay" accepted for break-away's second press) | met — resolved |
+| F-P8 (abort word that no longer exists) | `level_flight` gains "level off" | met — resolved |
+| F-P9 (below-floor starts) | AGL-relative drop (Q-P3-2) | met — resolved |
+
+### Open assumption not settled in the mechanism
+
+- **A second "align for launch" during recovery.** The goal check named this explicitly: *"serves
+  the why: re-enter `launch_aligned` and keep the first pre-align snapshot ... would not:
+  re-snapshotting a recovery's half-restored altitude and speed."* The user's follow-up answered
+  it directly — *"command align for launch" — a fresh align for launch, not ignored* — confirming
+  the behaviour is wanted, not deferred. But `cbtm_align_for_launch()`'s body (L3588-3591) and the
+  Co-moving table's own `cbtm_align_for_launch` row (L3647) both capture `pre_align_snapshot` from
+  "the current goal/held values" unconditionally — no branch for `align_phase == "recovering"`.
+  Said mid-recovery, this re-snapshots whatever altitude/speed the climb-back has reached *so
+  far*, not the original pre-align values — the exact "would not" case the goal check warned
+  against. This is a **Finding**, not a question: the user already answered what should happen;
+  the plan's mechanism just doesn't implement it. Fix: `cbtm_align_for_launch`'s snapshot capture
+  needs a branch — if `align_phase == "recovering"`, keep the existing `pre_align_snapshot`
+  (whose altitude/speed targets are already the pre-align values) rather than re-capturing from
+  the in-progress recovery goal; only capture fresh when `align_phase == "none"`.
+
+### Findings
+
+1. **A second "align for launch" mid-recovery loses the original snapshot.** Lens: the non-obvious
+   case. See above — missing, not deferred, because the user already settled the intended
+   behaviour and the mechanism doesn't carry it.
+2. **Mode-1 "break away" is absent, and the plan's own U11 recommends not building it — now
+   overruled by `1659a54d`.** Lens: purpose/standing rule. See E-P22 above. The direction landed
+   the same day as the Architect pass but after it, so this is not a flaw in the Architect's
+   reasoning at the time — U11's "recommend: not in this batch" was reasonable against what was
+   known when it was written. It is wrong now, against the standing rule, and needs a fix before
+   Implementer builds from this section as written.
+
+### Two suspicions checked — both resolved, no finding
+
+- **(a) `pending_order` seeds `("altitude", "speed")`, excluding heading, "per Q7."** The terse
+  2026-11-18 answer "altitude, heading, speed" (explore-notes L826) reads, in isolation, like
+  heading belongs in the recovery queue — which would contradict Q7 ("holds current," no
+  swing-back, already settled in the original goal check's own open-assumption text). But the
+  same user, same session, immediately clarifies (explore-notes L853-857, quoted in full as
+  "Decision 26" in the plan): *"altitude recovery starts first, but heading change can happen
+  while climbing."* That sentence names a *fresh voice heading command* not being serialised
+  behind the climb — not a restored heading step. The plan's F-P6 mechanism (a fresh command for
+  one parameter doesn't block the other's recovery) delivers exactly that reading. **Agree with
+  the plan**: the clarification is the later, fuller statement from the same answer and
+  supersedes the terse one: heading correctly stays out of `pending_order`.
+- **(b) `BREAK_TURN_BANK_DEG` defaults to 30° = `MAX_BANK_DEG` — is that "tight"?** The plan states
+  its own comparison: ordinary "turn left 30" flies at `MAX_TURN_BANK_DEG` (20°); 30° is the
+  envelope's hard ceiling, used here instead. Turn radius scales with `1/tan(bank)`, so 30° vs 20°
+  is roughly a 35-40% tighter radius at the same airspeed — a real, perceptible difference, and it
+  is literally the steepest bank the aircraft is ever allowed to fly, so "tight" is the correct
+  word for what the envelope can give. The plan already flags it as an architect default "for
+  retune after the first flight," which is the right posture for a number the user didn't
+  specify beyond "tight" — not something to escalate further.
+
+### Questions for the user
+
+None beyond the plan's own Q-P3-1..6, already open above (unchanged by this check). The two
+Findings are mechanism fixes, not decisions — Architect/Implementer can close both without
+further input.

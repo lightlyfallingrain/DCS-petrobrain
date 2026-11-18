@@ -80,6 +80,8 @@ class TestSendAiPilotGoal:
                 "speed_target_kmh": None,
                 "hvrt_direction": None,
                 "hvrt_step": None,
+                "cbtm_action": None,
+                "cbtm_seq": None,
             }
         finally:
             receiver.close()
@@ -154,6 +156,8 @@ class _RecordingCommandSender(CommandSender):
         speed_target_kmh: object,
         hvrt_direction: object,
         hvrt_step: object = None,
+        cbtm_action: object = None,
+        cbtm_seq: object = None,
     ) -> None:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
@@ -167,6 +171,8 @@ class _RecordingCommandSender(CommandSender):
                 speed_target_kmh,
                 hvrt_direction,
                 hvrt_step,
+                cbtm_action,
+                cbtm_seq,
             )
         )
 
@@ -208,7 +214,9 @@ class TestAiPilotGoalCommandEndpoint:
         status, body = _post(server, "/command/ai_pilot_goal", _VALID_BODY)
         assert status == 200
         assert body == {"ok": True}
-        assert sender.sent == [(1, "heading", 90.0, None, None, None, None, None)]
+        assert sender.sent == [
+            (1, "heading", 90.0, None, None, None, None, None, None, None)
+        ]
 
     def test_the_idle_message_is_accepted(
         self,
@@ -217,7 +225,9 @@ class TestAiPilotGoalCommandEndpoint:
         server, sender = running_server_with_sender
         status, _body = _post(server, "/command/ai_pilot_goal", _IDLE_BODY)
         assert status == 200
-        assert sender.sent == [(0, None, None, None, None, None, None, None)]
+        assert sender.sent == [
+            (0, None, None, None, None, None, None, None, None, None)
+        ]
 
     def test_integer_target_values_are_accepted_and_forwarded_as_floats(
         self,
@@ -227,7 +237,9 @@ class TestAiPilotGoalCommandEndpoint:
         body = {**_VALID_BODY, "heading_target_deg": 90}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
-        assert sender.sent == [(1, "heading", 90.0, None, None, None, None, None)]
+        assert sender.sent == [
+            (1, "heading", 90.0, None, None, None, None, None, None, None)
+        ]
 
     def test_an_hvrt_direction_message_is_accepted(
         self,
@@ -237,7 +249,9 @@ class TestAiPilotGoalCommandEndpoint:
         body = {**_IDLE_BODY, "goal_seq": 2, "hvrt_direction": "left"}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
-        assert sender.sent == [(2, None, None, None, None, None, "left", None)]
+        assert sender.sent == [
+            (2, None, None, None, None, None, "left", None, None, None)
+        ]
 
     def test_an_invalid_param_returns_400(
         self,
@@ -282,7 +296,9 @@ class TestAiPilotGoalCommandEndpoint:
         body = {**_IDLE_BODY, "goal_seq": 3, "hvrt_step": "up"}
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
-        assert sender.sent == [(3, None, None, None, None, None, None, "up")]
+        assert sender.sent == [
+            (3, None, None, None, None, None, None, "up", None, None)
+        ]
 
     def test_an_invalid_hvrt_step_returns_400(
         self,

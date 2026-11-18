@@ -5,8 +5,7 @@ ready to build"). `ParkedFlightState` carries the activation/overlay-
 readback fields Stage P1 reads and writes, the takeover revision's own
 diagnostic mirrors (`raw_arg_852`/`raw_arg_952`/`takeover_stage`/
 `correction_path`, additive -- see `advance_parked_flight_state`), and
-`goal` (Stage P2's own `AiPilotWheelGoal`, below) -- `align_phase`/
-`pre_align_snapshot` stay later stages' own fields (P3/P4). Grepping
+`goal` (Stage P2's own `AiPilotWheelGoal`, below). Grepping
 `ParkedFlightState(` finds exactly the one construction site this
 module's own `advance_parked_flight_state` uses (`replace()` never
 constructs fresh), the same single-construction-site shape
@@ -22,16 +21,26 @@ anything while a takeover correction (Stage P1) is still running. Root
 `CLAUDE.md`, "Behaviour as actions and params": actions take explicit
 params and never decide *when*; `decide_ai_pilot_wheel` is the one "when"
 function, apart from the actions, per the plan's own framing.
-`cbtm_align`/`cbtm_align_for_launch`/`recover_to_level` remain Stage
-P3/P4's own additions, not built here."""
+
+**Stage P3+P4** (`plans/flight-control/plan.md`, "Revised 2026-11-18 --
+Stages P3+P4 ready to build") add CBTM align/align-for-launch/break/
+break-away: `AlignPhase`/`FlightSnapshot` (the typed replacements for
+what used to be stub fields), the four `cbtm_*` action bodies
+(`cbtm_apply_align`/`cbtm_apply_align_for_launch` here; the two breaks
+are a one-shot CBTM-channel send with no state of their own to apply --
+see `CrewConsole.cbtm_break`/`cbtm_break_away`), `payload_count_dropped`
+(launch detection), and `decide_ai_pilot_wheel`'s own three new steps
+(break-wins, the recovery triggers, recovery's end condition) -- see
+that function's own docstring for the exact ordering."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Final, Literal
+from typing import Final, Literal
 
 import tuning
-from aircraft_client import AircraftLayerClient
+from aircraft_client import AircraftLayerClient, AircraftLayerError
 
 #: "Good enough" tolerance for the hold-up/down nudge loop Stage P2's
 #: `set_parked_altitude` goal will use (user, `aircraft-layer/research/
@@ -133,6 +142,58 @@ AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M: Final[float] = tuning.real(
 #: as a JSON number token.
 AI_PILOT_SPEED_MAX_SENTINEL_KMH: Final[float] = 1_000_000.0
 
+#: `plans/flight-control/plan.md`, "Revised 2026-11-18 -- Stages P3+P4
+#: ready to build", "F-P9 / Q-P3-2 -- the AGL floor, answered": the
+#: user's own original 40 m figure, now read as a *drop* below the AGL
+#: recorded at the moment "align for launch" was spoken, not an
+#: absolute floor -- a shot started at 30 m AGL is legal; recovery
+#: fires once the aircraft has sunk this far below *that* starting
+#: height.
+AI_PILOT_RECOVER_AGL_DROP_M: Final[float] = tuning.real(
+    "belief.ai_pilot_wheel.AI_PILOT_RECOVER_AGL_DROP_M",
+    40.0,
+    lo=5.0,
+    hi=200.0,
+    status="agreed-guess",
+)
+
+#: Same plan section, Q5 -- an absolute IAS ceiling (there is no
+#: "starting IAS" to measure a drop against; an overspeed is an
+#: overspeed wherever the dive started), unchanged from the original
+#: plan's own figure.
+AI_PILOT_RECOVER_IAS_CEILING_KMH: Final[float] = tuning.real(
+    "belief.ai_pilot_wheel.AI_PILOT_RECOVER_IAS_CEILING_KMH",
+    280.0,
+    lo=100.0,
+    hi=400.0,
+    status="agreed-guess",
+)
+
+#: Stage P3+P4's own `align_phase` states (plan, "`AlignPhase` and
+#: `FlightSnapshot` -- the typed replacements for the stub fields").
+AlignPhase = Literal["none", "aligning", "launch_aligned", "recovering"]
+
+#: The CBTM one-shot wire channel's own closed vocabulary (plan, "The
+#: CBTM one-shot wire channel") -- the same five values `Export.lua`'s
+#: `cbtm_action` field and `CommandSender.send_ai_pilot_goal` accept.
+CbtmAction = Literal[
+    "align", "align_for_launch", "break_left", "break_right", "break_away"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class FlightSnapshot:
+    """The pre-align snapshot "align for launch" captures and recovery
+    restores from (plan, "`AlignPhase` and `FlightSnapshot`"). `agl_m`
+    is the AGL reading at the moment of capture, for the Q-P3-2
+    relative floor -- not a goal field, never sent to `Export.lua`."""
+
+    heading_deg: float
+    altitude_m: float
+    altitude_ref: AiPilotAltitudeRef
+    speed_kmh: float
+    agl_m: float
+
 
 @dataclass(frozen=True, slots=True)
 class AiPilotWheelGoal:
@@ -227,9 +288,24 @@ class ParkedFlightState:
     seq` on the wire) -- same posture as `takeover_stage`/`correction_
     path` above: `body.py`'s own call site reads them to derive `decide_
     ai_pilot_wheel`'s `settled_param`/`hvrt_released_timeout` arguments,
-    never decided from here. `align_phase`/`pre_align_snapshot` stay
-    later-stage fields (Stage P3/P4), `None`/`"none"` until those stages
-    give them a writer."""
+    never decided from here.
+
+    Stage P3+P4's own fields (plan, "Revised 2026-11-18 -- Stages P3+P4
+    ready to build", "`AlignPhase` and `FlightSnapshot`"): `align_phase`/
+    `pre_align_snapshot` are the typed replacements for what used to be
+    described here as "later-stage" stub fields. `lua_cbtm_status`/
+    `lua_cbtm_seq` are read-only mirrors of `Export.lua`'s own CBTM
+    report (`apw_cbtm_status`/`apw_cbtm_seq`), same posture as `lua_
+    goal_progress`/`lua_goal_seq`. `cbtm_action_sent` is **not** a Lua
+    mirror -- it is this side's own record of which `CbtmAction` the
+    last `_apply_ai_pilot_wheel_goal` send carried (`body.py`), carried
+    through unchanged by this function exactly like `goal` is:
+    `decide_ai_pilot_wheel`'s F-P7 break-wins check reads it to tell a
+    break apart from an align/align-for-launch without a second status
+    round-trip. `payload_station_counts_last_seen` mirrors `GET
+    /payload/latest`'s `stations` list as `{index: count}`, `None` only
+    before the first payload line has arrived this session, never on an
+    empty (no-ATGM) loadout."""
 
     parked_active: bool = False
     ai_mode: str | None = None
@@ -249,9 +325,12 @@ class ParkedFlightState:
     goal: AiPilotWheelGoal | None = None
     lua_goal_progress: str | None = None
     lua_goal_seq: int | None = None
-    # P3/P4's own fields -- see the module docstring's Co-moving Fields note.
-    align_phase: str = "none"
-    pre_align_snapshot: Any | None = None
+    align_phase: AlignPhase = "none"
+    pre_align_snapshot: FlightSnapshot | None = None
+    lua_cbtm_status: str | None = None
+    lua_cbtm_seq: int | None = None
+    cbtm_action_sent: CbtmAction | None = None
+    payload_station_counts_last_seen: Mapping[int, int] | None = None
 
 
 def _parse_float(value: object) -> float | None:
@@ -301,6 +380,38 @@ def seat_change(
     return current
 
 
+def _parse_payload_station_counts(
+    sample: object,
+) -> Mapping[int, int] | None:
+    """`GET /payload/latest`'s own `{"stations": [{"index", "count", ...},
+    ...]}` shape (`aircraft-layer/src/schema/payload.py`'s `PayloadSample.
+    to_api_dict`) flattened to `{index: count}` -- the shape `payload_
+    count_dropped` below compares. `None` for a missing/malformed sample
+    (no payload line has arrived yet, or an older aircraft-layer sends a
+    shape this cannot read) -- degrades gracefully rather than raising,
+    same posture `_parse_float` takes for a single field. A malformed
+    *entry* inside an otherwise-valid list is skipped, not fatal to the
+    rest -- the same "degrade rather than error" posture `schema.payload`
+    itself documents for `LoGetPayloadInfo()`'s own uncertainty."""
+    if not isinstance(sample, dict):
+        return None
+    stations = sample.get("stations")
+    if not isinstance(stations, list):
+        return None
+    counts: dict[int, int] = {}
+    for entry in stations:
+        if not isinstance(entry, dict):
+            continue
+        index = entry.get("index")
+        count = entry.get("count")
+        if isinstance(index, bool) or not isinstance(index, (int, float)):
+            continue
+        if isinstance(count, bool) or not isinstance(count, (int, float)):
+            continue
+        counts[int(index)] = int(count)
+    return counts
+
+
 def advance_parked_flight_state(
     state: ParkedFlightState, client: AircraftLayerClient
 ) -> ParkedFlightState:
@@ -310,10 +421,30 @@ def advance_parked_flight_state(
     readback` already uses. A `None` sample (the feed has not sent a line
     yet this session) leaves `state` unchanged, same "absence is not a
     decided value" posture every other `*_observed` field in this layer
-    takes."""
+    takes.
+
+    Stage P3+P4's own addition: also mirrors `GET /payload/latest`
+    (plan, "Launch detection -- implemented, reusing only the payload
+    feed") -- a *second* aircraft-layer read, in the same poll as the
+    ai-pilot-wheel one, since both are "mirrored each poll" read-only
+    fields on this one state. A missing/malformed payload sample leaves
+    `payload_station_counts_last_seen` at whatever it already was
+    (same "absence is not a decided value" posture as the top-level
+    `sample is None` check above), never reset to `None` on a transient
+    read failure. **A failed payload read does not abort this whole
+    function** -- caught separately from the ai-pilot-wheel read above,
+    so a transient failure on this second, independent call never loses
+    an otherwise-successful ai-pilot-wheel refresh for the poll (the
+    same reasoning `body.py`'s own call site already applies one level
+    up, to the ai-pilot-wheel read itself, extended to this one)."""
     sample = client.get_ai_pilot_wheel_latest()
     if sample is None:
         return state
+    try:
+        payload_sample = client.get_payload_latest()
+    except AircraftLayerError:
+        payload_sample = None
+    new_counts = _parse_payload_station_counts(payload_sample)
     return ParkedFlightState(
         parked_active=bool(sample.get("apw_parked_active", False)),
         ai_mode=sample.get("apw_mode_text"),
@@ -336,6 +467,14 @@ def advance_parked_flight_state(
         lua_goal_seq=_as_optional_int(sample.get("apw_goal_seq")),
         align_phase=state.align_phase,
         pre_align_snapshot=state.pre_align_snapshot,
+        lua_cbtm_status=sample.get("apw_cbtm_status"),
+        lua_cbtm_seq=_as_optional_int(sample.get("apw_cbtm_seq")),
+        cbtm_action_sent=state.cbtm_action_sent,
+        payload_station_counts_last_seen=(
+            new_counts
+            if new_counts is not None
+            else state.payload_station_counts_last_seen
+        ),
     )
 
 
@@ -661,12 +800,138 @@ def goal_param_for_wire(goal: AiPilotWheelGoal) -> AiPilotWheelParam | None:
     return goal.active_param
 
 
+def payload_count_dropped(
+    previous: Mapping[int, int] | None, current: Mapping[int, int]
+) -> bool:
+    """Stage P3+P4's own launch-detection helper (plan, "Launch
+    detection -- implemented, reusing only the payload feed"): any
+    station's count lower than it was last poll. `previous is None`
+    (the first read this activation -- `ParkedFlightState.payload_
+    station_counts_last_seen` was `None`) is never a drop, since there
+    is nothing to compare against. A station present in `current` but
+    absent from `previous` is likewise never a drop -- there is nothing
+    to compare that station against either."""
+    if previous is None:
+        return False
+    for station, count in current.items():
+        previous_count = previous.get(station)
+        if previous_count is not None and count < previous_count:
+            return True
+    return False
+
+
+def capture_flight_snapshot(
+    state: ParkedFlightState, goal: AiPilotWheelGoal, agl_m: float | None
+) -> FlightSnapshot | None:
+    """ "Align for launch"'s own pre-align snapshot (plan, "`pre_align_
+    snapshot`... captured from the current goal if one is outstanding,
+    else the current held values -- 'a goal already in flight is what's
+    restored'"). `None` only if some parameter has neither a goal target
+    nor a held reading yet (never happened this activation), or `agl_m`
+    is not yet known -- the caller's job to decide what to do then."""
+    heading = (
+        goal.heading_target_deg
+        if goal.heading_target_deg is not None
+        else state.held_heading
+    )
+    altitude = (
+        goal.altitude_target_m
+        if goal.altitude_target_m is not None
+        else state.held_altitude
+    )
+    altitude_ref = (
+        goal.altitude_target_ref
+        if goal.altitude_target_ref is not None
+        else altitude_ref_from_letter(state.held_altitude_ref)
+    )
+    speed = (
+        goal.speed_target_kmh if goal.speed_target_kmh is not None else state.held_speed
+    )
+    if (
+        heading is None
+        or altitude is None
+        or altitude_ref is None
+        or speed is None
+        or agl_m is None
+    ):
+        return None
+    return FlightSnapshot(
+        heading_deg=heading,
+        altitude_m=altitude,
+        altitude_ref=altitude_ref,
+        speed_kmh=speed,
+        agl_m=agl_m,
+    )
+
+
+def cbtm_apply_align(state: ParkedFlightState) -> ParkedFlightState:
+    """Action: voice "align" (plan, "Mode-2 action bodies"). Always
+    (re)starts a plain alignment -- there is no recovery path for
+    `"aligning"` at all (Q1's "hold what break leaves" reasoning
+    extended to a plain align too), so nothing is captured."""
+    return replace(state, align_phase="aligning", pre_align_snapshot=None)
+
+
+def cbtm_apply_align_for_launch(
+    state: ParkedFlightState, goal: AiPilotWheelGoal, agl_m: float | None
+) -> ParkedFlightState:
+    """Action: voice "align for launch" (plan, "Mode-2 action bodies" +
+    "Fix 1 (plan check) -- a second 'align for launch' keeps the first
+    snapshot"). Said again while already `"launch_aligned"`/
+    `"recovering"` with a snapshot already captured, keeps that
+    snapshot unconditionally (never re-captures from a half-restored
+    recovery or a dive in progress) and simply re-enters
+    `"launch_aligned"`; otherwise captures fresh (only reachable from
+    `"none"`/`"aligning"`, or from `"launch_aligned"`/`"recovering"`
+    with no snapshot yet, which should not happen in practice but is
+    handled the same as a fresh capture rather than asserted away)."""
+    if state.align_phase in ("launch_aligned", "recovering") and (
+        state.pre_align_snapshot is not None
+    ):
+        return replace(state, align_phase="launch_aligned")
+    snapshot = capture_flight_snapshot(state, goal, agl_m)
+    return replace(state, align_phase="launch_aligned", pre_align_snapshot=snapshot)
+
+
+def seed_recovery_goal(
+    goal: AiPilotWheelGoal, snapshot: FlightSnapshot, now_sim: float
+) -> AiPilotWheelGoal:
+    """Decision 26's own priority order (plan, "Mid-task amendment --
+    recovery order is command (press) order, not settle order"):
+    altitude becomes `active_param` immediately, speed is queued right
+    behind it -- seeded directly, never through `request_goal`'s
+    generic FIFO append, which could not guarantee this exact order if
+    some other parameter already held the active slot or a queue
+    position. Heading is deliberately excluded from this queue (Fix 2:
+    "keep aligned heading" -- recovery restores altitude and speed
+    only); if heading happened to be `active_param` when recovery
+    starts, it is re-queued (not dropped) ahead of speed so a later
+    voice heading command still has something to preempt rather than
+    an orphaned target with no queue slot."""
+    pending = [p for p in goal.pending_order if p not in ("altitude", "speed")]
+    if goal.active_param is not None and goal.active_param not in ("altitude", "speed"):
+        pending.insert(0, goal.active_param)
+    return replace(
+        goal,
+        altitude_target_m=snapshot.altitude_m,
+        altitude_target_ref=snapshot.altitude_ref,
+        speed_target_kmh=snapshot.speed_kmh,
+        active_param="altitude",
+        active_since_sim=now_sim,
+        pending_order=tuple(pending) + ("speed",),
+        goal_seq=goal.goal_seq + 1,
+    )
+
+
 def decide_ai_pilot_wheel(
     state: ParkedFlightState,
     now_sim: float,
     *,
     settled_param: AiPilotWheelParam | None = None,
     hvrt_released_timeout: bool = False,
+    payload_count_dropped: bool = False,
+    agl_m: float | None = None,
+    ias_kmh: float | None = None,
 ) -> ParkedFlightState:
     """The one "when" apart from the actions above (root `CLAUDE.md`,
     "Behaviour as actions and params"): promotes the front of
@@ -686,8 +951,8 @@ def decide_ai_pilot_wheel(
     immediate readback (the caller's job); it is simply not acted on
     until the takeover resolves.
 
-    A no-op (returns `state` unchanged) when there is no goal at all, or
-    the goal has nothing outstanding and nothing to settle.
+    A no-op (returns `state` unchanged) when there is no goal, no
+    outstanding align/recovery, and nothing to settle.
 
     **Never promotes, demotes, settles or rotates anything while an HVRT
     translate direction is outstanding either** (review fix, main loop's
@@ -698,19 +963,91 @@ def decide_ai_pilot_wheel(
     how a stuck translate's own safety release unpauses this channel
     again on the very same call -- once `clear_hvrt_direction` has run,
     the pause check below sees `hvrt_direction is None` and the normal
-    rotation resumes immediately, with no extra poll of lag."""
-    goal = state.goal
-    if goal is None:
+    rotation resumes immediately, with no extra poll of lag.
+
+    **Stage P3+P4's own additions** (plan, "`decide_ai_pilot_wheel` --
+    the align/break/recovery 'when,' added to the existing function"),
+    run before the pre-existing rotation logic below (a break or a
+    recovery trip pre-empts whatever the rotation would otherwise do):
+
+    1. **F-P7 -- a break always wins.** `state.cbtm_action_sent` names a
+       break (`"break_left"`/`"break_right"`/`"break_away"`): the
+       `heading` target/queue entry is dropped from `goal` outright, and
+       if `align_phase != "none"` it is forced to `"none"` with `pre_
+       align_snapshot` cleared (Q1 -- no restore after a break). This
+       runs on every poll `cbtm_action_sent` names a break, not only the
+       one it was first sent on -- harmless once there is nothing left
+       to drop or clear, and the simplest reading of the plan's own
+       "reported running or freshly sent" condition that does not need
+       a second Lua status round-trip to resolve (flagged in the
+       implementation notes).
+    2. **E-P16 -- the three recovery triggers, while `"launch_aligned"`**
+       (payload count drop, the Q-P3-2 AGL-relative floor, the absolute
+       IAS ceiling): any one true enters `"recovering"` and seeds the
+       altitude-then-speed recovery queue (`seed_recovery_goal`, Decision
+       26's own priority order).
+    3. **Recovery's own end condition** -- once both recovery
+       parameters have cleared (no target, not active, nothing pending)
+       -- `align_phase` returns to `"none"` and `pre_align_snapshot` is
+       dropped. Checked after the pre-existing settle/promote logic
+       below has run this same call, so a recovery that finishes this
+       poll ends the same poll, not a poll later.
+    4. **The pre-existing slice-timer rotation is suppressed while
+       `"recovering"`** -- Decision 26: "promotes strictly on `settled_
+       param`, never the slice timer." Everything else (ordinary voice
+       goals, HVRT, the takeover pause) is unaffected."""
+    goal = state.goal if state.goal is not None else AiPilotWheelGoal()
+    align_phase = state.align_phase
+    pre_align_snapshot = state.pre_align_snapshot
+
+    if state.goal is None and align_phase == "none":
         return state
 
     if hvrt_released_timeout and goal.hvrt_direction is not None:
         goal = clear_hvrt_direction(goal)
 
+    if state.cbtm_action_sent in ("break_left", "break_right", "break_away"):
+        if goal.active_param == "heading":
+            goal = replace(
+                goal, heading_target_deg=None, active_param=None, active_since_sim=None
+            )
+        elif "heading" in goal.pending_order:
+            goal = replace(
+                goal,
+                heading_target_deg=None,
+                pending_order=tuple(p for p in goal.pending_order if p != "heading"),
+            )
+        if align_phase != "none":
+            align_phase = "none"
+            pre_align_snapshot = None
+
     if state.takeover_stage is not None:
-        return replace(state, goal=goal)
+        return replace(
+            state,
+            goal=goal,
+            align_phase=align_phase,
+            pre_align_snapshot=pre_align_snapshot,
+        )
 
     if goal.hvrt_direction is not None:
-        return replace(state, goal=goal)
+        return replace(
+            state,
+            goal=goal,
+            align_phase=align_phase,
+            pre_align_snapshot=pre_align_snapshot,
+        )
+
+    if align_phase == "launch_aligned" and pre_align_snapshot is not None:
+        floor_crossed = (
+            agl_m is not None
+            and pre_align_snapshot.agl_m - agl_m >= AI_PILOT_RECOVER_AGL_DROP_M
+        )
+        ceiling_crossed = (
+            ias_kmh is not None and ias_kmh >= AI_PILOT_RECOVER_IAS_CEILING_KMH
+        )
+        if payload_count_dropped or floor_crossed or ceiling_crossed:
+            align_phase = "recovering"
+            goal = seed_recovery_goal(goal, pre_align_snapshot, now_sim)
 
     if settled_param is not None and goal.active_param == settled_param:
         if settled_param == "heading":
@@ -723,7 +1060,15 @@ def decide_ai_pilot_wheel(
 
     if goal.active_param is None:
         if not goal.pending_order:
-            return replace(state, goal=goal)
+            if align_phase == "recovering":
+                align_phase = "none"
+                pre_align_snapshot = None
+            return replace(
+                state,
+                goal=goal,
+                align_phase=align_phase,
+                pre_align_snapshot=pre_align_snapshot,
+            )
         front, *rest = goal.pending_order
         goal = replace(
             goal,
@@ -732,9 +1077,18 @@ def decide_ai_pilot_wheel(
             pending_order=tuple(rest),
             goal_seq=goal.goal_seq + 1,
         )
-        return replace(state, goal=goal)
+        return replace(
+            state,
+            goal=goal,
+            align_phase=align_phase,
+            pre_align_snapshot=pre_align_snapshot,
+        )
 
-    if goal.pending_order and goal.active_since_sim is not None:
+    if (
+        align_phase != "recovering"
+        and goal.pending_order
+        and goal.active_since_sim is not None
+    ):
         elapsed = now_sim - goal.active_since_sim
         if elapsed >= AI_PILOT_GOAL_SLICE_S:
             demoted = goal.active_param
@@ -746,6 +1100,13 @@ def decide_ai_pilot_wheel(
                 pending_order=tuple(rest) + (demoted,),
                 goal_seq=goal.goal_seq + 1,
             )
-            return replace(state, goal=goal)
+            return replace(
+                state,
+                goal=goal,
+                align_phase=align_phase,
+                pre_align_snapshot=pre_align_snapshot,
+            )
 
-    return replace(state, goal=goal)
+    return replace(
+        state, goal=goal, align_phase=align_phase, pre_align_snapshot=pre_align_snapshot
+    )

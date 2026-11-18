@@ -731,6 +731,13 @@ class FakeConsoleAircraftClient:
     def get_flight_control_latest(self) -> dict[str, Any] | None:
         return self.flight_control_state
 
+    def get_payload_latest(self) -> dict[str, Any] | None:
+        # `plans/flight-control/plan.md`, BL-16 mode 2, P3+P4 -- `None`
+        # (the default) means no `GET /payload/latest` sample has
+        # arrived yet, same "not an error" posture as `ai_pilot_wheel_
+        # state`/`flight_control_state` above.
+        return None
+
     def write_flight_control(
         self,
         seq: int,

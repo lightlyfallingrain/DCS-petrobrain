@@ -248,8 +248,14 @@ the body/brain process, on either Windows or Mac (compute topology note in
   "altitude_target_m": number|null, "altitude_target_ref":
   "radar"|"barometric"|null, "speed_target_kmh": number|null,
   "hvrt_direction": "left"|"right"|"forward"|"back"|null, "hvrt_step":
-  "up"|"down"|null}`; forwards to `collector.command_sender.
-  CommandSender.send_ai_pilot_goal`, which fires the JSON command at
+  "up"|"down"|null, "cbtm_action": "align"|"align_for_launch"|
+  "break_left"|"break_right"|"break_away"|null, "cbtm_seq": int|null}`
+  (`cbtm_action`/`cbtm_seq` are Stage P3+P4's own sibling one-shot
+  fields, "Revised 2026-11-18" -- same closed-vocabulary/
+  act-once-per-distinct-seq contract as `hvrt_step`, see `CommandSender.
+  send_ai_pilot_goal`'s own docstring); forwards to `collector.
+  command_sender.CommandSender.send_ai_pilot_goal`, which fires the
+  JSON command at
   `Export.lua`'s inbound UDP listener (the same listener
   `/command/cockpit_switch`/`/command/sight_target` already target), and
   responds `200 {"ok": true}` on the same "attempted the call" contract
@@ -473,6 +479,18 @@ _AI_PILOT_GOAL_VALID_HVRT_DIRECTIONS: tuple[str, ...] = (
 #: trigger (Stage P2b's own task list, not named in the plan's "wire
 #: shape" section -- see `CommandSender.send_ai_pilot_goal`'s docstring).
 _AI_PILOT_GOAL_VALID_HVRT_STEPS: tuple[str, ...] = ("up", "down")
+
+#: `cbtm_action`'s own closed vocabulary -- Stage P3+P4's one-shot
+#: align/break channel (`plans/flight-control/plan.md`, "Revised
+#: 2026-11-18 -- Stages P3+P4 ready to build", "The CBTM one-shot wire
+#: channel"), same sibling-field shape as `hvrt_step` above.
+_AI_PILOT_GOAL_VALID_CBTM_ACTIONS: tuple[str, ...] = (
+    "align",
+    "align_for_launch",
+    "break_left",
+    "break_right",
+    "break_away",
+)
 
 #: `/command/flight_control`'s own bounds (`plans/flight-control/plan.md`,
 #: "Revised 2026-11-18", "Wire", BL-16 mode 1, Stage M1) -- shape
@@ -1422,6 +1440,46 @@ def _make_handler(
                 )
                 return
 
+            cbtm_action = data.get("cbtm_action")
+            if (
+                cbtm_action is not None
+                and cbtm_action not in _AI_PILOT_GOAL_VALID_CBTM_ACTIONS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'cbtm_action' must be one of "
+                            f"{_AI_PILOT_GOAL_VALID_CBTM_ACTIONS} or null, got "
+                            f"{cbtm_action!r}"
+                        )
+                    },
+                )
+                return
+
+            cbtm_seq_raw = data.get("cbtm_seq")
+            cbtm_seq: int | None
+            if cbtm_seq_raw is None:
+                cbtm_seq = None
+            elif (
+                isinstance(cbtm_seq_raw, bool)
+                or not isinstance(cbtm_seq_raw, int)
+                or not (0 <= cbtm_seq_raw <= _AI_PILOT_GOAL_SEQ_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'cbtm_seq' must be a whole number in "
+                            f"[0, {_AI_PILOT_GOAL_SEQ_MAX}] or null, got "
+                            f"{cbtm_seq_raw!r}"
+                        )
+                    },
+                )
+                return
+            else:
+                cbtm_seq = cbtm_seq_raw
+
             try:
                 command_sender.send_ai_pilot_goal(
                     goal_seq_raw,
@@ -1432,6 +1490,8 @@ def _make_handler(
                     speed_target_kmh,
                     hvrt_direction,
                     hvrt_step,
+                    cbtm_action,
+                    cbtm_seq,
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})

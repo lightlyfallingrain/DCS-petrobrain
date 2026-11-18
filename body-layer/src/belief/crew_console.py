@@ -114,6 +114,7 @@ from belief.ai_pilot_wheel import (
     AiPilotAltitudeRef,
     AiPilotGoalRequest,
     AiPilotHvrtDirection,
+    CbtmAction,
     ParkedFlightState,
     altitude_ref_from_letter,
     nearest_speed_step,
@@ -1669,6 +1670,17 @@ class CrewConsole:
     #: section -- see that client method's docstring). Reset to `None` at
     #: the top of every `handle_command` dispatch, same convention.
     ai_pilot_hvrt_step_transition: Literal["up", "down"] | None = None
+    #: Stage P3+P4's own one-shot signal (`plans/flight-control/plan.md`,
+    #: "Revised 2026-11-18 -- Stages P3+P4 ready to build", "The CBTM
+    #: one-shot wire channel") -- which `CbtmAction` to send to
+    #: `Export.lua`'s CBTM tick next. Same one-shot-signal/reset
+    #: convention as `ai_pilot_hvrt_step_transition` above: `body.py`'s
+    #: poll loop is where the actual `cbtm_seq` bump and wire send live,
+    #: and `align_phase`/`pre_align_snapshot`'s own mutation (for
+    #: `"align"`/`"align_for_launch"`) happens there too, via `belief.
+    #: ai_pilot_wheel.cbtm_apply_align`/`cbtm_apply_align_for_launch` --
+    #: this field only ever carries the *intent*, never decides state.
+    ai_pilot_cbtm_transition: CbtmAction | None = None
     #: BL-16 mode 1 Stage M1 (`plans/flight-control/plan.md`, "Revised
     #: 2026-11-18") -- `take_controls`/`release_controls`'s own one-shot
     #: signal to `body.py`'s poll loop (`_apply_flight_control`), the
@@ -3224,6 +3236,7 @@ class CrewConsole:
         self.ai_pilot_level_flight_transition = False
         self.ai_pilot_hvrt_transition = None
         self.ai_pilot_hvrt_step_transition = None
+        self.ai_pilot_cbtm_transition = None
         self.flight_control_transition = None
         self.flight_control_goal_transition = None
         self._pending_mentions = None
@@ -4978,15 +4991,30 @@ class CrewConsole:
         promoted from here) -- by the time dispatch reaches this far, at
         least one of the three is already known. Asserted, not
         re-checked, for the same reason `increment_ai_heading` asserts
-        `held_heading is not None`."""
+        `held_heading is not None`.
+
+        **Stage P3+P4's own second form, "level off" (F-P8, plan's
+        "Follow-up on the goal check's open assumptions"):** `config/
+        rules/flight.lua`'s `level_flight` rule now takes either wording
+        and calls this same method -- there is no second action, this
+        is the one "spoken abort" `decide_ai_pilot_wheel`'s own step 2/3
+        comment refers to. `body.py`'s own call site is what actually
+        performs the abort (entering `"recovering"` and seeding the
+        recovery queue when `align_phase == "launch_aligned"`, or simply
+        letting `align_phase` fall back to `"none"` when it was
+        `"aligning"`, per Q1's "nothing to recover from" reasoning
+        extended to this case); this method only decides which readback
+        the rule should speak (Q0/Co-moving table: *"leveling off"*
+        spoken only in the recovering case, "level flight" otherwise)."""
         state = self.parked_flight_state
         assert (
             state.held_heading is not None
             or state.held_altitude is not None
             or state.held_speed is not None
         )
+        leveling_off = state.align_phase == "launch_aligned"
         self.ai_pilot_level_flight_transition = True
-        return {"ok": True, "reason": None}
+        return {"ok": True, "reason": None, "leveling_off": leveling_off}
 
     def set_heading(self, deg: int) -> dict[str, object]:
         """`[[BL-17]]` Stage 4's `flight.set_heading` action, extracted
@@ -5186,13 +5214,12 @@ class CrewConsole:
 
     def level_off(self) -> dict[str, object]:
         """`[[BL-17]]` Stage 4's `flight.level_off` action, extracted
-        from the pre-rules `_handle_level_off` (deleted) -- "level off"
-        (the "straight" synonym was dropped by the user, 2026-11-17), stops a turn and holds the *current* heading
-        (plan vocabulary table). F-P1's own second meaning for this same
-        command (a spoken abort, while an alignment is in progress) is
-        Stage P4's own addition, not built here -- `align_phase` never
-        leaves `"none"` in this stage, so this action's "stop turn"
-        meaning is the only one reachable yet.
+        from the pre-rules `_handle_level_off` (deleted) -- "stop turn",
+        stops a turn and holds the *current* heading (plan vocabulary
+        table). **F-P8, settled**: this is `"stop turn"`'s only meaning,
+        in every `align_phase` -- the spoken abort moved onto `level_
+        flight`'s own second wording ("level off") instead, never onto
+        this action; this method never reads or writes `align_phase`.
 
         **The old `current is None -> NOT_READY` branch is removed**
         (D16/D18): the `"flight_control_heading"` category gate owns it."""
@@ -5202,6 +5229,48 @@ class CrewConsole:
             param="heading", heading_deg=current
         )
         return {"ok": True, "heading_deg": round(current) % 360}
+
+    def cbtm_align(self) -> dict[str, object]:
+        """Stage P3+P4's `flight.cbtm_align` action (plan, "Mode-2
+        action bodies"). No refusal branch (U1: CBTM is always reachable
+        by one left press) -- the actual state transition (`belief.
+        ai_pilot_wheel.cbtm_apply_align`) and the wire send both happen
+        in `body.py`'s poll loop, same division of labour `ai_pilot_
+        goal_transition` already has."""
+        self.ai_pilot_cbtm_transition = "align"
+        return {"ok": True, "reason": None}
+
+    def cbtm_align_for_launch(self) -> dict[str, object]:
+        """Stage P3+P4's `flight.cbtm_align_for_launch` action. Same
+        no-refusal posture as `cbtm_align`; the snapshot capture (Fix 1:
+        a second "align for launch" mid-recovery keeps the first
+        snapshot) is `belief.ai_pilot_wheel.cbtm_apply_align_for_launch`'s
+        own job, applied by `body.py`, which has the live AGL reading
+        this method does not need to carry itself."""
+        self.ai_pilot_cbtm_transition = "align_for_launch"
+        return {"ok": True, "reason": None}
+
+    def cbtm_break(self, sign: Literal[-1, 1]) -> dict[str, object]:
+        """Stage P3+P4's `flight.cbtm_break` action -- "break turn
+        left/right" while flying through the AI overlay. `sign` is
+        already resolved from the rule's own `<direction:left|right>`
+        word-set slot (`-1`/`1`), the same "Lua resolves a directive
+        into a number" idiom `turn_continuous`'s own `sign` already
+        uses. No refusal branch (same no-refusal posture as `cbtm_
+        align`); F-P7's own "a break always wins" logic (dropping any
+        outstanding heading goal, ending any alignment) lives in
+        `decide_ai_pilot_wheel`, not here -- this method only ever
+        carries the intent to `body.py`."""
+        self.ai_pilot_cbtm_transition = "break_left" if sign < 0 else "break_right"
+        return {"ok": True, "reason": None}
+
+    def cbtm_break_away(self) -> dict[str, object]:
+        """Stage P3+P4's `flight.cbtm_break_away` action -- "break
+        away" (two long-left presses, `BREAK_AWAY_GAP_S` apart, Lua's
+        own job). Same no-refusal/F-P7 division of labour as `cbtm_
+        break` above."""
+        self.ai_pilot_cbtm_transition = "break_away"
+        return {"ok": True, "reason": None}
 
     def _ai_pilot_hvrt_ready(self) -> bool:
         """Stage P2b's own hover precondition (plan, "Decisions

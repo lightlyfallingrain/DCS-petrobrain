@@ -23,19 +23,27 @@ import pytest
 from aircraft_client import AircraftLayerClient
 from belief.ai_pilot_wheel import (
     AI_PILOT_GOAL_SLICE_S,
+    AI_PILOT_RECOVER_AGL_DROP_M,
+    AI_PILOT_RECOVER_IAS_CEILING_KMH,
     AI_PILOT_SPEED_MAX_SENTINEL_KMH,
     AiPilotGoalRequest,
     AiPilotWheelGoal,
+    FlightSnapshot,
     ParkedFlightState,
     advance_parked_flight_state,
     altitude_ref_from_letter,
+    capture_flight_snapshot,
+    cbtm_apply_align,
+    cbtm_apply_align_for_launch,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
     goal_param_for_wire,
     nearest_speed_step,
+    payload_count_dropped,
     request_goal,
     resolve_altitude_reference,
     seat_change,
+    seed_recovery_goal,
     set_hvrt_direction,
     set_parked_altitude,
     set_parked_heading,
@@ -771,3 +779,351 @@ class TestPlayerSeat:
     def test_no_change_and_going_unknown_are_not_changes(self) -> None:
         assert seat_change("pilot", "pilot") is None
         assert seat_change("operator", None) is None
+
+
+class TestPayloadCountDropped:
+    """Stage P3+P4's launch-detection helper (plan, "Launch detection --
+    implemented, reusing only the payload feed")."""
+
+    def test_no_previous_reading_is_never_a_drop(self) -> None:
+        assert payload_count_dropped(None, {1: 2}) is False
+
+    def test_a_drop_on_one_station_is_detected(self) -> None:
+        assert payload_count_dropped({1: 2}, {1: 1}) is True
+
+    def test_a_rise_on_one_station_while_another_drops_is_still_a_drop(
+        self,
+    ) -> None:
+        assert payload_count_dropped({1: 2, 2: 0}, {1: 2, 2: 1}) is False
+        assert payload_count_dropped({1: 2, 2: 1}, {1: 1, 2: 2}) is True
+
+    def test_a_new_station_with_no_previous_reading_is_not_a_drop(self) -> None:
+        assert payload_count_dropped({1: 2}, {1: 2, 2: 0}) is False
+
+    def test_no_change_is_not_a_drop(self) -> None:
+        assert payload_count_dropped({1: 2}, {1: 2}) is False
+
+
+class TestCaptureFlightSnapshot:
+    """`cbtm_align_for_launch`'s own pre-align snapshot (plan,
+    "`AlignPhase` and `FlightSnapshot`")."""
+
+    def test_prefers_the_outstanding_goal_target_over_the_held_value(self) -> None:
+        state = ParkedFlightState(
+            held_heading=10.0,
+            held_altitude=100.0,
+            held_altitude_ref="B",
+            held_speed=150.0,
+        )
+        goal = AiPilotWheelGoal(
+            heading_target_deg=270.0,
+            altitude_target_m=400.0,
+            altitude_target_ref="radar",
+            speed_target_kmh=200.0,
+        )
+        snapshot = capture_flight_snapshot(state, goal, agl_m=50.0)
+        assert snapshot == FlightSnapshot(
+            heading_deg=270.0,
+            altitude_m=400.0,
+            altitude_ref="radar",
+            speed_kmh=200.0,
+            agl_m=50.0,
+        )
+
+    def test_falls_back_to_held_values_with_no_outstanding_goal(self) -> None:
+        state = ParkedFlightState(
+            held_heading=10.0,
+            held_altitude=100.0,
+            held_altitude_ref="B",
+            held_speed=150.0,
+        )
+        snapshot = capture_flight_snapshot(state, AiPilotWheelGoal(), agl_m=50.0)
+        assert snapshot == FlightSnapshot(
+            heading_deg=10.0,
+            altitude_m=100.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=50.0,
+        )
+
+    def test_none_when_a_parameter_has_neither_target_nor_held_value(self) -> None:
+        state = ParkedFlightState(held_altitude=100.0, held_altitude_ref="B")
+        assert capture_flight_snapshot(state, AiPilotWheelGoal(), agl_m=50.0) is None
+
+    def test_none_when_agl_is_not_yet_known(self) -> None:
+        state = ParkedFlightState(
+            held_heading=10.0,
+            held_altitude=100.0,
+            held_altitude_ref="B",
+            held_speed=150.0,
+        )
+        assert capture_flight_snapshot(state, AiPilotWheelGoal(), agl_m=None) is None
+
+
+class TestCbtmApplyAlign:
+    def test_align_always_restarts_plain_alignment(self) -> None:
+        state = ParkedFlightState(
+            align_phase="recovering",
+            pre_align_snapshot=FlightSnapshot(1.0, 2.0, "radar", 3.0, 4.0),
+        )
+        result = cbtm_apply_align(state)
+        assert result.align_phase == "aligning"
+        assert result.pre_align_snapshot is None
+
+
+class TestCbtmApplyAlignForLaunch:
+    """Fix 1 (plan check, 2026-11-18): a second "align for launch" said
+    mid-recovery keeps the first snapshot."""
+
+    def test_captures_fresh_from_none(self) -> None:
+        state = ParkedFlightState(
+            held_heading=10.0,
+            held_altitude=100.0,
+            held_altitude_ref="B",
+            held_speed=150.0,
+        )
+        result = cbtm_apply_align_for_launch(state, AiPilotWheelGoal(), agl_m=50.0)
+        assert result.align_phase == "launch_aligned"
+        assert result.pre_align_snapshot == FlightSnapshot(
+            heading_deg=10.0,
+            altitude_m=100.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=50.0,
+        )
+
+    def test_a_second_call_mid_recovery_keeps_the_first_snapshot(self) -> None:
+        original = FlightSnapshot(10.0, 100.0, "barometric", 150.0, 50.0)
+        state = ParkedFlightState(
+            align_phase="recovering",
+            pre_align_snapshot=original,
+            held_heading=999.0,
+            held_altitude=5.0,
+            held_altitude_ref="R",
+            held_speed=999.0,
+        )
+        result = cbtm_apply_align_for_launch(state, AiPilotWheelGoal(), agl_m=5.0)
+        assert result.align_phase == "launch_aligned"
+        assert result.pre_align_snapshot == original
+
+    def test_a_second_call_while_launch_aligned_also_keeps_the_snapshot(
+        self,
+    ) -> None:
+        original = FlightSnapshot(10.0, 100.0, "barometric", 150.0, 50.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=original
+        )
+        result = cbtm_apply_align_for_launch(state, AiPilotWheelGoal(), agl_m=999.0)
+        assert result.pre_align_snapshot == original
+
+
+class TestSeedRecoveryGoal:
+    """Decision 26's own priority order."""
+
+    def test_altitude_is_active_speed_is_queued(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 200.0, 50.0)
+        result = seed_recovery_goal(AiPilotWheelGoal(), snapshot, now_sim=5.0)
+        assert result.active_param == "altitude"
+        assert result.active_since_sim == 5.0
+        assert result.altitude_target_m == 300.0
+        assert result.altitude_target_ref == "barometric"
+        assert result.pending_order == ("speed",)
+        assert result.speed_target_kmh == 200.0
+
+    def test_a_previously_active_heading_is_requeued_not_dropped(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 200.0, 50.0)
+        goal = AiPilotWheelGoal(
+            heading_target_deg=270.0, active_param="heading", active_since_sim=1.0
+        )
+        result = seed_recovery_goal(goal, snapshot, now_sim=5.0)
+        assert result.active_param == "altitude"
+        assert result.pending_order == ("heading", "speed")
+        assert result.heading_target_deg == 270.0
+
+
+class TestDecideAiPilotWheelCbtm:
+    """Stage P3+P4's own additions to `decide_ai_pilot_wheel` (plan,
+    "`decide_ai_pilot_wheel` -- the align/break/recovery 'when'")."""
+
+    def test_a_break_drops_the_active_heading_goal_and_clears_align_phase(
+        self,
+    ) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0, active_param="heading", active_since_sim=0.0
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            align_phase="aligning",
+            cbtm_action_sent="break_left",
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.align_phase == "none"
+        assert result.pre_align_snapshot is None
+        assert result.goal is not None
+        assert result.goal.active_param is None
+        assert result.goal.heading_target_deg is None
+
+    def test_a_break_drops_a_queued_heading_goal(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0,
+            speed_target_kmh=200.0,
+            active_param="speed",
+            active_since_sim=0.0,
+            pending_order=("heading",),
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal), cbtm_action_sent="break_away"
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.goal is not None
+        assert result.goal.heading_target_deg is None
+        assert result.goal.pending_order == ()
+        assert result.goal.active_param == "speed"
+
+    def test_an_align_action_sent_does_not_trigger_the_break_logic(self) -> None:
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0, active_param="heading", active_since_sim=0.0
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            align_phase="aligning",
+            cbtm_action_sent="align",
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.align_phase == "aligning"
+        assert result.goal is not None
+        assert result.goal.active_param == "heading"
+
+    def test_recovery_fires_once_on_the_agl_relative_floor(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=100.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        result = decide_ai_pilot_wheel(
+            state,
+            5.0,
+            agl_m=100.0 - AI_PILOT_RECOVER_AGL_DROP_M,
+        )
+        assert result.align_phase == "recovering"
+        assert result.goal is not None
+        assert result.goal.active_param == "altitude"
+        assert result.goal.pending_order == ("speed",)
+
+    def test_recovery_does_not_fire_before_the_floor_is_crossed(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=100.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        result = decide_ai_pilot_wheel(
+            state,
+            5.0,
+            agl_m=100.0 - AI_PILOT_RECOVER_AGL_DROP_M + 1.0,
+        )
+        assert result.align_phase == "launch_aligned"
+
+    def test_recovery_fires_on_the_ias_ceiling(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=500.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        result = decide_ai_pilot_wheel(
+            state,
+            5.0,
+            agl_m=500.0,
+            ias_kmh=AI_PILOT_RECOVER_IAS_CEILING_KMH,
+        )
+        assert result.align_phase == "recovering"
+
+    def test_recovery_fires_once_on_a_payload_count_drop(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=500.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        result = decide_ai_pilot_wheel(
+            state, 5.0, agl_m=500.0, payload_count_dropped=True
+        )
+        assert result.align_phase == "recovering"
+
+    def test_two_triggers_crossing_at_once_still_fires_only_once(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=100.0)
+        state = ParkedFlightState(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        result = decide_ai_pilot_wheel(
+            state,
+            5.0,
+            agl_m=100.0 - AI_PILOT_RECOVER_AGL_DROP_M,
+            ias_kmh=AI_PILOT_RECOVER_IAS_CEILING_KMH,
+            payload_count_dropped=True,
+        )
+        assert result.align_phase == "recovering"
+        assert result.goal is not None
+        assert result.goal.active_param == "altitude"
+
+    def test_recovery_promotes_speed_on_settled_param_never_the_slice_timer(
+        self,
+    ) -> None:
+        """Decision 26: recovery promotes strictly on `settled_param`,
+        never the slice timer -- even well past `AI_PILOT_GOAL_SLICE_S`,
+        altitude stays active until Lua reports it settled."""
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=500.0)
+        goal = AiPilotWheelGoal(
+            altitude_target_m=300.0,
+            altitude_target_ref="barometric",
+            speed_target_kmh=150.0,
+            active_param="altitude",
+            active_since_sim=0.0,
+            pending_order=("speed",),
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            align_phase="recovering",
+            pre_align_snapshot=snapshot,
+        )
+        result = decide_ai_pilot_wheel(state, AI_PILOT_GOAL_SLICE_S + 100.0)
+        assert result.goal is not None
+        assert result.goal.active_param == "altitude"
+        assert result.align_phase == "recovering"
+
+        promoted = decide_ai_pilot_wheel(
+            result, AI_PILOT_GOAL_SLICE_S + 100.0, settled_param="altitude"
+        )
+        assert promoted.goal is not None
+        assert promoted.goal.active_param == "speed"
+        assert promoted.align_phase == "recovering"
+
+    def test_recovery_ends_once_both_parameters_have_cleared(self) -> None:
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=500.0)
+        goal = AiPilotWheelGoal(
+            speed_target_kmh=150.0, active_param="speed", active_since_sim=0.0
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            align_phase="recovering",
+            pre_align_snapshot=snapshot,
+        )
+        result = decide_ai_pilot_wheel(state, 10.0, settled_param="speed")
+        assert result.align_phase == "none"
+        assert result.pre_align_snapshot is None
+        assert result.goal is not None
+        assert result.goal.active_param is None
+
+    def test_a_fresh_command_for_one_recovering_parameter_leaves_the_other_alone(
+        self,
+    ) -> None:
+        """Q6/the plan's own Co-moving table row: a fresh voice command
+        for one recovering parameter replaces that parameter's own
+        target via the ordinary `request_goal` 'latest wins' path --
+        the other keeps recovering untouched. Exercised at the
+        `request_goal` level, which is what a fresh `set_parked_
+        altitude` call during recovery actually goes through."""
+        snapshot = FlightSnapshot(10.0, 300.0, "barometric", 150.0, agl_m=500.0)
+        goal = seed_recovery_goal(AiPilotWheelGoal(), snapshot, now_sim=0.0)
+        assert goal.active_param == "altitude"
+        assert goal.pending_order == ("speed",)
+
+        updated = request_goal(goal, "altitude", 1.0, altitude_target_m=200.0)
+        assert updated.altitude_target_m == 200.0
+        assert updated.active_param == "altitude"
+        assert updated.speed_target_kmh == 150.0
+        assert updated.pending_order == ("speed",)

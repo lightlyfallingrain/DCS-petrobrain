@@ -150,6 +150,8 @@ class TestAiPilotWheelState:
             "apw_cam_fwd_m": pytest.approx(4.7),
             "apw_goal_progress": "pressing",
             "apw_goal_seq": 3,
+            "apw_cbtm_status": None,
+            "apw_cbtm_seq": None,
         }
 
 
@@ -306,6 +308,8 @@ class TestAiPilotWheelLatestEndpoint:
             # every other optional field here already has.
             "apw_goal_progress": None,
             "apw_goal_seq": None,
+            "apw_cbtm_status": None,
+            "apw_cbtm_seq": None,
         }
 
 

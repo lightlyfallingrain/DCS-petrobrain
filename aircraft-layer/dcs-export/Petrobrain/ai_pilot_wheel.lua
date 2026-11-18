@@ -201,6 +201,19 @@ local MODE_BLOCKED_RETRY_S = 3.0
 -- flag, Q-P2) -- revisit if a sortie shows it firing in ordinary use.
 local HVRT_TRANSLATE_MAX_HOLD_S = 15.0
 
+-- Stage P3+P4's own CBTM one-shot channel (`plans/flight-control/
+-- plan.md`, "Revised 2026-11-18 -- Stages P3+P4 ready to build", "The
+-- CBTM one-shot wire channel"). `LONG_PRESS_HOLD_S` is the duration a
+-- press is held open to register as the wheel's own "long press" (the
+-- outer-ring option -- `AI_WHEEL_UP`/`_DOWN`/`_LEFT`/`_RIGHT`'s own
+-- comment at the top of this file), reused for `align_for_launch`'s
+-- long-up and every break's long-left/right -- a discrete action, never
+-- an open hold (plan, "a discrete action, not an open hold"). `BREAK_
+-- AWAY_GAP_S` is the gap between `break_away`'s two long-left presses
+-- (user, verbatim, unchanged from the original plan).
+local LONG_PRESS_HOLD_S = 0.7
+local BREAK_AWAY_GAP_S = 2.0
+
 -- True only while ED's AI is believed to be flying: 852 stowed AND the
 -- player in the operator seat (see `SEAT_BOUNDARY_FWD_M`). Wire name
 -- `apw_parked_active` kept for compatibility. Every per-tick press loop
@@ -247,6 +260,18 @@ local ai_wheel_pending_cmd = nil
 -- invariant holding everywhere it is assumed.
 local ai_wheel_goal_pending_release_t = nil
 local ai_wheel_goal_pending_cmd = nil
+
+-- Stage P3+P4's own pending-release pair -- deliberately a **third**
+-- slot, separate from both pairs above, same reasoning as the goal
+-- channel's own comment: the CBTM channel's own timed press (`align_
+-- for_launch`/`break_*`) never needs to hold open at the same time as
+-- a takeover correction or a goal/HVRT hold in correct operation (Lua's
+-- own mutual-exclusion guard below pauses the goal/HVRT ticks whenever
+-- a CBTM action is outstanding), but a third slot means that invariant
+-- is never load-bearing for correctness, only for which press each
+-- release call releases.
+local ai_wheel_cbtm_pending_release_t = nil
+local ai_wheel_cbtm_pending_cmd = nil
 
 -- Takeover sub-sequence state (plan's own "Co-moving Fields" table,
 -- Stage P1 revision), grouped into **one** table rather than one local
@@ -361,6 +386,41 @@ local ai_pilot_goal = {
     hvrt_direction = nil,
     hvrt_hold_cmd = nil,
     hvrt_started_t = nil,
+}
+
+-- Stage P3+P4's own co-moving state -- the CBTM one-shot channel
+-- (align/align-for-launch/break/break-away), kept in its own table for
+-- the same Lua-5.1-local-ceiling reason `ai_pilot_takeover`/`ai_pilot_
+-- goal` are. `.action`: `nil` (idle) or one of the five `cbtm_action`
+-- wire values. `.seq`: the last `cbtm_seq` this channel has started
+-- acting on -- compared against an incoming message's own `cbtm_seq`
+-- the same "act once per distinct seq" way `hvrt_step` already is.
+-- `.status`: `"idle"`/`"running"`/`"done"`, echoed on the status push
+-- (`apw_cbtm_status`). `.mode_cycle_attempts`/`.mode_blocked_since_t`:
+-- this channel's own copy of the goal channel's bounded-retry pair,
+-- kept separate for the same reason the HVRT pair is. `.presses_done`:
+-- how many timed presses this action has opened so far -- `1` for
+-- `align_for_launch`/`break_left`/`break_right`, `2` for `break_away`
+-- (the second press, after the gap). `.gap_until_t`: the model time
+-- `break_away`'s second press may open, `nil` outside that gap.
+local ai_pilot_cbtm = {
+    action = nil,
+    seq = 0,
+    status = "idle",
+    mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
+    presses_done = 0,
+    gap_until_t = nil,
+}
+
+-- The physical button each timed-press CBTM action holds open -- `"align"`
+-- is a short tap (the wheel's own inner-ring option), handled separately
+-- in `ai_pilot_cbtm_tick` below, not in this table.
+local AI_PILOT_CBTM_PRESS_CMD = {
+    align_for_launch = AI_WHEEL_UP,
+    break_left = AI_WHEEL_LEFT,
+    break_right = AI_WHEEL_RIGHT,
+    break_away = AI_WHEEL_LEFT,
 }
 
 -- Flattens one `list_indication(HELPERAI_DEVICE_ID)` raw dump into a flat
@@ -923,6 +983,15 @@ local function ai_pilot_goal_tick(t)
     if ai_pilot_goal.param == nil then
         return
     end
+    -- Stage P3+P4: a CBTM action pauses the goal channel the same way
+    -- an outstanding HVRT translate already does (plan, "cbtm_action
+    -- non-None pauses the goal/HVRT ticks the same way an outstanding
+    -- HVRT direction already pauses the goal tick") -- both ultimately
+    -- drive the same physical wheel buttons.
+    if ai_pilot_cbtm.action ~= nil then
+        ai_pilot_goal_release_hold()
+        return
+    end
     if ai_pilot_goal.hvrt_direction ~= nil then
         ai_pilot_goal_release_hold()
         return
@@ -986,6 +1055,17 @@ end
 -- its top), not this function's: HVRT always wins once a translate
 -- direction is set, so there is no reciprocal guard needed here.
 local function ai_pilot_goal_tick_hvrt(t)
+    -- Stage P3+P4: same CBTM pause as `ai_pilot_goal_tick` above.
+    if ai_pilot_cbtm.action ~= nil then
+        if ai_pilot_goal.hvrt_hold_cmd ~= nil then
+            safe_call(function()
+                GetDevice(30):performClickableAction(ai_pilot_goal.hvrt_hold_cmd, 0)
+            end)
+            ai_pilot_goal.hvrt_hold_cmd = nil
+            ai_pilot_goal.hvrt_started_t = nil
+        end
+        return
+    end
     if ai_pilot_goal.hvrt_direction == nil then
         if ai_pilot_goal.hvrt_hold_cmd ~= nil then
             safe_call(function()
@@ -1046,6 +1126,89 @@ local function ai_pilot_goal_tick_hvrt(t)
     end
 end
 
+-- Stage P3+P4: CBTM is reachable only from this one overlay mode --
+-- unlike the FLT/HVR goal channel's two-mode acceptance.
+local function ai_pilot_cbtm_mode_ready(mode_text)
+    return mode_text == "CBTM"
+end
+
+-- Clears every running-episode field back to idle -- called once a
+-- channel action's last press has released, or once a bare "align"
+-- tap has fired. Never touches `.action`/`.seq` themselves when called
+-- mid-episode by anything other than the action's own completion (there
+-- is no such caller today, but this keeps the reset's own meaning
+-- narrow: "this run is over," not "forget what the last run was").
+local function ai_pilot_cbtm_finish()
+    ai_pilot_cbtm.action = nil
+    ai_pilot_cbtm.status = "done"
+    ai_pilot_cbtm.presses_done = 0
+    ai_pilot_cbtm.gap_until_t = nil
+    ai_pilot_cbtm.mode_cycle_attempts = 0
+    ai_pilot_cbtm.mode_blocked_since_t = nil
+end
+
+-- Stage P3+P4's own dispatcher (plan, "The CBTM one-shot wire channel"):
+-- cycles to CBTM first (bounded/retried the same way the goal channel's
+-- own mode-cycle is, `MODE_CYCLE_MAX_ATTEMPTS`/`MODE_BLOCKED_RETRY_S`,
+-- no new bound invented), then issues the one press shape the action
+-- needs. The actual *release* of a timed press happens in `run_ai_
+-- pilot_wheel`'s own per-frame deadline check below (`ai_wheel_cbtm_
+-- pending_release_t`), never here -- same split every other timed press
+-- in this file already has (open here, release there).
+local function ai_pilot_cbtm_tick(t)
+    if ai_pilot_cbtm.action == nil then
+        return
+    end
+    ai_pilot_cbtm.status = "running"
+    if ai_wheel_cbtm_pending_cmd ~= nil then
+        -- A timed press is already open -- nothing to decide until it
+        -- releases.
+        return
+    end
+    if ai_pilot_cbtm.gap_until_t ~= nil then
+        if t < ai_pilot_cbtm.gap_until_t then
+            return
+        end
+        ai_pilot_cbtm.gap_until_t = nil
+    end
+    if not ai_pilot_cbtm_mode_ready(ai_pilot_mode_text) then
+        if ai_pilot_cbtm.mode_cycle_attempts >= MODE_CYCLE_MAX_ATTEMPTS then
+            if ai_pilot_cbtm.mode_blocked_since_t == nil then
+                ai_pilot_cbtm.mode_blocked_since_t = t
+            end
+            if t - ai_pilot_cbtm.mode_blocked_since_t < MODE_BLOCKED_RETRY_S then
+                return
+            end
+            ai_pilot_cbtm.mode_cycle_attempts = 0
+            ai_pilot_cbtm.mode_blocked_since_t = nil
+        end
+        ai_pilot_tap30(AI_WHEEL_LEFT)
+        ai_pilot_cbtm.mode_cycle_attempts = ai_pilot_cbtm.mode_cycle_attempts + 1
+        ai_pilot_last_press = "cbtm_mode_cycle"
+        return
+    end
+    ai_pilot_cbtm.mode_cycle_attempts = 0
+    ai_pilot_cbtm.mode_blocked_since_t = nil
+
+    if ai_pilot_cbtm.action == "align" then
+        -- Short up, release -- the inner-ring option, a same-frame tap
+        -- (plan: "'align' -- short-up, release").
+        ai_pilot_tap30(AI_WHEEL_UP)
+        ai_pilot_last_press = "cbtm_align"
+        ai_pilot_cbtm_finish()
+        return
+    end
+
+    local cmd = AI_PILOT_CBTM_PRESS_CMD[ai_pilot_cbtm.action]
+    safe_call(function()
+        GetDevice(30):performClickableAction(cmd, 1)
+    end)
+    ai_wheel_cbtm_pending_cmd = cmd
+    ai_wheel_cbtm_pending_release_t = t + LONG_PRESS_HOLD_S
+    ai_pilot_cbtm.presses_done = ai_pilot_cbtm.presses_done + 1
+    ai_pilot_last_press = "cbtm_" .. ai_pilot_cbtm.action
+end
+
 -- Per-frame AI-pilot-wheel loop, called every frame (not gated by the
 -- 5 Hz export throttle) beside `sight.sight_servo_tick` -- the takeover
 -- sequence's own time-driven steps (the rising-edge snapshot, the
@@ -1095,6 +1258,27 @@ local function run_ai_pilot_wheel(t)
             -- Safety-ceiling timeout, not convergence -- same posture as
             -- the takeover correction's own timeout above.
             ai_pilot_goal.hold_cmd = nil
+        end
+    end
+
+    -- Stage P3+P4's own release-deadline check, against its own third
+    -- pending pair. Unlike the two checks above, releasing here is
+    -- always the *normal* path (every CBTM timed press releases after
+    -- exactly `LONG_PRESS_HOLD_S`, there is no convergence to wait for),
+    -- so what happens next depends only on how many presses the action
+    -- needed: `break_away`'s first release opens the `BREAK_AWAY_GAP_S`
+    -- gap before its second; every other case (including `break_away`'s
+    -- own second release) finishes the episode.
+    if ai_wheel_cbtm_pending_release_t ~= nil and t >= ai_wheel_cbtm_pending_release_t then
+        safe_call(function()
+            GetDevice(30):performClickableAction(ai_wheel_cbtm_pending_cmd, 0)
+        end)
+        ai_wheel_cbtm_pending_release_t = nil
+        ai_wheel_cbtm_pending_cmd = nil
+        if ai_pilot_cbtm.action == "break_away" and ai_pilot_cbtm.presses_done < 2 then
+            ai_pilot_cbtm.gap_until_t = t + BREAK_AWAY_GAP_S
+        else
+            ai_pilot_cbtm_finish()
         end
     end
 
@@ -1159,6 +1343,22 @@ local function run_ai_pilot_wheel(t)
                 GetDevice(30):performClickableAction(ai_pilot_goal.hvrt_hold_cmd, 0)
             end)
         end
+        -- Stage P3+P4's own release, same frame -- the same "nothing
+        -- resumes on the next park" reasoning as the goal channel's own
+        -- release immediately above.
+        if ai_wheel_cbtm_pending_release_t ~= nil then
+            safe_call(function()
+                GetDevice(30):performClickableAction(ai_wheel_cbtm_pending_cmd, 0)
+            end)
+            ai_wheel_cbtm_pending_release_t = nil
+            ai_wheel_cbtm_pending_cmd = nil
+        end
+        ai_pilot_cbtm.action = nil
+        ai_pilot_cbtm.status = "idle"
+        ai_pilot_cbtm.presses_done = 0
+        ai_pilot_cbtm.gap_until_t = nil
+        ai_pilot_cbtm.mode_cycle_attempts = 0
+        ai_pilot_cbtm.mode_blocked_since_t = nil
         -- Close the menu only if the player is still in the operator
         -- seat (took the controls back). Leaving the seat ends AI flight
         -- on DCS's side; a menu tap then would land on the pilot seat's
@@ -1332,6 +1532,12 @@ local function update_ai_pilot_wheel_overlay(raw, t)
     -- that itself (see the goal pending-release pair's own comment).
     if not fields_all_nil then
         ai_pilot_goal_tick(t)
+        -- Stage P3+P4's own tick, same `not fields_all_nil` guard as
+        -- the goal tick (it reads `ai_pilot_mode_text` too). `ai_pilot_
+        -- cbtm.action` is set by `handle_ai_pilot_goal_command` on
+        -- message receipt, not by this tick, so the two ticks' relative
+        -- order here does not matter for the pause guard.
+        ai_pilot_cbtm_tick(t)
     end
     ai_pilot_goal_tick_hvrt(t)
 end
@@ -1401,6 +1607,34 @@ local function handle_ai_pilot_goal_command(data, t)
     elseif hvrt_direction == nil then
         ai_pilot_goal.progress = "idle"
     end
+
+    -- Stage P3+P4's own sibling one-shot fields, same message (plan,
+    -- "The CBTM one-shot wire channel"). `cbtm_seq` is this channel's
+    -- own distinct sequence space, never compared against `goal_seq`
+    -- above -- acted on exactly once per distinct `cbtm_seq`, same
+    -- "act once per distinct seq" contract `hvrt_step` already has. A
+    -- fresh trigger always starts a new run, releasing whatever timed
+    -- press the previous one left open (a break always wins -- F-P7 --
+    -- and there is no other caller that could leave a stale press open
+    -- across two distinct `cbtm_seq` values in correct operation).
+    local cbtm_action = extract_json_string_field(data, "cbtm_action")
+    local cbtm_seq = extract_json_number_field(data, "cbtm_seq")
+    if cbtm_action ~= nil and cbtm_seq ~= nil and cbtm_seq ~= ai_pilot_cbtm.seq then
+        if ai_wheel_cbtm_pending_release_t ~= nil then
+            safe_call(function()
+                GetDevice(30):performClickableAction(ai_wheel_cbtm_pending_cmd, 0)
+            end)
+            ai_wheel_cbtm_pending_release_t = nil
+            ai_wheel_cbtm_pending_cmd = nil
+        end
+        ai_pilot_cbtm.action = cbtm_action
+        ai_pilot_cbtm.seq = cbtm_seq
+        ai_pilot_cbtm.status = "running"
+        ai_pilot_cbtm.presses_done = 0
+        ai_pilot_cbtm.gap_until_t = nil
+        ai_pilot_cbtm.mode_cycle_attempts = 0
+        ai_pilot_cbtm.mode_blocked_since_t = nil
+    end
 end
 
 -- Sends `run_ai_pilot_wheel`'s own status at 5 Hz, same cadence as the
@@ -1443,7 +1677,9 @@ local function push_ai_pilot_wheel_state(t)
         .. ',"apw_goal_progress":' .. text_or_null(ai_pilot_goal.progress)
         .. ',"apw_goal_seq":' .. fmt_num_or_null(ai_pilot_goal.goal_seq)
         .. ',"apw_seat":' .. text_or_null(ai_pilot_player_seat)
-        .. ',"apw_cam_fwd_m":' .. fmt_num_or_null(ai_pilot_cam_fwd_m) .. '}\n')
+        .. ',"apw_cam_fwd_m":' .. fmt_num_or_null(ai_pilot_cam_fwd_m)
+        .. ',"apw_cbtm_status":' .. text_or_null(ai_pilot_cbtm.status)
+        .. ',"apw_cbtm_seq":' .. fmt_num_or_null(ai_pilot_cbtm.seq) .. '}\n')
     if not ok then
         debug_log("ai-pilot-wheel send failed: " .. tostring(err))
         client:close()
@@ -1514,6 +1750,22 @@ local function on_stop()
     ai_pilot_goal.hvrt_started_t = nil
     ai_pilot_goal.hvrt_mode_cycle_attempts = 0
     ai_pilot_goal.hvrt_mode_blocked_since_t = nil
+    -- Stage P3+P4's own release/reset -- same AC-B13-class gap (a
+    -- long-lived open press with no `LuaExportStop` reset) this
+    -- channel would otherwise have.
+    if ai_wheel_cbtm_pending_cmd ~= nil then
+        safe_call(function()
+            GetDevice(30):performClickableAction(ai_wheel_cbtm_pending_cmd, 0)
+        end)
+    end
+    ai_wheel_cbtm_pending_release_t = nil
+    ai_wheel_cbtm_pending_cmd = nil
+    ai_pilot_cbtm.action = nil
+    ai_pilot_cbtm.status = "idle"
+    ai_pilot_cbtm.presses_done = 0
+    ai_pilot_cbtm.gap_until_t = nil
+    ai_pilot_cbtm.mode_cycle_attempts = 0
+    ai_pilot_cbtm.mode_blocked_since_t = nil
     -- A new mission starts with no seat known: nothing is pressed until
     -- the camera has placed the player in the operator seat.
     ai_pilot_player_seat = nil

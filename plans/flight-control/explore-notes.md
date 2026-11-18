@@ -790,3 +790,127 @@ wheel is the command menu (`ShowMenu`, the one with the option labels) and the p
 off. So the "cosmetic HUD change" worry in P0-1 is moot — the readback overlay is there anyway.
 P0-1 narrows to: does `list_indication(6)` carry the readback text with the right (command) wheel
 closed. Expected yes, since the texts belong to the always-drawn left overlay.
+
+## Stage P3 explore (user, 2026-11-18) — CBTM align, align for launch, breaks
+
+Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch." → long up;
+"Break turn left." → "Breaking left." (long left); "Break away." → "Breaking away." (long left,
+2 s, long left); P4 "Leveling off." on recovery. Answers, verbatim:
+
+1. **Build P3 and P4 together?** *"yes"* — "align for launch" never reaches `main` without the
+   P4 recovery that stops the post-launch dive.
+2. **The abort word.** *"there's "level flight" as well. That could be changed to "level
+   flight/off", both do pretty much the same thing."* — so the existing `level_flight` rule
+   (`body-layer/config/rules/flight.lua`) takes "level off" as a second form; that is the spoken
+   abort of an alignment. ("stop turn" stays the turn-stop; "Straight" from the 2026-11-15 table
+   is not carried forward.)
+3. **Readbacks.** *""Aligning for launch" is the only correction. As this goes to rules, it'll be
+   easy to change."* — so: "Aligning.", "Aligning for launch.", "Breaking left/right.",
+   "Breaking away.", "Leveling off." — in the Lua rules, where the user edits them.
+4. **After aligning.** *"once aligned, keep that until I command something else. No need to
+   change mode, unless there is need to change one of the flight params in FLT/HVR/HVRT mode."*
+   — stay in CBTM holding the alignment; only a heading/altitude/speed goal (which needs
+   FLT/HVR/HVRT) cycles out. Matches U3/always-reassert for the goal's own mode.
+5. **Mode 1.** *"Align for missile launch is not possible in Mode 1, because 9K113 is gated in AI
+   overlay flight and therefore Mode 2. Align and align for launch are usefull commands only when
+   player is using the CPG view and that is Mode 2 only. Mode 1 alignment can only be possbile if
+   ED ever makes it possible to use CPG view without AI flight control or with other helicopters
+   like Gazelle, but that is much further along."* — align/align-for-launch/breaks are mode-2-only;
+   in mode 1 they answer "unable" (the existing `_by_mode` "Unable, AI overlay." shape, mirrored).
+   No mode-1 alignment is planned.
+
+### Follow-up on the goal check's open assumptions (user, 2026-11-18, verbatim)
+
+- **"Level off" with no alignment running:** *"it is a command to fly straight and level,
+  regardless of when it was called."*
+- **Recovery order:** *"altitude, heading, speed"*.
+- **"Align for launch" again mid-recovery:** *"command align for launch"* — a fresh align for
+  launch, not ignored.
+- **Break vs. alignment:** *"break cancels alignment"*.
+
+### Answers to the goal check's concerns and Q-P3-0..6 (user, 2026-11-18, verbatim)
+
+- **F-P6 (goal read back, never flown):** *"yes, any new flight command ends align."*
+- **F-P7 (break cut short/undone):** *"yes, as proposed"* — a break supersedes any outstanding
+  heading goal and any alignment.
+- **Q0 — "level off" during align-for-launch:** *"first level at current, then start recovery to
+  pre alignment params"*.
+- **Q1 — after a break out of align-for-launch:** *"hold what break leaves. ED's break continues if
+  mode changes, it set's heading +- 90 degrees and flies that, that is the mechanism."* — so no
+  restore after a break, and leaving CBTM does not cut a break short; what undoes it is only a
+  later heading goal, which the break supersedes.
+- **Q2 — align for launch below 40 m AGL:** *"do align, but make the floor a drop below the
+  starting height"*.
+- **Q3 — breaks in mode 1:** *"break in mode 1 is a tight 90 degree turn"* — a mode-1 behaviour,
+  not "unable" (align/align-for-launch stay "unable" in mode 1).
+- **Q4 — leaving the CPG view while aligned:** *"not sure, I think there is no change. Leaving CPG
+  view does not automatically exit CMBT mode, it stays until left press changes it."* — plan on no
+  change; confirm on the test flight.
+- **Q5 — payload count drop other than a launch:** *"damage can, AAA can shoot the pylons off.
+  Let's ignore that case for now."*
+- **Q6 — "altitude 200" during align-for-launch:** *"yes"* — it aborts and the spoken value
+  replaces that parameter's restore target.
+- **Recovery order clarified (user, 2026-11-18, verbatim):** *"do not wait for the aircraft to
+  reach set params before setting the next one. This order is about what is commanded first via
+  overlay, so that altitude recovery starts first, but heading change can happen while
+  climbing"* — the order is the order the overlay commands are issued, back to back; no waiting
+  for one parameter to settle before commanding the next.
+- **Wheel mode is always read, never assumed (user, 2026-11-18, verbatim, answering Q4):** *"I
+  think it does, but then it does not matter. Petrobrain must always read the current wheel mode
+  and change it if necessary to give commands. We must never assume it is in the mode we would
+  like it to be. Changing mode is one left press, so just do it when needed."* — Q4 is not a
+  test-flight item; every command (align, break, goal, recovery) reads the live mode and
+  left-presses to the mode it needs before pressing.
+
+### Mode 1 carries mode 2's command set (user, 2026-11-18, verbatim — standing direction)
+
+> *"Except aligning to 9K113, all other flight commands from Mode 2 must also be available in Mode
+> 1. Mode 1 expands on the Mode 2 command set, because the possibilities are not limited by ED AI,
+> but I want the same commands to do same things in Mode 2 and Mode 1 as much as possible. Mode 1
+> allows not waiting for press and hold to take effect so simultanous or fast sequential changes
+> can happen without waiting for the overlay numbers to change."*
+
+Consequences for P3+P4: "break turn left/right" **and "break away"** exist in mode 1 (U11 answered:
+yes); align / align for launch are the only mode-2-only commands ("unable" in mode 1); "level
+off" means the same straight-and-level in both. In mode 1, several goals are applied at once
+rather than serialised behind overlay presses.
+
+### Recovery heading, and the mode-1 break / rotor envelope (user, 2026-11-18, verbatim)
+
+- **Recovery heading:** *"keep aligned heading"* — recovery restores altitude and speed only.
+- **Mode-1 break turn:** *"no set number, aim for fast turn rate. What that needs depends on flight
+  state. Moderate altitude drop allowed (~100 m, but never below 40 m AGL). Steep bank in any case,
+  I'd say 60 to 80 degrees. Pedal to direction of turn, plenty of collective to create lift but not
+  so much that rotor RPM drops or to cause retreating blade stall. -> need to monitor rotor RPM and
+  speed. retreating blade stall comes an issue to watch for at near or over 250 km/h. Rotor RPM min
+  allowed value to configurable param, set to 85% initially."*
+- **Mode-1 envelope, all states (standing):** *"the rotor rpm drop below minimum and retreating
+  blade stall are things to avoid in any Mode 1 state, whatever we are doing. High collective leads
+  to RPM drop, more so at slower speeds and more so if collective is increased fast. High blade
+  angle (=collective) and high speed lead to reatreating blade stall."*
+- **Mode-1 break, speed (user, 2026-11-18, verbatim):** *"also do not let speed to slow fast.
+  Increasing collective and pulling back on cyclic in a bank makes the helicopter turn fast, but
+  also slow down fast. Keep the speed up at about what is was when starting the break, fluctuation
+  is allowed."*
+- **Rotor RPM source (user, 2026-11-18, verbatim):** *"use engine RPM as proxy for rotor RPM for
+  now and add a reminder at next flight to check how to read rotor RPM, it should be a simple
+  change then."*
+- **Scope (user, 2026-11-18):** *"Yes, split it. Write the notes, then continue now with Mode 2.
+  Finish that first. When Mode 2 is done, continue with Mode 1."* — this batch is mode 2 P3+P4
+  only; the mode-1 break turn, break away and the mode-1 rotor envelope (RPM floor, retreating
+  blade stall) are the next batch. Until it lands, mode 1 answers "unable" to the break commands.
+
+### Mode 1: rates as settable flight parameters (user, 2026-11-18, verbatim — for the mode-1 batch)
+
+> *"It would be good to have turn rate as one flight parameter that can be set and mode 1 flies to
+> it. That'd get us different turns easily. Then the control logic for the axises would aim to get
+> that desired param. That'd be useful for any turn. Climb rate similarly , and acceleration."*
+
+Main-loop note on what exists: the merged mode-1 law (plan.md "Revised 2026-11-18 — mode 1")
+already runs on rate references internally — r_ref (turn rate, capped by the rate at
+`TURN_BANK_DEG`), vertical speed, dV_ref (capped by `MAX_ACCEL_MPS2`) — and `turn_continuous` /
+`level_off` already set a turn-rate goal. What is new is making **turn rate, climb rate and
+acceleration goals that commands set**, so a break is "turn rate high, hold speed, ≤100 m loss"
+rather than its own law, and an ordinary turn, a gentle turn and a break differ only in the
+requested rates. The rotor envelope (RPM floor, retreating blade stall) then limits what any
+requested rate can actually get.

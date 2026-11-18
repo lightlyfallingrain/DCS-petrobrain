@@ -1,11 +1,36 @@
-"""`body._apply_ai_pilot_wheel_goal` -- BL-16 mode 2 Stage P2a/P2b
-(`plans/flight-control/plan.md`, "Stage P2 ready to build"): the glue
-between `CrewConsole`'s one-shot transition fields and the goal-channel
-wire write (`AircraftLayerClient.write_ai_pilot_goal`). The rotation
+"""`body._apply_ai_pilot_wheel_goal` -- BL-16 mode 2 Stage P2a/P2b/P3+P4
+(`plans/flight-control/plan.md`, "Stage P2 ready to build", "Revised
+2026-11-18 -- Stages P3+P4 ready to build"): the glue between
+`CrewConsole`'s one-shot transition fields and the goal-channel/CBTM
+wire writes (`AircraftLayerClient.write_ai_pilot_goal`). The rotation
 mechanism/actions themselves are `belief.ai_pilot_wheel`'s own tested
 surface (`test_ai_pilot_wheel.py`); these tests exercise only the
 composition `body.py` adds on top: applying a transition, running
-`decide_ai_pilot_wheel`, and deciding whether/what to send."""
+`decide_ai_pilot_wheel`, and deciding whether/what to send.
+
+**Review fix (`plans/flight-control/review-p3p4.md` Required Fix 1):**
+the Stage P3+P4 classes below (`TestCbtmTransitions`,
+`TestFlightCommandEndsAlignment`, `TestLevelFlightAbortRecovery`,
+`TestRecoveryTriggerWiring`) cover the composition the pure-function
+tests in `test_ai_pilot_wheel.py` cannot reach: a CBTM one-shot
+transition actually landing on `align_phase`/`cbtm_action_sent` and a
+correctly-bumped `cbtm_seq` wire send, F-P6's "any voice command ends
+alignment" branch, the F-P8/Q0 `level_flight` abort, and `agl_m`/
+`ias_kmh`/`payload_count_dropped` actually reaching `decide_ai_pilot_
+wheel` from `runner`'s own live state rather than a test passing them
+in directly.
+
+**Every CBTM-transition call below also sends an ordinary goal
+message** -- a pre-existing behaviour this round found, not introduced
+by it (`_apply_ai_pilot_wheel_goal` always writes `goal=goal` back onto
+`runner.parked_flight_state` before computing `final_goal`, so a fresh,
+all-`None` `AiPilotWheelGoal()` differs from `runner.ai_pilot_goal_
+last_sent_seq`'s initial `None` and is sent once, harmlessly, on the
+first poll of any activation with no goal yet). Tests below that care
+only about the CBTM send filter `client.ai_pilot_goal_calls` down to
+the one entry whose `cbtm_action` (index 8) is not `None`, rather than
+asserting a single-call count that this pre-existing behaviour would
+break."""
 
 from __future__ import annotations
 
@@ -15,11 +40,13 @@ from typing import Any
 from belief.ai_pilot_wheel import (
     AiPilotGoalRequest,
     AiPilotWheelGoal,
+    FlightSnapshot,
     ParkedFlightState,
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from body import ConsolePerceptionRunner, _apply_ai_pilot_wheel_goal
+from perception.source import OwnshipState
 
 
 class _FakeAircraftClient:
@@ -298,3 +325,386 @@ class TestHvrtArbitration:
         sent = client.ai_pilot_goal_calls[0]
         assert sent[1] == "altitude"  # the goal runs
         assert sent[6] is None  # the translate is released on the wire
+
+
+def _cbtm_send(client: _FakeAircraftClient) -> tuple[Any, ...]:
+    """The one CBTM-carrying wire send among `client.ai_pilot_goal_
+    calls` (`cbtm_action`, index 8, not `None`) -- see this module's own
+    docstring for why a plain ordinary-goal send is also present and
+    must not be mistaken for it."""
+    cbtm_calls = [
+        call
+        for call in client.ai_pilot_goal_calls
+        if len(call) > 8 and call[8] is not None
+    ]
+    assert len(cbtm_calls) == 1
+    return cbtm_calls[0]
+
+
+class TestCbtmTransitions:
+    """Review fix (`plans/flight-control/review-p3p4.md` Required Fix 1):
+    each of the four `cbtm_*` one-shot transitions actually reaching
+    `align_phase`/`cbtm_action_sent` and a correctly-bumped `cbtm_seq`
+    wire send, through `_apply_ai_pilot_wheel_goal` itself -- not just
+    the underlying `belief.ai_pilot_wheel.cbtm_apply_align`/`cbtm_apply_
+    align_for_launch` pure functions (`test_ai_pilot_wheel.py`'s own
+    surface)."""
+
+    def test_align_starts_a_plain_alignment_and_sends_cbtm_seq_1(self) -> None:
+        runner, client = _runner()
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "align"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "aligning"
+        assert state.cbtm_action_sent == "align"
+        assert console.ai_pilot_cbtm_transition is None
+        assert runner.ai_pilot_cbtm_last_sent_seq == 1
+        sent = _cbtm_send(client)
+        assert sent[8] == "align"
+        assert sent[9] == 1
+
+    def test_align_for_launch_captures_a_snapshot_and_sends_cbtm_seq_1(self) -> None:
+        runner, client = _runner(
+            held_heading=90.0,
+            held_altitude=300.0,
+            held_altitude_ref="B",
+            held_speed=150.0,
+        )
+        runner.last_ownship_state = OwnshipState(
+            t_sim=10.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=300.0
+        )
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "align_for_launch"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "launch_aligned"
+        assert state.pre_align_snapshot == FlightSnapshot(
+            heading_deg=90.0,
+            altitude_m=300.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=300.0,
+        )
+        assert state.cbtm_action_sent == "align_for_launch"
+        sent = _cbtm_send(client)
+        assert sent[8] == "align_for_launch"
+        assert sent[9] == 1
+
+    def test_break_left_is_recorded_and_ends_an_outstanding_alignment(self) -> None:
+        """The break transition itself carries no `align_phase`
+        mutation of its own to apply -- F-P7's own heading-drop/align-
+        clear logic lives in `decide_ai_pilot_wheel`, keyed off `cbtm_
+        action_sent`. But `_apply_ai_pilot_wheel_goal` runs `decide_ai_
+        pilot_wheel` every call, in the same poll as this transition is
+        applied, so the end-to-end effect through this one function is
+        still `align_phase` dropping to `"none"` here -- the pure-
+        function split is `test_ai_pilot_wheel.py`'s own `TestDecide
+        AiPilotWheelCbtm`'s concern, not asserted a second time here."""
+        runner, client = _runner(align_phase="aligning")
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "break_left"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "none"
+        assert state.pre_align_snapshot is None
+        assert state.cbtm_action_sent == "break_left"
+        sent = _cbtm_send(client)
+        assert sent[8] == "break_left"
+        assert sent[9] == 1
+
+    def test_break_away_is_recorded_and_sent(self) -> None:
+        runner, client = _runner()
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "break_away"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.cbtm_action_sent == "break_away"
+        sent = _cbtm_send(client)
+        assert sent[8] == "break_away"
+        assert sent[9] == 1
+
+    def test_a_second_cbtm_transition_bumps_its_own_seq_space_again(self) -> None:
+        """`cbtm_seq` is its own distinct sequence space, never `goal_
+        seq` -- a second CBTM trigger bumps from the last *CBTM* seq
+        sent, independent of whatever `goal_seq` is doing."""
+        runner, client = _runner()
+        runner.ai_pilot_cbtm_last_sent_seq = 5
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "break_right"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.ai_pilot_cbtm_last_sent_seq == 6
+        sent = _cbtm_send(client)
+        assert sent[8] == "break_right"
+        assert sent[9] == 6
+
+
+class TestFlightCommandEndsAlignment:
+    """F-P6 (`plans/flight-control/plan.md`, "Stage P3+P4 ready to
+    build"): a fresh voice heading/altitude/speed command always ends
+    whichever `align_phase` is running (`"aligning"`/`"launch_aligned"`,
+    never `"recovering"` -- that case is `TestApplyAiPilotWheelGoal`'s
+    own "latest wins" path, unaffected by this branch) and is always
+    flown, never queued behind it."""
+
+    def test_a_heading_command_during_aligning_ends_it_and_still_flies(self) -> None:
+        runner, client = _runner(align_phase="aligning")
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=270.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "none"
+        assert state.pre_align_snapshot is None
+        goal = state.goal
+        assert goal is not None
+        assert goal.heading_target_deg == 270.0
+        assert goal.active_param == "heading"
+        assert any(
+            call[1] == "heading" and call[2] == 270.0
+            for call in client.ai_pilot_goal_calls
+        )
+
+    def test_an_altitude_command_during_launch_aligned_ends_it_and_keeps_the_snapshot_cleared(
+        self,
+    ) -> None:
+        """While `"launch_aligned"` with a captured snapshot, a fresh
+        altitude command still ends the alignment and drops the
+        snapshot outright -- the command is flown normally, not
+        absorbed into recovery (that only happens via `level_flight`'s
+        own `"recovering"` path, `TestLevelFlightAbortRecovery` below)."""
+        snapshot = FlightSnapshot(
+            heading_deg=90.0,
+            altitude_m=300.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=300.0,
+        )
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=snapshot
+        )
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="altitude", altitude_m=500.0, altitude_ref="barometric"
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "none"
+        assert state.pre_align_snapshot is None
+        goal = state.goal
+        assert goal is not None
+        assert goal.altitude_target_m == 500.0
+        assert goal.active_param == "altitude"
+
+    def test_a_speed_command_during_recovering_does_not_end_recovery(self) -> None:
+        """F-P6 deliberately excludes `"recovering"` -- a fresh command
+        for one of its own two recovering parameters just replaces that
+        parameter's target via the ordinary "latest wins" path (Q6),
+        and `align_phase` stays `"recovering"`."""
+        snapshot = FlightSnapshot(
+            heading_deg=90.0,
+            altitude_m=300.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=300.0,
+        )
+        runner, client = _runner(align_phase="recovering", pre_align_snapshot=snapshot)
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="speed", speed_kmh=200.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "recovering"
+        assert state.pre_align_snapshot == snapshot
+
+
+class TestLevelFlightAbortRecovery:
+    """F-P8/Q0 (`plans/flight-control/plan.md`, "Follow-up on the goal
+    check's own open assumptions"): "level off"/"level flight" spoken
+    while `"launch_aligned"` with a captured snapshot enters
+    `"recovering"` and seeds the recovery queue from the snapshot
+    (`seed_recovery_goal`), heading frozen at its current *held* value
+    -- never the snapshot's own heading, matching the reviewed "keep
+    aligned heading" reading (Fix 2) extended to this abort path."""
+
+    def test_launch_aligned_abort_enters_recovering_seeded_from_the_snapshot(
+        self,
+    ) -> None:
+        snapshot = FlightSnapshot(
+            heading_deg=90.0,
+            altitude_m=300.0,
+            altitude_ref="barometric",
+            speed_kmh=150.0,
+            agl_m=1000.0,
+        )
+        runner, client = _runner(
+            align_phase="launch_aligned",
+            pre_align_snapshot=snapshot,
+            held_heading=200.0,
+            held_altitude=900.0,
+            held_speed=400.0,
+        )
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_level_flight_transition = True
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "recovering"
+        assert state.pre_align_snapshot == snapshot  # kept, for the end condition
+        assert console.ai_pilot_level_flight_transition is False
+        goal = state.goal
+        assert goal is not None
+        # Heading frozen at the *current held* value, not the snapshot's.
+        assert goal.heading_target_deg == 200.0
+        # Altitude/speed jump straight to the snapshot's own targets.
+        assert goal.altitude_target_m == 300.0
+        assert goal.altitude_target_ref == "barometric"
+        assert goal.speed_target_kmh == 150.0
+        assert goal.active_param == "altitude"
+        assert "speed" in goal.pending_order
+
+    def test_aligning_abort_simply_ends_with_nothing_to_recover(self) -> None:
+        """Q1's "nothing to recover from" reasoning: while `"aligning"`
+        (no snapshot ever captured), `level_flight`'s abort just falls
+        back to `"none"` and the ordinary freeze-at-held-values applies,
+        same as the pre-existing non-CBTM `level_flight` behaviour."""
+        runner, client = _runner(
+            align_phase="aligning",
+            held_heading=200.0,
+            held_altitude=900.0,
+            held_speed=150.0,
+        )
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_level_flight_transition = True
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.align_phase == "none"
+        assert state.pre_align_snapshot is None
+        goal = state.goal
+        assert goal is not None
+        assert goal.heading_target_deg == 200.0
+        assert goal.altitude_target_m == 900.0
+        assert goal.speed_target_kmh == 150.0
+
+
+class TestRecoveryTriggerWiring:
+    """Required Fix 1's fourth bullet: `decide_ai_pilot_wheel`'s three
+    recovery triggers (payload drop, the AGL-relative floor, the IAS
+    ceiling) are actually fed from `runner`'s own live state by `_apply_
+    ai_pilot_wheel_goal` -- `agl_m` from `runner.last_ownship_state.alt_
+    agl_m`, `ias_kmh` from `runner.last_ias_kmh`, and `payload_count_
+    dropped` from comparing the caller-supplied `previous_payload_
+    counts` against `runner.parked_flight_state.payload_station_counts_
+    last_seen` -- not just `test_ai_pilot_wheel.py`'s own direct-argument
+    unit tests of the pure function."""
+
+    _SNAPSHOT = FlightSnapshot(
+        heading_deg=90.0,
+        altitude_m=300.0,
+        altitude_ref="barometric",
+        speed_kmh=150.0,
+        agl_m=1000.0,
+    )
+
+    def test_a_payload_drop_computed_from_the_previous_poll_triggers_recovery(
+        self,
+    ) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned",
+            pre_align_snapshot=self._SNAPSHOT,
+            payload_station_counts_last_seen={0: 1},
+        )
+
+        _apply_ai_pilot_wheel_goal(
+            runner,
+            CrewConsole(store=ContactStore()),
+            client,
+            previous_payload_counts={0: 2},
+        )
+
+        assert runner.parked_flight_state.align_phase == "recovering"
+
+    def test_no_drop_when_nothing_decreased_leaves_launch_aligned(self) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned",
+            pre_align_snapshot=self._SNAPSHOT,
+            payload_station_counts_last_seen={0: 1},
+        )
+
+        _apply_ai_pilot_wheel_goal(
+            runner,
+            CrewConsole(store=ContactStore()),
+            client,
+            previous_payload_counts={0: 1},
+        )
+
+        assert runner.parked_flight_state.align_phase == "launch_aligned"
+
+    def test_agl_from_last_ownship_state_crossing_the_floor_triggers_recovery(
+        self,
+    ) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=self._SNAPSHOT
+        )
+        runner.last_ownship_state = OwnshipState(
+            t_sim=10.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=950.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
+
+        assert runner.parked_flight_state.align_phase == "recovering"
+
+    def test_agl_from_last_ownship_state_still_above_the_floor_does_not_trigger(
+        self,
+    ) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=self._SNAPSHOT
+        )
+        runner.last_ownship_state = OwnshipState(
+            t_sim=10.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=990.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
+
+        assert runner.parked_flight_state.align_phase == "launch_aligned"
+
+    def test_ias_from_last_ias_kmh_crossing_the_ceiling_triggers_recovery(self) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=self._SNAPSHOT
+        )
+        runner.last_ias_kmh = 320.0
+
+        _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
+
+        assert runner.parked_flight_state.align_phase == "recovering"
+
+    def test_ias_from_last_ias_kmh_below_the_ceiling_does_not_trigger(self) -> None:
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=self._SNAPSHOT
+        )
+        runner.last_ias_kmh = 150.0
+
+        _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
+
+        assert runner.parked_flight_state.align_phase == "launch_aligned"

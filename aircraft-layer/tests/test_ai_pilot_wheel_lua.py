@@ -513,6 +513,10 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "SEAT_CAMERA_MAX_OFFAXIS_M",
     # fix/apw-seat-swap-settle -- the pilot-to-operator settle window.
     "AI_PILOT_SEAT_CHANGE_SETTLE_S",
+    # Stage P3+P4 -- `update_ai_pilot_wheel_overlay` now also calls
+    # `ai_pilot_cbtm_tick`, which closes over these.
+    "LONG_PRESS_HOLD_S",
+    "BREAK_AWAY_GAP_S",
 )
 
 #: `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON` are owned by `core.lua`, not
@@ -619,6 +623,31 @@ local ai_pilot_goal = {
     hvrt_mode_blocked_since_t = nil,
 }
 
+-- Stage P3+P4's own co-moving state and pending-release pair --
+-- `ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt`/`run_ai_pilot_wheel`'s
+-- unpark branch now all read/write this too, same reasoning as the
+-- goal-channel pair's own comment above.
+local ai_wheel_cbtm_pending_release_t = nil
+local ai_wheel_cbtm_pending_cmd = nil
+local ai_pilot_cbtm = {
+    action = nil,
+    seq = 0,
+    status = "idle",
+    mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
+    presses_done = 0,
+    gap_until_t = nil,
+}
+-- Hand-mirrored, not extracted (`_extract_lua_constant`'s regex is
+-- single-line only and this is a table literal) -- same values as
+-- production's own declaration.
+local AI_PILOT_CBTM_PRESS_CMD = {
+    align_for_launch = AI_WHEEL_UP,
+    break_left = AI_WHEEL_LEFT,
+    break_right = AI_WHEEL_RIGHT,
+    break_away = AI_WHEEL_LEFT,
+}
+
 local ai_pilot_takeover = {
     stage = nil,
     t = nil,
@@ -717,6 +746,13 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_hvrt"),
+            # Stage P3+P4 -- `update_ai_pilot_wheel_overlay` now also
+            # calls `ai_pilot_cbtm_tick`, and `run_ai_pilot_wheel`'s own
+            # release-deadline check and unpark branch now reference
+            # `ai_pilot_cbtm_finish`.
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_cbtm_mode_ready"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_cbtm_finish"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_cbtm_tick"),
             (_AI_PILOT_WHEEL_LUA, "run_ai_pilot_wheel"),
             (_AI_PILOT_WHEEL_LUA, "update_ai_pilot_wheel_overlay"),
         )
@@ -1467,6 +1503,7 @@ def _run_on_stop(
     pending_cmd: str,
     goal_hold_cmd: str = "nil",
     hvrt_hold_cmd: str = "nil",
+    cbtm_pending_cmd: str = "nil",
 ) -> dict[str, str]:
     """`AC-B13`'s own test (plan Stage 6): runs the real, extracted
     `on_stop` against a minimal `GetDevice` mock for device 30's
@@ -1531,6 +1568,20 @@ local ai_pilot_goal = {{
     hvrt_hold_cmd = {hvrt_hold_cmd},
     hvrt_started_t = 2.0,
 }}
+-- Stage P3+P4's own co-moving state and pending-release pair -- `on_
+-- stop` now releases/resets both too (same AC-B13-class gap this whole
+-- fixture exists to check).
+local ai_wheel_cbtm_pending_release_t = 42.0
+local ai_wheel_cbtm_pending_cmd = {cbtm_pending_cmd}
+local ai_pilot_cbtm = {{
+    action = "break_left",
+    seq = 3,
+    status = "running",
+    mode_cycle_attempts = 1,
+    mode_blocked_since_t = nil,
+    presses_done = 1,
+    gap_until_t = nil,
+}}
 """
     lines = [preamble]
     lines.extend(
@@ -1567,7 +1618,11 @@ local ai_pilot_goal = {{
         'print("goal_hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))\n'
         'print("goal_hvrt_direction=" .. tostring(ai_pilot_goal.hvrt_direction))\n'
         'print("goal_hvrt_hold_cmd=" .. tostring(ai_pilot_goal.hvrt_hold_cmd))\n'
-        'print("goal_hvrt_started_t=" .. tostring(ai_pilot_goal.hvrt_started_t))'
+        'print("goal_hvrt_started_t=" .. tostring(ai_pilot_goal.hvrt_started_t))\n'
+        'print("cbtm_pending_release_t=" .. tostring(ai_wheel_cbtm_pending_release_t))\n'
+        'print("cbtm_pending_cmd=" .. tostring(ai_wheel_cbtm_pending_cmd))\n'
+        'print("cbtm_action=" .. tostring(ai_pilot_cbtm.action))\n'
+        'print("cbtm_status=" .. tostring(ai_pilot_cbtm.status))'
     )
     script = "\n".join(lines)
 
@@ -1622,6 +1677,24 @@ class TestOnStop:
         assert values["goal_hvrt_direction"] == "nil"
         assert values["goal_hvrt_hold_cmd"] == "nil"
         assert values["goal_hvrt_started_t"] == "nil"
+        # Stage P3+P4's own co-moving state -- always cleared too, even
+        # with no open CBTM press this call (the default `cbtm_pending_
+        # cmd` of `"nil"`).
+        assert values["cbtm_pending_release_t"] == "nil"
+        assert values["cbtm_pending_cmd"] == "nil"
+        assert values["cbtm_action"] == "nil"
+        assert values["cbtm_status"] == "idle"
+
+    def test_open_cbtm_press_is_released(self) -> None:
+        """Stage P3+P4's own addition to the `AC-B13` fix, same
+        proactive reasoning as the goal/HVRT one above: an open CBTM
+        timed press (e.g. a break caught mid-hold) is released too."""
+        values = _run_on_stop("nil", cbtm_pending_cmd="3003")  # AI_WHEEL_LEFT
+        assert values["press_log"] == "3003:0"
+        assert values["cbtm_pending_release_t"] == "nil"
+        assert values["cbtm_pending_cmd"] == "nil"
+        assert values["cbtm_action"] == "nil"
+        assert values["cbtm_status"] == "idle"
 
     def test_open_goal_hold_and_hvrt_press_are_both_released(self) -> None:
         """Stage P2a/P2b's own addition to the `AC-B13` fix, applied
@@ -1718,6 +1791,23 @@ local ai_pilot_goal = {
     hvrt_started_t = nil,
     hvrt_mode_cycle_attempts = 0,
     hvrt_mode_blocked_since_t = nil,
+}
+
+-- Stage P3+P4's own co-moving state and pending-release pair --
+-- `ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt`/`handle_ai_pilot_goal_
+-- command` now all read or write this too (the pause guard and the
+-- new sibling one-shot fields respectively), though none of them call
+-- `ai_pilot_cbtm_tick` itself in this harness.
+local ai_wheel_cbtm_pending_release_t = nil
+local ai_wheel_cbtm_pending_cmd = nil
+local ai_pilot_cbtm = {
+    action = nil,
+    seq = 0,
+    status = "idle",
+    mode_cycle_attempts = 0,
+    mode_blocked_since_t = nil,
+    presses_done = 0,
+    gap_until_t = nil,
 }
 
 local press_log = {}
@@ -2256,6 +2346,7 @@ local ai_pilot_takeover = {
     raw_arg852 = nil, raw_arg952 = nil, stage = nil, correction_path = nil,
 }
 local ai_pilot_goal = { progress = "idle", goal_seq = 0 }
+local ai_pilot_cbtm = { status = "idle", seq = 0 }
 local DEBUG = false
 local function debug_log(msg) end
 
