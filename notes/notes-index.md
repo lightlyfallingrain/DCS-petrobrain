@@ -51,3 +51,5 @@ is now a pointer and holds no insights; writing to it puts the bullet where noth
 - [[mission-start-and-reset-patterns-bl-15]] — Mission Start & Reset Patterns (BL-15)
 - [[lua-export-module-architecture]] — Lua Export module architecture (AC-B12)
 - [[lua-sandboxing-with-lupa]] — Lua Sandboxing with lupa (BL-17)
+- [[feedback-control-law-design]] — Feedback control law design (BL-16 mode 1)
+- [[wire-protocol-validation]] — Wire protocol validation
