@@ -3527,9 +3527,22 @@ def _apply_flight_control(
     re-sent every poll regardless of either one-shot transition above --
     this is the lease Lua's own unpark-take precondition checks against
     (`ARM_LEASE_S`), and it must keep moving for as long as body-layer is
-    alive, independent of whatever else this poll's dispatch did."""
+    alive, independent of whatever else this poll's dispatch did.
+
+    **Co-moving row 11's other direction**: an `axes_*` goal action
+    spoken just before a park races `decide_flight_control`'s own park-
+    edge transition to `OVERLAY` -- both `flight_control_transition`/
+    `flight_control_goal_transition` are discarded unsent, never bumping
+    `wire_seq`, whenever `phase == "OVERLAY"` by the time this runs: a
+    stale axes goal/handover request has no meaning once he is flying
+    through the overlay instead, and sending it would confuse Lua's own
+    `armed` state for no benefit."""
     state = crew_console.flight_control_state
     limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
+
+    if state.phase == "OVERLAY":
+        crew_console.flight_control_transition = None
+        crew_console.flight_control_goal_transition = None
 
     transition = crew_console.flight_control_transition
     if transition is not None:

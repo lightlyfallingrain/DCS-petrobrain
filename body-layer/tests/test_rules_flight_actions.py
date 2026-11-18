@@ -31,6 +31,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from belief.ai_pilot_wheel import (
     AiPilotGoalRequest,
     AiPilotWheelGoal,
@@ -728,6 +730,41 @@ class TestHandoverActions:
         lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == []
         assert console.flight_control_transition is None
+
+
+class TestSeatNeverGatesMode1:
+    """BL-16 mode 1 Decision 25 -- "mode 1 is never gated on seat":
+    `flight_mode()`/`take_controls`'s own result must be identical
+    whether `player_seat` reads `"pilot"`, `"operator"`, or `None`
+    (unknown) -- both read `parked_active`/`on_ground`/`ias_kmh`/
+    `attack_run_engaged` only."""
+
+    @pytest.mark.parametrize("seat", ["pilot", "operator", None])
+    def test_flight_mode_is_the_same_whichever_seat(self, seat: str | None) -> None:
+        flying_console = _dispatching_console(parked_active=False, player_seat=seat)
+        flying_console.flight_control_state = replace(
+            flying_console.flight_control_state, phase="ACTIVE"
+        )
+        assert flying_console.flight_mode() == "axes"
+
+        overlay_console = _dispatching_console(parked_active=True, player_seat=seat)
+        assert overlay_console.flight_mode() == "overlay"
+
+        nobody_console = _dispatching_console(parked_active=False, player_seat=seat)
+        assert nobody_console.flight_mode() is None
+
+    @pytest.mark.parametrize("seat", ["pilot", "operator", None])
+    def test_take_controls_succeeds_the_same_whichever_seat(
+        self, seat: str | None
+    ) -> None:
+        console = _dispatching_console(parked_active=False, player_seat=seat)
+        console.on_ground = False
+        console.ias_kmh = 150.0
+        console.attack_run_engaged = False
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        assert lines == []
+        assert console.flight_control_state.phase == "TAKING"
+        assert console.flight_control_transition == "take"
 
 
 class TestTransitionsResetEachDispatch:

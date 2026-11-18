@@ -173,6 +173,34 @@ class TestApplyAiPilotWheelGoal:
         assert runner.ai_pilot_goal_last_sent_seq is None
         assert client.ai_pilot_goal_calls == []
 
+    def test_unparking_clears_every_stranded_ai_pilot_one_shot(self) -> None:
+        """BL-16 mode 1's Co-moving row 11 fix (`plans/flight-control/
+        plan.md`, "Revised 2026-11-18"): previously the three `ai_
+        pilot_*` one-shot transition fields persisted while unparked
+        (this function returned before ever reaching their clear) --
+        harmless while `CrewState.has_controls == parked_active` (the
+        gate refused every flight action while unparked, so nothing
+        could ever set one), but a latent leak once mode 1 widens `has_
+        controls`: an overlay command spoken just before an unpark is
+        now a realistic way to strand one, to fire on the next park.
+        All three must be `None`/`False` after this call, not just the
+        `goal`/`ai_pilot_goal_last_sent_seq` the pre-existing test above
+        already covers."""
+        runner, client = _runner(parked_active=False)
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=90.0
+        )
+        console.ai_pilot_level_flight_transition = True
+        console.ai_pilot_hvrt_transition = "left"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert console.ai_pilot_goal_transition is None
+        assert console.ai_pilot_level_flight_transition is False
+        assert console.ai_pilot_hvrt_transition is None
+        assert client.ai_pilot_goal_calls == []
+
     def test_no_ownship_sample_yet_is_a_no_op(self) -> None:
         client = _FakeAircraftClient()
         runner = ConsolePerceptionRunner(

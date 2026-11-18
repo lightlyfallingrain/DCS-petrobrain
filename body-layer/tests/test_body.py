@@ -3605,6 +3605,41 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
 
 
+def test_run_once_flying_clamps_the_optic_to_naked_eye(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BL-16 (U6, answered 2026-11-18: "no optics while Petrovich
+    flies", both modes) -- `run_once(flying=True)` must clamp whatever
+    `decide_optic` chose down to `UNAIDED_OPTIC`, the same external-
+    clamp shape the sight-not-ready test above pins for a different
+    cap. `flying=False` (the default) must not clamp anything -- the
+    companion negative case, so this is not a tautology (root
+    `CLAUDE.md`, "Show the red when your assertion is that nothing
+    happens")."""
+    import body as body_module
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(optic=BINOCULAR_OPTIC)
+
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once(flying=False)
+    assert runner.optic is BINOCULAR_OPTIC
+
+    telemetry["dcs_model_time_s"] = 1.0
+    runner.run_once(flying=True)
+    assert runner.optic is UNAIDED_OPTIC
+
+
 def test_run_once_resets_the_believed_sight_aim_to_boresight_on_observed_observ_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
