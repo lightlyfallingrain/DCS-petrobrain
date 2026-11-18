@@ -1,51 +1,62 @@
 --[[
-FLIGHT-AXES PROBE, SORTIE 1 (BL-16 mode 1, rows M0-A..M0-D) -- not the
-production script. Testing aid.
+FLIGHT-AXES PROBE, SORTIE 1 (BL-16 mode 1, rows M0-A..M0-D and M0-J) -- not
+the production script. Testing aid.
 
-Spec: plans/flight-control/plan.md, "Revised 2026-11-18 -- mode 1", stage M0.
+Spec: plans/flight-control/plan.md, "Revised 2026-11-18 -- mode 1", stage M0,
+including "M0 changes, amended 2026-11-18 for U5 and the seat rule".
 Scaffold: Export.probe-control-command-hold.lua (probe v2, 2026-11-01).
 
 Deploy by copying over Saved Games\DCS\Scripts\Export.lua; restore the
 production Export.lua afterwards. Petrobrain does not run while this is
 deployed. Log: Logs\aircraft_layer_probe_flight_axes.log
 
-FLIGHT: air start, straight and level, ~150 km/h, ~200 m AGL, flat ground,
-controls NOT parked, player in either seat.
+FLIGHT: air start, straight and level, ~150 km/h, ~200 m AGL, flat ground.
 
 CONTROL: an ICS half-press (pilot trigger arg 738 or operator trigger arg
 856, 0.5) is the only input. A full (radio) press is ignored.
   - Idle -> a half-press starts the next segment.
-  - A read segment (A*, B1, C1) -> a half-press ends it.
-  - A write segment (B2, C2, D*) runs its own schedule and ends itself;
-    a half-press during one STOPS WRITING at once (abort).
+  - A read segment -> a half-press ends it.
+  - A write segment runs its own schedule and ends itself; a half-press
+    during one STOPS WRITING at once (abort).
   The seat whose trigger was pressed is the seat whose control args are
   captured for writing.
 
 SEGMENTS, in order:
-  A1 level 60 s | A2 20 deg bank turns both ways | A3 5 m/s climb and
-  descend 100 m | A4 150 -> 220 km/h and back      (read only; note the HSI
-                                                    heading at each press)
-  B1 sweep pedals full left -> full right           (read only)
-  B2 feet off: 2003 = captured, +-0.05, +-0.10, 3 s each   (write)
-  C1 sweep collective low -> high                   (read only)
-  C2 2004 = captured, then +0.02 / -0.02, 2 s each  (write; auto-abort)
-  D1 hold every enabled axis 30 s while the pilot stirs stick, pedals,
-     collective ~10 s each, dither 1e-3            (write)
-  D2 same, dither 1e-4                              (write)
+  Pilot seat, controls unparked:
+    A1 level 60 s | A2 20 deg bank turns both ways | A3 5 m/s climb and
+    descend 100 m | A4 150 -> 220 km/h and back   (read; note HSI heading)
+    B1 sweep pedals                                 (read)
+    B2 feet off: 2003 = captured, +-0.05, +-0.10, 3 s each   (write)
+    C1 sweep collective                             (read)
+    C2 2004 = captured, then +0.02 / -0.02, 2 s each  (write; auto-abort)
+    D1 hold all enabled axes 30 s while the pilot stirs, dither 1e-3 (write)
+    D2 same, dither 1e-4                            (write)
+  Operator seat, copilot controls UNPARKED (amendment change 1):
+    B1o B2o C1o C2o D1o D2o -- the same, from the front seat
+  Operator seat, park and unpark while writing (amendment change 2, M0-J):
+    J1 hold; the user parks (Request Aircraft Control) -> writing stops on
+       the parked_active rising edge; ~20 s later the user unparks -> on
+       the falling edge the probe captures the PILOT set 1100-1103 in that
+       frame and holds it 10 s
+    J2 the same, capturing the SUM of both arg sets at the edge
+    J3 hold; park; then swap operator -> pilot while parked -> on the
+       falling edge capture as J1 and hold 10 s
 
-B2 and C2 decide, in flight, whether D also holds the pedals / collective:
-  pedals     if the pedal arg stayed within PEDAL_HOLD_TOL of each command;
-  collective if C2 finished without an abort.
-Pitch and roll are always held in D (probe v2 proved them).
+Each pass's B2 / C2 decide whether that pass's D also holds pedals /
+collective (pedals: arg within PEDAL_HOLD_TOL of each command; collective:
+C2 finished without an abort). The operator pass's results carry into J.
 
-C2 AUTO-ABORT (stops writing 2004 at once, logged with the reason):
-  |VS| > C2_ABORT_VS; the arg jumps > C2_JUMP_TOL from captured in the first
-  0.5 s (sign or scale wrong); or on the first step the arg moves against
-  the command (sign wrong).
+C2 AUTO-ABORT: |VS| > C2_ABORT_VS; the arg jumps > C2_JUMP_TOL from captured
+in the first 0.5 s; or on the first step the arg moves against the command.
 
-LOG: one row per frame during a segment, one per 0.1 s when idle; a dump of
-every getter's table at start; a per-segment SUMMARY of how often each
-value changed per second (the "updates every frame?" check).
+parked_active is computed exactly as production does (Petrobrain/
+ai_pilot_wheel.lua): arg 852 >= 0.9 AND the camera seat is the operator's.
+Every frame is logged from 1 s before to 3 s after any change in
+parked_active or the camera seat, whatever is running (amendment change 4).
+
+LOG: ROW lines (columns in ROW_COLUMNS), one per frame during a segment or
+an edge window, one per 0.1 s otherwise; EDGE lines; a getter dump at
+start; a per-segment SUMMARY of how often each value changed per second.
 ]]
 
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_flight_axes.log"
@@ -62,6 +73,7 @@ local SEAT_ARGS = {
 }
 local ARG_STICK_PARK = 852
 local ARG_PEDALS_PARK = 952
+local AI_PILOT_PARK_THRESHOLD = 0.9   -- production's value
 
 local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2004 }
 -- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals unproven;
@@ -82,27 +94,41 @@ local C2_SIGN_MIN_MOVE = 0.005
 local D_HOLD_S = 30.0
 local DITHER_D1 = 1e-3
 local DITHER_D2 = 1e-4
+local J_DITHER = 1e-3
+local J_WAIT_S = 120.0       -- give up on a J row if no park/unpark by then
+local J_HOLD_AFTER_S = 10.0  -- hold this long after the unpark capture
+
 local IDLE_ROW_S = 0.1
+local EDGE_PRE_S = 1.0
+local EDGE_POST_S = 3.0
 local FLUSH_S = 0.5
 
--- Camera seat, copied from Petrobrain/ai_pilot_wheel.lua (Views.lua eye x:
--- pilot 3.15 m, operator 4.65 m).
+-- Copied from Petrobrain/ai_pilot_wheel.lua (do not re-derive).
 local SEAT_BOUNDARY_FWD_M = 4.1
 local SEAT_CAMERA_MIN_FWD_M = 2.0
 local SEAT_CAMERA_MAX_FWD_M = 7.0
 local SEAT_CAMERA_MAX_OFFAXIS_M = 1.5
 
 local SEGMENTS = {
-    { id = "A1", kind = "read", say = "60 s straight and level; note HSI heading" },
+    { id = "A1", kind = "read", say = "pilot seat: 60 s straight and level; note HSI heading" },
     { id = "A2", kind = "read", say = "20 deg bank turns both ways; note HSI heading" },
     { id = "A3", kind = "read", say = "5 m/s climb 100 m, then descend 100 m" },
     { id = "A4", kind = "read", say = "accelerate 150 -> 220 km/h and back; note HSI heading" },
-    { id = "B1", kind = "read", say = "sweep pedals slowly full left -> full right -> centre" },
+    { id = "B1", kind = "read", pass_start = true, say = "sweep pedals slowly full left -> full right -> centre" },
     { id = "B2", kind = "pedals", say = "feet OFF the pedals; probe writes 2003" },
     { id = "C1", kind = "read", say = "sweep collective slowly low -> high -> back" },
     { id = "C2", kind = "collective", say = "hand OFF the collective; probe writes 2004" },
     { id = "D1", kind = "hold", dither = DITHER_D1, say = "stir stick 10 s, pedals 10 s, collective 10 s" },
     { id = "D2", kind = "hold", dither = DITHER_D2, say = "same again, smaller dither" },
+    { id = "B1o", kind = "read", pass_start = true, say = "OPERATOR seat, copilot controls unparked: sweep pedals" },
+    { id = "B2o", kind = "pedals", say = "feet OFF the pedals; probe writes 2003" },
+    { id = "C1o", kind = "read", say = "sweep collective slowly low -> high -> back" },
+    { id = "C2o", kind = "collective", say = "hand OFF the collective; probe writes 2004" },
+    { id = "D1o", kind = "hold", dither = DITHER_D1, say = "stir stick 10 s, pedals 10 s, collective 10 s" },
+    { id = "D2o", kind = "hold", dither = DITHER_D2, say = "same again, smaller dither" },
+    { id = "J1", kind = "park", capture = "pilot", say = "operator seat: park, ~20 s, unpark" },
+    { id = "J2", kind = "park", capture = "sum", say = "operator seat: park, ~20 s, unpark" },
+    { id = "J3", kind = "park", capture = "pilot", say = "operator seat: park, then swap to the PILOT seat" },
 }
 
 -- ---------------------------------------------------------------- logging
@@ -157,26 +183,52 @@ local function read_arg(n)
     return nil
 end
 
-local player_seat = nil
+-- Verbatim from Petrobrain/ai_pilot_wheel.lua.
+local function ai_pilot_seat_from_camera(cam_p, own_p, heading_rad, pitch_rad)
+    if type(cam_p) ~= "table" or type(own_p) ~= "table" or type(heading_rad) ~= "number" then
+        return nil, nil
+    end
+    if type(cam_p.x) ~= "number" or type(cam_p.y) ~= "number" or type(cam_p.z) ~= "number"
+        or type(own_p.x) ~= "number" or type(own_p.y) ~= "number" or type(own_p.z) ~= "number" then
+        return nil, nil
+    end
+    if type(pitch_rad) ~= "number" then
+        pitch_rad = 0.0
+    end
+    local dx, dy, dz = cam_p.x - own_p.x, cam_p.y - own_p.y, cam_p.z - own_p.z
+    local cp = math.cos(pitch_rad)
+    local fwd = dx * cp * math.cos(heading_rad) + dy * math.sin(pitch_rad) + dz * cp * math.sin(heading_rad)
+    local offaxis_sq = dx * dx + dy * dy + dz * dz - fwd * fwd
+    if fwd < SEAT_CAMERA_MIN_FWD_M or fwd > SEAT_CAMERA_MAX_FWD_M
+        or offaxis_sq > SEAT_CAMERA_MAX_OFFAXIS_M * SEAT_CAMERA_MAX_OFFAXIS_M then
+        return nil, fwd
+    end
+    if fwd >= SEAT_BOUNDARY_FWD_M then
+        return "operator", fwd
+    end
+    return "pilot", fwd
+end
 
-local function update_seat()
+local player_seat = nil
+local cam_fwd_m = nil
+local parked_active = false
+
+local function update_seat_and_park()
     local cam = call(LoGetCameraPosition)
     local sd = call(LoGetSelfData)
-    if type(cam) ~= "table" or type(cam.p) ~= "table" or type(sd) ~= "table" then return end
-    local pos = sd.Position
-    local own = type(pos) == "table" and (pos.p or pos) or nil
-    local hdg, pitch = sd.Heading, call(LoGetADIPitchBankYaw)
-    if type(own) ~= "table" or type(hdg) ~= "number" then return end
-    if type(pitch) ~= "number" then pitch = 0.0 end
-    local dx, dy, dz = cam.p.x - own.x, cam.p.y - own.y, cam.p.z - own.z
-    local cp = math.cos(pitch)
-    local fwd = dx * cp * math.cos(hdg) + dy * math.sin(pitch) + dz * cp * math.sin(hdg)
-    local off_sq = dx * dx + dy * dy + dz * dz - fwd * fwd
-    if fwd < SEAT_CAMERA_MIN_FWD_M or fwd > SEAT_CAMERA_MAX_FWD_M
-        or off_sq > SEAT_CAMERA_MAX_OFFAXIS_M * SEAT_CAMERA_MAX_OFFAXIS_M then
-        return
+    local cam_p = type(cam) == "table" and cam.p or nil
+    local own_p, heading = nil, nil
+    if type(sd) == "table" then
+        local pos = sd.Position
+        own_p = type(pos) == "table" and (pos.p or pos) or nil
+        heading = sd.Heading
     end
-    player_seat = fwd >= SEAT_BOUNDARY_FWD_M and "operator" or "pilot"
+    local seat, fwd = ai_pilot_seat_from_camera(cam_p, own_p, heading, call(LoGetADIPitchBankYaw))
+    cam_fwd_m = fwd
+    if seat ~= nil then player_seat = seat end
+    local stick_park = read_arg(ARG_STICK_PARK)
+    parked_active = player_seat == "operator" and stick_park ~= nil
+        and stick_park >= AI_PILOT_PARK_THRESHOLD
 end
 
 -- Every scalar a controller might close on, by name. Order fixes the row layout.
@@ -189,12 +241,10 @@ local FIELD_NAMES = {
 
 local function sample()
     local s = {}
-    local p, b, y = nil, nil, nil
     if type(LoGetADIPitchBankYaw) == "function" then
-        local ok, pp, bb, yy = pcall(LoGetADIPitchBankYaw)
-        if ok then p, b, y = pp, bb, yy end
+        local ok, p, b, y = pcall(LoGetADIPitchBankYaw)
+        if ok then s.adi_pitch, s.adi_bank, s.adi_yaw = p, b, y end
     end
-    s.adi_pitch, s.adi_bank, s.adi_yaw = p, b, y
     local sd = call(LoGetSelfData)
     s.sd_heading = type(sd) == "table" and sd.Heading or nil
     s.mag_yaw = call(LoGetMagneticYaw)
@@ -233,21 +283,25 @@ local dither_sign = 1.0
 local stats = nil     -- per-segment change counts
 local hold_pedals, hold_collective = false, false
 local b2_worst = 0.0
+local prev_parked, prev_seat = nil, nil
+local edge_until_t = nil
+local pre_rows = {}   -- {t=, line=} for the last EDGE_PRE_S, idle only
 
 local function header()
-    local cols = { "t", "dt", "seg", "seat", "cmd_p", "cmd_r", "cmd_y", "cmd_c" }
+    local cols = { "t", "dt", "seg", "seat", "parked", "cmd_p", "cmd_r", "cmd_y", "cmd_c" }
     for _, n in ipairs(FIELD_NAMES) do cols[#cols + 1] = n end
     log("ROW_COLUMNS " .. table.concat(cols, " "))
 end
 
-local function row(t, dt, s)
+local function format_row(t, dt, s)
     local sent = seg and seg.sent or {}
     local out = {
         string.format("%.3f", t), fmt(dt), seg and seg.def.id or "idle", player_seat or "nil",
+        parked_active and "1" or "0",
         fmt(sent.pitch), fmt(sent.roll), fmt(sent.pedals), fmt(sent.collective),
     }
     for _, n in ipairs(FIELD_NAMES) do out[#out + 1] = fmt(s[n]) end
-    log("ROW " .. table.concat(out, " "))
+    return "ROW " .. table.concat(out, " ")
 end
 
 local function count_changes(s)
@@ -278,17 +332,39 @@ local function clamp(v)
     return v
 end
 
+local function capture_from(seat_name)
+    local a = SEAT_ARGS[seat_name]
+    return {
+        pitch = read_arg(a.pitch), roll = read_arg(a.roll),
+        pedals = read_arg(a.pedals), collective = read_arg(a.collective),
+    }
+end
+
+local function capture_sum()
+    local p, o = capture_from("pilot"), capture_from("operator")
+    local out = {}
+    for _, axis in ipairs({ "pitch", "roll", "pedals", "collective" }) do
+        if p[axis] ~= nil and o[axis] ~= nil then out[axis] = p[axis] + o[axis] end
+    end
+    return out
+end
+
+local function captured_text(c)
+    return string.format("p=%s r=%s y=%s c=%s", fmt(c.pitch), fmt(c.roll), fmt(c.pedals), fmt(c.collective))
+end
+
 -- ---------------------------------------------------------------- segments
 local function end_segment(t, why)
     if seg == nil then return end
     summary(t)
-    if seg.def.id == "B2" and why == "done" then
+    local kind = seg.def.kind
+    if kind == "pedals" and why == "done" then
         hold_pedals = b2_worst <= PEDAL_HOLD_TOL
-        log(string.format("B2 RESULT worst |arg - command| = %.4f -> D holds pedals: %s",
-            b2_worst, tostring(hold_pedals)))
-    elseif seg.def.id == "C2" then
+        log(string.format("%s RESULT worst |arg - command| = %.4f -> D holds pedals: %s",
+            seg.def.id, b2_worst, tostring(hold_pedals)))
+    elseif kind == "collective" then
         hold_collective = why == "done"
-        log("C2 RESULT -> D holds collective: " .. tostring(hold_collective))
+        log(string.format("%s RESULT -> D holds collective: %s", seg.def.id, tostring(hold_collective)))
     end
     log(string.format("t=%.3f END %s (%s)", t, seg.def.id, why))
     seg, stats = nil, nil
@@ -301,31 +377,40 @@ local function start_segment(t, seat)
         return
     end
     next_index = next_index + 1
-    local a = SEAT_ARGS[seat]
-    seg = {
-        def = def, seat = seat, t0 = t, sent = {},
-        captured = {
-            pitch = read_arg(a.pitch), roll = read_arg(a.roll),
-            pedals = read_arg(a.pedals), collective = read_arg(a.collective),
-        },
-    }
+    if def.pass_start then hold_pedals, hold_collective = false, false end
+    seg = { def = def, seat = seat, t0 = t, sent = {}, captured = capture_from(seat), phase = "holding" }
     stats = { changes = {}, prev = {}, frames = 0 }
-    if def.id == "B2" then b2_worst = 0.0 end
-    local c = seg.captured
-    log(string.format("t=%.3f START %s (%s) seat=%s player_seat=%s captured p=%s r=%s y=%s c=%s | D will hold pedals=%s collective=%s",
-        t, def.id, def.say, seat, player_seat or "nil", fmt(c.pitch), fmt(c.roll), fmt(c.pedals),
-        fmt(c.collective), tostring(hold_pedals), tostring(hold_collective)))
-    for _, axis in ipairs({ "pitch", "roll", "pedals", "collective" }) do
-        if def.kind ~= "read" and c[axis] == nil then
-            log("  capture failed for " .. axis .. "; segment not written")
-            end_segment(t, "capture failed")
-            return
+    if def.kind == "pedals" then b2_worst = 0.0 end
+    log(string.format("t=%.3f START %s (%s) trigger_seat=%s camera_seat=%s parked=%s captured %s | holds pedals=%s collective=%s",
+        t, def.id, def.say, seat, player_seat or "nil", tostring(parked_active),
+        captured_text(seg.captured), tostring(hold_pedals), tostring(hold_collective)))
+    if player_seat ~= nil and player_seat ~= seat then
+        log("  WARNING: trigger seat and camera seat differ")
+    end
+    if def.kind ~= "read" then
+        for _, axis in ipairs({ "pitch", "roll", "pedals", "collective" }) do
+            if seg.captured[axis] == nil then
+                log("  capture failed for " .. axis .. "; segment not written")
+                end_segment(t, "capture failed")
+                return
+            end
         end
     end
 end
 
--- Returns the commands to send this frame (axis -> value), or nil when the
--- segment's own schedule has finished.
+local function hold_cmds(c, d)
+    local out = {
+        pitch = clamp(SIGN.pitch * c.pitch + d),
+        roll = clamp(SIGN.roll * c.roll + d),
+    }
+    if hold_pedals and c.pedals ~= nil then out.pedals = clamp(SIGN.pedals * c.pedals + d) end
+    if hold_collective and c.collective ~= nil then out.collective = clamp(SIGN.collective * c.collective + d) end
+    return out
+end
+
+-- Returns the commands to send this frame (axis -> value; {} = send
+-- nothing), nil when the schedule has finished, or false plus a reason to
+-- abort.
 local function schedule(t, s)
     local def, c, el = seg.def, seg.captured, t - seg.t0
     if def.kind == "pedals" then
@@ -351,8 +436,7 @@ local function schedule(t, s)
             return false, string.format("jump at capture: arg %s vs captured %s (sign or scale wrong)",
                 fmt(arg), fmt(c.collective))
         end
-        local first_step_end = C2_STEPS[1][2] + C2_SIGN_CHECK_S
-        if arg ~= nil and seg.c2_checked == nil and el >= first_step_end then
+        if arg ~= nil and seg.c2_checked == nil and el >= C2_STEPS[1][2] + C2_SIGN_CHECK_S then
             seg.c2_checked = true
             local moved = arg - c.collective
             local expected = C2_STEPS[2][1] / SIGN.collective
@@ -365,14 +449,35 @@ local function schedule(t, s)
     elseif def.kind == "hold" then
         if el >= D_HOLD_S then return nil end
         dither_sign = -dither_sign
-        local d = def.dither * dither_sign
-        local out = {
-            pitch = clamp(SIGN.pitch * c.pitch + d),
-            roll = clamp(SIGN.roll * c.roll + d),
-        }
-        if hold_pedals then out.pedals = clamp(SIGN.pedals * c.pedals + d) end
-        if hold_collective then out.collective = clamp(SIGN.collective * c.collective + d) end
-        return out
+        return hold_cmds(c, def.dither * dither_sign)
+    elseif def.kind == "park" then
+        -- holding -> (parked_active rises) parked -> (falls) taken -> done
+        if seg.phase == "holding" then
+            if parked_active then
+                seg.phase, seg.phase_t = "parked", t
+                log(string.format("t=%.3f %s PARK seen: writing stopped", t, def.id))
+                return {}
+            end
+            if el >= J_WAIT_S then return false, "no park within " .. J_WAIT_S .. " s" end
+        elseif seg.phase == "parked" then
+            if not parked_active then
+                seg.captured = def.capture == "sum" and capture_sum() or capture_from("pilot")
+                seg.phase, seg.phase_t = "taken", t
+                log(string.format("t=%.3f %s UNPARK seen (camera_seat=%s): captured %s from %s, holding",
+                    t, def.id, player_seat or "nil", captured_text(seg.captured), def.capture))
+                if seg.captured.pitch == nil or seg.captured.roll == nil then
+                    return false, "unpark capture failed"
+                end
+            elseif t - seg.phase_t >= J_WAIT_S then
+                return false, "no unpark within " .. J_WAIT_S .. " s"
+            else
+                return {}
+            end
+        elseif seg.phase == "taken" and t - seg.phase_t >= J_HOLD_AFTER_S then
+            return nil
+        end
+        dither_sign = -dither_sign
+        return hold_cmds(seg.captured, J_DITHER * dither_sign)
     end
     return {}
 end
@@ -407,11 +512,24 @@ local function poll_trigger(seat, t)
     end
 end
 
+-- ---------------------------------------------------------------- edges
+local function watch_edges(t)
+    if prev_parked ~= nil and (parked_active ~= prev_parked or player_seat ~= prev_seat) then
+        log(string.format("t=%.3f EDGE parked %s -> %s, camera_seat %s -> %s (cam_fwd_m=%s)",
+            t, tostring(prev_parked), tostring(parked_active), prev_seat or "nil",
+            player_seat or "nil", fmt(cam_fwd_m)))
+        for _, r in ipairs(pre_rows) do log(r.line .. " PRE") end
+        pre_rows = {}
+        edge_until_t = t + EDGE_POST_S
+    end
+    prev_parked, prev_seat = parked_active, player_seat
+end
+
 -- ---------------------------------------------------------------- driver
 function LuaExportStart()
     log("")
     log("#########################################################")
-    log("FLIGHT-AXES PROBE, SORTIE 1 (M0-A..M0-D) " .. os.date("%Y-%m-%d %H:%M:%S"))
+    log("FLIGHT-AXES PROBE, SORTIE 1 (M0-A..D, both seats, M0-J) " .. os.date("%Y-%m-%d %H:%M:%S"))
     log(string.format("  SIGN pitch=%+.0f roll=%+.0f pedals=%+.0f collective=%+.0f",
         SIGN.pitch, SIGN.roll, SIGN.pedals, SIGN.collective))
     log("  ICS half-press: idle -> start next segment; read segment -> end; write segment -> ABORT")
@@ -446,7 +564,8 @@ function LuaExportBeforeNextFrame()
         if type(t) ~= "number" then return end
         local dt = last_t and (t - last_t) or nil
         last_t = t
-        update_seat()
+        update_seat_and_park()
+        watch_edges(t)
         poll_trigger("pilot", t)
         poll_trigger("operator", t)
         local s = sample()
@@ -461,12 +580,19 @@ function LuaExportBeforeNextFrame()
                 seg.sent = cmds
             end
         end
+        local line = format_row(t, dt, s)
         if seg ~= nil then
             count_changes(s)
-            row(t, dt, s)
-        elseif last_idle_row_t == nil or t - last_idle_row_t >= IDLE_ROW_S then
-            last_idle_row_t = t
-            row(t, dt, s)
+            log(line)
+        elseif edge_until_t ~= nil and t <= edge_until_t then
+            log(line)
+        else
+            pre_rows[#pre_rows + 1] = { t = t, line = line }
+            while #pre_rows > 0 and t - pre_rows[1].t > EDGE_PRE_S do table.remove(pre_rows, 1) end
+            if last_idle_row_t == nil or t - last_idle_row_t >= IDLE_ROW_S then
+                last_idle_row_t = t
+                log(line)
+            end
         end
         flush(t)
     end)

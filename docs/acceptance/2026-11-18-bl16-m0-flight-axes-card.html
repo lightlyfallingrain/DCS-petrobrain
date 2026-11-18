@@ -319,8 +319,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
     <h2>What this flight decides</h2>
     <p>Whether Petrovich can fly on the raw controls at all, and the numbers his control loop needs. One question outranks the rest: <strong>when the probe holds the controls, does your physical stick still move the aircraft?</strong> If it does, mode 1 can't work as designed.</p>
     <div class="facts">
-      <div class="fact"><b>10</b><span>segments, one trigger</span></div>
-      <div class="fact"><b>~12 min</b><span>flight time</span></div>
+      <div class="fact"><b>19</b><span>segments, one trigger</span></div>
+      <div class="fact"><b>~25 min</b><span>flight time, both seats</span></div>
       <div class="fact"><b>150 km/h</b><span>~200 m AGL, flat ground</span></div>
     </div>
   </section>
@@ -329,8 +329,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
     <h2>Not in this flight</h2>
     <ul>
       <li><strong>Petrobrain doesn't run.</strong> The probe replaces Export.lua, so there's no Petrovich, no voice, no telemetry.</li>
-      <li><strong>Sortie 2</strong> (step response, release, trim, SAU, seat swap and park while writing) comes later, once the plan has absorbed your U5 answer.</li>
-      <li><strong>Controls stay unparked</strong> for the whole flight. Don't press Request Aircraft Control.</li>
+      <li><strong>Sortie 2</strong> (step response, release, trim, SAU, seat swap while holding) comes later.</li>
+      <li><strong>Controls stay unparked until J.</strong> Only the J rows ask you to press Request Aircraft Control.</li>
     </ul>
   </section>
 
@@ -339,7 +339,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
     <div class="keys">
       <kbd>idle</kbd><span>half-press starts the next segment</span>
       <kbd>read</kbd><span>A1–A4, B1, C1: half-press ends it</span>
-      <kbd>write</kbd><span>B2, C2, D1, D2 run themselves and end on their own; <strong>a half-press stops writing at once</strong></span>
+      <kbd>write</kbd><span>B2, C2, D1, D2 and J run themselves and end on their own; <strong>a half-press stops writing at once</strong></span>
     </div>
     <p>Either stick's ICS works. A full radio press is ignored. C2 also stops by itself if vertical speed passes 8 m/s, or if the collective jumps or moves the wrong way.</p>
   </section>
@@ -463,6 +463,55 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
 
   <section class="step">
     <div class="step-head">
+      <h3><span class="n">O</span>B, C and D again, from the operator seat</h3>
+      <label class="step-check"><input type="checkbox" id="so" data-k="so" aria-label="Operator pass done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Move to the <strong>operator seat with the copilot controls unparked</strong>: Petrovich would be flying from the pilot seat while you sit up front. Then run the six segments B1o, B2o, C1o, C2o, D1o and D2o exactly as above, using the operator stick's ICS.</p>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>The same as from the pilot seat. This is the first time pedal, collective and the stirred-stick hold are measured from the front seat.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Anything that behaved differently from the pilot-seat pass?</li>
+        <li>D1o/D2o: did the aircraft follow your operator stick, pedals or collective while held?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">J</span>Park and unpark while held: J1, J2, J3</h3>
+      <label class="step-check"><input type="checkbox" id="sj" data-k="sj" aria-label="Segment J done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Stay in the operator seat. Each J row starts with the probe holding the controls.</p>
+      <ul>
+        <li><strong>J1</strong>: half-press, then press <strong>Request Aircraft Control</strong> to park. The probe stops writing the moment ED's AI takes over. Let the AI fly about 20 s, then press it again to unpark. In that same frame the probe takes the controls back and holds for 10 s.</li>
+        <li><strong>J2</strong>: the same again. The probe uses a different starting position this time.</li>
+        <li><strong>J3</strong>: half-press, park, then <strong>swap to the pilot seat</strong> while parked. The probe takes the controls back at the swap and holds 10 s.</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>No lurch at the unpark or the swap. The aircraft carries on from what ED's AI was doing, and the cockpit stick holds still instead of following yours. If nothing happens within 2 minutes the row gives up by itself.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>At each unpark, and at J3's swap: did the aircraft jump, and which way?</li>
+        <li>Was J1 or J2 smoother?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
       <h3><span class="n">E</span>Restore and bring back</h3>
       <label class="step-check"><input type="checkbox" id="se" data-k="se" aria-label="Restore done"></label>
     </div>
@@ -479,7 +528,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
   <h2>Bring back</h2>
   <ol>
     <li>The log file, in <code>win-mac-sync/from-windows/dcs-logs/</code>.</li>
-    <li>D: did the aircraft follow your stick, pedals or collective while held?</li>
+    <li>D, in both seats: did the aircraft follow your stick, pedals or collective while held?</li>
+    <li>J: any jump at the unparks or the seat swap? J1 or J2 smoother?</li>
     <li>The three HSI headings from A.</li>
     <li>B2: did the pedals step, and which way did the nose go?</li>
     <li>C2: any jump at the start, and which way did VS go?</li>
