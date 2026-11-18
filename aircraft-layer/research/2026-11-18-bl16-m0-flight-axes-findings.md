@@ -245,9 +245,14 @@ showed:
   ±5.6°/s. **So the pedal half of M0-D is untested, not failed.** The probe now holds pedals and
   collective in D by default; a B2/C2 that runs and fails still turns them off.
 
-### Still owed
+**M0-D for the pedals is accepted without a flight, by user direction (2026-11-18):** *"Assume
+pedals hold as well, if the arg is correct, it'll behave as the other axis."* The pedal command
+and arg are proven, with sign −1 and scale 1 across flights 3 and 4. The pedals are accepted on
+the same mechanism that held cyclic and collective against stirring in flight 7. **M0-B, M0-C and
+M0-D are therefore answered, and U7's merge gate for M1+M2 is met.** The first Flight M-A still
+watches the pedals under stirring, and a failure there reopens this.
 
-- **M0-D for the pedals**: D again, with the pedals held. This is the last part of the go/no-go.
+### Still owed
 - The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
   true and magnetic. Steady on an exact HSI number and half-press.
 - The airborne yaw response to a pedal step (M0-E).
