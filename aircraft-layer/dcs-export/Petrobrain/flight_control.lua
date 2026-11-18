@@ -28,32 +28,43 @@ never as a licence to assume unparked.
 
 **The Mi-24P arg/cmd/sign table below is partly measured, partly still
 unverified.** 1100-1103/1110-1113 are read-only cockpit animation args
-(not a write channel); `LoSetCommand` 2001/2002/2003 are the real
-control-function channel for pitch/roll/pedal, confirmed against the
-user's own DCS binding file (scaffold probe `Export.probe-control-
-command-hold.lua` v2, flown 2026-11-01, for the mechanism; the binding
-file for the exact ids). **M0-B, flown 2026-11-18, confirmed on a second
-flight** (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-
-findings.md`): the pedal write works at `SIGN.pedals = -1.0`, scale 1 --
-command 2003 = `-arg 1103` holds the arg exactly at the commanded value
-(±0.05/±0.10 both confirmed), arg 1103 reads the full -1..+1 range, and
-the arg's own response to a step is first-order (not rate-limited): τ ≈
-0.25 s with the pedal damper on (≈ 0.2 s off), 98-99% settled by 1 s for
-every step size tried; the adjustable stops do not limit the write.
-Pedal is enabled below on that measurement. **M0-C, flown 2026-11-18
-(flight 5): command 2004 does NOT move the collective** -- arg 1102
-stayed at -0.1728 for 11 s of writes, because 2004 is `Throttle
-(Collective)`, the engine throttle, not the flight-control collective
-axis. **The real collective command id is 2087** (`iCommandPlaneCollective`,
-"Flight Control Collective" -- the same user's own DCS binding file),
-entered into `CMD` below now that it is known, but its **sign is not yet
-measured** (a step-response re-fly, under M0-C, is still owed with the
-corrected id) -- collective stays disabled in `FC_AXES_ENABLED` until
-that measurement exists, so the placeholder `SIGN.collective = 1.0`
-below is never written to the aircraft. M0-D (the stirred-control
-go/no-go) is still owed for the whole mode -- this module is built and
-tested ahead of it per the plan's own instruction, not flown until it
-passes (U7).
+(not a write channel); `LoSetCommand` 2001/2002/2003/2087 are the real
+control-function channel for pitch/roll/pedal/collective, confirmed
+against the user's own DCS binding file (scaffold probe `Export.probe-
+control-command-hold.lua` v2, flown 2026-11-01, for the mechanism; the
+binding file for the exact ids). **M0-B, flown 2026-11-18, confirmed on
+a second flight** (`aircraft-layer/research/2026-11-18-bl16-m0-flight-
+axes-findings.md`): the pedal write works at `SIGN.pedals = -1.0`, scale
+1 -- command 2003 = `-arg 1103` holds the arg exactly at the commanded
+value (±0.05/±0.10 both confirmed), arg 1103 reads the full -1..+1
+range, and the arg's own response to a step is first-order (not rate-
+limited): τ ≈ 0.25 s with the pedal damper on (≈ 0.2 s off), 98-99%
+settled by 1 s for every step size tried; the adjustable stops do not
+limit the write. Pedal is enabled below on that measurement. **M0-C,
+flown 2026-11-18 (flight 5): command 2004 does NOT move the
+collective** -- arg 1102 stayed at -0.1728 for 11 s of writes, because
+2004 is `Throttle (Collective)`, the engine throttle, not the flight-
+control collective axis; the real id is 2087 (`iCommandPlaneCollective`,
+the same binding file). **M0-C re-flown (flight 6, 2026-11-18) against
+the corrected id: `SIGN.collective = -1.0`, scale 1, same shape as
+pedal** (command = `-arg 1102`). Entered below; `FC_AXES_ENABLED.
+collective` is kept **false** regardless -- M0-C's sign/scale is now
+measured but its step-response lag and VS behaviour are not (the same
+two figures M0-B needed before pedal was enabled), so this is a
+judgement call extending pedal's own "measure the whole response before
+flipping the flag" bar to collective, not a literal reading of the
+plan's "sign and scale" wording. Flag this for confirmation at review.
+**Flight 6 also measured M0-F (plan, Decision 4): once a write stops,
+the arg holds Petrovich's last-commanded value until the player
+physically moves that control** -- arg 1102 sat 16+ s with the lever
+untouched after `release`. Confirmed for collective; pitch/roll/pedals
+are still owed. This matches Decision 4 exactly ("the release jump is
+not handled, the pilot matches his controls") and needs no code change
+-- `handle_flight_control_command`'s `"release"` branch already just
+stops calling `write_outputs()`, it never writes a last value or reads
+the physical stick. M0-D (the stirred-control go/no-go) is still owed
+for the whole mode -- this module is built and tested ahead of it per
+the plan's own instruction, not flown until it passes (U7).
 --]]
 
 local M = {}
@@ -77,20 +88,21 @@ local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2087 }
 
 -- command = SIGN * captured-arg. pitch/roll are probe v2's own unverified
 -- guesses, flip once M0-E reports; pedals = -1.0 is measured (M0-B,
--- 2026-11-18, module header). collective = 1.0 is an unmeasured
--- placeholder (M0-C's own sign re-fly, still owed against the corrected
--- 2087 id) -- never written while `FC_AXES_ENABLED.collective` is false.
-local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = 1.0 }
+-- 2026-11-18); collective = -1.0 is measured too (M0-C re-fly, flight 6,
+-- 2026-11-18, module header) -- never written while `FC_AXES_ENABLED.
+-- collective` is false (its lag/VS response are the still-owed figures).
+local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
 -- defaults off for pedal and collective until M0-B and M0-C" -- each
 -- axis gated on its own probe). Pitch/roll are the axes probe v2
 -- actually exercised; pedals is enabled on M0-B's own measurement
--- (module header); collective stays disabled -- its command id is now
--- known (2087) but the sign is not, so this axis is blocked on that
--- measurement, not on finding the id. An unmapped/unmeasured axis is
--- left entirely with the player (safe), never written with a guessed
--- sign/scale.
+-- (module header, both sign/scale AND the step-response lag). collective
+-- stays disabled: its sign/scale is now measured (flight 6) but its own
+-- lag/VS response is not, and pedal's own bar was the whole response,
+-- not sign/scale alone -- a judgement call, flagged in the Implementer's
+-- report. An unmapped/unmeasured axis is left entirely with the player
+-- (safe), never written with a guessed sign/scale.
 local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = true, collective = false }
 
 -- `UNPARK_TAKE_ENABLED` -- off until M0-J passes (plan, Decision 24/U7).
