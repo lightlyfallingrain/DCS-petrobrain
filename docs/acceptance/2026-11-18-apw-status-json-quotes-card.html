@@ -1,0 +1,193 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>AI Wheel Status Line Check</title>
+<style>
+/* layout: a tall single-column cockpit card -- two check blocks stacked, a record rail along
+   the right edge collapsing to below each block at phone width */
+:root{
+  --bg:#0c1210; --bg-panel:#141c19; --fg:#e9efe9; --fg-dim:#9fb0a8;
+  --accent:#e8a33d; --accent-dim:#7a5a23; --record:#4fa3c4; --record-dim:#1c3038;
+  --ok:#5fb87c; --rule:#263430;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+    --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+    --ok:#2f7a4a; --rule:#dcd6c4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+  --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+  --ok:#2f7a4a; --rule:#dcd6c4;
+  color-scheme: light;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--fg); margin:0;
+  font-family:"Source Sans 3",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+  padding-block:24px;
+}
+h1,h2,.mono{font-family:"Barlow Condensed",system-ui,sans-serif;}
+.mono,code,pre{font-family:"JetBrains Mono",monospace;}
+.wrap{max-width:720px; margin:0 auto; display:flex; flex-direction:column; gap:22px;}
+header{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+header h1{font-size:clamp(1.6rem,5vw,2.2rem); margin:0 0 4px; letter-spacing:.02em; text-transform:uppercase; color:var(--accent);}
+header p{margin:0; color:var(--fg-dim); font-size:.95rem;}
+.branch{
+  display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:6px; padding:10px 14px;
+}
+.branch .tag{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-dim);}
+.branch code{color:var(--accent); font-size:.95rem;}
+.note{
+  background:var(--bg-panel); border-left:3px solid var(--accent-dim); border-radius:0 6px 6px 0;
+  padding:12px 14px; font-size:.9rem; color:var(--fg-dim); line-height:1.5;
+}
+.note a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+.card{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:18px 18px 16px;
+}
+.card h2{
+  margin:0 0 10px; font-size:1.3rem; letter-spacing:.01em; display:flex; align-items:baseline; gap:10px;
+}
+.card h2 .n{color:var(--accent); font-variant-numeric:tabular-nums;}
+.block{display:flex; flex-direction:column; gap:10px;}
+.label{font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:2px;}
+pre.cmd{
+  background:var(--bg); border:1px solid var(--rule); border-radius:6px; padding:10px 12px;
+  overflow-x:auto; font-size:.85rem; color:var(--fg); margin:0; line-height:1.5;
+}
+.expect{font-size:.95rem; line-height:1.55;}
+.record-box{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:6px; padding:10px 12px;
+  font-size:.9rem; line-height:1.5;
+}
+.record-box .label{color:var(--record); opacity:.9;}
+.chk{display:flex; align-items:flex-start; gap:10px; margin-top:4px;}
+.chk input[type=checkbox]{
+  width:20px; height:20px; margin-top:2px; accent-color:var(--accent); flex-shrink:0;
+}
+.chk label{font-size:.95rem; line-height:1.4;}
+.unverified{
+  border:1px dashed var(--accent-dim); border-radius:8px; padding:14px 16px;
+  font-size:.88rem; color:var(--fg-dim); line-height:1.55;
+}
+.unverified strong{color:var(--accent);}
+.bringback{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:16px 18px;
+}
+.bringback h2{margin:0 0 10px; font-size:1.1rem;}
+.bringback ul{margin:0; padding-left:20px; font-size:.92rem; line-height:1.6;}
+.bringback .surprise{margin-top:10px; font-style:italic; color:var(--record);}
+footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px;}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>AI Wheel Status Line Check</h1>
+    <p>apw-status-json-quotes &mdash; fix verification, 2026-11-18</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <code>main</code>
+    <span class="tag">after this DoD pass's auto-merge</span>
+  </div>
+
+  <div class="note">
+    A double-quoting bug made the AI-overlay status line invalid JSON from the first poll &mdash;
+    <code>apw_mode_text</code> etc. froze at <code>null</code> even while the overlay was visibly
+    showing text and the AI was flying (seen on 2026-11-16's batch-A sortie). Fixed in
+    <code>ai_pilot_wheel.lua</code>. This may also explain stuck-looking readbacks on the
+    <strong>P2 voice-goals</strong> and <strong>BL-17 flight-commands</strong> cards &mdash; not
+    re-flown here, worth a second look if either felt unresponsive.
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span> Status line keeps advancing</h2>
+    <div class="block">
+      <div class="label">Prerequisite</div>
+      <div class="expect">AI pilot wheel engaged (stick parked, AI flying).</div>
+      <div class="label">Run (from the Mac, or any LAN machine)</div>
+      <pre class="cmd">OMEN=192.168.0.85; curl http://$OMEN:7791/ai_pilot_wheel/latest</pre>
+      <div class="expect">Run it 2&ndash;3 times, a few seconds apart, while the overlay shows
+        mode/course/altitude/speed text.</div>
+      <div class="label">Expect</div>
+      <div class="expect"><code>apw_mode_text</code>, <code>apw_course_text</code>,
+        <code>apw_alt_text</code>, <code>apw_speed_text</code> are non-null and
+        <strong>change between polls</strong> &mdash; not frozen at the same values, not all-null
+        while the overlay is visibly populated.</div>
+      <div class="chk">
+        <input type="checkbox" data-k="check1-done" id="c1">
+        <label for="c1">Checked &mdash; noted what happened below</label>
+      </div>
+      <div class="record-box">
+        <div class="label">Record</div>
+        Did the fields update between polls, or freeze?
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span> Voice command accepted</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">With mode 2 active and the player in the operator seat, speak a goal
+        &mdash; e.g. &ldquo;heading 090&rdquo; (check <code>BL-16</code>'s Stage P2 vocabulary if
+        this build phrases it differently).</div>
+      <div class="label">Expect</div>
+      <div class="expect">Acted on &mdash; a readback, or the status line's course/goal fields
+        moving toward the new target. Not <strong>&ldquo;say again&rdquo;</strong> (not
+        understood) and not <strong>&ldquo;unable&rdquo;</strong> (rejected as unavailable).</div>
+      <div class="chk">
+        <input type="checkbox" data-k="check2-done" id="c2">
+        <label for="c2">Checked &mdash; noted what happened below</label>
+      </div>
+      <div class="record-box">
+        <div class="label">Record</div>
+        Accepted and acted on, or refused &mdash; and if refused, &ldquo;say again&rdquo; or
+        &ldquo;unable&rdquo;?
+      </div>
+    </div>
+  </div>
+
+  <div class="unverified">
+    <strong>Not run by this DoD pass.</strong> Both checks need a live DCS session this role
+    cannot perform from here &mdash; tagged <code>#needs-flight</code> on
+    <code>body-layer/ROADMAP/BL-16.md</code> rather than held open as a merge blocker.
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Did the status line advance continuously, or still freeze at some point?</li>
+      <li>Was the spoken command accepted?</li>
+    </ul>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-11-18-apw-status-json-quotes-sortie.md</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='apw-status-json-quotes-card';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
