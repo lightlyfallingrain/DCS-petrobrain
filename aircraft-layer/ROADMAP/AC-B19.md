@@ -1,0 +1,3 @@
+# AC-B19 — Flight-control command channel jams at `fc_last_cmd_seq` = 2^31-1 for the DCS session
+
+- [ ] **Flight-control command channel jams at `fc_last_cmd_seq` = 2^31-1 for the DCS session.** #status/open Filed 2026-11-18 at the BL-16 mode 1 M1+M2 merge. Security residual from `plans/flight-control/security-m1-m2.md` Finding A after the restart-reconciliation fix: a message carrying the maximum seq still walks body-layer's `wire_seq` to the ceiling, after which every command fails (now a logged `AircraftLayerError`, not silent). Single-user LAN, low probability; the physical park gesture stays an independent escape. Fix would bound how far one message may advance the counter.
