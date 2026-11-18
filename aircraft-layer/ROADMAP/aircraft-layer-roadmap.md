@@ -55,6 +55,11 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   control-character set (REJECTED 2026-11-18, user: extremely unlikely)
 - [[AC-B16]] — false AI-wheel park signal for a few frames on pilot→operator seat swap (DCS's
   unstow animation lagging the camera-derived seat read); 0.5 s settle window, fixed
+- [[AC-B17]] — `law_update` copies the whole ~25-key law state with `pairs()` every active frame
+- [[AC-B18]] — Per-frame `GetDevice(0)` lookups keep growing across `Export.lua` modules (18+ now)
+- [[AC-B19]] — Flight-control command channel jams at `fc_last_cmd_seq` = 2^31-1 for the DCS session
+- [[AC-B20]] — `arm_lease_s` 10 s ceiling is declared in three places with no parity test
+- [[AC-B21]] — `_FLIGHT_CONTROL_LIMITS_BOUNDS` silently drops unknown `limits` keys
 
 ## Keeping this current
 
