@@ -850,3 +850,8 @@ Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch."
   Let's ignore that case for now."*
 - **Q6 — "altitude 200" during align-for-launch:** *"yes"* — it aborts and the spoken value
   replaces that parameter's restore target.
+- **Recovery order clarified (user, 2026-11-18, verbatim):** *"do not wait for the aircraft to
+  reach set params before setting the next one. This order is about what is commanded first via
+  overlay, so that altitude recovery starts first, but heading change can happen while
+  climbing"* — the order is the order the overlay commands are issued, back to back; no waiting
+  for one parameter to settle before commanding the next.
