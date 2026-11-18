@@ -251,3 +251,64 @@ reports (`ruff format --check`, `ruff check`, `mypy src`, the nine-file targeted
 whole-suite collect-only smoke) rather than trusting the logged numbers. Not re-run: the full,
 non-`-m "not slow"` suite and any `aircraft-layer` check (neither touched by this commit); no live
 DCS flight was possible from this environment, consistent with every prior pass on this feature.
+
+### Review Summary (DoD fix round, `81352488`, test-only)
+
+Scope: `81352488` only (`BL-16 P3+P4: fix 4 DoD-found test failures (test-only)`) -- two test-only
+diffs (`tests/test_body.py`'s `FakeConsoleAircraftClient.get_payload_latest`,
+`tests/test_aircraft_client.py`'s expected-payload-dict update) plus a note appended to
+`plans/flight-control/implementation.md`. No `src/` change. Checked against
+`plans/flight-control/dod-p3p4.md`'s four listed failures and this file's own prior rounds.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None.
+
+### Verification performed
+
+- **Fake default matches the real client's "no sample" shape.** `src/aircraft_client.py`'s real
+  `get_payload_latest` returns `None` when `/payload/latest` itself returns `None` ("nothing has
+  been received yet"); the new fake method returns the bare literal `None` unconditionally --
+  same shape, and matches the sibling `get_flight_control_latest`/`get_ai_pilot_wheel_latest`
+  fakes on the same class, which also return a stored-or-`None` field. No behaviour divergence
+  from the real "no sample" case.
+- **No assertion weakened.** Both diffs are purely additive: a new fake method (nothing removed,
+  nothing loosened), and two new expected-dict keys matching `write_ai_pilot_goal`'s real trailing
+  `cbtm_action`/`cbtm_seq` params (confirmed against `src/aircraft_client.py:483-499`'s signature
+  -- both already defaulted to `None` and always included in the POSTed dict). The pre-existing
+  assertion's other keys and values are untouched.
+- **The "no other `Fake*Client` is reached" claim.** Traced `advance_parked_flight_state`'s one
+  call site (`body.py:5197-5200`) and confirmed the surrounding `try: ... except AircraftLayerError:`
+  sits inside the poll loop's own outer `try` (opens `body.py:4864`) whose `except Exception as exc:`
+  (`body.py:5951`) is the swallow point the commit message describes -- an `AttributeError` from a
+  missing fake method would propagate past the inner `except AircraftLayerError` (which does not
+  catch it) and be caught there, exactly as claimed. Grepped every other `class Fake.*Client` in
+  `tests/` (`test_body.py`'s `FakeAircraftClient`/`FakeSpeechInputClient`;
+  `test_detection_trace.py`/`test_emission_pipeline.py`/`test_hybrid_source.py`/
+  `test_player_bubble.py`/`test_naked_eye_source.py`'s own `FakeAircraftClient`s;
+  `test_crew_console.py`'s `FakeSpeechClient`) -- confirmed none of them define
+  `get_ai_pilot_wheel_latest` or `get_flight_control_latest`, and none appear anywhere near
+  `_run_crew_text_poll_loop`. The claim holds.
+- **Tests**: `/Users/sg/Code/DCS-petrobrain/body-layer/.venv/bin/pytest tests/test_body.py
+  tests/test_aircraft_client.py -q` from this worktree's `body-layer/` -- **273 passed**, no
+  failures, no skips.
+- **Lint/format**: `ruff format --check` on both touched test files -- already formatted;
+  `ruff check` on both -- all checks passed. No `src/` change, so `mypy --strict` is unaffected by
+  this commit; `dod-p3p4.md`'s own log already reports `mypy src` clean for this round.
+
+### Verdict
+
+**APPROVED.**
+
+### Review Confidence
+
+Full read. Both touched test files read in full against the diff; the fake-default and
+no-other-Fake*Client claims verified by reading the real client's source and grepping every
+`Fake*Client` in `tests/` directly rather than trusting the commit message's account; the two
+named test files run directly rather than relying on the logged pass count. Not independently
+re-run: the full body-layer suite (DoD's own job per root `CLAUDE.md` "Verification") and any
+`aircraft-layer` check (no files under `aircraft-layer/` touched by this commit).
