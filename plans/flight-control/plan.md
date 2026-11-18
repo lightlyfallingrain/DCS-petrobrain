@@ -2457,6 +2457,12 @@ flying. Checked against the plan and the code:
   set is the AI's pilot set, finding 3), and must not block when the seat is unknown. The rule: on a
   voice take, the player's seat set; on an unpark take, the pilot set; seat unknown → the non-zero
   set (finding 5). The seat chooses which args to *read*, never whether mode 1 runs.
+  **Corrected again, M0-J flight 9 (2026-11-18):** a voice take reads whichever set is live
+  (non-zero), not the camera seat's — J1 captured the camera seat's zeros and pitched ~7°; both
+  live → the last steady snapshot. An unpark take reads the pilot set from the **last fully-stowed
+  frame** (852 ≥ 0.99, tracked while `armed`), not the 0.9 park edge, which is mid cross-fade.
+  `UNPARK_TAKE_ENABLED` is on. Source: `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`
+  (probe branch), `implementation.md`.
 - **A seat swap while parked** (operator → pilot) drops `parked_active` through the seat gate, so it
   is an unpark (Decision 24) and mode 1 takes. M0-J3 measures it.
 - **Confirmed by the user, 2026-11-18**, after the amendment:
@@ -2737,7 +2743,7 @@ The work splits across the layers like this:
 | h | AGL (radar when valid, else DCS AGL), or barometric altitude, depending on the goal's reference |
 | β | slip ball |
 | a_x, a_z | along-track and vertical acceleration (filtered dV/dt and dw/dt, or `LoGetAccelerationUnits` if M0-A shows it is per-frame) |
-| u_* | the live arg set: on a voice take, the player's seat set (`ai_pilot_wheel.player_seat()`); on an unpark take, the pilot set 1100–1103 (the AI's, finding 3); seat unknown → the non-zero set (finding 5). Read-only; never gates (Decision 25, amended 2026-11-18). |
+| u_* | the live arg set: on a voice take, the non-zero set (corrected M0-J flight 9; was the player's seat set); on an unpark take, the pilot set 1100–1103 from the last fully-stowed frame (852 ≥ 0.99; the AI's, finding 3). Read-only; never gates (Decision 25, amended 2026-11-18). |
 
 1. **Shape the goals into S-curves.** Each channel gets a reference value and rate. A critically
    damped second-order filter drives them toward the goal:

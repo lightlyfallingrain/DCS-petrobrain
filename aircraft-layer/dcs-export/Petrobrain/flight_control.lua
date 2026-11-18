@@ -134,13 +134,17 @@ local UNPARK_TAKE_ENABLED = true
 -- cross-fading for ~1.5 s by the time the lower threshold's edge fires,
 -- so capturing at the edge reads a partly-faded pilot set; this
 -- threshold is deliberately close to fully stowed (1.0) so the tracked
--- capture is taken well before the fade starts.
+-- capture is taken well before the fade starts. Behaviour-affecting (set
+-- too low, it reproduces flight 9's mid-fade capture) but this subproject
+-- has no `tuning.py`-equivalent loader -- would want the X-T26 mechanism.
 local STOWED_THRESHOLD = 0.99
 
 -- Below this, a seat's summed axis magnitude reads as "centred/idle",
 -- not "live" -- the voice-take capture rule (M0-J, flight 9) uses it to
 -- tell a genuinely-flown seat from one reading exact/near-zero because
--- nobody has requested control there yet.
+-- nobody has requested control there yet. Behaviour-affecting (it picks
+-- the seat a take copies from) but this subproject has no
+-- `tuning.py`-equivalent loader -- would want the X-T26 mechanism.
 local LIVE_SEAT_ZERO_EPS = 0.01
 
 -- The 9K113's own invisibility bound (`plans/9k113-sight-pointing/
