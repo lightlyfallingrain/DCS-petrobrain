@@ -258,6 +258,21 @@ print(string.format("%.6f", written[2002]))
         assert abs(float(pitch_written) - 0.321) <= 0.0011
         assert abs(float(roll_written) - (-0.154)) <= 0.0011
 
+    def test_pedal_capture_writes_with_the_measured_sign(self) -> None:
+        """M0-B (2026-11-18): `SIGN.pedals = -1.0` -- the written command
+        is `-captured_arg` (plus wobble), not the raw arg value."""
+        driver = """
+pilot_args.pedals = 0.4
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+print(string.format("%.6f", written[2003]))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - (-0.4)) <= 0.0011
+
     def test_unpark_take_is_refused_disabled_in_stage_m1(self) -> None:
         """`UNPARK_TAKE_ENABLED` defaults off until M0-J passes (plan,
         Decision 24/U7) -- so in Stage M1's own shipped state an unpark
@@ -521,7 +536,10 @@ print(sent_lines[#sent_lines])
 
 
 class TestAxesEnabledOnTheWire:
-    def test_pedal_and_collective_report_disabled(self) -> None:
+    def test_pedal_enabled_collective_disabled(self) -> None:
+        """M0-B (flown 2026-11-18) measured the pedal write (`SIGN.
+        pedals = -1.0`), so it is enabled; M0-C (collective) is still
+        unmeasured, so it stays disabled."""
         driver = """
 flight_control.push_flight_control_state(0.0)
 print(sent_lines[#sent_lines])
@@ -529,7 +547,7 @@ print(sent_lines[#sent_lines])
         lines = _run(driver)
         assert _field(lines[0], "fc_axes_pitch") == "true"
         assert _field(lines[0], "fc_axes_roll") == "true"
-        assert _field(lines[0], "fc_axes_pedal") == "false"
+        assert _field(lines[0], "fc_axes_pedal") == "true"
         assert _field(lines[0], "fc_axes_collective") == "false"
 
 

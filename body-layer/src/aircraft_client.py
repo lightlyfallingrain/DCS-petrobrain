@@ -523,6 +523,54 @@ class AircraftLayerClient:
             },
         )
 
+    def get_flight_control_latest(self) -> dict[str, Any] | None:
+        """`GET /flight_control/latest` -> the most recent flight-control
+        status (see `aircraft-layer/src/schema/flight_control.py`'s
+        `FlightControlState.to_api_dict`), or `None` if nothing has been
+        received yet -- same "not an error" posture as `get_ai_pilot_
+        wheel_latest` (`plans/flight-control/plan.md`, "Revised
+        2026-11-18", BL-16 mode 1, Stage M1). `belief.flight_control.
+        advance_flight_control_state` is the one caller, resolving the
+        typed `FlightControlState` itself -- this client does no
+        interpretation, same division of labour every other `get_*`
+        method here already has."""
+        result = self._get_json("/flight_control/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                "expected a JSON object or null from /flight_control/latest, "
+                f"got {type(result).__name__}"
+            )
+        return result
+
+    def write_flight_control(
+        self,
+        seq: int,
+        cmd: Literal["take", "release", "goal", "arm"],
+        limits: dict[str, float],
+        goal: dict[str, object] | None,
+    ) -> None:
+        """`POST /command/flight_control` -> sends BL-16 mode 1's own
+        handover/goal channel message (`plans/flight-control/plan.md`,
+        "Revised 2026-11-18", "Wire") to `Export.lua`'s per-frame
+        `flight_control` module (`aircraft-layer/src/collector/command_
+        sender.py`'s `CommandSender.send_flight_control`). Raises
+        `AircraftLayerError` on any failure, mirroring `write_ai_pilot_
+        goal`/`write_sight_target` -- see the module docstring for why.
+        `belief.flight_control.decide_flight_control`/`body.py`'s
+        `_apply_flight_control` are what decide *when* to call this;
+        this client is a pure pass-through, same division of labour
+        every other `write_*` method here already has.
+
+        `limits` travels in every message (the plan's own wire shape) --
+        the caller always passes the live bundle, never `None`, unlike
+        the aircraft-layer API's own defensive `None` allowance."""
+        self._post_json(
+            "/command/flight_control",
+            {"seq": seq, "cmd": cmd, "limits": limits, "goal": goal},
+        )
+
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         """`POST /command/look_direction` -> pushes the currently-commanded
         look-direction wedge (`aircraft-layer/src/collector/command_sender.

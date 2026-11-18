@@ -25,14 +25,25 @@ default): a park/unpark edge can only be detected by comparing against a
 known previous state, so "unknown" is treated the same as "stay off",
 never as a licence to assume unparked.
 
-**The Mi-24P arg/cmd/sign table below is unverified** -- copied from the
-scaffold probe (`Export.probe-control-command-hold.lua` v2, flown
-2026-11-01), which found 1100-1103/1110-1113 are read-only cockpit
-animation args (not a write channel) and that `LoSetCommand` 2001-2004
-is the real control-function channel, with `SIGN.collective = -1.0` an
-unconfirmed guess from ED's own source comment. M0-B/M0-C/M0-E correct
-this; until then the pedal and collective axes stay disabled
-(`FC_AXES_ENABLED`), so a wrong guess there cannot reach the aircraft.
+**The Mi-24P arg/cmd/sign table below is partly measured, partly still
+unverified.** 1100-1103/1110-1113 are read-only cockpit animation args
+(not a write channel); `LoSetCommand` 2001-2004 is the real control-
+function channel (scaffold probe `Export.probe-control-command-hold.lua`
+v2, flown 2026-11-01). **M0-B, flown 2026-11-18, confirmed on a second
+flight** (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-
+findings.md`): the pedal write works at `SIGN.pedals = -1.0`, scale 1 --
+command 2003 = `-arg 1103` holds the arg exactly at the commanded value
+(±0.05/±0.10 both confirmed), arg 1103 reads the full -1..+1 range, and
+the arg's own response to a step is first-order (not rate-limited): τ ≈
+0.25 s with the pedal damper on (≈ 0.2 s off), 98-99% settled by 1 s
+for every step size tried; the adjustable stops do not limit the write.
+Pedal is enabled below on that measurement. `SIGN.collective = -1.0` is
+still an unconfirmed guess from ED's own source comment (M0-C
+unmeasured); collective stays disabled (`FC_AXES_ENABLED`) so a wrong
+guess there cannot reach the aircraft. M0-D (the stirred-control
+go/no-go) is still owed for the whole mode -- this module is built and
+tested ahead of it per the plan's own instruction, not flown until it
+passes (U7).
 --]]
 
 local M = {}
@@ -50,16 +61,20 @@ local SEAT_ARGS = {
 -- actual write channel (probe v2 finding 1).
 local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2004 }
 
--- command = SIGN * captured-arg -- unverified guesses (probe v2's own
--- "KNOWN LIMITS" section), flip once M0-E reports.
-local SIGN = { pitch = 1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
+-- command = SIGN * captured-arg. pitch/roll are probe v2's own unverified
+-- guesses, flip once M0-E reports; pedals = -1.0 is measured (M0-B,
+-- 2026-11-18, module header); collective = -1.0 is still ED's own
+-- source-comment guess, unconfirmed (M0-C).
+local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
--- defaults off for pedal and collective until M0-B and M0-C"). Pitch/
--- roll are the axes probe v2 actually exercised; pedals/collective stay
--- disabled -- an unmapped axis is left entirely with the player (safe),
--- never written with a guessed sign/scale.
-local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = false, collective = false }
+-- defaults off for pedal and collective until M0-B and M0-C" -- each
+-- axis gated on its own probe). Pitch/roll are the axes probe v2
+-- actually exercised; pedals is enabled on M0-B's own measurement
+-- (module header); collective stays disabled pending M0-C -- an
+-- unmapped axis is left entirely with the player (safe), never written
+-- with a guessed sign/scale.
+local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = true, collective = false }
 
 -- `UNPARK_TAKE_ENABLED` -- off until M0-J passes (plan, Decision 24/U7).
 -- While off, an unpark from `armed` always refuses (`fc_refuse_cause =
