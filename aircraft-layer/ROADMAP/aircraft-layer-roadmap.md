@@ -51,6 +51,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   AC-B12)
 - [[AC-B14]] — `handle_ai_pilot_goal_command` skips the Lua-side enum/bound check its siblings
   have (low/low; `cockpit_switch` precedent already accepts a broader version of this exposure)
+- [[AC-B16]] — false AI-wheel park signal for a few frames on pilot→operator seat swap (DCS's
+  unstow animation lagging the camera-derived seat read); 0.5 s settle window, fixed
 
 ## Keeping this current
 
