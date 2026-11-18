@@ -565,6 +565,114 @@ class TestLevelOff:
         assert console.pending_rule_dispatch is not None
 
 
+class TestCbtmActions:
+    """Review fix (`plans/flight-control/review-p3p4.md` Required Fix
+    2): the four `cbtm_*` rules dispatched through the real `handle_
+    command` -> gate -> `run_rule` path against the real shipped
+    `flight.lua`, mirroring `TestHandoverActions`/`TestSeatNeverGates
+    Mode1`'s own shape -- the overlay-mode readback/transition for each
+    (category `"flight_control"`, has-controls only, U1: "no refusal
+    branch -- CBTM is always reachable by one left press"), plus the
+    two gated mode-1 "unable" reasons (`_axes_cbtm_align_unready`'s
+    permanent `AI_OVERLAY`, `_axes_cbtm_break_unready`'s temporary `NOT_
+    READY`). `test_shipped_rule_files_load_with_zero_failures` above
+    only confirms the four rule ids exist in the loaded set; nothing
+    else in this file previously called `handle_command` for any of
+    them."""
+
+    def test_align_speaks_aligning_and_sets_the_cbtm_transition(self) -> None:
+        console = _dispatching_console(parked_active=True)
+        lines = console.handle_command("cbtm_align", now_sim=0.0)
+        assert lines == ["Aligning."]
+        assert console.ai_pilot_cbtm_transition == "align"
+
+    def test_align_for_launch_speaks_aligning_for_launch(self) -> None:
+        console = _dispatching_console(parked_active=True)
+        lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
+        assert lines == ["Aligning for launch."]
+        assert console.ai_pilot_cbtm_transition == "align_for_launch"
+
+    def test_break_left_speaks_breaking_left(self) -> None:
+        console = _dispatching_console(parked_active=True)
+        lines = console.handle_command(
+            "cbtm_break", now_sim=0.0, slots={"direction": "left"}
+        )
+        assert lines == ["Breaking left."]
+        assert console.ai_pilot_cbtm_transition == "break_left"
+
+    def test_break_right_speaks_breaking_right(self) -> None:
+        console = _dispatching_console(parked_active=True)
+        lines = console.handle_command(
+            "cbtm_break", now_sim=0.0, slots={"direction": "right"}
+        )
+        assert lines == ["Breaking right."]
+        assert console.ai_pilot_cbtm_transition == "break_right"
+
+    def test_break_away_speaks_breaking_away(self) -> None:
+        console = _dispatching_console(parked_active=True)
+        lines = console.handle_command("cbtm_break_away", now_sim=0.0)
+        assert lines == ["Breaking away."]
+        assert console.ai_pilot_cbtm_transition == "break_away"
+
+    def test_not_flying_answers_unable_not_flying_before_any_mode_body_runs(
+        self,
+    ) -> None:
+        """The coarse `"flight_control"` gate (has-controls only) runs
+        before `_by_mode` ever picks an `overlay=`/`axes=` body --
+        nobody flying answers "unable, not flying," never reaching
+        either `cbtm_align`'s no-refusal body or either `_axes_cbtm_*_
+        unready` refusal."""
+        console = _dispatching_console(parked_active=False)
+        lines = console.handle_command("cbtm_align", now_sim=0.0)
+        assert lines == ["Unable, not flying."]
+        assert console.ai_pilot_cbtm_transition is None
+
+    def test_mode_1_align_is_permanently_unable_ai_overlay(self) -> None:
+        """`_axes_cbtm_align_unready` -- E-P20, the user's own answer:
+        "align"/"align for launch" are mode-2-only, permanently, since
+        the 9K113 is gated behind the CPG view which is gated behind
+        mode 2."""
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        lines = console.handle_command("cbtm_align", now_sim=0.0)
+        assert lines == [render_unable("AI_OVERLAY").text]
+        assert console.ai_pilot_cbtm_transition is None
+
+    def test_mode_1_align_for_launch_is_also_unable_ai_overlay(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
+        assert lines == [render_unable("AI_OVERLAY").text]
+        assert console.ai_pilot_cbtm_transition is None
+
+    def test_mode_1_break_is_unable_not_ready_until_the_next_batch(self) -> None:
+        """`_axes_cbtm_break_unready` -- withdrawn from *this* batch
+        only (mode-1 scope split), landing in the next one; `NOT_READY`
+        reads correctly either way."""
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        lines = console.handle_command(
+            "cbtm_break", now_sim=0.0, slots={"direction": "left"}
+        )
+        assert lines == [render_unable("NOT_READY").text]
+        assert console.ai_pilot_cbtm_transition is None
+
+    def test_mode_1_break_away_is_also_unable_not_ready(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        lines = console.handle_command("cbtm_break_away", now_sim=0.0)
+        assert lines == [render_unable("NOT_READY").text]
+        assert console.ai_pilot_cbtm_transition is None
+
+
 class TestHvrtTranslate:
     """Differential pin against the deleted `TestHvrtTranslate`. Category
     `"flight_control"` -- has-controls only; `_ai_pilot_hvrt_ready`'s own

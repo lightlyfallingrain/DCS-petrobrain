@@ -2048,3 +2048,65 @@ instead (permanently for align/align-for-launch, temporarily for break/break-awa
 - **No live DCS flight test was possible or attempted this round** (no Windows box in this
   environment) -- every check above is static/unit-level; the plan's own "Flight test steps" section
   remains the acceptance gate for this batch and needs a real sortie before the mode-1 batch begins.
+
+## Review-fix round (2026-11-19) -- review-p3p4.md's two Required Fixes
+
+Both of `review-p3p4.md`'s Required Fixes were missing-test gaps, not behavioural defects (its own
+verdict); no production code was planned to change, and none did except one test-only correction
+below. Fast-forwarded from `59192cfa` to the reviewed tip `d5eaee9b`, then committed on this round's
+own branch (not `feature/bl16-p3p4-cbtm` directly, per the dispatch's worktree instructions).
+
+**Required Fix 1** -- `body-layer/tests/test_body_ai_pilot_wheel.py` gains four new classes
+(`TestCbtmTransitions`, `TestFlightCommandEndsAlignment`, `TestLevelFlightAbortRecovery`,
+`TestRecoveryTriggerWiring`), covering exactly the four bullets the review named: each `cbtm_*`
+one-shot transition landing on `align_phase`/`cbtm_action_sent` with a correctly-bumped `cbtm_seq`
+wire send; F-P6 (a fresh heading/altitude/speed command ending `"aligning"`/`"launch_aligned"` and
+still flying, while `"recovering"` is untouched); the F-P8/Q0 `level_flight` abort reaching
+`"recovering"` seeded from the snapshot with heading frozen at the *current held* value, and the
+`"aligning"` case's plain end with nothing to recover; and `agl_m`/`ias_kmh`/`payload_count_dropped`
+actually reaching `decide_ai_pilot_wheel` from `runner.last_ownship_state.alt_agl_m`/`runner.
+last_ias_kmh`/a live `previous_payload_counts` comparison, not just the pure function's own direct
+arguments.
+
+**A pre-existing behaviour surfaced while writing these, not a defect in this round's own code**:
+every CBTM-transition call through `_apply_ai_pilot_wheel_goal` also sends one ordinary ("null"
+param, `goal_seq=0`) goal message on the first poll of an activation with no goal yet -- `goal` is
+written back onto `runner.parked_flight_state` unconditionally before `final_goal` is computed, so
+a fresh `AiPilotWheelGoal()` (`goal_seq=0`) differs from `runner.ai_pilot_goal_last_sent_seq`'s
+initial `None` and triggers one harmless extra send, self-correcting on the very next poll once
+`ai_pilot_goal_last_sent_seq` is set. Confirmed by hand against the real code (not assumed from
+reading it) before writing the tests around it -- the module docstring and a `_cbtm_send` helper
+(filters `client.ai_pilot_goal_calls` down to the one entry whose `cbtm_action` is not `None`) say
+so, rather than asserting a brittle single-call count that this behaviour would otherwise break.
+Flagged here per this round's own dispatch instruction ("if a test exposes a real bug, fix it
+minimally and say so") -- judged **not** a bug worth fixing: it is a one-poll, no-op-on-Lua message
+(every field `None`/unchanged), not a behaviour regression, and fixing it would be a change to
+`_apply_ai_pilot_wheel_goal`'s own existing send logic outside this round's stated scope (test
+coverage only, no behaviour change expected).
+
+**Required Fix 2** -- `body-layer/tests/test_rules_flight_actions.py` gains `TestCbtmActions`,
+dispatching all four `cbtm_*` rules through `_dispatching_console`/`handle_command` against the
+real shipped `flight.lua`: each rule's overlay-mode readback ("Aligning.", "Aligning for launch.",
+"Breaking left."/"Breaking right.", "Breaking away.") and `ai_pilot_cbtm_transition` value; the
+coarse `"flight_control"` gate's "not flying" `unable` taking priority over either mode body; and
+both mode-1 "unable" reasons (`cbtm_align`/`cbtm_align_for_launch` -> permanent `AI_OVERLAY`,
+`cbtm_break`/`cbtm_break_away` -> temporary `NOT_READY`), mirroring `TestHandoverActions`/
+`TestSeatNeverGatesMode1`'s own shape (`console.flight_control_state = replace(..., phase="ACTIVE")`
+to reach `flight_mode() == "axes"`).
+
+### Checks (this round)
+
+- **body-layer**: `ruff format --check` -- 1 file needed reformatting on the first pass
+  (`test_body_ai_pilot_wheel.py`, a line-length wrap in a new test, whitespace-only) --
+  reformatted with `ruff format`, then `ruff format --check` passes (227 files); `ruff check` --
+  all checks passed; `mypy src` -- 92 files, no issues (this round added no `src/` changes, so this
+  is an unchanged-green confirmation, not a new result); targeted run (the same nine-file set
+  `review-p3p4.md` itself used, `-m "not slow"`) -- **275 passed** (up from 249: 29 in `test_body_
+  ai_pilot_wheel.py`, up from 9 -- the 20 new Stage-P3+P4-composition tests; 69 in `test_rules_
+  flight_actions.py`, up from 59 -- the 10 new `TestCbtmActions` tests); `tests --collect-only`
+  over the whole suite (smoke) -- 3675 collected (up from 3649 by exactly the 26 new test functions),
+  no import errors. No `.venv` in this worktree either (same as the previous round) -- every command
+  above ran against `/Users/sg/Code/DCS-petrobrain/body-layer/.venv`'s binaries with this worktree's
+  `body-layer` as CWD, per the dispatch instruction; the full suite remains DoD's own job.
+- **aircraft-layer**: untouched this round -- no files under `aircraft-layer/` changed, so its own
+  checks were not re-run (review-p3p4.md's own pass already covers the tip this round built on).
