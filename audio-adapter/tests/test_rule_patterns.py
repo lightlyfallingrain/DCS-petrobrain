@@ -102,33 +102,84 @@ class TestAngleSlot:
 
 
 class TestHeadingSlot:
-    def test_requires_the_anchor_word(self) -> None:
-        elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("three one five")) is None
+    """`[[BL-B129]]` D6: pure digits, no anchor word of its own any more
+    -- the previous version required the literal word "heading" inside
+    the slot's own `consume`, which is what duplicated the anchor a
+    pattern author already writes in the grammar (see
+    `TestHeadingSlotWithPatternAnchor` below for the real shipped shape,
+    `flight.lua`'s own `"<verb:turn|fly> heading <heading_deg:heading>"`,
+    and the defect this fix closes)."""
 
     def test_exactly_three_digits(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three one five")) == {"deg": 315}
+        assert match_pattern(elements, _words("three one five")) == {"deg": 315}
 
     def test_two_digits_does_not_match(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three two")) is None
+        assert match_pattern(elements, _words("three two")) is None
 
     def test_leading_zero(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading zero one five")) == {"deg": 15}
+        assert match_pattern(elements, _words("zero one five")) == {"deg": 15}
 
     def test_360_normalises_to_0(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three six zero")) == {"deg": 0}
+        assert match_pattern(elements, _words("three six zero")) == {"deg": 0}
 
     def test_361_is_rejected(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading three six one")) is None
+        assert match_pattern(elements, _words("three six one")) is None
 
     def test_no_checksum_any_three_digit_value_accepted(self) -> None:
         elements = parse_pattern("<deg:heading>")
-        assert match_pattern(elements, _words("heading one two three")) == {"deg": 123}
+        assert match_pattern(elements, _words("one two three")) == {"deg": 123}
+
+    def test_no_anchor_word_of_its_own(self) -> None:
+        """A bare `<deg:heading>` pattern has nothing to consume the
+        word "heading" with any more -- unlike before D6, where the
+        slot itself swallowed it."""
+        elements = parse_pattern("<deg:heading>")
+        assert match_pattern(elements, _words("heading three one five")) is None
+
+
+class TestHeadingSlotWithPatternAnchor:
+    """The real shipped shape (`flight.lua`'s own
+    `"<verb:turn|fly> heading <heading_deg:heading>"`) -- `[[BL-B129]]`
+    D6's own fix target. Before D6, this exact pattern needed "heading"
+    said *twice* ("turn heading heading three one five") to match at
+    all, because the slot's own hidden `consume`-level anchor duplicated
+    the pattern's own literal; "turn heading three one five" -- what a
+    pilot actually says -- never matched."""
+
+    _PATTERN = "<verb:turn|fly> heading <heading_deg:heading>"
+
+    def test_turn_heading_resolves(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("turn heading three one five")) == {
+            "verb": "turn",
+            "heading_deg": 315,
+        }
+
+    def test_fly_heading_with_digits_resolves(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("fly heading 0 9 0")) == {
+            "verb": "fly",
+            "heading_deg": 90,
+        }
+
+    def test_double_heading_no_longer_matches(self) -> None:
+        """The defect D6 closes: this was the *only* wording the
+        pre-D6 grammar accepted, and it is rejected now -- unconsumed
+        extra "heading", same as any other leftover word."""
+        elements = parse_pattern(self._PATTERN)
+        assert (
+            match_pattern(elements, _words("turn heading heading three one five"))
+            is None
+        )
+
+    def test_heading_alone_without_the_verb_does_not_match(self) -> None:
+        elements = parse_pattern(self._PATTERN)
+        assert match_pattern(elements, _words("heading three one five")) is None
 
 
 class TestDigitWordHomophones:
@@ -187,9 +238,12 @@ class TestDigitWordHomophones:
         }
 
     def test_heading_slot_resolves_a_homophone_mid_run(self) -> None:
-        """The bench's own measured case: "heading to seven zero" -> 270,
-        mirroring `TestHeadingSlot`'s own exact-3-digit tests."""
-        elements = parse_pattern("<deg:heading>")
+        """The bench's own measured case: "heading to seven zero" -> 270.
+        `[[BL-B129]]` D6 moved the "heading" anchor word out of the
+        slot's own `consume` and into the pattern as a literal
+        (`TestHeadingSlotWithPatternAnchor`), so this test now uses the
+        real shipped pattern shape rather than a bare `<deg:heading>`."""
+        elements = parse_pattern("heading <deg:heading>")
         assert match_pattern(elements, _words("heading to seven zero")) == {"deg": 270}
 
     def test_speed_target_numeric_form_resolves_a_homophone(self) -> None:
@@ -211,8 +265,15 @@ class TestDigitWordHomophones:
     def test_a_fuzzed_digit_count_still_fails_headings_exact_three_rule(self) -> None:
         """Same constraint, the other bound: `heading` needs exactly
         three digits -- a homophone does not relax that count, so a
-        2-digit homophone run still fails to match at all."""
-        elements = parse_pattern("<deg:heading>")
+        2-digit homophone run still fails to match at all. Uses the
+        real shipped pattern shape (`[[BL-B129]]` D6's own anchor-in-
+        pattern form, `TestHeadingSlotWithPatternAnchor`) so the
+        rejection is genuinely about the digit count, not the now-
+        separate "heading" literal failing to match -- counterfactual
+        checked: `match_pattern(elements, _words("heading to seven
+        zero"))` (3 digits) resolves to `{"deg": 270}` in the sibling
+        test above, using this identical pattern string."""
+        elements = parse_pattern("heading <deg:heading>")
         assert match_pattern(elements, _words("heading to zero")) is None
 
     def test_homophone_fuzz_never_fires_outside_a_numeric_slot(self) -> None:

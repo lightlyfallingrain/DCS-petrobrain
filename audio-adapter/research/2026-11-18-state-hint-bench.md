@@ -139,3 +139,49 @@ verified against this corpus (A_full unaffected, `small.en` does not exhibit thi
 here) and against `right 45`/`right forty five`/`left 30` directly (now `token=None`, "say again"),
 with a counterfactual confirming a legitimate `relative`+distance phrase ("look right 5
 kilometres") still resolves.
+
+## D6: added mid-implementation (main-loop decision, 2026-11-18)
+
+Found while implementing D3: the real shipped `turn_heading` pattern,
+`"<verb:turn|fly> heading <heading_deg:heading>"`, needed the literal word "heading" **twice** to
+match at all -- once from the pattern grammar, once more from inside `rule_patterns.
+_consume_heading`'s own `consume`, which also required that literal before reading the three
+digits. "turn heading three one five" (what a pilot actually says) never matched the real rule;
+only "turn heading heading three one five" did.
+
+Fix: `heading` is pure digits now (exactly 3, 0-360, 360→0, same homophone table as D3), and the
+anchor word moved into the pattern as an ordinary literal -- `flight.lua`'s own pattern string
+needed no change, since it already wrote "heading" correctly; only the slot type's `consume`/
+sample, the bare-slot tests, and the `rule_words` docstring (which incorrectly claimed no pattern
+used a literal "heading" -- it was wrong on both counts) needed correcting.
+
+Re-ran `phrase_bench.py` on the same corpus after D6: **zero change** from the D1-D5 "after" numbers
+(A_full 139/25/0, unchanged clip for clip). Expected and confirmed by a clip-by-clip diff: this
+corpus's own `heading_*` clips ("heading three one five", "heading two seven zero", "heading zero
+nine zero") all say "heading …" **without** "turn"/"fly", so they resolve via the legacy
+`scan_bearing_deg`/`report_bearing_deg` path (per this file's own "Caveats" section above, predating
+the user's wording change to "turn/fly heading") and were never affected by `turn_heading`'s bug or
+its fix. D6's own new tests (`turn heading three one five`, `fly heading 0 9 0`, `turn heading to
+seven zero`, the double-"heading" rejection, bare "heading 315" rejection) are unit/integration
+tests against the real pattern directly, not bench clips -- there is no recorded clip saying "turn
+heading <digits>" in this corpus.
+
+### `tools/check_rules.py`'s self-match step, and why it missed this
+
+`check_rules.py` (body-layer) does have a self-match step, via audio-adapter's
+`tools/check_rule_patterns.py`: `_expand` generates every concrete word sequence a rule's own
+grammar can produce (one alternative per word-set position, each slot's own `SlotType.sample()`),
+and `_samples` calls `match_pattern` on each, keeping only the ones that match. This ran cleanly on
+`turn_heading` both before and after D6 -- **not because the check is broken, but because the
+pre-D6 bug was self-consistent**: the `heading` slot type's own `sample()` lambda returned
+`"heading two zero zero"` (baking the same "needs its own 'heading' word" assumption into the test
+data that `consume` required), so `_expand` always produced `["turn", "heading", "heading", "two",
+"zero", "zero"]` -- a sample that *did* match the buggy grammar, because both the sample generator
+and the acceptor shared the identical wrong assumption. A self-match check built from a rule's own
+stated primitives cannot catch an error where the primitive itself (what one slot type's sample
+"should" look like) encodes the same mistake as the code that accepts it -- it has no independent
+oracle for "what a human would actually say," only "is this rule internally consistent with its own
+declared grammar." Not fixed here: closing this class of gap in general would need an independent
+source of realistic utterances (the bench corpus is exactly that, but is not run by `check_rules.py`
+itself), which is a bigger change than "small and local" — noted as a follow-up in
+`plans/speech-word-fixes/implementation.md` rather than grown into this plan's scope.

@@ -32,7 +32,13 @@ def _rule(rule_id: str, pattern: str) -> CompiledRule:
 #: reads it), so it is omitted here.
 _FLIGHT_RULE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("turn_heading_relative", "turn <direction:left|right> <degrees:angle>"),
-    ("turn_heading", "<heading_deg:heading>"),
+    # `[[BL-B129]]` D6: this entry had drifted from the real shipped
+    # pattern (`"<heading_deg:heading>"`, missing the `<verb:turn|fly>
+    # heading` prefix `flight.lua` actually has) since before D6 -- the
+    # real pattern's own double-"heading" defect (the slot's own hidden
+    # anchor duplicating this literal) was undiscovered until D3's
+    # implementation. Corrected to the real string.
+    ("turn_heading", "<verb:turn|fly> heading <heading_deg:heading>"),
     ("level_flight", "level flight"),
     ("set_speed", "speed <speed_target:speed_target>"),
     ("speed_step", "<verb:slow|speed> <direction:down|up>"),
@@ -131,24 +137,39 @@ def test_the_real_shipped_pattern_set_rejects_exactly_the_known_collisions() -> 
 class TestTurnHeadingAbsolute:
     """Differential pin against the deleted `parse_heading_deg`'s
     digit-by-digit form (`test_bl16_stage_p2_vocabulary.py`'s own
-    `TestParseHeadingDeg`/`TestMatchTranscriptTurnHeading`)."""
+    `TestParseHeadingDeg`/`TestMatchTranscriptTurnHeading`).
+
+    `[[BL-B129]]` D6 moved "heading" out of the `heading` slot type's
+    own `consume` and into this pattern's grammar as an ordinary
+    literal -- every phrase below now needs the verb
+    ("turn"/"fly") the real pattern actually requires, which the
+    pre-D6 fixture (missing that prefix entirely) never exercised."""
 
     def test_digit_by_digit(self) -> None:
-        result = match_transcript("heading three one five", rules=_FLIGHT_RULES)
+        result = match_transcript("turn heading three one five", rules=_FLIGHT_RULES)
         assert result.token == "turn_heading"
-        assert result.slots == {"heading_deg": 315}
+        assert result.slots == {"verb": "turn", "heading_deg": 315}
 
     def test_digits(self) -> None:
-        result = match_transcript("heading 090", rules=_FLIGHT_RULES)
+        result = match_transcript("fly heading 090", rules=_FLIGHT_RULES)
         assert result.token == "turn_heading"
-        assert result.slots == {"heading_deg": 90}
+        assert result.slots == {"verb": "fly", "heading_deg": 90}
+
+    def test_a_homophone_mid_run_resolves(self) -> None:
+        """`[[BL-17]]`/`[[BL-B129]]` D3's own bench-measured case:
+        "heading **to** seven zero" -> 270 -- now reachable through the
+        real shipped pattern, not just the bare slot
+        (`test_rule_patterns.py::TestDigitWordHomophones`)."""
+        result = match_transcript("turn heading to seven zero", rules=_FLIGHT_RULES)
+        assert result.token == "turn_heading"
+        assert result.slots == {"verb": "turn", "heading_deg": 270}
 
     def test_a_value_above_360_does_not_match(self) -> None:
-        result = match_transcript("heading nine nine nine", rules=_FLIGHT_RULES)
+        result = match_transcript("turn heading nine nine nine", rules=_FLIGHT_RULES)
         assert result.token is None
 
     def test_heading_with_nothing_after_it_does_not_match(self) -> None:
-        result = match_transcript("heading", rules=_FLIGHT_RULES)
+        result = match_transcript("turn heading", rules=_FLIGHT_RULES)
         assert result.token is None
 
     def test_the_legacy_compass_point_form_is_dropped(self) -> None:
@@ -156,15 +177,34 @@ class TestTurnHeadingAbsolute:
         shipped `heading` slot type is three digits only, with no
         compass-word alternative -- "heading north" used to resolve via
         `parse_heading_deg`'s compass branch and no longer does."""
-        result = match_transcript("heading north", rules=_FLIGHT_RULES)
+        result = match_transcript("turn heading north", rules=_FLIGHT_RULES)
         assert result.token is None
 
     def test_turn_heading_relative_is_unaffected(self) -> None:
         """ "turn left two zero" still anchors on "turn," not "heading" --
-        `turn_heading`'s own `heading` slot type requires the literal
-        word "heading" first, so the two rules never compete."""
+        `turn_heading`'s own pattern needs the literal word "heading"
+        after the verb, so the two rules never compete."""
         result = match_transcript("turn left two zero", rules=_FLIGHT_RULES)
         assert result.token == "turn_heading_relative"
+
+    def test_double_heading_no_longer_matches(self) -> None:
+        """`[[BL-B129]]` D6's own fix target: before D6, this exact
+        wording was the *only* one the real shipped pattern accepted
+        (the slot's own hidden anchor duplicating this pattern's own
+        literal "heading") -- "turn heading three one five", what a
+        pilot actually says, never matched. Rejected now, as unconsumed
+        extra "heading" should be."""
+        result = match_transcript(
+            "turn heading heading three one five", rules=_FLIGHT_RULES
+        )
+        assert result.token is None
+
+    def test_heading_alone_without_the_verb_does_not_match(self) -> None:
+        """ "heading 315" with no "turn"/"fly" verb before it must not
+        become `turn_heading` -- the verb is a required, not optional,
+        element of this pattern."""
+        result = match_transcript("heading 315", rules=_FLIGHT_RULES)
+        assert result.token is None
 
 
 class TestLevelFlight:

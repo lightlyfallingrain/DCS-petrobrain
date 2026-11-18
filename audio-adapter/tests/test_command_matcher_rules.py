@@ -226,16 +226,25 @@ class TestDigitHomophoneFillerConflict:
     ever saw it, making D3's own bench-measured fix a no-op for the one
     case it was built for."""
 
-    _HEADING_RULE = _rule("turn_heading", "<heading_deg:heading>")
+    # `[[BL-B129]]` D6: the real shipped pattern string, now that
+    # "heading" is a literal in the pattern rather than a hidden anchor
+    # inside the slot's own `consume` -- a bare `"<heading_deg:heading>"`
+    # pattern never matches "heading to seven zero" at all any more
+    # (the slot itself no longer consumes the word "heading").
+    _HEADING_RULE = _rule(
+        "turn_heading", "<verb:turn|fly> heading <heading_deg:heading>"
+    )
     _ALTITUDE_RULE = _rule(
         "set_altitude", "altitude <altitude_m:quantity> [<reference:radar|barometric>]"
     )
 
     def test_to_resolves_as_a_digit_inside_a_rule_numeric_slot(self) -> None:
         """Bench evidence: "heading to seven zero" (x3) -> 270."""
-        result = match_transcript("heading to seven zero", rules=(self._HEADING_RULE,))
+        result = match_transcript(
+            "turn heading to seven zero", rules=(self._HEADING_RULE,)
+        )
         assert result.token == "turn_heading"
-        assert result.slots == {"heading_deg": 270}
+        assert result.slots == {"verb": "turn", "heading_deg": 270}
 
     def test_to_resolves_mid_run_too(self) -> None:
         """Bench evidence: "altitude 3 to 0 radar" -> 320."""

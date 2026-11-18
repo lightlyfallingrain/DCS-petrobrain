@@ -79,6 +79,25 @@ number, no "turn") must not match `point`; a miss ("say again") is correct -- ne
 to complete it into `turn_heading_relative`. Fix must not regress real `point` phrasings that
 legitimately pair a number with its own unit marker ("two o'clock", "three kilometres").
 
+**D6 — fix the `turn_heading` double-"heading" defect found while implementing D3.** Added
+mid-implementation, main-loop decision 2026-11-18. The real shipped `flight.lua` pattern,
+`"<verb:turn|fly> heading <heading_deg:heading>"`, required the literal word "heading" **twice** to
+match at all -- once from the pattern's own grammar, once more from inside `rule_patterns.
+_consume_heading`'s own `consume`, which also checked for the literal word "heading" before reading
+the three digits. "turn heading three one five" (what a pilot actually says, and every test's own
+assumed wording) never matched the real rule; only "turn heading heading three one five" did.
+
+**Fix:** make the `heading` slot type pure digits -- exactly 3 digits, 0-360 (360→0), the same
+digit-homophone table D3 ships -- and move the anchor word into the pattern, as an ordinary
+literal, where it belongs. `flight.lua`'s own pattern string needs no change (it already writes the
+literal correctly); only the slot type's own `consume` and its sample, every direct use of the bare
+`<deg:heading>` slot in tests, and the `rule_words` docstring (which incorrectly claimed no pattern
+used a literal "heading") needed correcting. Reasoning: a literal in the pattern is what
+`rule_words` walks to feed the whisper prompt bias (D10); an anchor hidden inside a slot's own
+`consume` never reached the prompt either way (user direction, 2026-11-18, recorded in `BL-17`:
+*"read the actual speech patterns used from the lua rule files and use them to get whisper recognize
+those"*).
+
 ## Out of scope
 
 - "speed max" heard as "speed maximum"/"speed x", "forward" as "from what", "level flight" as
@@ -92,10 +111,16 @@ legitimately pair a number with its own unit marker ("two o'clock", "three kilom
 - Unit tests for D1 (the two patterns), D3 (each homophone in each numeric slot type, bounds,
   never outside a slot), D4 ("alright" → right; a free-speech sentence with "all right" unchanged),
   D5 ("right 45"/"right forty five"/"left 30" never match `point`; a legitimate relative+distance
-  phrase, e.g. "look right 5 kilometres", still does).
+  phrase, e.g. "look right 5 kilometres", still does), D6 ("turn heading three one five"/"fly
+  heading 0 9 0"/"turn heading to seven zero" → `turn_heading` with the right value; "turn heading
+  heading 315" no longer matches; "heading 315" alone does not become `turn_heading`).
 - `phrase_bench.py` re-run on the corpus with the branch's matcher, rules and prompt: A_full row
   correct count up, WRONG count not up; the before/after table appended to
-  `audio-adapter/research/2026-11-18-state-hint-bench.md`.
+  `audio-adapter/research/2026-11-18-state-hint-bench.md`. (D6 note: the corpus's own
+  `heading_*`-style clips say "heading …" without "turn"/"fly", so they stay on the legacy
+  `scan_bearing_deg`/`report_bearing_deg` path per the corpus's own documented caveat and are
+  unaffected by D6.)
 - `tools/check_rules.py` (body-layer) passes on the edited `flight.lua`.
 - Flight: `#needs-flight` — say "altitude three hundred", "hold altitude", "turn left three zero",
-  "heading two seven zero" (as "turn heading two seven zero"), "right".
+  "turn heading two seven zero" (D6: the verb is required now — bare "heading two seven zero" is
+  not a command), "right".

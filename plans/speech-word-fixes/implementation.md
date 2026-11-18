@@ -1,7 +1,8 @@
 ### Implementation Summary
 
-Implements `[[BL-B129]]` D1–D5 (D5 added mid-implementation, user-approved 2026-11-18). D2 was
-measured and explicitly **not** shipped (see below).
+Implements `[[BL-B129]]` D1–D6 (D5 added mid-implementation, user-approved 2026-11-18; D6 added
+mid-implementation, main-loop decision 2026-11-18, fixing a defect D5's own narration surfaced
+while implementing D3). D2 was measured and explicitly **not** shipped (see below).
 
 ### Files Changed
 
@@ -62,11 +63,37 @@ measured and explicitly **not** shipped (see below).
   hand-built `slots` fixtures no longer carry `"verb"`, matching what the real matcher now
   produces after D1 (these tests still passed unmodified, since the Lua handler never read
   `s.verb`, but the fixture was stale relative to reality — updated for accuracy).
+- `audio-adapter/src/rule_patterns.py` — D6: `_consume_heading` no longer requires the literal word
+  "heading" inside its own `consume` (pure 3-digit grammar, same homophone table, 0-360→0, no
+  checksum, unchanged); the `heading` `SlotType`'s own `sample()` lambda drops the leading
+  "heading" word it used to bake in (now `"two zero zero"`, matching `angle`/`quantity`'s own
+  convention). Module docstring and the `rule_words` docstring both corrected — the latter
+  previously claimed no pattern used a literal "heading" at all, which was false even before D6
+  (`flight.lua`'s own pattern already did; the claim was simply wrong, not merely stale).
+- `audio-adapter/tests/test_rule_patterns.py` — `TestHeadingSlot` tests rewritten for the bare
+  slot's new pure-digit grammar (no "heading" word in the input any more) plus a new
+  `test_no_anchor_word_of_its_own`; new `TestHeadingSlotWithPatternAnchor` class tests the real
+  shipped pattern shape directly (resolves, homophone mid-run, the double-"heading" rejection, bare
+  digits without the verb rejected); `TestDigitWordHomophones`'s own two heading tests updated to
+  use the anchored pattern (`"heading <deg:heading>"`) instead of the bare slot, since the bare
+  slot no longer has an anchor to test the homophone against in isolation — one of the two
+  (`test_a_fuzzed_digit_count_still_fails_headings_exact_three_rule`) had started passing for the
+  wrong reason after the slot-grammar change and was corrected to use the real pattern shape so the
+  rejection is genuinely about the digit count again, not an unrelated anchor-word mismatch.
+- `audio-adapter/tests/test_flight_rules_matching.py` — `_FLIGHT_RULE_PATTERNS`'s own
+  `turn_heading` entry corrected to the real shipped pattern string (it had drifted to a bare
+  `"<heading_deg:heading>"`, missing the `<verb:turn|fly> heading` prefix, since before this plan
+  started — the double-"heading" defect was undiscovered until D3); `TestTurnHeadingAbsolute`
+  rewritten to say the verb every test now requires, plus new tests for the homophone-through-the-
+  real-pattern case, the double-"heading" rejection, and the bare-digits-without-verb rejection.
+- `audio-adapter/tests/test_command_matcher_rules.py` — `TestDigitHomophoneFillerConflict`'s own
+  `_HEADING_RULE` fixture corrected to the real pattern string for the same reason.
 - `audio-adapter/research/2026-11-18-state-hint-bench.md` — appended the before/after bench table,
   the clip-by-clip trace of every kind-change between runs, the D2 prompt-experiment result and
-  why it was not shipped, and the D5 finding/fix summary.
-- `plans/speech-word-fixes/plan.md` — added the D5 section and updated Acceptance (coordinator
-  scope addition, user-approved 2026-11-18).
+  why it was not shipped, the D5 finding/fix summary, and the D6 finding/fix summary plus why the
+  re-run bench shows zero change (the corpus's own "heading" clips never say "turn"/"fly").
+- `plans/speech-word-fixes/plan.md` — added the D5 and D6 sections and updated Acceptance
+  (coordinator scope additions, user-approved/main-loop-decided 2026-11-18).
 
 ### Tests Added
 
@@ -82,6 +109,11 @@ measured and explicitly **not** shipped (see below).
   `test_a_bare_number_does_not_block_a_legitimate_distance_phrase` — D5.
 - `test_command_matcher_rules.py::TestDigitHomophoneFillerConflict` (3 tests) — D3's filler
   conflict and fix, end to end.
+- `test_rule_patterns.py::TestHeadingSlot::test_no_anchor_word_of_its_own`,
+  `TestHeadingSlotWithPatternAnchor` (4 tests) — D6.
+- `test_flight_rules_matching.py::TestTurnHeadingAbsolute::test_a_homophone_mid_run_resolves`,
+  `test_double_heading_no_longer_matches`, `test_heading_alone_without_the_verb_does_not_match` —
+  D6, against the real pattern.
 
 ### Checks
 
@@ -89,8 +121,8 @@ measured and explicitly **not** shipped (see below).
 - ruff format --check: pass
 - ruff check: pass
 - mypy src: pass (17 source files)
-- pytest -q (full suite): 557 passed, 2 skipped
-- `.claude/scripts/fast-tests.sh audio-adapter`: 405 passed, 1 skipped
+- pytest -q (full suite): 564 passed, 2 skipped
+- `.claude/scripts/fast-tests.sh audio-adapter`: 412 passed, 1 skipped
 
 **body-layer/**
 - ruff format --check: pass
@@ -111,8 +143,10 @@ measured and explicitly **not** shipped (see below).
 WRONG drops to 0 on A_full (D4's fix). A_full's `ok` count drops by 2 — traced clip by clip in the
 research note: entirely attributable to three recordings of the now-deprecated "alt" phrasing
 (D1's own intended cost) plus a wash of two unrelated clips shifted by the shorter A_full prompt
-text (a known property of prompt-conditioned decoding, not a defect). Full trace and D2/D5 notes:
-`audio-adapter/research/2026-11-18-state-hint-bench.md`.
+text (a known property of prompt-conditioned decoding, not a defect). **D6 re-run: zero change**
+from these numbers, clip for clip — expected, since this corpus's own `heading_*` clips never say
+"turn"/"fly" and so never reach `turn_heading` either before or after D6. Full trace and D2/D5/D6
+notes: `audio-adapter/research/2026-11-18-state-hint-bench.md`.
 
 ### Notable Discoveries
 
@@ -137,15 +171,22 @@ text (a known property of prompt-conditioned decoding, not a defect). Full trace
   starting with "alright" ("alright then let's go" → `point`). Narrowed to a whole-transcript bare
   word alias instead, with zero new false-positive surface (verified: "it's all right with me",
   "that was alright I guess", "alright then lets go" all stay `token=None`).
-- **A genuine pre-existing matcher defect, out of scope, found and left alone**: `flight.lua`'s real
-  shipped `turn_heading` pattern is `"<verb:turn|fly> heading <heading_deg:heading>"`, but the
-  `heading` slot type's own `_consume_heading` *also* requires the literal word "heading" at its
-  own start — so the real pattern needs "turn heading heading three one five" to match at all;
-  "turn heading three one five" (the form every test and the bench's own clips actually say) does
-  not match the real rule today. This explains why "turn heading to seven zero" (D3's own bench
-  case) never resolves in the real pipeline even with D3's fix — not a D3 defect, a separate,
-  pre-existing one-literal-too-many bug in the shipped pattern string. Not fixed here (out of
-  `[[BL-B129]]`'s scope); flagged for a follow-up.
+- **D6 — a genuine pre-existing matcher defect, found while implementing D3, fixed by main-loop
+  decision.** `flight.lua`'s real shipped `turn_heading` pattern,
+  `"<verb:turn|fly> heading <heading_deg:heading>"`, needed the literal word "heading" **twice** to
+  match at all — once from the pattern's own grammar, once more from inside `_consume_heading`'s
+  own `consume`. "turn heading three one five" (what a pilot actually says, and every test's and
+  the bench's own assumed wording) never matched the real rule before D6. Fixed by making the
+  `heading` slot type pure digits and moving the anchor into the pattern, where `rule_words` (the
+  whisper prompt bias) actually reads it from. `check_rules.py`'s own self-match step
+  (`generate_samples`/`_expand` → `match_pattern`) missed this because the bug was *internally
+  consistent*: the `heading` slot's own `sample()` lambda baked in the same "needs its own
+  'heading' word" assumption the buggy `consume` required, so the generated self-test sample always
+  matched the buggy grammar it was generated from. A self-match check built from a rule's own
+  stated primitives cannot catch an error shared between the primitive (what a sample "should" look
+  like) and the code that accepts it — it has no independent oracle for what a human actually says.
+  Closing that gap generally (e.g. running the real bench corpus through `check_rules.py`) is a
+  bigger change than "small and local" — noted here as a follow-up, not attempted.
 - **A `grep` of the test suite surfaced four test files the plan did not name**
   (`test_rule_patterns.py`, `test_command_matcher.py`, `test_command_matcher_rules.py`, and
   `body-layer/tests/test_rules_flight_actions.py`), all touching D1/D3's own grammar/digit-run
@@ -156,10 +197,10 @@ text (a known property of prompt-conditioned decoding, not a defect). Full trace
 
 Say "altitude three hundred", "hold altitude", "turn left three zero", "alright" (expect
 `hvrt_translate_right`), "right 45"/"left 30" said deliberately with no "turn" (expect "say
-again", never a silent `point`).
+again", never a silent `point`), "turn heading two seven zero" (D6 — now resolves correctly;
+bare "heading two seven zero" with no "turn"/"fly" must stay "say again").
 
-**The plan's own flight line ("heading two seven zero", as "turn heading two seven zero") will not
-work as written** — see the pre-existing `turn_heading` double-"heading" defect above; "turn
-heading two seven zero" needs to be said as "turn heading heading two seven zero" to match the
-real shipped rule today, which is almost certainly not what the user should fly. Flagging rather
-than silently adjusting the flight instruction or fixing the unrelated rule.
+D6 fixed what would otherwise have been a flight-test failure: the plan's own original line
+("heading two seven zero", as "turn heading two seven zero") would not have worked as written
+before D6 — the real shipped rule needed "turn heading heading two seven zero" (doubled) to match
+at all. That is no longer true; the flight line above reflects the fixed behaviour.
