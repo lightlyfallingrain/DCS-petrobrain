@@ -7,6 +7,9 @@
 -- run when Petrovich has no controls, and -- for the categories that need
 -- a particular held value -- holds (then retries) during the
 -- takeover-settle window rather than refusing outright.
+--
+-- No rule checks whether its action worked: an action that fails ends the
+-- handler, and Petrovich says "unable, <reason>" (README, "Actions").
 
 when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle>",
   "flight_control_heading",
@@ -15,11 +18,7 @@ when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle
     if s.direction == "left" then
       delta = -delta
     end
-    local r = flight.increment_heading(delta)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.increment_heading(delta)
     say(s.degrees .. " " .. s.direction .. ".")
   end)
 
@@ -29,10 +28,6 @@ when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle
 when.speech("turn_heading", "<heading_deg:heading>", "flight_control",
   function(s)
     local r = flight.set_heading(s.heading_deg)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     say("Heading " .. digits(r.heading_deg) .. ".")
   end)
 
@@ -41,11 +36,7 @@ when.speech("turn_heading", "<heading_deg:heading>", "flight_control",
 -- known yet, passes once any one of them is.
 when.speech("level_flight", "level flight", "flight_control_any",
   function(s)
-    local r = flight.level_flight()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.level_flight()
     say("Level flight.")
   end)
 
@@ -57,19 +48,11 @@ when.speech("level_flight", "level flight", "flight_control_any",
 when.speech("set_speed", "speed <speed_target:speed_target>", "flight_control",
   function(s)
     if s.speed_target.kind == "max" then
-      local r = flight.set_speed_max()
-      if not r.ok then
-        say(unable(r.reason))
-        return
-      end
+      flight.set_speed_max()
       say("Speed max.")
       return
     end
     local r = flight.set_speed(s.speed_target.value)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     if r.is_max then
       say("Speed max.")
     else
@@ -95,10 +78,6 @@ when.speech("speed_step", "<verb:slow|speed> <direction:down|up>",
       sign = -1
     end
     local r = flight.step_speed(sign)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     if r.is_max then
       say("Speed max.")
     else
@@ -121,10 +100,6 @@ when.speech(
       ref_code = 2
     end
     local r = flight.set_altitude(s.altitude_m, ref_code)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     if r.barometric then
       say(r.altitude_m .. " meters barometric.")
     else
@@ -141,10 +116,6 @@ when.speech("altitude_step", "<direction:climb|descend> <amount_m:quantity>",
       delta = -delta
     end
     local r = flight.step_altitude(delta)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     if r.barometric then
       say(r.altitude_m .. " meters barometric.")
     else
@@ -158,28 +129,15 @@ when.speech("altitude_step", "<direction:climb|descend> <amount_m:quantity>",
 when.speech("hold_altitude", "hold <verb:altitude|alt>", "flight_control_altitude",
   function(s)
     local r = flight.hold_altitude()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
     say("Holding " .. r.altitude_m .. " meters.")
   end)
 
--- "Straight" / "level off" -- two phrasings that share nothing but their
--- effect (not a value variant of one pattern, so two rule ids rather
--- than one -- the same "one enumerated token per word" shape the HVRT
--- bare-word rules below use), both stopping a turn and holding the
--- current heading.
-local function speak_level_off()
-  local r = flight.level_off()
-  if not r.ok then
-    say(unable(r.reason))
-    return
-  end
-  say("Heading " .. digits(r.heading_deg) .. ".")
-end
-
-when.speech("level_off", "level off", "flight_control_heading", speak_level_off)
+-- "Level off" -- stops a turn and holds the current heading.
+when.speech("level_off", "level off", "flight_control_heading",
+  function(s)
+    local r = flight.level_off()
+    say("Heading " .. digits(r.heading_deg) .. ".")
+  end)
 
 -- HVRT translate/hold/step -- bare single-word commands. The adapter
 -- recognises these via its own exact, pre-rule `_HVRT_BARE_WORD_TOKENS`
@@ -192,71 +150,43 @@ when.speech("level_off", "level off", "flight_control_heading", speak_level_off)
 -- (`_ai_pilot_hvrt_ready`) stays the action's own finer check (D16/D18).
 when.speech("hvrt_translate_left", "left", "flight_control",
   function(s)
-    local r = flight.hvrt_translate_left()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_translate_left()
     say("Left.")
   end)
 
 when.speech("hvrt_translate_right", "right", "flight_control",
   function(s)
-    local r = flight.hvrt_translate_right()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_translate_right()
     say("Right.")
   end)
 
 when.speech("hvrt_translate_forward", "forward", "flight_control",
   function(s)
-    local r = flight.hvrt_translate_forward()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_translate_forward()
     say("Forward.")
   end)
 
 when.speech("hvrt_translate_back", "back", "flight_control",
   function(s)
-    local r = flight.hvrt_translate_back()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_translate_back()
     say("Back.")
   end)
 
 when.speech("hvrt_hold", "hold", "flight_control",
   function(s)
-    local r = flight.hvrt_hold()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_hold()
     say("Holding.")
   end)
 
 when.speech("hvrt_step_up", "up", "flight_control",
   function(s)
-    local r = flight.hvrt_step_up()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_step_up()
     say("Up.")
   end)
 
 when.speech("hvrt_step_down", "down", "flight_control",
   function(s)
-    local r = flight.hvrt_step_down()
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.hvrt_step_down()
     say("Down.")
   end)
 

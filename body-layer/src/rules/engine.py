@@ -45,6 +45,23 @@ RULE_LOAD_INSTRUCTION_BUDGET: Final[int] = 2_000_000
 RULE_DISPATCH_INSTRUCTION_BUDGET: Final[int] = 200_000
 
 
+class RuleUnable(Exception):
+    """An action answered `ok = false`: the action's own wrapper raises
+    this instead of handing the rule a failure table, and `run_rule`
+    catches it and speaks `unable(reason)` (user, 2026-11-18). Rules do not
+    check `r.ok` and cannot catch this (no `pcall` in the sandbox), so
+    every failure is handled in one place. Not an error: lines the handler
+    already said stay spoken, and nothing is rolled back.
+
+    lupa propagates a Python exception raised inside a callback unwrapped
+    through the Lua frames (`research/2026-11-17-lupa-sandbox.md`), so
+    this arrives at `run_rule` as itself, never as a `LuaError`."""
+
+    def __init__(self, reason: str | None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class RuleOutcome:
     """What `run_rule` hands back to `CrewConsole` (via `body.py`'s
@@ -187,10 +204,12 @@ def _make_action_wrapper(
     further legality is `action.invoke`'s job, not this wrapper's) before
     `action.invoke` ever sees it (module docstring; security memory
     `project_ai_pilot_goal_lua_dispatch_missing_validation`), and converts
-    the dict result to a genuine Lua table. A bad call (wrong arity, wrong
-    type, out of bounds) answers `{ok=false, reason=nil}` rather than
-    raising -- `unable(nil)` degrades to a plain "Unable." (`render_
-    unable`'s own graceful-degradation posture), not a crash.
+    the dict result to a genuine Lua table. An `ok = false` result raises
+    `RuleUnable` instead (the rule never sees it). A bad call (wrong
+    arity, wrong type, out of bounds) is a bug in the rule file, so it
+    raises `RuleRuntimeError` -- "Action file error." and a log line, the
+    same as `nil` arithmetic -- rather than passing for a closed reason
+    (user, 2026-11-18: rules are fixed, not recovered from).
 
     **Arity (D20)**: a trailing `optional` parameter (`ActionParam.
     optional`) may be omitted from the Lua call entirely -- `required`
@@ -201,9 +220,7 @@ def _make_action_wrapper(
     required = sum(0 if param.optional else 1 for param in action.params)
 
     def reject(why: str) -> Any:
-        if ctx.on_rejected_call is not None:
-            ctx.on_rejected_call(action.name, why)
-        return sandbox.table_from({"ok": False, "reason": None})
+        raise RuleRuntimeError(f"bad call to {action.name}(): {why}")
 
     def wrapper(*lua_args: object) -> Any:
         if not required <= len(lua_args) <= len(action.params):
@@ -242,6 +259,9 @@ def _make_action_wrapper(
         for omitted in action.params[len(lua_args) :]:
             args[omitted.name] = None
         result = action.invoke(ctx, args)
+        if not result.get("ok"):
+            reason = result.get("reason")
+            raise RuleUnable(reason if isinstance(reason, str) else None)
         return sandbox.table_from(result)
 
     return wrapper
@@ -394,6 +414,10 @@ def run_rule(
     before calling this at all (D4); this is a defensive fallback, not the
     primary gate.
 
+    **An action failing ends the handler** (`RuleUnable`): the lines it
+    already said are kept and `unable(reason)` is appended -- an ordinary,
+    non-error outcome.
+
     **Catches any bare Python exception, not only `RuleRuntimeError`/
     `RuleBudgetExceeded`** (`[[BL-17]]` Stage 4, `review-stage3b.md`'s
     optional refinement) -- Stage 0's own research
@@ -418,6 +442,9 @@ def run_rule(
         lua_slots = sandbox.table_from(slots) if slots else sandbox.table()
         with sandbox.run_with_budget(RULE_DISPATCH_INSTRUCTION_BUDGET):
             rule.handler(lua_slots)
+    except RuleUnable as exc:
+        logger.info("rule %r (%s) unable: %s", rule_id, rule.file, exc.reason)
+        sink.say(render_unable(exc.reason or "").text)
     except (RuleRuntimeError, RuleBudgetExceeded) as exc:
         logger.error("rule %r (%s) dispatch error: %s", rule_id, rule.file, exc)
         error = True

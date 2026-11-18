@@ -25,7 +25,7 @@ one, and exits 1 if it found any:
   or ordinary speech — the same check audio-adapter runs at load, offline (needs
   `audio-adapter/.venv`; without it this part is skipped with a warning);
 - a **dry run** of every handler with sample slot values — each directive alternative, each
-  slot form — while flying, while hovering, and with every action answering `ok = false`. It
+  slot form — while flying, while hovering, and with every action failing. It
   catches a misspelt action, a wrong argument type or count, `nil` arithmetic, `digits()` of
   a word, and an `effector.write` naming a switch or value `effectors.toml` does not have.
   A branch none of the samples reach is not checked.
@@ -41,11 +41,7 @@ The same check runs as a **git pre-commit hook** whenever a commit touches
 when.speech("turn_heading_relative", "turn <direction:left|right> <degrees:angle>",
   "flight_control",
   function(s)
-    local r = flight.increment_heading(s.direction == "left" and -s.degrees or s.degrees)
-    if not r.ok then
-      say(unable(r.reason))
-      return
-    end
+    flight.increment_heading(s.direction == "left" and -s.degrees or s.degrees)
     say(s.degrees .. " " .. s.direction .. ".")
   end)
 ```
@@ -133,8 +129,14 @@ ordinary (non-filesystem) members.
 ## Actions
 
 Actions are namespaced Lua tables — what a rule may *do*, as opposed to what it may *say*.
-Every argument is validated in Python before the underlying code runs; a bad call answers
-`{ok = false, reason = nil}` rather than raising.
+Every argument is validated in Python before the underlying code runs. A bad call (wrong
+argument count, type or range) is a bug in the rule: it is logged and Petrovich says "Action
+file error."
+
+**A rule never checks whether an action worked.** When one fails, the handler stops there and
+Petrovich says `unable(reason)`, e.g. "Unable, not flying." Anything the handler already said
+before the failing call is still spoken, and nothing it did is undone. The failure is logged.
+Rules cannot catch the failure themselves.
 
 | call | params | effect |
 |---|---|---|
@@ -151,12 +153,11 @@ Every argument is validated in Python before the underlying code runs; a bad cal
 | `flight.hvrt_translate_left/right/forward/back()` | — | cycles the AI wheel into HVRT (from hover) and presses the named direction |
 | `flight.hvrt_hold()` | — | clears an outstanding HVRT translate press |
 | `flight.hvrt_step_up/down()` | — | the 2 m HVRT altitude tap |
-| `effector.write(name, value, says)` | `name`/`value`: strings, checked against the loaded aircraft's own effector registry; `says` optional, free-text (silently capped at the same length `say()` enforces) | queues a cockpit switch write; **says nothing when it returns** — `r.ok = true` only means the write was accepted, not that it happened yet (it may take several polls). If `says` was given, that text is spoken once the write actually lands, through the same path a sequence file's own `petrovich-says` cell uses. No shipped rule calls this yet — it exists so a later rule group can write effectors without a second mechanism. A second `effector.write` naming the same effector while the first is still pending is a no-op if it names the *same* value (the pilot repeating themselves), or **replaces** the pending request if it names a *different* one — latest wins, nothing lost. |
+| `effector.write(name, value, says)` | `name`/`value`: strings, checked against the loaded aircraft's own effector registry; `says` optional, free-text (silently capped at the same length `say()` enforces) | queues a cockpit switch write; **says nothing when it returns** — returning only means the write was accepted, not that it happened yet (it may take several polls). If `says` was given, that text is spoken once the write actually lands, through the same path a sequence file's own `petrovich-says` cell uses. No shipped rule calls this yet — it exists so a later rule group can write effectors without a second mechanism. A second `effector.write` naming the same effector while the first is still pending is a no-op if it names the *same* value (the pilot repeating themselves), or **replaces** the pending request if it names a *different* one — latest wins, nothing lost. |
 
-Every action returns a table: `r.ok` (bool), `r.reason` (a reason key for `unable`, or `nil` on
-success), plus whatever extra fields that action's own row above names (e.g. `r.altitude_m`) for
-the handler's own readback. `effector.write`'s own failure reason is always `"UNKNOWN_EFFECTOR"` — an unknown
-`name`, or a `value` that effector does not know.
+An action that works returns a table with whatever fields its row above names (e.g.
+`r.altitude_m`) for the handler's readback. `effector.write`'s own failure reason is always
+`"UNKNOWN_EFFECTOR"`: an unknown `name`, or a `value` that effector does not know.
 
 ## Failures
 

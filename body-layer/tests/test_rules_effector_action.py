@@ -119,8 +119,7 @@ def test_effector_write_rule_unknown_effector_never_reaches_the_engine(
 ) -> None:
     (tmp_path / "r.lua").write_text(
         'when.speech("probe_bad", "x", "always", function(s)\n'
-        '  local r = effector.write("no_such_effector", "on", "Hi.")\n'
-        "  if not r.ok then say(unable(r.reason)) end\n"
+        '  effector.write("no_such_effector", "on", "Hi.")\n'
         "end)\n",
         encoding="utf-8",
     )
@@ -151,8 +150,7 @@ def test_effector_write_rule_illegal_value_never_reaches_the_engine(
 ) -> None:
     (tmp_path / "r.lua").write_text(
         'when.speech("probe_bad_value", "x", "always", function(s)\n'
-        '  local r = effector.write("observ", "sideways", "Hi.")\n'
-        "  if not r.ok then say(unable(r.reason)) end\n"
+        '  effector.write("observ", "sideways", "Hi.")\n'
         "end)\n",
         encoding="utf-8",
     )
@@ -181,8 +179,7 @@ def test_effector_write_says_is_optional(tmp_path: Path) -> None:
     optional, free-text) -- the action still validates and enqueues."""
     (tmp_path / "r.lua").write_text(
         'when.speech("probe_no_says", "x", "always", function(s)\n'
-        '  local r = effector.write("observ", "on")\n'
-        "  if not r.ok then say(unable(r.reason)) end\n"
+        '  effector.write("observ", "on")\n'
         "end)\n",
         encoding="utf-8",
     )
@@ -211,8 +208,7 @@ def test_effector_write_says_explicit_nil_is_also_optional(tmp_path: Path) -> No
     the other) must resolve the same way as omitting it entirely."""
     (tmp_path / "r.lua").write_text(
         'when.speech("probe_explicit_nil_says", "x", "always", function(s)\n'
-        '  local r = effector.write("observ", "on", nil)\n'
-        "  if not r.ok then say(unable(r.reason)) end\n"
+        '  effector.write("observ", "on", nil)\n'
         "end)\n",
         encoding="utf-8",
     )
