@@ -3536,7 +3536,21 @@ def _apply_flight_control(
     `wire_seq`, whenever `phase == "OVERLAY"` by the time this runs: a
     stale axes goal/handover request has no meaning once he is flying
     through the overlay instead, and sending it would confuse Lua's own
-    `armed` state for no benefit."""
+    `armed` state for no benefit.
+
+    **The one-frame `TAKING` window (review-m2.md Required Fix 1)**: a
+    goal sent while `phase == "TAKING"` would reach `Export.lua` before
+    `fc_law` exists, and `apply_goal_fields` only calls `law_apply_goal`
+    once `fc_law is not None` -- so a goal command dispatched there is
+    silently lost (nothing ever reconciles the `fc_goal_*` wire echo
+    against what the law is actually flying), while the rule's own
+    readback already spoke the commanded value as if it had landed. So
+    `goal_request` is held here, unsent and uncleared, for as long as
+    `phase == "TAKING"` -- it is retried next poll and actually sent
+    once Lua confirms `ACTIVE` (symmetric with the `held_*` gates'
+    already-stated "wait for a law to exist" intent). If the take itself
+    fails instead (ack timeout -> `PILOT`), the goal is dropped: there
+    is no law, and will be no law for this `take_seq`, to apply it to."""
     state = crew_console.flight_control_state
     limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
 
@@ -3560,19 +3574,24 @@ def _apply_flight_control(
             )
 
     goal_request = crew_console.flight_control_goal_transition
-    if goal_request is not None:
+    if goal_request is not None and state.phase != "TAKING":
         crew_console.flight_control_goal_transition = None
-        next_seq = state.wire_seq + 1
-        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
-        state = crew_console.flight_control_state
-        try:
-            aircraft_client.write_flight_control(
-                next_seq, "goal", limits, goal_request_fields(goal_request)
-            )
-        except AircraftLayerError:
-            logger.warning(
-                "flight-control goal write failed (continuing)", exc_info=True
-            )
+        if state.phase == "ACTIVE":
+            next_seq = state.wire_seq + 1
+            crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+            state = crew_console.flight_control_state
+            try:
+                aircraft_client.write_flight_control(
+                    next_seq, "goal", limits, goal_request_fields(goal_request)
+                )
+            except AircraftLayerError:
+                logger.warning(
+                    "flight-control goal write failed (continuing)", exc_info=True
+                )
+        # else: the take that was in progress when this goal was
+        # commanded has already failed (phase fell to PILOT/OVERLAY by
+        # the time this poll ran) -- dropped, there is nothing left to
+        # apply it to.
 
     if state.phase == "OVERLAY" and state.unpark_take:
         next_seq = state.wire_seq + 1

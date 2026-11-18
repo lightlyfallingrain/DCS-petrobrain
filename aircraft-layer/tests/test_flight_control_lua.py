@@ -712,39 +712,72 @@ print(written[2001] == nil)
 
 class TestPauseRowHolds:
     def test_a_paused_frame_rewrites_outputs_unchanged(self) -> None:
+        """review-m2.md Required Fix 2: a goal applied right before the
+        paused frame gives the shaper a real tracking error to move
+        against if it were (wrongly) advanced -- a bare `~= nil` check
+        cannot tell a frozen rewrite from an un-frozen one, since both
+        write *something*. Written values differ frame to frame by
+        exactly one wobble step even when correctly frozen (`write_
+        outputs`'s alternating parity), so the two samples are compared
+        within two wobble steps of each other, not for exact equality."""
         driver = """
 pilot_args.pitch = 0.5
+pilot_args.roll = 0.2
 ap_parked = false
 ap_seat = "pilot"
 flight_control.handle_flight_control_command(
     '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
 flight_control.run_flight_control(10.0)
+-- A goal that disagrees with the captured heading: if the pause branch
+-- wrongly advanced the law instead of freezing it, this is what the
+-- shaper would move against.
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{"min_ias_kmh":80.0},"goal":{"heading_deg":90.0}}', 10.0)
+local before_pitch = written[2001]
+local before_roll = written[2002]
 written = {}
 -- dt <= 0 (a paused frame: model time did not advance).
 flight_control.run_flight_control(10.0)
-print(written[2001] ~= nil)
+print(string.format("%.6f", before_pitch))
+print(string.format("%.6f", written[2001]))
+print(string.format("%.6f", before_roll))
+print(string.format("%.6f", written[2002]))
 """
         lines = _run(driver)
-        assert lines[0] == "true"
+        before_pitch, after_pitch, before_roll, after_roll = (float(v) for v in lines)
+        assert abs(after_pitch - before_pitch) <= 0.0021
+        assert abs(after_roll - before_roll) <= 0.0021
 
     def test_a_huge_frame_jump_also_rewrites_rather_than_shaping(self) -> None:
         driver = """
 pilot_args.pitch = 0.5
+pilot_args.roll = 0.2
 ap_parked = false
 ap_seat = "pilot"
 flight_control.handle_flight_control_command(
     '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
 flight_control.run_flight_control(10.0)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{"min_ias_kmh":80.0},"goal":{"heading_deg":90.0}}', 10.0)
+local before_pitch = written[2001]
+local before_roll = written[2002]
 written = {}
 flight_control.run_flight_control(50.0)  -- dt = 40s, above DT_CAP
 flight_control.push_flight_control_state(50.0)
 print(sent_lines[#sent_lines])
-print(written[2001] ~= nil)
+print(string.format("%.6f", before_pitch))
+print(string.format("%.6f", written[2001]))
+print(string.format("%.6f", before_roll))
+print(string.format("%.6f", written[2002]))
 """
         lines = _run(driver)
-        status_line, wrote = lines[0], lines[1]
+        status_line = lines[0]
+        before_pitch, after_pitch, before_roll, after_roll = (
+            float(v) for v in lines[1:]
+        )
         assert _field(status_line, "fc_mode") == "active"
-        assert wrote == "true"
+        assert abs(after_pitch - before_pitch) <= 0.0021
+        assert abs(after_roll - before_roll) <= 0.0021
 
 
 class TestEnvelopeRelease:

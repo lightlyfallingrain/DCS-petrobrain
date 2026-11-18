@@ -11,6 +11,7 @@ function."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from aircraft_client import AircraftLayerError
@@ -66,7 +67,7 @@ class TestApplyFlightControl:
 
     def test_a_goal_request_is_sent_with_its_fields_and_cleared(self) -> None:
         client = _FakeAircraftClient()
-        console = _console(FlightControlState(wire_seq=0))
+        console = _console(FlightControlState(phase="ACTIVE", wire_seq=0))
         console.flight_control_goal_transition = FlightControlGoalRequest(
             heading_deg=270.0
         )
@@ -84,7 +85,7 @@ class TestApplyFlightControl:
         self,
     ) -> None:
         client = _FakeAircraftClient()
-        console = _console(FlightControlState(wire_seq=0))
+        console = _console(FlightControlState(phase="ACTIVE", wire_seq=0))
         console.flight_control_transition = "take"
         console.flight_control_goal_transition = FlightControlGoalRequest(turn=1)
 
@@ -94,6 +95,71 @@ class TestApplyFlightControl:
         seqs = [call[0] for call in client.flight_control_calls]
         assert seqs == [1, 2]
         assert console.flight_control_state.wire_seq == 2
+
+    def test_a_goal_during_taking_is_held_not_sent_and_not_cleared(self) -> None:
+        """review-m2.md Required Fix 1: a goal commanded in the one-
+        frame `TAKING` window (the absolute-set `axes_*` actions gate on
+        `has_controls` alone, which is already true here) must not be
+        sent while `fc_law` cannot yet exist on the Lua side -- `Export.
+        lua`'s `apply_goal_fields` only applies a goal once `fc_law is
+        not None`, so sending it now would be silently dropped there,
+        with no retry. It is kept pending instead, to be retried once
+        Lua confirms `ACTIVE`."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", wire_seq=3))
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=315.0
+        )
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert client.flight_control_calls == []
+        assert console.flight_control_goal_transition == FlightControlGoalRequest(
+            heading_deg=315.0
+        )
+        assert console.flight_control_state.wire_seq == 3
+
+    def test_a_held_goal_is_sent_once_phase_becomes_active(self) -> None:
+        """The other half of Required Fix 1: once Lua confirms `active`
+        (`phase` moves from `TAKING` to `ACTIVE`), a goal held through
+        the taking window is sent on the very next poll -- not lost."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", wire_seq=3))
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=315.0
+        )
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        assert client.flight_control_calls == []
+
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert console.flight_control_goal_transition is None
+        assert len(client.flight_control_calls) == 1
+        seq, cmd, _limits, goal = client.flight_control_calls[0]
+        assert seq == 4
+        assert cmd == "goal"
+        assert goal == {"heading_deg": 315.0}
+        assert console.flight_control_state.wire_seq == 4
+
+    def test_a_goal_held_through_a_failed_take_is_dropped_not_sent(self) -> None:
+        """If the take itself fails (ack timeout moves `phase` from
+        `TAKING` to `PILOT` before this poll runs), there is no law --
+        and will be no law for this `take_seq` -- to apply the held
+        goal to. It is dropped, not sent to a now-irrelevant take."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="PILOT", wire_seq=3))
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=315.0
+        )
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert client.flight_control_calls == []
+        assert console.flight_control_goal_transition is None
+        assert console.flight_control_state.wire_seq == 3
 
     def test_the_arm_lease_resends_every_poll_while_overlay_and_unpark_take(
         self,

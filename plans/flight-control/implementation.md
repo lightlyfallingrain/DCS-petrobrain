@@ -1577,13 +1577,17 @@ committed to that branch.
   ω²·err − 2ζω·v`, there exists a ω that exactly matches the stopping-distance physics for *one*
   specific initial velocity, but the stopping-height goal itself scales with `v²` while the matching
   ω scales with `1/v` — so one fixed ω cannot zero the overshoot for every climb rate the aircraft
-  might be in when taken over. `OMEGA_ALT` was raised from its first value (0.2 → 0.5 rad/s) to keep
-  the overshoot comfortably inside the altitude band (well under the ≥10 m floor) for the climb
-  rates tested (1–4 m/s); the toy-plant test asserts the plan's own alternative, equally-valid pass
-  criterion ("any overshoot stays inside the band") rather than a blanket "never reverses," which
-  placeholder gains cannot promise in general. Flagged for Flight M-A/M0-E: either a materially
-  higher `OMEGA_ALT`, or (if the user wants a stricter guarantee) a velocity-scaled target/gain is a
-  design change beyond this stage's scope.
+  might be in when taken over. `OMEGA_ALT` was raised from its first value (0.2 → 0.5 rad/s) for
+  *less* overshoot, not because 0.2 crossed the ≥10 m-floor pass criterion — review-m2.md's
+  counterfactual (reverting to 0.2 and rerunning `test_flight_control_law.py` at the plan's own
+  tested climb rates, plus the shaper's own 5 m/s ceiling) found 0.2 already well under that floor
+  (2.4 m overshoot at every rate tried, against a ~20.8–21.25 m band) and the existing test passing
+  at both gains (11/11). The toy-plant test asserts the plan's own alternative, equally-valid pass criterion ("any
+  overshoot stays inside the band") rather than a blanket "never reverses," which placeholder gains
+  cannot promise in general; 0.5 is a reasonable judgement call for less overshoot, all else equal,
+  not a value `0.2` demonstrably fails at this scale. Flagged for Flight M-A/M0-E: either a
+  materially higher `OMEGA_ALT`, or (if the user wants a stricter guarantee) a velocity-scaled
+  target/gain is a design change beyond this stage's scope.
 - **A second real bug, caught the same way, in `src/api/server.py`, not in the Lua or Python
   `flight_control` modules**: `_FLIGHT_CONTROL_LIMITS_BOUNDS` (the `POST /command/flight_control`
   handler's shape-validation dict) is iterated as a *whitelist* — `for field, (lo, hi) in
@@ -1636,3 +1640,73 @@ committed to that branch.
   through its own worktree/branch (root `CLAUDE.md`, "Workflow" — non-code, cross-cutting updates),
   not bundled into a feature branch's commits — a second reason to leave it for its own pass rather
   than build it here.
+
+## M2 review-fix round (`review-m2.md`)
+
+Three items, all fixed on `m2-fix` (branched from `review-m2.md`'s tip `f78d90af`, read in full
+first against `plan.md`'s Decisions 18/21–25 and the control-law section).
+
+**Required Fix 1 — a goal commanded during the one-frame `TAKING` window was silently dropped,
+with a false-confirmation readback.** Chose the first of the review's two named alternatives: hold
+the queued goal in `body.py`'s `_apply_flight_control` until `state.phase == "ACTIVE"`, rather than
+sending it while `TAKING` (symmetric with the `held_*` gates' own "wait for a law to exist"
+posture) — not the Lua-side alternative (reading a pending `fc_goal_*` echo inside
+`law_init_at_take`'s own caller), because the body-side fix needs no change to `Export.lua`'s
+state machine at all, and the three phases a pending goal can be caught in (`TAKING` → hold and
+retry next poll; `ACTIVE` → send as before; `PILOT`, reached only if the take's own ack times out
+first → drop, there is no law for that `take_seq` to apply it to) are already distinct fields body-
+layer tracks. Updated the stale comment this exact bug sat under in `apply_goal_fields`
+(`flight_control.lua`) — it asserted a goal arriving before capture "is not expected in practice",
+which review-m2.md's own trace (the absolute-set `axes_*` actions gate on `has_controls` alone,
+already true at `TAKING`) disproved; it now says body-layer holds the goal instead.
+
+Tests added in `test_body_flight_control.py` (`TestApplyFlightControl`): one per phase outcome —
+held-not-sent during `TAKING`, sent on the next poll once `ACTIVE`, dropped once `PILOT`.
+Counterfactual-checked by reverting the `body.py` fix (byte-for-byte, confirmed by `shasum` before/
+after) and confirming all three go red, then restoring. The two pre-existing tests that happened to
+exercise the goal-send path from `FlightControlState`'s *default* `phase="PILOT"` (an artifact of
+the test not setting phase at all, not a realistic scenario — a pending goal action only exists
+once `has_controls` is true) were updated to `phase="ACTIVE"`, the phase a goal send is actually
+reachable from.
+
+**Required Fix 2 — `TestPauseRowHolds` asserted a write happened, not that it was unchanged.**
+Both of its tests were weak the same way (`written[2001] ~= nil`). Strengthening them needed a real
+tracking error to move against during the "paused" frame, since the take's own captured state has
+zero error against its own at-take goal (every reference starts exactly at the measured value) —
+a mutated, un-frozen `law_update` would be a mathematical no-op against that input and the test
+would never go red. Added a heading-goal command (90°, against the zero-heading mock) between the
+take and the paused frame, and compared the roll/pitch written values before and after the pause
+within two wobble steps (`0.0021`; `write_outputs`'s alternating ±0.001 parity means consecutive
+writes of the *same* frozen value legitimately differ by up to one step each, so exact equality
+cannot be the assertion). Confirmed empirically (`luajit`, not just read): the unmutated code gives
+written roll `0.199`→`0.201` (within tolerance); the reviewer's exact mutation (`law_update(fc_law,
+0.5, ...)` in the pause branch, writing its result) gives `0.199`→`0.771` — both the new and the
+pre-existing huge-frame-jump test now fail under that mutation, confirmed by applying it to a
+working copy, running, then restoring and matching the pre/post `shasum`.
+
+**Documentation accuracy — `OMEGA_ALT`'s Notable Discoveries entry.** Reworded to state what the
+review's counterfactual actually measured (0.2 already well under the floor at every climb rate
+tested; 0.5 only reduces overshoot further), not that 0.2 crossed a pass/fail line it demonstrably
+did not, per review-m2.md's own table. No gain changed — this is a wording-only fix, as the review
+asked.
+
+### Checks (this round)
+
+Both subprojects' commands rerun from a clean working tree after the three fixes:
+- **aircraft-layer**: `ruff format --check`/`ruff check` pass; `mypy src` — 28 files, no issues;
+  `.claude/scripts/fast-tests.sh aircraft-layer` — 821 passed; the three flight-control-specific
+  test files — 68 passed (unchanged count: the two strengthened tests replace, not add); `luac5.1
+  -p` on `flight_control.lua` — pass.
+- **body-layer**: `ruff format --check`/`ruff check` pass; `mypy src` (`PYTHONPATH=../world-model/
+  src`) — 92 files, no issues; `.claude/scripts/fast-tests.sh body-layer` — 2814 passed (2811 + the
+  3 new `TestApplyFlightControl` cases), 4 xfailed.
+
+### Notable discoveries (this round)
+
+- The two pre-existing `test_body_flight_control.py` cases that silently relied on `FlightControl
+  State`'s default `phase="PILOT"` to exercise the goal-send path are the kind of gap `plan-aligner`
+  /this role's own "treat the plan's test-impact list as a hypothesis" step exists to catch —
+  `review-m2.md`'s required-fix list named neither test, and both would have gone stale (still
+  green, no longer testing what their name says) the moment Required Fix 1 landed, had they not
+  been found by grepping every `FlightControlState(` construction site in the touched test file
+  rather than trusting the review's own enumeration.

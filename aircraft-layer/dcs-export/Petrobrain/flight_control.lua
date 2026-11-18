@@ -1013,10 +1013,15 @@ local function apply_goal_fields(data)
     -- undo the law's own internal settle-to-heading transition).
     -- `fc_law` is `nil` while "taking"/"off"/"armed"; a goal that
     -- arrives before capture completes is still recorded in `fc_goal_*`
-    -- above (so the wire echo is correct) but the law itself only ever
-    -- sees it once the take completes and starts fresh from Decision
-    -- 24's own "At take" values -- a goal commanded before capture is
-    -- not expected in practice (`held_*` gates HOLD until `active`).
+    -- above (so the wire echo is correct) but is not applied here --
+    -- the law itself only ever sees it once the take completes and
+    -- starts fresh from Decision 24's own "At take" values. **A goal
+    -- commanded during the one-frame "taking" window is reachable**
+    -- (`axes_set_heading`/`axes_set_speed`/`axes_set_altitude` gate on
+    -- `has_controls` alone, already true there) -- body-layer now holds
+    -- such a goal unsent until it sees this module report `active`,
+    -- then sends it fresh (review-m2.md Required Fix 1), rather than
+    -- relying on anything here to re-apply it once `fc_law` exists.
     if fc_law ~= nil then
         fc_law = law_apply_goal(fc_law, {
             heading_deg = heading_deg,
