@@ -167,6 +167,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B127]] — `effector.write` is not coupled to the calling rule's category/seat; deferred by the user (rule writer's responsibility for now); found in `[[BL-17]]` Stages 3a–4 security analysis
 - [[BL-B128]] — `drain_pending_rule_dispatch`'s unconditional clear can drop a concurrent REPL-thread hold; low probability, the pilot repeats; found in `[[BL-17]]` Stages 3a–4 security analysis
 - [[BL-B129]] — Speech word fixes from the Stage 3c corpus bench: altitude-only wording, numbers, fuzzy numeric slots, "alright" → "right" (done, merged to `main` 2026-11-18; `#needs-flight`)
+- [[BL-B130]] — Whisper prompt over the 224-token cap fails loud, naming the dropped words (BL-17 follow-up)
+- [[BL-B131]] — Recording/bench phrase list generated from the rule files (BL-17 follow-up)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
