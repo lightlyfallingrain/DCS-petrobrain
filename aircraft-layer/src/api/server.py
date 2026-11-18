@@ -495,6 +495,19 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     "on_ground_agl_threshold_m": (0.0, 100.0),
     "arm_lease_s": (0.0, 60.0),
     "max_bank_deg": (0.0, 90.0),
+    # M2 additions (`Export.lua`'s own `FC_LIMIT_BOUNDS`, matched here
+    # key-for-key -- a field this dict does not name is silently
+    # dropped by the loop below, never forwarded at all, so adding a
+    # new wire key to body-layer's `flight_control_limits()` without a
+    # matching entry here would be a silent loss, not a rejection).
+    "max_turn_bank_deg": (0.0, 60.0),
+    "max_climb_vs_mps": (0.0, 20.0),
+    "max_accel_mps2": (0.0, 10.0),
+    "speed_band_frac": (0.0, 1.0),
+    "alt_band_frac": (0.0, 1.0),
+    "alt_band_min_m": (0.0, 100.0),
+    "turn_rate_band_frac": (0.0, 1.0),
+    "heading_band_deg": (0.0, 90.0),
 }
 #: `goal` fields -- same generous-sanity-bound posture as `limits` above.
 _FLIGHT_CONTROL_GOAL_BOUNDS: dict[str, tuple[float, float]] = {

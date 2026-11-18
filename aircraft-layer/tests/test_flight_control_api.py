@@ -498,6 +498,46 @@ class TestFlightControlCommandEndpoint:
         assert status == 400
         assert sender.sent == []
 
+    def test_m2s_shaper_limits_and_bands_forward_when_in_bounds(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """`_FLIGHT_CONTROL_LIMITS_BOUNDS` must name every field `body.
+        flight_control_limits()` sends -- a field this dict does not
+        name is silently dropped by `_handle_flight_control_command`'s
+        own loop, never forwarded at all, rather than rejected. This
+        pins that every M2 key actually reaches `CommandSender`."""
+        server, sender = running_server_with_sender
+        m2_limits = {
+            "max_turn_bank_deg": 20.0,
+            "max_climb_vs_mps": 5.0,
+            "max_accel_mps2": 1.0,
+            "speed_band_frac": 0.10,
+            "alt_band_frac": 0.10,
+            "alt_band_min_m": 10.0,
+            "turn_rate_band_frac": 0.10,
+            "heading_band_deg": 5.0,
+        }
+        body = {"seq": 1, "cmd": "take", "limits": m2_limits, "goal": None}
+        status, _body = _post(server, "/command/flight_control", body)
+        assert status == 200
+        assert sender.sent == [(1, "take", m2_limits, None)]
+
+    def test_an_m2_limits_field_beyond_its_bound_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {
+            "seq": 1,
+            "cmd": "take",
+            "limits": {"max_turn_bank_deg": 999.0},
+            "goal": None,
+        }
+        status, _body = _post(server, "/command/flight_control", body)
+        assert status == 400
+        assert sender.sent == []
+
     def test_a_non_json_body_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],

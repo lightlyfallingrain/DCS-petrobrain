@@ -97,8 +97,13 @@ _PREAMBLE = """
 local pilot_args = { pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }
 local operator_args = { pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }
 local ias_mps = 150.0 / 3.6
+local tas_mps = nil  -- nil means "same as ias_mps", set per-test to diverge
 local bank_rad = 0.0
+local pitch_rad = 0.0
 local agl_m = 200.0
+local asl_m = nil  -- nil means "same as agl_m"
+local vs_mps = 0.0
+local ang_x, ang_y, ang_z = 0.0, 0.0, 0.0  -- roll/yaw/pitch rate, rad/s
 local heading_rad = 0.0
 local radar_dist, radar_valid = 200.0, true
 local self_data_present = true
@@ -131,15 +136,33 @@ function LoSetCommand(cmd, value)
 end
 
 function LoGetADIPitchBankYaw()
-    return 0.0, bank_rad, 0.0
+    return pitch_rad, bank_rad, 0.0
 end
 
 function LoGetIndicatedAirSpeed()
     return ias_mps
 end
 
+function LoGetTrueAirSpeed()
+    if tas_mps == nil then return ias_mps end
+    return tas_mps
+end
+
+function LoGetVerticalVelocity()
+    return vs_mps
+end
+
+function LoGetAngularVelocity()
+    return { x = ang_x, y = ang_y, z = ang_z }
+end
+
 function LoGetAltitudeAboveGroundLevel()
     return agl_m
+end
+
+function LoGetAltitudeAboveSeaLevel()
+    if asl_m == nil then return agl_m end
+    return asl_m
 end
 
 function LoGetRadarAltimeter()

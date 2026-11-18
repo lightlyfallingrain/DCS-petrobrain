@@ -122,6 +122,86 @@ MAX_BANK_DEG: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: M2's own bank for a commanded continuous turn ("turn left/right")
+#: and for the heading channel's own rate-limit while converging to a
+#: spoken heading -- `Export.lua`'s `law_turn_rate_at_bank(this, V_t)`
+#: is the turn rate either channel's shaper rate-limits to. 20 deg is
+#: the M0-A reference manoeuvre's own bank ("20° bank turns both
+#: ways"), reused as a judgement call rather than measured for this
+#: purpose specifically.
+MAX_TURN_BANK_DEG: Final[float] = tuning.real(
+    "belief.flight_control.MAX_TURN_BANK_DEG",
+    20.0,
+    lo=5.0,
+    hi=45.0,
+    status="judgement",
+)
+
+#: The altitude channel's own vertical-speed ceiling -- M0-A's
+#: reference manoeuvre flew a "5 m/s climb and descent of 100 m",
+#: reused here as the shaper's own rate limit rather than measured for
+#: this purpose.
+MAX_CLIMB_VS_MPS: Final[float] = tuning.real(
+    "belief.flight_control.MAX_CLIMB_VS_MPS",
+    5.0,
+    lo=1.0,
+    hi=15.0,
+    status="judgement",
+)
+
+#: The speed channel's own along-track acceleration ceiling -- no
+#: probe ever measured a step-response accel figure for this (M0-E was
+#: not flown), so this is a placeholder, owed by M0-E like every gain
+#: `Export.lua`'s own "M2 control law constants" block names.
+MAX_ACCEL_MPS2: Final[float] = tuning.real(
+    "belief.flight_control.MAX_ACCEL_MPS2",
+    1.0,
+    lo=0.1,
+    hi=5.0,
+    status="agreed-guess",
+)
+
+#: A9's tolerance band for the speed channel: what "good enough" means
+#: as a fraction of the commanded IAS, used by `Export.lua` only for
+#: the status feed's `in_band_speed` and (M4) the settle test before a
+#: Trimmer press -- never a deadband (Decision 18).
+SPEED_BAND_FRAC: Final[float] = tuning.fraction(
+    "belief.flight_control.SPEED_BAND_FRAC", 0.10, status="judgement"
+)
+#: A9's tolerance band for the altitude channel, as a fraction of the
+#: commanded altitude -- see `ALT_BAND_MIN_M` for the floor that
+#: applies alongside it at low altitude. Status-feed only, never a
+#: deadband (Decision 18).
+ALT_BAND_FRAC: Final[float] = tuning.fraction(
+    "belief.flight_control.ALT_BAND_FRAC", 0.10, status="judgement"
+)
+#: The floor `ALT_BAND_FRAC` is clamped above, so a low-altitude hold
+#: is not held to an unrealistically tight absolute band (the plan's
+#: own example: "so 50 m AGL is not held to ±5 m" -- 10 m clears that
+#: bar, 5 m would not).
+ALT_BAND_MIN_M: Final[float] = tuning.real(
+    "belief.flight_control.ALT_BAND_MIN_M",
+    10.0,
+    lo=1.0,
+    hi=50.0,
+    status="judgement",
+)
+#: A9's tolerance band for the turn-rate channel, as a fraction of the
+#: commanded turn rate. Not yet read by any body-layer action (A9:
+#: the bands feed only the status field and M4's settle test).
+TURN_RATE_BAND_FRAC: Final[float] = tuning.fraction(
+    "belief.flight_control.TURN_RATE_BAND_FRAC", 0.10, status="judgement"
+)
+#: No natural "10%" reading for a heading (D-c) -- 5° is the plan's own
+#: recommended default.
+HEADING_BAND_DEG: Final[float] = tuning.real(
+    "belief.flight_control.HEADING_BAND_DEG",
+    5.0,
+    lo=1.0,
+    hi=30.0,
+    status="judgement",
+)
+
 #: U10's lease: Lua takes at an unpark only if body-layer has re-sent
 #: `arm` within this many seconds -- about three missed ~1 Hz polls,
 #: closing the park-then-unpark escape route a same-frame unpark take
@@ -208,7 +288,16 @@ class FlightControlState:
     always known once Lua is active, used as the fallback "current"
     value by the handful of actions that need one before any goal has
     been commanded (`CrewConsole.current_crew_state`'s own merge of the
-    two is what the `"flight_control*"` gates actually see)."""
+    two is what the `"flight_control*"` gates actually see).
+
+    `in_band_heading`/`in_band_altitude`/`in_band_speed` mirror `fc_in_
+    band_*` (M2's own A9 computation, `None` before `fc_law` exists --
+    off/taking/armed, or an M1-only `Export.lua` that never computes
+    them at all). No action in this module reads them yet -- A9's own
+    "what the bands are used for" names only the status field and M4's
+    settle test, both still ahead -- but mirroring them here, where
+    every other wire status field is already mirrored, costs nothing
+    and saves M4 a second pass through this dataclass."""
 
     phase: FlightControlPhase = "PILOT"
     take_seq: int = 0
@@ -229,6 +318,9 @@ class FlightControlState:
     lua_release_reason: str | None = None
     lua_refuse_cause: str | None = None
     lua_takeover_mode: str | None = None
+    in_band_heading: bool | None = None
+    in_band_altitude: bool | None = None
+    in_band_speed: bool | None = None
 
 
 def _as_optional_float(value: object) -> float | None:
@@ -239,6 +331,12 @@ def _as_optional_float(value: object) -> float | None:
 
 def _as_optional_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _as_optional_bool(value: object) -> bool | None:
+    if not isinstance(value, bool):
         return None
     return value
 
@@ -258,7 +356,7 @@ def advance_flight_control_state(
     latest` feed, once per poll -- same "replace wholesale, never
     mutate, a `None` sample leaves `state` unchanged" shape `belief.
     ai_pilot_wheel.advance_parked_flight_state` already uses. Only the
-    `lua_*`/`held_*`/`measured_*` mirrors move; `phase`/`take_seq`/
+    `lua_*`/`held_*`/`measured_*`/`in_band_*` mirrors move; `phase`/`take_seq`/
     `pending_take_says`/`took_at_sim`/`unpark_take`/`wire_seq` are
     body-layer's own fields and are carried through unchanged -- this
     function never decides the handover phase, `decide_flight_control`
@@ -299,6 +397,9 @@ def advance_flight_control_state(
             if isinstance(sample.get("fc_takeover_mode"), str)
             else None
         ),
+        in_band_heading=_as_optional_bool(sample.get("fc_in_band_heading")),
+        in_band_altitude=_as_optional_bool(sample.get("fc_in_band_altitude")),
+        in_band_speed=_as_optional_bool(sample.get("fc_in_band_speed")),
     )
 
 
@@ -508,6 +609,16 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
         "on_ground_agl_threshold_m": on_ground_agl_threshold_m,
         "arm_lease_s": ARM_LEASE_S,
         "max_bank_deg": MAX_BANK_DEG,
+        # M2 additions -- the shaper's own rate limits and A9's bands,
+        # read by `Export.lua`'s control law, never acted on here.
+        "max_turn_bank_deg": MAX_TURN_BANK_DEG,
+        "max_climb_vs_mps": MAX_CLIMB_VS_MPS,
+        "max_accel_mps2": MAX_ACCEL_MPS2,
+        "speed_band_frac": SPEED_BAND_FRAC,
+        "alt_band_frac": ALT_BAND_FRAC,
+        "alt_band_min_m": ALT_BAND_MIN_M,
+        "turn_rate_band_frac": TURN_RATE_BAND_FRAC,
+        "heading_band_deg": HEADING_BAND_DEG,
     }
 
 

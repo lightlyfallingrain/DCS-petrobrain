@@ -88,6 +88,9 @@ def server_with_sample() -> Iterator[str]:
         "fc_measured_speed": 150.0,
         "fc_release_reason": None,
         "fc_refuse_cause": None,
+        "fc_in_band_heading": True,
+        "fc_in_band_altitude": False,
+        "fc_in_band_speed": None,
         "fc_axes_pitch": True,
         "fc_axes_roll": True,
         "fc_axes_pedal": True,
@@ -117,6 +120,9 @@ class TestAdvanceFlightControlState:
         assert state.measured_speed == pytest.approx(150.0)
         assert state.lua_release_reason is None
         assert state.lua_refuse_cause is None
+        assert state.in_band_heading is True
+        assert state.in_band_altitude is False
+        assert state.in_band_speed is None
 
     def test_body_layer_own_fields_are_carried_through_unchanged(
         self, server_with_sample: str
@@ -447,6 +453,25 @@ class TestWireHelpers:
         assert limits["on_ground_agl_threshold_m"] == 12.5
         assert limits["min_ias_kmh"] == MIN_IAS_KMH
         assert limits["max_ias_kmh"] == MAX_IAS_KMH
+
+    def test_flight_control_limits_carries_m2s_shaper_limits_and_bands(self) -> None:
+        """M2's own additions to the wire `limits` bundle -- the
+        shaper's own rate limits (`max_turn_bank_deg`/`max_climb_vs_
+        mps`/`max_accel_mps2`) and A9's bands, all sent so `Export.
+        lua`'s control law has one source of truth for behaviour."""
+        limits = flight_control_limits(12.5)
+        for key in (
+            "max_turn_bank_deg",
+            "max_climb_vs_mps",
+            "max_accel_mps2",
+            "speed_band_frac",
+            "alt_band_frac",
+            "alt_band_min_m",
+            "turn_rate_band_frac",
+            "heading_band_deg",
+        ):
+            assert key in limits
+            assert isinstance(limits[key], float)
 
     def test_goal_request_fields_omits_none_and_false_fields(self) -> None:
         assert goal_request_fields(FlightControlGoalRequest()) == {}
