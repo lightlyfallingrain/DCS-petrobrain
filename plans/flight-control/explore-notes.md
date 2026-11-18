@@ -861,3 +861,16 @@ Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch."
   like it to be. Changing mode is one left press, so just do it when needed."* — Q4 is not a
   test-flight item; every command (align, break, goal, recovery) reads the live mode and
   left-presses to the mode it needs before pressing.
+
+### Mode 1 carries mode 2's command set (user, 2026-11-18, verbatim — standing direction)
+
+> *"Except aligning to 9K113, all other flight commands from Mode 2 must also be available in Mode
+> 1. Mode 1 expands on the Mode 2 command set, because the possibilities are not limited by ED AI,
+> but I want the same commands to do same things in Mode 2 and Mode 1 as much as possible. Mode 1
+> allows not waiting for press and hold to take effect so simultanous or fast sequential changes
+> can happen without waiting for the overlay numbers to change."*
+
+Consequences for P3+P4: "break turn left/right" **and "break away"** exist in mode 1 (U11 answered:
+yes); align / align for launch are the only mode-2-only commands ("unable" in mode 1); "level
+off" means the same straight-and-level in both. In mode 1, several goals are applied at once
+rather than serialised behind overlay presses.
