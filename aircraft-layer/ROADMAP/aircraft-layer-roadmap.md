@@ -53,6 +53,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   have (low/low; `cockpit_switch` precedent already accepts a broader version of this exposure)
 - [[AC-B15]] — `json_escape_string` escapes only `\`/`"`/`\n`, not the rest of JSON's required
   control-character set (REJECTED 2026-11-18, user: extremely unlikely)
+- [[AC-B16]] — false AI-wheel park signal for a few frames on pilot→operator seat swap (DCS's
+  unstow animation lagging the camera-derived seat read); 0.5 s settle window, fixed
 
 ## Keeping this current
 

@@ -511,6 +511,8 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "SEAT_CAMERA_MIN_FWD_M",
     "SEAT_CAMERA_MAX_FWD_M",
     "SEAT_CAMERA_MAX_OFFAXIS_M",
+    # fix/apw-seat-swap-settle -- the pilot-to-operator settle window.
+    "AI_PILOT_SEAT_CHANGE_SETTLE_S",
 )
 
 #: `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON` are owned by `core.lua`, not
@@ -581,6 +583,7 @@ def _run_ai_pilot_wheel_integration(script_body: str) -> str:
 local ai_pilot_parked_active = false
 local ai_pilot_player_seat = nil
 local ai_pilot_cam_fwd_m = nil
+local ai_pilot_seat_settle_until_t = nil
 local ai_pilot_mode_text = nil
 local ai_pilot_course_text = nil
 local ai_pilot_alt_text = nil
@@ -1292,9 +1295,11 @@ class TestSeatGate:
     ) -> None:
         """Pilot -> operator switch: the camera reaches the operator seat
         while arg 852 still reads stowed for a moment (the player retakes
-        the copilot stick; un-stow lag). That brief false rising edge must
-        be absorbed by the 0.5 s reference-toggle delay -- no press, and
-        the takeover dropped once 852 falls."""
+        the copilot stick; un-stow lag). `fix/apw-seat-swap-settle`: the
+        settle window (`AI_PILOT_SEAT_CHANGE_SETTLE_S`) now holds
+        `ai_pilot_parked_active` at its pre-switch value (false) through
+        the whole un-stow -- no false rising edge at all, not merely one
+        the reference-toggle delay absorbs after the fact."""
         script = """
         camera_fwd = 3.15
         stick_park_value = 1.0
@@ -1302,8 +1307,9 @@ class TestSeatGate:
         agl_value = 300.0
         run_ai_pilot_wheel(0.0)          -- pilot seat, stowed: not flying
         camera_fwd = 4.65                -- seat switch
-        run_ai_pilot_wheel(0.1)          -- false rising edge
-        print("stage_at_edge=" .. tostring(ai_pilot_takeover.stage))
+        run_ai_pilot_wheel(0.1)          -- within the settle window
+        print("stage_at_switch=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_at_switch=" .. tostring(ai_pilot_parked_active))
         stick_park_value = 0.5           -- un-stow under way
         run_ai_pilot_wheel(0.2)
         stick_park_value = 0.0
@@ -1316,10 +1322,123 @@ class TestSeatGate:
             line.split("=", 1)
             for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
         )
-        assert values["stage_at_edge"] == "toggling_reference"
+        assert values["stage_at_switch"] == "nil"
+        assert values["parked_at_switch"] == "false"
         assert values["presses"] == "0"
         assert values["stage"] == "nil"
         assert values["parked"] == "false"
+
+    def test_seat_swap_settle_absorbs_flight8_unstow_animation(self) -> None:
+        """Reproduces flight 8, 2026-11-18 verbatim (`aircraft-layer/
+        research/2026-11-18-bl16-m0-flight-axes-findings.md`, "Flight
+        8"): the camera reaches the operator seat while 852 still reads
+        0.963 (stowed from the pilot seat), then animates down --
+        0.930, 0.893, 0.853, ..., 0.624 at +94 ms, fully unstowed by
+        +0.3 s. No park edge anywhere in that sequence, and no edge once
+        the settle window itself has elapsed with the player still
+        flying (852 all the way down)."""
+        script = """
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        msl_value = 900.0
+        agl_value = 300.0
+        run_ai_pilot_wheel(0.0)           -- pilot seat: not flying
+        camera_fwd = 4.65                 -- seat switch at t=0
+        stick_park_value = 0.963
+        run_ai_pilot_wheel(0.023)
+        print("stage_at_switch=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_at_switch=" .. tostring(ai_pilot_parked_active))
+        stick_park_value = 0.930
+        run_ai_pilot_wheel(0.046)
+        stick_park_value = 0.893
+        run_ai_pilot_wheel(0.070)
+        stick_park_value = 0.853
+        run_ai_pilot_wheel(0.093)
+        stick_park_value = 0.624
+        run_ai_pilot_wheel(0.117)
+        print("stage_mid_unstow=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_mid_unstow=" .. tostring(ai_pilot_parked_active))
+        stick_park_value = 0.0
+        run_ai_pilot_wheel(0.3)
+        print("stage_after_animation=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_after_animation=" .. tostring(ai_pilot_parked_active))
+        -- Past the settle window too (armed at t=0.023, +0.5 s = 0.523):
+        -- still flying, still no edge.
+        run_ai_pilot_wheel(0.6)
+        print("presses=" .. #press_log)
+        print("stage=" .. tostring(ai_pilot_takeover.stage))
+        print("parked=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["stage_at_switch"] == "nil"
+        assert values["parked_at_switch"] == "false"
+        assert values["stage_mid_unstow"] == "nil"
+        assert values["parked_mid_unstow"] == "false"
+        assert values["stage_after_animation"] == "nil"
+        assert values["parked_after_animation"] == "false"
+        assert values["presses"] == "0"
+        assert values["stage"] == "nil"
+        assert values["parked"] == "false"
+
+    def test_automatic_handover_parks_after_the_settle_window(self) -> None:
+        """The user's own scenario, verbatim: DCS set to automatic AI
+        handover rather than the player's explicit control setting. 852
+        is still stowed at the end of the settle window -- a genuine
+        park, not a transient -- so the rising edge fires once the delay
+        elapses, never during it."""
+        script = """
+        camera_fwd = 3.15
+        stick_park_value = 1.0
+        msl_value = 900.0
+        agl_value = 300.0
+        run_ai_pilot_wheel(0.0)           -- pilot seat
+        camera_fwd = 4.65                 -- seat switch, settle armed at t=0.1
+        run_ai_pilot_wheel(0.1)
+        print("stage_during_settle=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_during_settle=" .. tostring(ai_pilot_parked_active))
+        run_ai_pilot_wheel(0.4)           -- still settling (until 0.6)
+        print("parked_still_settling=" .. tostring(ai_pilot_parked_active))
+        run_ai_pilot_wheel(0.65)          -- settle elapsed, 852 still stowed
+        print("stage_after_settle=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_after_settle=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["stage_during_settle"] == "nil"
+        assert values["parked_during_settle"] == "false"
+        assert values["parked_still_settling"] == "false"
+        assert values["stage_after_settle"] == "toggling_reference"
+        assert values["parked_after_settle"] == "true"
+
+    def test_request_control_key_with_no_seat_change_is_immediate(self) -> None:
+        """No camera move -- the park change is the player's own Request
+        Aircraft Control key while already seated at the operator's
+        position, not a seat swap -- so the settle window never arms and
+        the pre-existing immediate rising-edge behaviour is untouched."""
+        script = """
+        camera_fwd = 4.65
+        stick_park_value = 0.0
+        msl_value = 900.0
+        agl_value = 300.0
+        run_ai_pilot_wheel(0.0)
+        print("parked_before=" .. tostring(ai_pilot_parked_active))
+        stick_park_value = 0.95          -- Request Control pressed
+        run_ai_pilot_wheel(0.1)
+        print("stage_at_press=" .. tostring(ai_pilot_takeover.stage))
+        print("parked_at_press=" .. tostring(ai_pilot_parked_active))
+        """
+        values = dict(
+            line.split("=", 1)
+            for line in _run_ai_pilot_wheel_integration(script).strip().splitlines()
+        )
+        assert values["parked_before"] == "false"
+        assert values["stage_at_press"] == "toggling_reference"
+        assert values["parked_at_press"] == "true"
 
     def test_external_view_keeps_the_operator_seat(self) -> None:
         """Camera leaves the cockpit (F2 / map) while the AI flies: the

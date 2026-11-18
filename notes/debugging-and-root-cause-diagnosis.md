@@ -50,3 +50,15 @@
   applied" field that can diverge need every downstream reader of "current state" to go through
   one shared resolver, not through whichever field happened to be convenient at each call site
   (`optic-views-actual-look` debug + review, 2026-10-26).
+
+- **A DCS cockpit arg driven by the game's own animation can lag the camera-derived seat/state
+  read that gates it, producing a few transient frames of a false reading with no bug in the gating
+  logic itself.** Flight 8 showed the camera reaching the operator seat at 17.301 s while arg 852
+  (operator stick stow) still read its pilot-seat-forced value and animated down over ~0.3 s —
+  during that window a same-frame read of "in operator seat" + "stick parked" produced a false
+  positive. The fix is a settle window armed only on the detected *transition* (not on first-ever
+  read, which would delay every mission start for no transient to absorb) that holds the gated
+  belief at its prior value until the window closes, then trusts the real reading — and the window
+  is one-directional: only the direction whose camera read can outrun the arg's animation needs it;
+  the reverse direction, where the arg is forced to a known value the instant the seat gate fires,
+  stays immediate (`apw-seat-swap-settle` debug + review, 2026-11-18).
