@@ -2458,6 +2458,19 @@ flying. Checked against the plan and the code:
   set (finding 5). The seat chooses which args to *read*, never whether mode 1 runs.
 - **A seat swap while parked** (operator → pilot) drops `parked_active` through the seat gate, so it
   is an unpark (Decision 24) and mode 1 takes. M0-J3 measures it.
+- **Confirmed by the user, 2026-11-18**, after the amendment:
+
+  > *"there are two ways AI overlay gets toggled off — Player presses the key to request control ->
+  > DCS stops AI flight mode and unparks the copilot controls. Player in copilot seat. — Player
+  > presses key to go to pilot seat -> DCS stops AI flight mode, but copilot controls remain parked
+  > because player is in pilot seat. Therefore: AI ovelray is ON when Player is in copilot seat AND
+  > controls are parked."*
+
+  That is `parked_active` exactly. The converse follows: a swap back to the copilot seat while the
+  copilot controls are still parked turns the overlay on, which is a park edge (row 8) and a silent
+  switch to mode 2. The main loop added **M0-J4** to the sortie 1 probe for it: after J3, from the
+  pilot seat with the controls still parked, swap to the copilot seat, which should stop the
+  writes; then Request Aircraft Control, which should make the probe take.
 
 #### U6, U7, U8 as answered
 
