@@ -591,12 +591,27 @@ local function push_flight_control_state(t)
         measured_heading = math.deg(self_data.Heading)
     end
 
-    local agl_source = nil
+    -- Plain telemetry passthrough, same reasoning as `measured_heading`
+    -- above: `hold_altitude`/`level_flight`/`set_speed`'s "current"
+    -- reading needs *something* the instant mode 1 takes, before any
+    -- goal has ever been commanded (`fc_goal_altitude`/`fc_goal_speed`
+    -- both start null) -- there is no AI pilot here reporting its own
+    -- held value the way mode 2's overlay readback does.
+    local measured_agl = safe_call(LoGetAltitudeAboveGroundLevel)
     local radar_dist, radar_valid = safe_call(LoGetRadarAltimeter)
+    local agl_source = nil
+    local measured_altitude = nil
     if radar_valid then
         agl_source = "radar"
-    elseif safe_call(LoGetAltitudeAboveGroundLevel) ~= nil then
+        measured_altitude = radar_dist
+    elseif measured_agl ~= nil then
         agl_source = "dcs"
+        measured_altitude = measured_agl
+    end
+    local measured_ias_mps = safe_call(LoGetIndicatedAirSpeed)
+    local measured_speed = nil
+    if type(measured_ias_mps) == "number" then
+        measured_speed = measured_ias_mps * 3.6
     end
 
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
@@ -610,6 +625,8 @@ local function push_flight_control_state(t)
         .. ',"fc_goal_altitude_ref":' .. text_or_null(fc_goal_alt_ref)
         .. ',"fc_goal_speed":' .. fmt_num_or_null(fc_goal_ias_kmh)
         .. ',"fc_measured_heading":' .. fmt_num_or_null(measured_heading)
+        .. ',"fc_measured_altitude":' .. fmt_num_or_null(measured_altitude)
+        .. ',"fc_measured_speed":' .. fmt_num_or_null(measured_speed)
         .. ',"fc_in_band_heading":' .. bool_or_null(nil)
         .. ',"fc_in_band_altitude":' .. bool_or_null(nil)
         .. ',"fc_in_band_speed":' .. bool_or_null(nil)

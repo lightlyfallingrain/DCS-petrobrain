@@ -49,6 +49,8 @@ class FlightControlState:
     goal_altitude_ref: str | None
     goal_speed_kmh: float | None
     measured_heading_deg: float | None
+    measured_altitude_m: float | None
+    measured_speed_kmh: float | None
     in_band_heading: bool | None
     in_band_altitude: bool | None
     in_band_speed: bool | None
@@ -150,6 +152,8 @@ class FlightControlState:
             goal_altitude_ref=_optional_str("fc_goal_altitude_ref"),
             goal_speed_kmh=_optional_number("fc_goal_speed"),
             measured_heading_deg=_optional_number("fc_measured_heading"),
+            measured_altitude_m=_optional_number("fc_measured_altitude"),
+            measured_speed_kmh=_optional_number("fc_measured_speed"),
             in_band_heading=_optional_bool("fc_in_band_heading"),
             in_band_altitude=_optional_bool("fc_in_band_altitude"),
             in_band_speed=_optional_bool("fc_in_band_speed"),
@@ -189,6 +193,8 @@ class FlightControlState:
             "fc_goal_altitude_ref": self.goal_altitude_ref,
             "fc_goal_speed": self.goal_speed_kmh,
             "fc_measured_heading": self.measured_heading_deg,
+            "fc_measured_altitude": self.measured_altitude_m,
+            "fc_measured_speed": self.measured_speed_kmh,
             "fc_in_band_heading": self.in_band_heading,
             "fc_in_band_altitude": self.in_band_altitude,
             "fc_in_band_speed": self.in_band_speed,

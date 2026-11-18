@@ -40,7 +40,8 @@ _LINE = (
     '"fc_take_origin":"voice","fc_takeover_mode":"heading",'
     '"fc_goal_heading":270.0,"fc_goal_altitude":null,'
     '"fc_goal_altitude_ref":null,"fc_goal_speed":null,'
-    '"fc_measured_heading":271.2,"fc_in_band_heading":null,'
+    '"fc_measured_heading":271.2,"fc_measured_altitude":480.0,'
+    '"fc_measured_speed":160.0,"fc_in_band_heading":null,'
     '"fc_in_band_altitude":null,"fc_in_band_speed":null,'
     '"fc_agl_source":"radar","fc_release_reason":null,'
     '"fc_refuse_cause":null,"fc_limit_hit":false,'
@@ -62,6 +63,8 @@ class TestFlightControlState:
         assert sample.goal_heading_deg == pytest.approx(270.0)
         assert sample.goal_altitude_m is None
         assert sample.measured_heading_deg == pytest.approx(271.2)
+        assert sample.measured_altitude_m == pytest.approx(480.0)
+        assert sample.measured_speed_kmh == pytest.approx(160.0)
         assert sample.agl_source == "radar"
         assert sample.release_reason is None
         assert sample.refuse_cause is None
@@ -138,6 +141,8 @@ class TestFlightControlState:
             "fc_goal_altitude_ref": None,
             "fc_goal_speed": None,
             "fc_measured_heading": pytest.approx(271.2),
+            "fc_measured_altitude": pytest.approx(480.0),
+            "fc_measured_speed": pytest.approx(160.0),
             "fc_in_band_heading": None,
             "fc_in_band_altitude": None,
             "fc_in_band_speed": None,
