@@ -65,6 +65,10 @@ values = { on = 1.0, off = 0.0 }
 source_element = "WEAP-SELECT-KNOB-PTR"   # arg 523
 values = { off = 0.0, GM_30 = 0.1, FXD_MG_7_62_AND_12_7 = 0.2, FXD_MG_12_7 = 0.3, FXD_MG_7_62 = 0.4, FXD_MG_30 = 0.5, rockets = 0.6, bomb = 0.7, uslp = 0.8 }
 
+[effectors.o_missile_pylon]
+source_element = "SHSCHO-KNOB-PTR" # arg 963
+values = { off = 0.0, pylon_1 = 0.1, pylon_2 = 0.2, pylon_3 = 0.3, pylon_4 = 0.4, pylon_5 = 0.5, pylon_6 = 0.6, pylon_7 = 0.7, pylon_8 = 0.8 }
+
 [effectors.p_hide_stick_ui_helper]
 source_element = "PTR-STICK-HIDE-974"   # arg 974
 values = { on = 1.0, off = 0.0 }
@@ -88,3 +92,4 @@ values = { open = 1.0, closed = 0.0 }
 [effectors.p_sau_b_channel_on]
 source_element = "SAU-B-ON-PTR"    # arg 255
 values = { on = 1.0, off = 0.0 }
+

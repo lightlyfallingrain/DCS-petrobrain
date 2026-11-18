@@ -210,7 +210,7 @@ rather than from this dump).
 | `OP-STICK-RS-COVER-PTR` | Fire Weapons Cover | operator (explicit) | default_blue_cover | [3022] | [853] |  | 0/1 |  |
 | `OP-STICK-RS-PTR` | Fire Weapons | operator (explicit) | default_button | [3021] | [187] |  | 0/1 momentary |  |
 | `SHSCHO-CHECK-PTR` | SCHO Lamps Check | operator (explicit) | default_button | [3035] | [956] |  | 0/1 momentary |  |
-| `SHSCHO-KNOB-PTR` | Select Station | operator (explicit) | multiposition_switch | [3038] | [963] |  | 0 to 0.8 (9 steps) |  |
+| `SHSCHO-KNOB-PTR` | Select Station | operator (explicit) | multiposition_switch | [3038] | [963] |  | 0 to 0.8 (9 steps) | `o_missile_pylon` |
 | `SHSCHO-POWER-PTR` | SCHO Power | operator (explicit) | default_2_position_tumb | [3030] | [955] |  | 0/1 | `scho_pwr_b1` |
 | `WEAP-BOMBS-BLOCKS-OP-COVER-PTR` | Bombs/Blocks Mode Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3043] | [699] |  | 0/1 |  |
 | `WEAP-BOMBS-BLOCKS-OP-PTR` | Bombs/Blocks Mode | operator (explicit) | default_3_position_tumb | [3033] | [700] |  | -1/0/1 |  |
