@@ -158,3 +158,63 @@ round.
 
 Tested tree: `1fab614c7241614af73a31c6cc23a06d0eec0608` (branch `feature/bl16-p3p4-cbtm`, checked
 out here as `p3p4-dod`).
+
+## Re-run 2026-11-19 — PASSED
+
+**Verdict: PASSED.** Scoped to tip `edec57e4` (`feature/bl16-p3p4-cbtm`, checked out in this
+worktree by fast-forwarding `worktree-agent-abc5db4afd3cd5010` onto it — `HEAD` was a strict
+ancestor of `edec57e4` with a clean tree, so `git merge --ff-only edec57e4` applied cleanly; no
+snapshot fallback needed). If the branch moves past `edec57e4`, re-run.
+
+The two fixes from the required-fixes list above landed in `81352488` (test-only: the
+`FakeConsoleAircraftClient.get_payload_latest` default and the `test_aircraft_client.py` expected-
+payload update) and were re-reviewed APPROVED in `edec57e4` (`review-p3p4.md`'s final section,
+"Review Summary (DoD fix round, `81352488`, test-only)") — full read of both diffs against both
+required fixes, no production code touched, 273 passed on the two named test files. Item 4
+(optional, not blocking) is resolved by the plan itself: `plans/flight-control/plan.md`'s
+"Amendment 2026-11-18" section states outright *"U11 is answered: mode 1 gets break away too"*
+and names the next-batch deferral explicitly, so no further implementation-log edit was needed —
+confirmed by reading that section directly (see "Ledger" below).
+
+**Full suites re-run from this worktree, both subprojects, both clean:**
+
+- `aircraft-layer` (`/Users/sg/Code/DCS-petrobrain/aircraft-layer/.venv`, cwd this worktree's
+  `aircraft-layer/`): `ruff format --check .` — 1 file would be reformatted
+  (`research/2026-10-06-unit-id-join-reduce.py`); `ruff check .` — 1 finding (`EXE001`, same
+  file). **Both pre-existing and untouched by this feature** — confirmed with
+  `git diff --name-only 2ef961c3 HEAD -- aircraft-layer/research/2026-10-06-unit-id-join-reduce.py`
+  (no output; `2ef961c3` is `git merge-base main HEAD`). `mypy src` — clean, 28 files. Full
+  `pytest tests -q -n auto` — **961 passed**, 0 failed.
+- `body-layer` (`/Users/sg/Code/DCS-petrobrain/body-layer/.venv`, cwd this worktree's
+  `body-layer/`): `ruff format --check .` — 2 files would be reformatted
+  (`research/2026-10-05-security-audit.md`, `research/2026-11-17-lupa-sandbox.md`). **Both
+  pre-existing and untouched by this feature** — same merge-base diff check, no output. `ruff
+  check .` — all checks passed. `mypy src` (`PYTHONPATH=src:../world-model/src`) — clean, 92
+  files. Full `pytest tests -q -n auto` — **3671 passed, 4 xfailed, 0 failed** (3667 + the 4
+  previously-failing tests, now passing).
+
+No new debug output, TODOs, or unhandled-error paths found in the two test-only files touched by
+`81352488`; no production code changed by the fix round, so the invariant/scope checks from the
+original pass stand unchanged.
+
+**Ledger, re-checked by hand** (the mechanical script only reads the plan's *first* "Decisions
+Requiring User Input" heading, named limitation —
+`.claude/agent-memory/dod/feedback_accepted_items_ledger_only_checks_first_decisions_section.md`):
+U1/U2/U3 (mode-2 section, line 572) are answered and out of this batch's build scope as already
+covered in the original pass; U11 (line 3778, "this batch") is answered in the plan's own
+"Amendment 2026-11-18" subsection — *"U11 is answered: mode 1 gets break away too"* — and
+explicitly deferred to the next batch (mode-1 break/break-away/rotor envelope), which is exactly
+what `rules/actions.py`'s `_axes_cbtm_break_unready` comment and `body-layer/ROADMAP/BL-16.md`'s
+next-batch entry already say. Nothing unmentioned, nothing unbuilt-and-undeferred.
+
+**Unblock condition executed, not just read**: the required-fixes list's own item 3 ("re-run the
+full body-layer suite after both fixes and confirm `0 failed`") is the clearing condition for this
+round's FAILED verdict — it was run above, for real, from this environment, and shows `0 failed`.
+
+**Checks run, for the record (this round):** `aircraft-layer` and `body-layer` full suites, lint,
+format, mypy as logged above; `git diff --name-only` against `merge-base main HEAD` for both
+flagged pre-existing lint/format files; `plans/flight-control/plan.md`'s "Amendment 2026-11-18"
+section read directly for U11's resolution; `review-p3p4.md`'s final section read directly for
+the fix-round re-review verdict.
+
+Tested tree: `edec57e4` (branch `feature/bl16-p3p4-cbtm`).
