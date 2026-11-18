@@ -321,6 +321,69 @@ class CommandSender:
                 f"param={param!r}: {exc}"
             ) from exc
 
+    def send_flight_control(
+        self,
+        seq: int,
+        cmd: Literal["take", "release", "goal", "arm"],
+        limits: dict[str, float] | None,
+        goal: dict[str, object] | None,
+    ) -> None:
+        """Send `{"op": "flight_control", "seq": seq, "cmd": cmd, "limits":
+        limits, "goal": goal}` to `Export.lua`'s command listener --
+        BL-16 mode 1's own channel (`plans/flight-control/plan.md`,
+        "Revised 2026-11-18", "Wire"), Stage M1. Same `CommandSendError`
+        posture as `send_ai_pilot_goal`: a dropped handover/goal message
+        is a real behavioral gap, not an opaque display string to
+        swallow.
+
+        **`limits` travels in every message** (the plan's own wire
+        shape) -- `None` is accepted here only for a caller that has not
+        yet resolved its tunables (defensive; `body.py`'s own call site
+        always passes the live bundle). `goal` is `None` for `take`/
+        `release`/`arm` messages, which carry no goal fields.
+
+        **Only the fields `Export.lua`'s hand-rolled, nesting-blind
+        regex parser needs are unique strings** -- `goal`/`limits` are
+        plain `json.dumps`-nested objects on the wire (unlike `send_
+        cockpit_switch`/`send_sight_target`'s hand-formatted floats):
+        every value on this channel (a compass heading, a metre
+        altitude, a km/h speed, a small whole `seq`) is a real-world
+        magnitude with no near-zero-fraction case, so the exponent-
+        notation risk that forced hand-formatting on the 9K113 channel
+        does not apply here, same posture as `send_ai_pilot_goal`.
+
+        **No validation happens here** -- same division of labour as
+        `send_ai_pilot_goal`'s own docstring: `api.server`'s `POST
+        /command/flight_control` handler validates shape before this
+        method is ever called, and `Export.lua`'s own dispatch
+        (`handle_flight_control_command`) validates a third time."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {
+                "op": "flight_control",
+                "seq": seq,
+                "cmd": cmd,
+                "limits": limits,
+                "goal": goal,
+            }
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "flight-control command send failed: seq=%r cmd=%r",
+                seq,
+                cmd,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send flight_control seq={seq!r} cmd={cmd!r}: {exc}"
+            ) from exc
+
     def send_watch_args(self, watch_id: str, args: list[int]) -> None:
         """Send `{"op": "watch_args", "watch_id": watch_id, "args": args}`
         to `Export.lua`'s command listener -- the continuous watched-args

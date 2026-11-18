@@ -1466,10 +1466,30 @@ local function on_stop()
     ai_pilot_cam_fwd_m = nil
 end
 
+-- `plans/flight-control/plan.md`, "Revised 2026-11-18", Decision 25 --
+-- read-only getters for `flight_control.lua`, the mode-1 module. **Must
+-- return `ai_pilot_parked_active`, never 852 alone**: 852 alone would
+-- self-release mode 1 the moment it started with the player in the
+-- pilot seat (852 reads stowed there with nobody but the player flying
+-- -- the seat gate above is exactly what tells the two cases apart).
+local function is_parked()
+    return ai_pilot_parked_active
+end
+
+-- Read-only mirror of `ai_pilot_player_seat` -- `"pilot"`/`"operator"`/
+-- `nil` (unknown this mission). `flight_control.lua`'s own capture-source
+-- rule (Decision 25) reads this on a voice take; it never gates whether
+-- mode 1 may run.
+local function player_seat()
+    return ai_pilot_player_seat
+end
+
 M.run_ai_pilot_wheel = run_ai_pilot_wheel
 M.update_ai_pilot_wheel_overlay = update_ai_pilot_wheel_overlay
 M.push_ai_pilot_wheel_state = push_ai_pilot_wheel_state
 M.handle_ai_pilot_goal_command = handle_ai_pilot_goal_command
 M.on_stop = on_stop
+M.is_parked = is_parked
+M.player_seat = player_seat
 
 return M

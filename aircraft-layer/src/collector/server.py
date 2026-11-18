@@ -32,7 +32,9 @@ AI-pilot-wheel status line (`plans/flight-control/plan.md`, BL-16 mode 2,
 Stage P1) has a top-level `"apw_parked_active"` key instead
 (`schema.AiPilotWheelState`); the push-to-talk line's own `"ptt_op"`
 field (same plan, Stage P-ICS) is additive on the existing `"ptt"` line,
-not a new kind. An old `Export.lua`'s cockpit-switch line (top-level
+not a new kind. The flight-control status line (BL-16 mode 1, Stage M1)
+has a top-level `"fc_mode"` key instead (`schema.FlightControlState`). An
+old `Export.lua`'s cockpit-switch line (top-level
 `"missl_pw"` key) is dropped at DEBUG rather than parsed -- that feed no
 longer exists on this side. `_handle_line` distinguishes them
 by that key's presence before parsing, rather than trying each parser in
@@ -60,6 +62,7 @@ from typing import Self
 from collector.arg_read_broker import ArgReadBroker
 from collector.cache import (
     AiPilotWheelCache,
+    FlightControlCache,
     PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
@@ -73,6 +76,8 @@ from collector.cache import (
 from schema import (
     AiPilotWheelParseError,
     AiPilotWheelState,
+    FlightControlParseError,
+    FlightControlState,
     PayloadParseError,
     PayloadSample,
     PetrovichIndicationParseError,
@@ -159,7 +164,12 @@ logger = logging.getLogger(__name__)
 #: message that also carries a non-null `"hvrt_direction"` where a
 #: pre-fix pairing could see both meaningful at once -- see `Export.
 #: lua`'s own matching comment.
-EXPECTED_EXPORT_VERSION = "2026-11-16e"
+#: Bumped again 2026-11-18 (`plans/flight-control/plan.md`, "Revised
+#: 2026-11-18 -- mode 1 (unparked, raw axes) re-cut", Stage M1) for the
+#: new per-frame flight-control status line (wire key `"fc_mode"`) and
+#: the new `flight_control` inbound command op -- additive only, same
+#: reasoning as the AI-pilot-wheel bumps above.
+EXPECTED_EXPORT_VERSION = "2026-11-18"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -233,6 +243,10 @@ class CollectorServer:
         # AiPilotWheelCache simply drops "apw_parked_active" lines
         # (`plans/flight-control/plan.md`, BL-16 mode 2, Stage P1).
         ai_pilot_wheel_cache: AiPilotWheelCache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # FlightControlCache simply drops "fc_mode" lines (`plans/
+        # flight-control/plan.md`, BL-16 mode 1, Stage M1).
+        flight_control_cache: FlightControlCache | None = None,
         # Not optional, unlike every cache above -- a collector with no
         # `ArgReadBroker` simply drops "read_id" lines (the one-shot read
         # reply has nowhere to go without it), same posture as a `None`
@@ -255,6 +269,7 @@ class CollectorServer:
         self._sight_servo_cache = sight_servo_cache
         self._payload_cache = payload_cache
         self._ai_pilot_wheel_cache = ai_pilot_wheel_cache
+        self._flight_control_cache = flight_control_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -573,6 +588,22 @@ class CollectorServer:
             logger.debug("parsed ai-pilot-wheel sample: %r", ai_pilot_wheel_sample)
             if self._ai_pilot_wheel_cache is not None:
                 self._ai_pilot_wheel_cache.push(ai_pilot_wheel_sample)
+            return
+
+        if "fc_mode" in data:
+            # `plans/flight-control/plan.md`, BL-16 mode 1, Stage M1 --
+            # ahead of the telemetry fallthrough for the same reason
+            # every other named kind above is.
+            try:
+                flight_control_sample = FlightControlState.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except FlightControlParseError:
+                logger.warning("dropping malformed flight-control line: %r", line)
+                return
+            logger.debug("parsed flight-control sample: %r", flight_control_sample)
+            if self._flight_control_cache is not None:
+                self._flight_control_cache.push(flight_control_sample)
             return
 
         try:

@@ -3,7 +3,8 @@ Petrobrain / commands -- the inbound UDP command listener only.
 `AC-B12` (`plans/ac-b12-export-modules/plan.md`): the one module that
 must load LAST, after every handler-owning module (`petrovich`,
 `effectors`, `sight`, and -- Stage P2, `plans/flight-control/plan.md` --
-`ai_pilot_wheel`) -- its dispatch table below is built once, directly
+`ai_pilot_wheel`, and -- Stage M1, same plan's "Revised 2026-11-18" --
+`flight_control`) -- its dispatch table below is built once, directly
 from those modules' own returned tables, read as bare globals set by the
 loader's `load_module` (see `core.lua`'s header comment for the
 mechanism). No self-registering registry: simpler, and the one load-
@@ -87,6 +88,9 @@ if sight ~= nil then
 end
 if ai_pilot_wheel ~= nil then
     handlers.ai_pilot_goal = ai_pilot_wheel.handle_ai_pilot_goal_command
+end
+if flight_control ~= nil then
+    handlers.flight_control = flight_control.handle_flight_control_command
 end
 
 -- Drains every command datagram currently waiting on command_socket

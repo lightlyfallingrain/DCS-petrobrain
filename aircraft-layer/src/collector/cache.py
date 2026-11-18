@@ -49,6 +49,9 @@ P1) is the same "latest of one" shape as `SightServoCache` -- a
 **separate** cache, same reasoning that module's own docstring gives for
 `SightServoCache` vs. `CockpitSwitchCache`: a dedicated per-frame rate
 class, not the change-gated feeds.
+
+`FlightControlCache` (`plans/flight-control/plan.md`, BL-16 mode 1, Stage
+M1) is the same shape again, for `GET /flight_control/latest`.
 """
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ from typing import NamedTuple
 
 from schema import (
     AiPilotWheelState,
+    FlightControlState,
     LineOfSightSnapshot,
     MissionStartEvent,
     PayloadSample,
@@ -349,6 +353,26 @@ class AiPilotWheelCache:
     def latest(self) -> AiPilotWheelState | None:
         """Return the most recently pushed sample, or `None` if no
         AI-pilot-wheel line has arrived yet this session."""
+        return self._latest
+
+
+class FlightControlCache:
+    """Holds the latest `FlightControlState` sample (`plans/
+    flight-control/plan.md`, BL-16 mode 1, Stage M1) --
+    `flight_control.push_flight_control_state`'s own per-frame status.
+    Same "latest of one" shape as `AiPilotWheelCache`."""
+
+    def __init__(self) -> None:
+        self._latest: FlightControlState | None = None
+
+    def push(self, sample: FlightControlState) -> None:
+        """Record a newly-received sample as the current flight-control
+        state."""
+        self._latest = sample
+
+    def latest(self) -> FlightControlState | None:
+        """Return the most recently pushed sample, or `None` if no
+        flight-control line has arrived yet this session."""
         return self._latest
 
 
