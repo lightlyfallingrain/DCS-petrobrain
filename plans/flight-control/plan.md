@@ -2466,11 +2466,11 @@ flying. Checked against the plan and the code:
   > because player is in pilot seat. Therefore: AI ovelray is ON when Player is in copilot seat AND
   > controls are parked."*
 
-  That is `parked_active` exactly. The converse follows: a swap back to the copilot seat while the
-  copilot controls are still parked turns the overlay on, which is a park edge (row 8) and a silent
-  switch to mode 2. The main loop added **M0-J4** to the sortie 1 probe for it: after J3, from the
-  pilot seat with the controls still parked, swap to the copilot seat, which should stop the
-  writes; then Request Aircraft Control, which should make the probe take.
+  That is `parked_active` exactly. A main-loop inference, that swapping back to the copilot seat
+  with the controls still parked would turn the overlay on again, was **corrected by the user the
+  same day**: *"not possible in DCS"*. So the only park edge is Request Aircraft Control from the
+  copilot seat. The M0-J4 row briefly added for that case was removed. Row 8 needs no seat-swap
+  park path.
 
 #### U6, U7, U8 as answered
 
