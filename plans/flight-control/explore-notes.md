@@ -827,3 +827,26 @@ Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch."
 - **"Align for launch" again mid-recovery:** *"command align for launch"* — a fresh align for
   launch, not ignored.
 - **Break vs. alignment:** *"break cancels alignment"*.
+
+### Answers to the goal check's concerns and Q-P3-0..6 (user, 2026-11-18, verbatim)
+
+- **F-P6 (goal read back, never flown):** *"yes, any new flight command ends align."*
+- **F-P7 (break cut short/undone):** *"yes, as proposed"* — a break supersedes any outstanding
+  heading goal and any alignment.
+- **Q0 — "level off" during align-for-launch:** *"first level at current, then start recovery to
+  pre alignment params"*.
+- **Q1 — after a break out of align-for-launch:** *"hold what break leaves. ED's break continues if
+  mode changes, it set's heading +- 90 degrees and flies that, that is the mechanism."* — so no
+  restore after a break, and leaving CBTM does not cut a break short; what undoes it is only a
+  later heading goal, which the break supersedes.
+- **Q2 — align for launch below 40 m AGL:** *"do align, but make the floor a drop below the
+  starting height"*.
+- **Q3 — breaks in mode 1:** *"break in mode 1 is a tight 90 degree turn"* — a mode-1 behaviour,
+  not "unable" (align/align-for-launch stay "unable" in mode 1).
+- **Q4 — leaving the CPG view while aligned:** *"not sure, I think there is no change. Leaving CPG
+  view does not automatically exit CMBT mode, it stays until left press changes it."* — plan on no
+  change; confirm on the test flight.
+- **Q5 — payload count drop other than a launch:** *"damage can, AAA can shoot the pylons off.
+  Let's ignore that case for now."*
+- **Q6 — "altitude 200" during align-for-launch:** *"yes"* — it aborts and the spoken value
+  replaces that parameter's restore target.
