@@ -1372,7 +1372,11 @@ local function push_ai_pilot_wheel_state(t)
         if value == nil then
             return "null"
         end
-        return '"' .. json_escape_string(value) .. '"'
+        -- `json_escape_string` already returns a quoted literal
+        -- (`"..."`) -- wrapping it in another pair of quotes here
+        -- produced `""FLT""`, invalid JSON, on every non-nil text field
+        -- (found and fixed, `plans/apw-status-json-quotes/debug.md`).
+        return json_escape_string(value)
     end
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"apw_parked_active":' .. tostring(ai_pilot_parked_active)

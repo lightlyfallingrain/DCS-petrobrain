@@ -2107,3 +2107,138 @@ class TestAiPilotGoalTickHvrt:
         assert values["attempts_retry"] == "1"
         assert values["progress_retry"] == "cycling_mode"
         assert values["press_count_retry"] == "8"  # one renewed attempt
+
+
+def _run_push_ai_pilot_wheel_state(script_body: str) -> str:
+    """Runs the real `push_ai_pilot_wheel_state` (plus `core.lua`'s
+    `fmt_num_or_null`/`json_escape_string`, the two helpers it closes
+    over) against a fake `client:send` that captures the one line sent,
+    then prints it verbatim -- so the caller can feed the captured line
+    straight to `json.loads`. `plans/apw-status-json-quotes/debug.md`:
+    `text_or_null` re-wrapped `json_escape_string`'s own already-quoted
+    return value in a second pair of quotes, producing `""FLT""` on
+    every non-nil text field -- invalid JSON, dropped whole by
+    `collector/server.py`'s `_handle_line`."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    preamble = """
+local ai_pilot_parked_active = false
+local ai_pilot_mode_text = nil
+local ai_pilot_course_text = nil
+local ai_pilot_alt_text = nil
+local ai_pilot_alt_add_text = nil
+local ai_pilot_speed_text = nil
+local ai_pilot_last_press = nil
+local ai_pilot_player_seat = nil
+local ai_pilot_cam_fwd_m = nil
+local ai_pilot_takeover = {
+    raw_arg852 = nil, raw_arg952 = nil, stage = nil, correction_path = nil,
+}
+local ai_pilot_goal = { progress = "idle", goal_seq = 0 }
+local DEBUG = false
+local function debug_log(msg) end
+
+local LAST_SENT = nil
+client = {
+    send = function(self, line)
+        LAST_SENT = line
+        return true
+    end,
+    close = function(self) end,
+}
+"""
+    functions = "\n".join(
+        (
+            _extract_lua_function(_CORE_LUA, "fmt_num_or_null"),
+            _extract_lua_function(_CORE_LUA, "json_escape_string"),
+            _extract_lua_function(_AI_PILOT_WHEEL_LUA, "push_ai_pilot_wheel_state"),
+        )
+    )
+    script = (
+        preamble + "\n" + functions + "\n" + script_body + "\nio.write(LAST_SENT)\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    return result.stdout
+
+
+class TestPushAiPilotWheelStateJson:
+    """`plans/apw-status-json-quotes/debug.md` -- the AI-overlay status
+    push must always produce valid JSON, including whenever any
+    `apw_*_text`/`apw_takeover_stage`/`apw_correction_path`/`apw_seat`/
+    `apw_goal_progress` field is non-nil (the double-quoting bug fired on
+    every one of them, not only the five `_text` fields the flight
+    evidence happened to show)."""
+
+    def test_all_text_fields_nil_is_valid_json(self) -> None:
+        line = _run_push_ai_pilot_wheel_state("push_ai_pilot_wheel_state(1.0)")
+        parsed = json.loads(line)
+        assert parsed["apw_mode_text"] is None
+        assert parsed["apw_goal_progress"] == "idle"
+
+    def test_mode_text_set_is_valid_json(self) -> None:
+        """The exact defect: before the fix, a non-nil `apw_mode_text`
+        made `push_ai_pilot_wheel_state` send `""FLT""`, which
+        `json.loads` rejects and `collector/server.py` drops whole."""
+        line = _run_push_ai_pilot_wheel_state(
+            """
+            ai_pilot_mode_text = "FLT"
+            push_ai_pilot_wheel_state(2.0)
+            """
+        )
+        parsed = json.loads(line)
+        assert parsed["apw_mode_text"] == "FLT"
+
+    def test_every_text_field_populated_is_valid_json(self) -> None:
+        """All five overlay `_text` fields plus the diagnostic
+        `takeover_stage`/`correction_path`/`seat` string fields at once
+        -- the live-flight shape, not just one field in isolation."""
+        line = _run_push_ai_pilot_wheel_state(
+            """
+            ai_pilot_mode_text = "FLT"
+            ai_pilot_course_text = "123"
+            ai_pilot_alt_text = "900"
+            ai_pilot_alt_add_text = "B"
+            ai_pilot_speed_text = "250"
+            ai_pilot_last_press = "up"
+            ai_pilot_takeover.stage = "menu_open"
+            ai_pilot_takeover.correction_path = "quick"
+            ai_pilot_player_seat = "copilot"
+            push_ai_pilot_wheel_state(3.0)
+            """
+        )
+        parsed = json.loads(line)
+        assert parsed["apw_mode_text"] == "FLT"
+        assert parsed["apw_course_text"] == "123"
+        assert parsed["apw_alt_text"] == "900"
+        assert parsed["apw_alt_add_text"] == "B"
+        assert parsed["apw_speed_text"] == "250"
+        assert parsed["apw_last_press"] == "up"
+        assert parsed["apw_takeover_stage"] == "menu_open"
+        assert parsed["apw_correction_path"] == "quick"
+        assert parsed["apw_seat"] == "copilot"
+
+    def test_text_with_special_characters_still_escapes(self) -> None:
+        """`json_escape_string`'s own contract (backslash/quote/newline
+        escaping) must still hold once the extra wrapping quotes are
+        gone -- this is the one thing the fix must not break."""
+        line = _run_push_ai_pilot_wheel_state(
+            r"""
+            ai_pilot_mode_text = 'has "quotes" and \\backslash'
+            push_ai_pilot_wheel_state(4.0)
+            """
+        )
+        parsed = json.loads(line)
+        assert parsed["apw_mode_text"] == 'has "quotes" and \\backslash'
