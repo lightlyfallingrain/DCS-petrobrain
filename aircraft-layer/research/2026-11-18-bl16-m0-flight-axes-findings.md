@@ -189,10 +189,29 @@ probe and recorded only A1/A2. Conditions were about 470–550 m AGL and 52–55
   The sign of 2087 is not measured yet. The probe assumes +1, and C2's capture-jump check aborts
   within about 0.1 s if that is wrong.
 
+## Flight 6: C1 and C2, pilot seat, airborne, collective command 2087
+
+User, 2026-11-18: *"C again"*. The run started 15:13:40, with `collective writes use 2087 … SIGN
++1 unproven`. Conditions were 438 m AGL and 55.6 m/s IAS.
+
+- **2087 drives the collective.** C2 captured +0.0991 and wrote +0.0991. The capture-jump check
+  aborted after 21 ms, three frames, when the arg had already fallen to +0.044. **The sign is −1
+  and the scale is 1:** with writing already stopped, the arg kept going and settled at exactly
+  −0.0991 within 2.6 s. Vertical speed fell from +3.1 to 0 m/s as it did. The abort worked as
+  designed: three frames of a wrong-sign command.
+- **The last written value stays after writing stops.** Arg 1102 then sat at −0.0991 for at least
+  16 s, until D1 captured it there. The physical lever had not moved, so it sent nothing to replace
+  it. **Releasing an axis therefore does not hand it back to the player's lever position; the
+  aircraft keeps Petrovich's last command until the player moves that control.** This is M0-F's
+  question, answered for the collective. M1's release, and the "I have controls" readback, should
+  assume it until M0-F measures the other axes.
+- `SIGN.collective` is now −1 in the probe. **C2 is still owed with the right sign**, to measure
+  the collective's lag and its VS response per step.
+
 ### Still owed
 
 - The HSI headings (A1, A2, A4). The user's account, "about north, west, back to north", fits both
   true and magnetic. Steady on an exact HSI number and half-press.
-- The Mi-24P collective axis command ID, then C2 again.
+- C2 with SIGN −1.
 - The airborne yaw response to a pedal step (M0-E).
 - B, C and D in both seats, and J1–J3.

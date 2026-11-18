@@ -88,9 +88,9 @@ local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2087 }
 local COLLECTIVE_CMD_NAME = "iCommandPlaneCollective"
 -- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals proven -1
 -- (flight 3 B2, 2026-11-18: 2003 = +0.05 held arg 1103 at -0.050 exactly).
--- Collective 2087: UNPROVEN, +1 assumed (ED's "inverted" note was about
--- 2004). C2's capture-jump check aborts within about 0.1 s if wrong.
-local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = 1.0 }
+-- Collective 2087: proven -1 (flight 6, 2026-11-18: +1 aborted after 21 ms,
+-- and the arg then settled at exactly -captured, -0.0991 for +0.0991).
+local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 local B2_STEPS = { 0.0, 0.05, -0.05, 0.10, -0.10, 0.0 }
 local B2_STEP_S = 3.0
