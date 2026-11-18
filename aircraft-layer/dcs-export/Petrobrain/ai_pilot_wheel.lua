@@ -99,6 +99,27 @@ local AI_PILOT_ALT_TOLERANCE_M = 20.0
 -- (pilot, verbatim: "I'd put a half second delay there").
 local AI_PILOT_REFERENCE_TOGGLE_DELAY_S = 0.5
 
+-- Settle delay after the camera crosses *into* the operator seat, before
+-- arg 852 is trusted (flight 8, 2026-11-18, `aircraft-layer/research/
+-- 2026-11-18-bl16-m0-flight-axes-findings.md` "Flight 8"): the camera
+-- reached the operator seat at 17.301 s while 852 still read 0.963
+-- (stowed, from the pilot seat), then animated down over ~0.3 s
+-- (0.930, 0.893, 0.853, ... 0.624 at +94 ms) -- a false park-rising edge
+-- for a few frames if read immediately. User, verbatim: "allow that
+-- initial small delay so that the control either unparks or remains
+-- parked, then read state and that determines whether AI has controls".
+-- 0.5 s covers the ~0.3 s animation with margin, same reasoning as
+-- `AI_PILOT_REFERENCE_TOGGLE_DELAY_S` above. Only the pilot-to-operator
+-- direction needs this: the reverse (operator-to-pilot) forces the park
+-- arg to `nil` unconditionally (`run_ai_pilot_wheel`'s seat gate), which
+-- has no transient to absorb, and delaying *that* unpark would hold a
+-- stale "parked" belief while the player already has the stick back --
+-- see `run_ai_pilot_wheel`'s own comment at the seat gate. This is a
+-- behaviour-affecting constant with no `tuning.py` equivalent in this
+-- subproject (root `CLAUDE.md`, "Behaviour-affecting constants are
+-- tunable") -- it would want that mechanism if aircraft-layer had one.
+local AI_PILOT_SEAT_CHANGE_SETTLE_S = 0.5
+
 -- How long the overlay must read every field `nil` before the menu is
 -- believed closed and re-opened -- the toggle is a single press that
 -- closes an open menu just as readily as it opens a closed one, so
@@ -194,6 +215,11 @@ local ai_pilot_parked_active = false
 -- offset behind it, diagnostic only (status push).
 local ai_pilot_player_seat = nil
 local ai_pilot_cam_fwd_m = nil
+-- Model time the pilot-to-operator settle window (`AI_PILOT_SEAT_CHANGE_
+-- SETTLE_S` above) ends, or `nil` when no settle is in progress -- set
+-- by `ai_pilot_update_seat` the frame the camera crosses into the
+-- operator seat, consumed by `run_ai_pilot_wheel`'s own seat gate.
+local ai_pilot_seat_settle_until_t = nil
 local ai_pilot_mode_text = nil
 local ai_pilot_course_text = nil
 local ai_pilot_alt_text = nil
@@ -589,8 +615,13 @@ end
 
 -- Reads camera + ownship and refreshes `ai_pilot_player_seat` (kept
 -- when this frame gives no reading). Every frame, so a seat switch is
--- seen before arg 852's stow animation can produce a false edge.
-local function ai_pilot_update_seat()
+-- seen before arg 852's stow animation can produce a false edge. Also
+-- arms the settle window (`AI_PILOT_SEAT_CHANGE_SETTLE_S`) the frame the
+-- seat crosses from a known, different seat *into* "operator" -- the
+-- one direction arg 852 can transiently still read stowed (flight 8
+-- finding, see the constant's own comment); a first-ever reading
+-- (`ai_pilot_player_seat` still `nil`) is not a switch and arms nothing.
+local function ai_pilot_update_seat(t)
     local cam = safe_call(LoGetCameraPosition)
     local self_data = safe_call(LoGetSelfData)
     local cam_p = type(cam) == "table" and cam.p or nil
@@ -605,6 +636,10 @@ local function ai_pilot_update_seat()
     local seat, fwd = ai_pilot_seat_from_camera(cam_p, own_p, heading, pitch)
     ai_pilot_cam_fwd_m = fwd
     if seat ~= nil then
+        if seat == "operator" and ai_pilot_player_seat ~= nil
+            and ai_pilot_player_seat ~= "operator" then
+            ai_pilot_seat_settle_until_t = t + AI_PILOT_SEAT_CHANGE_SETTLE_S
+        end
         ai_pilot_player_seat = seat
     end
 end
@@ -1074,11 +1109,26 @@ local function run_ai_pilot_wheel(t)
 
     -- Seat gate: the stow arg counts only while the player is in the
     -- operator seat -- in the pilot seat 852 reads stowed with nobody
-    -- but the player flying (`SEAT_BOUNDARY_FWD_M`'s comment).
-    ai_pilot_update_seat()
+    -- but the player flying (`SEAT_BOUNDARY_FWD_M`'s comment). Leaving
+    -- the operator seat is still immediate (`in_operator_seat and
+    -- stick_park or nil` below forces the reading to `nil` the same
+    -- frame) -- only entering it waits out the settle window, and only
+    -- while still in the operator seat: a hop back to the pilot seat
+    -- before the window ends clears `in_operator_seat` and the real,
+    -- immediate gate applies, never the held value.
+    ai_pilot_update_seat(t)
     local in_operator_seat = ai_pilot_player_seat == "operator"
-    local now_parked, rising = ai_pilot_park_rising(
-        ai_pilot_parked_active, in_operator_seat and stick_park or nil)
+    if ai_pilot_seat_settle_until_t ~= nil and t >= ai_pilot_seat_settle_until_t then
+        ai_pilot_seat_settle_until_t = nil
+    end
+    local settling = in_operator_seat and ai_pilot_seat_settle_until_t ~= nil
+    local now_parked, rising
+    if settling then
+        now_parked, rising = ai_pilot_parked_active, false
+    else
+        now_parked, rising = ai_pilot_park_rising(
+            ai_pilot_parked_active, in_operator_seat and stick_park or nil)
+    end
     ai_pilot_parked_active = now_parked
 
     if not now_parked then
@@ -1464,6 +1514,7 @@ local function on_stop()
     -- the camera has placed the player in the operator seat.
     ai_pilot_player_seat = nil
     ai_pilot_cam_fwd_m = nil
+    ai_pilot_seat_settle_until_t = nil
 end
 
 M.run_ai_pilot_wheel = run_ai_pilot_wheel
