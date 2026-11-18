@@ -1000,3 +1000,163 @@ transient) are all fixed in this revision — confirmed by rereading, not re-lit
   not ready" for the identical signal on `cbtm_align`. Should a heading/altitude/speed goal that
   never gets out of `mode_blocked` eventually say so too, or is silent-forever retry the intended
   behaviour here?
+
+## Plan check — 2026-11-18 (mode 1, unparked, raw axes re-cut)
+
+**Verdict:** CONCERNS
+
+Checked `plans/flight-control/plan.md`'s "Revised 2026-11-18 — mode 1 (unparked, raw axes)
+re-cut" (M0–M5) against the goal check — 2026-10-31 above, which is the mode-1 goal check and
+whose E1–E10 are not re-derived. The mode-2 goal check and its E-P expectations are a separate
+contract and are not in scope here. Also checked: that every open assumption and every numbered
+Finding (F1–F8)/Question (Q1–Q8) from the 2026-10-31 goal check was actually closed, not merely
+superseded by a later section's silence — all eight were traced to a specific user answer
+(`explore-notes.md`, "Goal-check answers … 2026-10-31", A1–A9) or to a later direction quoted in
+the re-cut's own "What changed" table. None was found open and unaddressed.
+
+Confirmed against the live tree (not just the plan's own claims): `body-layer/src/belief/
+optic_policy.py` has no `flying`/`has_controls` input today (grep — only a turbulence-based
+"flying smoothly enough for binoculars" check at L1257), and `body-layer/config/rules/flight.lua`
+on this tip still carries the pre-refactor `r.ok` shape and the two silent `"always"`-category
+handover rules, both consistent with the re-cut's own account of what exists before M1 lands.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (handover confirmed only once Lua is actually flying; "unable, \<reason\>" on refusal) | M1, Decision 22 | met |
+| E2 (nothing jumps; turn/climb/IAS continuation at takeover) | M1 (bit-exact capture) + M2 (takeover modes, stopping height) | met |
+| E3 (stick/collective/pedals do nothing while he flies) | M0-D (go/no-go, blocker not workaround), M0-B/M0-C, M1 | met — correctly gated, not assumed |
+| E4 (short readback, smooth, no overshoot) | Decision 21 readbacks + M2 shapers (ζ≥1) | met — "no overshoot" is A9-revised to "converges into the band, no ringing"; that revision is the user's own (A9), not this plan's drift |
+| E5 (stop a turn by voice) | M2 `level_off`/continuous `turn` (Decision 21) | met |
+| E6 ("I have controls" at once, never "confirm?") | M1, `HANDOVER_TOKENS` (Decision 13), row 6 | met |
+| E7 (he says when he can't/won't; silent on a goal merely not reached) | M1 refusals + M3 terrain call; Decision 14/A4 for the "not reached" half | met |
+| E8 (never into the ground from current height) | M3 (unchanged old Stage 3) | met |
+| E9 (no optics while he flies) | **deferred → U6**, which names M1 (if accepted) or `[[BL-B123]]` (if not) | deferred, but see Finding 1 |
+| E10 (no model latency) | M1 (rule path only; Decision 19) | met |
+| Open assumption: turn-vs-drift threshold at takeover | Decision 1 REVISED / A2 (5° bank) | settled |
+| Open assumption: altitude reference at takeover | A6 / Decision 1, 9 REVISED (AGL default) | settled |
+| Open assumption: AGL meaning over forest/buildings | A6 (radar "sees trees") + M0-A's optional forest/town pass | settled, confirmatory measurement only |
+| Open assumption: the stop word | A1 (`level_off`/"straight"), Decision 12 | settled |
+| Open assumption: seat jump while flying | A8, Decision 17, Co-moving row 10, M0-I | settled |
+
+### Findings
+
+1. **E9 is tracked as `deferred → U6`, but U6's "alternative" branch ships mode 1 in direct
+   contradiction of an expectation the original 2026-10-31 goal check already recorded as
+   settled, and of a standing user rule the plan itself quotes.** Lens: purpose, whose job.
+   - Assumption: presenting U6 as a symmetric architectural choice ("build the one shared
+     mechanism now" vs. "leave it wholly to `[[BL-B123]]`") is a fair framing of an open decision,
+     with a recommendation attached.
+   - In the sim: the 2026-10-31 goal check lists E9 as *"Settled: point 2"* — mode 1's "no optics
+     while flying" was never an open question, it was already decided at the explore stage
+     (`body-layer/ROADMAP/BL-16.md`, settled point 2: *"Petrovich's optics stop while he flies and
+     come back when he hands over"*). `todo/todo/X-T29.md` (priority 3, the same list that puts
+     mode 1 at priority 2 just above it) restates it as a standing rule in the user's own words:
+     *"When Petrovich is flying (AI overlay or no-AI overlay) no optic can be used."* Grepping the
+     live tree confirms `optic_policy.py` has no such input today for *either* mode. If U6
+     resolves to its stated alternative, mode 1 — a priority-2 item that can ship and auto-merge
+     on its own DoD pass — goes live with optics available while Petrovich flies, and stays that
+     way until `[[BL-B123]]` (priority 3, not yet started) eventually closes it.
+   - The pilot would see: he hands over, uses the 9K113 or binoculars while Petrovich flies, and
+     nothing stops him — exactly the behaviour the goal check and the user's own 2026-11-17 rule
+     already ruled out, reopened by how this one plan presents an already-settled requirement as a
+     fresh 50/50 choice.
+   - Grounded in: the 2026-10-31 goal check's E9 row, `BL-16.md` settled point 2, `X-T29`
+     priority 3's verbatim quote, and the live-tree grep above.
+   - Suggests: U6 is answered "yes" (as the plan itself recommends) before M1 is considered
+     complete, not left to default silently — this is not a tidy generalisation opportunity, it is
+     closing a gap against an already-decided requirement. If the answer is genuinely "no" for
+     now, the plan and the mode-1 test card should say in those terms that mode 1 ships with a
+     known, user-accepted regression against E9/BL-16.md point 2 until `[[BL-B123]]` lands, rather
+     than letting U6's silence read as "deferred, no harm."
+
+2. **No second finding changes the verdict** — everything else traced cleanly. U5, U7 and U8 are
+   genuine open decisions (park-while-flying handoff, build/merge order relative to the probe, and
+   the confidence floor for *taking* controls) and are correctly surfaced to the user rather than
+   assumed; they do not bear on any E-expectation the way U6 does, so they are not findings here,
+   only items for the Questions list below (restated from the plan, not new).
+
+### Questions for the user
+
+- **Q1 (from Finding 1)** — Should "no optics while Petrovich flies" (U6) ship as part of M1,
+  covering both modes, as the plan recommends? If not now, should the mode-1 test card and
+  `BL-16.md` record that mode 1 ships with optics still usable while he flies, as a known,
+  accepted gap against the already-settled E9/point 2, pending `[[BL-B123]]`?
+- U5 (restated from the plan) — does a park while mode 1 is flying hand over to mode 2 silently
+  with mode-1 goals dropped, as recommended, or should heading/altitude/speed carry across?
+- U7 (restated from the plan) — should M1+M2 merge be held until M0-D/M0-B/M0-C answer, even
+  though DoD-pass auto-merge would otherwise land them the same day they pass?
+- U8 (restated from the plan) — is "never confirm" the right floor for *taking* controls too (as
+  it already is for giving them back), or should "you have controls" keep a confidence floor
+  below which he asks?
+
+## Plan check — 2026-11-18, amendment (U5–U10, seat rule)
+
+**Verdict:** ALIGNED
+
+Checked `plans/flight-control/plan.md`'s "Amended 2026-11-18 — the user's answers to U5–U8, and
+the seat rule" (Decisions 24 and 25), the U9/U10 entries under "Decisions Requiring User Input
+(mode 1 re-cut)", and the "What changed" table's seat-rule correction (M0-J4 removed), against:
+the 2026-10-31 goal check's E1–E10 above (not re-derived); `explore-notes.md`'s page 1 ("maintain
+current state", "stops writing axis values... can use the optics again" on "I have controls",
+"must be ignored" for the physical stick) and settled point 2 ("Handover is spoken only");
+`body-layer/ROADMAP/BL-16.md`'s "Mode 1" section, which restates the same answers and explicitly
+records the prior CONCERNS (U6) as closed; and the live tree, confirming no dangling `M0-J4`
+reference survives the removal (`grep -n M0-J4 plans/flight-control/plan.md` returns one hit, the
+prose explaining the removal itself, and the M0 table at line 2894 runs J1–J3 only).
+
+This is a re-check, not a fresh pass: the previous entry's single CONCERNS item (U6, which framed
+an already-settled "no optics while flying" as a fresh 50/50 choice) is closed — **U6 answered
+"yes"**, built in M1 for both modes, confirmed by this amendment's own text and by `BL-16.md`
+line 301 ("Plan check `alignment.md` 2026-11-18: CONCERNS about U6 only, closed by the answer
+below"). The rest of the previous pass's table (E1–E8, E10, the five open assumptions) is
+unaffected by this amendment and stands.
+
+| expectation / item | stage | status |
+|---|---|---|
+| E9 (no optics while flying) | M1, row 17 (`flying == CrewState.has_controls`) | **met** — U6 answered yes; no longer deferred |
+| E2/E3 maintained across park and unpark (new ground, from U5) | Decision 24 (`armed`, same-frame unpark take, M0-J) | met |
+| E6 ("I have controls" acts at once, never "confirm?") — for mode 1 itself | M1, row 6, Decision 13 | met, unaffected |
+| "Handover is spoken only" (settled point 2) vs. the silent park/unpark mode switches | Decision 24's framing: park/unpark change *mode*, never *who holds the controls* | met — the silent events move between Petrovich's two mechanisms, never between Petrovich and the player; the one exception is forced and named below |
+| **U5 — unpark no longer hands the stick to the player** | Decision 24; disclosed in Risks ("The test card says it in those words") and `BL-16.md` | met — Flight M-A step 9 ("unpark: he keeps flying in mode 1; then 'I have controls'") is the disclosure in the test card's own words, not just the plan's prose |
+| **U9 — "I have controls" in the overlay** | row 9c; "Unable, AI overlay.", nothing remembered | met — matches the user's verbatim answer exactly; Flight M-A step 11 exercises it |
+| **U10 — the arm lease** | `ARM_LEASE_S = 3.0`, re-sent every poll, Decision 2 unchanged for an *active* mode 1 | met — closes the park→unpark escape route U5 would otherwise remove, without adding a watchdog nobody asked for |
+| **Forced "You have controls!" on an unpark outside the envelope** | row 9a; state diagram `OVL --> PLAYER: unpark when mode 1 cannot take` | met, with the tension named, not hidden — see below |
+| Seat rule (never gated on seat) | Decision 25 | met |
+| Seat-swap park-edge correction (M0-J4 removed) | "What changed" table, seat-rule bullet | met — no dangling reference, M0 table has only J1–J3 |
+
+### Findings
+
+None that change the verdict. Two items are worth recording as confirmed-consistent rather than
+silent, since the task brief asked for them by name:
+
+1. **The forced handover is the one place "player command only" does not hold, and the plan says
+   so itself, in those words, twice.** Lens: whose job / the non-obvious case.
+   - The Risks section states it directly: *"(U5) Forced handovers... This is the only place
+     'player command only' is not met, and it is physical, not a choice."* The reason is
+     structural, not a design shortcut: mode 1 is forward-flight only (Decision 3) and explicitly
+     excludes hover for this first build, so an unpark in a hover or below `MIN_IAS_KMH` leaves
+     nobody to fly the aircraft if Petrovich does not take it. The existing urgent "You have
+     controls!" line (already used for the Lua self-release, row 7) is reused rather than a new
+     string invented for the case.
+   - This is not a gap the plan introduced and failed to notice — it is the plan naming its own
+     exception against the rule it just adopted, with the reason, in the same section a reader
+     would check. Nothing to ask the user; recorded here because the task named it as a thing to
+     verify, not because it was found wanting.
+
+2. **U9's "unable, don't remember" answer is a genuine, disclosed narrowing of the original E6,
+   not a silent one.** Lens: purpose.
+   - E6 (2026-10-31) reads "'I have controls' gives the aircraft back at once, including in an
+     emergency," written before mode 2 (the AI overlay) existed as a destination. U9 answers the
+     overlay-specific case the original E6 could not have anticipated: while parked, the player's
+     stick is physically dead regardless of Petrobrain (DCS itself ignores `LoSetCommand` while
+     parked, per probe v2), so "at once" cannot mean "flying resumes this instant" there — it can
+     only mean "answered this instant," which is what "Unable, AI overlay." does. The player's
+     actual escape (unpark, then "I have controls") is two deliberate steps, both disclosed in the
+     test card (Flight M-A step 11) and in `BL-16.md`. This is the user's own explicit answer
+     against two offered options, not an assumption the plan filled in, so it is not re-litigated
+     here — recorded so a later reader does not mistake the narrowing for an oversight.
+
+### Questions for the user
+
+None. U5–U10 and the seat rule are all answered on the record; nothing in this amendment opens a
+new question the main loop would need to carry to the user.

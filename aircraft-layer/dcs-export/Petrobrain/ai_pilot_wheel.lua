@@ -1521,10 +1521,45 @@ local function on_stop()
     ai_pilot_seat_settle_until_t = nil
 end
 
+-- `plans/flight-control/plan.md`, "Revised 2026-11-18", Decision 25 --
+-- read-only getters for `flight_control.lua`, the mode-1 module. **Must
+-- return `ai_pilot_parked_active`, never 852 alone**: 852 alone would
+-- self-release mode 1 the moment it started with the player in the
+-- pilot seat (852 reads stowed there with nobody but the player flying
+-- -- the seat gate above is exactly what tells the two cases apart).
+local function is_parked()
+    return ai_pilot_parked_active
+end
+
+-- Read-only mirror of `ai_pilot_player_seat` -- `"pilot"`/`"operator"`/
+-- `nil` (unknown this mission). Never gates whether mode 1 may run
+-- (Decision 25). **No longer read by `flight_control.lua`'s own
+-- capture-source rule** -- M0-J (flight 9) found the camera seat is not
+-- the live-controls seat (the operator set can read zero while the
+-- player sits there, before requesting control); `flight_control.lua`
+-- resolves the live seat from the arg sets themselves instead
+-- (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`,
+-- "Flight 9"). Kept for diagnostics/other callers.
+local function player_seat()
+    return ai_pilot_player_seat
+end
+
+-- Read-only mirror of the raw stow arg (852) -- `flight_control.lua`'s
+-- own unpark-take capture rule (M0-J, flight 9) tracks this every frame
+-- while parked to find the last frame it read fully stowed (>= 0.99),
+-- since the two arg sets have already begun their ~1.5 s cross-fade by
+-- the time `ai_pilot_parked_active`'s own 0.9 edge fires.
+local function stick_park_raw()
+    return ai_pilot_takeover.raw_arg852
+end
+
 M.run_ai_pilot_wheel = run_ai_pilot_wheel
 M.update_ai_pilot_wheel_overlay = update_ai_pilot_wheel_overlay
 M.push_ai_pilot_wheel_state = push_ai_pilot_wheel_state
 M.handle_ai_pilot_goal_command = handle_ai_pilot_goal_command
 M.on_stop = on_stop
+M.is_parked = is_parked
+M.player_seat = player_seat
+M.stick_park_raw = stick_park_raw
 
 return M

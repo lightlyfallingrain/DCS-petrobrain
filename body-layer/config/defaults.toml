@@ -225,6 +225,87 @@ COMPOSITION_MATCH_RATIO = 2.0
 # source: belief/expected_area.py:EXPECTED_AREA_MAX_HALF_WIDTH_DEG
 EXPECTED_AREA_MAX_HALF_WIDTH_DEG = 15.0
 
+[belief.flight_control]
+# A9's tolerance band for the altitude channel, as a fraction of the commanded altitude -- see `ALT_BAND_MIN_M` for the floor that applies alongside it at low altitude.
+# status: judgement
+# source: belief/flight_control.py:ALT_BAND_FRAC
+ALT_BAND_FRAC = 0.1
+
+# The floor `ALT_BAND_FRAC` is clamped above, so a low-altitude hold is not held to an unrealistically tight absolute band (the plan's own example: "so 50 m AGL is not held to ±5 m" -- 10 m clears that bar, 5 m would not).
+# status: judgement | range: 1.0 .. 50.0
+# source: belief/flight_control.py:ALT_BAND_MIN_M
+ALT_BAND_MIN_M = 10.0
+
+# U10's lease: Lua takes at an unpark only if body-layer has re-sent `arm` within this many seconds (a safety margin; keep it at or below 10 s, the ceiling `Export.lua` and the HTTP layer also enforce, or the whole flight-control message is rejected at the wire).
+# status: judgement | range: 0.5 .. 10.0
+# source: belief/flight_control.py:ARM_LEASE_S
+ARM_LEASE_S = 3.0
+
+# The terrain floor mode 1 holds once M3 builds the climb-for-terrain logic (the user's own Q5 number, reused here -- mode 2 never declared it, see the plan's "Behaviour constants" section: "P4 is unbuilt... mode 1 declares its own constants with those defaults").
+# status: agreed-guess | range: 0.0 .. 500.0
+# source: belief/flight_control.py:FLOOR_AGL_M
+FLOOR_AGL_M = 40.0
+
+# How long `TAKING` waits for `Export.lua` to confirm `active` before giving up and speaking "Unable, not ready." -- judgement call, same shape as `RULE_GATE_HOLD_TIMEOUT_S`'s own role for mode 2's takeover- settle window, just a separate constant: this one bounds a network round trip (voice command -> HTTP POST -> the next `GET /flight_control/latest` poll), not a belief-state settle.
+# status: judgement | range: 0.5 .. 30.0
+# source: belief/flight_control.py:HANDOVER_ACK_TIMEOUT_S
+HANDOVER_ACK_TIMEOUT_S = 2.0
+
+# No natural "10%" reading for a heading (D-c) -- 5° is the plan's own recommended default.
+# status: judgement | range: 1.0 .. 30.0
+# source: belief/flight_control.py:HEADING_BAND_DEG
+HEADING_BAND_DEG = 5.0
+
+# The speed channel's own along-track acceleration ceiling -- no probe ever measured a step-response accel figure for this (M0-E was not flown), so this is a placeholder, owed by M0-E like every gain `Export.lua`'s own "M2 control law constants" block names.
+# status: agreed-guess | range: 0.1 .. 5.0
+# source: belief/flight_control.py:MAX_ACCEL_MPS2
+MAX_ACCEL_MPS2 = 1.0
+
+# The envelope-release bank limit `Export.lua` checks every active frame (plus its own hard-coded margin) -- judgement call, A9 favours robustness over tight tracking.
+# status: judgement | range: 10.0 .. 60.0
+# source: belief/flight_control.py:MAX_BANK_DEG
+MAX_BANK_DEG = 30.0
+
+# The altitude channel's own vertical-speed ceiling -- M0-A's reference manoeuvre flew a "5 m/s climb and descent of 100 m", reused here as the shaper's own rate limit rather than measured for this purpose.
+# status: judgement | range: 1.0 .. 15.0
+# source: belief/flight_control.py:MAX_CLIMB_VS_MPS
+MAX_CLIMB_VS_MPS = 5.0
+
+# The ceiling `set_speed`/`step_speed`/`set_speed_max` clamp to -- mode 2's own Q5 ceiling (280 km/h), reused as a judgement call the same way `belief.ai_pilot_wheel.AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M`'s docstring already reuses a mode-2 figure elsewhere.
+# status: judgement | range: 100.0 .. 500.0
+# source: belief/flight_control.py:MAX_IAS_KMH
+MAX_IAS_KMH = 280.0
+
+# M2's own bank for a commanded continuous turn ("turn left/right") and for the heading channel's own rate-limit while converging to a spoken heading -- `Export.lua`'s `law_turn_rate_at_bank(this, V_t)` is the turn rate either channel's shaper rate-limits to.
+# status: judgement | range: 5.0 .. 45.0
+# source: belief/flight_control.py:MAX_TURN_BANK_DEG
+MAX_TURN_BANK_DEG = 20.0
+
+# Below this IAS, mode 1 refuses a takeover (`TOO_SLOW`) and `Export.lua`'s own envelope check self-releases an already-active session (Decision 3, user: "~80").
+# status: agreed-guess | range: 20.0 .. 200.0
+# source: belief/flight_control.py:MIN_IAS_KMH
+MIN_IAS_KMH = 80.0
+
+# A9's tolerance band for the speed channel: what "good enough" means as a fraction of the commanded IAS, used by `Export.lua` only for the status feed's `in_band_speed` and (M4) the settle test before a Trimmer press -- never a deadband (Decision 18).
+# status: judgement
+# source: belief/flight_control.py:SPEED_BAND_FRAC
+SPEED_BAND_FRAC = 0.1
+
+# "Slow down"/"speed up"'s own step size -- judgement call; mode 2's wheel step is ~50 km/h, this is the one the plan's own "Behaviour constants" table flags to revisit after Flight M-A.
+# status: judgement | range: 1.0 .. 100.0
+# source: belief/flight_control.py:SPEED_STEP_KMH
+SPEED_STEP_KMH = 20.0
+
+# At takeover, |bank| under this holds heading; at or above it, the turn in progress continues (Decision 1 REVISED/24, user A2: "heading. Let's say <5 deg bank gets level flight").
+# status: agreed-guess | range: 0.0 .. 45.0
+# source: belief/flight_control.py:TAKEOVER_LEVEL_BANK_DEG
+TAKEOVER_LEVEL_BANK_DEG = 5.0
+
+# A9's tolerance band for the turn-rate channel, as a fraction of the commanded turn rate.
+# status: judgement
+# source: belief/flight_control.py:TURN_RATE_BAND_FRAC
+TURN_RATE_BAND_FRAC = 0.1
+
 [belief.optic_policy]
 # `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a binocular look must be expected to tighten the range of a contact the pilot asked to watch, in metres, before Petrovich raises binoculars just for its position.
 # status: judgement | range: 5.0 .. 500.0

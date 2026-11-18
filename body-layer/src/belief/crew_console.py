@@ -147,6 +147,19 @@ from belief.escalation import (
     DebugPrintBrainClient,
     handle_player_utterance,
 )
+from belief.flight_control import (
+    MAX_IAS_KMH,
+    MIN_IAS_KMH,
+    SPEED_STEP_KMH,
+    AltitudeRef,
+    FlightControlGoalRequest,
+    FlightControlState,
+    clamp_altitude,
+    clamp_speed,
+    decide_flight_control,
+    release_controls,
+    take_controls,
+)
 from belief.optic_policy import (
     POINT_DISTANCE_BAND_HALF_KM,
     POINT_READY_TIMEOUT_S,
@@ -1329,6 +1342,26 @@ ALTIMETER_QNH_TIMEOUT_LINE: Final[str] = "Unable, altimeter pressure not set."
 #: split `CONFIG_ERROR_LINE`'s own docstring describes for sequence files.
 ACTION_FILE_ERROR_LINE: Final[str] = "Action file error."
 
+#: BL-16 mode 1 Decision 22's own forced-handover/self-release wording
+#: ("You have controls!", reused for both Co-moving row 9a's unpark-take
+#: refusal and row 7's Lua envelope self-release) lives in `belief.
+#: flight_control.decide_flight_control` -- that module owns it, not
+#: this file, since it is the one place both of those code paths meet.
+#: A code-side exception to "wording lives in the rule file" (there are
+#: no event rules yet, `[[BL-B95]]`'s `when.event`) -- named here so the
+#: exception is not mistaken for precedent, same posture `ALTIMETER_QNH_
+#: NO_RESPONSE_LINE` already has.
+
+
+def _is_flight_bypass_category(category: str) -> bool:
+    """D19/U22's own urgent-readback scope -- every `"flight_control*"`
+    category plus `"flight_handover"` (BL-16 mode 1 Decision 22), never
+    `"always"`. One function so `handle_command`'s immediate bypass
+    check and `drain_pending_rule_dispatch`'s deferred one can never
+    silently diverge."""
+    return category.startswith("flight_control") or category == "flight_handover"
+
+
 #: `[[BL-17]]` D16/U20 -- how long Petrovich holds an understood but not
 #: yet actionable rule command, such as a flight command caught by the
 #: takeover-settle window, before giving up and speaking "unable" instead
@@ -1636,6 +1669,26 @@ class CrewConsole:
     #: section -- see that client method's docstring). Reset to `None` at
     #: the top of every `handle_command` dispatch, same convention.
     ai_pilot_hvrt_step_transition: Literal["up", "down"] | None = None
+    #: BL-16 mode 1 Stage M1 (`plans/flight-control/plan.md`, "Revised
+    #: 2026-11-18") -- `take_controls`/`release_controls`'s own one-shot
+    #: signal to `body.py`'s poll loop (`_apply_flight_control`), the
+    #: same division `ai_pilot_goal_transition`'s own docstring states:
+    #: the actual wire send lives in the poll loop, not here. `"take"`
+    #: (bump `flight_control_state.take_seq`, send `cmd="take"`) or
+    #: `"release"` (send `cmd="release"`) -- never both at once, since
+    #: each action sets this itself, synchronously, the instant it
+    #: decides to act. Reset to `None` at the top of every `handle_
+    #: command` dispatch, same convention as `ai_pilot_goal_transition`.
+    flight_control_transition: Literal["take", "release"] | None = None
+    #: The mode-1 goal-channel sibling of `ai_pilot_goal_transition` --
+    #: one `FlightControlGoalRequest` per `axes_*` action call, applied
+    #: and cleared by `body.py`'s `_apply_flight_control` the same "send
+    #: on change" way. **Not** a rotation/promotion structure like mode
+    #: 2's `AiPilotWheelGoal` -- mode 1's wire carries every goal field
+    #: in one message with no shared physical button to arbitrate over
+    #: (`belief.flight_control`'s own module docstring). Reset to `None`
+    #: at the top of every `handle_command` dispatch, same convention.
+    flight_control_goal_transition: FlightControlGoalRequest | None = None
     #: "Where is it?"'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
     #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
@@ -1947,6 +2000,43 @@ class CrewConsole:
     parked_flight_state: ParkedFlightState = field(
         default_factory=ParkedFlightState, repr=False
     )
+
+    #: BL-16 mode 1 Stage M1 -- the same "refreshed every poll, never
+    #: mutated here" shape as `parked_flight_state` immediately above,
+    #: from `runner.flight_control_state` (`advance_flight_control_
+    #: state`/`decide_flight_control`, both in `body.py`). `take_
+    #: controls`/`release_controls`/the `axes_*` goal actions below do
+    #: mutate it directly, unlike `parked_flight_state` -- mode 1's own
+    #: handover phase is this class's one authoritative copy, not a
+    #: read-only mirror of something `body.py` alone writes (see
+    #: `belief.flight_control`'s own module docstring on why the
+    #: handover actions are synchronous).
+    flight_control_state: FlightControlState = field(
+        default_factory=FlightControlState, repr=False
+    )
+
+    #: `take_controls`'s own `TOO_SLOW` refusal (Decision 22) needs live
+    #: IAS, which no existing field on this class carries (`on_ground`
+    #: is the nearest precedent: refreshed every poll by `body.py` from
+    #: real telemetry, defaulting to the safe "refuse" assumption before
+    #: the first poll resolves it -- here, "too slow" rather than "on
+    #: the ground"). `None` before the first poll; `take_controls` reads
+    #: `None` as "too slow" (fail toward refusing a takeover, not
+    #: granting one on unknown airspeed).
+    ias_kmh: float | None = field(default=None, repr=False)
+
+    #: `take_controls`'s own `took_at_sim` timestamp (`decide_flight_
+    #: control`'s ack-timeout clock) needs a sim-time reading, and no
+    #: existing path threads `now_sim` from `handle_command` down into
+    #: a rule's own action invoke (`rules.actions`' `(ctx, args) ->
+    #: dict` shape carries neither) -- unlike every other action here,
+    #: `take_controls` is the first to need one. Refreshed every poll
+    #: by `body.py`, same place `on_ground`/`ias_kmh` are, rather than
+    #: widening the rule-dispatch chain for one field: at most one poll
+    #: interval (~1 s) stale against the actual moment the command was
+    #: heard, which the `HANDOVER_ACK_TIMEOUT_S` window (2 s) easily
+    #: tolerates. `None` before the first poll.
+    poll_now_sim: float | None = field(default=None, repr=False)
 
     #: `drain_ai_pilot_wheel_speech`'s own edge-trigger bookkeeping --
     #: `True` once "Unable, not ready." has been spoken for the current
@@ -3134,6 +3224,8 @@ class CrewConsole:
         self.ai_pilot_level_flight_transition = False
         self.ai_pilot_hvrt_transition = None
         self.ai_pilot_hvrt_step_transition = None
+        self.flight_control_transition = None
+        self.flight_control_goal_transition = None
         self._pending_mentions = None
 
     def set_enabled_rule_ids(
@@ -3153,25 +3245,82 @@ class CrewConsole:
         if categories is not None:
             self.rule_categories = dict(categories)
 
+    def flight_mode(self) -> Literal["overlay", "axes"] | None:
+        """BL-16 mode 1 Decision 21/25 -- the **one** place that decides
+        which mode is live, read by `rules.actions._by_mode` for every
+        one of the 16 shipped flight actions it wraps. `"overlay"`
+        whenever `parked_active` (mode 2 flying, or armed-and-waiting
+        for an unpark); `"axes"` whenever mode 1's own phase is `TAKING`
+        or `ACTIVE`; `None` otherwise (nobody flying -- the player has
+        the stick). If both were somehow true at once, overlay wins
+        (the park row, U5, keeps that overlap to a single poll).
+
+        **Reads no seat** (Decision 25: "mode 1 is never gated on
+        seat") -- `parked_active` already encodes "ED's AI is not
+        flying" correctly from either seat (`ParkedFlightState.parked_
+        active`'s own docstring on why 852 alone would be wrong)."""
+        if self.parked_flight_state.parked_active:
+            return "overlay"
+        if self.flight_control_state.phase in ("TAKING", "ACTIVE"):
+            return "axes"
+        return None
+
     def current_crew_state(self) -> CrewState:
         """`[[BL-17]]` D16/D17 -- built fresh from `self.parked_flight_
-        state` on every call, never cached: the category gate
-        (`_handle_rule`/`drain_pending_rule_dispatch`) and (Stage 3c) the
-        decision to push `PUT /crew_state` must read the same computed
-        value within one poll (plan's "Co-moving Fields" table).
-        `held_heading`/`held_altitude`/`held_speed` are read-only mirrors
-        of the same-named `parked_flight_state` fields, so each gate
-        (`rules.gates`) can check whichever one its own category needs
-        (Stage 4, review-stage3b.md Required Fix 1) rather than one
-        shared proxy. `seat`/`hands_free`/`eyes_free` are named stubs
-        pending `[[BL-B123]]` -- see `CrewState`'s own docstring for why."""
-        state = self.parked_flight_state
-        has_controls = state.parked_active
+        state`/`self.flight_control_state` on every call, never cached:
+        the category gate (`_handle_rule`/`drain_pending_rule_dispatch`)
+        and (Stage 3c) the decision to push `PUT /crew_state` must read
+        the same computed value within one poll (plan's "Co-moving
+        Fields" table). `seat`/`hands_free`/`eyes_free` are named stubs
+        pending `[[BL-B123]]` -- see `CrewState`'s own docstring for why.
+
+        **Widened for BL-16 mode 1 (Decision 22's Co-moving row):**
+        `has_controls = parked_active or flight_control_state.phase in
+        (TAKING, ACTIVE)` -- Petrovich flying through either mechanism
+        counts, and `has_controls` stays `True` continuously across a
+        park/unpark while he flies (Decision 24: the `OVERLAY` phase is
+        reached from `TAKING`/`ACTIVE`, never from a bare release, so
+        this disjunction is `True` through the whole park->unpark
+        window too, from whichever side is live at the instant).
+        `held_heading`/`held_altitude`/`held_speed` are mode-2's own
+        `parked_flight_state` mirrors whenever he flies through the
+        overlay, and mode 1's own `flight_control_state.held_*` --
+        falling back to `flight_control_state.measured_*` whenever the
+        commanded value is still `None` (no goal set yet this
+        activation; `measured_*` is plain telemetry, always known once
+        Lua is active) -- whenever he flies on the axes. **This fallback
+        is what keeps the gates' "HOLD until held_* is known" rule from
+        freezing the very first turn/heading/altitude/speed command
+        after a fresh take**, since mode 1 has no AI pilot reporting a
+        pre-existing held value the way mode 2's overlay readback
+        does (`belief.flight_control`'s own module docstring)."""
+        parked = self.parked_flight_state
+        axes = self.flight_control_state
+        flying_axes = axes.phase in ("TAKING", "ACTIVE")
+        has_controls = parked.parked_active or flying_axes
+        if flying_axes:
+            held_heading = (
+                axes.held_heading
+                if axes.held_heading is not None
+                else axes.measured_heading
+            )
+            held_altitude = (
+                axes.held_altitude
+                if axes.held_altitude is not None
+                else axes.measured_altitude
+            )
+            held_speed = (
+                axes.held_speed if axes.held_speed is not None else axes.measured_speed
+            )
+        else:
+            held_heading = parked.held_heading
+            held_altitude = parked.held_altitude
+            held_speed = parked.held_speed
         return CrewState(
             has_controls=has_controls,
-            held_heading=state.held_heading,
-            held_altitude=state.held_altitude,
-            held_speed=state.held_speed,
+            held_heading=held_heading,
+            held_altitude=held_altitude,
+            held_speed=held_speed,
             seat="copilot",
             hands_free=not has_controls,
             eyes_free=True,
@@ -3311,9 +3460,13 @@ class CrewConsole:
         # a flight-category rule's own readback may cut off an in-flight
         # routine callout, but only while he actually has controls (an
         # `UNABLE` verdict here means he lost them while held, so this
-        # stays `False` for that line).
+        # stays `False` for that line). `flight_handover` never actually
+        # reaches `HOLD` (its gate always `PASS`es, BL-16 mode 1 Decision
+        # 22) so this branch is unreachable for it in practice -- widened
+        # anyway to keep this check and `handle_command`'s own identical
+        # one from silently diverging.
         bypass_gate = (
-            pending.category.startswith("flight_control")
+            _is_flight_bypass_category(pending.category)
             and self.current_crew_state().has_controls
         )
         if outcome.verdict == "hold":
@@ -3545,14 +3698,15 @@ class CrewConsole:
             # class of speech where lateness has a real cost, confirmed as
             # a genuine behaviour change (U22). Scoped to flight-category
             # rules (`"flight_control"`/`"flight_control_heading"`/
-            # `"_speed"`/`"_altitude"`/`"_any"`, never `"always"`'s "you/I
-            # have controls") while he actually has controls -- an
-            # `UNABLE("NOT_FLYING")`/held-timeout line is spoken with
-            # `has_controls=False`, so this check also keeps those on the
-            # ordinary, non-urgent path.
+            # `"_speed"`/`"_altitude"`/`"_any"`) and (BL-16 mode 1 Decision
+            # 22) `"flight_handover"` -- the two handover rules moved off
+            # `"always"` to their own category -- while he actually has
+            # controls: an `UNABLE("NOT_FLYING")`/held-timeout line is
+            # spoken with `has_controls=False`, so this check also keeps
+            # those on the ordinary, non-urgent path.
             category = self.rule_categories.get(token, "always")
             if (
-                category.startswith("flight_control")
+                _is_flight_bypass_category(category)
                 and self.current_crew_state().has_controls
             ):
                 bypass_gate = True
@@ -5111,6 +5265,243 @@ class CrewConsole:
         self.ai_pilot_hvrt_step_transition = direction
         return {"ok": True, "reason": None}
 
+    def _axes_current_heading(self) -> float | None:
+        """The "held heading, or the measured heading in turn mode"
+        value Decision 21's table names for `increment_heading`/`level_
+        off` -- the same merge `current_crew_state()` applies for the
+        gate, computed once here so an action and the gate that just
+        let it through never disagree about what "current" means."""
+        state = self.flight_control_state
+        return (
+            state.held_heading
+            if state.held_heading is not None
+            else state.measured_heading
+        )
+
+    def _axes_current_altitude(self) -> tuple[float | None, AltitudeRef | None]:
+        """`(altitude, reference)` -- same held-or-measured merge as
+        `_axes_current_heading`, for `hold_altitude`/`step_altitude`.
+        The reference has no measured fallback of its own (there is no
+        instrument that reports "AGL vs barometric" as a fact); it
+        defaults to `"agl"` once a measured altitude exists with no
+        reference commanded yet (Decision 9 REVISED: AGL is the default
+        unless barometric is spoken)."""
+        state = self.flight_control_state
+        if state.held_altitude is not None:
+            return state.held_altitude, state.held_altitude_ref
+        if state.measured_altitude is not None:
+            return state.measured_altitude, "agl"
+        return None, None
+
+    def _axes_current_speed(self) -> float | None:
+        """Held-or-measured merge for `step_speed`, mirroring `_axes_
+        current_heading`."""
+        state = self.flight_control_state
+        return (
+            state.held_speed if state.held_speed is not None else state.measured_speed
+        )
+
+    def take_controls(self, says: str) -> dict[str, object]:
+        """BL-16 mode 1 Decision 22's `flight.take_controls` -- the
+        rule-callable wrapper around `belief.flight_control.take_
+        controls`'s pure state transition, supplying the live context
+        it needs (`flight_mode() == "overlay"`, `self.on_ground`,
+        `self.ias_kmh`, `self.attack_run_engaged`).
+
+        **`says` is recorded, never spoken here** -- `decide_flight_
+        control`/`drain_flight_control` speak it only once `Export.lua`
+        reports `active` for this `take_seq` (the same "spoken when it
+        actually lands" contract as `effector.write`'s `says`, speech-
+        rules D20)."""
+        too_slow = self.ias_kmh is None or self.ias_kmh < MIN_IAS_KMH
+        new_state, result = take_controls(
+            self.flight_control_state,
+            self.poll_now_sim if self.poll_now_sim is not None else 0.0,
+            overlay_flying=self.flight_mode() == "overlay",
+            on_ground=self.on_ground,
+            too_slow=too_slow,
+            attack_run_engaged=self.attack_run_engaged,
+        )
+        if result.get("acted"):
+            new_state = replace(new_state, pending_take_says=says)
+            self.flight_control_transition = "take"
+        self.flight_control_state = new_state
+        return result
+
+    def release_controls(self) -> dict[str, object]:
+        """BL-16 mode 1 Decision 22's `flight.release_controls` -- the
+        rule-callable wrapper around `belief.flight_control.release_
+        controls`'s pure state transition."""
+        new_state, result = release_controls(
+            self.flight_control_state, overlay_flying=self.flight_mode() == "overlay"
+        )
+        self.flight_control_state = new_state
+        if result.get("acted"):
+            self.flight_control_transition = "release"
+        return result
+
+    def axes_turn_continuous(self, sign: Literal[-1, 0, 1]) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.turn_
+        continuous` -- "turn left/right" with no degrees heard. The
+        overlay-mode `AI_OVERLAY` refusal is `rules.actions._turn_
+        continuous`'s own job (there is no overlay body to dispatch to
+        at all, unlike every other `_by_mode`-wrapped action -- see that
+        wrapper's own docstring)."""
+        self.flight_control_goal_transition = FlightControlGoalRequest(turn=sign)
+        return {"ok": True, "reason": None}
+
+    def axes_increment_heading(self, delta_deg: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.increment_
+        heading` -- "turn left/right NN", relative to `_axes_current_
+        heading`'s own held-or-measured value, computed once (never
+        re-derived as the aircraft turns, same posture `increment_ai_
+        heading` already has for mode 2)."""
+        current = self._axes_current_heading()
+        assert current is not None
+        target = (current + delta_deg) % 360.0
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=target
+        )
+        return {"ok": True, "reason": None}
+
+    def axes_set_heading(self, deg: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.set_heading`
+        -- "heading &lt;deg&gt;", the absolute form. "Shortest way" is
+        `Export.lua`'s own shaper's job (M2), not encoded here."""
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=float(deg)
+        )
+        return {"ok": True, "heading_deg": deg}
+
+    def axes_level_off(self) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.level_off`
+        -- "level off", a turn-rate goal of 0. The readback names the
+        *measured* heading now (Decision 21's table: "settle heading
+        differs by a few degrees, inside the band"), not the held goal
+        -- there is no held heading to settle *to* here, this command
+        is what starts holding one."""
+        measured = self.flight_control_state.measured_heading
+        assert measured is not None
+        self.flight_control_goal_transition = FlightControlGoalRequest(turn=0)
+        return {"ok": True, "heading_deg": round(measured) % 360}
+
+    def axes_level_flight(self) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.level_
+        flight` -- freezes heading (via a level-off), altitude, and
+        speed at their current held-or-measured values in one request.
+        `FlightControlGoalRequest` carries every field in one message
+        (no rotation needed, `belief.flight_control`'s own module
+        docstring), so this needs only one transition, unlike mode 2's
+        `ai_pilot_level_flight_transition` + `body.py`'s own three-field
+        read."""
+        altitude, altitude_ref = self._axes_current_altitude()
+        speed = self._axes_current_speed()
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            turn=0,
+            altitude_m=clamp_altitude(altitude, altitude_ref or "agl")
+            if altitude is not None
+            else None,
+            altitude_ref=altitude_ref,
+            ias_kmh=clamp_speed(speed) if speed is not None else None,
+        )
+        return {"ok": True, "reason": None}
+
+    def axes_set_speed(self, value: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.set_speed`
+        -- "speed &lt;value&gt;", clamped to `[MIN_IAS_KMH, MAX_IAS_
+        KMH]` (unlike mode 2, no discrete wheel steps -- this is a
+        continuous goal)."""
+        clamped = clamp_speed(float(value))
+        self.flight_control_goal_transition = FlightControlGoalRequest(ias_kmh=clamped)
+        is_max = clamped >= MAX_IAS_KMH
+        return {"ok": True, "is_max": is_max, "speed_kmh": int(clamped)}
+
+    def axes_set_speed_max(self) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.set_speed_
+        max` -- "speed max", IAS goal = `MAX_IAS_KMH` exactly (not mode
+        2's sentinel -- mode 1 has no wheel step to aim past, the
+        ceiling itself is the goal)."""
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            ias_kmh=MAX_IAS_KMH
+        )
+        return {"ok": True, "is_max": True, "speed_kmh": int(MAX_IAS_KMH)}
+
+    def axes_step_speed(self, sign: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.step_speed`
+        -- "slow down"/"speed up", one `SPEED_STEP_KMH` step from `_axes_
+        current_speed`'s own held-or-measured value, clamped."""
+        current = self._axes_current_speed()
+        assert current is not None
+        clamped = clamp_speed(current + sign * SPEED_STEP_KMH)
+        self.flight_control_goal_transition = FlightControlGoalRequest(ias_kmh=clamped)
+        is_max = clamped >= MAX_IAS_KMH
+        return {"ok": True, "is_max": is_max, "speed_kmh": int(clamped)}
+
+    def axes_set_altitude(self, m: int, reference_code: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.set_altitude`
+        -- "alt[itude] &lt;value&gt; [radar/barometric]". **Decision 9
+        REVISED**: `reference_code` 0 (none heard) or 1 (radar) both
+        give AGL; 2 (barometric) gives barometric -- unlike mode 2,
+        there is no "keep the current reference" default and no 700 m
+        radar-cap resolution (mode 1 has no AI pilot wheel reference to
+        cap against)."""
+        ref: AltitudeRef = "baro" if reference_code == 2 else "agl"
+        clamped = clamp_altitude(float(m), ref)
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            altitude_m=clamped, altitude_ref=ref
+        )
+        return {"ok": True, "altitude_m": round(clamped), "barometric": ref == "baro"}
+
+    def axes_step_altitude(self, delta_m: int) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.step_
+        altitude` -- "climb/descend &lt;m&gt;", relative to `_axes_
+        current_altitude`'s own held-or-measured value, in its current
+        reference, clamped."""
+        current, ref = self._axes_current_altitude()
+        assert current is not None
+        ref = ref or "agl"
+        clamped = clamp_altitude(current + delta_m, ref)
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            altitude_m=clamped, altitude_ref=ref
+        )
+        return {"ok": True, "altitude_m": round(clamped), "barometric": ref == "baro"}
+
+    def axes_hold_altitude(self) -> dict[str, object]:
+        """BL-16 mode 1 Decision 21's axes body for `flight.hold_
+        altitude` -- "hold alt[itude]", freezes the goal at `_axes_
+        current_altitude`'s own held-or-measured value, in its current
+        reference. No barometric/radar suffix in the readback, matching
+        mode 2's `hold_altitude`'s own text exactly."""
+        current, ref = self._axes_current_altitude()
+        assert current is not None
+        ref = ref or "agl"
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            altitude_m=current, altitude_ref=ref
+        )
+        return {"ok": True, "altitude_m": round(current)}
+
+    def drain_flight_control(self, now_sim: float, *, parked_active: bool) -> list[str]:
+        """BL-16 mode 1 -- runs `belief.flight_control.decide_flight_
+        control` once per poll (the one "when" apart from `take_
+        controls`/`release_controls`, root `CLAUDE.md`'s "Behaviour as
+        actions and params") and speaks whatever it decided. Called
+        once per poll from `body.py`, after `advance_flight_control_
+        state` has refreshed `self.flight_control_state` this poll --
+        same spot `drain_ai_pilot_wheel_speech` is called from.
+
+        `urgent=True` lines (the self-release/forced-handover lines)
+        bypass the gate via `_print`'s own `bypass_gate`, same posture
+        D19 already gives every other urgent flight-control line."""
+        new_state, decision = decide_flight_control(
+            self.flight_control_state, now_sim, parked_active=parked_active
+        )
+        self.flight_control_state = new_state
+        if decision is None:
+            return []
+        lines = [decision.says]
+        self._print(lines, now_sim, bypass_gate=decision.urgent)
+        return lines
+
     def drain_ai_pilot_wheel_speech(self, now_sim: float) -> list[str]:
         """BL-16 mode 2 Stage P2a -- `"mode_blocked"`'s own spoken line
         (plan, "Decisions Requiring User Input (Stage P2) -- answered
@@ -6552,7 +6943,12 @@ class CrewConsole:
                 return lines
 
         decision = classify_response(
-            token, match_ratio, confidence, verb_anchored, ambiguous
+            token,
+            match_ratio,
+            confidence,
+            verb_anchored,
+            ambiguous,
+            has_controls=self.current_crew_state().has_controls,
         )
         self._log_transcript(
             transcript=transcript,

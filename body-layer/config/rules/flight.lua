@@ -1,20 +1,41 @@
--- Flying commands. Petrovich flies through the AI overlay (parked, mode
--- 2) -- plans/speech-rules/plan.md Stage 2/Stage 4, plans/flight-control/
--- plan.md. Every rule here (except "you/i have controls", category
--- "always" -- Q7: a silent no-op, the player toggles AI-overlay flight
--- mode himself) belongs to one of the "flight_control*" categories: the
--- gate refuses "unable, not flying" before any of these handlers ever
--- run when Petrovich has no controls, and -- for the categories that need
--- a particular held value -- holds (then retries) during the
--- takeover-settle window rather than refusing outright.
+-- Flying commands. Petrovich flies through the AI overlay (mode 2,
+-- parked) or on the raw axes (mode 1, unparked) -- plans/speech-rules/
+-- plan.md Stage 2/Stage 4, plans/flight-control/plan.md. Each
+-- `flight.*` action dispatches by mode itself (Decision 21's `_by_mode`,
+-- `rules.actions.py`); the wording and readbacks below are shared by
+-- both modes unchanged. Every rule here except the two handover rules
+-- (category "flight_handover", BL-16 mode 1 Decision 22) belongs to one
+-- of the "flight_control*" categories: the gate refuses "unable, not
+-- flying" before any of these handlers ever run when Petrovich has no
+-- controls, and -- for the categories that need a particular held value
+-- -- holds (then retries) during the takeover-settle window rather than
+-- refusing outright.
 --
 -- No rule checks whether its action worked: an action that fails ends the
 -- handler, and Petrovich says "unable, <reason>" (README, "Actions").
 
+-- "turn left/right [NN]" -- with degrees, relative to the held heading
+-- (unchanged); with no degrees (BL-16 mode 1 Decision 21), a continuous
+-- turn: `flight.turn_continuous` raises "Unable, AI overlay." in mode 2
+-- (there is no continuous-turn concept on the AI-pilot wheel) and starts
+-- a turn-rate goal in mode 1.
 when.speech("turn_heading_relative",
-    "turn <direction:left|right> <degrees:angle>",
+    "turn <direction:left|right> [<degrees:angle>]",
     "flight_control_heading",
   function(s)
+    if s.degrees == nil then
+      local sign = -1
+      if s.direction == "right" then
+        sign = 1
+      end
+      flight.turn_continuous(sign)
+      if s.direction == "left" then
+        say("Left.")
+      else
+        say("Right.")
+      end
+      return
+    end
     local delta = s.degrees
     if s.direction == "left" then
       delta = -delta
@@ -217,13 +238,23 @@ when.speech("hvrt_step_down",
     say("Down.")
   end)
 
--- "You have controls" / "I have controls" -- not the handover in
--- AI-overlay mode (that is a DCS key press the player makes); a silent
--- no-op (Q7: "say nothing, it's up to player to toggle AI overlay flight
--- mode"). Category "always": not limited by seat or flight state.
+-- "You have controls" / "I have controls" -- BL-16 mode 1 Decision 22.
+-- Category "flight_handover": always PASS, not limited by seat or
+-- flight state -- what each means depends on state, which the action
+-- itself reads (see that category's own docstring in rules/gates.py).
+-- Refusals raise unable; "I have controls." is spoken only once Lua
+-- confirms the take (the `says` argument, landed-confirmation contract).
+-- In the AI overlay, "you have controls" is a silent no-op (the
+-- 2026-11-17 answer -- Request Aircraft Control is that handover);
+-- "I have controls" there answers "Unable, AI overlay." (U9).
 when.speech("you_have_controls",
     "you have controls",
-    "always", function(s) end)
+    "flight_handover", function(s)
+  flight.take_controls("I have controls.")
+end)
 when.speech("i_have_controls",
     "i have controls",
-    "always", function(s) end)
+    "flight_handover", function(s)
+  local r = flight.release_controls()
+  if r.acted then say("You have controls.") end
+end)

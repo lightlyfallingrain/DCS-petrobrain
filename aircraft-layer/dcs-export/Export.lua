@@ -221,7 +221,16 @@ creating/deleting the flag file.
 -- held, so a pre-fix collector/body-layer pair reading the post-fix
 -- wire would see the goal channel go silently idle during any translate
 -- rather than fighting it).
-local EXPORT_SCRIPT_VERSION = "2026-11-16e"
+--
+-- Bumped again 2026-11-18 (`plans/flight-control/plan.md`, "Revised
+-- 2026-11-18 -- mode 1 (unparked, raw axes) re-cut", Stage M1) for the
+-- new `Petrobrain/flight_control.lua` module: a new `LuaExportBeforeNextFrame`
+-- callback (ED's own documented injection point), the new per-frame
+-- flight-control status line (wire key `"fc_mode"`) and the new
+-- `flight_control` inbound command op -- additive only, same reasoning
+-- as the AI-pilot-wheel module bumps above. Update `aircraft-layer/src/
+-- collector/server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-11-18"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 
@@ -270,11 +279,15 @@ core.init(EXPORT_SCRIPT_VERSION)
 
 -- Dependency order: every feature module needs `core`, already loaded
 -- above; `commands` needs every handler-owning module (`petrovich`,
--- `effectors`, `sight`), so it loads LAST.
+-- `effectors`, `sight`), so it loads LAST. `flight_control` (BL-16 mode
+-- 1, Stage M1) loads after `ai_pilot_wheel` -- it reads that module's
+-- `is_parked`/`player_seat` getters (Decision 25), read-only, and must
+-- itself exist before `commands` registers its handler.
 local telemetry = load_module("telemetry")
 local petrovich = load_module("petrovich")
 local sight = load_module("sight")
 local ai_pilot_wheel = load_module("ai_pilot_wheel")
+local flight_control = load_module("flight_control")
 local effectors = load_module("effectors")
 local ptt_ics = load_module("ptt_ics")
 local commands = load_module("commands")
@@ -307,6 +320,7 @@ function LuaExportStop()
     -- actually order-sensitive on stop since every module's reset is
     -- independent state (plan's own "Load mechanism" note).
     call_if(sight, "on_stop")
+    call_if(flight_control, "on_stop")
     call_if(ai_pilot_wheel, "on_stop")
     call_if(petrovich, "on_stop")
     call_if(ptt_ics, "on_stop")
@@ -314,6 +328,21 @@ function LuaExportStop()
     call_if(telemetry, "on_stop")
     call_if(commands, "on_stop")
     core.on_stop()
+end
+
+-- `plans/flight-control/plan.md` Decision 23 (Stage M1): the flight-axes
+-- loop runs from `LuaExportBeforeNextFrame`, ED's own documented
+-- injection point for an axis-command override (the same callback probe
+-- v2's scaffold used) -- every frame, unconditionally, same reasoning as
+-- every per-frame call already inside `LuaExportAfterNextFrame` below
+-- (command parse stays in `AfterNextFrame`'s `poll_command_socket`, so a
+-- goal lands one frame later, which does not matter against 1 Hz goals).
+function LuaExportBeforeNextFrame()
+    local t = safe_call(LoGetModelTime)
+    if t == nil then
+        return
+    end
+    call_if(flight_control, "run_flight_control", t)
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -412,6 +441,9 @@ function LuaExportAfterNextFrame()
     -- comment and `update_ai_pilot_wheel_overlay`'s docstring.
     call_if(ai_pilot_wheel, "update_ai_pilot_wheel_overlay", helperai_raw, t)
     call_if(ai_pilot_wheel, "push_ai_pilot_wheel_state", t)
+    -- `plans/flight-control/plan.md` Decision 23 (Stage M1): same 5 Hz
+    -- cadence as every other per-frame status line above.
+    call_if(flight_control, "push_flight_control_state", t)
 
     local connected, fresh = core.ensure_connected(t)
     if not connected then

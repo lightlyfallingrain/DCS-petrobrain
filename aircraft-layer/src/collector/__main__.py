@@ -102,6 +102,7 @@ from collector.arg_read_broker import ArgReadBroker
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     AiPilotWheelCache,
+    FlightControlCache,
     LineOfSightCache,
     MissionStartCache,
     PayloadCache,
@@ -325,6 +326,11 @@ def main() -> None:
     # AI-pilot-wheel status feed, same "latest of one" shape as
     # sight_servo_cache above (a per-frame feed, constructed the same way).
     ai_pilot_wheel_cache = AiPilotWheelCache()
+    # `plans/flight-control/plan.md`, BL-16 mode 1, Stage M1 -- the
+    # flight-control status feed, same "latest of one" shape as
+    # ai_pilot_wheel_cache above (a per-frame feed, constructed the same
+    # way).
+    flight_control_cache = FlightControlCache()
 
     collector = CollectorServer(
         cache,
@@ -338,6 +344,7 @@ def main() -> None:
         arg_read_broker=arg_read_broker,
         payload_cache=payload_cache,
         ai_pilot_wheel_cache=ai_pilot_wheel_cache,
+        flight_control_cache=flight_control_cache,
         host=args.host,
         port=args.port,
     )
@@ -366,6 +373,7 @@ def main() -> None:
         arg_read_broker=arg_read_broker,
         payload_cache=payload_cache,
         ai_pilot_wheel_cache=ai_pilot_wheel_cache,
+        flight_control_cache=flight_control_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

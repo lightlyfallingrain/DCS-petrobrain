@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from .ai_pilot_wheel import AiPilotWheelParseError, AiPilotWheelState
+from .flight_control import FlightControlParseError, FlightControlState
 from .line_of_sight import (
     LineOfSightParseError,
     LineOfSightSnapshot,
@@ -74,6 +75,8 @@ __all__ = [
     "MAX_WATCHED_ARG_NUMBER",
     "AiPilotWheelParseError",
     "AiPilotWheelState",
+    "FlightControlParseError",
+    "FlightControlState",
     "LineOfSightParseError",
     "LineOfSightSnapshot",
     "LineOfSightVerdict",

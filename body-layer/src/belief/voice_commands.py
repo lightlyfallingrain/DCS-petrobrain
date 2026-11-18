@@ -149,6 +149,26 @@ CANCEL_TOKENS: frozenset[str] = frozenset(
     }
 )
 
+#: BL-16 mode 1 Decision 13 (`plans/flight-control/plan.md`) -- the two
+#: handover tokens, both exempt from the ordinary act/confirm/say-again
+#: floors below: **neither ever answers "confirm?"** (a false takeover
+#: means he ignores the player's own stick; the recovery is one phrase
+#: that always acts, not a second question). `i_have_controls` acts at
+#: *any* matched confidence (any confidence `token is not None` implies,
+#: since `audio_adapter.command_matcher` already cleared `MATCH_FLOOR`
+#: upstream); `you_have_controls` acts from `CONFIRM_FLOOR` up (U8,
+#: answered 2026-11-18: "as recommended"), "say again" below it, same
+#: `classify_response`'s own docstring on why floors compare against
+#: `confidence` alone. When the two are confused with each other
+#: (`ambiguous=True` and the best-guess `token` is one of this pair --
+#: the two phrases are near-reverses of each other, the realistic
+#: confusion `audio_adapter.command_matcher` would raise), the ambiguous
+#: pair resolves to a release while Petrovich flies (the safe-side
+#: reading: handing back is safe even if misheard, taking is not) and
+#: "say again" otherwise (nothing to resolve safely if he is not even
+#: flying).
+HANDOVER_TOKENS: frozenset[str] = frozenset({"you_have_controls", "i_have_controls"})
+
 #: History -- the original 0.35 figure's reasoning (current value and why: last paragraph).
 #: Below this, nothing fires and Petrovich asks the player to say it
 #: again (`belief.speech.render_say_again`) rather than guessing or
@@ -428,6 +448,8 @@ def classify_response(
     confidence: float,
     verb_anchored: bool,
     ambiguous: bool,
+    *,
+    has_controls: bool = False,
 ) -> BandDecision:
     """The band decision for one matched transcript -- `audio_adapter.
     command_matcher.MatchResult`'s fields plus the transcript's own STT
@@ -467,13 +489,26 @@ def classify_response(
     routing (Decision 4 REVISED AGAIN: "`verb_anchored` decides between the
     two right-hand cells... only speech with no verb anchor at all goes to
     the brain"). Only then does a genuine single candidate get
-    confidence-compared."""
+    confidence-compared, with `HANDOVER_TOKENS`'s own branch checked first
+    (BL-16 mode 1 Decision 13) -- ahead of the ordinary floor comparison,
+    since neither handover token ever uses `ACT_FLOOR`/`ACT_FLOOR_CANCEL`
+    or answers "confirm?" at all. `has_controls` is read only by that
+    branch; every other token ignores it, unchanged."""
     if not verb_anchored:
         return BandDecision(disposition="fallthrough")
     if ambiguous:
         assert token is not None  # command_matcher always names a best candidate
+        if token in HANDOVER_TOKENS:
+            if has_controls:
+                return BandDecision(disposition="act", token="i_have_controls")
+            return BandDecision(disposition="say_again")
         return BandDecision(disposition="confirm", token=token)
     if token is None:
+        return BandDecision(disposition="say_again")
+
+    if token in HANDOVER_TOKENS:
+        if token == "i_have_controls" or confidence >= CONFIRM_FLOOR:
+            return BandDecision(disposition="act", token=token)
         return BandDecision(disposition="say_again")
 
     floor = ACT_FLOOR_CANCEL if token in CANCEL_TOKENS else ACT_FLOOR

@@ -31,6 +31,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from belief.ai_pilot_wheel import (
     AiPilotGoalRequest,
     AiPilotWheelGoal,
@@ -38,6 +40,7 @@ from belief.ai_pilot_wheel import (
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
+from belief.speech import render_unable
 from rules.actions import ACTION_NAMESPACES, ActionContext
 from rules.engine import RuleSet, run_rule
 from rules.loader import DEFAULT_RULES_DIR
@@ -647,20 +650,121 @@ class TestHvrtStep:
         assert console.ai_pilot_hvrt_step_transition is None
 
 
-class TestHaveControlsNoOp:
-    """Q7: a silent no-op in AI-overlay mode, category `"always"` --
-    never gated by seat or flight state, dispatches identically whether
-    or not Petrovich has controls."""
+class TestHandoverActions:
+    """BL-16 mode 1 Decision 22 (`plans/flight-control/plan.md`,
+    "Revised 2026-11-18") -- replaces the old `TestHaveControlsNoOp`:
+    "you/i have controls" now really hand the controls over on the
+    axes, category `"flight_handover"`. The *readback* text ("I have
+    controls."/"You have controls.") is deferred for a successful take
+    (spoken only once `Export.lua` confirms, via `drain_flight_control`
+    -- the Lua rule body for `you_have_controls` calls no `say()` at
+    all), so `handle_command`'s own immediate return stays `[]` even
+    when the take succeeds; the belief-state side effect is immediate
+    and asserted here instead. `release_controls`'s own rule *does*
+    call `say()` directly when it acts, so that line is immediate.
 
-    def test_you_have_controls_is_silent(self) -> None:
-        console = _dispatching_console(parked_active=False)
+    `_dispatching_console`'s `**state_fields` only ever sets `Parked
+    FlightState` fields (its own docstring) -- `on_ground`/`ias_kmh`/
+    `attack_run_engaged`/`flight_control_state` are set directly on the
+    returned console in the tests below that need them."""
+
+    def test_you_have_controls_is_silent_while_overlay_flying(self) -> None:
+        """The 2026-11-17 no-op: Petrovich already has the controls
+        through the AI overlay, so nothing happens and nothing is
+        said -- `acted=False`, not a refusal."""
+        console = _dispatching_console(parked_active=True)
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
+        assert console.flight_control_state.phase == "PILOT"
+        assert console.flight_control_transition is None
 
-    def test_i_have_controls_is_silent_while_flying_too(self) -> None:
+    def test_you_have_controls_takes_when_clear_to_fly(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.on_ground = False
+        console.ias_kmh = 150.0
+        console.attack_run_engaged = False
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        assert lines == []
+        assert console.flight_control_state.phase == "TAKING"
+        assert console.flight_control_state.take_seq == 1
+        assert console.flight_control_transition == "take"
+        assert console.flight_control_state.pending_take_says == "I have controls."
+
+    def test_you_have_controls_refuses_on_the_ground(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.on_ground = True
+        console.ias_kmh = 150.0
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        assert lines == [render_unable("ON_GROUND").text]
+        assert console.flight_control_state.phase == "PILOT"
+        assert console.flight_control_transition is None
+
+    def test_you_have_controls_refuses_too_slow(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.on_ground = False
+        console.ias_kmh = 10.0
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        assert lines == [render_unable("TOO_SLOW").text]
+
+    def test_i_have_controls_is_unable_while_overlay_flying(self) -> None:
+        """U9, answered 2026-11-18: "unable", not remembered -- the
+        player's escape is to unpark, then say it again."""
         console = _dispatching_console(parked_active=True, held_heading=10.0)
         lines = console.handle_command("i_have_controls", now_sim=0.0)
+        assert lines == [render_unable("AI_OVERLAY").text]
+
+    def test_i_have_controls_releases_while_flying_on_the_axes(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE"
+        )
+        lines = console.handle_command("i_have_controls", now_sim=0.0)
+        assert lines == ["You have controls."]
+        assert console.flight_control_state.phase == "PILOT"
+        assert console.flight_control_transition == "release"
+
+    def test_i_have_controls_is_a_silent_no_op_with_nobody_flying(self) -> None:
+        """The player already has the controls -- `acted=False`, same
+        silent shape as the overlay no-op above, not a refusal."""
+        console = _dispatching_console(parked_active=False)
+        lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == []
+        assert console.flight_control_transition is None
+
+
+class TestSeatNeverGatesMode1:
+    """BL-16 mode 1 Decision 25 -- "mode 1 is never gated on seat":
+    `flight_mode()`/`take_controls`'s own result must be identical
+    whether `player_seat` reads `"pilot"`, `"operator"`, or `None`
+    (unknown) -- both read `parked_active`/`on_ground`/`ias_kmh`/
+    `attack_run_engaged` only."""
+
+    @pytest.mark.parametrize("seat", ["pilot", "operator", None])
+    def test_flight_mode_is_the_same_whichever_seat(self, seat: str | None) -> None:
+        flying_console = _dispatching_console(parked_active=False, player_seat=seat)
+        flying_console.flight_control_state = replace(
+            flying_console.flight_control_state, phase="ACTIVE"
+        )
+        assert flying_console.flight_mode() == "axes"
+
+        overlay_console = _dispatching_console(parked_active=True, player_seat=seat)
+        assert overlay_console.flight_mode() == "overlay"
+
+        nobody_console = _dispatching_console(parked_active=False, player_seat=seat)
+        assert nobody_console.flight_mode() is None
+
+    @pytest.mark.parametrize("seat", ["pilot", "operator", None])
+    def test_take_controls_succeeds_the_same_whichever_seat(
+        self, seat: str | None
+    ) -> None:
+        console = _dispatching_console(parked_active=False, player_seat=seat)
+        console.on_ground = False
+        console.ias_kmh = 150.0
+        console.attack_run_engaged = False
+        lines = console.handle_command("you_have_controls", now_sim=0.0)
+        assert lines == []
+        assert console.flight_control_state.phase == "TAKING"
+        assert console.flight_control_transition == "take"
 
 
 class TestTransitionsResetEachDispatch:

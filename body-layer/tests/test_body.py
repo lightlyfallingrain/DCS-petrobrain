@@ -608,6 +608,15 @@ class FakeConsoleAircraftClient:
         #: latest` call, so a test can assert the per-poll GET only fires
         #: while `config_error_pending` is actually set.
         self.spu8_state_requests = 0
+        #: BL-16 mode 1 Stage M1 -- `None` (the default) means no `GET /
+        #: flight_control/latest` sample has arrived yet, same "not an
+        #: error" posture as `ai_pilot_wheel_state` above.
+        self.flight_control_state: dict[str, Any] | None = None
+        #: Stage M1 -- every `write_flight_control` call this fake has
+        #: recorded, oldest first, same shape as `sight_target_writes`.
+        self.flight_control_writes: list[
+            tuple[int, str, dict[str, float], dict[str, object] | None]
+        ] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -718,6 +727,18 @@ class FakeConsoleAircraftClient:
 
     def get_ai_pilot_wheel_latest(self) -> dict[str, Any] | None:
         return self.ai_pilot_wheel_state
+
+    def get_flight_control_latest(self) -> dict[str, Any] | None:
+        return self.flight_control_state
+
+    def write_flight_control(
+        self,
+        seq: int,
+        cmd: str,
+        limits: dict[str, float],
+        goal: dict[str, object] | None,
+    ) -> None:
+        self.flight_control_writes.append((seq, cmd, limits, goal))
 
 
 #: A frozen copy of `config/sequences/` (one `mi-24p/` subdirectory),
@@ -3584,6 +3605,41 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
 
 
+def test_run_once_flying_clamps_the_optic_to_naked_eye(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BL-16 (U6, answered 2026-11-18: "no optics while Petrovich
+    flies", both modes) -- `run_once(flying=True)` must clamp whatever
+    `decide_optic` chose down to `UNAIDED_OPTIC`, the same external-
+    clamp shape the sight-not-ready test above pins for a different
+    cap. `flying=False` (the default) must not clamp anything -- the
+    companion negative case, so this is not a tautology (root
+    `CLAUDE.md`, "Show the red when your assertion is that nothing
+    happens")."""
+    import body as body_module
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(optic=BINOCULAR_OPTIC)
+
+    monkeypatch.setattr(body_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once(flying=False)
+    assert runner.optic is BINOCULAR_OPTIC
+
+    telemetry["dcs_model_time_s"] = 1.0
+    runner.run_once(flying=True)
+    assert runner.optic is UNAIDED_OPTIC
+
+
 def test_run_once_resets_the_believed_sight_aim_to_boresight_on_observed_observ_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4566,7 +4622,7 @@ def test_crew_text_poll_loop_survives_a_raising_poll_and_keeps_going(
     # poll-count spin loop is exactly the shape that goes flaky under load.
     recovered = threading.Event()
 
-    def flaky_run_once() -> None:
+    def flaky_run_once(flying: bool = False) -> None:
         calls.append(len(calls))
         if len(calls) == 1:
             raise RuntimeError("simulated dispatch failure inside the poll body")
@@ -4886,7 +4942,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
         phase=OpticPhase.GLASSING, phase_started_sim=0.0, guidance_optic=None
     )
     runner.attack_run_state = AttackRunState()
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
 
     captured: dict[str, object] = {}
     done = threading.Event()
@@ -4970,7 +5026,7 @@ def _run_one_atgm_poll(
     monkeypatch: pytest.MonkeyPatch,
     done: threading.Event,
 ) -> None:
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
     stop_event = threading.Event()
     poll_thread = threading.Thread(
         target=_run_crew_text_poll_loop,
@@ -5187,7 +5243,7 @@ def _drive_where_is_it_spy(
     conn = open_for_build(db_path)
     conn.close()
 
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
     calls: list[object] = []
     done = threading.Event()
 
@@ -5334,7 +5390,7 @@ def test_crew_text_poll_loop_resets_belief_on_mission_restart(
     )
     assert runner.tasks.tasks  # pre-condition: not already empty
 
-    monkeypatch.setattr(runner, "run_once", lambda: None)
+    monkeypatch.setattr(runner, "run_once", lambda flying=False: None)
 
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -5808,7 +5864,7 @@ def test_crew_text_poll_loop_warns_on_the_live_los_coverage_gap_once(
     calls: list[int] = []
     second_poll_done = threading.Event()
 
-    def counting_run_once() -> list[Observation]:
+    def counting_run_once(flying: bool = False) -> list[Observation]:
         result = real_run_once()
         calls.append(len(calls))
         if len(calls) >= 2:

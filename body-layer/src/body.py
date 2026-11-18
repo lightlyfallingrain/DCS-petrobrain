@@ -190,6 +190,11 @@ from belief.expected_area import (
     relocation_warranted,
     resolve_checks,
 )
+from belief.flight_control import (
+    advance_flight_control_state,
+    flight_control_limits,
+    goal_request_fields,
+)
 from belief.mission_phase import (
     MissionPhaseInfo,
     MissionPhaseTracker,
@@ -428,6 +433,13 @@ class ConsolePerceptionRunner:
     #: parity with `last_t_sim`'s "latest telemetry snapshot" role and any
     #: future non-enrichment consumer.
     last_ownship_state: OwnshipState | None = None
+    #: BL-16 mode 1 Stage M1 -- `take_controls`'s own `TOO_SLOW` refusal
+    #: (Decision 22) needs live IAS, which `OwnshipState` does not carry
+    #: (it was never needed before this). Set in `run_once` from the raw
+    #: telemetry dict's own `"ias_mps"` field, alongside `last_ownship_
+    #: state` above, since no other call site reads the raw dict at all.
+    #: `None` before the first poll, same posture as `last_ownship_state`.
+    last_ias_kmh: float | None = None
     #: Built lazily on the first poll that has both real telemetry and a
     #: `world_model_conn`/`theatre` (i.e. always, once `_run_crew_text_poll_
     #: loop` has set those two), then updated in place every poll after --
@@ -800,7 +812,7 @@ class ConsolePerceptionRunner:
         self._last_probe_points = ()
         self._last_probe_seq = 0
 
-    def run_once(self) -> list[Observation]:
+    def run_once(self, *, flying: bool = False) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
         print one minimal contact/observation-count line. Returns an empty
@@ -815,12 +827,31 @@ class ConsolePerceptionRunner:
         `self.store.tick(...)`, the same poll-loop hook point -- a
         `scan_area` task's success check reads `self.store`'s freshly
         ticked contacts, so it must run after that tick, not before or
-        independently scheduled."""
+        independently scheduled.
+
+        `flying` (BL-16 mode 1/2, U6 answered 2026-11-18: "no optics
+        while Petrovich flies") is `CrewConsole.current_crew_state().
+        has_controls`, read by the caller (`body.py`'s poll loop) since
+        this runner has no `CrewConsole` reference of its own. Clamps
+        `decide_optic`'s own chosen optic to `UNAIDED_OPTIC` below, the
+        same external-clamp shape the pre-existing sight-not-ready cap
+        already uses -- not a new `OpticState`/`decide_optic` parameter
+        (the plan's own instruction: "not an `OpticState` field").
+        Naked-eye scanning/contact/threat calls continue unaffected (A5,
+        settled); only binoculars/the 9K113 are denied. Defaults
+        `False`, a true no-op for every pre-existing caller (test
+        fixtures included)."""
         telemetry = self.aircraft_client.get_telemetry_latest()
         if telemetry is None:
             return []
         ownship = OwnshipState.from_telemetry_dict(telemetry)
         self.last_ownship_state = ownship
+        ias_mps = telemetry.get("ias_mps")
+        self.last_ias_kmh = (
+            ias_mps * 3.6
+            if isinstance(ias_mps, (int, float)) and not isinstance(ias_mps, bool)
+            else None
+        )
         # Ownship-anchored attention areas track the nose, and they must be
         # re-projected *before* this tick's `ingest`/`tick` so the contacts
         # ingested below are judged against this tick's heading rather than
@@ -1094,6 +1125,15 @@ class ConsolePerceptionRunner:
             and not head_will_be_free
         ):
             optic_decision = replace(optic_decision, optic=BINOCULAR_OPTIC)
+        # BL-16 (U6, answered 2026-11-18: "no optics while Petrovich
+        # flies", both modes) -- the same external-clamp shape the
+        # sight-not-ready cap immediately above already uses, not an
+        # `OpticState` field: naked-eye scanning/contact/threat calls
+        # continue (A5, settled), only binoculars/the 9K113 are denied.
+        # Applied last so it overrides that cap too, regardless of
+        # which optic either decision chose.
+        if flying and optic_decision.optic is not UNAIDED_OPTIC:
+            optic_decision = replace(optic_decision, optic=UNAIDED_OPTIC)
         self.optic = optic_decision.optic
         is_sight_tier = optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
         # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
@@ -3318,11 +3358,26 @@ def _apply_ai_pilot_wheel_goal(
     park)**: while not parked, `goal` is forced back to `None` and the
     send cursor cleared, so a park that follows starts from a clean
     goal exactly as the Lua side already does on its own unpark
-    branch."""
+    branch.
+
+    **BL-16 mode 1 Co-moving row 11 fix**: the three `ai_pilot_*`
+    one-shot transition fields (`ai_pilot_goal_transition`/`ai_pilot_
+    level_flight_transition`/`ai_pilot_hvrt_transition`) are also
+    cleared here, in this same unparked branch -- previously they
+    persisted while unparked (this function returned before ever
+    reaching the clear further down), harmless while `CrewState.has_
+    controls == parked_active` (the gate refused every flight action
+    while unparked, so nothing could ever set one), but a latent leak
+    once mode 1 widens `has_controls` to include the axes phase: an
+    overlay command spoken just before an unpark is now a realistic way
+    to strand one, to fire on the next park."""
     if not runner.parked_flight_state.parked_active:
         if runner.parked_flight_state.goal is not None:
             runner.parked_flight_state = replace(runner.parked_flight_state, goal=None)
         runner.ai_pilot_goal_last_sent_seq = None
+        crew_console.ai_pilot_goal_transition = None
+        crew_console.ai_pilot_level_flight_transition = False
+        crew_console.ai_pilot_hvrt_transition = None
         return
     if runner.last_t_sim is None:
         # No ownship sample yet this session -- nothing this function
@@ -3445,6 +3500,128 @@ def _apply_ai_pilot_wheel_goal(
             )
         runner.ai_pilot_goal_last_sent_seq = bumped_seq
         crew_console.ai_pilot_hvrt_step_transition = None
+
+
+def _apply_flight_control(
+    crew_console: CrewConsole, aircraft_client: AircraftLayerClient
+) -> None:
+    """BL-16 mode 1 Stage M1 -- sends `crew_console.flight_control_
+    transition` (a pending "take"/"release", set synchronously by
+    `CrewConsole.take_controls`/`release_controls`) and `flight_control_
+    goal_transition` (a pending `FlightControlGoalRequest`, set by one of
+    the `axes_*` actions), each exactly once, then clears it -- the same
+    "send on change, applied and cleared by the poll loop" shape `_apply_
+    ai_pilot_wheel_goal` already uses for `ai_pilot_goal_transition`.
+    Called once per poll, right after `advance_flight_control_state` has
+    refreshed `crew_console.flight_control_state` this poll, before
+    `crew_console.drain_flight_control` (which reads the same state this
+    leaves behind).
+
+    **`wire_seq` is bumped here, not inside `CrewConsole`** -- the actual
+    send (and therefore whether a `seq` was actually consumed) only
+    happens in this function; `take_controls`/`release_controls`/the
+    `axes_*` actions never touch it, the same division of labour `take_
+    seq` already has (`FlightControlState`'s own docstring on the two).
+
+    **The arm lease (U10)**: while `OVERLAY` and `unpark_take`, `arm` is
+    re-sent every poll regardless of either one-shot transition above --
+    this is the lease Lua's own unpark-take precondition checks against
+    (`ARM_LEASE_S`), and it must keep moving for as long as body-layer is
+    alive, independent of whatever else this poll's dispatch did.
+
+    **Co-moving row 11's other direction**: an `axes_*` goal action
+    spoken just before a park races `decide_flight_control`'s own park-
+    edge transition to `OVERLAY` -- both `flight_control_transition`/
+    `flight_control_goal_transition` are discarded unsent, never bumping
+    `wire_seq`, whenever `phase == "OVERLAY"` by the time this runs: a
+    stale axes goal/handover request has no meaning once he is flying
+    through the overlay instead, and sending it would confuse Lua's own
+    `armed` state for no benefit.
+
+    **The one-frame `TAKING` window (review-m2.md Required Fix 1)**: a
+    goal sent while `phase == "TAKING"` would reach `Export.lua` before
+    `fc_law` exists, and `apply_goal_fields` only calls `law_apply_goal`
+    once `fc_law is not None` -- so a goal command dispatched there is
+    silently lost (nothing ever reconciles the `fc_goal_*` wire echo
+    against what the law is actually flying), while the rule's own
+    readback already spoke the commanded value as if it had landed. So
+    `goal_request` is held here, unsent and uncleared, for as long as
+    `phase == "TAKING"` -- it is retried next poll and actually sent
+    once Lua confirms `ACTIVE` (symmetric with the `held_*` gates'
+    already-stated "wait for a law to exist" intent). If the take itself
+    fails instead (ack timeout -> `PILOT`), the goal is dropped: there
+    is no law, and will be no law for this `take_seq`, to apply it to.
+
+    **`wire_seq` reconciliation against `fc_last_cmd_seq` (security-m1-
+    m2.md Finding A, change-request round)**: runs first, unconditional
+    on anything sending this poll. `wire_seq` resets to 0 on a body-
+    layer process restart; `Export.lua`'s own `fc_last_cmd_seq` (mirrored
+    as `state.lua_last_cmd_seq`) does not, including across a mission
+    restart -- so a restart while mode 1 is anywhere but `off` would
+    otherwise leave every later `seq` this process sends stuck below it,
+    silently dropped by Lua's own `seq <= fc_last_cmd_seq` check for the
+    rest of the DCS session. Catching `wire_seq` up to `lua_last_cmd_
+    seq` here (never past it) means the very next send's `wire_seq + 1`
+    is accepted; a genuine duplicate/stale resend within one body-layer
+    session is still rejected exactly as before, since this only ever
+    raises `wire_seq`, never lowers it below what this process has
+    itself already sent."""
+    state = crew_console.flight_control_state
+    if state.lua_last_cmd_seq is not None and state.lua_last_cmd_seq > state.wire_seq:
+        crew_console.flight_control_state = replace(
+            state, wire_seq=state.lua_last_cmd_seq
+        )
+        state = crew_console.flight_control_state
+    limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
+
+    if state.phase == "OVERLAY":
+        crew_console.flight_control_transition = None
+        crew_console.flight_control_goal_transition = None
+
+    transition = crew_console.flight_control_transition
+    if transition is not None:
+        crew_console.flight_control_transition = None
+        next_seq = state.wire_seq + 1
+        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+        state = crew_console.flight_control_state
+        try:
+            aircraft_client.write_flight_control(next_seq, transition, limits, None)
+        except AircraftLayerError:
+            logger.warning(
+                "flight-control %s write failed (continuing)",
+                transition,
+                exc_info=True,
+            )
+
+    goal_request = crew_console.flight_control_goal_transition
+    if goal_request is not None and state.phase != "TAKING":
+        crew_console.flight_control_goal_transition = None
+        if state.phase == "ACTIVE":
+            next_seq = state.wire_seq + 1
+            crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+            state = crew_console.flight_control_state
+            try:
+                aircraft_client.write_flight_control(
+                    next_seq, "goal", limits, goal_request_fields(goal_request)
+                )
+            except AircraftLayerError:
+                logger.warning(
+                    "flight-control goal write failed (continuing)", exc_info=True
+                )
+        # else: the take that was in progress when this goal was
+        # commanded has already failed (ack timeout moved phase to
+        # PILOT before this poll ran -- OVERLAY was already cleared,
+        # above) -- dropped, there is nothing left to apply it to.
+
+    if state.phase == "OVERLAY" and state.unpark_take:
+        next_seq = state.wire_seq + 1
+        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+        try:
+            aircraft_client.write_flight_control(next_seq, "arm", limits, None)
+        except AircraftLayerError:
+            logger.warning(
+                "flight-control arm write failed (continuing)", exc_info=True
+            )
 
 
 def _check_for_new_mission(
@@ -4664,7 +4841,12 @@ def _run_crew_text_poll_loop(
                 sight_lock_seen_before_poll = _sight_lock_seen(
                     runner.sight_head, runner.atgm_run_state
                 )
-                runner.run_once()
+                # BL-16 (U6, answered 2026-11-18) -- the *previous* poll's
+                # own `CrewState.has_controls`, the same one-poll lag
+                # `sight_lock_seen_before_poll` above already accepts:
+                # this poll's own flight-control dispatch (which could
+                # change it) has not run yet.
+                runner.run_once(flying=crew_console.current_crew_state().has_controls)
                 if runner.optic_state.point_clear_label is not None:
                     # `plans/9k113-scan-procedure/plan-stage2.md` -- a
                     # bounded `look <o'clock>`/`look <compass>` just
@@ -4763,6 +4945,16 @@ def _run_crew_text_poll_loop(
                         crew_console.attack_run_engaged = (
                             runner.attack_run_state is not None
                         )
+                        # BL-16 mode 1 Stage M1 -- refreshed every poll,
+                        # same as `on_ground`/`attack_run_engaged` above:
+                        # `take_controls`'s own `TOO_SLOW` refusal and
+                        # `decide_flight_control`'s ack-timeout clock
+                        # both need a sim-time/IAS reading synchronous
+                        # Lua-action dispatch has no other way to reach
+                        # (`CrewConsole.poll_now_sim`/`ias_kmh`'s own
+                        # field docstrings on why).
+                        crew_console.ias_kmh = runner.last_ias_kmh
+                        crew_console.poll_now_sim = runner.last_t_sim
                         # `plans/9k113-scan-procedure/plan-stage2.md`,
                         # "What 'ready' means" -- refreshed every poll, so
                         # `drain_pending_point_request` can wait for the
@@ -4864,6 +5056,32 @@ def _run_crew_text_poll_loop(
                             runner, crew_console, aircraft_client
                         )
                         crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
+                        # BL-16 mode 1 Stage M1 -- same "refresh, apply
+                        # pending transitions, speak" shape as mode 2's
+                        # three calls immediately above, operating on
+                        # `crew_console.flight_control_state` directly
+                        # (that class's own authoritative copy, unlike
+                        # `parked_flight_state`'s mirror-of-`runner`
+                        # shape -- see that field's own docstring for
+                        # why). `decide_flight_control` reads mode 2's
+                        # freshly-refreshed `parked_active` from the
+                        # call just above.
+                        try:
+                            crew_console.flight_control_state = (
+                                advance_flight_control_state(
+                                    crew_console.flight_control_state,
+                                    aircraft_client,
+                                )
+                            )
+                        except AircraftLayerError:
+                            logger.debug(
+                                "flight-control readback failed", exc_info=True
+                            )
+                        _apply_flight_control(crew_console, aircraft_client)
+                        crew_console.drain_flight_control(
+                            runner.last_t_sim,
+                            parked_active=runner.parked_flight_state.parked_active,
+                        )
                         # `[[BL-17]]` D16 -- same spot, after `parked_
                         # flight_state` has been refreshed this poll
                         # (just above), so `current_crew_state()` inside
@@ -5398,7 +5616,15 @@ def _run_crew_text_poll_loop(
                         # section). A dropped write degrades to
                         # "Export.lua keeps re-asserting whatever goal it
                         # last received" -- never stops the poll loop.
-                        if runner.sight_head.mode == "free":
+                        # BL-16 (U6, answered 2026-11-18: "no optics
+                        # while Petrovich flies") -- the plan's own
+                        # explicit instruction, named separately from
+                        # the `decide_optic`-output clamp above: skip
+                        # the write outright rather than relying on
+                        # `sight_head.mode` happening to follow from it.
+                        if runner.sight_head.mode == "free" and not (
+                            crew_console.current_crew_state().has_controls
+                        ):
                             goal_az = runner.sight_head.goal_world_az_deg
                             goal_el = runner.sight_head.goal_world_el_deg
                             if goal_az is not None and goal_el is not None:

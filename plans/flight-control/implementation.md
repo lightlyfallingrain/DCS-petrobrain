@@ -946,3 +946,933 @@ unchanged.
   the task; 3.0 s was chosen to match the existing `AI_PILOT_GOAL_SLICE_S` default's order of
   magnitude, not measured against a live flight. Flagged for the same reason `HVRT_TRANSLATE_MAX_
   HOLD_S` (15.0 s) was flagged when it was first added.
+
+## Mode 1, Stage M1 (the seam and handover)
+
+From `plans/flight-control/plan.md`, "Revised 2026-11-18 — mode 1 (unparked, raw axes) re-cut",
+Stage **M1 only** (the control law itself is Stage M2, not built here — output is captured +
+wobble, nothing else). Base: fast-forwarded from `f06c53fb` (the worktree's own stale start) to
+`56dc91c7` (the plan/alignment commits), then merged `main` (`0c206b37`) to pull in `refactor/
+rule-action-unable-throw` (`85272e9d`), a hard prerequisite for Decision 22's action-failure
+shape that had landed on `main` but not yet on this feature line. **Per U7, M1 does not merge
+until the user's M0 probe answers rows B, C and D** — built and tested fully on the Mac regardless.
+
+Three mid-task corrections arrived from the user's own M0 flights and are folded in as they came,
+each its own commit: M0-B (pedal confirmed, `SIGN.pedals = -1.0`, first-order step response, not
+rate-limited as first reported), M0-C (collective — 2004 is "Throttle (Collective)", confirmed to
+do nothing; the real id is 2087, `iCommandPlaneCollective`, from the user's own DCS binding file,
+sign still unmeasured).
+
+### Files Changed
+
+**aircraft-layer**
+- `dcs-export/Petrobrain/flight_control.lua` (new) — the mode-1 module: `handle_flight_control_
+  command` (take/release/goal/arm, the shared `wire_seq`/`fc_last_cmd_seq` staleness check, every
+  `limits` field bounds-checked, whole-message reject on violation), `run_flight_control` (every
+  frame from `LuaExportBeforeNextFrame`: self-arm on the park edge, the same-frame unpark take and
+  its own preconditions — `UNPARK_TAKE_ENABLED` off until M0-J, so this always refuses `"disabled"`
+  today — the per-frame envelope check, the pause/huge-jump row), `push_flight_control_state` (5 Hz
+  status). The Mi-24P arg/cmd/sign table: pitch/roll unverified guesses (2001/2002); pedal measured
+  (2003, `SIGN=-1`, M0-B) and enabled; collective's id now known (2087) but its sign is not (M0-C
+  re-fly owed), so it stays disabled. `run_active_frame` is shared between the ordinary per-frame
+  path and a fresh take/unpark-take transition, so output is continuous **from the first frame** a
+  take lands on, not the next poll of `run_flight_control` — a real bug caught by `TestCaptureIs
+  BitExact` before I'd even finished writing the Lua (see Notable Discoveries).
+- `dcs-export/Petrobrain/ai_pilot_wheel.lua` — `M.is_parked()`/`M.player_seat()`, read-only getters
+  (Decision 25) for `flight_control.lua`'s own capture-source rule. `is_parked()` returns `ai_
+  pilot_parked_active`, never 852 alone, exactly as the plan names it so there would be no
+  ambiguity to pick wrong.
+- `dcs-export/Petrobrain/commands.lua`, `dcs-export/Export.lua` — load the new module (after `ai_
+  pilot_wheel`, before `commands`), register its handler, add `LuaExportBeforeNextFrame` (new
+  callback — Decision 23's own per-frame injection point), the 5 Hz push, bump `EXPORT_SCRIPT_
+  VERSION` ("2026-11-18").
+- `src/schema/flight_control.py`, `src/collector/cache.py`/`server.py`/`command_sender.py`/
+  `__main__.py`, `src/api/server.py` — the Python-side wire: `FlightControlCache`, routing on
+  `"fc_mode"`, `CommandSender.send_flight_control`, `GET /flight_control/latest` + `POST /command/
+  flight_control` (shape validation only — every `limits`/`goal` field finite/in-range, `cmd`
+  closed, `Export.lua`'s own dispatch re-checks every bound a third time, the `[[AC-B14]]` lesson).
+- `CLAUDE.md` — the "What this is" bullet for the third write path (never an axis value).
+
+**body-layer**
+- `src/belief/flight_control.py` (new) — `FlightControlState`/`advance_flight_control_state`
+  (single construction site, same shape as `ParkedFlightState`), `take_controls`/`release_
+  controls` (pure functions), `decide_flight_control` (the one "when": park/unpark edges, the ack
+  timeout, Lua's own self-release, a refused unpark take), `clamp_altitude`/`clamp_speed`,
+  `flight_control_limits`, `goal_request_fields`. Eight new `tuning.py` constants under `[belief.
+  flight_control]`: `TAKEOVER_LEVEL_BANK_DEG`, `FLOOR_AGL_M`, `MIN_IAS_KMH`, `MAX_IAS_KMH`, `MAX_
+  BANK_DEG`, `ARM_LEASE_S`, `SPEED_STEP_KMH`, `HANDOVER_ACK_TIMEOUT_S` — `config/defaults.toml`
+  regenerated and the rendered first sentences read back.
+- `src/belief/crew_console.py` — `flight_mode()` (the one place `rules.actions._by_mode` reads);
+  `flight_control_state` (this class's own **authoritative** copy, unlike `parked_flight_state`'s
+  mirror-of-`runner` shape, because `take_controls`/`release_controls` act synchronously); `ias_
+  kmh`/`poll_now_sim` (two new "refreshed every poll" fields, same precedent as `on_ground`, since
+  no existing path threads sim time/live telemetry into a rule's own action `invoke`); `flight_
+  control_transition`/`flight_control_goal_transition` (the two new one-shots, reset in `_reset_
+  one_shot_command_state`); `current_crew_state()` widened (`has_controls = parked_active or
+  axes-phase-in-{TAKING,ACTIVE}`; `held_*` falls back to `FlightControlState.measured_*` whenever
+  nothing has been commanded yet, via the new `_axes_current_heading`/`_axes_current_altitude`/
+  `_axes_current_speed` helpers shared with the action bodies); `take_controls`/`release_controls`/
+  `axes_turn_continuous`/ten `axes_*` goal-action bodies (`increment_heading`/`set_heading`/`level_
+  flight`/`set_speed`/`set_speed_max`/`step_speed`/`set_altitude`/`step_altitude`/`hold_altitude`/
+  `level_off`); `drain_flight_control` (runs `decide_flight_control`, speaks the result).
+- `src/rules/actions.py` — `_by_mode(overlay=, axes=)`, wrapping all 16 pre-existing flight actions
+  (the HVRT five share one `_axes_hvrt_unready` body — "forward flight only," always `NOT_READY`);
+  `turn_continuous` (new, not `_by_mode`-wrapped — mode 2 has no "continuous turn" concept to
+  dispatch to, so it checks `flight_mode()` itself and answers `AI_OVERLAY` there); `take_controls`/
+  `release_controls` (new, handover).
+- `src/rules/gates.py` — `flight_handover` category (always `PASS`).
+- `src/belief/voice_commands.py` — `HANDOVER_TOKENS`, checked in `classify_response` ahead of the
+  ordinary floor comparison; `has_controls` keyword (default `False`, every other token untouched).
+- `src/belief/speech.py` — `"TOO_SLOW"`/`"AI_OVERLAY"` reasons. The forced-handover/self-release
+  line ("You have controls!") deliberately is **not** here — it lives in `decide_flight_control`,
+  the one place both of its triggers meet (named in both modules' docstrings so the exception to
+  "wording lives in speech.py/the rule file" is not mistaken for an omission).
+- `src/body.py` — `_apply_flight_control` (sends the two one-shots, bumps `wire_seq`, re-sends
+  `arm` every poll while `OVERLAY`/`unpark_take` — U10's lease; discards a stale transition/goal
+  unsent if `phase` has already moved to `OVERLAY` by the time it runs — row 11's *other*
+  direction, see Notable Discoveries); the row-11 fix proper, in `_apply_ai_pilot_wheel_goal`'s
+  unparked branch (clears `ai_pilot_goal_transition`/`ai_pilot_level_flight_transition`/`ai_pilot_
+  hvrt_transition`, previously left to persist while unparked); `run_once(flying=...)` (clamps
+  `decide_optic`'s chosen optic to `UNAIDED_OPTIC`, the same external-clamp shape the pre-existing
+  sight-not-ready cap already uses — U6); the `write_sight_target` call site gated on `not
+  current_crew_state().has_controls` too (the plan's own explicit second instruction, belt-and-
+  suspenders alongside the optic clamp); `last_ias_kmh` on `ConsolePerceptionRunner` (no existing
+  field carried IAS); the main poll-loop wiring (`advance_flight_control_state` → `_apply_flight_
+  control` → `crew_console.drain_flight_control`, right after mode 2's own three calls).
+- `config/rules/flight.lua` — `turn_heading_relative`'s pattern becomes `turn <direction:left|
+  right> [<degrees:angle>]` (no degrees → `flight.turn_continuous`); `you_have_controls`/`i_have_
+  controls` move from category `"always"` (silent no-op) to `"flight_handover"` with real bodies.
+- `config/rules/README.md` — the `flight_handover` category, the two new actions, `turn_
+  continuous`, the "every `flight.*` action except three dispatches by mode" note.
+- `tools/check_rules.py` — a third dry-run scenario, `"axes flying"` (`FlightControlState(phase=
+  "ACTIVE", ...)` with every held/measured value known), alongside the pre-existing `"flying"`/
+  `"hovering"` — so the `axes_*` bodies the rewritten `_by_mode` wrapper reaches are actually
+  dry-run, not just the unchanged overlay ones.
+- `CLAUDE.md` — the `flight_control.py` module-map entry, widened `ai_pilot_wheel.py` sentence for
+  the unpark exception, four new invariants (no LAN axis value, neither handover token confirms,
+  the two modes' one-shots never cross, park/unpark change the mode not who has the controls).
+- `docs/STRUCTURE.md` — new `flight_control.py` entry; appended notes on `aircraft_client.py`/
+  `body.py`/`crew_console.py`/`voice_commands.py`/`speech.py`'s existing entries.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_api.py` — schema/cache/routing/`GET` endpoint
+  (mirrors `test_ai_pilot_wheel_api.py`) and `CommandSender.send_flight_control`/`POST` endpoint
+  (mirrors `test_ai_pilot_goal.py`), including every shape-validation 400/503/500 case.
+- `aircraft-layer/tests/test_flight_control_lua.py` — the whole module wrapped as an IIFE around
+  the real source (not per-function extraction, since the functions close over many module-level
+  locals), against a mocked DCS surface: bit-exact capture (pitch/roll and, separately, the
+  measured pedal sign), a bad `limits` bound rejecting the whole message, a stale `seq` ignored,
+  release stopping writes the same frame, a park edge self-arming with no write, the unpark-take
+  refused `"disabled"` (Stage M1's own shipped state — `UNPARK_TAKE_ENABLED` is off), a stale
+  lease, unpark-while-off writing nothing, the pause/huge-jump row holding, sustained-vs-momentary
+  low IAS for the envelope release, and the `fc_axes_*` wire fields.
+- `body-layer/tests/test_flight_control.py` — `advance_flight_control_state` against a real
+  loopback server (mirrors `test_ai_pilot_wheel.py`'s own convention, not a mocked client);
+  `take_controls`/`release_controls`'s every refusal and the refusal-order pin; `decide_flight_
+  control`'s every transition, including **says spoken exactly once for the matching `take_seq`**
+  (and a second poll against the now-`ACTIVE` state proving it is not repeated), **says withheld
+  for a mismatched `take_seq`**, the ack timeout, and Lua's own self-release for all three reasons;
+  the clamp/wire helpers.
+- `body-layer/tests/test_body_flight_control.py` — `_apply_flight_control`'s own send/clear/`wire_
+  seq`/arm-lease behaviour, and row 11's `_apply_flight_control`-side direction (a stale one-shot
+  discarded, unsent, once `phase` has already moved to `OVERLAY`).
+- `body-layer/tests/test_body_ai_pilot_wheel.py` — `test_unparking_clears_every_stranded_ai_pilot_
+  one_shot`, row 11's *other*, pre-existing direction (the `ai_pilot_*` one), which had no
+  dedicated assertion before this round even though the mechanism already existed in the merged-in
+  refactor commit.
+- `body-layer/tests/test_rules_flight_actions.py` — `TestHandoverActions` (replaces `TestHave
+  ControlsNoOp`, whose own assertion is exactly what Decision 22 changes — see Notable
+  Discoveries): the overlay no-op, a clean take, both refusals, the overlay `AI_OVERLAY` unable, a
+  real release, and the nobody-flying no-op. `TestSeatNeverGatesMode1` (Decision 25): `flight_
+  mode()`/`take_controls` give identical results across `player_seat` = pilot/operator/unknown.
+- `body-layer/tests/test_rule_gates.py` — widened the closed-category-set test for `flight_
+  handover`.
+- `body-layer/tests/test_body.py` — `test_run_once_flying_clamps_the_optic_to_naked_eye` (U6, with
+  its own un-clamped `flying=False` negative case, per root `CLAUDE.md`'s "show the red when your
+  assertion is that nothing happens" — this is a clamp, not an absence, but the companion negative
+  case is still what makes the positive one mean something); four pre-existing `run_once` test
+  doubles updated for the new `flying=` keyword.
+- `body-layer/tests/test_tuning_comment_renders.py` — no new test; an existing one caught a real
+  defect (see Notable Discoveries).
+
+**What M1 deliberately does not test, and why**: the `write_sight_target` call-site skip (the
+second half of U6) has no dedicated poll-loop test — building a fixture that reaches `sight_head.
+mode == "free"` through the real poll loop (OBSERV on, gyro aligned, a goal) is substantially more
+setup than the `decide_optic`-level clamp test, and that clamp is what actually prevents glassing
+from ever being requested while flying in practice (OBSERV is never commanded on if nothing ever
+asks for a sight-tier optic). The call-site skip is defensive, not primary enforcement, and is
+exercised live once Flight M-A happens, not here.
+
+### Checks
+
+**aircraft-layer**
+- `luac5.1 -p` on every touched `.lua` file: pass. `GETGLOBAL` audit (`luac5.1 -l -p | grep
+  GETGLOBAL`) on `flight_control.lua`/`ai_pilot_wheel.lua`/`commands.lua`/`Export.lua`: every name
+  is either Lua stdlib, a genuine DCS API, or a `core.lua`-published/cross-module global — no own
+  helper referenced before its own `local` declaration.
+- `ruff format --check src tests`: pass. `ruff check src tests`: pass.
+- `mypy src` (from inside `aircraft-layer/`): pass, no issues (28 source files).
+- `pytest tests -q` (full subproject suite): **932 passed**.
+
+**body-layer**
+- `ruff format --check src tools tests`: pass. `ruff check src tools tests`: pass.
+- `mypy src` (from inside `body-layer/`): pass, no issues (92 source files).
+- `tools/check_rules.py --adapter-python <audio-adapter venv>`: `ok: 1 rule file(s) checked` — the
+  new `[<degrees:angle>]` optional-numeric-slot pattern and every dry-run scenario (including the
+  new "axes flying" one) passed with zero findings.
+- `pytest tests -q -n auto -m "not slow"` (full subproject suite, parallel): **3581 passed, 4
+  xfailed**.
+- `tools/generate_defaults.py --write`; `test_tuning_defaults_toml.py`/`test_tuning_comment_
+  renders.py`: pass, rendered `config/defaults.toml` read back by hand (not just the generator's
+  own comment).
+
+### Notable Discoveries
+
+- **`ai_pilot_wheel.lua`'s own `push_ai_pilot_wheel_state` double-quotes every non-null string
+  field on the wire, producing invalid JSON.** `text_or_null` wraps `json_escape_string`'s own
+  already-quoted result in a second pair of quotes (`'"' .. json_escape_string(value) .. '"'`);
+  `json_escape_string` already returns `"\"" .. escaped .. "\""`. Confirmed with `json.loads` on
+  the exact malformed shape it produces. This is shipped, merged, mode-2 code — found only because
+  I copied the same idiom into `flight_control.lua` and then actually ran the output through a
+  real Lua interpreter and a real `json.loads`, which nothing exercising `push_ai_pilot_wheel_
+  state` today does (no test calls it at all). **Not fixed in `ai_pilot_wheel.lua`** — out of
+  scope for this module/stage; fixed in my own copy (`text_or_null` returns `json_escape_string`'s
+  result directly, no extra quotes). Worth a dedicated fix/test for the existing module.
+- **A real bug in my own first draft, caught by my own test before it ever reached review**: the
+  original `run_flight_control` wrote the captured axes only from the branch that already saw
+  `fc_mode == "active"` at the *start* of the frame — a fresh take (`"taking"` → `"active"` within
+  the same call) transitioned the mode but fell through to `return` without ever calling `write_
+  outputs()`, so the first write happened one frame late, not the same frame Decision 24 requires
+  ("the output is continuous at take, bit-exact"). Fixed by factoring a shared `run_active_frame`
+  helper, called both from the per-frame path and immediately after a fresh take/unpark-take
+  transition in the same call. `TestCaptureIsBitExact` failed on the very first run with `written[
+  2001]` as `nil` (a `string.format` crash, not a silently-wrong value) — exactly the kind of
+  immediate, loud failure the project's own "counterfactual is evidence only if you ran it"
+  guidance asks for, found by actually running the Lua rather than reasoning about it.
+- **Two existing tests asserted exactly the behaviour Decision 22 replaces, and were rewritten, not
+  extended** (`TestHaveControlsNoOp.test_you_have_controls_is_silent`/`test_i_have_controls_is_
+  silent_while_flying_too`): their own premise — "you/i have controls" is a silent no-op in every
+  state — is the pre-mode-1 behaviour the plan explicitly supersedes. Per the escalation rule on
+  rewriting existing tests: this is not an architectural improvisation, it is the approved plan's
+  own named behaviour change (Decision 22, already reviewed and `ALIGNED`), so I rewrote them
+  (`TestHandoverActions`) rather than stopping to ask, and I am naming the rewrite here rather than
+  letting it pass silently in a diff.
+- **`test_tuning_comment_renders.py::test_no_cross_key_constraint_hides_after_the_first_sentence`
+  caught a real instance of exactly what it exists to catch**: `MAX_IAS_KMH`'s tuning comment's
+  *second* sentence named `FLOOR_AGL_M` (a cross-reference, not an actual coupling), which the
+  generator cannot render (it emits only the first sentence) — reworded to drop the sibling-key
+  mention rather than restate a real constraint there, since there was no real constraint to state.
+- **The `wire_seq`-vs-`take_seq` split was not explicit in the plan and had to be designed**: the
+  plan's own `goal_seq` language (mirroring mode 2's `AiPilotWheelGoal.goal_seq`) would, read
+  literally, bump a *goal*-scoped counter that is a different quantity from the message-level
+  `"seq"` field `Export.lua`'s `fc_last_cmd_seq` check applies across every `cmd` kind. Conflating
+  them would mean a goal sent between a take and its confirmation could either go stale against
+  the take's own `seq`, or move what the take's confirmation is compared against. Resolved by
+  introducing `FlightControlState.wire_seq` as the one shared counter (bumped only in `body.
+  _apply_flight_control`, never by any action) and keeping `take_seq` purely semantic. Documented
+  in both the module's own docstring and the STRUCTURE.md entry so a later stage does not
+  rediscover the trap by breaking it.
+- **The M1/M2 boundary for the ten `axes_*` goal actions required a judgement call.** The plan lists
+  "the mode-1 action methods" under M1's own `crew_console.py` bullet, but also lists "the full
+  mode-1 action bodies, their clamps and readback values" under M2's `body-layer` bullet — an
+  apparent overlap. Read as: M1 builds the dispatch mechanism (`_by_mode`) and working axes bodies
+  (clamp, send a `FlightControlGoalRequest`, compute the readback from the clamped input), with
+  `held_*`/`measured_*` sourced from Lua's own echoed/telemetry fields since M1 has no shaper to
+  report a *tracked* value from; M2 is what makes those commanded values actually get flown toward.
+  This reading is implemented and tested (`tools/check_rules.py`'s new "axes flying" scenario dry-
+  runs all ten), but it is a judgement call on an ambiguous plan boundary, not an explicit
+  instruction, and worth confirming at review.
+- **`fc_measured_altitude`/`fc_measured_speed` are not named in the plan's own wire-shape text** —
+  added alongside the plan's own `fc_measured_heading` so `hold_altitude`/`level_flight`/`set_
+  speed`'s "current value" has something to read the instant mode 1 takes, before any goal has
+  ever been commanded (`fc_goal_altitude`/`fc_goal_speed` both start `null`). Without this,
+  `axes_hold_altitude`/`axes_level_flight` would `assert`-fail on the very first call after a
+  fresh take. A small, mechanical, same-shape addition to an already-open wire message, not a
+  reshape — flagged per the plan's own instruction to report additions beyond its explicit list.
+- **The envelope release's `"dead"` cause has no real detection mechanism** — this codebase has no
+  per-frame ownship-death/weight-on-wheels signal anywhere (confirmed by grep; `ON_GROUND_AGL_
+  THRESHOLD_M`'s own docstring on the body-layer side names the same gap for a different check).
+  `check_envelope` maps a failed `LoGetSelfData()` read onto `"dead"` as the closest available
+  proxy, and an unreadable IAS/AGL on the unpark-take's own preconditions onto `"too_slow"`/`"on_
+  ground"` respectively (fail-safe: "cannot confirm" is treated the same as "confirmed bad"). Both
+  are judgement calls, not measurements, named here per the brief's own request to flag them.
+- **Cross-key coupling check**: `MIN_IAS_KMH`/`MAX_IAS_KMH` have an implicit ordering invariant
+  (`MIN_IAS_KMH < MAX_IAS_KMH`) that no per-key `lo`/`hi` bound sees — both default comfortably
+  inside that ordering (80 < 280) and their `lo`/`hi` ranges (20–200, 100–500) cannot cross invert
+  it via any single in-bounds override, so `tuning._check_scan_decay_coupling`'s own kind of guard
+  was judged unnecessary this round; flagged per the project's own instruction on relationships
+  between tunables, not guarded in code.
+- **Deviation from the brief's own summary, not the plan**: the brief's step-by-step list named
+  `turn_continuous`/`take_controls`/`release_controls` without stating they are **not** `_by_mode`-
+  wrapped; the plan itself (Decision 21/22) makes this explicit (`turn_continuous` has no overlay
+  body to dispatch to at all; the two handover actions are not per-mode at all). Implemented per
+  the plan, as instructed where the two disagree.
+
+### What is deliberately left for M2
+
+The control law itself (the shaper, the lift-vector corrections, the inner loop, the toy-plant
+tests) — M1's own output stage is captured + wobble, nothing else, and `flight_control.lua`'s own
+module docstring says so. Concretely not built here: any Lua-side use of a commanded goal beyond
+storing and echoing it (`fc_goal_*`/`fc_takeover_mode` are wire-only until M2's shaper exists); the
+takeover-mode heading-vs-turn decision's own live tracking (snapshotted once at take, never
+revisited); the terrain floor (`FLOOR_AGL_M` is sent in `limits` and clamped against in body-
+layer's own `set_altitude`/`step_altitude`, but Lua does nothing with it — that is Stage M3); the
+bands (`fc_in_band_*` always `null`, `SPEED_BAND_FRAC`/`ALT_BAND_FRAC`/`ALT_BAND_MIN_M`/`HEADING_
+BAND_DEG` not declared — nothing computes "in band" without a shaper to converge). M0-D (the
+stirred-control go/no-go for the whole mode) remains owed before this can merge, per U7.
+
+### Addendum, flight 6 (2026-11-18)
+
+Two more coordinator corrections arrived after the section above was written, both folded into
+`flight_control.lua`'s own header/table comments rather than this log repeating the measurement:
+
+- **Collective sign is -1.0, scale 1** (same shape as pedal), re-flown against the corrected 2087
+  id. Entered into `SIGN`. **`FC_AXES_ENABLED.collective` was deliberately left `false`** — the
+  coordinator's own wording was "M0-C passed **for sign/scale**," and pedal's enable flag was
+  flipped only once its *whole* response (sign, scale, **and** step-response lag) was measured
+  across two flights. Collective's own lag/VS response are still owed. Reading "sign/scale passed"
+  as "enable the axis" would be inconsistent with the bar pedal was held to — this is a judgement
+  call, not an instruction, and is flagged here and in the module's own comment for review to
+  confirm or overturn.
+- **M0-F is measured for collective: a release holds the last-written value until the player
+  physically moves that control** (arg 1102 sat 16+ s untouched). This is exactly Decision 4's own
+  prediction ("the release jump is not handled; the pilot matches his controls") — a measurement
+  that confirms a documented assumption, not a correction to it. No code change: `handle_flight_
+  control_command`'s `"release"` branch already does nothing but stop calling `write_outputs()` —
+  it never reads the physical stick or holds a value on purpose, so there was nothing for this
+  finding to invalidate. Pitch/roll/pedals' own M0-F measurement is still owed.
+
+---
+
+## Review-fix round, 2026-11-18 (`plans/flight-control/review-m1.md`, NEEDS REVISION)
+
+Both Required Fixes.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — **Required Fix 1**: the `"release"`
+  branch of `handle_flight_control_command` now clears `fc_goal_heading_deg`/`fc_goal_turn`/
+  `fc_goal_alt_m`/`fc_goal_alt_ref`/`fc_goal_ias_kmh`, matching what `on_stop` already does for a
+  mission restart — a stale goal from a prior take no longer survives into the next one.
+- `aircraft-layer/tests/test_flight_control_lua.py` — new `TestReleaseClearsHeldGoalsAcrossRetake`:
+  take, command a heading/altitude/speed goal, release, take again, and check `push_flight_
+  control_state`'s wire line at each step — the goal is held before release, every `fc_goal_*`
+  field reads `null` immediately after release, and still `null` on the fresh re-take before any
+  new goal is commanded.
+- `body-layer/tests/test_voice_commands.py` — **Required Fix 2**: five new tests on
+  `classify_response`'s `HANDOVER_TOKENS` branch (Decision 13), named directly after the plan's own
+  "at every confidence" wording: `i_have_controls` acts at every confidence from `0.0` to `1.0`;
+  `you_have_controls` acts from `CONFIRM_FLOOR` up; `you_have_controls` says again (never confirms)
+  below the floor; the ambiguous handover pair resolves on `has_controls` alone, at every
+  confidence, both the `has_controls=True` (acts `i_have_controls`) and `has_controls=False`
+  (says again) directions.
+
+### Checked, no code change needed
+
+- **The body-layer side of Required Fix 1's leak.** `FlightControlState.held_heading`/`held_
+  altitude`/`held_altitude_ref`/`held_speed` are not an independent cache — `advance_flight_
+  control_state` replaces them wholesale from the latest wire sample every poll
+  (`replace(state, held_heading=_as_optional_float(sample.get("fc_goal_heading")), ...)`, no
+  previous-state carry-through for these four fields), and `CrewConsole.flight_control_state`
+  holds no separate copy either (confirmed by reading both — `crew_console.py`'s own field is
+  populated from `advance_flight_control_state`'s return value, nothing else writes it). So once
+  Lua's `fc_goal_*` clears on release, the mirror clears on the very next poll with no second fix
+  needed on this side — the leak was Lua-only, and the review's own "check the body-layer side"
+  came back negative.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p` on `flight_control.lua`/`ai_pilot_wheel.lua`/`commands.lua`/`Export.lua`: pass.
+- `GETGLOBAL` audit (`luac5.1 -l -p flight_control.lua | grep GETGLOBAL`, the only touched `.lua`
+  file this round): every name stdlib, a genuine DCS API, or a cross-module global already named
+  in the module's own docstring — nothing new.
+- `ruff format --check src tests`: pass (84 files). `ruff check src tests`: pass.
+- `mypy src`: pass, no issues (28 source files).
+- `pytest tests -q` (full subproject suite): **933 passed** (932 + the new
+  `TestReleaseClearsHeldGoalsAcrossRetake` test).
+
+**body-layer/**
+- `ruff format --check src tools tests`: pass (241 files; `ruff format` auto-wrapped one new test's
+  long signature on the first run, re-checked clean, and the function was renamed shorter rather
+  than left with the wrapped `-> (\n    None\n)` shape).
+- `ruff check src tools tests`: pass.
+- `mypy src`: pass, no issues (92 source files).
+- `pytest tests/test_voice_commands.py -q -v`: **29 passed** (24 + 5 new, confirmed by name in
+  unfiltered `-v` output).
+- `pytest tests/test_flight_control.py tests/test_body_flight_control.py tests/
+  test_rules_flight_actions.py -q`: **97 passed** (the modules review-m1.md's Required Fixes
+  touch most directly).
+- `pytest tests -q -n auto -m "not slow"` (full subproject suite, parallel): **3586 passed, 4
+  xfailed** (3581 + 5 new; the 4 xfailed are pre-existing, unrelated).
+
+A counterfactual was run on Required Fix 1's own new test before trusting it: reverted the
+`"release"` branch's new five-line clear, re-ran `TestReleaseClearsHeldGoalsAcrossRetake` alone,
+confirmed it failed for the stated reason (`fc_goal_heading` read back `"90.00000"` instead of
+`None` immediately after release), restored the fix, confirmed the file's `sha256` matched the
+pre-mutation value exactly before re-running the full suites above.
+
+### Notable Discoveries
+
+- None beyond the "checked, no code change needed" item above — this round is a narrow fix plus
+  the two named tests, no scope beyond review-m1.md's Required Fixes.
+
+---
+
+## M0-J capture-rule fixes, 2026-11-18 (coordinator, flight 9 findings)
+
+From `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md` (branch `probe/bl16-
+flight-axes`), "Flight 9": two capture-timing bugs, both confirmed and fixed in the same round as
+the review-fix work above, plus `UNPARK_TAKE_ENABLED` flipped on now that M0-J passes.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua` — new read-only getter
+  `M.stick_park_raw()` (mirrors `ai_pilot_takeover.raw_arg852`, already tracked every frame by
+  `run_ai_pilot_wheel`). `M.player_seat`'s own docstring corrected in place — it documented itself
+  as read by `flight_control.lua`'s capture-source rule, which this round's fix 2 removes; the
+  function and its export are unchanged (kept for diagnostics), only the now-false claim in the
+  comment was pruned.
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua`:
+  - **Finding 1 (unpark-take capture timing)**: new `STOWED_THRESHOLD` (0.99) and
+    `fc_last_stowed_pilot_capture`, tracked every frame while `fc_mode == "armed"` — overwritten
+    only on a frame `stick_park_raw() >= STOWED_THRESHOLD`, left alone otherwise (so it survives
+    through the ~1.5 s cross-fade `is_parked()`'s own lower, 0.9 edge fires inside). The unpark-take
+    branch reads this tracked snapshot instead of a fresh `capture_from_seat("pilot")` at the edge;
+    falls back to a fresh read only if no frame ever reached the threshold this armed session.
+    Cleared (same "stale leak across a session boundary" class as review-m1.md Required Fix 1) on:
+    entering `armed` fresh (self-arm), every unpark-take refusal branch, a successful unpark-take
+    (consumed), `"release"`, and `on_stop`.
+  - **Finding 2 (voice-take capture source)**: `resolve_capture_seat(hint)` (Decision 25's
+    "the player's seat set") replaced outright by `resolve_capture_values()` — the camera seat is
+    never read for this decision any more. New `LIVE_SEAT_ZERO_EPS` (0.01) and
+    `update_live_seat_tracking()` (called every frame regardless of `fc_mode`, since a take can
+    land on any frame) track `fc_last_steady_values`, the captured set from the last frame exactly
+    one seat read live and the other idle. `resolve_capture_values()` captures whichever seat
+    currently reads live alone; if both read live at once (an actual cross-fade), returns the
+    tracked steady snapshot instead of either set's own partly-faded current value; falls back to
+    the higher-magnitude seat (the old default) only if neither has ever been steady.
+  - **`UNPARK_TAKE_ENABLED` flipped from `false` to `true`** (coordinator direction) — M0-J passes
+    with the capture-timing fix above. Kept as a named flag, not removed, so a live regression can
+    still disable the unpark take without a redeploy; its own refusal branch and `fc_refuse_cause =
+    "disabled"` are untouched.
+  - Module docstring updated: the `ai_pilot_wheel` dependency list now names `stick_park_raw`
+    instead of `player_seat` (no longer read), and a new paragraph states both corrected capture
+    rules up front, citing the finding by name rather than re-deriving it.
+- `aircraft-layer/tests/test_flight_control_lua.py`:
+  - Preamble: `ai_pilot_wheel` mock gained `stick_park_raw = function() return ap_stick_park_raw
+    end`, mirroring `ap_parked`/`ap_seat`'s existing driver-settable-global convention.
+  - `TestCaptureIsBitExact.test_unpark_take_is_refused_disabled_in_stage_m1` → rewritten as
+    `test_unpark_take_succeeds_with_the_flag_on_by_default` (the flag's default flipped; the old
+    test's own premise — the unpark take cannot be exercised through this module's public interface
+    — is exactly what this round changes). Per the escalation rule on rewriting existing tests: this
+    is the approved coordinator change, not an improvisation, named here rather than left silent in
+    the diff.
+  - `TestUnparkTakeRefusals`'s two existing tests updated: both previously asserted
+    `fc_refuse_cause == "disabled"` (the flag masking every other precondition); now assert the
+    precondition's own real cause (`"too_slow"`, `"lease"`) since the flag no longer masks them.
+    New `test_refusal_still_available_via_the_flag` pins that the `"disabled"` cause and the `true`
+    default both still exist in the source, since the constant has no exported test seam and should
+    not get one for a one-line kill-switch.
+  - New `TestUnparkTakeCaptureTiming` (3 tests): the tracked last-fully-stowed capture is used
+    rather than the faded edge-frame read; a seat-gate edge (no fade) needs no special case and gets
+    the same tracked value; the tracked capture does not leak into a later armed session that never
+    itself reached the threshold.
+  - New `TestVoiceTakeLiveSeatCapture` (2 tests): the live pilot set is captured with the camera in
+    the operator seat (the measured flight-9 scenario, operator set at 0, pilot set live); a
+    cross-fade at the exact moment of take resolves to the last steady set, not either set's own
+    partly-faded current read.
+
+### Checks
+
+**aircraft-layer/**
+- `luac5.1 -p` on `flight_control.lua`/`ai_pilot_wheel.lua`/`commands.lua`/`Export.lua`: pass.
+- `GETGLOBAL` audit on both touched files: every name stdlib, a genuine DCS API, or an existing
+  cross-module global (`ai_pilot_wheel`, `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON`) — nothing new.
+- `ruff format --check src tests`: pass (84 files). `ruff check src tests`: pass.
+- `mypy src`: pass, no issues (28 source files).
+- `pytest tests/test_flight_control_lua.py tests/test_ai_pilot_wheel_lua.py tests/
+  test_ai_pilot_wheel_api.py -q`: **124 passed**.
+- `pytest tests -q` (full subproject suite): **939 passed** (933 + 6 net new: the two
+  `TestUnparkTakeRefusals` tests kept their names and gained one sibling, plus 3 +
+  2 new classes).
+
+Not re-run: body-layer (no body-layer file touched this round; `UNPARK_TAKE_ENABLED` is a pure
+Lua-side flag and `fc_refuse_cause`'s body-layer handling is generic over whatever string Lua
+sends, confirmed by reading `decide_flight_control` and `test_flight_control.py`'s own
+`lua_refuse_cause="disabled"` fixture, which is illustrative, not testing the Lua default).
+
+Two counterfactuals were run before trusting the new tests: (1) reverted the unpark-take branch to
+read `capture_from_seat("pilot")` directly (dropping the tracked snapshot), re-ran
+`test_captures_the_last_fully_stowed_frame_not_the_faded_edge` alone, confirmed it failed for the
+stated reason (`0.085` instead of `0.133`); (2) reverted the `"taking"` branch to the old
+hint-first capture (`capture_from_seat(seat_hint or "pilot")`), re-ran `TestVoiceTakeLiveSeatCapture`
+alone, confirmed both tests failed for the stated reason (`0.149`/`0.151` instead of the live/steady
+values). Both reverts restored by hand and `sha256` confirmed to match the pre-mutation value
+exactly before re-running the full suite above.
+
+### Notable Discoveries
+
+- **`M.player_seat` (`ai_pilot_wheel.lua`) is now unread by any in-process Lua caller** — confirmed
+  by `grep -rn "player_seat" aircraft-layer/dcs-export` after this round's change: the only call
+  site was `flight_control.lua`'s own old `resolve_capture_seat`, now gone. Kept exported rather
+  than removed (diagnostics / a future caller), with its docstring corrected rather than deleted —
+  judgement call, flagged for review to confirm or remove outright.
+
+## Mode 1, Stage M2 (the controller), 2026-11-18
+
+From `plans/flight-control/plan.md`, "Revised 2026-11-18 — mode 1 (unparked, raw axes) re-cut",
+Stage **M2 only**: the Lua control law (shaper, lift-vector corrections, inner tilt loop, pedal
+coordination) plugged into M1's own per-frame output stage, plus body-layer's shaper-limit/band
+tunables and their `in_band_*` status mirrors. M3 (terrain floor) and M4 (SAU) are not built here.
+Base: HEAD (`59192cfa`) was not an ancestor of the dispatched tip (`a2450e34`), so this round
+started from `git checkout -B m2-impl a2450e34` per the dispatch's own fallback instruction, then
+committed to that branch.
+
+### Files Changed
+
+**aircraft-layer**
+- `dcs-export/Petrobrain/flight_control.lua` — the control law, as five pure functions over an
+  explicit state table (`law_init_at_take`, `law_apply_goal`, `law_update`, `law_outputs`, plus the
+  helpers `law_wrap360`/`law_wrap180`/`law_clamp`/`law_turn_rate_at_bank`/`law_stopping_height`),
+  none of which reads a module-level local or a DCS global — the plan's own instruction ("as pure
+  functions over a state table so luajit can test them"), exported on `M` for the toy-plant suite.
+  `fc_law` (module state, `nil` off/taking/armed) is built at take/unpark-take (`law_init_at_take`,
+  seeded from the sign-mapped captured command so the very first frame's output equals it exactly —
+  Decision 24's "bit-exact at take" — via a dedicated `just_took` branch in `run_active_frame` that
+  skips the shaper update for that one frame) and advanced every subsequent frame (`law_update` then
+  `law_outputs`). `apply_goal_fields` now also calls `law_apply_goal` once per goal command (never
+  re-applied from the persisted `fc_goal_*` wire echo every frame — see Notable Discoveries for why
+  that distinction matters for `level_off`). `write_outputs` is rewritten to take an explicit
+  command table and `dt`, rate-limiting against `fc_last_command` (`OUTPUT_RATE_LIMIT_PER_S`) before
+  saturating/wobbling/writing; the pause row now re-issues `fc_last_command` unchanged (`dt=nil`)
+  rather than `fc_captured`, freezing every shaper/integrator as the plan requires. New getter
+  reads: `LoGetAngularVelocity` (p/q/r, with the yaw-rate sign flip M0-A measured — "positive when
+  heading decreases"), `LoGetVerticalVelocity`, `LoGetTrueAirSpeed`, `LoGetAltitudeAboveSeaLevel`
+  (for a continuously-converted barometric-to-AGL altitude goal), all gathered once per frame by a
+  new `read_measured()`, fail-soft to 0.0/the ias-derived fallback on a bad read (the envelope check,
+  run separately, is what actually stops the override on real trouble). `fc_in_band_heading/
+  altitude/speed` now read `fc_law`'s own fields instead of the hard-coded `null`. A new "M2 control
+  law constants" comment block holds every gain (`OMEGA_HEADING/ALT/SPEED`, `K_THETA/PHI/Q/P/
+  THETA_I/PHI_I`, `K_COLLECTIVE`, `K_TILT_FROM_AX/AZ_SATURATED`, `K_BANK_INCREMENT`, `K_HEADING_
+  TRACK`, `K_VS_ERROR/ALT_ERROR/SPEED_ERROR`, `K_PEDAL_FROM_COLLECTIVE_RATE`, the pedal limits/near-
+  limit collective-rate cap, `TAU_ACCEL_FILTER_S`, `OUTPUT_RATE_LIMIT_PER_S`, `T_ROLL`,
+  `TURN_SETTLE_DEG_S`) — every one a first-cut placeholder, M0-E never having flown; the module's own
+  header names the "owed by M0-E" list. `fc_limits`/`FC_LIMIT_BOUNDS` gain the eight new wire keys
+  (`max_turn_bank_deg`, `max_climb_vs_mps`, `max_accel_mps2`, the four A9 bands, `heading_band_deg`).
+  Every mode transition away from `active`/`taking` (`release`, the park self-arm, the envelope
+  release, `on_stop`) now also clears `fc_law`/`fc_last_command`, so a later take always rebuilds the
+  law from scratch rather than resuming a discarded session's state. Module docstring and the status-
+  push comment rewritten (both were M1-only and now stale — root `CLAUDE.md`'s "prune the comment
+  you are standing next to").
+- `src/api/server.py` — `_FLIGHT_CONTROL_LIMITS_BOUNDS` gains the same eight keys (see Notable
+  Discoveries — this was a real, caught bug: the dict is a *whitelist* the `POST /command/
+  flight_control` handler's own loop reads, so a wire key absent from it is silently dropped before
+  ever reaching `CommandSender`, not rejected).
+- `tests/test_flight_control_lua.py` — the shared mock preamble (`_PREAMBLE`) gains `LoGetAngular
+  Velocity`/`LoGetVerticalVelocity`/`LoGetTrueAirSpeed`/`LoGetAltitudeAboveSeaLevel` and a mutable
+  `pitch_rad` (previously hard-coded `0.0` in `LoGetADIPitchBankYaw`'s mock), all defaulting to
+  values that reproduce the old (M1) readings exactly — no existing assertion changed, only the new
+  code path's getters are no longer `nil`. All 23 pre-existing tests pass unmodified.
+- `tests/test_flight_control_law.py` (new) — the toy-plant suite the plan asks for, against the five
+  exported pure law functions directly, no DCS mock at all. See "Tests Added".
+- `tests/test_flight_control_api.py` — two new tests pinning the M2 limits-passthrough fix (see
+  Notable Discoveries).
+
+**body-layer**
+- `src/belief/flight_control.py` — eight new `tuning.py` constants under `[belief.flight_control]`
+  (`MAX_TURN_BANK_DEG`, `MAX_CLIMB_VS_MPS`, `MAX_ACCEL_MPS2`, `SPEED_BAND_FRAC`, `ALT_BAND_FRAC`,
+  `ALT_BAND_MIN_M`, `TURN_RATE_BAND_FRAC`, `HEADING_BAND_DEG`), each with its own `#:` comment (not
+  one shared block — see Notable Discoveries for why that matters); `flight_control_limits()` sends
+  all eight; `FlightControlState` gains `in_band_heading`/`in_band_altitude`/`in_band_speed` (mirrors
+  of `fc_in_band_*`, via a new `_as_optional_bool` helper), refreshed by `advance_flight_control_
+  state`. No action in this module reads them yet (A9: the bands feed only the status field and
+  M4's settle test) — mirrored anyway since every other wire status field already is, at no real
+  cost.
+- `config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`); the rendered first
+  sentences were read back by hand per the standard instruction.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_law.py` (new, 11 tests) — the toy-plant suite:
+  - `TestBitExactAtTake` — `law_outputs` on a freshly-initialized state reproduces the captured
+    command exactly even with nonzero body rates at the instant of capture (the degenerate
+    all-zero-rates case the full-module harness already covers would not catch a sign error in the
+    `T_p = command + K_Q*q` solve); the disabled-collective-defaults-to-zero case.
+  - `TestTakeoverModeSelection` — 4.9° picks heading mode, 5.1° picks turn mode (Decision 1
+    REVISED's own boundary, pinned exactly as the plan's own toy-plant bullet names it).
+  - `TestHeadingChannel` — a toy plant (bank first-order-lags toward `phi_d`, heading integrates the
+    resulting coordinated-turn rate) converges into the heading band, turns at most once (no
+    ringing), and the mean error over the last 10% of the run is below the first 10%.
+  - `TestClimbTakeoverStoppingHeight` — the stopping-height goal is ahead of capture in the climb
+    direction (and behind it for a descent); a dedicated overshoot test (see Notable Discoveries for
+    why this is "overshoot stays inside the band," not a blanket "never reverses").
+  - `TestSpeedChannel` — converges into the speed band against a pitch-driven toy plant.
+  - `TestLevelOffSettlesToHeadingMode` — a continuing turn, then `turn=0`, rolls out and the law
+    switches internally to heading mode holding the settle heading (Decision 12's own "without a
+    reversal").
+  - `test_file_parses_without_a_lua_interpreter_too` — `luac5.1 -p` sanity, mirroring the sibling
+    file's own copy.
+- `aircraft-layer/tests/test_flight_control_api.py` — `test_m2s_shaper_limits_and_bands_forward_
+  when_in_bounds`, `test_an_m2_limits_field_beyond_its_bound_returns_400` (the caught bug, see
+  Notable Discoveries).
+- `body-layer/tests/test_flight_control.py` — `test_flight_control_limits_carries_m2s_shaper_
+  limits_and_bands` (every new key present and typed); the `in_band_*` fixture/assertions added to
+  `TestAdvanceFlightControlState.test_a_sample_is_parsed_into_the_mirrors`.
+
+**Counterfactuals run, restored by `shasum` before/after, never by eye:**
+1. `src/api/server.py`: reverted the `_FLIGHT_CONTROL_LIMITS_BOUNDS` addition, re-ran the two new
+   `test_flight_control_api.py` tests alone — both failed for the stated reason (`sender.sent ==
+   [(1, "take", {}, None)]` instead of the full dict; a 999°/60° out-of-bound value returning 200
+   instead of 400). Restored; sha matched; full suite re-run green.
+2. `body-layer/src/belief/flight_control.py`: reverted the three `in_band_*` assignments in
+   `advance_flight_control_state`, re-ran `test_a_sample_is_parsed_into_the_mirrors` alone — failed
+   for the stated reason (`None` instead of `True`). Restored; sha matched; full suite re-run green.
+
+### Checks
+
+**aircraft-layer**
+- `luac5.1 -p` on every touched/new `.lua` file: pass. `GETGLOBAL` audit on `flight_control.lua`
+  (`luac5.1 -l -p | grep GETGLOBAL`): every name is Lua stdlib, a genuine DCS API, or a `core.lua`/
+  cross-module global — no own helper (`law_*`, `axis_command`, `read_measured`) referenced before
+  its own `local`.
+- `ruff format --check src tests`: pass. `ruff check src tests`: pass.
+- `mypy src` (from inside `aircraft-layer/`): pass, no issues (28 source files).
+- `pytest tests -q` (full subproject suite): **952 passed** — 939 before this round's own changes
+  (measured directly, a full run right after the Lua law was wired in but before any new test file
+  existed) plus 13 new tests this round: 11 in the new `test_flight_control_law.py` toy-plant suite
+  and 2 in `test_flight_control_api.py` (the M2-limits-passthrough fix's own pin). 939 + 13 = 952,
+  confirmed by an intermediate run at 950 (939 + the 11 toy-plant tests, before the 2 API tests were
+  added).
+
+**body-layer**
+- `ruff format --check src tools tests`: pass. `ruff check src tools tests`: pass.
+- `mypy src` (from inside `body-layer/`, with `PYTHONPATH=../world-model/src`): pass, no issues (92
+  source files).
+- `pytest tests -q -n auto -m "not slow"` (full subproject suite, parallel): **3587 passed, 4
+  xfailed**. `test_flight_control.py` alone (after this round's two new tests —
+  `test_flight_control_limits_carries_m2s_shaper_limits_and_bands` and the `in_band_*` fixture/
+  assertion addition to `test_a_sample_is_parsed_into_the_mirrors`): 31 passed.
+- `tools/generate_defaults.py --write` / `test_tuning_defaults_toml.py` / `test_tuning_comment_
+  renders.py`: pass, rendered `config/defaults.toml` read back by hand.
+
+### Notable Discoveries
+
+- **A real bug, caught by writing the toy-plant altitude test, not by reasoning about the formula**:
+  `law_init_at_take`'s stopping-height goal originally called `law_stopping_height(h, w, limits.
+  max_climb_vs_mps)` — the plan's own formula ("h + w·|w|/(2·A_v)") needs the channel's
+  *deceleration* capability (`ALT_ACCEL_CAP_MPS2`, 1.0) for `A_v`, not the velocity *ceiling*
+  (`max_climb_vs_mps`, 5.0). With the wrong divisor the computed goal (201.6 m for a 200 m/4 m/s
+  climb) asked for more deceleration than the channel's own accel cap could deliver, so the toy
+  plant — run with the real accel-capped shaper — overshot that wrong goal by several metres before
+  settling back down: an actual reversal, the exact defect the plan's own "no reversal in `h_ref`"
+  bullet exists to catch. Fixed by passing `ALT_ACCEL_CAP_MPS2` instead; confirmed by re-running the
+  same scenario (goal now 208 m, matching the hand-worked figure, overshoot reduced to well under a
+  metre).
+- **A fixed-gain critically-damped shaper cannot generally guarantee zero overshoot against a
+  velocity-dependent target, even with the right divisor.** Even after the fix above, the altitude
+  toy-plant test still showed a small overshoot (~0.3–0.4 m past the 200–208 m goal, worked example
+  in the test file) for a realistic initial climb rate. The algebra: for the formula `a_ref =
+  ω²·err − 2ζω·v`, there exists a ω that exactly matches the stopping-distance physics for *one*
+  specific initial velocity, but the stopping-height goal itself scales with `v²` while the matching
+  ω scales with `1/v` — so one fixed ω cannot zero the overshoot for every climb rate the aircraft
+  might be in when taken over. `OMEGA_ALT` was raised from its first value (0.2 → 0.5 rad/s) for
+  *less* overshoot, not because 0.2 crossed the ≥10 m-floor pass criterion — review-m2.md's
+  counterfactual (reverting to 0.2 and rerunning `test_flight_control_law.py` at the plan's own
+  tested climb rates, plus the shaper's own 5 m/s ceiling) found 0.2 already well under that floor
+  (2.4 m overshoot at every rate tried, against a ~20.8–21.25 m band) and the existing test passing
+  at both gains (11/11). The toy-plant test asserts the plan's own alternative, equally-valid pass criterion ("any
+  overshoot stays inside the band") rather than a blanket "never reverses," which placeholder gains
+  cannot promise in general; 0.5 is a reasonable judgement call for less overshoot, all else equal,
+  not a value `0.2` demonstrably fails at this scale. Flagged for Flight M-A/M0-E: either a
+  materially higher `OMEGA_ALT`, or (if the user wants a stricter guarantee) a velocity-scaled
+  target/gain is a design change beyond this stage's scope.
+- **A second real bug, caught the same way, in `src/api/server.py`, not in the Lua or Python
+  `flight_control` modules**: `_FLIGHT_CONTROL_LIMITS_BOUNDS` (the `POST /command/flight_control`
+  handler's shape-validation dict) is iterated as a *whitelist* — `for field, (lo, hi) in
+  _FLIGHT_CONTROL_LIMITS_BOUNDS.items(): if field not in limits_raw: continue` — so a `limits` key
+  absent from this dict is never copied into the forwarded `limits`, with no error raised at all.
+  Body-layer's new eight wire keys would have been silently dropped at this one layer (api.server),
+  never reaching `CommandSender`/`Export.lua`, while every other check (body-layer's own tuning
+  bounds, Lua's own `FC_LIMIT_BOUNDS`) would have looked correct in isolation — this is exactly the
+  "enumerate the containing unit before fixing" lesson: a `grep` for "flight_control" bounds in the
+  Lua module alone would never have surfaced this second, independent enumeration. Caught only by
+  tracing the actual wire path end-to-end and writing a test against the real `POST` endpoint (not
+  just `CommandSender` in isolation, which the existing tests already exercised and which gave no
+  signal of the problem since it only forwards whatever `limits` dict it is handed).
+- **The `wire_seq`-vs-per-frame-goal-re-application boundary needed a design decision not explicit
+  in the plan.** `apply_goal_fields` must call `law_apply_goal` exactly once per actual goal command
+  — never by re-reading the persisted `fc_goal_heading_deg`/`fc_goal_turn` wire-echo locals every
+  frame — because `level_off`'s own internal turn-mode-to-heading-mode transition (triggered inside
+  `law_update` once `r_ref` settles) would otherwise be immediately undone the very next frame by
+  the still-persisted `fc_goal_turn = 0` being re-applied as a fresh "go to turn mode, r_goal=0"
+  command. Resolved by having `handle_flight_control_command`'s own `"goal"` branch call `law_apply_
+  goal` directly with the just-extracted local fields (never the module-level echo), and by making
+  `level_off`'s own settle transition purely internal to `law_update`'s returned state (it never
+  touches the module-level `fc_goal_*` locals at all). Not named in the plan; flagged per the brief's
+  own instruction to report a design decision an ambiguous plan boundary required.
+- **A goal commanded before capture completes (during `"taking"`) is not applied to the law at
+  all** — `fc_law` is `nil` until `law_init_at_take` runs, and `run_active_frame`'s `just_took`
+  branch does not read the pending `fc_goal_*` echo into the freshly-created law state. In practice
+  this window is at most one frame (`"taking"` normally resolves on the very next frame the capture
+  succeeds), and body-layer's own `held_*` HOLD-until-known gates block a goal action before `active`
+  is confirmed, so this should not be reachable from a real voice command — but it is a real,
+  documented simplification, not a verified impossibility, and is named here per the brief's own
+  instruction on consequential design calls.
+- **No slip-ball feedback in the pedal channel.** `LoGetSlipBallPosition` exists (confirmed present
+  in the DCS Control API reference), but no probe (including M0-A) ever read it, so its return
+  shape/units are unknown; guessing a unit conversion risked a wrong-sign pedal command, which is
+  worse than omitting the term entirely. The pedal axis runs on the collective-coupling feedforward
+  (`K_PEDAL_FROM_COLLECTIVE_RATE`) alone. Owed by a slip-ball probe, separate from M0-E's own gain
+  measurements.
+- **Every gain in the new "M2 control law constants" block is a first-cut placeholder, M0-E never
+  having flown** — `OMEGA_HEADING/ALT/SPEED`, every `K_*` gain, `T_ROLL`, the pedal limits, the
+  accel filter time constant, the output rate limit. All are named in the module's own header
+  comment rather than scattered; Flight M-A and M0-E (if it is ever flown) retune them. This is the
+  plan's own explicit framing ("written against an unmeasured plant... the gains, limits and signs
+  are placeholders"), not a gap introduced here.
+- **`sortie-log-triage`'s flight-trace section (time-to-band, time-in-band, zero crossings) was
+  not built in this round.** The plan names it under "Flight M-A" (the acceptance flight card, after
+  M1+M2 merge), not under M2's own bullet list — ambiguous which stage owns it, and per the brief's
+  own instruction ("if ambiguous, note it and leave it"), left unbuilt. It is also, structurally, a
+  skill-file edit (`.claude/skills/sortie-log-triage`), which this project's own workflow routes
+  through its own worktree/branch (root `CLAUDE.md`, "Workflow" — non-code, cross-cutting updates),
+  not bundled into a feature branch's commits — a second reason to leave it for its own pass rather
+  than build it here.
+
+## M2 review-fix round (`review-m2.md`)
+
+Three items, all fixed on `m2-fix` (branched from `review-m2.md`'s tip `f78d90af`, read in full
+first against `plan.md`'s Decisions 18/21–25 and the control-law section).
+
+**Required Fix 1 — a goal commanded during the one-frame `TAKING` window was silently dropped,
+with a false-confirmation readback.** Chose the first of the review's two named alternatives: hold
+the queued goal in `body.py`'s `_apply_flight_control` until `state.phase == "ACTIVE"`, rather than
+sending it while `TAKING` (symmetric with the `held_*` gates' own "wait for a law to exist"
+posture) — not the Lua-side alternative (reading a pending `fc_goal_*` echo inside
+`law_init_at_take`'s own caller), because the body-side fix needs no change to `Export.lua`'s
+state machine at all, and the three phases a pending goal can be caught in (`TAKING` → hold and
+retry next poll; `ACTIVE` → send as before; `PILOT`, reached only if the take's own ack times out
+first → drop, there is no law for that `take_seq` to apply it to) are already distinct fields body-
+layer tracks. Updated the stale comment this exact bug sat under in `apply_goal_fields`
+(`flight_control.lua`) — it asserted a goal arriving before capture "is not expected in practice",
+which review-m2.md's own trace (the absolute-set `axes_*` actions gate on `has_controls` alone,
+already true at `TAKING`) disproved; it now says body-layer holds the goal instead.
+
+Tests added in `test_body_flight_control.py` (`TestApplyFlightControl`): one per phase outcome —
+held-not-sent during `TAKING`, sent on the next poll once `ACTIVE`, dropped once `PILOT`.
+Counterfactual-checked by reverting the `body.py` fix (byte-for-byte, confirmed by `shasum` before/
+after) and confirming all three go red, then restoring. The two pre-existing tests that happened to
+exercise the goal-send path from `FlightControlState`'s *default* `phase="PILOT"` (an artifact of
+the test not setting phase at all, not a realistic scenario — a pending goal action only exists
+once `has_controls` is true) were updated to `phase="ACTIVE"`, the phase a goal send is actually
+reachable from.
+
+**Required Fix 2 — `TestPauseRowHolds` asserted a write happened, not that it was unchanged.**
+Both of its tests were weak the same way (`written[2001] ~= nil`). Strengthening them needed a real
+tracking error to move against during the "paused" frame, since the take's own captured state has
+zero error against its own at-take goal (every reference starts exactly at the measured value) —
+a mutated, un-frozen `law_update` would be a mathematical no-op against that input and the test
+would never go red. Added a heading-goal command (90°, against the zero-heading mock) between the
+take and the paused frame, and compared the roll/pitch written values before and after the pause
+within two wobble steps (`0.0021`; `write_outputs`'s alternating ±0.001 parity means consecutive
+writes of the *same* frozen value legitimately differ by up to one step each, so exact equality
+cannot be the assertion). Confirmed empirically (`luajit`, not just read): the unmutated code gives
+written roll `0.199`→`0.201` (within tolerance); the reviewer's exact mutation (`law_update(fc_law,
+0.5, ...)` in the pause branch, writing its result) gives `0.199`→`0.771` — both the new and the
+pre-existing huge-frame-jump test now fail under that mutation, confirmed by applying it to a
+working copy, running, then restoring and matching the pre/post `shasum`.
+
+**Documentation accuracy — `OMEGA_ALT`'s Notable Discoveries entry.** Reworded to state what the
+review's counterfactual actually measured (0.2 already well under the floor at every climb rate
+tested; 0.5 only reduces overshoot further), not that 0.2 crossed a pass/fail line it demonstrably
+did not, per review-m2.md's own table. No gain changed — this is a wording-only fix, as the review
+asked.
+
+### Checks (this round)
+
+Both subprojects' commands rerun from a clean working tree after the three fixes:
+- **aircraft-layer**: `ruff format --check`/`ruff check` pass; `mypy src` — 28 files, no issues;
+  `.claude/scripts/fast-tests.sh aircraft-layer` — 821 passed; the three flight-control-specific
+  test files — 68 passed (unchanged count: the two strengthened tests replace, not add); `luac5.1
+  -p` on `flight_control.lua` — pass.
+- **body-layer**: `ruff format --check`/`ruff check` pass; `mypy src` (`PYTHONPATH=../world-model/
+  src`) — 92 files, no issues; `.claude/scripts/fast-tests.sh body-layer` — 2814 passed (2811 + the
+  3 new `TestApplyFlightControl` cases), 4 xfailed.
+
+### Notable discoveries (this round)
+
+- The two pre-existing `test_body_flight_control.py` cases that silently relied on `FlightControl
+  State`'s default `phase="PILOT"` to exercise the goal-send path are the kind of gap `plan-aligner`
+  /this role's own "treat the plan's test-impact list as a hypothesis" step exists to catch —
+  `review-m2.md`'s required-fix list named neither test, and both would have gone stale (still
+  green, no longer testing what their name says) the moment Required Fix 1 landed, had they not
+  been found by grepping every `FlightControlState(` construction site in the touched test file
+  rather than trusting the review's own enumeration.
+
+## M1+M2 perf/security change-request round
+
+Three fixes, from `plans/flight-control/perf-m1-m2.md` finding 1 (NOW) and `plans/flight-control/
+security-m1-m2.md` Findings A and B, per the main loop's own dispatch decisions.
+
+**Perf finding 1 — `check_envelope`/`read_measured` each read `LoGetSelfData`/`LoGetIndicated
+AirSpeed`/`LoGetADIPitchBankYaw` independently, every active frame.** Reordered `run_active_frame`
+(`flight_control.lua`) to call `read_measured()` first and pass its result into `check_envelope(t,
+measured)`, which no longer makes any `LoGet*` call of its own — eliminating the duplication
+entirely (the mitigation's own suggested fallback, "one redundant `LoGetSelfData` call instead of
+three," turned out unnecessary, since `read_measured` already makes that exact call for `psi_deg`).
+The one subtlety: `read_measured`'s own fail-soft policy (zero a bad `ias_mps`/`bank_rad` read
+rather than propagate `nil`/NaN into the law) is the *wrong* policy for `check_envelope`'s own "a
+bad read means release, with a specific cause" job — reusing the zeroed values directly would have
+turned an immediate `"nan"` release into a slow `"envelope"` release once the zeroed IAS crossed the
+low-speed margin, a real behaviour change, not a pure refactor. Fixed by having `read_measured`
+also return `self_data_ok`/`ias_valid`/`bank_valid` — captured *before* the fail-soft zeroing —
+which `check_envelope` checks instead of re-reading. `bank_deg` itself needed no separate flag
+(NaN propagates through `math.deg` unchanged, so an invalid `bank_rad` already leaves `bank_deg`
+NaN rather than zeroed) but `bank_valid` is still needed to distinguish that from a `LoGetADIPitch
+BankYaw` call that returned nothing at all (`type(bank_rad) ~= "number"`), which NaN-propagation
+alone cannot tell apart from a valid zero. All 23 pre-existing `test_flight_control_lua.py` cases
+pass unchanged, confirming the refactor is behaviour-preserving.
+
+**Security Finding A — `fc_last_cmd_seq` desyncs permanently across a body-layer restart; fixed
+now (main-loop decision, per the dispatch: "it is a functional bug, not only an attack").** Chose
+option (b) from security-m1-m2.md's own two recommendations — body-layer reconciles its own
+`wire_seq` against Lua's echoed counter — over option (a) (bounding how far a single message may
+advance `fc_last_cmd_seq` in `Export.lua`), because (b) is the one that actually fixes the much
+more probable self-inflicted trigger (an ordinary body-layer restart mid-session) as well as the
+LAN-reachable one, and needs no new Lua-side policy call about "how big a jump is implausible" (a
+genuine body-layer restart after a long sortie could legitimately need to jump by dozens).
+
+**Did *not* reuse `ai_pilot_wheel.lua`'s `goal_seq ~= ai_pilot_goal.goal_seq` ("different", not
+"greater") shape the dispatch pointed at as the existing precedent** — read it first
+(`ai_pilot_wheel.lua:1322`) and it does not fit here: that check is a one-shot *trigger* dedup for
+a single field (`hvrt_step`) layered *on top of* the channel's own already-monotonic `goal_seq`
+staleness gate, not a replacement for monotonic ordering. `flight_control`'s own `seq` gate
+(`handle_flight_control_command`) is that staleness gate itself, guarding four different command
+kinds over a loopback UDP socket where out-of-order delivery is a real, named case this codebase
+already defends against (`test_a_stale_seq_is_ignored`). Switching it from "greater than" to
+"different from" would accept a genuinely stale, reordered duplicate as if it were new — the exact
+failure mode the gate exists to prevent — so the mode-2 precedent's *shape* does not transfer, only
+its *reasoning* ("let body-layer's own counter track Lua's, rather than inventing a second
+mechanism") does, which is what the reconciliation approach below actually borrows.
+
+Mechanism: `Export.lua`'s `push_flight_control_state` now echoes `fc_last_cmd_seq` itself (new wire
+field, additive — an older collector/body-layer simply never reads it, same "null means nothing new"
+posture every other optional field here has), deliberately *not* reset by `on_stop` (matching the
+field's own existing "never reset" comment one line below). `schema.flight_control.FlightControl
+State` carries it through (`last_cmd_seq`) to `GET /flight_control/latest`. `belief.flight_control.
+FlightControlState` mirrors it as `lua_last_cmd_seq` (a plain `advance_flight_control_state` mirror,
+nothing special there). The actual reconciliation lives in `body._apply_flight_control`, run
+unconditionally at the top before any send this poll: `if state.lua_last_cmd_seq is not None and
+state.lua_last_cmd_seq > state.wire_seq: wire_seq = lua_last_cmd_seq`. This only ever *raises*
+`wire_seq`, never lowers it, so it cannot reintroduce acceptance of a genuine duplicate/stale resend
+within the same body-layer session — the one property Finding A's own requirement named explicitly.
+
+Tested end to end in both languages per the dispatch instruction: `test_flight_control_lua.py`'s new
+`TestLastCmdSeqEchoSurvivesOnStop` (Lua, real interpreter) sends `seq=47`, confirms the echo, calls
+`on_stop()`, confirms the echo survives it unchanged, then confirms a reconciled `seq=48` is
+accepted. `test_body_flight_control.py`'s new `test_a_body_layer_restart_reconciles_wire_seq_
+above_lua_last_cmd_seq` seeds `FlightControlState(wire_seq=0, lua_last_cmd_seq=47)` (a fresh
+process's default `wire_seq` against a mid-sortie-high Lua counter) and asserts the actual send
+lands at `seq=48`; `test_reconciliation_never_lowers_wire_seq_below_its_own_history` seeds the
+opposite case (`wire_seq=10, lua_last_cmd_seq=3`, modelling the mirror lagging one poll behind
+this process's own last send) and asserts the send still lands at `11`, not `4`. Both new body-layer
+tests counterfactual-checked by reverting the reconciliation block in `body.py` (byte-for-byte,
+`shasum`-matched before/after) — the restart test goes red (`seq == 1`, not `48`) for exactly the
+stated reason; restored and reran clean. The Lua test counterfactual-checked the other direction:
+temporarily made `on_stop` reset `fc_last_cmd_seq` (the behaviour this fix and `on_stop`'s own
+pre-existing comment both forbid) and confirmed the echo assertion goes red, then restored
+(`shasum`-matched).
+
+**Security Finding B — `arm_lease_s` shared the generic 60 s sanity ceiling, letting any accepted
+message widen U10's 3 s escape-hatch margin by 20x.** Gave it its own ceiling at both layers that
+check it independently (`Export.lua`'s `FC_LIMIT_BOUNDS.arm_lease_s`, the HTTP layer's `_FLIGHT_
+CONTROL_LIMITS_BOUNDS["arm_lease_s"]`): **10.0 s**, chosen as roughly 3x the 3 s default — enough
+headroom that a deliberately slower lease (e.g. for a laggier LAN) is still representable without
+a code change, while capping the worst case at a third of the old ceiling and nowhere near the
+60 s every other limit still shares. body-layer's own `tuning.py` declaration for the same
+constant (`ARM_LEASE_S`, `belief/flight_control.py`) had its `hi` bound lowered from 30.0 to match
+10.0 — not because body-layer's own tunable range needs to be that tight for ordinary flying, but
+because a user-configured value between 10.0 and the old 30.0 would now be silently rejected
+*whole-message* at the wire layer (the `AC-B14` posture: an out-of-bounds limit rejects everything,
+not just that field) rather than applied, which is a worse failure than simply narrowing the
+tunable range to match. Regenerated `config/defaults.toml` with `tools/generate_defaults.py
+--write` and read the rendered output directly (not the source comment) per this project's own
+"the generator emits only the first sentence" caveat: confirmed it now reads `range: 0.5 .. 10.0`
+for `ARM_LEASE_S`. `test_tuning_defaults_toml.py`'s own staleness check passes against the
+regenerated file. No existing test asserted the old `60.0`/`30.0` ceilings directly (grepped both
+subprojects' test suites for `arm_lease_s`/`ARM_LEASE_S`); every existing Lua/HTTP test already
+uses `arm_lease_s` values of 1.0–3.0, well inside the new ceiling, so none needed updating.
+
+**Cross-key coupling check (per this role's own standing instruction to flag one even if not
+guarded):** `ARM_LEASE_S` has no asserted relationship with any other tuning key in `tuning.
+_check_scan_decay_coupling` or elsewhere — it is read only by `flight_control_limits()` and sent
+as one independent `limits` field. Not adding a new coupling check here; flagging only because the
+value *is* now coupled, outside the tuning system, to two other hard-coded ceilings (`Export.lua`'s
+`FC_LIMIT_BOUNDS.arm_lease_s`, the HTTP layer's own bound) that `generate_defaults.py` cannot see
+and does not check against — a future change to any one of the three needs a human (or a future
+`invariant-check`-style grep) to keep the other two in step; this round kept all three at 10.0 by
+hand, verified by grep.
+
+### Comment pruning (per "Prune the comment you are standing next to")
+
+Two comments pruned, both in `flight_control.lua`, right beside code this round touched:
+
+- `check_envelope`'s docstring previously only explained the `"nan"`/`"dead"` cause split; it now
+  also states why it takes `measured` rather than reading `LoGet*` itself (the fail-soft-vs-release
+  policy mismatch) — an addition, not a deletion, since the original "why the two causes exist"
+  sentences were still load-bearing and kept verbatim.
+- `read_measured`'s docstring gained one new paragraph (the `self_data_ok`/`ias_valid`/`bank_valid`
+  rationale) with nothing removed — its existing "every reader fails soft... the envelope check,
+  run separately, is what actually stops the override on real trouble" sentence turned out to be
+  exactly the load-bearing context the new paragraph needed to point back at, so it stayed.
+
+No comment was found stale enough to delete outright in either touched file this round — both
+functions' existing docstrings were accurate statements of *why*, not *what*, and remained true
+after the edits; only `check_envelope`'s call site (`run_active_frame`) changed shape, and it
+carries no comment of its own to prune.
+
+### Checks (this round)
+
+- **aircraft-layer**: `ruff format --check` — 85 files already formatted; `ruff check` — all
+  checks passed; `mypy src` — 28 files, no issues; `luac5.1 -p` on `Export.lua`, `flight_control.
+  lua`, `core.lua`, `ai_pilot_wheel.lua` — all pass; full `tests/` — 953 passed (was 821 pre-round
+  per the prior round's own count — this round's new/changed tests are `test_flight_control_lua.py`
+  (+1, `TestLastCmdSeqEchoSurvivesOnStop`) and `test_flight_control_api.py` (field additions to
+  existing assertions, no new test count); the jump from 821 to 953 reflects this subproject's test
+  suite having grown across intervening rounds not covered by this implementation.md entry, not a
+  miscount here — confirmed by `-v` name listing that every flight-control test file's own count
+  matches what this entry states (24 in `test_flight_control_lua.py`, 34 in `test_flight_control_
+  api.py`).
+- **body-layer**: `ruff format --check` → 2 files needed reformatting (`body.py`, `test_body_
+  flight_control.py`, both whitespace-only from the new code/tests) — reformatted with `ruff
+  format`, then `ruff format --check` passes; `ruff check` — all checks passed; `mypy src` — 92
+  files, no issues; `test_tuning_defaults_toml.py` — passes against the regenerated `config/
+  defaults.toml`; targeted run (`test_flight_control.py` + `test_body_flight_control.py` +
+  `test_tuning_defaults_toml.py`, `-m "not slow"`) — 45 passed (13 in `test_body_flight_control.py`,
+  up from 11 pre-round: the 2 new reconciliation tests). The full `body-layer/tests/` suite was
+  started but not completed in this round (it runs ~3+ minutes serially in this environment and the
+  targeted run plus the full `aircraft-layer` suite already cover every touched module and its
+  direct test files with no regressions) — flagged here rather than silently claimed; DoD's own
+  `--full` pass is the authoritative run for this subproject.
+
+### Notable discoveries (this round)
+
+- `read_measured` already made the exact `LoGetSelfData` call `check_envelope` needed for its
+  `"dead"` cause — the perf finding's own mitigation text assumed one redundant call would remain
+  ("one redundant call instead of three"); reading both functions side by side first showed the
+  duplication could be eliminated completely, not just reduced by two of three.
+- The dispatch pointed at `ai_pilot_wheel.lua`'s `goal_seq ~= ai_pilot_goal.goal_seq` shape as "the
+  existing shape to reuse where it fits" — it did not fit, and the 15 minutes spent reading that
+  call site first (rather than assuming the pointer was correct and copying the shape) is what
+  caught that before it became a wire-ordering regression. Worth recording because the dispatch
+  text itself invited exactly that copy.
+- `arm_lease_s`'s new 10.0 s ceiling is now a value asserted identically in three places
+  (`Export.lua`, `aircraft-layer/src/api/server.py`, `body-layer`'s `tuning.py` `hi` bound) with no
+  single mechanical check tying them together — `test_export_lua_constants_parity.py` exists for a
+  *different* pair of constants (the `watched_args`/`read_args` size bound) and does not cover this
+  one. Not fixed in this round (out of the dispatch's stated scope), but worth a backlog item if
+  this project wants `invariant-check`-style coverage for "the same safety-margin ceiling, declared
+  in three languages/layers, stays in step" more generally — `arm_lease_s` is the first instance of
+  that specific shape in this codebase.
