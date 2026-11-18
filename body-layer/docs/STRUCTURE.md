@@ -328,7 +328,11 @@ The entries are in the order they were written, which is roughly perception → 
   (`GET /f10_commands/poll`): unlike every other `get_*` method here, its
   empty state is `[]`, not `None` (the aircraft layer's response is always
   a JSON list) — it still raises `AircraftLayerError` on transport/parse
-  failure like the rest of them.
+  failure like the rest of them. `write_flight_control`/`get_flight_
+  control_latest` (BL-16 mode 1, `plans/flight-control/plan.md`, "Revised
+  2026-11-18") are the mode-1 handover/goal channel's own write/read
+  pair, same raise-on-write-failure/`None`-on-empty-read posture as
+  `write_ai_pilot_goal`/`get_ai_pilot_wheel_latest`.
 - `src/belief/audio_client.py` (BL-10 first slice, `plans/tts-voice-output/plan.md`) —
   `AudioAdapterClient`, an HTTP client for `audio-adapter`'s `POST /speak` endpoint. This subproject's
   own, independent copy of the same shape `aircraft_client.py` already has (not an import of
@@ -762,7 +766,14 @@ The entries are in the order they were written, which is roughly perception → 
   `--expected-area-log`) names which `area_visibility` clause failed, for logging only — it never
   feeds back into the verdict `area_visibility` already decided. See `expected_area_log.py`'s own
   module docstring for why that log exists and `belief/expected_area.py`'s entry below for the
-  mechanism this function drives.
+  mechanism this function drives. **BL-16 mode 1 Stage M1** (`plans/flight-control/plan.md`,
+  "Revised 2026-11-18") adds `_apply_flight_control` (the mode-1 sibling of `_apply_ai_pilot_
+  wheel_goal`: sends `crew_console.flight_control_transition`/`flight_control_goal_transition`,
+  bumps `FlightControlState.wire_seq`, and re-sends `arm` every poll while `OVERLAY`/`unpark_
+  take` — the lease, U10) and the `run_once(flying=...)` parameter (U6: clamps `decide_optic`'s
+  chosen optic down to `UNAIDED_OPTIC`, the same external-clamp shape the pre-existing sight-
+  not-ready cap already uses, rather than a new `decide_optic`/`OpticState` parameter) — see
+  `belief/flight_control.py`'s own entry below for the state machine these call into.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`GAZE`/`COCKPIT_MASK`/`OPTIC_FOV`/
   `RANGE_OR_SIZE`/`TERRAIN_LOS`/`FOREST`/`ADMITTED`/`PLAYER_BUBBLE` — `FOREST` added `plans/
   forest-occlusion/plan.md` Stage 1, the answer to "lost in forest" vs. "lost to terrain LOS" a
@@ -952,7 +963,14 @@ The entries are in the order they were written, which is roughly perception → 
   fragment identical in shape to `_contact_report_text`'s own but deliberately not shared with it,
   since that helper also carries a count clause and a `", moving"` tail this milestone's
   vocabulary never calls for) and `render_attack_run_off()` (`"Attack run off."`, `disengage`'s
-  readback).
+  readback). **BL-16 mode 1 Decision 22/21** (`plans/flight-control/plan.md`, "Revised
+  2026-11-18") adds two `_UNABLE_TEMPLATES` entries: `"TOO_SLOW"` (`take_controls`'s own refusal,
+  IAS below `MIN_IAS_KMH`) and `"AI_OVERLAY"` (reached from two places — `turn_continuous` with no
+  degrees heard while flying through the overlay, and `release_controls`/"I have controls" said
+  there, U9). The forced-handover/self-release line ("You have controls!") is **not** a
+  `_UNABLE_TEMPLATES` entry — it lives in `belief.flight_control.decide_flight_control`, the one
+  place both of its triggers (Co-moving rows 7 and 9a) meet; named here so the exception to
+  "wording lives in this module" is not mistaken for an omission.
 - `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-7) — BL-14's alignment
   derivation. This module and `percept.py` are the only two files under `belief/` allowed to
   mention `relative_direction`/`RelativeDirection` (grep-fenced, `test_attack_run.py`, mirroring
@@ -1355,6 +1373,21 @@ The entries are in the order they were written, which is roughly perception → 
   (and `speech_log_sink`'s own callable type grew a third parameter to match) — `drain_attack_run`
   is the only caller that ever supplies it, carrying the target contact id, tier, and current
   azimuth/elevation error for the sortie log.
+  **BL-16 mode 1 Stage M1** (`plans/flight-control/plan.md`, "Revised 2026-11-18") widens this
+  class on top of mode 2's own fields: `flight_mode()` is the **one** place that decides
+  `"overlay"`/`"axes"`/`None` (read by `rules.actions._by_mode` for all 16 shipped flight
+  actions); `flight_control_state` is this class's own **authoritative** copy (not a mirror of
+  something `body.py` alone writes, unlike `parked_flight_state`) because `take_controls`/
+  `release_controls` must act synchronously, at once, never deferred to the next poll; `ias_kmh`/
+  `poll_now_sim` are two new "refreshed every poll" fields (the `on_ground` precedent) because no
+  existing path threads `now_sim`/live telemetry down into a rule's own action `invoke`.
+  `current_crew_state()`'s `held_*` now fall back from the axes mode's own commanded value to
+  `FlightControlState.measured_*` (plain telemetry) whenever nothing has been commanded yet this
+  activation — mode 1 has no AI pilot reporting a pre-existing held value the way mode 2's
+  overlay readback does, so without the fallback the gates would HOLD forever on the very first
+  command after a fresh take. See `belief/flight_control.py`'s own entry for the actions/state
+  machine this class's new methods (`take_controls`/`release_controls`/`axes_*`/`drain_flight_
+  control`) delegate to.
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import
@@ -1442,7 +1475,15 @@ The entries are in the order they were written, which is roughly perception → 
   compass scan never steered gaze at all** — see `perception/gaze.py`'s and `body.py`'s own
   Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `body._active_gaze`'s
   absolute→relative conversion). The nine new tokens are **unbenched**, same cost class as
-  `cancel_scan`/`cancel_watch` before 2026-09-23.
+  `cancel_scan`/`cancel_watch` before 2026-09-23. **BL-16 mode 1 Decision 13** (`plans/
+  flight-control/plan.md`, "Revised 2026-11-18") adds `HANDOVER_TOKENS` (`you_have_controls`/
+  `i_have_controls`), checked in `classify_response` ahead of the ordinary `ACT_FLOOR`/`CONFIRM_
+  FLOOR` comparison: neither token ever answers "confirm?" — `you_have_controls` acts from
+  `CONFIRM_FLOOR` up (U8), `i_have_controls` at any matched confidence; an ambiguous match between
+  the two resolves to a release while Petrovich already has the controls (the safe-side reading:
+  handing back is safe even if misheard) and "say again" otherwise. The new `has_controls`
+  keyword (default `False`, a true no-op for every other token) is this branch's one new input —
+  `classify_response`'s own docstring has the full ordering.
 - `src/perception/gaze.py` — `ScanPlan` (module docstring: pure per-`t_sim` `gaze_at`), unchanged
   in its core shape since 2C except for one Stage 5 addition (`plans/voice-command-completeness/
   plan.md` Decision 5): a `commanded_legs: tuple[int, ...] | None` field carrying o'clock legs
