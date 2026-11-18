@@ -52,7 +52,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B14]] — `handle_ai_pilot_goal_command` skips the Lua-side enum/bound check its siblings
   have (low/low; `cockpit_switch` precedent already accepts a broader version of this exposure)
 - [[AC-B15]] — `json_escape_string` escapes only `\`/`"`/`\n`, not the rest of JSON's required
-  control-character set (low/low; same gap `BL-B91` already fixed for the TOML renderer)
+  control-character set (REJECTED 2026-11-18, user: extremely unlikely)
 
 ## Keeping this current
 

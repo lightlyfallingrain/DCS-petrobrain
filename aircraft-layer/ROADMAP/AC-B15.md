@@ -1,6 +1,6 @@
 # AC-B15 — `json_escape_string` escapes only `\`/`"`/`\n`, not the rest of JSON's required control-character set
 
-- [ ] **AC-B15 — Escape every C0 control character (or reject the field) in `core.lua`'s `json_escape_string`, not just backslash/quote/newline.** #status/open
+- [x] **AC-B15 — Escape every C0 control character (or reject the field) in `core.lua`'s `json_escape_string`, not just backslash/quote/newline — REJECTED 2026-11-18 (user), not fixed.** #status/done User: *"reject AC-B15, extremely unlikely to happen"*.
 
 `aircraft-layer/dcs-export/Petrobrain/core.lua:180-183`:
 
