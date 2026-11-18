@@ -31,7 +31,7 @@ SEGMENTS, in order:
     B1 sweep pedals                                 (read)
     B2 feet off: 2003 = captured, +-0.05, +-0.10, 3 s each   (write)
     C1 sweep collective                             (read)
-    C2 2004 = captured, then +0.02 / -0.02, 2 s each  (write; auto-abort)
+    C2 collective (iCommandPlaneCollective) = captured, then +0.02 / -0.02, 2 s each  (write; auto-abort)
     D1 hold all enabled axes 30 s while the pilot stirs, dither 1e-3 (write)
     D2 same, dither 1e-4                            (write)
   Operator seat, copilot controls UNPARKED (amendment change 1):
@@ -78,7 +78,13 @@ local ARG_STICK_PARK = 852
 local ARG_PEDALS_PARK = 952
 local AI_PILOT_PARK_THRESHOLD = 0.9   -- production's value
 
-local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2004 }
+-- Collective: NOT 2004 (flight 5: 2004 left arg 1102 untouched). The Mi-24P
+-- binds "Flight Control Collective" to `iCommandPlaneCollective` (both seats'
+-- Input/*/joystick/default.lua), whose number is not in any shipped Lua file.
+-- LuaExportStart reads it from the global if Export.lua's environment has it;
+-- otherwise collective writes are refused (nil), never guessed.
+local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = nil }
+local COLLECTIVE_CMD_NAME = "iCommandPlaneCollective"
 -- command = SIGN * arg. pitch/roll proven +1 (probe v2); pedals proven -1
 -- (flight 3 B2, 2026-11-18: 2003 = +0.05 held arg 1103 at -0.050 exactly);
 -- collective -1 from ED's comment, C2 tests it.
@@ -121,13 +127,13 @@ local SEGMENTS = {
     { id = "B1", kind = "read", pass_start = true, say = "sweep pedals slowly full left -> full right -> centre" },
     { id = "B2", kind = "pedals", say = "feet OFF the pedals; probe writes 2003" },
     { id = "C1", kind = "read", say = "sweep collective slowly low -> high -> back" },
-    { id = "C2", kind = "collective", say = "hand OFF the collective; probe writes 2004" },
+    { id = "C2", kind = "collective", say = "hand OFF the collective; probe writes the collective" },
     { id = "D1", kind = "hold", dither = DITHER_D1, say = "stir stick 10 s, pedals 10 s, collective 10 s" },
     { id = "D2", kind = "hold", dither = DITHER_D2, say = "same again, smaller dither" },
     { id = "B1o", kind = "read", pass_start = true, say = "OPERATOR seat, copilot controls unparked: sweep pedals" },
     { id = "B2o", kind = "pedals", say = "feet OFF the pedals; probe writes 2003" },
     { id = "C1o", kind = "read", say = "sweep collective slowly low -> high -> back" },
-    { id = "C2o", kind = "collective", say = "hand OFF the collective; probe writes 2004" },
+    { id = "C2o", kind = "collective", say = "hand OFF the collective; probe writes the collective" },
     { id = "D1o", kind = "hold", dither = DITHER_D1, say = "stir stick 10 s, pedals 10 s, collective 10 s" },
     { id = "D2o", kind = "hold", dither = DITHER_D2, say = "same again, smaller dither" },
     { id = "J1", kind = "park", capture = "pilot", say = "operator seat: park, ~20 s, unpark" },
@@ -428,6 +434,9 @@ local function schedule(t, s)
         end
         return { pedals = cmd }
     elseif def.kind == "collective" then
+        if CMD.collective == nil then
+            return false, "collective command id unknown (" .. COLLECTIVE_CMD_NAME .. " not a global here); nothing written"
+        end
         local acc, step = 0.0, nil
         for _, st in ipairs(C2_STEPS) do
             if el < acc + st[2] then step = st break end
@@ -494,7 +503,9 @@ end
 
 local function send(cmds)
     pcall(function()
-        for axis, v in pairs(cmds) do LoSetCommand(CMD[axis], v) end
+        for axis, v in pairs(cmds) do
+            if CMD[axis] ~= nil then LoSetCommand(CMD[axis], v) end
+        end
     end)
 end
 
@@ -582,6 +593,18 @@ function LuaExportStart()
         "LoGetRadarAltimeter" }) do
         local f = _G[n]
         log(string.format("  %s: %s -> %s", n, type(f), tostring(call(f))))
+    end
+    log("COMMAND GLOBALS (pitch should read 2001 if this environment has them)")
+    for _, n in ipairs({ "iCommandPlanePitch", "iCommandPlaneRoll", "iCommandPlaneRudder",
+        "iCommandPlaneThrustCommon", COLLECTIVE_CMD_NAME, "iCommandHelicopterCollective" }) do
+        log(string.format("  %s = %s", n, tostring(_G[n])))
+    end
+    local coll = _G[COLLECTIVE_CMD_NAME]
+    if type(coll) == "number" then
+        CMD.collective = coll
+        log(string.format("  collective writes use %s = %d", COLLECTIVE_CMD_NAME, coll))
+    else
+        log("  collective command unknown: C2 will refuse to write, D holds no collective")
     end
     header()
     started = true
