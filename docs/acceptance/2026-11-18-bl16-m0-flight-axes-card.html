@@ -319,7 +319,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
     <h2>What this flight decides</h2>
     <p>Whether Petrovich can fly on the raw controls at all, and the numbers his control loop needs. One question outranks the rest: <strong>when the probe holds the controls, does your physical stick still move the aircraft?</strong> If it does, mode 1 can't work as designed.</p>
     <div class="facts">
-      <div class="fact"><b>19</b><span>segments, one trigger</span></div>
+      <div class="fact"><b>20</b><span>segments, one trigger</span></div>
       <div class="fact"><b>~25 min</b><span>flight time, both seats</span></div>
       <div class="fact"><b>150 km/h</b><span>~200 m AGL, flat ground</span></div>
     </div>
@@ -485,7 +485,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
 
   <section class="step">
     <div class="step-head">
-      <h3><span class="n">J</span>Park and unpark while held: J1, J2, J3</h3>
+      <h3><span class="n">J</span>Park and unpark while held: J1–J4</h3>
       <label class="step-check"><input type="checkbox" id="sj" data-k="sj" aria-label="Segment J done"></label>
     </div>
     <div class="block">
@@ -495,6 +495,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
         <li><strong>J1</strong>: half-press, then press <strong>Request Aircraft Control</strong> to park. The probe stops writing the moment ED's AI takes over. Let the AI fly about 20 s, then press it again to unpark. In that same frame the probe takes the controls back and holds for 10 s.</li>
         <li><strong>J2</strong>: the same again. The probe uses a different starting position this time.</li>
         <li><strong>J3</strong>: half-press, park, then <strong>swap to the pilot seat</strong> while parked. The probe takes the controls back at the swap and holds 10 s.</li>
+        <li><strong>J4</strong>: you're now in the pilot seat with the copilot controls still parked. Half-press (pilot ICS), then <strong>swap back to the copilot seat</strong>. The AI overlay comes back on and the probe stops writing. After about 20 s, press <strong>Request Aircraft Control</strong>; the probe takes the controls back and holds 10 s.</li>
       </ul>
     </div>
     <div class="block expect">
@@ -505,6 +506,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); out
       <span class="tag">Record</span>
       <ul>
         <li>At each unpark, and at J3's swap: did the aircraft jump, and which way?</li>
+        <li>J4: did the AI overlay really take over when you sat back in the copilot seat?</li>
         <li>Was J1 or J2 smoother?</li>
       </ul>
     </div>
