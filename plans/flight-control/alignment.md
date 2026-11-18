@@ -1452,3 +1452,187 @@ new "Mode 1 carries mode 2's command set" section at the file's end.
 None beyond the plan's own Q-P3-1..6, already open above (unchanged by this check). The two
 Findings are mechanism fixes, not decisions — Architect/Implementer can close both without
 further input.
+
+## Goal check — 2026-11-19 (mode 1: breaks, rotor envelope, rates as flight parameters)
+
+**Verdict:** CONCERNS — two. Mode 1's merged bank self-release would hand the aircraft back in the
+middle of every break (F-M1). And "rate as a settable flight parameter", if read the way altitude
+and speed are, would make every turn after a break into another break (F-M2). Both are grounded in
+the user's own words and in code on `main`, and each settles in a line. The rest is questions, of
+which one matters most: whether engine RPM falls when rotor RPM does (Q-M1-1).
+
+Scope: the next BL-16 batch on `feature/bl16-mode1-break` at `e2067c77` (= main). It covers
+(a) "break turn left/right" and "break away" in mode 1, (b) the rotor envelope across every
+mode-1 state, and (c) turn rate, climb rate and acceleration as goals that mode 1 flies to.
+Inputs:
+
+- explore-notes 2026-11-18 sections: "Mode 1 carries mode 2's command set", "Recovery heading,
+  and the mode-1 break / rotor envelope", "Mode 1: rates as settable flight parameters", plus the
+  2026-11-15 wheel notes (line ~605) and the 2026-10-26 yaw note (line ~225);
+- plan.md, "Revised 2026-11-18 — mode 1": the control law and the behaviour constants;
+- plan.md, P3+P4 and its Amendment, where the mode-1 break design was withdrawn;
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` on main: `check_envelope` and
+  `fc_limits`;
+- `body-layer/config/rules/flight.lua`.
+
+E1–E10 (mode 1, 2026-10-31) and E-P1–E-P21 (mode 2) stand. New here: E11 onward, F-M*, Q-M1-*.
+
+### Why
+
+A break is the pilot's evasion: *"Break left"* when something is shooting or about to. With
+Petrovich on the raw axes, the pilot's hands are off the controls. That is the point of mode 1:
+he is looking out, or at the map. So the turn has to come from Petrovich, **now and hard**, and it
+must not cost the aircraft its rotor or its height near the ground.
+
+Why does that matter? Because the pilot will only hand the aircraft over at low level, in a combat
+zone, if the crewmate flying it can be trusted to manoeuvre it hard without killing it. That is the
+lasting why from 2026-10-31: *"a crewmate who can be trusted with the aircraft at low level"*.
+
+Rates as parameters are the means to that. A gentle turn, an ordinary turn and a break are then
+one behaviour with different asks, and the rotor envelope is the one thing every ask is limited by.
+The user's standing direction adds the second half of the why: the pilot should not have to know
+which mode he is in for a command to do what he expects (*"same commands to do same things in
+Mode 2 and Mode 1 as much as possible"*).
+
+### Player expectations
+
+- **E11 — "Break turn left/right" is a hard 90° that way, starting at once.** "Breaking left." The
+  bank goes steep (60–80°), the pedal goes into the turn, and the heading swings quickly. He rolls
+  out about 90° from the heading he had when he spoke, and holds it. The phrase and the end
+  heading are the same as mode 2's (E-P17, E-P21). It supersedes any heading goal and any running
+  turn; latest wins (F-P7 answer).
+- **E12 — A break does not cost much height and never goes near the ground.** It loses at most
+  about 100 m and never goes below 40 m AGL. Speed stays near what it was when the break began, so
+  the aircraft does not come out of a break slow and wallowing (user: *"keep the speed up at about
+  what it was … fluctuation is allowed"*).
+- **E13 — "Break away" is a hard 180° to the left**, ending roughly reciprocal to the starting
+  heading. "Breaking away." It is left for the same reason as in mode 2: *"Mi-24 turn faster
+  left, therefore 180 should be to the left"* (user, 2026-11-15). That is a property of the
+  aircraft, not of ED's AI, so it carries over. The two-presses-2-s-apart mechanism does not carry
+  over: mode 1 can fly one continuous 180°, and nothing the pilot sees should be a pause halfway.
+- **E14 — Petrovich keeps the controls through any break.** The pilot never hears "You have
+  controls!" because a break went steep. A hand-back mid-evasion, at low level and 70° of bank, is
+  the worst moment he could get it. (See F-M1: as merged, this is broken.)
+- **E15 — Whatever mode 1 is doing, the rotor RPM does not sag below the floor (85%, tunable) and
+  the blades do not stall.** That covers the take, a hold, a climb, a speed change, a turn and a
+  break. The pilot never sees RPM sag or an uncommanded pitch-up or roll at high speed under
+  Petrovich's hands. When the envelope limits what was asked, the aircraft just does less of it:
+  a shallower turn, a slower climb, speed bleeding off at high IAS. He does not announce it,
+  consistent with E7's "silent on a goal merely not reached".
+- **E16 — An ordinary turn after a break is an ordinary turn.** "Turn left 30" after a break flies
+  at the ordinary rate, not at break rate. A gentle, ordinary or hard turn differs only in the
+  rate it is asked for, which lasts as long as the command that asked for it.
+- **E17 — The take is smooth whatever the rotor state.** If Petrovich takes the controls with RPM
+  already low, or at high speed with high collective, he eases out of it smoothly within E2's "nothing jumps"
+  rather than with a jerk or a hand-back.
+- **E18 — Several things can change at once.** A break and a climb, or a speed change and a turn,
+  are flown together, not one after the other (the user: *"simultaneous or fast sequential
+  changes can happen"*), within the one envelope.
+
+### Open assumptions
+
+- **Is a requested rate sticky, like an altitude or speed goal?** Serves the why: a rate belongs
+  to the command that set it. A heading goal carries its own turn rate until it is reached; a
+  continuous "turn left" keeps its rate until "stop turn"; climb rate and acceleration likewise
+  last for their altitude or speed goal. Would not: a rate stored as a standing parameter, so
+  that every later turn inherits the last one's rate. → F-M2.
+- **Spoken rate words.** Serves the why: none this batch. The user asked for rates as *parameters*,
+  not as words, and the existing commands (and the break) set them. Would not: inventing
+  vocabulary such as "gentle turn" or "climb rate 5" without the user. → Q-M1-3.
+- **What a break supersedes.** Serves the why: the heading goal and any continuous turn, as in
+  mode 2 (F-P7 answer: *"a break supersedes any outstanding heading goal"*). The altitude and
+  speed goals stay. The break's ≤100 m height loss is an *allowance*, not a new altitude goal, so
+  afterwards the aircraft climbs back to the altitude goal it had. Would not: a break that resets
+  the altitude goal to wherever it bottomed out. That leaves the pilot ~100 m lower than he set,
+  with nothing said.
+- **What "keep speed near entry" means at high entry speed.** Serves the why: the envelope wins
+  (user: *"things to avoid in any Mode 1 state, whatever we are doing"*). A break started at
+  270 km/h lets speed bleed below the retreating-blade-stall region, because high collective at
+  that speed is exactly the stall case. Would not: holding 270 km/h through a break by adding
+  collective.
+- **What the pedal does in a break.** Serves the why: the user's *"pedal to direction of turn"*,
+  i.e. yaw is driven into the turn. That is more than the merged law's pedal, which only
+  coordinates (β → 0). The small right-pedal margin (user, 2026-10-26) means a right break may be
+  weaker, at low speed especially, which the user already expects. Would not: reusing
+  coordination-only pedal and calling it a break.
+- **Where the rotor envelope sits in the saturation priority.** The merged order is floor, then
+  altitude, then speed. Serves the why: rotor RPM and blade stall above altitude and speed. Their
+  order against the terrain floor is genuinely the user's call. → Q-M1-2.
+- **What happens when the envelope cannot hold the RPM floor.** Serves the why: he keeps flying,
+  lowers collective as fast as the rate limits allow, and stays silent (E15). Would not: a new
+  self-release reason that hands a drooping, low aircraft to the pilot. Listed, not asked; the
+  user may still want a callout.
+- **A take during a mode-2 break.** The pilot says "break left" parked, ED flies it, and he unparks
+  mid-turn. Serves the why: mode 1 carries the break to the heading Petrobrain asked ED for
+  (E-P17's ±90). Would not: today's take rule, which inherits the measured turn rate as a
+  continuous turn capped at the ordinary bank. The aircraft would then orbit at 20° bank instead of
+  rolling out. (The bank at take is F-M1.)
+- **The RPM source.** Engine RPM stands in for rotor RPM (user decision), and the next test card
+  carries the reminder to find the rotor-RPM read. Whether the engine RPM DCS exports *falls* when
+  the rotor droops is the agent's doubt, not a fact. → Q-M1-1.
+
+### Findings
+
+1. **F-M1: The merged envelope self-release hands the aircraft back in the middle of every
+   break.** Lens: the envelope / crew sense. Breaks E11 and E14.
+   - On main, `check_envelope` (`flight_control.lua`) releases with "envelope" when
+     |bank| > `max_bank_deg` + `ENV_BANK_MARGIN_DEG`, which is 30 + 10 = **40°**. The law also
+     clamps φ_d to ±`max_bank_deg` (30°).
+   - The user wants 60–80° in a break. The obvious filling is to raise the requested turn rate and
+     leave the envelope alone. The break then reaches 30°, and the moment anything overshoots 40°,
+     Petrovich speaks the urgent "You have controls!".
+   - The other obvious filling is to raise `max_bank_deg` to 80°. That quietly moves the bank
+     self-release for **every** mode-1 state to 90°, which effectively removes the bank safety for
+     ordinary flight.
+   - The same check catches a take during a steep turn. The vignette is an unpark during a mode-2
+     break, which ED flies at whatever bank it uses (unknown to us): the take could release in its
+     first frame.
+   - The pilot would see: "Break turn left." → "Breaking left." The aircraft rolls hard, and
+     "You have controls!" comes at 70° of bank and 60 m AGL.
+   - Grounded in: the user's *"steep bank in any case, I'd say 60 to 80 degrees"*; the code on
+     main; plan.md "Behaviour constants" (`MAX_BANK_DEG` 30, "judgement").
+   - Suggests: the bank limit and its self-release follow what is being flown: steep while a break
+     is flown, the ordinary limit otherwise, and a take at steep bank is not a release by itself.
+     Architect decides how. The rotor envelope (E15) is the real protection in a break; the bank
+     release backs it up.
+
+2. **F-M2: "Rate as a settable flight parameter" read like altitude/speed makes every later turn a
+   break.** Lens: purpose. Breaks E16.
+   - The user's words: *"turn rate as one flight parameter that can be set and mode 1 flies to
+     it"*, *"Climb rate similarly, and acceleration"*. The most literal build is three new
+     standing goals beside heading, altitude and speed.
+   - In the cockpit: "Break turn left" sets turn rate to maximum. Two minutes later, "turn left
+     30" is flown at 70° of bank, and "altitude 300" climbs at whatever the last command asked.
+   - Grounded in: the user's own purpose for rates, *"That'd get us different turns easily"*. The
+     turns differ *per command*. The withdrawn plan's break design already had to reset its bank
+     "once the goal settles, so a later plain 'turn left 20' is not left flying at the break's
+     bank".
+   - Suggests: a rate is part of the command that sets it and lasts as long as that goal (see Open
+     assumptions). If the user does want standing rates (a "fly gently" mode), that is Q-M1-3.
+
+3. **F-M3: Mode-1 breaks need no new phrases; the refusals are what change.** Lens: crew sense.
+   Informational. The `cbtm_break` / `cbtm_break_away` rules and their readbacks are already in
+   `flight.lua`, with the mode-1 axes body raising "Unable, not ready." as a temporary stub. This
+   batch replaces that stub; it adds no rule and changes no wording, so the pilot hears exactly
+   mode 2's phrases (E-P21). "Align" / "align for launch" stay "Unable, AI overlay." (E-P20).
+
+Vignette walked: 70 m AGL, 260 km/h, heading 090, altitude goal 70 m AGL, mode 1. "Break turn
+right." Right pedal margin is small, but at 260 km/h it is not the hover case, so the bank goes
+steep. Collective comes up for lift, and at 260 km/h that is the blade-stall case. The envelope
+caps the collective, so the turn tightens by trading speed: IAS drops toward ~230, which the
+"keep speed near entry" allowance has to tolerate here. Height sags 30 m to 40 m AGL: the floor
+holds at 40, and the 100 m allowance is not reached. The aircraft rolls out on 180. Under F-M1 as
+merged, it never got there, because "You have controls!" came at 41° of bank. Under F-M2's
+literal build, the next "turn left 20" goes to 70°. With both settled, it flies E11/E12/E15 and
+then climbs back to 70 m AGL (Open assumptions, "what a break supersedes").
+
+### Questions for the user
+
+- **Q-M1-1** — In the DCS Mi-24P, does the engine RPM you'd use as the proxy *fall* when the
+  rotor droops under high collective? If it is the turbocompressor (gas generator) gauge, it
+  usually *rises* with collective, and an 85% floor on it would never fire. If it does not fall,
+  is building the floor now and swapping the source after the next flight still what you want?
+- **Q-M1-2** — Low and slow near the 40 m floor, the terrain floor wants collective that the RPM
+  floor won't give: which wins, the ground clearance or the rotor RPM?
+- **Q-M1-3** — Rates this batch: only set by the existing commands and the breaks (recommended),
+  or do you want spoken words for them now, e.g. "gentle turn left" or a standing "fly gently"?
