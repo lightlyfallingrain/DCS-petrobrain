@@ -818,3 +818,12 @@ Asked against a sketch: "Align." → "Aligning." (short up); "Align for launch."
    like Gazelle, but that is much further along."* — align/align-for-launch/breaks are mode-2-only;
    in mode 1 they answer "unable" (the existing `_by_mode` "Unable, AI overlay." shape, mirrored).
    No mode-1 alignment is planned.
+
+### Follow-up on the goal check's open assumptions (user, 2026-11-18, verbatim)
+
+- **"Level off" with no alignment running:** *"it is a command to fly straight and level,
+  regardless of when it was called."*
+- **Recovery order:** *"altitude, heading, speed"*.
+- **"Align for launch" again mid-recovery:** *"command align for launch"* — a fresh align for
+  launch, not ignored.
+- **Break vs. alignment:** *"break cancels alignment"*.
