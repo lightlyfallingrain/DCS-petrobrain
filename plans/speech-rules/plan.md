@@ -199,7 +199,8 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
 - **D11 — `--print-rules`**, in the shape of `--print-tuning`: it loads the rules standalone and
   prints every id, pattern and failure. With `--audio-adapter-url` it also pushes the rules and
   prints the adapter's verdict. This is how the pilot checks an edit without flying (E2/E5).
-- **D12 — "Scan/report bearing NNN" becomes relative now, in Stage 1a, not when scan/report are
+- **D12 — REJECTED 2026-11-18 with Stage 1a** (see "Stages 1a and 10 rejected" under Stage 1a
+  below); kept for the record. **"Scan/report bearing NNN" becomes relative now, in Stage 1a, not when scan/report are
   ported.** The user accepted it as relative (U9). Leaving it unbuilt until Stage 6 would mean
   weeks of "say again" for a phrase the pilot uses out of habit. It runs on machinery that already
   exists. The relative bearing is rounded to the nearest clock hour, following the user's
@@ -712,8 +713,23 @@ pin the newest version that has one. Confirm and record in
 If the instruction cap cannot be had, stop and report. That decides whether a runaway rule can
 freeze the poll loop.
 
-**Stage 1a — the bearing→heading rename on the command surface (Python only, no Lua).** Scope as
-recommended in U17; the open choice is there.
+**Stages 1a and 10 rejected (user, 2026-11-18).** Both renames are dropped, along with D12, U9's
+relative "scan/report bearing" and U17's scope. The user had mixed up the two words with their
+meaning somewhere else:
+
+> *"Drop 1a and 10, mark then rejected. I confused "heading" and "bearing" usage from an another
+> thing. Rule: heading refers to heading we fly or want to fly. Bearing is heading from a point,
+> often ownship. Leave existing wordings as they are."*
+
+So the codebase's existing usage is already right. **Heading** is the direction the aircraft flies
+or should fly, which is the Stage 1b `heading` slot type and "turn heading". **Bearing** is the
+direction from a point, usually ownship, to something: today's "scan/report bearing NNN",
+`geometry.bearing_deg`, `BEARING_SIGMA_DEG`. No spoken wording and no identifier changes. The WIP
+branch `wip/bl17-stage1a-rename` holds the abandoned build and is not to be merged. The Stage 1a
+text below is kept for the record only.
+
+**Stage 1a — REJECTED 2026-11-18 (above). The bearing→heading rename on the command surface
+(Python only, no Lua).** Scope as recommended in U17; the open choice is there.
 1. Vocabulary: "scan/report heading NNN" (compass, exactly three digits, any value 000–359) replaces
    "scan/report bearing NNN". The new "scan/report bearing NNN" is relative (D12). `parse_bearing`
    splits into `parse_heading_digits` and `parse_bearing_digits`, each keeping the three-way
@@ -982,6 +998,12 @@ supports it (U23).
    (from `audio-adapter/`) to see the prompts, then
    `PYTHONPATH=src .venv/bin/python tools/record_corpus.py --corpus-dir tests/fixtures/corpus/bl17-stage3c/ --phrases-file tests/fixtures/corpus/bl17-stage3c-phrases.txt`
    to record (both verified run in that DoD pass, not just read from the tool's `--help`).
+   **Revised 2026-11-18 when BL-17 was parked:** the list now covers every shipped `flight.lua`
+   wording (41 phrases, each checked to match its rule), drops "straight" and "turn left 30", and
+   drops the per-state refusal repeats. Recording state is irrelevant because the clips are audio
+   only, and the bench assigns each phrase its state. Clips go to the git-ignored
+   `data/corpus/bl17-stage3c/`, the established corpus location, not `tests/fixtures/`. The
+   user's instructions are `docs/acceptance/2026-11-18-bl17-stage3c-recording-card.html`.
 4. **Measurement**: `tools/stt_bench.py` run three times against the recorded corpus (full prompt /
    in-state-first / out-of-state-removed), reported as `research/2026-11-17-state-hint-bench.md`
    (dated Investigator-style research note, since this is reconnaissance on recognition behaviour,
@@ -1051,7 +1073,7 @@ pass when scheduled):
 | 7 | `watch.lua`, `target.lua` | `watch_*`, `follow`, `cancel_watch/task`, `select_target`, `drop_target`, `step`, `engage`, `disengage`, `point` | target choice as an action returning one unit or `nil` (U5) |
 | 8 | `marks.lua` | `mark_here`, `mark_target`, plus new offset, origin and place marks (U14–U16) | needs the union types (D7), ownship pose at PTT release, terrain elevation, waypoint numbering (R8), map-feature lookup |
 | 9 | — | delete the legacy matcher branches and `PHRASES` apart from routing | — |
-| 10 | — | full internal bearing→heading rename: compass-meaning "bearing" in perception, world-model, DCS-side Lua and tests; `BEARING_SIGMA_DEG` with the old key still read (U17). **Method, approved by the user 2026-11-17** (*"suggestion for stage 10 is a good one"*): classify every use by meaning first, then one mechanical rename per class — relative uses (`relative_bearing_deg`, `relative_now["bearing_deg"]`) **stay "bearing"**; compass direction *to a thing* (`geometry.bearing_deg`, `true_bearing_deg`) becomes `heading_to_*`, not plain "heading", because "heading" already means where a vehicle points or moves (`Group.heading_deg`, ownship `heading_true_deg`). A blind `sed` was measured and rejected: it inverts 10 relative identifiers, collides 5 names, and rewrites verbatim user quotes in 678 Markdown files. Docs keep historical quotes as said. | last, after every command is ported, so it touches settled code once |
+| 10 | — | **REJECTED 2026-11-18** (user: existing heading/bearing usage is correct; see "Stages 1a and 10 rejected" under Stage 1a). Was: full internal bearing→heading rename: compass-meaning "bearing" in perception, world-model, DCS-side Lua and tests; `BEARING_SIGMA_DEG` with the old key still read (U17). **Method, approved by the user 2026-11-17** (*"suggestion for stage 10 is a good one"*): classify every use by meaning first, then one mechanical rename per class — relative uses (`relative_bearing_deg`, `relative_now["bearing_deg"]`) **stay "bearing"**; compass direction *to a thing* (`geometry.bearing_deg`, `true_bearing_deg`) becomes `heading_to_*`, not plain "heading", because "heading" already means where a vehicle points or moves (`Group.heading_deg`, ownship `heading_true_deg`). A blind `sed` was measured and rejected: it inverts 10 relative identifiers, collides 5 names, and rewrites verbatim user quotes in 678 Markdown files. Docs keep historical quotes as said. | last, after every command is ported, so it touches settled code once |
 | 11 | — | **named only, not planned** (D20, coordinator direction 2026-11-17): `[[BL-B90]]`'s effector sequence `.md` files become rule files — each row's write becomes an `effector.write(...)` call in a rule's own handler body, a row's `condition` becomes a plain Lua `if`/the gate's own category check where it was really a seat/state precondition rather than a cockpit readback, and a `WaitRow` becomes a new engine primitive (`wait(s)`) rules do not have yet; `EffectorTrigger`-fired sequences become `when.trigger(...)` rules once `[[BL-B95]]` builds that trigger kind, reading the same `EffectorTrigger` enum rather than a second taxonomy. | after Stage 3d has been exercised by at least one real ported effector group (Stage 5), so the migration has a working example to generalise from, not a guess |
 
 These stay in code and never become rules: `wake_petrovich`, `cancel_nevermind`, `say_again`, and

@@ -1,0 +1,475 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>BL-17 Corpus Recording</title>
+<style>
+/* layout: one scrolling desk card -- sticky branch banner, scope blocks, then four numbered
+   steps (get code, preview, record, copy back), each do/expect/record; bring-back sheet from
+   the bottom rail. Same system as the 2026-11-17 BL-17 flight cards. */
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #1b1f26;
+  --fg: #e8e6df;
+  --fg-dim: #9aa0aa;
+  --amber: #ffb02e;
+  --amber-dim: #8a6324;
+  --record: #5fc2ba;
+  --rule: #2a2f38;
+  --danger: #ff6b5e;
+  --on-amber: #1a1200;
+  --amber-wash: rgba(255, 176, 46, 0.08);
+  --record-wash: rgba(95, 194, 186, 0.12);
+  --danger-wash: rgba(255, 107, 94, 0.12);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --panel-2: #eceae3;
+    --fg: #1c1b18;
+    --fg-dim: #5c584f;
+    --amber: #b3651a;
+    --amber-dim: #d9a35c;
+    --record: #0f7a72;
+    --rule: #ddd8cc;
+    --danger: #b3261e;
+    --on-amber: #ffffff;
+    --amber-wash: rgba(179, 101, 26, 0.08);
+    --record-wash: rgba(15, 122, 114, 0.10);
+    --danger-wash: rgba(179, 38, 30, 0.08);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --panel: #ffffff;
+  --panel-2: #eceae3;
+  --fg: #1c1b18;
+  --fg-dim: #5c584f;
+  --amber: #b3651a;
+  --amber-dim: #d9a35c;
+  --record: #0f7a72;
+  --rule: #ddd8cc;
+  --danger: #b3261e;
+  --on-amber: #ffffff;
+  --amber-wash: rgba(179, 101, 26, 0.08);
+  --record-wash: rgba(15, 122, 114, 0.10);
+  --danger-wash: rgba(179, 38, 30, 0.08);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+h1, h2, h3 {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+code, pre {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+header.banner {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: var(--bg);
+  margin: 0 -16px;
+  padding-block: 14px 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.banner-inner { max-width: 680px; margin: 0 auto; }
+.eyebrow {
+  color: var(--amber);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+h1 { font-size: clamp(1.7rem, 6vw, 2.3rem); font-weight: 700; margin: 2px 0 8px; }
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.branch-row .label { color: var(--fg-dim); font-size: 0.85rem; }
+.branch-row code {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.95rem;
+  color: var(--amber);
+}
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.card, .step {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.card.scope { border-left: 3px solid var(--fg-dim); }
+.card.skip { border-left: 3px solid var(--danger); }
+.step.prize { border-color: var(--amber-dim); background: linear-gradient(135deg, var(--amber-wash), transparent), var(--panel); }
+.card h2 { font-size: 1.05rem; color: var(--fg-dim); margin: 0 0 8px; }
+.card ul, .block ul { margin: 4px 0 0; padding-left: 20px; }
+.card li, .block li { margin-bottom: 4px; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.fact { background: var(--panel-2); border-radius: 6px; padding: 8px 10px; }
+.fact b {
+  display: block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.5rem;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+.fact span { color: var(--fg-dim); font-size: 0.85rem; }
+.step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.step-head h3 { font-size: 1.15rem; margin: 0; }
+.step-head .n { color: var(--amber); margin-right: 6px; }
+.prize-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  border-radius: 20px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.step-check input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--amber); }
+.block { margin-bottom: 12px; }
+.block:last-child { margin-bottom: 0; }
+.block .tag {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.block.expect .tag { color: var(--amber); }
+.block.record .tag { color: var(--record); }
+.block p { margin: 4px 0; }
+pre.cmd {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 0.86rem;
+  margin: 6px 0;
+  white-space: pre;
+}
+pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-size: 0.78rem; }
+.pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 20px;
+  padding: 2px 9px;
+}
+.pill.ok { color: var(--record); background: var(--record-wash); border: 1px solid var(--record); }
+.pill.no { color: var(--danger); background: var(--danger-wash); border: 1px solid var(--danger); }
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 6px 0;
+  align-items: baseline;
+}
+.keys kbd {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+.phrases {
+  columns: 2 220px;
+  column-gap: 20px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.92rem;
+}
+.phrases li { break-inside: avoid; padding: 2px 0; }
+.phrases .grp {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  padding-top: 8px;
+}
+.phrases .grp:first-child { padding-top: 0; }
+.rail {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  background: var(--panel-2);
+  border-top: 1px solid var(--rule);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.rail button, .sheet .close {
+  width: 100%;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 12px;
+  cursor: pointer;
+}
+.rail button { background: var(--amber); color: var(--on-amber); border: none; }
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 25;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  border-radius: 14px 14px 0 0;
+  padding: 18px max(18px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.sheet h2 { color: var(--record); margin: 0 0 10px; font-size: 1.1rem; }
+.sheet ol { padding-left: 22px; margin: 0 0 12px; }
+.sheet li { margin-bottom: 8px; }
+.sheet .surprise {
+  background: var(--panel-2);
+  border-left: 3px solid var(--record);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+.sheet .close { margin-top: 14px; background: transparent; border: 1px solid var(--rule); color: var(--fg-dim); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<header class="banner">
+  <div class="banner-inner">
+    <div class="eyebrow">BL-17 &middot; Stage 3c &middot; at the desk, Windows box</div>
+    <h1>Corpus Recording</h1>
+    <div class="branch-row">
+      <span class="label">Branch:</span>
+      <code>main</code>
+      <span class="label">copied to the Windows box with your sync script</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="card scope">
+    <h2>What this is</h2>
+    <p>You read each phrase into the cockpit headset a few times. Later, the bench runs these clips through speech recognition three ways (full word hint, hint ordered by what Petrovich is doing, out-of-state words removed) to decide whether narrowing the hint by state is safe to ship.</p>
+    <div class="facts">
+      <div class="fact"><b>41</b><span>phrases</span></div>
+      <div class="fact"><b>4</b><span>takes each</span></div>
+      <div class="fact"><b>164</b><span>clips</span></div>
+      <div class="fact"><b>~15 min</b><span>one sitting, resumable</span></div>
+    </div>
+  </section>
+
+  <section class="card skip">
+    <h2>Not needed, not happening</h2>
+    <ul>
+      <li><strong>No DCS, no flight, no aircraft state.</strong> The clips are audio only, and which state a phrase counts as being said in is decided when the bench runs. The old instruction to say some phrases on the ground and some while flying is gone.</li>
+      <li><strong>Petrovich won't answer.</strong> Nothing of body-layer or audio-adapter runs; the recorder writes WAV files and nothing else.</li>
+      <li><strong>The bench and the hint itself aren't built yet.</strong> They come once this corpus exists, when BL-17 resumes.</li>
+    </ul>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">1</span>Get the phrase list onto Windows</h3>
+      <label class="step-check"><input type="checkbox" id="s1" data-k="s1" aria-label="Step 1 done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Copy <code>main</code>'s <code>audio-adapter\</code> to the Windows box the way you usually do. The revised list (2026-11-18) is <code>audio-adapter\tests\fixtures\corpus\bl17-stage3c-phrases.txt</code>. Then check sox is still there:</p>
+      <pre class="cmd"><span class="dir">any directory, Windows cmd</span>sox --version</pre>
+      <span class="pill no">unverified on Windows</span>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>A version line. The same sox recorded the 252-clip corpus on this box in September.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">2</span>Preview the prompts</h3>
+      <label class="step-check"><input type="checkbox" id="s2" data-k="s2" aria-label="Step 2 done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <pre class="cmd"><span class="dir">from the repo's audio-adapter\ folder, Windows cmd</span>set PYTHONPATH=src
+python tools\record_corpus.py --list-prompts --phrases-file tests\fixtures\corpus\bl17-stage3c-phrases.txt</pre>
+      <span class="pill ok">run on the Mac with this list</span>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>41 lines, first <code>turn_left_thirty: "turn left thirty"</code>, last <code>be_careful: "be careful"</code>. No microphone is used yet.</p>
+    </div>
+  </section>
+
+  <section class="step prize">
+    <div class="step-head">
+      <h3><span class="n">3</span>Record<span class="prize-pill">the point</span></h3>
+      <label class="step-check"><input type="checkbox" id="s3" data-k="s3" aria-label="Step 3 done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <pre class="cmd"><span class="dir">same folder, same window (PYTHONPATH still set)</span>python tools\record_corpus.py --corpus-dir data\corpus\bl17-stage3c --phrases-file tests\fixtures\corpus\bl17-stage3c-phrases.txt</pre>
+      <span class="pill no">unverified on Windows</span>
+      <div class="keys">
+        <kbd>Space</kbd><span>start the take, say the phrase, Space again to stop</span>
+        <kbd>r</kbd><span>redo the take just recorded</span>
+        <kbd>s</kbd><span>skip this phrase</span>
+        <kbd>q</kbd><span>save and quit; run the same command again to carry on where you left off</span>
+      </div>
+      <p>Cockpit headset, normal speaking level, the way you'd say it on the intercom. Don't over-enunciate: a careful corpus flatters the recogniser.</p>
+    </div>
+    <div class="block">
+      <span class="tag">The phrases, in recording order</span>
+      <ul class="phrases">
+        <li class="grp">Turn</li>
+        <li>turn left thirty</li><li>turn right forty five</li><li>turn left three zero</li><li>turn right one two zero</li>
+        <li class="grp">Heading</li>
+        <li>heading three one five</li><li>heading zero nine zero</li><li>heading two seven zero</li>
+        <li class="grp">Level</li>
+        <li>level flight</li><li>level off</li>
+        <li class="grp">Speed</li>
+        <li>speed two hundred</li><li>speed max</li><li>speed one hundred fifty three</li><li>speed two two zero</li><li>slow down</li><li>speed up</li>
+        <li class="grp">Altitude</li>
+        <li>altitude three hundred</li><li>altitude three hundred twenty</li><li>altitude three two zero radar</li><li>altitude three zero zero barometric</li><li>alt one five zero</li><li>climb fifty</li><li>descend one hundred</li><li>hold altitude</li><li>hold alt</li>
+        <li class="grp">Hover, one word each</li>
+        <li>left</li><li>right</li><li>forward</li><li>back</li><li>hold</li><li>up</li><li>down</li>
+        <li class="grp">Controls</li>
+        <li>you have controls</li><li>i have controls</li>
+        <li class="grp">Not flight commands</li>
+        <li>watch nearest</li><li>binoculars</li><li>scan ahead</li>
+        <li class="grp">Ordinary speech</li>
+        <li>look at that</li><li>the tanks are on the ridge</li><li>describe the mission to me</li><li>silence is golden</li><li>be careful</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>A <code>[n/164]</code> counter climbing to 164. Each take is cut where you press Space, capped at 15 s.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Which phrases would you never say like that in the cockpit, and what would you say instead?</li>
+        <li>Which phrases did you have to redo more than once, and why?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">4</span>Bring the clips to the Mac</h3>
+      <label class="step-check"><input type="checkbox" id="s4" data-k="s4" aria-label="Step 4 done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Copy the Windows folder <code>audio-adapter\data\corpus\bl17-stage3c\</code> to the Mac root checkout at <code>audio-adapter/data/corpus/bl17-stage3c/</code>. That folder is git-ignored, so nothing needs committing. Then count:</p>
+      <pre class="cmd"><span class="dir">from the repo root, Mac</span>find audio-adapter/data/corpus/bl17-stage3c -name '*.wav' | wc -l</pre>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p><code>164</code>, fewer if you skipped phrases. 41 sub-folders, one per phrase.</p>
+    </div>
+  </section>
+
+</main>
+
+<div class="rail"><button type="button" id="openSheet">Bring back</button></div>
+<div class="sheet" id="sheet" hidden>
+  <h2>Bring back</h2>
+  <ol>
+    <li>The clip count on the Mac, and any phrases you skipped.</li>
+    <li>Phrases you'd say differently in the cockpit, with how you'd say them.</li>
+    <li>Phrases that needed several takes, and why.</li>
+  </ol>
+  <div class="surprise">Anything that surprised you is worth more than anything on this list.</div>
+  <button type="button" class="close" id="closeSheet">Close</button>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'bl17-stage3c-recording-card';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+  var sheet = document.getElementById('sheet');
+  document.getElementById('openSheet').addEventListener('click', function () { sheet.hidden = false; });
+  document.getElementById('closeSheet').addEventListener('click', function () { sheet.hidden = true; });
+})();
+</script>

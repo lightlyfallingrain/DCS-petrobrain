@@ -2,44 +2,51 @@
 # speech-to-text hint", step 3). Read by tools/record_corpus.py --phrases-file.
 #
 # Lines starting with # are comments (including this block) and blank lines are skipped.
-# Record each phrase at its default --takes repetitions. The four phrases under "Refusal
-# cases" must be said while NOT in the matching state, exactly as plan.md specifies --
-# record_corpus.py has no way to enforce or prompt for aircraft state, so follow the
-# per-line note yourself:
-#   - "turn left thirty" / "turn left 30" -- say these while NOT flying (parked AI-overlay
-#     off, or not in the pilot's seat with controls) -- expect "unable, not flying" once
-#     Stage 4's gate is exercised live.
-#   - "watch nearest" / "binoculars" -- say these WHILE flying -- expect "unable, hands
-#     busy" once Stage 6 ports that reason (recorded now so the corpus does not need a
-#     second session later; this will not yet produce that refusal live).
+# Record each phrase at the default --takes repetitions.
+#
+# Aircraft state does not matter while recording: the corpus is audio only. Which state each
+# phrase counts as being said in is decided when the bench runs, so record everything at the
+# desk, with the cockpit headset, at a normal speaking level.
+#
+# Revised 2026-11-18: "straight" removed (the command was dropped); "turn left 30" removed (it is
+# said exactly like "turn left thirty"); the refusal-case repeats of "turn left thirty" removed
+# (same audio, the state is the bench's job); every other shipped flight.lua wording added.
 
-# Number words and digit forms
+# Turn: natural number word and digit by digit
 turn left thirty
-turn left 30
+turn right forty five
 turn left three zero
+turn right one two zero
 
-# Heading / level / straight-synonym forms
+# Heading: always three digits
 heading three one five
+heading zero nine zero
+heading two seven zero
+
+# Level
 level flight
-straight
 level off
 
-# Speed forms
+# Speed
 speed two hundred
 speed max
 speed one hundred fifty three
 speed two two zero
+slow down
+speed up
 
-# Altitude forms
+# Altitude
 altitude three hundred
+altitude three hundred twenty
+altitude three two zero radar
 altitude three zero zero barometric
+alt one five zero
 climb fifty
 descend one hundred
-
-# Hold altitude
 hold altitude
+hold alt
 
-# HVRT bare words
+# HVRT bare words, said once each in isolation
 left
 right
 forward
@@ -48,14 +55,17 @@ hold
 up
 down
 
-# Refusal cases -- record these while NOT in the matching state (see header note)
-turn left thirty
-turn left 30
+# Control handover (a no-op in AI-overlay mode, recognised all the same)
+you have controls
+i have controls
+
+# Commands that are out of place while flying (the bench removes them from the hint for the
+# "flying" state; they must still be heard)
 watch nearest
 binoculars
+scan ahead
 
-# Non-command sentences, for contrast (real entries from vocabulary.FREE_SPEECH_GUARD,
-# not invented -- checked against src/vocabulary.py directly)
+# Non-command sentences, for contrast (real entries from vocabulary.FREE_SPEECH_GUARD)
 look at that
 the tanks are on the ridge
 describe the mission to me
