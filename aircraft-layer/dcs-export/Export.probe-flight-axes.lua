@@ -13,7 +13,10 @@ deployed. Log: Logs\aircraft_layer_probe_flight_axes.log
 FLIGHT: air start, straight and level, ~150 km/h, ~200 m AGL, flat ground.
 
 CONTROL: an ICS half-press (pilot trigger arg 738 or operator trigger arg
-856, 0.5) is the only input. A full (radio) press is ignored.
+856, 0.5) steps through segments. A full (radio) press SKIPS to the next
+phase (A -> B -> C -> D -> Bo -> Co -> Do -> J), stopping anything running;
+the next half-press then starts that phase's first segment. Both act on
+release, so a full press never also counts as a half-press.
   - Idle -> a half-press starts the next segment.
   - A read segment -> a half-press ends it.
   - A write segment runs its own schedule and ends itself; a half-press
@@ -490,6 +493,31 @@ local function send(cmds)
 end
 
 -- ---------------------------------------------------------------- trigger
+-- A phase is a segment id without its digits: A1..A4 -> "A", B1o/B2o -> "Bo".
+local function phase_of(def)
+    return (def.id:gsub("%d", ""))
+end
+
+-- Full (radio) press: stop any running segment (writes stop at once) and
+-- point at the first segment of the next phase. Nothing starts until the
+-- next ICS half-press. (User, 2026-11-18: "radio trigger (full press) moves
+-- to next probe phase, e.g. A > B".)
+local function skip_phase(t, seat, peak)
+    local from = seg and seg.def or SEGMENTS[next_index]
+    if seg ~= nil then end_segment(t, "skipped by radio press") end
+    if from == nil then
+        log(string.format("t=%.3f %s radio press (peak %.2f): no segments left", t, seat, peak))
+        return
+    end
+    local phase = phase_of(from)
+    local i = next_index
+    while SEGMENTS[i] ~= nil and phase_of(SEGMENTS[i]) == phase do i = i + 1 end
+    next_index = i
+    local nxt = SEGMENTS[next_index]
+    log(string.format("t=%.3f %s radio press (peak %.2f): SKIP phase %s -> next is %s",
+        t, seat, peak, phase, nxt and nxt.id or "(none, all done)"))
+end
+
 local function poll_trigger(seat, t)
     local tr = triggers[seat]
     local v = read_arg(tr.arg)
@@ -502,8 +530,10 @@ local function poll_trigger(seat, t)
     if not tr.pressed then return end
     local peak = tr.peak
     tr.pressed, tr.peak = false, 0.0
+    -- Both presses act on release, so the ICS step a full press passes
+    -- through on its way down never counts as a half-press.
     if peak >= FULL_PRESS_MIN then
-        log(string.format("t=%.3f %s trigger full press (peak %.2f), ignored", t, seat, peak))
+        skip_phase(t, seat, peak)
         return
     end
     if seg ~= nil then
