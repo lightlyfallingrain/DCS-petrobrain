@@ -178,9 +178,8 @@ new module `body-layer/src/belief/ai_pilot_wheel.py`:
 - `set_parked_heading(deg: float)`, `set_parked_altitude(m: float, reference: "radar"|"baro")`,
   `set_parked_speed(step_kmh: float)` — each clamps to limits, returns the value actually set
   (A9's posture, carried over), bumps `goal_seq`.
-- `cbtm_align()`, `cbtm_align_for_launch()` — player-only triggers (E-P7); refuse (not "unable" —
-  silently ignored, since these are not spoken commands the player expects a readback failure
-  from — this needs the user, see **U2**) outside CBTM-reachable state.
+- `cbtm_align()`, `cbtm_align_for_launch()` — player-only triggers (E-P7); reach CBTM by the wheel's left press, which is always available (U1, answered 2026-11-18: no
+  not-reachable branch).
 - `recover_to_level(reason: "launch"|"abort"|"agl_floor"|"ias_ceiling")` — internal-only entry
   point `decide_ai_pilot_wheel` calls; never reachable from voice.
 
@@ -580,6 +579,11 @@ overlay channel needs forcing open (P0-1) — a fact mode 1 never needed and now
   alignment attempt mid-cycle, or only report failure after the attempt bound is exhausted?
   **Recommend:** only after exhaustion — matches mode 1's A4 posture ("fly within parameters,"
   no mid-attempt narration).
+
+  **U1 answered 2026-11-18 (user, verbatim):** *"CBTM should always be reachable via left press.
+  Do not plan for not reachable."* So `cbtm_align`/`cbtm_align_for_launch` reach CBTM by the left
+  press and have no "not reachable" branch — no refusal path, spoken or silent, is designed for it.
+  **U2, 2026-11-18 (user):** *"ignore for now"* — moot under U1's answer; not planned.
 - **U3 — the player changing the AI wheel's mode himself.** Q4's answer assumes this does not
   happen; if it does, should Petrovich's cycle-back defer to the player's choice for some window
   before reasserting the mode his goal needs (closer to E-P5's spirit), or always reassert at
