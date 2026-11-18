@@ -49,6 +49,16 @@
   imports lupa directly, and expose a typed wrapper to everything else, rather than letting the
   suppression spread.
 
+- **A Lua helper function cannot return out of its caller** — there is no non-local return in Lua,
+  so a shared helper meant to replace N duplicated `if failed then say(...) return end` blocks
+  across N rule handlers cannot work: calling the helper from inside the handler only returns out
+  of the *helper*, leaving the handler's own `return` still needed at every call site, which is
+  exactly the duplication being removed. When centralizing a failure path that originates deep
+  inside Lua code called from Python, raise the host-language (Python) exception from the
+  callback instead and catch it once at the top of the Python-side dispatch loop — the FFI
+  boundary gives early-return-through-caller for free, in the direction Lua itself cannot do it
+  (`refactor/rule-action-unable-throw`, `[[BL-17]]`, 2026-11-18).
+
 - **`LuaRuntime` holds one global per-runtime lock for the entire top-level call, including any
   Python callback invoked from inside it** — measured empirically (8 threads, 16,000 concurrent
   calls, zero lost increments, consistent with full serialization), not assumed. If thread A is
