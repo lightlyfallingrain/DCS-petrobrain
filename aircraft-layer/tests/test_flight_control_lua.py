@@ -194,12 +194,19 @@ client = {
 """
 
 
-def _run(driver: str) -> list[str]:
+def _run(driver: str, *, rotor_rpm_source: str | None = None) -> list[str]:
     """Assembles core-helper extraction + the mock preamble + the whole
     of `flight_control.lua` (wrapped as an immediately-invoked function
     expression so its own `return M` becomes this expression's value)
     + `driver` (which may print lines), and returns stdout split into
-    lines. Skips cleanly without a Lua interpreter on `PATH`."""
+    lines. Skips cleanly without a Lua interpreter on `PATH`.
+
+    `rotor_rpm_source` (mode-1 batch) patches the module's own
+    `ROTOR_RPM_SOURCE` default (`"dummy"`) to `"arg_proxy"` for
+    `TestReadRotorRpmPct` below -- the one module-level constant no
+    test needs to flip otherwise, so a one-line source-text substitution
+    is simpler than threading a new mock global through every other
+    test in this file."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
@@ -208,6 +215,12 @@ def _run(driver: str) -> list[str]:
         _extract_lua_function(_CORE_LUA, name) for name in _CORE_HELPERS
     )
     module_source = _FLIGHT_CONTROL_LUA.read_text(encoding="utf-8")
+    if rotor_rpm_source is not None:
+        needle = 'local ROTOR_RPM_SOURCE = "dummy"'
+        assert needle in module_source, "ROTOR_RPM_SOURCE default line moved/renamed"
+        module_source = module_source.replace(
+            needle, f'local ROTOR_RPM_SOURCE = "{rotor_rpm_source}"'
+        )
     script = (
         _PREAMBLE
         + "\n"
@@ -858,6 +871,31 @@ print(sent_lines[#sent_lines])
         assert _field(lines[0], "fc_mode") == "off"
         assert _field(lines[0], "fc_release_reason") == "envelope"
 
+    def test_sustained_high_bank_never_releases(self) -> None:
+        """F-M1 (mode-1 batch): "remove the 30 degree limit. Set no
+        limit for now" -- there is no bank-triggered release any more
+        at all. A bank well past the old 30 deg ceiling, held for well
+        past `ENV_HOLD_S`, never releases -- IAS alone governs release
+        now."""
+        driver = """
+pilot_args.pitch = 0.5
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+ias_mps = 150.0 / 3.6
+bank_rad = math.rad(50.0)
+for i = 1, 20 do
+    flight_control.run_flight_control(0.1 + i * 0.2)
+end
+flight_control.push_flight_control_state(0.1 + 20 * 0.2)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "active"
+        assert _field(lines[0], "fc_release_reason") is None
+
     def test_momentary_low_ias_does_not_release(self) -> None:
         driver = """
 pilot_args.pitch = 0.5
@@ -875,6 +913,55 @@ print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
         assert _field(lines[0], "fc_mode") == "active"
+
+
+class TestReadRotorRpmPct:
+    """Mode-1 batch, Decision 28 -- `read_rotor_rpm_pct()`, exported
+    directly (`M.read_rotor_rpm_pct`) same as the law's own pure
+    functions."""
+
+    def test_dummy_source_returns_the_configured_dummy_value(self) -> None:
+        driver = """
+local pct, valid = flight_control.read_rotor_rpm_pct()
+print(string.format("%.6f", pct))
+print(tostring(valid))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) == 90.0
+        assert lines[1] == "true"
+
+    def test_arg_proxy_scales_a_good_read(self) -> None:
+        driver = """
+function GetDevice(id)
+    return { get_argument_value = function(self, arg)
+        if arg == 42 then return 0.73 end
+        return nil
+    end }
+end
+local pct, valid = flight_control.read_rotor_rpm_pct()
+print(string.format("%.6f", pct))
+print(tostring(valid))
+"""
+        lines = _run(driver, rotor_rpm_source="arg_proxy")
+        assert abs(float(lines[0]) - 73.0) < 1e-6
+        assert lines[1] == "true"
+
+    def test_arg_proxy_falls_back_to_the_dummy_on_a_bad_read(self) -> None:
+        """A failed/NaN `arg_proxy` read fails soft to the dummy value
+        with `valid=false` -- `read_measured()`'s own caller treats
+        this the same as every other fail-soft field (does not release
+        the envelope on its own)."""
+        driver = """
+function GetDevice(id)
+    return { get_argument_value = function(self, arg) return nil end }
+end
+local pct, valid = flight_control.read_rotor_rpm_pct()
+print(string.format("%.6f", pct))
+print(tostring(valid))
+"""
+        lines = _run(driver, rotor_rpm_source="arg_proxy")
+        assert float(lines[0]) == 90.0
+        assert lines[1] == "false"
 
 
 class TestAxesEnabledOnTheWire:

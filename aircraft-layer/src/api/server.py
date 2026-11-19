@@ -518,12 +518,14 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     # shares -- must match `Export.lua`'s own `FC_LIMIT_BOUNDS.arm_
     # lease_s` and body-layer's `tuning.py` `ARM_LEASE_S` `hi` exactly.
     "arm_lease_s": (0.0, 10.0),
-    "max_bank_deg": (0.0, 90.0),
     # M2 additions (`Export.lua`'s own `FC_LIMIT_BOUNDS`, matched here
     # key-for-key -- a field this dict does not name is silently
     # dropped by the loop below, never forwarded at all, so adding a
     # new wire key to body-layer's `flight_control_limits()` without a
     # matching entry here would be a silent loss, not a rejection).
+    # **No `max_bank_deg` entry any more** (mode-1 batch, F-M1: "remove
+    # the 30 degree limit") -- removed key-for-key with `Export.lua`'s
+    # own `FC_LIMIT_BOUNDS` and body-layer's `tuning.py`, not widened.
     "max_turn_bank_deg": (0.0, 60.0),
     "max_climb_vs_mps": (0.0, 20.0),
     "max_accel_mps2": (0.0, 10.0),
@@ -532,12 +534,25 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     "alt_band_min_m": (0.0, 100.0),
     "turn_rate_band_frac": (0.0, 1.0),
     "heading_band_deg": (0.0, 90.0),
+    # Mode-1 batch additions (`Export.lua`'s own `FC_LIMIT_BOUNDS`,
+    # same key-for-key matching requirement).
+    "rotor_rpm_floor_pct": (0.0, 100.0),
+    "retreating_blade_stall_ias_kmh": (0.0, 500.0),
+    "break_max_height_loss_m": (0.0, 1000.0),
+    "vrs_ias_threshold_kmh": (0.0, 200.0),
+    "vrs_max_descent_mps": (0.0, 50.0),
 }
 #: `goal` fields -- same generous-sanity-bound posture as `limits` above.
 _FLIGHT_CONTROL_GOAL_BOUNDS: dict[str, tuple[float, float]] = {
     "heading_deg": (0.0, 360.0),
     "alt_m": (-500.0, 20_000.0),
     "ias_kmh": (0.0, 2_000_000.0),
+    # Mode-1 batch, Decision 27 -- the break's own signed rate override.
+    # Generous sanity bound (same posture as every other goal field
+    # here); `rules/actions.py`'s own `ActionParam(lo=1, hi=90)` is the
+    # tight, domain-specific bound on the magnitude the rule can ever
+    # send.
+    "turn_rate_deg_s": (-90.0, 90.0),
 }
 
 

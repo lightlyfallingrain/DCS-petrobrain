@@ -353,24 +353,24 @@ def _axes_cbtm_align_unready(
     return {"ok": False, "reason": "AI_OVERLAY"}
 
 
-def _axes_cbtm_break_unready(
-    ctx: ActionContext, args: dict[str, object]
-) -> dict[str, object]:
-    """BL-16 mode 2 Stage P3+P4, main-loop amendment: unlike the two
-    align commands above, mode 1's own "break turn"/"break away" are
-    **not** permanently unreachable (the standing direction landed the
-    same day: "all other flight commands from Mode 2 must also be
-    available in Mode 1... except aligning to 9K113") -- they are
-    withdrawn from *this* batch only (mode-1 scope split, "continue now
-    with Mode 2... when Mode 2 is done, continue with Mode 1") and land
-    in the next one. `NOT_READY` reads correctly either way ("unable,
-    not ready") and is this project's own existing reason for "heard
-    and understood, not doable yet" (`speech.py`'s own `_UNABLE_
-    TEMPLATES` comment on `GUIDANCE_NOT_READY`) -- replace this body
-    with the real mode-1 break mechanism (60-80 deg bank, pedal into
-    the turn, rotor-RPM-aware collective) once that batch lands,
-    without a new reason string."""
-    return {"ok": False, "reason": "NOT_READY"}
+def _axes_break_turn(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """Mode-1 batch (`plans/flight-control/plan.md`, "Revised
+    2026-11-19", Decision 27) -- the real mode-1 axes body for `flight.
+    cbtm_break`, replacing the withdrawn `_axes_cbtm_break_unready`
+    stub. `rate_deg_s` is the rule's own `BREAK_TURN_RATE_DEG_S`
+    (`config/rules/flight.lua`), passed through as a plain float -- the
+    rate belongs to the command that set it (F-M2), never a Python
+    constant."""
+    sign = cast(Literal[-1, 1], _int_arg(args, "sign"))
+    rate = _int_arg(args, "rate_deg_s")
+    return ctx.console.axes_break_turn(sign, float(rate))
+
+
+def _axes_break_away(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    """Mode-1 batch Decision 27's real axes body for `flight.cbtm_
+    break_away`, same reasoning as `_axes_break_turn` above."""
+    rate = _int_arg(args, "rate_deg_s")
+    return ctx.console.axes_break_away(float(rate))
 
 
 def _turn_continuous(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
@@ -435,11 +435,13 @@ def _release_controls(ctx: ActionContext, args: dict[str, object]) -> dict[str, 
 #:
 #: **BL-16 mode 2 Stage P3+P4** (`plans/flight-control/plan.md`, "Revised
 #: 2026-11-18 -- Stages P3+P4 ready to build", main-loop amendment): the
-#: four `cbtm_*` actions are also `_by_mode`-wrapped, but their `axes=`
-#: bodies are refusals, not real mode-1 behaviour -- `cbtm_align`/`cbtm_
-#: align_for_launch` permanently (`AI_OVERLAY`, E-P20), `cbtm_break`/
-#: `cbtm_break_away` only until the next (mode-1) batch (`NOT_READY`) --
-#: see each `_axes_cbtm_*_unready` body's own docstring.
+#: four `cbtm_*` actions are also `_by_mode`-wrapped. `cbtm_align`/`cbtm_
+#: align_for_launch`'s `axes=` bodies are a permanent refusal (`AI_
+#: OVERLAY`, E-P20) -- see `_axes_cbtm_align_unready`'s own docstring.
+#: `cbtm_break`/`cbtm_break_away`'s `axes=` bodies were the same kind of
+#: refusal (`NOT_READY`) until the mode-1 batch (`plans/flight-control/
+#: plan.md`, "Revised 2026-11-19") replaced them with `_axes_break_turn`/
+#: `_axes_break_away` -- the real mode-1 break mechanism.
 FLIGHT_ACTIONS: tuple[Action, ...] = (
     Action(
         name="increment_heading",
@@ -511,13 +513,21 @@ FLIGHT_ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         name="cbtm_break",
-        params=(ActionParam(name="sign", lo=-1, hi=1),),
-        invoke=_by_mode(overlay=_cbtm_break, axes=_axes_cbtm_break_unready),
+        params=(
+            ActionParam(name="sign", lo=-1, hi=1),
+            # Mode-1 batch, Decision 27 -- the rule's own
+            # `BREAK_TURN_RATE_DEG_S` (`config/rules/flight.lua`),
+            # always supplied (never `optional=True`: the rule always
+            # passes the constant, there is no "omitted" case). Mode
+            # 2's own `_cbtm_break` simply does not read it.
+            ActionParam(name="rate_deg_s", lo=1, hi=90),
+        ),
+        invoke=_by_mode(overlay=_cbtm_break, axes=_axes_break_turn),
     ),
     Action(
         name="cbtm_break_away",
-        params=(),
-        invoke=_by_mode(overlay=_cbtm_break_away, axes=_axes_cbtm_break_unready),
+        params=(ActionParam(name="rate_deg_s", lo=1, hi=90),),
+        invoke=_by_mode(overlay=_cbtm_break_away, axes=_axes_break_away),
     ),
     Action(
         name="hvrt_translate_left",

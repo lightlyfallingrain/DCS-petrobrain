@@ -200,6 +200,23 @@ class TestApplyAiPilotWheelGoal:
         assert runner.ai_pilot_goal_last_sent_seq is None
         assert client.ai_pilot_goal_calls == []
 
+    def test_unparking_also_clears_a_captured_break_entry_heading(self) -> None:
+        """Mode-1 batch, Decision 32 -- a stale break entry heading
+        from a previous session must not survive into a later unpark,
+        the same leak class `cbtm_action_sent` itself already guards
+        against."""
+        runner, client = _runner(
+            cbtm_action_sent="break_left",
+            cbtm_break_entry_heading_deg=123.0,
+            parked_active=False,
+        )
+        console = CrewConsole(store=ContactStore())
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.parked_flight_state.cbtm_action_sent is None
+        assert runner.parked_flight_state.cbtm_break_entry_heading_deg is None
+
     def test_unparking_clears_every_stranded_ai_pilot_one_shot(self) -> None:
         """BL-16 mode 1's Co-moving row 11 fix (`plans/flight-control/
         plan.md`, "Revised 2026-11-18"): previously the three `ai_
@@ -431,6 +448,31 @@ class TestCbtmTransitions:
         sent = _cbtm_send(client)
         assert sent[8] == "break_away"
         assert sent[9] == 1
+
+    def test_break_left_captures_the_held_heading_at_the_press(self) -> None:
+        """Mode-1 batch, Decision 32 -- the held heading right at this
+        instant (before anything else this poll can move it) is
+        captured onto `cbtm_break_entry_heading_deg`, for a later
+        unpark-take to seed its own heading goal from."""
+        runner, client = _runner(held_heading=123.0)
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "break_left"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.parked_flight_state.cbtm_break_entry_heading_deg == 123.0
+
+    def test_align_does_not_capture_an_entry_heading(self) -> None:
+        """Only the three break kinds capture one -- `align`/`align_
+        for_launch` leave it untouched (`None` here since nothing has
+        set it yet)."""
+        runner, client = _runner(held_heading=123.0)
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "align"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.parked_flight_state.cbtm_break_entry_heading_deg is None
 
     def test_a_second_cbtm_transition_bumps_its_own_seq_space_again(self) -> None:
         """`cbtm_seq` is its own distinct sequence space, never `goal_

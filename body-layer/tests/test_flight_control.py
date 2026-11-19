@@ -18,6 +18,9 @@ from typing import Any
 import pytest
 
 from aircraft_client import AircraftLayerClient
+from belief.ai_pilot_wheel import ParkedFlightState
+from belief.contacts import ContactStore
+from belief.crew_console import CrewConsole
 from belief.flight_control import (
     FLOOR_AGL_M,
     MAX_IAS_KMH,
@@ -488,3 +491,113 @@ class TestWireHelpers:
         assert goal_request_fields(FlightControlGoalRequest(ias_kmh=150.0)) == {
             "ias_kmh": 150.0
         }
+
+    def test_goal_request_fields_carries_the_break_rate_override(self) -> None:
+        """Mode-1 batch, Decision 27 -- `turn_rate_deg_s` rides the wire
+        only when a command actually set it (e.g. `axes_break_turn`),
+        never for an ordinary heading command."""
+        assert goal_request_fields(
+            FlightControlGoalRequest(heading_deg=90.0, turn_rate_deg_s=-40.0)
+        ) == {"heading_deg": 90.0, "turn_rate_deg_s": -40.0}
+        assert "turn_rate_deg_s" not in goal_request_fields(
+            FlightControlGoalRequest(heading_deg=90.0)
+        )
+
+    def test_flight_control_limits_has_no_max_bank_deg_and_carries_the_rotor_envelope(
+        self,
+    ) -> None:
+        """F-M1 (mode-1 batch): "remove the 30 degree limit. Set no
+        limit for now" -- `max_bank_deg` is removed from the wire
+        entirely, not widened. Decisions 29-31 add the rotor-RPM floor,
+        the retreating-blade-stall IAS, the break's own height-loss
+        budget, and the VRS descent cap."""
+        limits = flight_control_limits(12.5)
+        assert "max_bank_deg" not in limits
+        for key in (
+            "rotor_rpm_floor_pct",
+            "retreating_blade_stall_ias_kmh",
+            "break_max_height_loss_m",
+            "vrs_ias_threshold_kmh",
+            "vrs_max_descent_mps",
+        ):
+            assert key in limits
+            assert isinstance(limits[key], float)
+
+
+class TestDrainFlightControlSeedsTheBreakTarget:
+    """Mode-1 batch, Decision 32 (`plans/flight-control/plan.md`,
+    main-loop amendment 2026-11-19) -- `CrewConsole.drain_flight_
+    control`'s own seeding logic for an unpark-take that lands while a
+    mode-2 break was active. The `OVERLAY` -> `ACTIVE` transition
+    itself is `decide_flight_control`'s own tested surface (`TestDecide
+    FlightControl` above); these tests exercise only what `drain_
+    flight_control` adds on top of it."""
+
+    def _console(
+        self, *, cbtm_action_sent: str | None, entry_heading: float | None
+    ) -> CrewConsole:
+        console = CrewConsole(store=ContactStore())
+        console.flight_control_state = FlightControlState(
+            phase="OVERLAY",
+            unpark_take=True,
+            lua_mode="active",
+            lua_take_origin="unpark",
+            lua_take_seq=9,
+        )
+        console.parked_flight_state = ParkedFlightState(
+            cbtm_action_sent=cbtm_action_sent,  # type: ignore[arg-type]
+            cbtm_break_entry_heading_deg=entry_heading,
+        )
+        return console
+
+    def test_unpark_take_during_a_break_seeds_the_break_target(self) -> None:
+        console = self._console(cbtm_action_sent="break_left", entry_heading=100.0)
+
+        console.drain_flight_control(10.0, parked_active=False)
+
+        assert console.flight_control_state.phase == "ACTIVE"
+        request = console.flight_control_goal_transition
+        assert request is not None
+        assert request.heading_deg == pytest.approx(10.0)
+        assert request.turn_rate_deg_s is None
+
+    def test_unpark_take_with_no_break_active_is_unchanged(self) -> None:
+        console = self._console(cbtm_action_sent=None, entry_heading=None)
+
+        console.drain_flight_control(10.0, parked_active=False)
+
+        assert console.flight_control_state.phase == "ACTIVE"
+        assert console.flight_control_goal_transition is None
+
+    def test_unpark_take_with_a_break_action_but_no_entry_heading_is_unchanged(
+        self,
+    ) -> None:
+        """Defensive -- should not happen in practice (every break
+        capture sets both together), but a break action with no
+        captured entry heading must not seed a bogus goal."""
+        console = self._console(cbtm_action_sent="break_right", entry_heading=None)
+
+        console.drain_flight_control(10.0, parked_active=False)
+
+        assert console.flight_control_goal_transition is None
+
+    def test_an_ordinary_take_confirmation_does_not_seed_anything(self) -> None:
+        """An ordinary voice take (`TAKING` -> `ACTIVE`, not `OVERLAY`
+        -> `ACTIVE`) never goes through this path at all."""
+        console = CrewConsole(store=ContactStore())
+        console.flight_control_state = FlightControlState(
+            phase="TAKING",
+            take_seq=1,
+            took_at_sim=5.0,
+            pending_take_says="You have controls.",
+            lua_mode="active",
+            lua_take_seq=1,
+        )
+        console.parked_flight_state = ParkedFlightState(
+            cbtm_action_sent="break_left", cbtm_break_entry_heading_deg=100.0
+        )
+
+        console.drain_flight_control(10.0, parked_active=False)
+
+        assert console.flight_control_state.phase == "ACTIVE"
+        assert console.flight_control_goal_transition is None

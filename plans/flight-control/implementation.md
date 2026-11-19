@@ -2139,3 +2139,194 @@ this fix and already noted in `review-p3p4.md`'s re-review); `ruff check .` -- a
 `mypy src` -- 92 files, no issues; full suite `pytest -n auto -q` -- **3671 passed, 4 xfailed, 0
 failed** (up from 3667 passed/4 failed before this round's two fixes). `aircraft-layer` untouched,
 not re-run.
+
+## Mode 1 batch (break turn, break away, rotor envelope, VRS, rates as goals), 2026-11-19
+
+Implements `plans/flight-control/plan.md`, "Revised 2026-11-19 -- mode-1 batch: break turn, break
+away, the rotor envelope, rates as goals" (Decisions 27-31) plus the "Main-loop amendment
+2026-11-19 (after the plan check)" (Decision 32, the `ROTOR_RPM_ARG_SCALE_MAX_PCT` naming). Branch
+`feature/bl16-mode1-break`, fast-forwarded onto `12c439a8` (the plan + main-loop amendment commits)
+before any implementation.
+
+**Plan-vs-codebase check (step 1b) found both kinds of mismatch the role's own instructions warn
+about, before writing a line:**
+
+- **Phantom tests.** The plan's "F-M1's removal ripples through the test/doc surface" section
+  names two tests to delete (`test_flight_control_lua.py`'s "self-releases at 41 deg of
+  bank"/"clamps `phi_d` to `max_bank_deg`") and a `max_bank_deg` parity assertion in `test_export_
+  lua_constants_parity.py`. **None of the three exist** -- grepped both files for `max_bank_deg`/
+  `bank`/`ENV_BANK`/`release` and found no such tests in either; `test_export_lua_constants_
+  parity.py` does not reference `flight_control` at all. Nothing was deleted; a new positive test
+  (`TestEnvelopeRelease::test_sustained_high_bank_never_releases`) was added instead, confirming
+  the removal's own wiring rather than inverting tests that were never there.
+- **No missing-file surprises this time** -- `grep`ing `MAX_BANK_DEG`/`max_bank_deg` across both
+  subprojects' `src/`/`tests/` before editing found every real call site (`belief/flight_control.
+  py`, `aircraft-layer/src/api/server.py`, `dcs-export/Petrobrain/flight_control.lua`,
+  `aircraft-layer/tests/test_flight_control_law.py`'s own `_LIMITS` fixture), so none were missed.
+
+### Files Changed
+
+**body-layer:**
+- `src/belief/flight_control.py` -- `MAX_BANK_DEG` removed (F-M1, "remove the 30 degree limit");
+  five new `tuning.real` constants (`ROTOR_RPM_FLOOR_PCT`, `RETREATING_BLADE_STALL_IAS_KMH`,
+  `BREAK_MAX_HEIGHT_LOSS_M`, `VRS_IAS_THRESHOLD_KMH`, `VRS_MAX_DESCENT_MPS`), all `status=
+  "agreed-guess"` (the tuning-status enum has no `"user"` literal -- mypy caught this; every one
+  of these is the user's own stated number, closest existing status is `"agreed-guess"`, same as
+  `TAKEOVER_LEVEL_BANK_DEG`'s own precedent for a user-answered-but-unmeasured value); `Flight
+  ControlGoalRequest.turn_rate_deg_s: float | None`; `flight_control_limits()` drops `max_bank_deg`
+  and adds the five new wire keys; `goal_request_fields()` carries `turn_rate_deg_s` when set.
+- `src/belief/ai_pilot_wheel.py` -- `ParkedFlightState.cbtm_break_entry_heading_deg: float | None`
+  (Decision 32's own capture); `cbtm_break_target_heading_deg(action, entry_heading_deg)`, a pure
+  helper (entry -90/+90/-180 for left/right/away).
+- `src/body.py` -- `_apply_ai_pilot_wheel_goal` captures `state.held_heading` into `cbtm_break_
+  entry_heading_deg` the instant a break `cbtm_transition` fires (before anything else that poll
+  can move it), carries it through unchanged otherwise, and clears it on unpark alongside `cbtm_
+  action_sent` (same leak class that field's own docstring already names).
+- `src/belief/crew_console.py` -- `axes_break_turn(sign, rate_deg_s)`/`axes_break_away(rate_deg_s)`
+  replace the two mode-1 `_axes_cbtm_break_unready` call sites' real bodies; `drain_flight_control`
+  gains Decision 32's own seeding (an `OVERLAY` -> `ACTIVE` transition with a break active seeds
+  `flight_control_goal_transition` from `cbtm_break_target_heading_deg`).
+- `src/rules/actions.py` -- `_axes_break_turn`/`_axes_break_away` replace `_axes_cbtm_break_
+  unready`; `cbtm_break`/`cbtm_break_away`'s `Action.params` each gain a trailing `rate_deg_s`
+  (`lo=1, hi=90`, required, mode 2's own bodies ignore it).
+- `config/rules/flight.lua` -- `BREAK_TURN_RATE_DEG_S = 40` (F-M2: the rate lives in the rule, not
+  Python), passed as the new trailing arg to both `flight.cbtm_break`/`cbtm_break_away` calls.
+- `config/defaults.toml` -- regenerated (`tools/generate_defaults.py --write`); the five new keys
+  render, `MAX_BANK_DEG` is gone.
+
+**aircraft-layer:**
+- `dcs-export/Petrobrain/flight_control.lua` -- `ENV_BANK_MARGIN_DEG` and `check_envelope`'s bank
+  branch deleted (IAS alone governs release now); `max_bank_deg` dropped from `fc_limits`/`FC_
+  LIMIT_BOUNDS`, the five new keys added to both; the mode-1 batch's own constants block (rotor/
+  stall margins and rate caps, `K_BREAK_PEDAL_BIAS`, the rotor-RPM seam constants); `read_rotor_
+  rpm_pct()` (ships `"dummy"`, flips to `"arg_proxy"` later), called once per frame in `read_
+  measured()`; `law_apply_goal`'s `turn`/`heading_deg` branches both set/clear `rate_override_deg_
+  s`/`break_entry_h_m` (Decision 27); `law_update`'s heading-mode branch reads the override for its
+  own rate/accel ceiling, the altitude shaper gains Decision 29's break floor and Decision 31's VRS
+  cap, step 3 widens `collective_saturated` to `collective_limited` (Decision 30) and step 5 adds
+  the break's pedal bias; settling (`in_band_heading` going true) clears the override (B3); `phi_d`'s
+  clamp against `max_bank_deg` is gone (F-M1); `law_init_at_take` seeds both new fields `nil` (B5).
+  `M.read_rotor_rpm_pct` exported alongside the law functions, for `TestReadRotorRpmPct`'s own
+  direct call.
+- `src/api/server.py` -- `_FLIGHT_CONTROL_LIMITS_BOUNDS` drops `max_bank_deg`, adds the five new
+  keys (generous sanity bounds, matched key-for-key to `Export.lua`'s own `FC_LIMIT_BOUNDS`);
+  `_FLIGHT_CONTROL_GOAL_BOUNDS` gains `turn_rate_deg_s: (-90.0, 90.0)`.
+
+### Departures from the plan, and why
+
+1. **`axes_break_turn`/`axes_break_away` answer `NOT_READY` on an unknown current heading, rather
+   than the plan's own `assert current is not None` pattern (copied verbatim from `axes_increment_
+   heading`).** `cbtm_break`/`cbtm_break_away`'s rule category is the plain `"flight_control"`
+   (shared with mode 2's own no-refusal body), not `"flight_control_heading"`'s hold-until-known
+   gate `increment_heading` relies on for the same `assert` to be safe -- so a break commanded in
+   the one-poll gap right after a take, before `fc_measured_heading` has ever been reported, is
+   genuinely reachable and would otherwise crash. Local and reversible (one method body each); not
+   escalated. Flagging for Architect/Reviewer: the alternative -- moving `cbtm_break`/`cbtm_break_
+   away` to a `"_heading"`-holding category -- would also hold mode 2's own no-refusal body for a
+   beat, a cross-mode behaviour change the plan never asked for, which is why this round did not
+   take that path instead.
+2. **Decision 32's exact mechanism is the Implementer's own design, not literally specified.** The
+   amendment says "the take path seeds `heading_goal` from it" without naming where "it" (the
+   break's own numeric target) comes from, since body-layer never tracked one for mode 2's break
+   (ED computes it internally) -- added `cbtm_break_entry_heading_deg`, captured from `held_
+   heading` at the press, and seed only `heading_deg` (not `turn_rate_deg_s` -- the amendment names
+   no rate for this case, and `None` means "ordinary rate," a reasonable reading of "seeds the
+   heading goal" literally). Flagged for review since this is new state, not in the plan's own
+   Co-moving Fields table.
+3. **The plan's own worked bank figures (150 km/h/40 deg/s -> ~71 deg; 220 km/h -> ~76 deg) do not
+   hold against the actual shaper**, measured via the toy-plant suite: 150 km/h settles around ~43
+   deg, 220 km/h around ~54 deg. Root cause, worked out while writing `TestBreakTurnChannel`: the
+   heading-mode branch's critically-damped shaper (`OMEGA_HEADING = 0.3`, an explicitly unmeasured
+   placeholder) peaks at roughly `E*omega/e` for a step error `E`, independent of the rate ceiling
+   once that ceiling exceeds the natural peak -- raising `turn_rate_deg_s`'s ceiling does not by
+   itself drive the rate up *to* it for a 90 deg error. Part of the bank reached above that
+   kinematic prediction comes from `phi_i`'s own now-unclamped growth (the plan's own named Risk:
+   "Integrator windup in `phi_i`... deliberately not fixed this batch"). Not fixed here -- `OMEGA_
+   HEADING` is a first-cut gain the plan itself says is "owed by M0-E," and retuning the shaper is
+   an Architect-level call, not an Implementer one. Tests assert the qualitative claim (steeper
+   than an ordinary turn, converges, settling clears the override) rather than the specific figure.
+   **Flagging prominently for Flight M-A**: as shipped, a break will not visibly reach the 60-80
+   deg bank the plan's own text promises the pilot.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_law.py` -- `TestBreakTurnChannel` (3, qualitative bank/
+  settle/mirror-symmetry, see Departure 3 above), `TestRateOverrideClearing` (3: set-on-heading-
+  with-rate, cleared-by-ordinary-heading, cleared-by-continuous-turn -- B1/B2), `TestBreakHeight
+  Floor` (2: floor holds while active, released on settle -- Decision 29), `TestRotorEnvelopeGuards`
+  (4: RPM-floor caps a rise/leaves a fall untouched, stall-margin caps a rise, clear-of-both rises
+  freely -- Decision 30), `TestVrsDescentCap` (2: capped below threshold, uncapped at cruise --
+  Decision 31). `_LIMITS`/`_measured()` fixtures extended with the five new limits keys, `floor_
+  agl_m` (newly read by `law_update` this batch), and `rotor_rpm_pct` (defaulted well clear of the
+  floor so no pre-existing scenario trips a guard it isn't testing).
+- `aircraft-layer/tests/test_flight_control_lua.py` -- `TestEnvelopeRelease::test_sustained_high_
+  bank_never_releases` (F-M1's own positive confirmation); `TestReadRotorRpmPct` (3: dummy value,
+  arg-proxy scaling, arg-proxy fail-soft-to-dummy) via a new `_run(..., rotor_rpm_source=...)`
+  parameter that patches the module source's `ROTOR_RPM_SOURCE` default for this one test class.
+- `body-layer/tests/test_flight_control.py` -- `TestWireHelpers` additions (`turn_rate_deg_s` on
+  the wire only when set; `max_bank_deg` absent, the five new limits present);
+  `TestDrainFlightControlSeedsTheBreakTarget` (4: seeds on an OVERLAY->ACTIVE break take, no-op
+  with no break/no entry heading, unaffected by an ordinary TAKING->ACTIVE take -- Decision 32).
+- `body-layer/tests/test_ai_pilot_wheel.py` -- `TestCbtmBreakTargetHeadingDeg` (4, including a
+  wrap-through-zero case).
+- `body-layer/tests/test_body_ai_pilot_wheel.py` -- `TestCbtmTransitions` gains the entry-heading
+  capture (break captures, align does not) and `TestApplyAiPilotWheelGoal` gains the unpark-clears-
+  it case.
+- `body-layer/tests/test_rules_flight_actions.py` -- `TestCbtmActions`'s two mode-1 `NOT_READY`
+  tests rewritten (the stub they covered is gone): `test_mode_1_break_not_ready_without_a_known_
+  heading`/`..._away_...` (the new guard from Departure 1) plus three new tests flying the real
+  break (`test_mode_1_break_left/right/away_flies_the_real_break`) asserting the dispatched
+  `FlightControlGoalRequest`.
+
+### Checks
+
+**body-layer** (fresh `.venv` built for this worktree -- none existed; `pyproj`/`numpy`/`lupa==2.8`/
+`mypy`/`ruff`/`pytest` installed per `pyproject.toml`'s own declared versions):
+- `ruff format --check src tests` -- pass (227 files).
+- `ruff check src tests` -- pass.
+- `mypy src` -- pass, 92 files.
+- `tools/check_rules.py config/rules` -- `ok: 1 rule file(s) checked`; wording/dry-run steps
+  skipped with a warning (`audio-adapter/.venv` not built in this worktree, pre-existing, not
+  something this round's changes can affect) -- `luac5.1 -p config/rules/flight.lua` passes
+  separately as a syntax backstop.
+- `tests/test_tuning_defaults_toml.py`/`test_tuning_comment_renders.py` -- pass (the second caught
+  a real bug: `BREAK_MAX_HEIGHT_LOSS_M`'s `FLOOR_AGL_M` cross-reference lived in its comment's
+  *second* sentence, which the generator never renders -- fixed by restating it in the first).
+- Full suite, `pytest tests -q` (no xdist in this fresh venv) -- **3687 passed, 4 xfailed, 0
+  failed**.
+- `.claude/scripts/fast-tests.sh body-layer` -- smoke clean; the targeted run surfaced one
+  deterministic, order-dependent failure, `test_main_print_tuning_works_without_aircraft_layer_
+  url`, **not reproducible** standalone, within its own file, combined with `test_flight_control.
+  py`, or under the full suite's own (alphabetical) order -- only under this script's specific
+  targeted-selection order for this diff. Root cause, traced through `tuning.py`: `Resolution.
+  defaulted`/`applied` are populated incrementally as each tuning-declaring module is first
+  imported, reading `os.environ["PETROBRAIN_TUNING"]` *at that import instant* (`tuning.py`'s own
+  documented "constants bind by value at import" design) -- some test file earlier in this
+  specific combined run's import order sets that env var (directly or via a fixture that outlives
+  its own test) to a file that supplies every key, so by the time this test's own `monkeypatch.
+  delenv` runs, the global `defaulted` set is already permanently empty for the rest of the
+  process. Pre-existing architecture (documented in `tuning.py`'s own module docstring and `body-
+  layer/CLAUDE.md`'s "Tuning" section), not touched by anything in this diff, and not reproducible
+  under the full suite's own order -- flagged for the Reviewer/DoD rather than chased further here
+  (root `CLAUDE.md`: the full suite, not `fast-tests.sh`'s targeted heuristic, is the authoritative
+  gate). Not refuted the DoD's full-suite pass above, which is clean.
+
+**aircraft-layer** (fresh `.venv` built for this worktree likewise):
+- `ruff format --check src tests` -- pass (85 files).
+- `ruff check src tests` -- pass.
+- `mypy src` -- pass, 28 files.
+- `luac5.1 -p dcs-export/Petrobrain/flight_control.lua` -- pass.
+- `luac5.1 -l -p ... | grep GETGLOBAL` -- clean (every name is a genuine stdlib/DCS global, no
+  own-helper referenced before its `local`; re-run after the `check_envelope` edit caught one
+  left-behind `ENV_BANK_MARGIN_DEG` reference the first pass missed).
+- Full suite, `pytest tests -q` -- **979 passed**.
+
+### Notable Discoveries
+
+- **This worktree had no `.venv` for either subproject at all** (both built fresh from each
+  `pyproject.toml`'s declared dependencies) -- flagging in case the main loop's worktree-creation
+  step is expected to carry these forward and silently didn't this time.
+- Decision 29's break floor and Decision 31's VRS cap both needed `limits.floor_agl_m` inside
+  `law_update` for the first time -- it had been sent on the wire since Stage M1 but never read by
+  the law itself before this batch; the toy-plant suite's own `_LIMITS` fixture needed the same
+  addition, confirming the field really was new to that function, not an oversight in this round.
