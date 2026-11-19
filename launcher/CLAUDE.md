@@ -19,8 +19,9 @@ value from `OPT_<SERVICE>_<FLAG>` in `run-scripts/petrobrain.env`; autostart fro
 `DEFAULT_SERVICES` there.
 
 Not "fancy or very robust at this stage" (user, 2026-11-19) -- toggles reset each launch, values
-are not editable in the UI, and a service that draws on the terminal or reads stdin is started by
-hand instead.
+are not editable in the UI, and a service that draws on the terminal, or that you want to type
+into, is started by hand instead. Services get a stdin pipe that stays open and is never written
+(an EOF ended body-layer's stdin REPL, and so body-layer, at start -- 2026-11-19).
 
 ## Tech stack
 
