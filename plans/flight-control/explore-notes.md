@@ -957,3 +957,14 @@ Main-loop note: this reverses the mode-1 plan's Decision 3 ("mode 1 is forward f
 under which every `hvrt_*` command answers "unable, not ready" in mode 1. Arrived while the
 break/rotor-envelope batch was mid-build; recorded here, planned as the next mode-1 batch unless
 the user says otherwise. Mode 2's "move up/down" stays ED's 2 m step.
+
+Answers (user, 2026-11-19, verbatim): *"Mode 1 hover. Write it into BL-16, but leave until later.
+There are more important things first. Q1 - ground speed Q2 - "speed 0" Q3 - yes, all translate
+command keep the translate going until "hold" command Q4 - fixed spot, heading and altitude Q5 -
+this is acceptable speed range, but limittations appy like the descend rate. In hover, heading
+change is possible command and must be done with pedals to induce yaw. Bank in hover is not the
+way to change heading. The slower the flight, the more gentle inputs need to be."*
+
+(Questions were: Q1 ground speed or airspeed; Q2 how hover is entered; Q3 translate continuous
+until "hold"; Q4 what "hold" holds; Q5 whether 25–50 km/h forward flight is fine.) Deferred:
+`[[BL-16]]` "Later — mode 1 hover".
