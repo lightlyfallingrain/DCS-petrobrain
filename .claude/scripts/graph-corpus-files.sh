@@ -87,6 +87,16 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
         find "$sub/ROADMAP" -name '*.md' 2>/dev/null
         find "$sub/docs" -name '*.md' 2>/dev/null
     done 2>/dev/null
+    # A roadmap can exist before its code does (wingbrain, 2026-11-19: ROADMAP/
+    # and no pyproject.toml); the sentinel pointer marks it. Same rule as
+    # roadmap-entry-consistency-gate.sh's discovery.
+    for p in */ROADMAP.md; do
+        sub="${p%/ROADMAP.md}"
+        [ -f "$sub/pyproject.toml" ] && continue
+        head -1 "$p" | grep -qF '<!-- split-roadmap: see ROADMAP/ -->' || continue
+        printf '%s\n' "$p"
+        find "$sub/ROADMAP" -name '*.md' 2>/dev/null
+    done 2>/dev/null
 
     # Dated research findings — factual records, not superseded intent
     find . -path '*/research/*.md' \
