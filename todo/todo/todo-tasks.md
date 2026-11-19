@@ -33,6 +33,8 @@ on the index without opening anything.
 - [[X-T25]] — Compact the agent-memory indexes — **DONE 2026-10-16**, closed by user direction and
   resolved by deleting the indexes rather than compacting them: each is now a 747-byte pointer to
   `memory-search.py`, which derives the index on demand, and the hook that nagged six agents is gone
+- [[X-T30]] — **Next, 2026-11-19: the user flies the unflown BL-16/BL-17 cards on `main`** — six
+  cards in stack order, what to do with the results, then BL-17 waits/cancel → unset. Read first
 - [[X-T29]] — **Standing priority order, 2026-11-17** — BL-17, then BL-16 raw-axes flight, seats,
   light/weather, offset marks, launcher, helicopter gating, MI wiring, wingman recon. Read this
   before choosing what to start; supersedes X-T27
