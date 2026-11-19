@@ -96,3 +96,13 @@ Consistent with the original F-P7 answer (2026-11-18, *"yes, as proposed"*: a br
 toward the threat). The implementation over-reached to goals commanded after the break. Settled:
 a goal older than the break is superseded by it; a goal commanded during or after a break is flown
 at once, ending any remaining break press (including break away's second press).
+
+## Reset and single running number, user direction (verbatim)
+
+> handle the reset. having individual channels and their numbers sounds error prone. I'd still
+> prefer single running number. Not critical immediately, but should be done in BL-16
+
+- Reset on body-layer start: built in this batch (clears Lua's command state; mode 1 lets go, see
+  the decision above).
+- One mission-wide running number for every command channel: BL-16 work, recorded on
+  `body-layer/ROADMAP/BL-16.md`, not this batch.
