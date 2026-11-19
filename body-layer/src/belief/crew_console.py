@@ -1702,6 +1702,24 @@ class CrewConsole:
     #: (`belief.flight_control`'s own module docstring). Reset to `None`
     #: at the top of every `handle_command` dispatch, same convention.
     flight_control_goal_transition: FlightControlGoalRequest | None = None
+    #: 2026-11-19 mode 1 handover feedback, review-handover-ack.md
+    #: Required Fix -- the ack-timeout's own self-queued release
+    #: (`drain_flight_control`'s `TAKING -> PILOT` branch), kept off
+    #: `flight_control_transition` entirely so it cannot be clobbered.
+    #: Two things could otherwise lose it before `_apply_flight_control`
+    #: sends it next poll: `_reset_one_shot_command_state` clears `flight_
+    #: control_transition` at the top of *every* `handle_command`
+    #: dispatch this same poll (regardless of whether that dispatch
+    #: acts), and `take_controls`/`release_controls` write that same
+    #: field when it does act -- either one, run from `_poll_transcripts`
+    #: after `drain_flight_control`, would otherwise overwrite or erase
+    #: the queued release with no wire message ever carrying it. Same
+    #: "survives dispatch, consumed only at the next poll's top" posture
+    #: as `where_is_it_requested` above, for the same reason: its
+    #: consumer (`_apply_flight_control`) runs at the top of the *next*
+    #: poll, not later in this one. Takes priority over `flight_control_
+    #: transition` there -- see that function's own docstring.
+    flight_control_system_release_pending: bool = False
     #: "Where is it?"'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
     #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
@@ -5634,6 +5652,22 @@ class CrewConsole:
         new_state, decision = decide_flight_control(
             self.flight_control_state, now_sim, parked_active=parked_active
         )
+        if old_phase == "TAKING" and new_state.phase == "PILOT":
+            # 2026-11-19 mode 1 handover feedback, fix b: the only way
+            # `decide_flight_control` makes this transition is the ack
+            # timeout -- belief gives up and goes back to `PILOT`, but
+            # says nothing to `Export.lua`, which by then has often
+            # already gone `active` (the take simply arrived late) and
+            # keeps flying the axes regardless of what belief now
+            # thinks. review-handover-ack.md Required Fix: queued on
+            # `flight_control_system_release_pending`, not `flight_
+            # control_transition` itself -- a same-poll player take/
+            # release recognised later this poll (`_poll_transcripts`)
+            # must not be able to clobber it. `_apply_flight_control`
+            # sends it next poll, ahead of anything in `flight_control_
+            # transition`, so belief and the aircraft never disagree
+            # about who flies for long.
+            self.flight_control_system_release_pending = True
         if old_phase == "OVERLAY" and new_state.phase == "ACTIVE":
             break_action = self.parked_flight_state.cbtm_action_sent
             entry_heading = self.parked_flight_state.cbtm_break_entry_heading_deg

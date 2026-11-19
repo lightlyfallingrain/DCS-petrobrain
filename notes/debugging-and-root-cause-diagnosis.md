@@ -62,3 +62,19 @@
   is one-directional: only the direction whose camera read can outrun the arg's animation needs it;
   the reverse direction, where the arg is forced to a known value the instant the seat gate fires,
   stays immediate (`apw-seat-swap-settle` debug + review, 2026-11-18).
+
+- **A test that constructs two counters meant to be compared "equal by hand" verifies the
+  comparison, not that the two values actually arrive at the same number in production.**
+  `decide_flight_control`'s `TAKING` branch compared `FlightControlState.take_seq` (a local
+  per-take counter, bumped at decision time) against `lua_take_seq` (the wire seq Export.lua
+  actually echoed back). Every existing test built both fields with the same literal
+  (`FlightControlState(take_seq=N, lua_take_seq=N)`), which exercises the branch's logic
+  correctly but can never catch the two counters having no real relationship to each other — the
+  wire seq is chosen later, by a different code path, than the local counter is bumped. The real
+  mismatch only showed up on a live sortie; a test written against the real wire path (constructing
+  a state with the two values deliberately different, then calling the actual send function to see
+  what `take_seq` it computes) reproduced it directly. When a test builds two fields that a
+  production code path is supposed to keep in sync, check whether anything actually enforces that
+  sync, or whether the test is only allowed to assume it (`plans/flight-control/debug.md`, first
+  bug; `plans/flight-control/review-handover-ack.md` confirms the same tests "hid the bug by
+  construction").

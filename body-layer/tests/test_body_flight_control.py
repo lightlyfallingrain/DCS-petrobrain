@@ -53,6 +53,33 @@ class TestApplyFlightControl:
         assert goal is None
         assert console.flight_control_state.wire_seq == 1
 
+    def test_a_take_transition_sets_take_seq_to_the_actual_sent_wire_seq(
+        self,
+    ) -> None:
+        """2026-11-19 mode 1 handover feedback: `Export.lua` echoes back
+        the **wire** seq of the `take` message as `fc_take_seq`
+        (`fc_pending_take_seq = seq` in `flight_control.lua`'s own
+        `cmd == "take"` handler), never `FlightControlState.take_seq`'s
+        own independent per-take counter. `take_controls` bumps that
+        counter locally (here, 5 -> 6) with no knowledge of the wire --
+        `decide_flight_control`'s ack comparison (`lua_take_seq ==
+        take_seq`) can only ever match by the two counters' sheer luck,
+        which is exactly why the existing pure-function tests (built
+        with both values set equal by hand) never saw this. `take_seq`
+        must come out equal to the *sent* wire seq (3, from
+        `wire_seq=2 + 1`), not the independently-bumped 6, or every
+        voice take times out even though Lua goes active."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", take_seq=6, wire_seq=2))
+        console.flight_control_transition = "take"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        seq, cmd, _limits, _goal = client.flight_control_calls[0]
+        assert seq == 3
+        assert cmd == "take"
+        assert console.flight_control_state.take_seq == 3
+
     def test_a_release_transition_is_sent_and_cleared(self) -> None:
         client = _FakeAircraftClient()
         console = _console(FlightControlState(wire_seq=5))
@@ -95,6 +122,46 @@ class TestApplyFlightControl:
         seqs = [call[0] for call in client.flight_control_calls]
         assert seqs == [1, 2]
         assert console.flight_control_state.wire_seq == 2
+
+    def test_a_system_release_is_sent_alone_and_a_queued_take_is_deferred(
+        self,
+    ) -> None:
+        """review-handover-ack.md Required Fix -- what actually goes on
+        the wire for the interleaving `test_flight_control.py`'s
+        `test_a_same_poll_take_does_not_clobber_the_queued_release`
+        reproduces at the belief level: the ack-timeout's self-queued
+        release (`flight_control_system_release_pending`) must reach
+        Lua before the same-poll player `take` that followed it --
+        and that `take` must not simply be dropped, only deferred to
+        the next poll's own `_apply_flight_control` call, once Lua has
+        had this release to act on."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", wire_seq=10))
+        console.flight_control_transition = "take"
+        console.flight_control_system_release_pending = True
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert len(client.flight_control_calls) == 1
+        seq, cmd, _limits, goal = client.flight_control_calls[0]
+        assert seq == 11
+        assert cmd == "release"
+        assert goal is None
+        assert console.flight_control_state.wire_seq == 11
+        assert console.flight_control_system_release_pending is False
+        # the player's "take" is neither sent nor discarded this poll --
+        # it is still here, to be sent on the very next poll.
+        assert console.flight_control_transition == "take"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert len(client.flight_control_calls) == 2
+        seq, cmd, _limits, goal = client.flight_control_calls[1]
+        assert seq == 12
+        assert cmd == "take"
+        assert goal is None
+        assert console.flight_control_transition is None
+        assert console.flight_control_state.wire_seq == 12
 
     def test_a_goal_during_taking_is_held_not_sent_and_not_cleared(self) -> None:
         """review-m2.md Required Fix 1: a goal commanded in the one-

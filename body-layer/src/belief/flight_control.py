@@ -343,6 +343,18 @@ class FlightControlState:
     collide (an intervening goal send bumping what a take confirmation
     is compared against) if conflated into one field.
 
+    **`take_controls`'s own `take_seq + 1` bump is provisional, not the
+    value `decide_flight_control` ever compares against** (2026-11-19
+    mode 1 handover feedback/fix a) -- it is overwritten by `body.py`'s
+    `_apply_flight_control` with the *actual* wire `seq` the `take`
+    message is sent with, the one value `Export.lua` can possibly echo
+    back as `fc_take_seq` (its own `cmd == "take"` handler: `fc_pending_
+    take_seq = seq`, the wire message's own seq, not a second counter
+    of its own). Comparing the local bump directly against `fc_take_seq`
+    -- what this field held before the fix -- can only ever match by
+    coincidence, which is exactly why it went unnoticed: every existing
+    pure-function test built `take_seq`/`lua_take_seq` equal by hand.
+
     **`lua_last_cmd_seq` mirrors `Export.lua`'s own `fc_last_cmd_seq`
     directly (security-m1-m2.md Finding A, change-request round)** --
     unlike every other `lua_*` mirror, `_apply_flight_control` reads it
@@ -529,12 +541,19 @@ def release_controls(
     answered 2026-11-18: *"respond 'unable' when in AI overlay mode.
     Don't remember, Player will handle."*) raises unable `AI_OVERLAY` --
     nothing here is remembered; the next unpark still takes per Decision
-    24 regardless of this call. Otherwise: `acted=True` only while
-    actually holding the controls (`TAKING`/`ACTIVE`), `acted=False`
-    (silent, the player already has them) from `PILOT`."""
+    24 regardless of this call. Otherwise: `acted=True` while actually
+    holding the controls (`TAKING`/`ACTIVE`) **or whenever `Export.lua`
+    itself still reports holding the axes** (`lua_mode` `"active"` or
+    `"taking"`, 2026-11-19 mode 1 handover feedback, fix c) -- belief
+    can land on `PILOT` with Lua still flying (the ack-timeout case,
+    before fix b's own release reaches it, or any other poll in
+    between), and Decision 13's recovery phrase must always act then:
+    the player's stick really was being ignored. `acted=False` (silent,
+    the player already has the controls and Lua agrees) only when
+    neither belief nor Lua is flying mode 1."""
     if overlay_flying:
         return state, {"ok": False, "reason": "AI_OVERLAY"}
-    if state.phase in ("TAKING", "ACTIVE"):
+    if state.phase in ("TAKING", "ACTIVE") or state.lua_mode in ("active", "taking"):
         new_state = replace(
             state,
             phase="PILOT",
