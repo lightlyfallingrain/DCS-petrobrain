@@ -165,7 +165,21 @@ def _resolve_poll_hz(ptt: str, poll_hz: float | None) -> float:
     return DEFAULT_DCS_POLL_HZ if ptt == "dcs" else DEFAULT_LOCAL_POLL_HZ
 
 
+def _utf8_console() -> None:
+    """Write stdout/stderr as UTF-8 whatever the platform default is.
+
+    A Windows Python whose output is a pipe (the launcher, run from WSL)
+    defaults to cp1252, which cannot encode the "●" REC marker and killed
+    the process on the first PTT press. The launcher decodes UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_console()
     args = _build_parser().parse_args(argv)
 
     if not sox_available(args.sox_binary):

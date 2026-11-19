@@ -17,10 +17,15 @@ instead of resolving it once after parsing.
 
 from __future__ import annotations
 
+import io
+
+import pytest
+
 from audio_adapter.capture import (
     DEFAULT_LOCAL_POLL_HZ,
     _build_parser,
     _resolve_poll_hz,
+    _utf8_console,
 )
 from ptt_source import DEFAULT_DCS_POLL_HZ
 
@@ -56,3 +61,15 @@ def test_parser_default_poll_hz_is_none() -> None:
 def test_explicit_poll_hz_flag_is_parsed() -> None:
     args = _build_parser().parse_args(["--ptt", "dcs", "--poll-hz", "12.5"])
     assert args.poll_hz == 12.5
+
+
+def test_rec_marker_survives_a_cp1252_pipe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows Python writing to a pipe defaults to cp1252; "●" crashed it."""
+    raw = io.BytesIO()
+    cp1252 = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr("sys.stdout", cp1252)
+    monkeypatch.setattr("sys.stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    _utf8_console()
+    print("  \u25cf REC")
+    cp1252.flush()
+    assert raw.getvalue().decode("utf-8") == "  \u25cf REC\n"
