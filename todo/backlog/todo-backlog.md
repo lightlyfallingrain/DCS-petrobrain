@@ -89,7 +89,7 @@ than normalised.
 - [[X-B37]] — The tuning TOML generator renders only a first sentence, and renders markdown into it
 - [[X-B38]] — Two accepted-but-untested edge cases in `tuning.py`
 - [[X-B39]] — A mechanical check for the leaf-tested / wiring-untested defect `[?]`
-- [[X-B40]] — Petrobrain launcher: a text UI for starting, stopping and watching the services
+- [[X-B40]] — Petrobrain launcher: a text UI for starting, stopping and watching the services `[~]`
 - [[X-B41]] — What can DCS AI wingmen be commanded to do? (recon, first step toward X-B21) —
   **moved 2026-11-19 to [[WB-1]]**, in the new `wingbrain/ROADMAP/`
 
