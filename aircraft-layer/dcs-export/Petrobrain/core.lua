@@ -101,15 +101,46 @@ local function debug_dump(label, value)
     dump(value, "  ", 0)
 end
 
--- `nil` formats as the bare JSON literal `null`, never a quoted string --
--- `encode_json_line` below does the same for its own flat tables; this is
--- the same convention for the one-off lines built with direct string
--- concatenation in several other modules.
-local function fmt_num_or_null(v)
+-- True for a Lua number that JSON can actually carry -- `nan`/`inf`/
+-- `-inf` are not valid JSON tokens, so a value that is any of those
+-- must format as `null` rather than emit a syntax `encode_json_line`'s
+-- consumer (`json.loads` on the collector/schema side) would choke on.
+local function is_finite_number(v)
     if type(v) ~= "number" then
+        return false
+    end
+    if v ~= v then -- NaN is the only Lua value that compares unequal to itself
+        return false
+    end
+    return v ~= math.huge and v ~= -math.huge
+end
+
+-- `nil` (and non-finite) formats as the bare JSON literal `null`, never a
+-- quoted string -- `encode_json_line` below does the same for its own
+-- flat tables; this is the same convention for the one-off lines built
+-- with direct string concatenation in several other modules.
+local function fmt_num_or_null(v)
+    if not is_finite_number(v) then
         return "null"
     end
     return string.format("%.5f", v)
+end
+
+-- Same contract as `fmt_num_or_null` above, for a field the wire schema
+-- on the Python side parses strictly as `int` (a sequence counter, never
+-- a measurement) -- `%.5f` on an integer-typed field (e.g. a seq of
+-- `-1`) emits `"-1.00000"`, which `json.loads` parses as a Python
+-- `float`, and every schema that demands a whole number for that field
+-- then rejects the entire line (`plans/flight-control/debug.md`,
+-- "Common root cause, both modes", 2026-11-19: `fc_take_seq`/
+-- `fc_goal_seq`/`fc_last_cmd_seq`, `apw_goal_seq`/`apw_cbtm_seq`).
+-- `math.floor` before `%d` since these counters are already
+-- integer-valued Lua numbers; `v` itself is never fractional.
+local function fmt_int_or_null(v)
+    if not is_finite_number(v) then
+        return "null"
+    end
+    return string.format("%d", math.floor(v))
 end
 
 -- Shared, mutable, cross-module: every `push_*` function in every other
@@ -341,6 +372,7 @@ M.WHEEL_CENTER_BUTTON = WHEEL_CENTER_BUTTON
 _G.debug_log = debug_log
 _G.debug_dump = debug_dump
 _G.fmt_num_or_null = fmt_num_or_null
+_G.fmt_int_or_null = fmt_int_or_null
 _G.safe_call = safe_call
 _G.encode_json_line = encode_json_line
 _G.json_escape_string = json_escape_string

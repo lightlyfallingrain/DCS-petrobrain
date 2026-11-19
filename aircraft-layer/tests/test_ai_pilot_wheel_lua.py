@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from schema import AiPilotWheelState
+
 _PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
 _CORE_LUA = _PETROBRAIN_DIR / "core.lua"
 _AI_PILOT_WHEEL_LUA = _PETROBRAIN_DIR / "ai_pilot_wheel.lua"
@@ -2320,8 +2322,9 @@ class TestAiPilotGoalTickHvrt:
 
 def _run_push_ai_pilot_wheel_state(script_body: str) -> str:
     """Runs the real `push_ai_pilot_wheel_state` (plus `core.lua`'s
-    `fmt_num_or_null`/`json_escape_string`, the two helpers it closes
-    over) against a fake `client:send` that captures the one line sent,
+    `fmt_num_or_null`/`fmt_int_or_null`/`json_escape_string`, the
+    helpers it closes over) against a fake `client:send` that captures
+    the one line sent,
     then prints it verbatim -- so the caller can feed the captured line
     straight to `json.loads`. `plans/apw-status-json-quotes/debug.md`:
     `text_or_null` re-wrapped `json_escape_string`'s own already-quoted
@@ -2361,7 +2364,14 @@ client = {
 """
     functions = "\n".join(
         (
+            # `is_finite_number` must precede `fmt_num_or_null`/
+            # `fmt_int_or_null` -- both call it as a bare name, and this
+            # concatenates the extracted bodies into one chunk in this
+            # order, same local-before-use rule `core.lua` itself
+            # follows.
+            _extract_lua_function(_CORE_LUA, "is_finite_number"),
             _extract_lua_function(_CORE_LUA, "fmt_num_or_null"),
+            _extract_lua_function(_CORE_LUA, "fmt_int_or_null"),
             _extract_lua_function(_CORE_LUA, "json_escape_string"),
             _extract_lua_function(_AI_PILOT_WHEEL_LUA, "push_ai_pilot_wheel_state"),
         )
@@ -2452,3 +2462,41 @@ class TestPushAiPilotWheelStateJson:
         )
         parsed = json.loads(line)
         assert parsed["apw_mode_text"] == 'has "quotes" and \\backslash'
+
+
+class TestSeqFieldsSurviveTheRealSchema:
+    """`plans/flight-control/debug.md` "Common root cause, both modes"
+    (2026-11-19): `core.lua`'s `fmt_num_or_null` formatted every number
+    `%.5f`, so `apw_goal_seq`/`apw_cbtm_seq` went out as e.g.
+    `"3.00000"` -- valid JSON, but a `float`, which `schema.
+    ai_pilot_wheel.AiPilotWheelState.from_dict` rejects (`"must be a
+    whole number or null"`), dropping the whole line once either field
+    was ever set. These run the real `push_ai_pilot_wheel_state`
+    (not a hand-built JSON string) through the real schema's
+    `from_dict` -- a weaker test built from a `%.5f`-style string by
+    hand would not have caught this, since it would never emit what
+    Lua actually does."""
+
+    def test_default_seqs_parse_as_int_through_the_real_schema(self) -> None:
+        """The preamble's own defaults (`goal_seq = 0`, `seq = 0`) --
+        already non-nil on every single push, so this is the shape that
+        was dropping every AI-wheel line once a goal had ever been set,
+        not only an edge case."""
+        line = _run_push_ai_pilot_wheel_state("push_ai_pilot_wheel_state(1.0)")
+        state = AiPilotWheelState.from_dict(json.loads(line), received_wall_clock_s=0.0)
+        assert state.goal_seq == 0
+        assert state.cbtm_seq == 0
+
+    def test_nonzero_seqs_parse_as_int_through_the_real_schema(self) -> None:
+        line = _run_push_ai_pilot_wheel_state(
+            """
+            ai_pilot_goal.goal_seq = 3
+            ai_pilot_cbtm.seq = 7
+            push_ai_pilot_wheel_state(2.0)
+            """
+        )
+        state = AiPilotWheelState.from_dict(json.loads(line), received_wall_clock_s=0.0)
+        assert isinstance(state.goal_seq, int)
+        assert isinstance(state.cbtm_seq, int)
+        assert state.goal_seq == 3
+        assert state.cbtm_seq == 7

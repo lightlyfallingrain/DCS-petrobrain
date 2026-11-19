@@ -107,3 +107,109 @@ are unchanged. Mode 2 (`ai_pilot_wheel`) code is untouched.
 - `mypy --strict` (run from `body-layer/`): Success, no issues found in 92 source files.
 - Mode 2 (`ai_pilot_wheel.py`, `ai_pilot_wheel.lua`) left untouched, per the brief -- a separate
   mode 2 "unable, not flying" defect is being investigated by the main loop.
+
+---
+
+### Debug Report (second bug, same branch)
+
+### Observed Issue
+
+`docs/acceptance/2026-11-19-mode1-handover-feedback.md`, "Common root cause, both modes": the
+Windows collector console logged `dropping malformed ai-pilot-wheel line` and `dropping malformed
+flight-control line` while telemetry was live, and `GET /ai_pilot_wheel/latest` /
+`GET /flight_control/latest` both returned `null`. This is the actual root cause behind both modes'
+"unable, not flying" symptoms described above -- the take-ack seq fix above addressed a real but
+secondary defect; the lines carrying the fix's own evidence were never reaching body-layer at all.
+
+### Hypothesis
+
+`aircraft-layer/dcs-export/Petrobrain/core.lua`'s `fmt_num_or_null` formats every number with
+`%.5f`, with no distinction between a measurement and an integer-typed wire field. For a sequence
+counter this produces e.g. `"-1.00000"`, which `json.loads` parses as a Python `float`; every
+schema field declared strictly `int` (`fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` in
+`src/schema/flight_control.py`, `apw_goal_seq`/`apw_cbtm_seq` in `src/schema/ai_pilot_wheel.py`)
+then raises and the collector drops the whole line. `fc_last_cmd_seq` is never `null` (an always-set
+`-1` sentinel before any command), so every flight-control line has been dropped since the module
+that introduced it (`307d6a81`, 2026-11-18); the AI-wheel line drops only once a goal/combat-trim
+command has ever been accepted this session (`apw_goal_seq`/`apw_cbtm_seq` start `nil`/`null`).
+
+### Evidence
+
+- `core.lua:108` (pre-fix): `local function fmt_num_or_null(v) ... return string.format("%.5f", v)
+  end` -- no int/float distinction.
+- `src/schema/flight_control.py`'s `_optional_int` (`"must be a whole number or null"`) and
+  `src/schema/ai_pilot_wheel.py`'s matching checks on `apw_goal_seq`/`apw_cbtm_seq`: both reject
+  any `float`, including an integer-valued one like `3.0`.
+- Reproduced directly: `AiPilotWheelState.from_dict({'t':1.0,'apw_parked_active':True,
+  'apw_goal_seq':3.0}, received_wall_clock_s=0.0)` raises `AiPilotWheelParseError`.
+- `grep -n fmt_num_or_null aircraft-layer/dcs-export/Petrobrain/*.lua` -- swept every call site
+  against every schema's int-strict fields (`isinstance(..., int)`/`_optional_int`/"whole number"
+  across `src/schema/*.py`): only `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` (`flight_control.
+  lua`) and `apw_goal_seq`/`apw_cbtm_seq` (`ai_pilot_wheel.lua`) are both (a) formatted by
+  `fmt_num_or_null` and (b) parsed strictly as `int`. `sight.lua`'s `fmt_num_or_null` fields and
+  `ai_pilot_wheel.lua`'s `apw_arg852`/`apw_arg952`/`apw_cam_fwd_m` all parse as `float | int`-tolerant
+  `_optional_number`, so no defect there. `world_objects.py`'s `category`/`subcategory` (also
+  `_optional_int`) are formatted by `telemetry.lua`'s `encode_scalar`, which uses Lua's own
+  `tostring` (`%.14g`-equivalent, prints an integer-valued double without a decimal point) --
+  unaffected. `mission_start.py`'s strict-int `sequence`/`atmosphere_type` are sent by
+  `petrobrain-mission-start-hook.lua` via a real `JSON:encode` library (Hook-state script, not
+  `Export.lua`/`core.lua`) -- also unaffected. `line_of_sight.py`'s `_parse_int` fields come from a
+  pipe-delimited payload string built by a separate Hook script, never `fmt_num_or_null` -- also
+  unaffected.
+- Checked `fmt_num_or_null` for the non-finite case too (not previously guarded): `nan`/`inf`/`-inf`
+  are not valid JSON tokens, so a non-finite float on any `fmt_num_or_null`-formatted field (e.g. a
+  measurement after a DCS API returns something degenerate) would already have produced an
+  unparseable line, same failure mode, never previously tested.
+
+### Fix Applied
+
+- `core.lua`: added `is_finite_number(v)` (false for non-number, NaN, or either infinity) and a new
+  `fmt_int_or_null(v)` (`"null"` for non-finite, else `%d` on a `math.floor`ed value), exported as
+  `_G.fmt_int_or_null` the same way `fmt_num_or_null` already is. `fmt_num_or_null` itself now also
+  routes through `is_finite_number`, so a non-finite measurement emits `null` instead of `nan`/`inf`
+  text.
+- `flight_control.lua`: `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` now use `fmt_int_or_null`
+  instead of `fmt_num_or_null`. Every other `fmt_num_or_null` call in this file (the heading/
+  altitude/speed goal and measured fields) is unchanged -- those schema fields are float-tolerant.
+- `ai_pilot_wheel.lua`: `apw_goal_seq`/`apw_cbtm_seq` now use `fmt_int_or_null`. `apw_arg852`/
+  `apw_arg952`/`apw_cam_fwd_m` are unchanged (float-tolerant schema fields).
+- `sight.lua`, `telemetry.lua`, `petrobrain-mission-start-hook.lua`, `petrobrain-line-of-sight-hook.
+  lua`: no change -- swept and confirmed unaffected (see Evidence).
+- No schema change -- the Python side keeps demanding a real `int` for these fields; the fix is on
+  the Lua side that was emitting the wrong wire type, per this project's "code owns truth" posture
+  (a schema that silently accepted a float here would hide the next version of this same bug).
+
+### Verification
+
+- New `aircraft-layer/tests/test_core_lua.py`: `fmt_num_or_null`/`fmt_int_or_null` run against a
+  real Lua interpreter (`luajit` on this machine; `lua5.1` not installed locally, `_EXEC_TOOLS`
+  falls back through `luajit`/`lua5.5`/`lua5.1`/`lua`) -- ordinary values, `nil`, non-number, NaN
+  (`0/0`), `+inf`/`-inf` (`math.huge`/`-math.huge`). 14 passed.
+- `aircraft-layer/tests/test_flight_control_lua.py`: added `fmt_int_or_null`/`is_finite_number` to
+  the extracted `_CORE_HELPERS` set (full-module-execution harness, already in use); new
+  `TestSeqFieldsSurviveTheRealSchema` runs the real `push_flight_control_state` (not a hand-built
+  JSON string) through the real `schema.flight_control.FlightControlState.from_dict` -- default
+  state (`last_cmd_seq == -1`, parses as `int`) and after a real take+goal (`take_seq`/`goal_seq`/
+  `last_cmd_seq` all `int`). Updated the pre-existing `fc_last_cmd_seq` wire-format assertions from
+  `"47.00000"`/`"48.00000"` to `"47"`/`"48"` (the format changed; the counter value did not). 30
+  passed (28 pre-existing + 2 new, all updated assertions green).
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`: added the same two helpers to
+  `_run_push_ai_pilot_wheel_state`'s extraction list; new `TestSeqFieldsSurviveTheRealSchema` runs
+  the real `push_ai_pilot_wheel_state` through `schema.ai_pilot_wheel.AiPilotWheelState.from_dict` --
+  default (`goal_seq`/`cbtm_seq == 0`) and after setting both nonzero (`3`/`7`), both parsing as
+  `int`. 89 passed (87 pre-existing + 2 new).
+- A weaker test built from a hand-written `%.5f`-style JSON string was deliberately not used
+  anywhere -- every new assertion here parses the real line a real Lua interpreter actually
+  produced, which is what would have caught this the first time.
+- `luac5.1 -p` on `core.lua`/`flight_control.lua`/`ai_pilot_wheel.lua`: all pass.
+- `luac5.1 -l -p` GETGLOBAL sweep on all three touched files: `fmt_int_or_null` reads as a bare
+  global in `flight_control.lua`/`ai_pilot_wheel.lua`, same as `fmt_num_or_null` already does
+  (intentional cross-module access, `core.lua`'s own header comment); no name collides with a local
+  declared in the same file.
+- `ruff format`/`ruff check` (`aircraft-layer/src aircraft-layer/tests`): one file reformatted
+  (new/edited test assertions' line wrapping), all checks pass after.
+- `mypy --strict` (run from `aircraft-layer/`): Success, no issues found in 28 source files.
+- Full `pytest aircraft-layer/tests -q`: 997 passed (18 of them new -- 14 in `test_core_lua.py`, 2
+  each in `test_flight_control_lua.py`/`test_ai_pilot_wheel_lua.py` -- the other 979 pre-existing,
+  no regressions). No skips: a real Lua interpreter (`luajit`) was available on this machine.
+- `body-layer/` untouched -- this defect and fix are entirely within `aircraft-layer/`.

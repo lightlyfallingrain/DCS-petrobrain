@@ -1614,8 +1614,8 @@ local function push_flight_control_state(t)
 
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"fc_mode":"' .. fc_mode .. '"'
-        .. ',"fc_take_seq":' .. fmt_num_or_null(fc_take_seq)
-        .. ',"fc_goal_seq":' .. fmt_num_or_null(fc_goal_seq)
+        .. ',"fc_take_seq":' .. fmt_int_or_null(fc_take_seq)
+        .. ',"fc_goal_seq":' .. fmt_int_or_null(fc_goal_seq)
         -- security-m1-m2.md Finding A: echoes the one counter every
         -- `handle_flight_control_command` accept bumps, across every
         -- `cmd` kind, so body-layer can reconcile its own `wire_seq`
@@ -1623,7 +1623,7 @@ local function push_flight_control_state(t)
         -- process; this does not, same as `fc_last_cmd_seq` itself
         -- never resetting on `on_stop`) instead of being silently
         -- stuck below it for the rest of the DCS session.
-        .. ',"fc_last_cmd_seq":' .. fmt_num_or_null(fc_last_cmd_seq)
+        .. ',"fc_last_cmd_seq":' .. fmt_int_or_null(fc_last_cmd_seq)
         .. ',"fc_take_origin":' .. text_or_null(fc_take_origin)
         .. ',"fc_takeover_mode":' .. text_or_null(fc_takeover_mode)
         .. ',"fc_goal_heading":' .. fmt_num_or_null(goal_heading)

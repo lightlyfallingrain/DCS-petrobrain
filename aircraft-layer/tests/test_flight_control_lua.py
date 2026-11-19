@@ -15,8 +15,9 @@ module reads (`GetDevice`, `LoSetCommand`, `LoGetADIPitchBankYaw`,
 cross-module global (Decision 25's `is_parked`/`player_seat` getters)
 are mocked; `core.lua`'s own helper functions (`safe_call`,
 `extract_json_number_field`, `extract_json_string_field`,
-`fmt_num_or_null`, `json_escape_string`) are extracted from the real
-`core.lua`, same technique `test_ai_pilot_wheel_lua.py` already uses.
+`is_finite_number`, `fmt_num_or_null`, `fmt_int_or_null`,
+`json_escape_string`) are extracted from the real `core.lua`, same
+technique `test_ai_pilot_wheel_lua.py` already uses.
 
 Internal state (`fc_mode`/`fc_release_reason`/`fc_refuse_cause`/...) is
 never exported directly -- the test reads it the same way body-layer
@@ -28,6 +29,7 @@ Skips cleanly without a Lua interpreter on `PATH`."""
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -35,6 +37,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
+from schema.flight_control import FlightControlState
 
 _PETROBRAIN_DIR = Path(__file__).resolve().parent.parent / "dcs-export" / "Petrobrain"
 _CORE_LUA = _PETROBRAIN_DIR / "core.lua"
@@ -80,7 +84,13 @@ _CORE_HELPERS: tuple[str, ...] = (
     "safe_call",
     "extract_json_number_field",
     "extract_json_string_field",
+    # `is_finite_number` must precede `fmt_num_or_null`/`fmt_int_or_null`
+    # in this tuple -- both call it as a bare name, and the harness below
+    # concatenates these extracted bodies into one chunk in tuple order,
+    # same local-before-use rule `core.lua` itself follows.
+    "is_finite_number",
     "fmt_num_or_null",
+    "fmt_int_or_null",
     "json_escape_string",
 )
 
@@ -475,14 +485,19 @@ print(sent_lines[#sent_lines])
             lines[1],
             lines[2],
         )
-        assert _field(after_goal_line, "fc_last_cmd_seq") == "47.00000"
+        # `plans/flight-control/debug.md` "Common root cause, both
+        # modes": these three seq fields are now `fmt_int_or_null`, not
+        # `fmt_num_or_null` -- a bare `"47"`, never `"47.00000"`, which
+        # `json.loads` would parse as a float and every strict-`int`
+        # schema field would then reject whole.
+        assert _field(after_goal_line, "fc_last_cmd_seq") == "47"
         # on_stop resets fc_mode but not the staleness counter.
         assert _field(after_stop_line, "fc_mode") == "off"
-        assert _field(after_stop_line, "fc_last_cmd_seq") == "47.00000"
+        assert _field(after_stop_line, "fc_last_cmd_seq") == "47"
         # The reconciled seq=48 is accepted -- strictly greater than
         # the never-reset counter -- and advances it in turn.
         assert _field(after_resend_line, "fc_mode") == "active"
-        assert _field(after_resend_line, "fc_last_cmd_seq") == "48.00000"
+        assert _field(after_resend_line, "fc_last_cmd_seq") == "48"
 
 
 class TestReleaseStopsWritesSameFrame:
@@ -978,6 +993,60 @@ print(sent_lines[#sent_lines])
         assert _field(lines[0], "fc_axes_roll") == "true"
         assert _field(lines[0], "fc_axes_pedal") == "true"
         assert _field(lines[0], "fc_axes_collective") == "false"
+
+
+class TestSeqFieldsSurviveTheRealSchema:
+    """`plans/flight-control/debug.md` "Common root cause, both modes"
+    (2026-11-19): `core.lua`'s `fmt_num_or_null` formatted every number
+    `%.5f`, so `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` went out as
+    e.g. `"-1.00000"` -- valid JSON, but a `float`, which `schema.
+    flight_control.FlightControlState._optional_int` rejects, dropping
+    the whole line. These tests run the real `push_flight_control_state`
+    (not a hand-built JSON string) through the real schema's `from_dict`
+    -- a weaker test built from a `%.5f`-style string by hand would not
+    have caught this, since it would never emit what Lua actually does."""
+
+    def test_default_seqs_parse_as_int_through_the_real_schema(self) -> None:
+        """Before any command at all: `fc_take_seq`/`fc_goal_seq` are
+        `nil` (`null` on the wire), `fc_last_cmd_seq` is `-1` -- the one
+        value that was dropped on every single line, take or no take."""
+        driver = """
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        state = FlightControlState.from_dict(
+            json.loads(line), received_wall_clock_s=0.0
+        )
+        assert state.take_seq is None
+        assert state.goal_seq is None
+        assert state.last_cmd_seq == -1
+
+    def test_seqs_after_a_take_and_a_goal_parse_as_int_through_the_real_schema(
+        self,
+    ) -> None:
+        """A real take (`seq=1`) then a real goal (`seq=2`) -- the exact
+        shape a live sortie's handover produces, with every seq field
+        now holding a real non-sentinel integer."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        state = FlightControlState.from_dict(
+            json.loads(line), received_wall_clock_s=0.0
+        )
+        assert isinstance(state.take_seq, int)
+        assert isinstance(state.goal_seq, int)
+        assert isinstance(state.last_cmd_seq, int)
+        assert state.last_cmd_seq == 2
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:
