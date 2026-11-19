@@ -998,17 +998,37 @@ def decide_ai_pilot_wheel(
     run before the pre-existing rotation logic below (a break or a
     recovery trip pre-empts whatever the rotation would otherwise do):
 
-    1. **F-P7 -- a break always wins.** `state.cbtm_action_sent` names a
-       break (`"break_left"`/`"break_right"`/`"break_away"`): the
-       `heading` target/queue entry is dropped from `goal` outright, and
-       if `align_phase != "none"` it is forced to `"none"` with `pre_
-       align_snapshot` cleared (Q1 -- no restore after a break). This
-       runs on every poll `cbtm_action_sent` names a break, not only the
-       one it was first sent on -- harmless once there is nothing left
-       to drop or clear, and the simplest reading of the plan's own
-       "reported running or freshly sent" condition that does not need
-       a second Lua status round-trip to resolve (flagged in the
-       implementation notes).
+    1. **F-P7 -- a break always wins, but only until Lua reports it
+       done.** `state.cbtm_action_sent` names a break
+       (`"break_left"`/`"break_right"`/`"break_away"`) **and**
+       `state.lua_cbtm_status != "done"`: the `heading` target/queue
+       entry is dropped from `goal` outright, and if `align_phase !=
+       "none"` it is forced to `"none"` with `pre_align_snapshot`
+       cleared (Q1 -- no restore after a break). `!= "done"` (not
+       `== "running"`) deliberately also covers the one poll the break
+       is freshly sent on -- `_apply_ai_pilot_wheel_goal` sets `cbtm_
+       action_sent` to the new break and calls this function in the same
+       poll, before the just-sent command has even reached `Export.lua`,
+       so `lua_cbtm_status` that poll is still whatever it mirrored
+       *before* this break (`None` the first time this activation, or an
+       older `"done"`/`"idle"` left over) -- gating on `== "running"`
+       alone would miss that same-poll drop and fail `test_body_ai_
+       pilot_wheel.py`'s `test_break_left_is_recorded_and_ends_an_
+       outstanding_alignment`. `cbtm_action_sent` is carried through
+       unchanged for the rest of the activation (it has a second reader,
+       the mode-1 unpark-take's `cbtm_break_target_heading_deg` seed), so
+       without the `lua_cbtm_status` gate this drop ran on *every* poll
+       for the rest of the activation, not just while the break's press
+       was open -- including a heading goal spoken well after the break
+       had finished and Lua had released the press, which it silently
+       ate every time (bug found 2026-11-20, `docs/acceptance/
+       2026-11-20-sortie-feedback.md`: a heading goal after a break was
+       acknowledged and never flown). Gating on `Export.lua`'s own
+       `"running"`/`"done"` readback -- already mirrored here, no new
+       wire field -- bounds the drop to the break's actual episode, the
+       same "reported running or freshly sent" condition the plan always
+       meant (flagged in the implementation notes), without a second
+       round-trip.
     2. **E-P16 -- the three recovery triggers, while `"launch_aligned"`**
        (payload count drop, the Q-P3-2 AGL-relative floor, the absolute
        IAS ceiling): any one true enters `"recovering"` and seeds the
@@ -1034,7 +1054,10 @@ def decide_ai_pilot_wheel(
     if hvrt_released_timeout and goal.hvrt_direction is not None:
         goal = clear_hvrt_direction(goal)
 
-    if state.cbtm_action_sent in ("break_left", "break_right", "break_away"):
+    if (
+        state.cbtm_action_sent in ("break_left", "break_right", "break_away")
+        and state.lua_cbtm_status != "done"
+    ):
         if goal.active_param == "heading":
             goal = replace(
                 goal, heading_target_deg=None, active_param=None, active_since_sim=None

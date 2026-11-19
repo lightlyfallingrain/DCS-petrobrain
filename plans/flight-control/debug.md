@@ -213,3 +213,124 @@ command has ever been accepted this session (`apw_goal_seq`/`apw_cbtm_seq` start
   each in `test_flight_control_lua.py`/`test_ai_pilot_wheel_lua.py` -- the other 979 pre-existing,
   no regressions). No skips: a real Lua interpreter (`luajit`) was available on this machine.
 - `body-layer/` untouched -- this defect and fix are entirely within `aircraft-layer/`.
+
+### Debug Report (third bug, mode 2 -- heading goal stuck after a break)
+
+### Observed Issue
+
+2026-11-20 sortie, mode 2 (AI-pilot wheel overlay), flown on `main` at `98174b54`
+(`docs/acceptance/2026-11-20-sortie-feedback.md`):
+
+> Mode 2: break left -> ok > break right -> ok > turn heading 060 -> acknowledged, but nothing
+> happens. Not in CPG. No flicker.
+
+A later live sample (`GET /ai_pilot_wheel/latest`, after the user also manually switched the
+overlay to FLT and spoke "turn left 15") showed `"apw_cbtm_status": "done"`, `"apw_cbtm_seq": 2`
+(both breaks completed cleanly) and `"apw_goal_progress": "idle"`, `"apw_goal_seq": 0` -- Lua had
+never received a single `ai_pilot_goal` message with a heading this whole mission, in either
+overlay mode. "No flicker" (no `AI_WHEEL_LEFT` mode-cycle tap at all) was the tell: `Export.lua`'s
+own `ai_pilot_goal_tick` never even starts trying, which only happens while `ai_pilot_goal.param`
+is still `nil` -- i.e. body-layer never sent a heading goal, on either channel's own sequence
+space. This ruled out every Lua-side hypothesis (mode-cycle bound, CPG-view hold, a stuck
+`ai_pilot_cbtm.action`, a stuck `hvrt_direction`) and a cross-channel `goal_seq`/`cbtm_seq`
+dedupe collision (`Export.lua`'s `handle_ai_pilot_goal_command` checks each sequence space only
+against itself, confirmed by reading it in full) -- the defect is entirely upstream, in
+body-layer's own pure decision function, before anything is ever written to the wire.
+
+### Hypothesis
+
+`belief/ai_pilot_wheel.py`'s `decide_ai_pilot_wheel` ("F-P7 -- a break always wins") drops a
+`heading` goal whenever `state.cbtm_action_sent` names a break. `cbtm_action_sent` is set once,
+by `body._apply_ai_pilot_wheel_goal`, when a break is spoken, and is **never cleared** except on
+unpark (`body.py`'s own unparked branch). So F-P7 fired on *every* poll for the rest of the
+activation, not only while the break's press was actually open -- any heading goal spoken any
+time after any break, for the rest of that parked activation, was silently stripped from `goal`
+before `decide_ai_pilot_wheel`'s own promotion step (the one place that bumps `goal_seq`) ever
+saw it. `goal_seq` therefore never moved, `body.py`'s "send on `goal_seq` change" guard
+(`final_goal.goal_seq != runner.ai_pilot_goal_last_sent_seq`) never fired, and no
+`POST /command/ai_pilot_goal` carrying a heading was ever sent -- matching `apw_goal_seq: 0`
+exactly. The function's own docstring even predicted the opposite of what actually happens: "This
+runs on every poll `cbtm_action_sent` names a break, not only the one it was first sent on --
+harmless once there is nothing left to drop or clear" -- false the moment a *new* heading goal
+arrives after the break, which a break-then-level-off-then-new-heading flight profile does on
+every sortie.
+
+### Evidence
+
+- Read `ai_pilot_wheel.py`'s `decide_ai_pilot_wheel` (old F-P7 block, then at line ~1037) and
+  `request_goal`: a brand-new goal (no prior target) is only *queued* into `pending_order`,
+  `goal_seq` is **not** bumped there -- it is bumped only by the promotion step at
+  `goal.active_param is None` -> `pending_order` pop (line ~1113-1120) or by the slice-timer
+  rotation. F-P7 ran *before* that promotion step and removed `"heading"` from `pending_order`
+  outright, so the promotion/seq-bump code path was never reached for a heading goal spoken after
+  a break.
+- Read `body.py`'s `_apply_ai_pilot_wheel_goal`: `cbtm_action_sent` is carried through unchanged
+  (`cbtm_action_sent=(cbtm_transition if cbtm_transition is not None else
+  runner.parked_flight_state.cbtm_action_sent)`) and cleared only in the `not parked_active`
+  branch -- confirmed by grep (`cbtm_action_sent` appears nowhere else as a write target in
+  `body-layer/src/`).
+- Read `Export.lua`'s `handle_ai_pilot_goal_command` in full: `goal_seq` is compared only against
+  its own prior value (for `hvrt_step`'s one-shot dedup) and `cbtm_seq` only against its own --
+  no shared/cross-channel sequence check exists on the Lua side. Ruled out the coordinator's
+  "shared counter" hypothesis directly from the code, before building anything for it.
+- Reproduced with a unit test against `decide_ai_pilot_wheel` directly
+  (`body-layer/tests/test_ai_pilot_wheel.py::TestDecideAiPilotWheelCbtm::
+  test_a_heading_goal_after_the_break_has_finished_is_not_dropped`): a queued heading goal with
+  `cbtm_action_sent="break_right"`, `lua_cbtm_status="done"` (the break has already finished) is
+  silently dropped on the old code (`heading_target_deg` ends `None`, `goal_seq` stays `0`) and
+  correctly promoted on the fixed code (`heading_target_deg == 60.0`, `active_param == "heading"`,
+  `goal_seq == 1`). Confirmed failing on the pre-fix function by temporarily stashing the source
+  change only and re-running that one test (`AssertionError: assert None == 60.0`), then restoring
+  the fix.
+
+### Fix Applied
+
+`body-layer/src/belief/ai_pilot_wheel.py`, `decide_ai_pilot_wheel`'s F-P7 block: added
+`and state.lua_cbtm_status != "done"` to the break-wins condition (was: `state.cbtm_action_sent
+in ("break_left", "break_right", "break_away")` alone). `lua_cbtm_status` is already a read-only
+mirror of `Export.lua`'s own `apw_cbtm_status` (`"idle"`/`"running"`/`"done"`) -- no new field, no
+wire change. `!= "done"` rather than `== "running"` deliberately also covers the one poll a break
+is freshly sent on: `_apply_ai_pilot_wheel_goal` sets `cbtm_action_sent` and calls `decide_ai_
+pilot_wheel` in the same poll, before the just-sent command has reached `Export.lua`, so `lua_
+cbtm_status` that poll is still whatever it mirrored *before* this break (`None` the first break
+this activation) -- `== "running"` would have missed that same-poll drop and broken the existing
+`test_body_ai_pilot_wheel.py::TestCbtmTransitions::
+test_break_left_is_recorded_and_ends_an_outstanding_alignment` (confirmed: it failed with that
+narrower condition, passes with `!= "done"`). `cbtm_action_sent` itself is left untouched (still
+carried through to unpark, still read by the mode-1 unpark-take's `cbtm_break_target_heading_deg`
+seed) -- only the F-P7 drop's own duration is bounded, which is the minimal change the confirmed
+root cause needs. Docstring updated to describe the real condition and name the bug.
+
+Two existing unit tests (`test_a_break_drops_the_active_heading_goal_and_clears_align_phase`,
+`test_a_break_drops_a_queued_heading_goal`) were updated to set `lua_cbtm_status="running"`,
+since they exercise the "break in progress" case the old unconditional code never distinguished
+from "break long done." Two new tests added: the "done -> not dropped" regression above, and
+`test_a_freshly_sent_break_drops_heading_before_lua_has_echoed` (the same-poll case with `lua_
+cbtm_status=None`, the condition the narrower `== "running"` fix would have broken).
+
+**On the coordinator's shared-counter/reset-signal line of investigation**: stopped and did not
+build it. The root cause confirmed above is not a seq/dedupe collision between channels -- `Export.
+lua` never cross-checks `goal_seq` against `cbtm_seq` (read in full, see Evidence), and the live
+sample's `apw_goal_seq: 0` is fully explained by body-layer never sending the message at all, not
+by Lua rejecting or deduping one it received. No `flight_control.lua`/`flight_control.py` lines
+were touched, and no mission-restart/reset mechanism was built, per the instruction to stop and
+report rather than build a shared counter if the root cause turned out to be something else.
+
+### Verification
+
+- `body-layer/tests/test_ai_pilot_wheel.py` + `test_body_ai_pilot_wheel.py`: 124 passed (4 new/
+  changed in the first file; the previously-failing `TestCbtmTransitions::
+  test_break_left_is_recorded_and_ends_an_outstanding_alignment` in the second file now passes).
+- `ruff format --check body-layer/src body-layer/tests`: 227 files already formatted.
+- `ruff check body-layer/src body-layer/tests`: all checks pass.
+- `cd body-layer && .venv/bin/mypy src`: Success, no issues found in 92 source files.
+- Full `pytest body-layer -q` (no filter): ran clean (3696 passed, 4 xfailed, 0 failed) against the
+  version of the fix with the overly-narrow `== "running"` condition, which is exactly how the one
+  regression above (`TestCbtmTransitions::
+  test_break_left_is_recorded_and_ends_an_outstanding_alignment`) was caught and then fixed to
+  `!= "done"`; re-run of the touched files after the correction (above) is clean. A second full,
+  unfiltered run against the corrected code was in flight when this report was written -- rerun
+  `pytest body-layer -q` to confirm if that matters before merge; nothing in the diff outside
+  `ai_pilot_wheel.py`/`test_ai_pilot_wheel.py` changed between the two runs.
+- No Lua files touched by this fix -- `luac5.1 -p`/GETGLOBAL checks not applicable.
+- `aircraft-layer/` untouched -- this defect and fix are entirely within `body-layer/`.
