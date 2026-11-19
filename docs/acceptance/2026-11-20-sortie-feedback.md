@@ -51,3 +51,11 @@ unambiguous:
 - Mode 1: a take adds no pedal of its own; holding a heading means wings ~level, ball centred.
 - Mode 1: a take never ends in "unable, not ready" while Petrovich in fact holds the controls.
 - Mode 2: a heading goal after a break cycles CBTM → FLT and is flown.
+
+Continuation, verbatim:
+
+> Mode 2, continuation. I changed mode to FLT myself, commanded "turn left 15" -> acknowledged, but
+> nothing happens
+
+So the mode cycle is not the blocker: even in FLT the goal is never pressed. The goal channel
+itself is gated off after the breaks (or body-layer never sends it).
