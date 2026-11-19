@@ -374,12 +374,22 @@ class TestRequestGoal:
 
 class TestSetParkedHeading:
     def test_normalises_into_0_360(self) -> None:
-        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, 370.0)
+        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, 370.0, 1)
         assert goal.heading_target_deg == pytest.approx(10.0)
 
     def test_negative_degrees_wrap_positive(self) -> None:
-        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, -10.0)
+        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, -10.0, 1)
         assert goal.heading_target_deg == pytest.approx(350.0)
+
+    def test_stamps_the_order_argument(self) -> None:
+        """2026-11-20 rework -- every call stamps `heading_requested_
+        order`, regardless of whether the target is new, queued or
+        already active, since this is the only path that ever sets
+        `heading_target_deg` (`decide_ai_pilot_wheel`'s F-P7 rule reads
+        this to tell "requested before the break" from "during or
+        after it")."""
+        goal = set_parked_heading(AiPilotWheelGoal(), 1.0, 90.0, 7)
+        assert goal.heading_requested_order == 7
 
 
 class TestNearestSpeedStep:
@@ -962,18 +972,32 @@ class TestSeedRecoveryGoal:
 
 class TestDecideAiPilotWheelCbtm:
     """Stage P3+P4's own additions to `decide_ai_pilot_wheel` (plan,
-    "`decide_ai_pilot_wheel` -- the align/break/recovery 'when'")."""
+    "`decide_ai_pilot_wheel` -- the align/break/recovery 'when'").
 
-    def test_a_break_drops_the_active_heading_goal_and_clears_align_phase(
+    **Reworked 2026-11-20** (`docs/acceptance/2026-11-20-sortie-
+    feedback.md`, "Mode 2 root cause and the 'latest wins' direction"):
+    F-P7 now decides purely from command order
+    (`AiPilotWheelGoal.heading_requested_order` vs. `ParkedFlightState.
+    cbtm_action_order`), never from `lua_cbtm_status` -- every test
+    below stamps those two fields directly rather than relying on
+    `lua_cbtm_status`, which some tests still set (to a value that
+    would have mattered under the old status-gated rule) specifically
+    to prove the new rule no longer reads it."""
+
+    def test_a_break_drops_a_heading_requested_before_it_and_clears_align_phase(
         self,
     ) -> None:
         goal = AiPilotWheelGoal(
-            heading_target_deg=90.0, active_param="heading", active_since_sim=0.0
+            heading_target_deg=90.0,
+            active_param="heading",
+            active_since_sim=0.0,
+            heading_requested_order=1,
         )
         state = replace(
             replace_goal(ParkedFlightState(), goal),
             align_phase="aligning",
             cbtm_action_sent="break_left",
+            cbtm_action_order=2,
             lua_cbtm_status="running",
         )
         result = decide_ai_pilot_wheel(state, 1.0)
@@ -983,17 +1007,19 @@ class TestDecideAiPilotWheelCbtm:
         assert result.goal.active_param is None
         assert result.goal.heading_target_deg is None
 
-    def test_a_break_drops_a_queued_heading_goal(self) -> None:
+    def test_a_break_drops_a_queued_heading_goal_requested_before_it(self) -> None:
         goal = AiPilotWheelGoal(
             heading_target_deg=90.0,
             speed_target_kmh=200.0,
             active_param="speed",
             active_since_sim=0.0,
             pending_order=("heading",),
+            heading_requested_order=1,
         )
         state = replace(
             replace_goal(ParkedFlightState(), goal),
             cbtm_action_sent="break_away",
+            cbtm_action_order=2,
             lua_cbtm_status="running",
         )
         result = decide_ai_pilot_wheel(state, 1.0)
@@ -1002,44 +1028,62 @@ class TestDecideAiPilotWheelCbtm:
         assert result.goal.pending_order == ()
         assert result.goal.active_param == "speed"
 
-    def test_a_freshly_sent_break_drops_heading_before_lua_has_echoed(self) -> None:
-        """The same-poll case `_apply_ai_pilot_wheel_goal` relies on: a
-        break just sent this poll has `cbtm_action_sent` set, but `Export.
-        lua` has not processed the command yet, so `lua_cbtm_status`
-        still mirrors whatever it was *before* this break (`None` the
-        first time this activation). The drop must still apply -- this
-        is why the gate is `!= "done"`, not `== "running"`."""
+    def test_a_break_drops_a_heading_never_requested_this_activation(self) -> None:
+        """`heading_requested_order is None` (no `set_parked_heading`
+        call has ever stamped it this activation) is treated
+        conservatively as "predates the break" -- by construction this
+        cannot coexist with a real `heading_target_deg` (the only
+        writer of that field also stamps this one), but the gate must
+        not blow up or silently keep a heading it cannot order against."""
         goal = AiPilotWheelGoal(
             heading_target_deg=90.0, active_param="heading", active_since_sim=0.0
         )
         state = replace(
             replace_goal(ParkedFlightState(), goal),
-            align_phase="aligning",
             cbtm_action_sent="break_left",
-            lua_cbtm_status=None,
+            cbtm_action_order=1,
         )
         result = decide_ai_pilot_wheel(state, 1.0)
-        assert result.align_phase == "none"
         assert result.goal is not None
         assert result.goal.heading_target_deg is None
 
-    def test_a_heading_goal_after_the_break_has_finished_is_not_dropped(self) -> None:
-        """Bug fix, 2026-11-20 sortie
-        (`docs/acceptance/2026-11-20-sortie-feedback.md`): once `Export.
-        lua` reports the break's own CBTM episode `"done"` (the timed
-        press has released), a heading goal spoken afterwards must reach
-        `pending_order`/promotion and bump `goal_seq` like any other
-        goal -- not be silently eaten by F-P7's break-wins rule forever,
-        which is what happened while that rule keyed only on `cbtm_
-        action_sent` (never cleared except on unpark) and ignored
-        whether the break itself was still running."""
+    def test_align_phase_clears_on_a_break_even_with_no_heading_outstanding(
+        self,
+    ) -> None:
+        """Q1 -- no restore after a break -- never depended on heading
+        ordering: it fires whenever the current `cbtm_action_sent`
+        names a break, independent of `cbtm_action_order`/`heading_
+        requested_order` entirely."""
+        state = replace(
+            ParkedFlightState(),
+            align_phase="aligning",
+            cbtm_action_sent="break_left",
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.align_phase == "none"
+        assert result.pre_align_snapshot is None
+
+    def test_a_heading_goal_commanded_during_a_still_running_break_is_not_dropped(
+        self,
+    ) -> None:
+        """The direction this rework is named for (user, verbatim,
+        2026-11-20): "If player commands anything during a break, act
+        on it. Latest player command always wins." A heading commanded
+        *after* the break was sent (a higher `heading_requested_order`
+        than `cbtm_action_order`) is flown immediately -- even while
+        `lua_cbtm_status` still reports `"running"`, proving the rule
+        no longer waits for `Export.lua` to report the break done."""
         goal = AiPilotWheelGoal(
-            heading_target_deg=60.0, pending_order=("heading",), goal_seq=0
+            heading_target_deg=60.0,
+            pending_order=("heading",),
+            goal_seq=0,
+            heading_requested_order=2,
         )
         state = replace(
             replace_goal(ParkedFlightState(), goal),
             cbtm_action_sent="break_right",
-            lua_cbtm_status="done",
+            cbtm_action_order=1,
+            lua_cbtm_status="running",
         )
         result = decide_ai_pilot_wheel(state, 1.0)
         assert result.goal is not None

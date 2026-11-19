@@ -135,6 +135,7 @@ from typing import Final, Literal, TextIO, cast
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.ai_pilot_wheel import (
+    CBTM_BREAK_ACTIONS,
     AiPilotWheelGoal,
     ParkedFlightState,
     advance_parked_flight_state,
@@ -3377,7 +3378,9 @@ def _apply_ai_pilot_wheel_goal(
     goal exactly as the Lua side already does on its own unpark
     branch. Stage P3+P4 extends this to `align_phase`/`pre_align_
     snapshot`/`cbtm_action_sent` -- an unpark ends an alignment/break/
-    recovery exactly as it ends a goal, same reasoning.
+    recovery exactly as it ends a goal, same reasoning. The 2026-11-20
+    rework's own `command_order_seq`/`cbtm_action_order` reset the same
+    way, same reasoning again.
 
     **BL-16 mode 1 Co-moving row 11 fix**: the three `ai_pilot_*`
     one-shot transition fields (`ai_pilot_goal_transition`/`ai_pilot_
@@ -3403,6 +3406,8 @@ def _apply_ai_pilot_wheel_goal(
                 pre_align_snapshot=None,
                 cbtm_action_sent=None,
                 cbtm_break_entry_heading_deg=None,
+                command_order_seq=0,
+                cbtm_action_order=None,
             )
         runner.ai_pilot_goal_last_sent_seq = None
         runner.ai_pilot_cbtm_last_sent_seq = None
@@ -3428,10 +3433,20 @@ def _apply_ai_pilot_wheel_goal(
     goal = state.goal if state.goal is not None else AiPilotWheelGoal()
     align_phase = state.align_phase
     pre_align_snapshot = state.pre_align_snapshot
+    # 2026-11-20 rework (`docs/acceptance/2026-11-20-sortie-feedback.md`,
+    # "Mode 2 root cause and the 'latest wins' direction"): a local
+    # monotonic stamp, bumped once per heading request or break send, in
+    # the order this function processes them -- the body-side "command
+    # order" `decide_ai_pilot_wheel`'s F-P7 rule compares against, in
+    # place of `Export.lua`'s own running/done status. Read from state
+    # (not reset to 0 each poll) and written back once at the end.
+    order_seq = state.command_order_seq
+    cbtm_action_order = state.cbtm_action_order
 
     if crew_console.ai_pilot_level_flight_transition:
         if state.held_heading is not None:
-            goal = set_parked_heading(goal, now_sim, state.held_heading)
+            order_seq += 1
+            goal = set_parked_heading(goal, now_sim, state.held_heading, order_seq)
         # Stage P3+P4, F-P8/Q0: "level off"/"level flight" is the
         # spoken abort of an alignment -- while `"launch_aligned"`, it
         # enters `"recovering"` and seeds the recovery queue (altitude/
@@ -3472,7 +3487,8 @@ def _apply_ai_pilot_wheel_goal(
             align_phase = "none"
             pre_align_snapshot = None
         if request.param == "heading" and request.heading_deg is not None:
-            goal = set_parked_heading(goal, now_sim, request.heading_deg)
+            order_seq += 1
+            goal = set_parked_heading(goal, now_sim, request.heading_deg, order_seq)
         elif request.param == "altitude" and request.altitude_m is not None:
             goal, _ = set_parked_altitude(
                 goal,
@@ -3511,8 +3527,14 @@ def _apply_ai_pilot_wheel_goal(
     cbtm_break_entry_heading_deg = (
         runner.parked_flight_state.cbtm_break_entry_heading_deg
     )
-    if cbtm_transition in ("break_left", "break_right", "break_away"):
+    if cbtm_transition in CBTM_BREAK_ACTIONS:
         cbtm_break_entry_heading_deg = state.held_heading
+        # Stamped here, not inside `decide_ai_pilot_wheel`: this is the
+        # "when" a break is actually commanded, which only this
+        # function's caller (`crew_console`'s one-shot transition)
+        # knows -- see the 2026-11-20 rework note on `order_seq` above.
+        order_seq += 1
+        cbtm_action_order = order_seq
     if cbtm_transition is not None:
         if cbtm_transition == "align":
             new_state = cbtm_apply_align(
@@ -3550,6 +3572,8 @@ def _apply_ai_pilot_wheel_goal(
             else runner.parked_flight_state.cbtm_action_sent
         ),
         cbtm_break_entry_heading_deg=cbtm_break_entry_heading_deg,
+        command_order_seq=order_seq,
+        cbtm_action_order=cbtm_action_order,
     )
 
     # The rotation mechanism reads `Export.lua`'s own goal_progress

@@ -486,3 +486,103 @@ what Lua echoed back.
   both fixes, same files).
 - `body-layer/` untouched — this defect's fix is entirely within `Export.lua`'s own
   `flight_control.lua` module; body-layer's sequencing was already correct.
+
+### Rework, 2026-11-20 -- "latest wins" during a still-running break
+
+**The fix above still violated the user's own rule.** `!= "done"` bounded the drop to the break's
+own running window, but a heading commanded *during* a still-open break was still dropped --
+exactly what the user ruled out, verbatim, on being told that: *"Why? If player commands anything
+during a break, act on it. Latest player command always wins."* (`docs/acceptance/
+2026-11-20-sortie-feedback.md`, "Mode 2 root cause and the 'latest wins' direction"). Reconciled
+with F-P7's original answer (2026-11-18, "a break supersedes any **outstanding** heading goal, i.e.
+one set before it"): a heading commanded *before* the break stays superseded; one commanded *during
+or after* it is flown at once, ending whatever remains of the break on the Lua side.
+
+**Root cause of the status-gated version's own failure**: `Export.lua`'s own
+`lua_cbtm_status`/running-done readback times *when the break's press happened to release*, not
+*when the player spoke relative to it* -- the two coincide only when nothing is commanded until
+after the break finishes, which is precisely the case the direction above rules out. Fixing this by
+tightening the status window further (e.g. some other Lua-reported sub-state) would still be timing
+against the wrong clock; the right clock is command order.
+
+**Fix applied, body-layer (`body-layer/src/belief/ai_pilot_wheel.py`, `body-layer/src/body.py`)**:
+replaced the `lua_cbtm_status != "done"` gate with a body-side command-order comparison.
+
+- `ParkedFlightState` gains `command_order_seq: int` (a monotonic counter) and `cbtm_action_order:
+  int | None` (the order stamp taken when `cbtm_action_sent` was last set to a break kind).
+  `AiPilotWheelGoal` gains `heading_requested_order: int | None`, stamped by `set_parked_heading`
+  (now taking an explicit `order: int` parameter) on every call -- the only path that ever writes
+  `heading_target_deg`.
+- `body._apply_ai_pilot_wheel_goal` holds a local `order_seq` (read from `state.command_order_seq`),
+  bumped once per heading request (`level_flight`'s own heading freeze, or an ordinary
+  `turn_heading`/goal-transition heading request) or break send, in the order this function
+  processes them each poll, and writes the final value back at the end. `advance_parked_flight_
+  state` carries both new fields through unchanged each poll (same posture as every other
+  later-stage field) -- missing this would have silently reset them to their defaults every poll,
+  since that function reconstructs `ParkedFlightState` from scratch rather than `replace()`-ing it.
+- `decide_ai_pilot_wheel`'s F-P7 block: align-phase clearing (Q1, "no restore after a break") is now
+  unconditional on `cbtm_action_sent in CBTM_BREAK_ACTIONS` alone -- it never actually depended on
+  heading ordering (a fresh `cbtm_apply_align`/`_align_for_launch` call always overwrites `cbtm_
+  action_sent` away from a break name in the same poll it runs, so `align_phase` can never be
+  non-`"none"` while `cbtm_action_sent` still names a stale break). The heading drop itself now
+  fires only when `goal.heading_requested_order` is `None` (never requested this activation, the
+  conservative default) or strictly less than `state.cbtm_action_order` -- "requested before this
+  break," not "while Lua still reports it running."
+- `CBTM_BREAK_ACTIONS` is the new module-level constant (`("break_left", "break_right",
+  "break_away")`) both call sites share, replacing the inline tuple literal.
+
+**Fix applied, aircraft-layer (`aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua`,
+`handle_ai_pilot_goal_command`)**: the body-side fix alone is not sufficient -- `ai_pilot_goal_tick`/
+`ai_pilot_goal_tick_hvrt` both pause (no-op) while `ai_pilot_cbtm.action ~= nil`, so a goal message
+sent while a break's own CBTM episode is still open would sit acknowledged and never pressed, the
+same symptom moved one layer down. Added an `elseif` branch beside the existing "a new `cbtm_action`
+message starts a fresh run" check: when a goal message (`param ~= nil`) arrives and does **not**
+itself start a new CBTM run, and `ai_pilot_cbtm.action ~= nil`, it releases any open timed press
+(the same release the existing `cbtm_action`-starting branch already performs) and calls
+`ai_pilot_cbtm_finish()` -- the same "this run is over" reset a break that ran to completion
+already uses, so `apw_cbtm_status` reports `"done"`. No new wire field or status value: body-layer's
+own F-P7 no longer reads `lua_cbtm_status` to decide anything (command order alone decides it now),
+so inventing a distinct "superseded" status would have no reader.
+
+**Evidence**:
+- Read `ai_pilot_goal_tick`/`ai_pilot_goal_tick_hvrt` in full: both pause unconditionally while
+  `ai_pilot_cbtm.action ~= nil`, confirming the Lua-side fix is necessary even once body-layer stops
+  dropping the goal.
+- `luac5.1 -l -p` GETGLOBAL check before/after the Lua edit: identical global list (`diff` empty) --
+  no new unresolved global introduced.
+- Reproduced both directions against `decide_ai_pilot_wheel` directly
+  (`test_ai_pilot_wheel.py::TestDecideAiPilotWheelCbtm::
+  test_a_heading_goal_commanded_during_a_still_running_break_is_not_dropped`,
+  `test_a_break_drops_a_heading_requested_before_it_and_clears_align_phase`) and end to end through
+  `_apply_ai_pilot_wheel_goal` (`test_body_ai_pilot_wheel.py::
+  TestLatestCommandAlwaysWinsAgainstABreak`, both directions). Confirmed each test fails for the
+  stated reason on the pre-rework code (temporarily reverted `heading_predates_break`'s computation
+  to a bare `True` for the body-side cases, and removed the Lua `elseif` branch for the Lua cases;
+  both restored byte-for-byte afterward, verified by `shasum` before/after).
+- Reproduced the Lua-side fix with a real Lua interpreter (`lua5.5`, no `lua5.1` on this machine --
+  `luac5.1`, the syntax/bytecode checker, is a separate binary and was available):
+  `aircraft-layer/tests/test_ai_pilot_wheel_lua.py::TestHandleAiPilotGoalCommand::
+  test_a_goal_arriving_mid_break_ends_the_cbtm_episode_and_the_tick_then_runs` (the open press
+  releases, the episode finishes, and a tick run immediately afterward opens a fresh heading hold --
+  proving the pause actually lifted, not just that the fields changed) and `test_a_goal_arriving_
+  mid_break_away_cancels_the_pending_second_press` (the gap-until-second-press state clears with no
+  press to release).
+
+**Verification**:
+- `body-layer/tests/test_ai_pilot_wheel.py` + `test_body_ai_pilot_wheel.py`: 128 passed (two
+  existing `TestDecideAiPilotWheelCbtm` tests renamed and given explicit order fields; one test
+  retired as redundant with the order-based design and replaced by two new ones covering "never
+  requested this activation" and "align clears with no heading outstanding"; two new end-to-end
+  tests in a new `TestLatestCommandAlwaysWinsAgainstABreak` class in `test_body_ai_pilot_wheel.py`;
+  one new `TestSetParkedHeading` test for the `order` stamp itself).
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`: 91 passed (two new tests in
+  `TestHandleAiPilotGoalCommand`; `ai_pilot_cbtm_finish` added to `_run_goal_integration`'s extracted
+  function list, since `handle_ai_pilot_goal_command` now calls it directly).
+- `ruff format --check`/`ruff check` body-layer `src`/`tests`: clean. `cd body-layer &&
+  .venv/bin/mypy src`: Success, no issues found in 92 source files.
+- `ruff format --check`/`ruff check` aircraft-layer `src`/`tests`: clean. `cd aircraft-layer &&
+  .venv/bin/mypy src`: Success, no issues found in 28 source files (test files are not
+  `mypy --strict`-checked in this subproject, per its own `CLAUDE.md` "Commands").
+- `luac5.1 -p` on `ai_pilot_wheel.lua` and `Export.lua`: both pass.
+- Full-suite runs deferred to Reviewer/DoD per this project's "fast set while working, full suite
+  once at DoD" policy (root `CLAUDE.md`, "Verification") -- not re-run a third time here.
