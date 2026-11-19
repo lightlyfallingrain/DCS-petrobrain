@@ -26,3 +26,24 @@
   the band" as the pass criterion, not "never reverses"), or move to a velocity-scaled gain/target
   if a tighter guarantee is actually needed — a design change, not a tuning pass (BL-16 mode 1,
   Stage M2, `plans/flight-control/implementation.md`, `review-m2.md`'s own counterfactual).
+
+- **Raising a rate ceiling does not raise the rate a critically-damped shaper actually reaches,
+  once the ceiling already exceeds the shaper's own natural peak.** The heading-mode branch's
+  achieved turn rate for a step heading error `E` peaks at roughly `E*omega/e` (its own
+  `omega = OMEGA_HEADING`, an unmeasured placeholder), independent of how high the commanded rate
+  ceiling is set above that peak — the mode-1 break batch raised `turn_rate_deg_s` to 40°/s
+  expecting steeper banks and got the shaper's own lower natural peak instead, landing bank well
+  below the plan's worked figures (measured ~43°/~54° vs. a predicted ~71°/~76° at 150/220 km/h).
+  The ceiling only matters once the shaper's gain is high enough to actually reach it; tuning the
+  ceiling and tuning the gain are two different knobs, and this project's break mechanism had only
+  ever exercised the first one (BL-16 mode-1 batch, `plans/flight-control/plan.md` Decision 27,
+  `implementation.md` Departure 3, `review-mode1-batch.md`).
+
+- **Removing an output clamp (a bank limit) also removes the free anti-windup that clamp was
+  incidentally providing.** `phi_i`'s integrator had no dedicated anti-windup of its own — it
+  stayed bounded only because `max_bank_deg`'s clamp kept `phi_d` (and so the error driving the
+  integrator) from growing unbounded. Deleting the bank clamp for an unrelated reason (F-M1: "no
+  standing bank limit in mode 1") exposed integrator windup that had been dormant the whole time,
+  not introduced by the deletion — a reminder that removing a limit written for one purpose can
+  quietly remove a side-effect the system was depending on for another (BL-16 mode-1 batch,
+  `plan.md`'s own Risks, `implementation.md` Departure 3).

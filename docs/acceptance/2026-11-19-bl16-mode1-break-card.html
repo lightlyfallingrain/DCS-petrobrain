@@ -1,0 +1,177 @@
+<title>Mode 1 Break Flight</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* layout: a cockpit instrument card -- amber-on-dark readout, one block per manoeuvre, a sticky prize block up top, checkbox place-keepers, no inputs */
+:root{
+  --bg:#0c0f0c; --panel:#15190f; --panel-line:#2a3220; --fg:#d9e0c9; --fg-dim:#8a9476;
+  --amber:#e8a33d; --amber-dim:#8a5f1f; --record:#4fb0c0; --warn:#d6604a;
+  --font-display:'Oswald',sans-serif; --font-body:'Source Sans 3',sans-serif; --font-mono:'JetBrains Mono',monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);line-height:1.5;margin:0;
+  padding-left:max(16px, env(safe-area-inset-left,0px)); padding-right:max(16px, env(safe-area-inset-right,0px));}
+.wrap{max-width:760px;margin:0 auto;padding-block:28px 60px;}
+h1{font-family:var(--font-display);font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+  font-size:clamp(1.6rem,6vw,2.3rem);margin:0 0 4px;text-wrap:balance;color:var(--amber)}
+.sub{color:var(--fg-dim);font-size:.95rem;margin:0 0 20px}
+.branch{background:var(--panel);border:1px solid var(--amber-dim);border-radius:6px;padding:12px 14px;
+  margin-bottom:18px;font-family:var(--font-mono);font-size:.9rem;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline}
+.branch b{color:var(--amber);font-family:var(--font-body);text-transform:uppercase;font-size:.72rem;letter-spacing:.06em}
+.gap{border:1px solid var(--warn);background:#1c1410;border-radius:8px;padding:16px 18px;margin-bottom:22px}
+.gap h2{margin:0 0 6px;font-family:var(--font-display);font-size:1.05rem;letter-spacing:.03em;color:var(--warn);text-transform:uppercase}
+.gap p{margin:0 0 8px;font-size:.95rem}
+.gap p:last-child{margin-bottom:0}
+.setup{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:.92rem}
+.setup code{font-family:var(--font-mono);background:#000;color:var(--amber);padding:2px 6px;border-radius:4px;font-size:.85rem}
+.setup pre{margin:8px 0 0;overflow-x:auto;background:#000;border-radius:6px;padding:10px 12px}
+.setup pre code{background:none;padding:0;color:var(--amber)}
+h2.section{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.04em;font-size:1.1rem;
+  color:var(--fg-dim);margin:32px 0 14px;border-bottom:1px solid var(--panel-line);padding-bottom:6px}
+.block{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:16px 18px;margin-bottom:14px}
+.block.prize{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber-dim) inset}
+.block-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+.block-head h3{font-family:var(--font-display);font-size:1rem;letter-spacing:.02em;margin:0;color:var(--fg)}
+.tag{font-family:var(--font-mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;
+  background:var(--amber-dim);color:#1c1408;padding:3px 8px;border-radius:4px;white-space:nowrap}
+.row{display:grid;grid-template-columns:52px 1fr;gap:4px 10px;margin-bottom:6px;align-items:start}
+.row:last-child{margin-bottom:0}
+.row .lbl{font-family:var(--font-mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-dim);padding-top:2px}
+.row .val{font-size:.92rem}
+.row .val.record{color:var(--record)}
+.check{display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--panel-line)}
+.check input{margin-top:3px;accent-color:var(--amber)}
+.check label{font-size:.85rem;color:var(--fg-dim)}
+.bring{background:var(--panel);border:1px solid var(--record);border-radius:8px;padding:16px 18px;margin-top:28px}
+.bring h2{margin:0 0 10px;font-family:var(--font-display);font-size:1.05rem;letter-spacing:.03em;color:var(--record);text-transform:uppercase}
+.bring ul{margin:0;padding-left:20px;font-size:.92rem}
+.bring li{margin-bottom:6px}
+.bring .surprise{margin-top:10px;font-size:.92rem;color:var(--amber);font-style:italic}
+@media (min-width:600px){
+  .row{grid-template-columns:70px 1fr}
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<div class="wrap">
+  <h1>Mode 1 Break Flight</h1>
+  <p class="sub">BL-16 mode-1 batch — break turn/away, rotor envelope, VRS, rates-as-goals. DoD passed, tip <code style="font-family:var(--font-mono);background:#000;color:var(--amber);padding:2px 5px;border-radius:4px;">fd40f7ea</code>, Security PASS.</p>
+
+  <div class="branch">
+    <b>Branch to fly</b> <span>main, after merge</span>
+  </div>
+
+  <div class="gap">
+    <h2>Known gap — read before you fly</h2>
+    <p><strong>The plan promised ~60–80° of bank at cruise speed on a break. The offline measurement says ~43° at 150 km/h, ~54° at 220 km/h.</strong> The heading shaper's gain is an unmeasured placeholder and caps the achieved rate well below the commanded ceiling — raising the rate ceiling alone doesn't raise the bank to match. Flagged for a later retune, not a defect to chase in the air. Expect a gentler break than the plan's text describes, and record the real number.</p>
+    <p><strong>No standing bank limit exists in mode 1 any more, in any state.</strong> If the aircraft rolls further than you expect on any hard turn, that's the removed limit doing nothing — not a bug, but worth recording how far it actually goes.</p>
+  </div>
+
+  <div class="setup">
+    <strong>Setup:</strong> air start, straight and level, mode 1 (unparked).
+    <pre><code>git checkout main</code></pre>
+    Rotor RPM ships as a fixed dummy value (90%) this batch — the RPM floor and stall-trade mechanism won't fire from a real low-RPM event in flight.
+  </div>
+
+  <h2 class="section">Test blocks</h2>
+
+  <div class="block prize">
+    <div class="block-head"><h3>1 · Break turn, 150 km/h</h3><span class="tag">the prize</span></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Steady level flight at 150 km/h, "break left."</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">Fast heading change toward current heading − 90°, steeper bank than an ordinary turn, settles and levels on the new heading.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Peak bank, height lost, settle time, any overshoot past the target heading.</span></div>
+    <div class="check"><input type="checkbox" data-k="b1"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>2 · Break turn, 220 km/h</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Same, at 220 km/h, "break right."</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Same four numbers as block 1 — does the higher speed give noticeably more bank, as the kinematics predict?</span></div>
+    <div class="check"><input type="checkbox" data-k="b2"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>3 · Break away</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Steady flight, "break away."</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">A continuous turn to current heading − 180°, same mechanism as break turn.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Does it feel different from a break turn, or just twice the heading change?</span></div>
+    <div class="check"><input type="checkbox" data-k="b3"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>4 · Low and slow break</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Slow to ~60–80 km/h, low altitude, "break left" or "break right."</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">If RPM dropped under load, the aircraft should accelerate rather than let RPM droop. With the dummy RPM source, this path is barely exercised — "nothing special happens" is itself a useful answer.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">What the aircraft actually does.</span></div>
+    <div class="check"><input type="checkbox" data-k="b4"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>5 · Integrator windup</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">After a hard break, watch the approach to the target heading.</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">Some overshoot past the target before it settles — more than an ordinary turn, since no bank limit clamps the roll integrator any more.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Overshoot in degrees; does it damp out or oscillate?</span></div>
+    <div class="check"><input type="checkbox" data-k="b5"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>6 · VRS — vortex ring state</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Below 50 km/h, command a descent ("descend 100").</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">Descent rate capped at 4 m/s regardless of the altitude error.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Actual descent rate observed.</span></div>
+    <div class="check"><input type="checkbox" data-k="b6"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>7 · Take mid-break (Decision 32)</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">In mode 2 (parked), start a break via the AI wheel, then take the controls mid-break.</span></div>
+    <div class="row"><span class="lbl">Expect</span><span class="val">Mode 1 picks up the break's own target heading — not whatever continuous turn the AI wheel was flying.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Does it continue toward the same heading, or jump at the handover?</span></div>
+    <div class="check"><input type="checkbox" data-k="b7"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>8 · Rotor RPM gauge check</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">Watch the rotor RPM needle in normal flight and during a hard collective pull.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Does draw arg 42 track the needle (if you can probe it)? What's the needle's maximum — past 100%, or capped at 100%?</span></div>
+    <div class="check"><input type="checkbox" data-k="b8"><label>Flown</label></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h3>9 · Engine vs. rotor RPM</h3></div>
+    <div class="row"><span class="lbl">Do</span><span class="val">A hard, sustained collective pull at low-ish speed.</span></div>
+    <div class="row"><span class="lbl">Record</span><span class="val record">Do engine and rotor RPM needles move together or separately?</span></div>
+    <div class="check"><input type="checkbox" data-k="b9"><label>Flown</label></div>
+  </div>
+
+  <div class="bring">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Peak bank at 150 vs. 220 km/h, and height lost, for break turn and break away.</li>
+      <li>Whether the low-and-slow break showed any visible acceleration behaviour.</li>
+      <li>Overshoot after a hard break — degrees, damped or not.</li>
+      <li>VRS descent rate actually observed below 50 km/h.</li>
+      <li>Whether a take mid-break continued toward the break's own target heading.</li>
+      <li>Rotor RPM gauge's maximum, and whether arg 42 tracks it.</li>
+    </ul>
+    <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='bl16-mode1-break';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
