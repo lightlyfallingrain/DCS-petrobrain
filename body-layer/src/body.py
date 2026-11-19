@@ -3686,10 +3686,14 @@ def _apply_flight_control(
     poll** (review-handover-ack.md Required Fix): the ack-timeout's own
     self-queued release is checked first; when set, it is sent alone and
     `flight_control_transition` is left exactly as it was (deferred to a
-    later poll, not discarded) rather than risk a second `write_flight_
-    control` call this same poll landing on Lua's own single most-recent-
-    command slot ahead of, or racing, the one Export.lua has not read
-    yet.
+    later poll, not discarded). Lua itself would apply an in-order
+    release+take pair correctly (`commands.lua`'s `poll_command_socket`
+    drains every queued datagram per frame, in receipt order), but each
+    `write_flight_control` is its own collector round trip ending in a
+    UDP datagram, and two sent back to back may arrive reordered -- a take
+    landing first is a no-op while `fc_mode` is still `active`, and the
+    release after it would then hand the controls back. One poll's gap
+    rules that out.
 
     **The arm lease (U10)**: while `OVERLAY` and `unpark_take`, `arm` is
     re-sent every poll regardless of either one-shot transition above --
