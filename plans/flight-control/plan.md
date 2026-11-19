@@ -4041,6 +4041,11 @@ convention (`read_measured()`'s fail-soft style) extended by one function:
 local ROTOR_RPM_SOURCE = "dummy"  -- "dummy" | "arg_proxy"
 local ROTOR_RPM_ARG_PILOT = 42
 local ROTOR_RPM_DUMMY_PCT = 90.0
+-- Raw-arg-to-%RPM scale (main-loop amendment 2026-11-19): user, "very
+-- likely that is value * 100 = rotor rpm per cent. Unless the dial goes
+-- to over 100%, that has to be checked in cokpit." Correct this one
+-- constant once the cockpit dial's top mark is confirmed.
+local ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0
 
 local function read_rotor_rpm_pct()
     if ROTOR_RPM_SOURCE == "dummy" then
@@ -4050,7 +4055,7 @@ local function read_rotor_rpm_pct()
     if type(raw) ~= "number" or raw ~= raw then
         return ROTOR_RPM_DUMMY_PCT, false
     end
-    return raw * 100.0, true  -- calibration unconfirmed -- owed by the next flight
+    return raw * ROTOR_RPM_ARG_SCALE_MAX_PCT, true  -- calibration unconfirmed -- owed by the next flight
 end
 ```
 
@@ -4212,7 +4217,7 @@ are ever *cleared by settling*, and the one place `collective_limited`/`rotor_rp
 | `VRS_MAX_DESCENT_MPS` | 4.0 | user, explicitly "configurable" | body-layer `tuning.py`, wire-carried |
 | `BREAK_TURN_RATE_DEG_S` | 40 | architect default (lands 60–80° bank at cruise IAS); flag for retune after Flight M-A | **`config/rules/flight.lua`**, per F-M2 — not Python, not `tuning.py` |
 | `ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT`, `RETREATING_BLADE_STALL_MARGIN_KMH`, `COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR`, `COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL`, `K_BREAK_PEDAL_BIAS` | 5.0 / 20.0 / 0.0 / 0.0 / 0.2 | judgement — smoothing/gain details, same class as `ENV_*_MARGIN`/`K_*` already in the "M2 control law constants" block | `flight_control.lua` constants block, owed by M0-E/Flight M-A |
-| `ROTOR_RPM_SOURCE`, `ROTOR_RPM_ARG_PILOT`, `ROTOR_RPM_DUMMY_PCT` | `"dummy"` / 42 / 90.0 | Decision 28's seam — not user-tunable behaviour, a source-selection flag | `flight_control.lua` |
+| `ROTOR_RPM_SOURCE`, `ROTOR_RPM_ARG_PILOT`, `ROTOR_RPM_DUMMY_PCT`, `ROTOR_RPM_ARG_SCALE_MAX_PCT` | `"dummy"` / 42 / 90.0 / 100.0 | Decision 28's seam — not user-tunable behaviour, a source-selection flag | `flight_control.lua` |
 | `MAX_BANK_DEG` | — | **removed** (F-M1) | was body-layer `tuning.py` |
 
 ### F-M1's removal ripples through the test/doc surface
@@ -4285,3 +4290,21 @@ raised, verbatim, in `explore-notes.md`'s "Mode-1 goal check answers" section. D
 above are this plan's own implementation choices within those answers (rate-as-goal mechanism,
 the RPM seam's exact shape, the break-floor's scope, which existing flag the rotor/stall guards
 widen) — local and reversible, so none is escalated as a `U<n>`.
+
+### Main-loop amendment 2026-11-19 (after the plan check) — not the Architect's text
+
+1. **Decision 32 — a take during a mode-2 break finishes the break.** Plan check Finding 1 / Q1
+   (`alignment.md`). Not a new question: the goal check's recorded assumption — *"a takeover
+   during a mode 2 break continues to that break's ±90 target"* — was put to the user on
+   2026-11-18 as "how it would behave, unless you object" and drew no objection; the user's own
+   description of ED's break is *"it set's heading +- 90 degrees and flies that"*. So: when a
+   mode-1 take happens while a mode-2 break (or break away) is the active CBTM command, the
+   take's heading goal is that break's target heading — the held heading at the break press
+   ±90° (break away: the target ED was given, per the P3+P4 build) — not the inherited
+   continuous turn. Body-layer already records the break and its direction (P3+P4); the take
+   path seeds `heading_goal` from it. Altitude and speed goals take over as an ordinary take
+   does. Test: a take with a break active seeds the break target; a take with no break active is
+   unchanged. Flight M-C card gets one row for it.
+2. **Rotor RPM scale is a named constant** — `ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0` in Decision
+   28's block and the constants table, per the user's 2026-11-19 mapping note
+   (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`, Finding 2).
