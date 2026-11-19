@@ -180,6 +180,12 @@ CbtmAction = Literal[
     "align", "align_for_launch", "break_left", "break_right", "break_away"
 ]
 
+#: The three break kinds -- the subset of `CbtmAction` F-P7's break-wins
+#: rule (and its 2026-11-20 "latest wins" rework, see `decide_ai_pilot_
+#: wheel`'s own docstring) applies to. `align`/`align_for_launch` are not
+#: breaks and never gate the heading-drop/align-clear logic below.
+CBTM_BREAK_ACTIONS: tuple[CbtmAction, ...] = ("break_left", "break_right", "break_away")
+
 
 @dataclass(frozen=True, slots=True)
 class FlightSnapshot:
@@ -223,7 +229,18 @@ class AiPilotWheelGoal:
     directly. The four target fields are written by voice (`set_parked_
     heading`/`altitude`/`speed`, each via `request_goal`); `hvrt_direction`
     is written and cleared by voice directly (Stage P2b's own handlers),
-    with no queueing -- HVRT has no "outstanding, not yet active" state."""
+    with no queueing -- HVRT has no "outstanding, not yet active" state.
+
+    `heading_requested_order` (2026-11-20 rework, `docs/acceptance/
+    2026-11-20-sortie-feedback.md`, "Mode 2 root cause and the 'latest
+    wins' direction") is the body-side monotonic command-order stamp
+    `set_parked_heading` writes every time it is called (queued or
+    active, regardless of whether `goal_seq` itself bumps) -- the value
+    `decide_ai_pilot_wheel`'s F-P7 rule compares against `ParkedFlight
+    State.cbtm_action_order` to tell "this heading was commanded before
+    the current break" from "commanded during or after it," by command
+    order rather than `Export.lua`'s own running/done status. `None`
+    means no heading has ever been requested this activation."""
 
     heading_target_deg: float | None = None
     altitude_target_m: float | None = None
@@ -234,6 +251,7 @@ class AiPilotWheelGoal:
     pending_order: tuple[AiPilotWheelParam, ...] = ()
     goal_seq: int = 0
     hvrt_direction: AiPilotHvrtDirection | None = None
+    heading_requested_order: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,7 +323,23 @@ class ParkedFlightState:
     round-trip. `payload_station_counts_last_seen` mirrors `GET
     /payload/latest`'s `stations` list as `{index: count}`, `None` only
     before the first payload line has arrived this session, never on an
-    empty (no-ATGM) loadout."""
+    empty (no-ATGM) loadout.
+
+    `command_order_seq`/`cbtm_action_order` (2026-11-20 rework, docs/
+    acceptance/2026-11-20-sortie-feedback.md) are the body-side ordering
+    this activation's F-P7 rule now runs on, replacing the original
+    Lua-status-timing gate (`lua_cbtm_status != "done"`): `command_
+    order_seq` is a monotonic counter `body._apply_ai_pilot_wheel_goal`
+    bumps once per heading request or break send, in the order it
+    processes them each poll; `cbtm_action_order` is the stamp taken at
+    the moment `cbtm_action_sent` was last set to one of `CBTM_BREAK_
+    ACTIONS` (`None` while no break has been sent this activation).
+    Comparing it against `AiPilotWheelGoal.heading_requested_order`
+    tells "heading commanded before this break" from "commanded during
+    or after it" by command order, not by whether `Export.lua` has
+    reported the break `"done"` yet -- the user's own rule is "latest
+    player command always wins," not "wins once the break finishes."
+    Both reset on unpark, same posture as `cbtm_action_sent`."""
 
     parked_active: bool = False
     ai_mode: str | None = None
@@ -340,6 +374,8 @@ class ParkedFlightState:
     #: `cbtm_action_sent`).
     cbtm_break_entry_heading_deg: float | None = None
     payload_station_counts_last_seen: Mapping[int, int] | None = None
+    command_order_seq: int = 0
+    cbtm_action_order: int | None = None
 
 
 def _parse_float(value: object) -> float | None:
@@ -484,6 +520,8 @@ def advance_parked_flight_state(
             if new_counts is not None
             else state.payload_station_counts_last_seen
         ),
+        command_order_seq=state.command_order_seq,
+        cbtm_action_order=state.cbtm_action_order,
     )
 
 
@@ -594,14 +632,24 @@ def request_goal(
 
 
 def set_parked_heading(
-    goal: AiPilotWheelGoal, now_sim: float, deg: float
+    goal: AiPilotWheelGoal, now_sim: float, deg: float, order: int
 ) -> AiPilotWheelGoal:
     """Action: request a heading goal, normalised to `[0, 360)`. Used for
     `turn_heading`/`turn_heading_relative`/`level_flight`'s heading
     component (the caller resolves "current heading" or "current +/-
     delta" before calling this -- this action only ever takes the final
-    degree value, per root `CLAUDE.md`'s "explicit params" rule)."""
-    return request_goal(goal, "heading", now_sim, heading_target_deg=deg % 360.0)
+    degree value, per root `CLAUDE.md`'s "explicit params" rule).
+
+    **`order`** (2026-11-20 rework) is the caller's (`body._apply_ai_
+    pilot_wheel_goal`) own monotonic `command_order_seq` stamp for this
+    call, written unconditionally onto `AiPilotWheelGoal.heading_
+    requested_order` -- `heading_target_deg` is the only field this
+    function sets through any path other than this one (grep-checkable:
+    `_with_target`'s `heading_target_deg=` assignment inside `request_
+    goal`), so stamping here covers every heading request this
+    activation makes, queued or immediately active."""
+    new_goal = request_goal(goal, "heading", now_sim, heading_target_deg=deg % 360.0)
+    return replace(new_goal, heading_requested_order=order)
 
 
 def nearest_speed_step(value: float) -> float:
@@ -998,37 +1046,45 @@ def decide_ai_pilot_wheel(
     run before the pre-existing rotation logic below (a break or a
     recovery trip pre-empts whatever the rotation would otherwise do):
 
-    1. **F-P7 -- a break always wins, but only until Lua reports it
-       done.** `state.cbtm_action_sent` names a break
-       (`"break_left"`/`"break_right"`/`"break_away"`) **and**
-       `state.lua_cbtm_status != "done"`: the `heading` target/queue
-       entry is dropped from `goal` outright, and if `align_phase !=
-       "none"` it is forced to `"none"` with `pre_align_snapshot`
-       cleared (Q1 -- no restore after a break). `!= "done"` (not
-       `== "running"`) deliberately also covers the one poll the break
-       is freshly sent on -- `_apply_ai_pilot_wheel_goal` sets `cbtm_
-       action_sent` to the new break and calls this function in the same
-       poll, before the just-sent command has even reached `Export.lua`,
-       so `lua_cbtm_status` that poll is still whatever it mirrored
-       *before* this break (`None` the first time this activation, or an
-       older `"done"`/`"idle"` left over) -- gating on `== "running"`
-       alone would miss that same-poll drop and fail `test_body_ai_
-       pilot_wheel.py`'s `test_break_left_is_recorded_and_ends_an_
-       outstanding_alignment`. `cbtm_action_sent` is carried through
-       unchanged for the rest of the activation (it has a second reader,
-       the mode-1 unpark-take's `cbtm_break_target_heading_deg` seed), so
-       without the `lua_cbtm_status` gate this drop ran on *every* poll
-       for the rest of the activation, not just while the break's press
-       was open -- including a heading goal spoken well after the break
-       had finished and Lua had released the press, which it silently
-       ate every time (bug found 2026-11-20, `docs/acceptance/
-       2026-11-20-sortie-feedback.md`: a heading goal after a break was
-       acknowledged and never flown). Gating on `Export.lua`'s own
-       `"running"`/`"done"` readback -- already mirrored here, no new
-       wire field -- bounds the drop to the break's actual episode, the
-       same "reported running or freshly sent" condition the plan always
-       meant (flagged in the implementation notes), without a second
-       round-trip.
+    1. **F-P7 -- a break supersedes any heading goal commanded before
+       it; "latest player command always wins" otherwise** (reworked
+       2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`,
+       "Mode 2 root cause and the 'latest wins' direction" -- user,
+       verbatim, on being told the first fix bounded the drop to "while
+       the break runs" rather than "until superseded": *"Why? If player
+       commands anything during a break, act on it. Latest player
+       command always wins."*). Whenever `state.cbtm_action_sent` names
+       a break (`CBTM_BREAK_ACTIONS`): if `align_phase != "none"` it is
+       always forced to `"none"` with `pre_align_snapshot` cleared (Q1 --
+       no restore after a break; this never depended on heading
+       ordering -- a fresh `cbtm_apply_align`/`_align_for_launch` call
+       always overwrites `cbtm_action_sent` away from a break name in
+       the same poll it runs, so `align_phase` can never be non-`"none"`
+       while `cbtm_action_sent` still names a stale break). The `heading`
+       target/queue entry is dropped **only if it predates this break**
+       -- `goal.heading_requested_order` is `None` (never requested this
+       activation, treated conservatively as "predates") or strictly
+       less than `state.cbtm_action_order` (the order stamp
+       `_apply_ai_pilot_wheel_goal` took when it last set `cbtm_action_
+       sent` to a break). A heading commanded during or after the break
+       (a strictly greater order) is left alone, to be flown immediately
+       by the pre-existing promotion/rotation logic below -- the "ends
+       the break on Lua's own side" half of "latest wins" is `Export.
+       lua`'s `handle_ai_pilot_goal_command`'s job, not this function's.
+
+       **Why order, not `Export.lua`'s own running/done status**: the
+       first fix (`state.lua_cbtm_status != "done"`) bounded the drop to
+       "while the break's own CBTM episode is still running," which
+       fixed the original bug (a heading goal silently eaten forever
+       after *any* break, `cbtm_action_sent` never clearing except on
+       unpark) but still dropped a heading commanded *during* a
+       still-running break -- exactly the case the direction above
+       rules out. Command order is decided once, at the moment each
+       command is issued, and is immune to the same-poll echo-delay
+       `lua_cbtm_status` has (a break just sent this poll still mirrors
+       whatever `apw_cbtm_status` reported *before* it, since `Export.
+       lua` has not processed the just-sent command yet) without needing
+       a special-cased `!=`/`==` distinction for it.
     2. **E-P16 -- the three recovery triggers, while `"launch_aligned"`**
        (payload count drop, the Q-P3-2 AGL-relative floor, the absolute
        IAS ceiling): any one true enters `"recovering"` and seeds the
@@ -1054,23 +1110,30 @@ def decide_ai_pilot_wheel(
     if hvrt_released_timeout and goal.hvrt_direction is not None:
         goal = clear_hvrt_direction(goal)
 
-    if (
-        state.cbtm_action_sent in ("break_left", "break_right", "break_away")
-        and state.lua_cbtm_status != "done"
-    ):
-        if goal.active_param == "heading":
-            goal = replace(
-                goal, heading_target_deg=None, active_param=None, active_since_sim=None
-            )
-        elif "heading" in goal.pending_order:
-            goal = replace(
-                goal,
-                heading_target_deg=None,
-                pending_order=tuple(p for p in goal.pending_order if p != "heading"),
-            )
+    if state.cbtm_action_sent in CBTM_BREAK_ACTIONS:
         if align_phase != "none":
             align_phase = "none"
             pre_align_snapshot = None
+        heading_predates_break = state.cbtm_action_order is not None and (
+            goal.heading_requested_order is None
+            or goal.heading_requested_order < state.cbtm_action_order
+        )
+        if heading_predates_break:
+            if goal.active_param == "heading":
+                goal = replace(
+                    goal,
+                    heading_target_deg=None,
+                    active_param=None,
+                    active_since_sim=None,
+                )
+            elif "heading" in goal.pending_order:
+                goal = replace(
+                    goal,
+                    heading_target_deg=None,
+                    pending_order=tuple(
+                        p for p in goal.pending_order if p != "heading"
+                    ),
+                )
 
     if state.takeover_stage is not None:
         return replace(

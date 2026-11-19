@@ -1847,6 +1847,11 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_hvrt"),
+            # 2026-11-20 rework -- `handle_ai_pilot_goal_command` now
+            # calls this directly (a goal superseding a still-open CBTM
+            # episode), not only `ai_pilot_cbtm_tick`/`run_ai_pilot_
+            # wheel` as before.
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_cbtm_finish"),
             (_AI_PILOT_WHEEL_LUA, "handle_ai_pilot_goal_command"),
         )
     )
@@ -2110,6 +2115,89 @@ class TestHandleAiPilotGoalCommand:
         values = dict(line.split("=", 1) for line in out.strip().splitlines())
         assert values["param"] == "nil"
         assert values["progress"] == "idle"
+
+    def test_a_goal_arriving_mid_break_ends_the_cbtm_episode_and_the_tick_then_runs(
+        self,
+    ) -> None:
+        """2026-11-20 rework (`docs/acceptance/2026-11-20-sortie-
+        feedback.md`): a heading goal arriving while `ai_pilot_cbtm.
+        action` is still `"break_left"` (an open timed press, status
+        `"running"`) must end that CBTM episode immediately -- release
+        the open press, finish the episode (`status` becomes `"done"`,
+        same as a break that ran to completion) -- rather than leave
+        `ai_pilot_goal_tick` paused against it. The tick run right
+        after proves the pause actually lifted: it opens a fresh
+        heading hold on the very next call, not a no-op."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_course_text = "10"
+        ai_pilot_cbtm.action = "break_left"
+        ai_pilot_cbtm.status = "running"
+        ai_wheel_cbtm_pending_release_t = 5.0
+        ai_wheel_cbtm_pending_cmd = AI_WHEEL_LEFT
+
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "heading", '
+            .. '"heading_target_deg": 90.0, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 1.0)
+
+        print("cbtm_action_after_command=" .. tostring(ai_pilot_cbtm.action))
+        print("cbtm_status_after_command=" .. tostring(ai_pilot_cbtm.status))
+        print("cbtm_pending_release_after_command="
+            .. tostring(ai_wheel_cbtm_pending_release_t))
+        print("cbtm_pending_cmd_after_command=" .. tostring(ai_wheel_cbtm_pending_cmd))
+        print("press_log_after_command=" .. table.concat(press_log, ","))
+
+        ai_pilot_goal_tick(1.2)
+        print("press_log_after_tick=" .. table.concat(press_log, ","))
+        print("hold_after_tick=" .. tostring(ai_pilot_goal.hold_cmd))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["cbtm_action_after_command"] == "nil"
+        assert values["cbtm_status_after_command"] == "done"
+        assert values["cbtm_pending_release_after_command"] == "nil"
+        assert values["cbtm_pending_cmd_after_command"] == "nil"
+        # The break's own open press (AI_WHEEL_LEFT) releases as part of
+        # ending the episode, before the goal tick ever runs.
+        assert values["press_log_after_command"] == "3003:0"
+        # The goal tick is no longer paused: it opens a fresh heading
+        # hold the very next call (AI_WHEEL_RIGHT, course 10 -> target
+        # 90 turns right).
+        assert values["press_log_after_tick"] == "3003:0,3002:1"
+        assert values["hold_after_tick"] == "3002"
+
+    def test_a_goal_arriving_mid_break_away_cancels_the_pending_second_press(
+        self,
+    ) -> None:
+        """`break_away`'s own gap between its two long-left presses
+        (`.gap_until_t`, no open press mid-gap) is cancelled the same
+        way -- `ai_pilot_cbtm_finish` clears `.gap_until_t` along with
+        `.action`, so the second press never opens once a goal has
+        superseded the break."""
+        script = """
+        ai_pilot_cbtm.action = "break_away"
+        ai_pilot_cbtm.presses_done = 1
+        ai_pilot_cbtm.gap_until_t = 10.0
+        ai_pilot_cbtm.status = "running"
+
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 200.0, '
+            .. '"altitude_target_ref": "barometric", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 1.0)
+
+        print("cbtm_action_after=" .. tostring(ai_pilot_cbtm.action))
+        print("cbtm_status_after=" .. tostring(ai_pilot_cbtm.status))
+        print("cbtm_gap_after=" .. tostring(ai_pilot_cbtm.gap_until_t))
+        print("press_log_after=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["cbtm_action_after"] == "nil"
+        assert values["cbtm_status_after"] == "done"
+        assert values["cbtm_gap_after"] == "nil"
+        # No open press mid-gap -- nothing to release.
+        assert values["press_log_after"] == ""
 
 
 class TestHandleAiPilotGoalCommandHvrtStep:

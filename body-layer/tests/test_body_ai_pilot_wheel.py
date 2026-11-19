@@ -491,6 +491,69 @@ class TestCbtmTransitions:
         assert sent[9] == 6
 
 
+class TestLatestCommandAlwaysWinsAgainstABreak:
+    """2026-11-20 rework (`docs/acceptance/2026-11-20-sortie-feedback.md`,
+    "Mode 2 root cause and the 'latest wins' direction"): the two
+    end-to-end cases through `_apply_ai_pilot_wheel_goal` itself, each
+    simulating a prior poll's own break/heading via `_runner`'s state
+    fields rather than two real calls (the same pattern `test_a_second_
+    cbtm_transition_bumps_its_own_seq_space_again` above already uses
+    for "something already happened on an earlier poll")."""
+
+    def test_a_heading_commanded_after_an_already_running_break_is_sent(self) -> None:
+        """A break was sent on an earlier poll (`cbtm_action_order=1`,
+        still `lua_cbtm_status="running"` -- it has not finished) and
+        now the player commands a heading. The goal must be sent on the
+        wire this poll, not dropped -- the user's own rule, "latest
+        player command always wins," applies even while the break is
+        still running."""
+        runner, client = _runner(
+            cbtm_action_sent="break_left",
+            cbtm_action_order=1,
+            command_order_seq=1,
+            lua_cbtm_status="running",
+        )
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=250.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.goal is not None
+        assert state.goal.heading_target_deg == 250.0
+        assert state.goal.active_param == "heading"
+        assert runner.ai_pilot_goal_last_sent_seq is not None
+        sent = client.ai_pilot_goal_calls[-1]
+        assert sent[1] == "heading"
+        assert sent[2] == 250.0
+
+    def test_a_break_drops_a_heading_commanded_on_an_earlier_poll(self) -> None:
+        """A heading was commanded on an earlier poll
+        (`heading_requested_order=1`) and now the player commands a
+        break. The outstanding heading must be dropped -- F-P7's
+        original rule, unchanged by the rework: a break supersedes any
+        heading goal commanded *before* it."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=250.0,
+            active_param="heading",
+            active_since_sim=5.0,
+            heading_requested_order=1,
+        )
+        runner, client = _runner(goal=goal, command_order_seq=1)
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "break_right"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        state = runner.parked_flight_state
+        assert state.goal is not None
+        assert state.goal.heading_target_deg is None
+        assert state.goal.active_param is None
+        assert state.cbtm_action_sent == "break_right"
+
+
 class TestFlightCommandEndsAlignment:
     """F-P6 (`plans/flight-control/plan.md`, "Stage P3+P4 ready to
     build"): a fresh voice heading/altitude/speed command always ends

@@ -1634,6 +1634,35 @@ local function handle_ai_pilot_goal_command(data, t)
         ai_pilot_cbtm.gap_until_t = nil
         ai_pilot_cbtm.mode_cycle_attempts = 0
         ai_pilot_cbtm.mode_blocked_since_t = nil
+    elseif param ~= nil and ai_pilot_cbtm.action ~= nil then
+        -- 2026-11-20 rework (`docs/acceptance/2026-11-20-sortie-
+        -- feedback.md`, "Mode 2 root cause and the 'latest wins'
+        -- direction"): a heading/altitude/speed goal message arriving
+        -- while a CBTM episode (align/align-for-launch/break/break-
+        -- away) is still open ends that episode immediately -- "latest
+        -- player command always wins" (user, verbatim), not "wins once
+        -- Export.lua reports the episode done." Without this,
+        -- `ai_pilot_goal_tick` (and `ai_pilot_goal_tick_hvrt`) would
+        -- keep pausing against `ai_pilot_cbtm.action ~= nil` until the
+        -- episode releases on its own -- the goal would sit
+        -- acknowledged but never flown, the same symptom the original
+        -- bug had, moved one layer down. Releases any open timed press
+        -- and drops `break_away`'s own pending second press
+        -- (`.gap_until_t`) the same way `ai_pilot_cbtm_finish` always
+        -- has; `.status` becomes `"done"`, the same value a break that
+        -- ran to completion reports -- body-layer's own `decide_ai_
+        -- pilot_wheel` no longer reads this status for F-P7 at all
+        -- (command order alone decides it now), so there is no reason
+        -- to invent a second, distinct "superseded" status value only
+        -- this layer would ever read.
+        if ai_wheel_cbtm_pending_release_t ~= nil then
+            safe_call(function()
+                GetDevice(30):performClickableAction(ai_wheel_cbtm_pending_cmd, 0)
+            end)
+            ai_wheel_cbtm_pending_release_t = nil
+            ai_wheel_cbtm_pending_cmd = nil
+        end
+        ai_pilot_cbtm_finish()
     end
 end
 
