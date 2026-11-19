@@ -59,3 +59,13 @@ Continuation, verbatim:
 
 So the mode cycle is not the blocker: even in FLT the goal is never pressed. The goal channel
 itself is gated off after the breaks (or body-layer never sends it).
+
+Live sample from that state: `apw_cbtm_status: "done"`, `apw_cbtm_seq: 2`, `apw_goal_seq: 0`,
+`apw_goal_progress: "idle"`, mode FLT. CBTM finished cleanly; Lua had accepted no goal at all in
+the mission. Main-loop lead: goal and CBTM messages checked against one shared seq high-water mark
+while numbered independently.
+
+User direction, verbatim:
+
+> If that is the reason, all commands should really use a mission wide unique running number, not
+> individual numbering.
