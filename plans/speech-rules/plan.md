@@ -191,6 +191,14 @@ from ownship position and heading at push-to-talk release. Both belong to the ma
   five original candidates, `set_speed`/`altitude_step` and `level_off` are rescued; `straight`/
   `hvrt_translate_right` remain rejected, both via one shared rule × rule collision (see the
   implementation note for the exact ratios).
+
+  **Narrowed 2026-11-19** (user-approved, `fix/rule-collision-misheard`): the "beating by at least
+  `SEPARATION_MIN`" clause now applies to **rule × rule only**. In rule × legacy it disabled a rule
+  whenever its perturbed sample resolved clearly to a legacy command — but the legacy command wins
+  that mis-hearing whether or not the rule exists, so disabling the rule only removed a working
+  command. It had silently disabled `cbtm_align` ("align" probed as "light" → `point`) and
+  `cbtm_break` ("break turn left" as "repeat turn left" → `report`). Exact ties stay rejected in
+  both passes. `plans/rule-collision-misheard/review.md`.
 - **D10 — The whisper prompt becomes dynamic.** `WhisperCliEngine` takes a prompt provider instead
   of a fixed string. The adapter rebuilds the prompt from the legacy words plus the active rule
   words on every accepted `PUT`. The 224-token cap stays a test for the shipped vocabulary. At
