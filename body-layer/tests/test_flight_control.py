@@ -260,6 +260,35 @@ class TestReleaseControls:
         assert result == {"ok": True, "acted": False}
         assert state.phase == "PILOT"
 
+    def test_lua_still_active_while_belief_says_pilot_still_acts(self) -> None:
+        """2026-11-19 mode 1 handover feedback, fix c: the ack-timeout
+        case (or any poll before fix b's own release has reached Lua)
+        leaves belief at `PILOT` while `Export.lua` is still `active` --
+        Decision 13's recovery phrase must still act, since the player's
+        stick really was being ignored."""
+        state, result = release_controls(
+            FlightControlState(phase="PILOT", lua_mode="active"),
+            overlay_flying=False,
+        )
+        assert result == {"ok": True, "acted": True}
+        assert state.phase == "PILOT"
+
+    def test_lua_still_taking_while_belief_says_pilot_still_acts(self) -> None:
+        _state, result = release_controls(
+            FlightControlState(phase="PILOT", lua_mode="taking"),
+            overlay_flying=False,
+        )
+        assert result == {"ok": True, "acted": True}
+
+    def test_lua_off_while_belief_says_pilot_is_still_a_silent_no_op(self) -> None:
+        """The ordinary case -- belief and Lua agree nobody but the
+        player is flying -- must stay silent."""
+        _state, result = release_controls(
+            FlightControlState(phase="PILOT", lua_mode="off"),
+            overlay_flying=False,
+        )
+        assert result == {"ok": True, "acted": False}
+
 
 class TestDecideFlightControl:
     def test_park_edge_while_active_moves_to_overlay_silently(self) -> None:
@@ -601,3 +630,50 @@ class TestDrainFlightControlSeedsTheBreakTarget:
 
         assert console.flight_control_state.phase == "ACTIVE"
         assert console.flight_control_goal_transition is None
+
+
+class TestDrainFlightControlSendsReleaseOnAckTimeout:
+    """2026-11-19 mode 1 handover feedback, fix b: the ack timeout
+    (`TAKING` -> `PILOT`, the only transition `decide_flight_control`
+    itself makes into `PILOT` from `TAKING`) must queue a `release` to
+    `Export.lua` -- belief giving up must not leave Lua still flying
+    the axes with no one told."""
+
+    def test_ack_timeout_queues_a_release_transition(self) -> None:
+        console = CrewConsole(store=ContactStore())
+        console.flight_control_state = FlightControlState(
+            phase="TAKING",
+            take_seq=1,
+            took_at_sim=0.0,
+            pending_take_says="I have controls.",
+        )
+
+        lines = console.drain_flight_control(100.0, parked_active=False)
+
+        assert console.flight_control_state.phase == "PILOT"
+        assert lines == ["Unable, not ready."]
+        assert console.flight_control_transition == "release"
+
+    def test_a_successful_take_queues_no_release(self) -> None:
+        console = CrewConsole(store=ContactStore())
+        console.flight_control_state = FlightControlState(
+            phase="TAKING",
+            take_seq=1,
+            took_at_sim=0.0,
+            pending_take_says="I have controls.",
+            lua_mode="active",
+            lua_take_seq=1,
+        )
+
+        console.drain_flight_control(0.5, parked_active=False)
+
+        assert console.flight_control_state.phase == "ACTIVE"
+        assert console.flight_control_transition is None
+
+    def test_an_ordinary_quiet_poll_queues_no_release(self) -> None:
+        console = CrewConsole(store=ContactStore())
+        console.flight_control_state = FlightControlState(phase="PILOT")
+
+        console.drain_flight_control(10.0, parked_active=False)
+
+        assert console.flight_control_transition is None

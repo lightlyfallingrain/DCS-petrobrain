@@ -3740,7 +3740,21 @@ def _apply_flight_control(
     if transition is not None:
         crew_console.flight_control_transition = None
         next_seq = state.wire_seq + 1
-        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+        if transition == "take":
+            # 2026-11-19 mode 1 handover feedback: `Export.lua` echoes
+            # back the **wire** seq of this very message as `fc_take_
+            # seq` (`fc_pending_take_seq = seq` in its own `cmd ==
+            # "take"` handler) -- never `take_controls`'s own
+            # independently-bumped counter, which `decide_flight_
+            # control`'s ack comparison was reading before this fix.
+            # `take_seq` is overwritten here, at the one place that
+            # actually knows what seq is going on the wire, so the two
+            # agree by construction rather than by luck.
+            crew_console.flight_control_state = replace(
+                state, wire_seq=next_seq, take_seq=next_seq
+            )
+        else:
+            crew_console.flight_control_state = replace(state, wire_seq=next_seq)
         state = crew_console.flight_control_state
         try:
             aircraft_client.write_flight_control(next_seq, transition, limits, None)

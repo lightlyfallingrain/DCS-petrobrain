@@ -53,6 +53,33 @@ class TestApplyFlightControl:
         assert goal is None
         assert console.flight_control_state.wire_seq == 1
 
+    def test_a_take_transition_sets_take_seq_to_the_actual_sent_wire_seq(
+        self,
+    ) -> None:
+        """2026-11-19 mode 1 handover feedback: `Export.lua` echoes back
+        the **wire** seq of the `take` message as `fc_take_seq`
+        (`fc_pending_take_seq = seq` in `flight_control.lua`'s own
+        `cmd == "take"` handler), never `FlightControlState.take_seq`'s
+        own independent per-take counter. `take_controls` bumps that
+        counter locally (here, 5 -> 6) with no knowledge of the wire --
+        `decide_flight_control`'s ack comparison (`lua_take_seq ==
+        take_seq`) can only ever match by the two counters' sheer luck,
+        which is exactly why the existing pure-function tests (built
+        with both values set equal by hand) never saw this. `take_seq`
+        must come out equal to the *sent* wire seq (3, from
+        `wire_seq=2 + 1`), not the independently-bumped 6, or every
+        voice take times out even though Lua goes active."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", take_seq=6, wire_seq=2))
+        console.flight_control_transition = "take"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        seq, cmd, _limits, _goal = client.flight_control_calls[0]
+        assert seq == 3
+        assert cmd == "take"
+        assert console.flight_control_state.take_seq == 3
+
     def test_a_release_transition_is_sent_and_cleared(self) -> None:
         client = _FakeAircraftClient()
         console = _console(FlightControlState(wire_seq=5))

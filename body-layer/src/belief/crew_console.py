@@ -5634,6 +5634,18 @@ class CrewConsole:
         new_state, decision = decide_flight_control(
             self.flight_control_state, now_sim, parked_active=parked_active
         )
+        if old_phase == "TAKING" and new_state.phase == "PILOT":
+            # 2026-11-19 mode 1 handover feedback, fix b: the only way
+            # `decide_flight_control` makes this transition is the ack
+            # timeout -- belief gives up and goes back to `PILOT`, but
+            # says nothing to `Export.lua`, which by then has often
+            # already gone `active` (the take simply arrived late) and
+            # keeps flying the axes regardless of what belief now
+            # thinks. Queue a `release` the same one-shot way every
+            # other `flight_control_transition` write is queued --
+            # `_apply_flight_control` sends it next poll, so belief and
+            # the aircraft never disagree about who flies for long.
+            self.flight_control_transition = "release"
         if old_phase == "OVERLAY" and new_state.phase == "ACTIVE":
             break_action = self.parked_flight_state.cbtm_action_sent
             entry_heading = self.parked_flight_state.cbtm_break_entry_heading_deg
