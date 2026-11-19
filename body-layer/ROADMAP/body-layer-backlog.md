@@ -170,6 +170,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B130]] — Whisper prompt over the 224-token cap fails loud, naming the dropped words (BL-17 follow-up)
 - [[BL-B131]] — Recording/bench phrase list generated from the rule files (BL-17 follow-up)
 - [[BL-B132]] — Readable cockpit args (lamps, gauges, rotor RPM) in the switch reference
+- [[BL-B133]] — Petrovich does not start talking while the player keys ICS or RADIO
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
