@@ -1011,6 +1011,8 @@ def _is_genuine_collision(
     own_ratio: float,
     other_id: str,
     other_ratio: float,
+    *,
+    confident_loss_disables: bool = True,
 ) -> bool:
     """`[[BL-17]]` Stage 4 recalibration (2026-11-17), replacing D9's
     original "any hit disables both" criterion -- settled after measuring
@@ -1034,8 +1036,18 @@ def _is_genuine_collision(
       only arise on a clean sample (a perturbed one, by construction,
       never scores `1.0` against its own generating rule).
     - `other_ratio` beats `own_ratio` by at least `SEPARATION_MIN` --
-      saying `rule_id`'s own wording would make Petrovich confidently
-      act on `other_id` instead.
+      a mis-hearing of `rule_id`'s wording (only a perturbed sample can
+      score this way: a clean one is always `1.0` for its own rule) would
+      make Petrovich confidently act on `other_id` instead. **Only when
+      `confident_loss_disables`** -- the rule x rule pass. Disabling
+      either rule there removes the near-homophone pair an author wrote.
+      The rule x legacy pass passes `False` (2026-11-19, user-approved):
+      a legacy command cannot be disabled, so it wins that mis-hearing
+      whether or not the rule exists, and disabling the rule only lost a
+      working command -- measured on `cbtm_align` ("align" probed as
+      "light" -> legacy `point`) and `cbtm_break` ("break turn left" as
+      "repeat turn left" -> legacy `report`), both silently inactive in
+      flight.
 
     A **fuzzy near-tie** (the gap is under `SEPARATION_MIN` and neither
     side is a clean `1.0`) is logged at `INFO` and returns `False`: this
@@ -1050,7 +1062,7 @@ def _is_genuine_collision(
         return True
     gap = other_ratio - own_ratio
     if gap >= SEPARATION_MIN:
-        return True
+        return confident_loss_disables
     if gap > -SEPARATION_MIN:
         logger.info(
             "collision probe near-tie, not disabled (runtime confirm "
@@ -1112,7 +1124,8 @@ def _collides_with_legacy(
     **Recalibrated 2026-11-17** (see `_is_genuine_collision`'s own
     docstring): a probe resolving to some *other* token is no longer
     automatically a collision -- it is one only when that resolution
-    beats, or exactly ties, `rule`'s own ratio on the same sample.
+    exactly ties `rule`'s own ratio on the same sample. (Until
+    2026-11-19 also when it beat it; see `confident_loss_disables`.)
 
     `samples` is `rule`'s own precomputed `_samples_with_perturbation`
     result, passed in rather than recomputed here (same performance fix
@@ -1125,7 +1138,12 @@ def _collides_with_legacy(
             continue
         own_ratio = _own_ratio(rule, sample)
         if _is_genuine_collision(
-            rule.id, sample, own_ratio, probe.token, probe.match_ratio
+            rule.id,
+            sample,
+            own_ratio,
+            probe.token,
+            probe.match_ratio,
+            confident_loss_disables=False,
         ):
             return True
     return False

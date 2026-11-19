@@ -117,6 +117,32 @@ def test_a_rule_colliding_with_an_existing_command_is_rejected(
     assert body["rejected"][0]["id"] == "new_rule"
 
 
+def test_a_mis_hearing_that_only_reaches_a_legacy_command_keeps_the_rule(
+    running_server: TTSAdapterServer,
+) -> None:
+    """Both CBTM rules were rejected until 2026-11-19: their perturbed
+    probes ("light", "repeat turn left") resolve to legacy `point`/`report`,
+    which win those mis-hearings with or without the rule. The real legacy
+    matcher and the real `flight.lua` patterns."""
+    status, body = _put_rules(
+        running_server,
+        {
+            "version": "v1",
+            "rules": [
+                {"id": "cbtm_align", "pattern": "align", "category": "flight_control"},
+                {
+                    "id": "cbtm_break",
+                    "pattern": "break turn <direction:left|right>",
+                    "category": "flight_control",
+                },
+            ],
+        },
+    )
+    assert status == 200
+    assert sorted(body["accepted"]) == ["cbtm_align", "cbtm_break"]
+    assert body["rejected"] == []
+
+
 def test_missing_version_is_a_400(running_server: TTSAdapterServer) -> None:
     status, _body = _put_rules(running_server, {"rules": []})
     assert status == 400
