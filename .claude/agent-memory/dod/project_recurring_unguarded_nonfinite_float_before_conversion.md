@@ -1,6 +1,6 @@
 ---
 name: project-recurring-unguarded-nonfinite-float-before-conversion
-description: five findings now, across three sessions -- three in one day (2026-10-13) in two body-layer modules, a fourth on 2026-10-30 (BL-B104, a new wire field converted with int() before any isfinite check, at the LAN-HTTP boundary into body-layer), and a fifth on 2026-11-17 (BL-17, the same gap at a non-LAN boundary -- Lua-to-Python action dispatch) -- all a non-finite (NaN/Inf) float reaching an integer conversion or arithmetic expression with no explicit math.isfinite guard. A recurring category, not isolated bugs, and still being caught at Security/DoD rather than earlier, now confirmed to generalize past "wire boundary" to any boundary crossing into a value this codebase did not fully construct itself.
+description: six findings now, across four sessions -- three in one day (2026-10-13) in two body-layer modules, a fourth on 2026-10-30 (BL-B104, a new wire field converted with int() before any isfinite check, at the LAN-HTTP boundary into body-layer), a fifth on 2026-11-17 (BL-17, the same gap at a non-LAN boundary -- Lua-to-Python action dispatch), and a sixth on 2026-11-19/20 (fix/handover-ack-seq, the first occurrence on the ENCODE side -- core.lua's fmt_num_or_null blanket-formatted int-strict schema fields as %.5f, silently dropping every flight_control telemetry line for a full day before being traced). All a non-finite or wrong-typed numeric value crossing a boundary this codebase did not fully construct, with no validation anywhere it enters or leaves. A recurring category, not isolated bugs, still being caught at Security/DoD/Debugger rather than earlier, now confirmed to generalize past "wire boundary," past "parse side," and past "LAN/HTTP" to any numeric value crossing any boundary in either direction.
 metadata:
   type: project
 ---
@@ -53,6 +53,22 @@ upstream, and now a fourth time in a different feature entirely:
    unguarded conversion is to make it *visibly* fail at the layer that already has a logging/rollback
    contract for exactly that.
 
+6. `fix/handover-ack-seq` (2026-11-19/20, Debugger, `plans/flight-control/debug.md` second bug;
+   also caught and classified correctly by Security as the same category, `plans/flight-control/
+   security-handover-ack.md`): the first occurrence on the **encode** side rather than the parse
+   side. `aircraft-layer/dcs-export/Petrobrain/core.lua`'s `fmt_num_or_null` formatted every
+   number with `%.5f` with no distinction between a measurement and an `int`-strict schema field,
+   so a sequence counter went out as e.g. `"-1.00000"`, which `json.loads` parses as a `float` and
+   every strict `_optional_int` schema check then rejected — not a crash, a **silently dropped
+   wire line**, a failure mode this memory had not yet named. `fc_last_cmd_seq` is never `null`
+   (an always-set sentinel), so this dropped every `flight_control` telemetry line for a full day
+   (2026-11-18 onward) before being traced past two other symptoms that looked like separate bugs
+   (a take-ack seq mismatch, an ack-timeout recovery gap). Fixed with a second formatter,
+   `fmt_int_or_null`, used only at schema fields actually declared `int`; `fmt_num_or_null` itself
+   also gained the same `is_finite_number` guard this memory already prescribes, so a non-finite
+   measurement now encodes as `null` instead of literal `nan`/`inf` text (which is not valid JSON
+   either -- the same silent-whole-line-drop failure, reached from the opposite direction).
+
 The common root: a raw float/int entering from somewhere this codebase did not fully construct
 itself — DCS telemetry, a wire payload, or (as of finding 5) a sandboxed scripting language's own
 runtime values — with no finiteness validation anywhere it crosses in, and every new consumer has
@@ -82,18 +98,24 @@ already-known boundaries.
   contract and the other (`digits`) had none -- degrading the second the same way as the first hid a
   rule-author bug behind a legitimate-sounding "Unable." with no log. Check the surrounding contract
   per site, not just whether the guard exists.
-- **This is process debt, not just code debt, and it has now recurred a fifth time, the first time
-  at a boundary class (Lua, not LAN/HTTP) this memory had not yet named, after this exact memory
-  already existed to catch it.** The cheaper fix is a single finiteness-validating gate placed where
-  raw floats/ints first enter each pipeline (the perception/belief boundary, the schema-parsing
-  boundary, *and* the Lua-action-dispatch boundary `rules/engine.py` now owns), rather than
-  re-deriving "is this operand guarded" at every new boundary a future feature adds. **DoD's own
-  process signal, now sharper**: this pattern is being caught reliably at Security/DoD across three
-  different boundary classes, which is working as a gate but demonstrably not as prevention -- the
-  lesson from findings 1-4 did not reach whoever designed BL-17's action-wrapper validator, the
-  single function whose *whole job* is to be the validation boundary for every future rule-callable
-  action. Worth raising at Architect/Implementer time for any plan that introduces a *new kind of
-  boundary* at all (not just a new field on an existing one) -- a checklist item ("every new
-  `int(raw)`/`float(raw)` conversion on a value this process did not construct itself is
-  `math.isfinite`-guarded before conversion, regardless of whether the boundary is HTTP, Lua, or
-  something else entirely") would catch this before Security does, rather than after.
+- **This is process debt, not just code debt, and it has now recurred a sixth time, the first time
+  on the encode side of a boundary (Lua writing a wire line) rather than the parse side, after this
+  exact memory already existed to catch the parse-side version.** The cheaper fix is a single
+  finiteness/type-validating gate at both ends of each boundary -- the perception/belief boundary,
+  the schema-parsing boundary, the Lua-action-dispatch boundary `rules/engine.py` owns, *and now*
+  the Lua-side wire-encoding boundary (`core.lua`'s own `fmt_num_or_null`/`fmt_int_or_null`) --
+  rather than re-deriving "is this operand guarded, and does its declared type match the schema on
+  the other side" at every new boundary or every new field on an existing one. **DoD's own process
+  signal, now sharper still**: this pattern has now been caught at Debugger, Security and DoD
+  across four boundary classes and both directions of crossing (parse and encode), which is working
+  as a gate but demonstrably not as prevention -- the lesson from findings 1-4 did not reach
+  whoever designed BL-17's action-wrapper validator, and the lesson from finding 5 did not reach
+  whoever added `fc_last_cmd_seq` to `core.lua`'s wire encoding a day later. One project-wide rule
+  would catch every instance found so far: **a numeric value crossing any boundary, in either
+  direction, must be both finiteness-guarded and type-matched to the schema on the other side,
+  checked by grepping the other side's own validator rather than assuming an existing sibling
+  helper already matches it.** Worth raising at Architect/Implementer time for any plan touching a
+  wire-encoding or wire-decoding function at all, not only a new field -- this now recurs often
+  enough that a mechanical check (every `fmt_*`/`_optional_*` call site cross-referenced against
+  the schema it feeds, run once per touch to either side) would be cheaper than catching it by hand
+  a seventh time.
