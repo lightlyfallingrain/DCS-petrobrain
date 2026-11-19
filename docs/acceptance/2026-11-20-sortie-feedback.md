@@ -69,3 +69,6 @@ User direction, verbatim:
 
 > If that is the reason, all commands should really use a mission wide unique running number, not
 > individual numbering.
+
+> if body layer resets, it could send a reset signal. that would then reset the counters and reset
+> state at aircraft layer too. then body and collector would match
