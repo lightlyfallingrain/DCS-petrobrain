@@ -452,15 +452,17 @@ class TestCompileRules:
         assert [r.id for r in accepted] == ["scan_rule"]
         assert rejected == []
 
-    def test_legacy_probe_confidently_beating_a_perturbed_sample_is_still_rejected(
+    def test_legacy_probe_confidently_beating_a_perturbed_sample_keeps_the_rule(
         self,
     ) -> None:
-        """`[[BL-17]]` Stage 4 recalibration -- the counterfactual for the
-        test above: a legacy resolution that beats the rule's own
-        (perturbed) ratio by at least `SEPARATION_MIN` is a genuine
-        confident-wrong collision and is still disabled, even though it
-        is the *perturbed* sample -- not the rule's clean wording --
-        that triggers it."""
+        """A legacy resolution beating the rule's own *perturbed* ratio by
+        at least `SEPARATION_MIN` does not disable the rule (2026-11-19,
+        user-approved; until then it did). The legacy command wins that
+        mis-hearing whether or not the rule exists, so disabling the rule
+        only removed a working command -- `cbtm_align`/`cbtm_break` were
+        silently inactive in flight this way. Rule x rule keeps the
+        stricter check: `test_a_perturbed_sample_confidently_resolving_
+        to_another_rule_is_rejected` below."""
 
         def legacy_confidently_wrong(text: str) -> LegacyProbeResult:
             if text == "scam two zero":
@@ -472,6 +474,27 @@ class TestCompileRules:
         accepted, rejected = compile_rules(
             [("scan_rule", "scan <degrees:angle>")],
             legacy_probe=legacy_confidently_wrong,
+            free_speech_guard=(),
+        )
+        assert [r.id for r in accepted] == ["scan_rule"]
+        assert rejected == []
+
+    def test_legacy_exact_tie_on_the_clean_wording_is_still_rejected(
+        self,
+    ) -> None:
+        """The case U10 names, unchanged: the rule's own clean wording is
+        claimed exactly by a legacy command too."""
+
+        def legacy_claims_clean_wording(text: str) -> LegacyProbeResult:
+            if text == "scan two zero":
+                return LegacyProbeResult(
+                    token="some_other_command", verb_anchored=True, match_ratio=1.0
+                )
+            return LegacyProbeResult(token=None, verb_anchored=False, match_ratio=0.0)
+
+        accepted, rejected = compile_rules(
+            [("scan_rule", "scan <degrees:angle>")],
+            legacy_probe=legacy_claims_clean_wording,
             free_speech_guard=(),
         )
         assert accepted == []

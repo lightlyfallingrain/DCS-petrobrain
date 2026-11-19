@@ -159,6 +159,19 @@
   scoping one pass's effect to the call site that needs the exception, not changing the shared
   table everyone reads.
 
+- **A load-time collision check can disable a rule for a reason that changes nothing at
+  runtime, if the runtime merge already resolves ties independently of the registry.**
+  `[[BL-17]]`'s rule x legacy collision check disabled a rule whenever its own perturbed sample
+  confidently resolved to a different legacy command — but `command_matcher.match_transcript`'s
+  rule/legacy merge already picks whichever branch has the higher `match_ratio` once the gap
+  clears `SEPARATION_MIN`, regardless of whether the rule exists in the registry at all. So for
+  that exact mis-hearing, disabling the rule bought nothing: the mis-hearing still resolved to
+  legacy either way, and the only thing lost was correct recognition of the rule's own *clean*
+  wording (`cbtm_align`/`cbtm_break`, silently inactive in flight until fixed 2026-11-19,
+  `fix/rule-collision-misheard`). Before tightening a load-time gate "to be safe," check what the
+  gated outcome actually changes at runtime — a defensive check with no runtime effect only costs
+  correctness on the clean case it was never protecting.
+
 - **Fuzzy tolerance divides along closed-set-vs-open-ended, not along slot-vs-literal.** `[[BL-17]]`
   D13 (literal fuzz) plus the Stage 3a review's E12 correction extended near-miss tolerance to a
   rule's *directive* words too ("turn left" / "scan ahead" — the base command plus the handful of
