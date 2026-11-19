@@ -72,3 +72,11 @@ User direction, verbatim:
 
 > if body layer resets, it could send a reset signal. that would then reset the counters and reset
 > state at aircraft layer too. then body and collector would match
+
+Decision (asked: on a body-layer restart mid-flight, does Petrovich let go of the stick?), verbatim:
+
+> yes let go. A service reset is error situation, that should not happen. If player manually
+> restarts, he knows it then.
+
+So the reset clears all of Lua's command state: mode 1 releases the axes (player has the stick),
+mode 2's open goal/CBTM/HVRT is dropped (ED's AI keeps flying).
