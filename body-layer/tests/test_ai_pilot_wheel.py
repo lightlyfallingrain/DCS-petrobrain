@@ -974,6 +974,7 @@ class TestDecideAiPilotWheelCbtm:
             replace_goal(ParkedFlightState(), goal),
             align_phase="aligning",
             cbtm_action_sent="break_left",
+            lua_cbtm_status="running",
         )
         result = decide_ai_pilot_wheel(state, 1.0)
         assert result.align_phase == "none"
@@ -991,13 +992,60 @@ class TestDecideAiPilotWheelCbtm:
             pending_order=("heading",),
         )
         state = replace(
-            replace_goal(ParkedFlightState(), goal), cbtm_action_sent="break_away"
+            replace_goal(ParkedFlightState(), goal),
+            cbtm_action_sent="break_away",
+            lua_cbtm_status="running",
         )
         result = decide_ai_pilot_wheel(state, 1.0)
         assert result.goal is not None
         assert result.goal.heading_target_deg is None
         assert result.goal.pending_order == ()
         assert result.goal.active_param == "speed"
+
+    def test_a_freshly_sent_break_drops_heading_before_lua_has_echoed(self) -> None:
+        """The same-poll case `_apply_ai_pilot_wheel_goal` relies on: a
+        break just sent this poll has `cbtm_action_sent` set, but `Export.
+        lua` has not processed the command yet, so `lua_cbtm_status`
+        still mirrors whatever it was *before* this break (`None` the
+        first time this activation). The drop must still apply -- this
+        is why the gate is `!= "done"`, not `== "running"`."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=90.0, active_param="heading", active_since_sim=0.0
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            align_phase="aligning",
+            cbtm_action_sent="break_left",
+            lua_cbtm_status=None,
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.align_phase == "none"
+        assert result.goal is not None
+        assert result.goal.heading_target_deg is None
+
+    def test_a_heading_goal_after_the_break_has_finished_is_not_dropped(self) -> None:
+        """Bug fix, 2026-11-20 sortie
+        (`docs/acceptance/2026-11-20-sortie-feedback.md`): once `Export.
+        lua` reports the break's own CBTM episode `"done"` (the timed
+        press has released), a heading goal spoken afterwards must reach
+        `pending_order`/promotion and bump `goal_seq` like any other
+        goal -- not be silently eaten by F-P7's break-wins rule forever,
+        which is what happened while that rule keyed only on `cbtm_
+        action_sent` (never cleared except on unpark) and ignored
+        whether the break itself was still running."""
+        goal = AiPilotWheelGoal(
+            heading_target_deg=60.0, pending_order=("heading",), goal_seq=0
+        )
+        state = replace(
+            replace_goal(ParkedFlightState(), goal),
+            cbtm_action_sent="break_right",
+            lua_cbtm_status="done",
+        )
+        result = decide_ai_pilot_wheel(state, 1.0)
+        assert result.goal is not None
+        assert result.goal.heading_target_deg == 60.0
+        assert result.goal.active_param == "heading"
+        assert result.goal.goal_seq == 1
 
     def test_an_align_action_sent_does_not_trigger_the_break_logic(self) -> None:
         goal = AiPilotWheelGoal(
