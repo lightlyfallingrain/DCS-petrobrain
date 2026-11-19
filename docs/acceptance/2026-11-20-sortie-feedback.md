@@ -30,3 +30,24 @@ Not yet explored with the user. Main-loop reading only:
 - Item 1, code reading: there is no slip-ball term on the pedal (never probed), and a break's pedal
   bias is integrated into `t_y` and never unwound, so the heading hold can end up corrected by bank
   with crossed controls.
+
+User answers, verbatim:
+
+> Mode 1 control handover. Petrovich increased left pedal quite a lot -> left yaw -> bank right to
+> compensate -> ends up maintaining heading with right bank (5 deg this time) and unnecessary and
+> unwanted left yaw.
+> Second control transfer ended up in 10 deg right bank and "unable, not ready" nut still taking
+> controls.
+>
+> Mode 2: break left -> ok > break right -> ok > turn heading 060 -> acknowledget, but nothing
+> happens. Not in CPG. No flicker.
+>
+> 3 in CPG mode as well, left press changes mode.
+
+So: the sight-view hypothesis is out (not in CPG view, and short-left changes mode there too). No
+flicker means the goal channel is not even trying to cycle the mode. Expected behaviour, now
+unambiguous:
+
+- Mode 1: a take adds no pedal of its own; holding a heading means wings ~level, ball centred.
+- Mode 1: a take never ends in "unable, not ready" while Petrovich in fact holds the controls.
+- Mode 2: a heading goal after a break cycles CBTM → FLT and is flown.
