@@ -652,7 +652,47 @@ class TestDrainFlightControlSendsReleaseOnAckTimeout:
 
         assert console.flight_control_state.phase == "PILOT"
         assert lines == ["Unable, not ready."]
-        assert console.flight_control_transition == "release"
+        # review-handover-ack.md Required Fix: queued on the dedicated
+        # `flight_control_system_release_pending` flag, not the shared
+        # `flight_control_transition` field -- see that field's own
+        # docstring for why (a same-poll player take/release must not
+        # be able to clobber it).
+        assert console.flight_control_system_release_pending is True
+        assert console.flight_control_transition is None
+
+    def test_a_same_poll_take_does_not_clobber_the_queued_release(self) -> None:
+        """review-handover-ack.md Required Fix -- the exact interleaving
+        the review reproduced: a same-poll player "take" recognised from
+        a transcript (`body._poll_transcripts`, which runs after the
+        flight-control block) must not clobber the ack-timeout's own
+        self-queued release. Before the fix, `take_controls` wrote
+        straight over `flight_control_transition`, losing the release;
+        now the two live on separate fields and both survive."""
+        console = CrewConsole(store=ContactStore())
+        console.on_ground = False
+        console.ias_kmh = 200.0
+        console.flight_control_state = FlightControlState(
+            phase="TAKING",
+            take_seq=1,
+            took_at_sim=0.0,
+            pending_take_says="I have controls.",
+            lua_mode="active",
+            lua_take_seq=99,
+        )
+
+        console.drain_flight_control(100.0, parked_active=False)
+        assert console.flight_control_state.phase == "PILOT"
+        assert console.flight_control_system_release_pending is True
+
+        result = console.take_controls("I have controls.")
+
+        assert result["acted"] is True
+        assert console.flight_control_state.phase == "TAKING"
+        assert console.flight_control_transition == "take"
+        # the queued release must still be there -- `_apply_flight_
+        # control` sends it ahead of this "take" next poll, deferring
+        # the take rather than losing the release.
+        assert console.flight_control_system_release_pending is True
 
     def test_a_successful_take_queues_no_release(self) -> None:
         console = CrewConsole(store=ContactStore())

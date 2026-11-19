@@ -3681,6 +3681,16 @@ def _apply_flight_control(
     `axes_*` actions never touch it, the same division of labour `take_
     seq` already has (`FlightControlState`'s own docstring on the two).
 
+    **`flight_control_system_release_pending` takes priority over
+    `flight_control_transition`, and the two are never sent on the same
+    poll** (review-handover-ack.md Required Fix): the ack-timeout's own
+    self-queued release is checked first; when set, it is sent alone and
+    `flight_control_transition` is left exactly as it was (deferred to a
+    later poll, not discarded) rather than risk a second `write_flight_
+    control` call this same poll landing on Lua's own single most-recent-
+    command slot ahead of, or racing, the one Export.lua has not read
+    yet.
+
     **The arm lease (U10)**: while `OVERLAY` and `unpark_take`, `arm` is
     re-sent every poll regardless of either one-shot transition above --
     this is the lease Lua's own unpark-take precondition checks against
@@ -3735,35 +3745,58 @@ def _apply_flight_control(
     if state.phase == "OVERLAY":
         crew_console.flight_control_transition = None
         crew_console.flight_control_goal_transition = None
+        crew_console.flight_control_system_release_pending = False
 
-    transition = crew_console.flight_control_transition
-    if transition is not None:
-        crew_console.flight_control_transition = None
+    if crew_console.flight_control_system_release_pending:
+        # review-handover-ack.md Required Fix: the ack-timeout's own
+        # self-queued release (`CrewConsole.drain_flight_control`)
+        # always wins over whatever a same-poll player take/release
+        # wrote to `flight_control_transition` -- that field is left
+        # untouched below (retried next poll, once Lua has had this
+        # release to act on) rather than discarded or sent alongside it
+        # on the same wire. Lua's own `cmd == "take"` handler is a
+        # no-op while `fc_mode == "active"`, so a deferred take is the
+        # only way it can still succeed.
+        crew_console.flight_control_system_release_pending = False
         next_seq = state.wire_seq + 1
-        if transition == "take":
-            # 2026-11-19 mode 1 handover feedback: `Export.lua` echoes
-            # back the **wire** seq of this very message as `fc_take_
-            # seq` (`fc_pending_take_seq = seq` in its own `cmd ==
-            # "take"` handler) -- never `take_controls`'s own
-            # independently-bumped counter, which `decide_flight_
-            # control`'s ack comparison was reading before this fix.
-            # `take_seq` is overwritten here, at the one place that
-            # actually knows what seq is going on the wire, so the two
-            # agree by construction rather than by luck.
-            crew_console.flight_control_state = replace(
-                state, wire_seq=next_seq, take_seq=next_seq
-            )
-        else:
-            crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
         state = crew_console.flight_control_state
         try:
-            aircraft_client.write_flight_control(next_seq, transition, limits, None)
+            aircraft_client.write_flight_control(next_seq, "release", limits, None)
         except AircraftLayerError:
             logger.warning(
-                "flight-control %s write failed (continuing)",
-                transition,
-                exc_info=True,
+                "flight-control release write failed (continuing)", exc_info=True
             )
+    else:
+        transition = crew_console.flight_control_transition
+        if transition is not None:
+            crew_console.flight_control_transition = None
+            next_seq = state.wire_seq + 1
+            if transition == "take":
+                # 2026-11-19 mode 1 handover feedback: `Export.lua`
+                # echoes back the **wire** seq of this very message as
+                # `fc_take_seq` (`fc_pending_take_seq = seq` in its own
+                # `cmd == "take"` handler) -- never `take_controls`'s
+                # own independently-bumped counter, which `decide_
+                # flight_control`'s ack comparison was reading before
+                # this fix. `take_seq` is overwritten here, at the one
+                # place that actually knows what seq is going on the
+                # wire, so the two agree by construction rather than by
+                # luck.
+                crew_console.flight_control_state = replace(
+                    state, wire_seq=next_seq, take_seq=next_seq
+                )
+            else:
+                crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+            state = crew_console.flight_control_state
+            try:
+                aircraft_client.write_flight_control(next_seq, transition, limits, None)
+            except AircraftLayerError:
+                logger.warning(
+                    "flight-control %s write failed (continuing)",
+                    transition,
+                    exc_info=True,
+                )
 
     goal_request = crew_console.flight_control_goal_transition
     if goal_request is not None and state.phase != "TAKING":

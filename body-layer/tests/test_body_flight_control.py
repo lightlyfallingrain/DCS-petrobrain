@@ -123,6 +123,46 @@ class TestApplyFlightControl:
         assert seqs == [1, 2]
         assert console.flight_control_state.wire_seq == 2
 
+    def test_a_system_release_is_sent_alone_and_a_queued_take_is_deferred(
+        self,
+    ) -> None:
+        """review-handover-ack.md Required Fix -- what actually goes on
+        the wire for the interleaving `test_flight_control.py`'s
+        `test_a_same_poll_take_does_not_clobber_the_queued_release`
+        reproduces at the belief level: the ack-timeout's self-queued
+        release (`flight_control_system_release_pending`) must reach
+        Lua before the same-poll player `take` that followed it --
+        and that `take` must not simply be dropped, only deferred to
+        the next poll's own `_apply_flight_control` call, once Lua has
+        had this release to act on."""
+        client = _FakeAircraftClient()
+        console = _console(FlightControlState(phase="TAKING", wire_seq=10))
+        console.flight_control_transition = "take"
+        console.flight_control_system_release_pending = True
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert len(client.flight_control_calls) == 1
+        seq, cmd, _limits, goal = client.flight_control_calls[0]
+        assert seq == 11
+        assert cmd == "release"
+        assert goal is None
+        assert console.flight_control_state.wire_seq == 11
+        assert console.flight_control_system_release_pending is False
+        # the player's "take" is neither sent nor discarded this poll --
+        # it is still here, to be sent on the very next poll.
+        assert console.flight_control_transition == "take"
+
+        _apply_flight_control(console, client)  # type: ignore[arg-type]
+
+        assert len(client.flight_control_calls) == 2
+        seq, cmd, _limits, goal = client.flight_control_calls[1]
+        assert seq == 12
+        assert cmd == "take"
+        assert goal is None
+        assert console.flight_control_transition is None
+        assert console.flight_control_state.wire_seq == 12
+
     def test_a_goal_during_taking_is_held_not_sent_and_not_cleared(self) -> None:
         """review-m2.md Required Fix 1: a goal commanded in the one-
         frame `TAKING` window (the absolute-set `axes_*` actions gate on
