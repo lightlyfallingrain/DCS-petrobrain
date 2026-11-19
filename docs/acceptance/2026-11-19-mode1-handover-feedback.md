@@ -40,3 +40,21 @@ and c ("I have controls" releases whenever Lua reports holding the axes, whateve
 `GET /ai_pilot_wheel/latest` sample from that state. Open hypothesis: mode 1's Lua side was left
 `active` by the earlier failed take (defect 2 above; only a mission restart or a `release` clears
 it) and is interfering.
+
+## Common root cause, both modes (found 2026-11-19, from the collector console)
+
+`curl /ai_pilot_wheel/latest` and `/flight_control/latest` both returned `null` while telemetry
+was live. The Windows collector console showed, user-supplied:
+
+```
+2026-11-19 23:41:20,711 WARNING dropping malformed ai-pilot-wheel line: '{"t":107.962,"apw_parked_active":true
+2026-11-19 23:41:20,711 WARNING dropping malformed flight-control line: '{"t":107.962,"fc_mode":"off","fc_take
+```
+
+`core.lua`'s `fmt_num_or_null` formats every number `%.5f`, so a seq goes out as `-1.00000`,
+which JSON parses as a float; both schemas' seq fields demand `int` and reject the whole line.
+`fc_last_cmd_seq` is never null, so **every** flight-control line has been dropped since
+`307d6a81` (2026-11-18); the AI-wheel line is dropped once `apw_goal_seq`/`apw_cbtm_seq` is set.
+Reproduced against the schemas. Mode 2's "not flying" is `parked_active` never arriving; mode 1's
+take ack never arrived at all (the seq mismatch above was real too, but secondary). No test parses
+what Lua actually emits.
