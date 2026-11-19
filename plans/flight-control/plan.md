@@ -4304,7 +4304,8 @@ widen) — local and reversible, so none is escalated as a `U<n>`.
    continuous turn. Body-layer already records the break and its direction (P3+P4); the take
    path seeds `heading_goal` from it. Altitude and speed goals take over as an ordinary take
    does. Test: a take with a break active seeds the break target; a take with no break active is
-   unchanged. Flight M-C card gets one row for it.
+   unchanged. Flight M-C card gets one row for it. **Confirmed by the user 2026-11-19:**
+   *"solution for gap accepted"*.
 2. **Rotor RPM scale is a named constant** — `ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0` in Decision
    28's block and the constants table, per the user's 2026-11-19 mapping note
    (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`, Finding 2).
