@@ -67,6 +67,14 @@ for d in */pyproject.toml; do
     sub="${d%/pyproject.toml}"
     [ -d "$sub/ROADMAP" ] && DIRS="$DIRS $sub/ROADMAP"
 done
+# A roadmap can exist before its code does (wingbrain, 2026-11-19: ROADMAP/ and no
+# pyproject.toml). Its sentinel pointer is what marks it, so find it by that.
+for p in */ROADMAP.md; do
+    sub="${p%/ROADMAP.md}"
+    [ -f "$sub/pyproject.toml" ] && continue
+    [ -d "$sub/ROADMAP" ] && head -1 "$p" | grep -qF '<!-- split-roadmap: see ROADMAP/ -->' \
+        && DIRS="$DIRS $sub/ROADMAP"
+done
 for extra in todo/backlog todo/todo; do
     [ -d "$extra" ] && DIRS="$DIRS $extra"
 done

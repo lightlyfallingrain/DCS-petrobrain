@@ -67,7 +67,8 @@ than normalised.
 - [[X-B18]] — SRTM voids and unused staged tiles
 - [[X-B19]] — Pin `CLASSIFIER_VERSION` bump discipline with a test
 - [[X-B20]] — Landmark references must be LOS- and knowledge-gated
-- [[X-B21]] — "Wingman brain"
+- [[X-B21]] — "Wingman brain" — **scoped 2026-11-19 as wingbrain, roadmap at
+  `wingbrain/ROADMAP/`**
 - [[X-B22]] — Two red tests on `main` — an unmerged branch, not regressions
 - [[X-B23]] — 41 `worktree-agent-*` branches of unknowable harvest state
 - [[X-B24]] — Status page's daily launchd refresh
@@ -89,7 +90,8 @@ than normalised.
 - [[X-B38]] — Two accepted-but-untested edge cases in `tuning.py`
 - [[X-B39]] — A mechanical check for the leaf-tested / wiring-untested defect `[?]`
 - [[X-B40]] — Petrobrain launcher: a text UI for starting, stopping and watching the services
-- [[X-B41]] — What can DCS AI wingmen be commanded to do? (recon, first step toward X-B21)
+- [[X-B41]] — What can DCS AI wingmen be commanded to do? (recon, first step toward X-B21) —
+  **moved 2026-11-19 to [[WB-1]]**, in the new `wingbrain/ROADMAP/`
 
 ## One entry carries two checkbox blocks
 
