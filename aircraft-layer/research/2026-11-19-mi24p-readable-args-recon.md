@@ -72,6 +72,12 @@ re-investigated.
    background knowledge, not something read from this module's files — **do not treat it as the
    calibration without reading `mainpanel_init.lua`'s `CreateGauge` call for arg 42/845.**
 
+   **Working assumption, user 2026-11-19:** *"very likely that is value * 100 = rotor rpm per
+   cent. Unless the dial goes to over 100%, that has to be checked in cokpit."* So until checked:
+   %Nr = arg value × 100. The check is the dial's top mark in the cockpit (or the `CreateGauge`
+   output range): if the scale runs past 100% (e.g. to 110% or 120%), the mapping is value × that
+   maximum instead.
+
 3. **Does `BASE_SENSOR_LEFT_ENGINE_RPM` include rotor RPM? No — it is a separate, engine-only
    quantity, and DCS-BIOS's own data confirms the module treats them as entirely separate args.**
    `PLT_ROTOR_RPM` (42) and `PLT_ENG_L_RPM`/`PLT_ENG_R_RPM` (40/41) are three different draw
