@@ -941,3 +941,19 @@ Answers to `alignment.md`'s mode-1 goal check (F-M1, F-M2, Q-M1-1..3), plus one 
 - **Not this batch (filed separately):** *"switch-reference.md lists the effecors we can *write*.
   It'd be really good to add to that list args that we can *read*, like lamps, instrument values
   (like the rotor rpm), etc."* — `[[BL-B132]]`.
+
+### Mode-1 hover (user, 2026-11-19, verbatim)
+
+> *"Hover in Mode 1:*
+> *- consider flight state as hover when speed (length of speed vector) is less than 25 km/h.
+>   (configurable value)*
+> *- hover state makes hover translate commands available.*
+> *- desired speed for translates is 10 km/h (configurable)*
+> *- desired vertical speed for climb/descend is 2 m/s (configurable)*
+> *- move up/down is not a 2 m step in altitude, it is constant climb/descent at desired vertical
+>   speed, until "hold" command."*
+
+Main-loop note: this reverses the mode-1 plan's Decision 3 ("mode 1 is forward flight only"),
+under which every `hvrt_*` command answers "unable, not ready" in mode 1. Arrived while the
+break/rotor-envelope batch was mid-build; recorded here, planned as the next mode-1 batch unless
+the user says otherwise. Mode 2's "move up/down" stays ED's 2 m step.
