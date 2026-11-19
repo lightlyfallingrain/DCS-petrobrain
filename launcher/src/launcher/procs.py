@@ -64,7 +64,10 @@ class ServiceProcess:
             proc = subprocess.Popen(
                 argv,
                 cwd=self.scripts_dir,
-                stdin=subprocess.DEVNULL,
+                # A pipe held open and never written, not DEVNULL: body-layer's main thread is
+                # a stdin REPL (`body.py` `for line in sys.stdin`), and an immediate EOF ends
+                # the whole service with code 0. Closed in _pump once the service exits.
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=child_env(),
@@ -84,6 +87,8 @@ class ServiceProcess:
             text = _ANSI.sub("", raw.decode("utf-8", "replace")).rstrip("\r\n")
             self.log.append(text.split("\r")[-1])
         code = proc.wait()
+        if proc.stdin is not None:
+            proc.stdin.close()
         self.log.append(f"[launcher] exited, code {code}")
 
     def stop_async(self) -> None:
