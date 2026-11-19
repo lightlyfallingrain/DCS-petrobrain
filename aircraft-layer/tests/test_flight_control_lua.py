@@ -406,6 +406,80 @@ print(sent_lines[#sent_lines])
         assert _field(retaken_line, "fc_goal_speed") is None
 
 
+class TestRepeatedTakeWhileAlreadyFlyingStillAcks:
+    """BL-16 sortie 2026-11-20, defect B (`plans/flight-control/debug.md`):
+    a second `take` sent while Lua's `fc_mode` is already `"active"` or
+    `"taking"` is a no-op for the aircraft (no re-capture, no law reset
+    -- the comment right above this branch says why), but must still
+    move `fc_take_seq`/`fc_pending_take_seq` to the new message's own
+    seq. Before the fix, `fc_last_cmd_seq` (bumped unconditionally by
+    the bounds check, before this branch ever runs) advanced past the
+    stale `fc_take_seq`, so belief's own ack match (`lua_take_seq ==
+    take_seq`, set to the sent wire seq by `body.py`'s `_apply_flight_
+    control`) could never succeed for that take -- "Unable, not ready,"
+    forever, while Lua kept flying regardless."""
+
+    def test_a_repeated_take_while_active_still_updates_take_seq(self) -> None:
+        driver = """
+pilot_args.pitch = 0.1
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines - 1])
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        after_take_1, after_take_2 = lines[0], lines[1]
+        assert _field(after_take_1, "fc_mode") == "active"
+        assert _field(after_take_1, "fc_take_seq") == "1"
+        assert _field(after_take_1, "fc_last_cmd_seq") == "1"
+        # Before the fix: fc_mode stayed "active" (correct -- it is a
+        # no-op for the aircraft), fc_last_cmd_seq advanced to 2 (the
+        # bounds check bumps it unconditionally), but fc_take_seq
+        # stayed 1 -- the defect.
+        assert _field(after_take_2, "fc_mode") == "active"
+        assert _field(after_take_2, "fc_last_cmd_seq") == "2"
+        assert _field(after_take_2, "fc_take_seq") == "2"
+
+    def test_a_repeated_take_while_still_taking_also_updates_take_seq(
+        self,
+    ) -> None:
+        """Same defect, the `"taking"` half: a second `take` arrives
+        before the first one's capture has resolved into `"active"` --
+        `fc_pending_take_seq` (not `fc_take_seq` directly, which is only
+        set once `run_flight_control`'s own `"taking"` branch completes
+        the capture) must move to the new seq, or the eventual `active`
+        transition reports the *first* take's seq, not the one belief
+        is actually waiting on."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+-- No live stick deflection on either seat and no prior steady snapshot
+-- -- `resolve_capture_values` falls through to the magnitude-compare
+-- fallback, which still succeeds immediately (it never returns nil
+-- here), so this is only to exercise the "taking" window itself, not
+-- to actually stall the capture.
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "active"
+        assert _field(lines[0], "fc_take_seq") == "2"
+        assert _field(lines[0], "fc_last_cmd_seq") == "2"
+
+
 class TestBadBoundRejectsWholeMessage:
     def test_an_out_of_bounds_limit_rejects_the_whole_message(self) -> None:
         driver = """

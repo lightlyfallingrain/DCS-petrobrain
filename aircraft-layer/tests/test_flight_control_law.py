@@ -124,7 +124,7 @@ def _run(driver: str) -> list[str]:
 
 
 def _measured(**overrides: float) -> str:
-    base = {
+    base: dict[str, float | bool] = {
         "pitch_deg": 0.0,
         "bank_deg": 0.0,
         "psi_deg": 0.0,
@@ -140,9 +140,19 @@ def _measured(**overrides: float) -> str:
         # (85.0) by default, so no pre-existing scenario trips the
         # rotor-RPM guard it is not testing.
         "rotor_rpm_pct": 100.0,
+        # BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) --
+        # defaults `true` so every pre-existing collective-channel
+        # scenario above keeps exercising the collective-coupling
+        # pedal feedforward it always implicitly assumed; the new
+        # drift scenario below overrides it `false` to match today's
+        # real `FC_AXES_ENABLED.collective` default.
+        "collective_enabled": True,
     }
     base.update(overrides)
-    fields = ", ".join(f"{k} = {v}" for k, v in base.items())
+    fields = ", ".join(
+        f"{k} = {'true' if isinstance(v, bool) and v else 'false' if isinstance(v, bool) else v}"
+        for k, v in base.items()
+    )
     return "{ " + fields + " }"
 
 
@@ -755,6 +765,113 @@ print(string.format("%.6f", measured.bank_deg))
         turn_mode, final_bank = lines
         assert turn_mode == "false"
         assert abs(float(final_bank)) < 2.0
+
+
+class TestPedalDoesNotDriftWithCollectiveDisabled:
+    """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`,
+    defect A): the user reported Petrovich adding "quite a lot" of
+    left pedal right after a plain take, with no break involved --
+    confirmed as a continuous *ramp*, not a one-off offset, driven by
+    `K_PEDAL_FROM_COLLECTIVE_RATE * c_dot` where `c_dot` tracks a
+    collective that `FC_AXES_ENABLED.collective = false` never
+    actually writes to the aircraft. A sustained altitude-hold
+    tracking error (here: the real aircraft sits 5 m away from the
+    stopping height captured at take, and never moves, since nothing
+    is actually flying the collective) therefore never resolves and
+    keeps driving `c_dot`, and before the fix that fed straight into
+    the pedal every frame with nothing to arrest it."""
+
+    def test_sustained_altitude_error_does_not_move_the_pedal(self) -> None:
+        driver = f"""
+local measured_take = {_measured(h_m=200.0, w_mps=0.0, collective_enabled=False)}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local t_y_at_take = state.t_y
+-- The real aircraft sits 5 m above the stopping height captured at
+-- take, and never moves from there (nothing is flying the collective)
+-- -- a sustained, never-resolving altitude error.
+for i = 1, 200 do
+    local m = {_measured(h_m=205.0, w_mps=0.0, collective_enabled=False)}
+    state = flight_control.law_update(state, 0.1, m, LIMITS)
+end
+print(string.format("%.6f", t_y_at_take))
+print(string.format("%.6f", state.t_y))
+"""
+        lines = _run(driver)
+        t_y_at_take, t_y_after_20s = (float(v) for v in lines)
+        assert abs(t_y_at_take) < 1e-6
+        # Before the fix this reached roughly -0.1 after 20 s and kept
+        # growing (an unbounded ramp) -- a tight bound here catches a
+        # regression of the same shape, not only a total reversion.
+        assert abs(t_y_after_20s - t_y_at_take) < 0.01
+
+    def test_the_same_altitude_error_does_move_the_pedal_with_collective_enabled(
+        self,
+    ) -> None:
+        """Negative control: the gate in `law_update` is keyed on
+        `measured.collective_enabled`, not on the altitude error being
+        absent -- with collective enabled the same scenario is
+        expected to feed the pedal (today's `FC_AXES_ENABLED.
+        collective = false` default is what makes the gate matter in
+        practice, not a claim that the feedforward term itself is
+        wrong)."""
+        driver = f"""
+local measured_take = {_measured(h_m=200.0, w_mps=0.0, collective_enabled=True)}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+for i = 1, 200 do
+    local m = {_measured(h_m=205.0, w_mps=0.0, collective_enabled=True)}
+    state = flight_control.law_update(state, 0.1, m, LIMITS)
+end
+print(string.format("%.6f", state.t_y))
+"""
+        lines = _run(driver)
+        (t_y_after_20s,) = (float(v) for v in lines)
+        assert abs(t_y_after_20s) > 0.01
+
+
+class TestBreakPedalBiasUnwinds:
+    """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`,
+    defect A, hypothesis 2): `K_BREAK_PEDAL_BIAS` was integrated into
+    `t_y` for the duration of a break and never reversed -- a standing
+    pedal offset left over from a break the user flew earlier would
+    persist into whatever came after it, including a later take."""
+
+    def test_pedal_returns_to_its_pre_break_value_once_the_break_settles(
+        self,
+    ) -> None:
+        """An idealised plant where the measured heading instantly
+        tracks the law's own internal reference (`state.psi_ref`) --
+        isolating the pedal-bias unwind from heading-tracking physics,
+        which the other scenarios in this file already cover
+        separately (`TestHeadingChannel`)."""
+        driver = f"""
+local measured_take = {_measured(collective_enabled=False)}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local t_y_before_break = state.t_y
+state = flight_control.law_apply_goal(
+    state, {{ heading_deg = 90.0, turn_rate_deg_s = 15.0 }}, LIMITS)
+for i = 1, 400 do
+    local m = {_measured(psi_deg=0.0, collective_enabled=False)}
+    -- psi_deg is overwritten below, per-frame, to the law's own
+    -- current psi_ref (the idealised plant).
+    state = flight_control.law_update(
+        state, 0.1,
+        {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
+           v_t_mps = 42.0, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
+           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }},
+        LIMITS)
+end
+print(string.format("%.6f", t_y_before_break))
+print(string.format("%.6f", state.t_y))
+print(tostring(state.rate_override_deg_s))
+"""
+        lines = _run(driver)
+        t_y_before_break, t_y_after_settle = (float(v) for v in lines[:2])
+        override_after = lines[2]
+        assert override_after == "nil"  # the break actually settled
+        assert abs(t_y_after_settle - t_y_before_break) < 1e-6
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

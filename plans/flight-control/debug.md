@@ -331,3 +331,158 @@ report rather than build a shared counter if the root cause turned out to be som
   full run is clean: **3698 passed, 4 xfailed, 0 failed** (289.55s).
 - No Lua files touched by this fix -- `luac5.1 -p`/GETGLOBAL checks not applicable.
 - `aircraft-layer/` untouched -- this defect and fix are entirely within `body-layer/`.
+
+---
+
+### Debug Report (BL-16 sortie 2026-11-20, mode 1)
+
+### Observed Issue
+
+`docs/acceptance/2026-11-20-sortie-feedback.md`, flown on `main` at `98174b54` (after the
+handover-ack/wire-format fix above). Two defects, user's own words:
+
+> Mode 1 control handover. Petrovich increased left pedal quite a lot -> left yaw -> bank right to
+> compensate -> ends up maintaining heading with right bank (5 deg this time) and unnecessary and
+> unwanted left yaw.
+> Second control transfer ended up in 10 deg right bank and "unable, not ready" nut still taking
+> controls.
+
+Speech log (`body-layer/logs/speech-20261120-010040.jsonl`): take at `now_sim=26.01`, "I have
+controls" (release) at `now_sim=56.201`, take at `now_sim=78.223`. Expected (`docs/acceptance/...`,
+"Explore" section, now unambiguous): a take adds no pedal of its own, wings level/ball centred
+while holding heading; a take never answers "unable, not ready" while Petrovich in fact holds the
+controls.
+
+### Defect A — pedal drift at take, and a break's pedal bias never unwinding
+
+**Hypothesis.** Two independent mechanisms in `Petrobrain/flight_control.lua`'s `law_update`
+(Step 5, the pedal channel):
+
+1. `d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot` fed the pedal from the collective-coupling
+   rate `c_dot` unconditionally, even though `FC_AXES_ENABLED.collective = false` means the
+   collective axis is never actually written to the aircraft (`write_outputs` skips a disabled
+   axis). `u_c`/`c_dot` are an internal-only bookkeeping value in that case, driven by the
+   altitude-hold shaper's own tracking error (`a_z_d`), which has no real coupling back from a
+   collective that never moves the real aircraft -- so any sustained, never-resolving
+   real/internal altitude mismatch (plausible at any ordinary handover) keeps `c_dot` non-zero
+   indefinitely, and the pedal **ramps** rather than settling.
+2. `K_BREAK_PEDAL_BIAS` was integrated into `t_y` for the duration of a break's rate override and
+   never reversed once the break settled (the existing "settling clears it" block cleared
+   `rate_override_deg_s`/`break_entry_h_m` but never touched `t_y`), leaving a standing pedal
+   offset from any earlier break.
+
+**Evidence.**
+- Built the full-module Lua harness by hand (the same technique `test_flight_control_lua.py`
+  uses) and ran it against the *unfixed* module: a take with collective disabled, then 20 s of
+  `run_flight_control` with the real/measured altitude held a constant 5 m away from the stopping
+  height captured at take (a plausible handover transient, nothing else touching the aircraft) --
+  `written[2003]` (the pedal command) went from `-0.001` (wobble only) at take to `-0.101` after
+  20 s, confirmed still growing, not settling.
+- Built a second harness for the break case: a break's rate override held for ~2.5 s saturates the
+  pedal at `PEDAL_LIMIT_POSITIVE` (0.2/s bias vs. a 0.5 limit); once the break settles (~9 s, this
+  scenario), `t_y` stayed at `0.5` under the unfixed code -- never unwound.
+- Both reproduced independently of each other (toggling `measured.collective_enabled`/the break
+  goal in isolation).
+
+**Fix Applied** (`Petrobrain/flight_control.lua`):
+- `read_measured()` now reports `collective_enabled = FC_AXES_ENABLED.collective` on the
+  `measured` table it returns -- the law's five pure functions never read a module-level local
+  directly (module docstring), so this is how the config fact reaches `law_update` without
+  breaking that contract.
+- `law_update`'s pedal step now gates the collective-coupling feedforward on
+  `measured.collective_enabled`; `0.0` while disabled, unchanged while enabled (a negative-control
+  test confirms the term still works once collective is eventually enabled).
+- The break's own pedal bias is now tallied separately (`break_pedal_bias_accum`, reset to `0.0`
+  at `law_init_at_take` and at the start of each new break in `law_apply_goal`) as the **actually
+  applied** per-frame delta to `t_y` (`next_state.t_y - t_y_before_break_step`), not the nominal
+  `break_bias * dt` -- the first version of this fix tracked the nominal amount and overshot the
+  unwind badly once the pedal had saturated mid-break (confirmed with the toy-plant harness: a
+  15 s break ends at `t_y = 0.5` nominal-accumulated `0.6`+, and subtracting that overshoots to
+  `-1.0` instead of returning to the pre-break value). Tracking the actually-applied delta instead
+  means subtracting it exactly reverses the break's own contribution, including under saturation,
+  as long as nothing else touches `t_y` in between (true here). The "settling clears it" block now
+  also unwinds `t_y` by this accumulator and resets it to `0.0`.
+- Scoped explicitly in comments: the break-bias unwind undoes *all* `t_y` change since the break
+  began, which is exactly correct only while the collective-coupling term is zero (today's
+  default) -- a future flight with collective enabled would need Flight M-A's own judgement call
+  on how to apportion a saturated, shared clamp between the two terms.
+
+**Verification.**
+- New toy-plant tests (`aircraft-layer/tests/test_flight_control_law.py`,
+  `TestPedalDoesNotDriftWithCollectiveDisabled`/`TestBreakPedalBiasUnwinds`): both fail on the
+  pre-fix code (reproducing `-0.1`/`0.5` respectively) and pass after; a negative-control test
+  confirms the gate is keyed on `collective_enabled`, not on the altitude error being absent.
+  `_measured()`'s helper gained a `collective_enabled` field (default `True`, so every
+  pre-existing collective-channel scenario keeps exercising the feedforward it always implicitly
+  assumed).
+- `pytest aircraft-layer/tests/test_flight_control_law.py aircraft-layer/tests/test_flight_control_lua.py -q`:
+  60 passed (3 new: 2 toy-plant + 1 negative control), no regressions.
+- Full `pytest aircraft-layer/tests -q`: 1002 passed.
+- `ruff format --check`/`ruff check` (`aircraft-layer/src aircraft-layer/tests`): clean.
+- `mypy` (run from `aircraft-layer/`, `src` and the two touched test files): Success.
+- `luac5.1 -p` on `flight_control.lua`: passes. GETGLOBAL sweep: every name is a genuine DCS API,
+  Lua stdlib, or an already-intentional cross-module helper (`debug_log`/`fmt_*_or_null`/
+  `safe_call`/`json_escape_string`/`extract_json_*_field`) -- no new stray global.
+
+### Defect B — a re-take while Lua is already flying never acks
+
+**Hypothesis.** `handle_flight_control_command` bumps `fc_last_cmd_seq = seq` unconditionally,
+*before* the `cmd == "take"` branch's own idempotent-no-op check (`if fc_mode == "active" or
+fc_mode == "taking" then return end`). So a `take` message that arrives while Lua is already
+`"active"`/`"taking"` for any reason — a prior take whose matching `release` never reached or
+took effect at Lua (lost send, a reordered or dropped datagram, or simply a belief/aircraft
+disagreement about who flies, which is exactly the state yesterday's ack-timeout fix (2026-11-19
+report, above) accepts as reachable — "belief can land on `PILOT` with Lua still flying") —
+advances `fc_last_cmd_seq` as a side effect but leaves `fc_take_seq`/`fc_pending_take_seq`
+pointing at the *original* take. `body.py`'s `_apply_flight_control` sets
+`FlightControlState.take_seq` to the wire seq of *this* send (fix (a), 2026-11-19), so
+`decide_flight_control`'s ack match (`lua_take_seq == take_seq`) can never succeed for this take —
+guaranteed, not merely slow — and after `HANDOVER_ACK_TIMEOUT_S` belief gives up: "Unable, not
+ready," while Lua is still genuinely flying mode 1 the whole time. This matches both halves of the
+report exactly (the spoken refusal, and Petrovich still holding the controls), and does not
+depend on network timing.
+
+I traced the alternative "it's just a slow ack" explanation first and ruled it out: `Export.lua`'s
+own capture (`resolve_capture_values`) resolves within one physics frame whenever either seat
+reads live (via `update_live_seat_tracking`, which runs every frame regardless of mode) or falls
+back to the last-steady/magnitude-compare paths, none of which can block for anywhere near 2 s —
+confirmed by reading every branch of `resolve_capture_values`, which returns a value immediately
+in every reachable case (a `nil` capture only follows a genuine `NaN`/failed DCS read, not a
+timing race). Given the 22 s gap between this sortie's release (`t=56.2`) and the second take
+(`t=78.2`), a UDP-reordering race between those two specific messages (the only other candidate,
+and the one `_apply_flight_control`'s own docstring already defends against for same-poll
+sends) is not plausible either. What *is* plausible without further data (no
+`--belief-truth-log` was captured for this sortie) is that the first release's own send failed or
+was dropped somewhere between body-layer and `Export.lua` (every write on this channel is
+best-effort/log-and-continue, consistent with every other command channel in this codebase, and
+not itself a defect to retry) — but regardless of *why* Lua was still flying, the sequence-echo
+bug above is what turns that into a permanent, unrecoverable belief/aircraft disagreement rather
+than a one-poll hiccup, and is what I fixed.
+
+**Evidence.** Reproduced directly against the real Lua interpreter (full-module harness): `take`
+(`seq=1`) → `active`, `fc_take_seq=1`, `fc_last_cmd_seq=1`. A second `take` (`seq=2`) sent while
+still `active`: under the unfixed code, `fc_last_cmd_seq` advances to `2` but `fc_take_seq` stays
+`1` — the exact, permanent mismatch `decide_flight_control`'s `TAKING` branch can never clear.
+
+**Fix Applied** (`Petrobrain/flight_control.lua`, `handle_flight_control_command`'s `cmd ==
+"take"` branch): a repeat take remains a no-op for the aircraft (no re-capture, no `fc_law`
+reset — Petrovich keeps flying exactly as before), but now re-syncs the take bookkeeping to the
+new message's own seq: `fc_take_seq = seq` while already `"active"` (nothing else will ever set
+it again for this session), `fc_pending_take_seq = seq` while still `"taking"` (so the forthcoming
+`"taking" -> "active"` transition in `run_flight_control` reports the *new* seq, the one belief is
+actually waiting on, not the stale original). No change to body-layer — `FlightControlState.
+take_seq`/`decide_flight_control`'s comparison were already correct; the defect was entirely in
+what Lua echoed back.
+
+**Verification.**
+- New tests (`aircraft-layer/tests/test_flight_control_lua.py`,
+  `TestRepeatedTakeWhileAlreadyFlyingStillAcks`): a repeat take while `"active"` and one while
+  still `"taking"` each fail on the pre-fix code (`fc_take_seq` stuck at `1` where `2` is expected)
+  and pass after.
+- `pytest aircraft-layer/tests/test_flight_control_lua.py -q`: 32 passed (2 new), no regressions.
+- Full `pytest aircraft-layer/tests -q`: 1002 passed.
+- `ruff format --check`/`ruff check`, `mypy` (from `aircraft-layer/`), `luac5.1 -p`, and the
+  GETGLOBAL sweep: all clean, same results reported under Defect A above (one combined pass over
+  both fixes, same files).
+- `body-layer/` untouched — this defect's fix is entirely within `Export.lua`'s own
+  `flight_control.lua` module; body-layer's sequencing was already correct.

@@ -533,6 +533,10 @@ local function law_apply_goal(state, goal, limits)
         next_state.rate_override_deg_s = goal.turn_rate_deg_s
         if goal.turn_rate_deg_s ~= nil then
             next_state.break_entry_h_m = state.h_ref
+            -- A new break starts its own pedal-bias tally from zero
+            -- (same "a rate belongs to the command that set it"
+            -- reasoning as `break_entry_h_m` on this line).
+            next_state.break_pedal_bias_accum = 0.0
         else
             next_state.break_entry_h_m = nil
         end
@@ -600,6 +604,13 @@ local function law_init_at_take(measured, limits, command)
         -- inherits a stale break from a previous session.
         rate_override_deg_s = nil,
         break_entry_h_m = nil,
+        -- BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) --
+        -- the running total of `K_BREAK_PEDAL_BIAS` already folded into
+        -- `t_y` for the break currently (or most recently) active, so
+        -- it can be unwound exactly once that break settles (step 5,
+        -- "settling clears it"). A fresh activation starts clean, same
+        -- reasoning as `rate_override_deg_s`/`break_entry_h_m` above.
+        break_pedal_bias_accum = 0.0,
     }
 end
 
@@ -766,12 +777,55 @@ local function law_update(state, dt, measured, limits)
     -- Step 5: pedal (collective-coupling feedforward, plus Decision
     -- 27's own pedal-into-the-turn bias while a break's rate override
     -- is active -- no slip-ball feedback, module header).
-    local d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
+    --
+    -- BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`): the
+    -- collective-coupling feedforward only applies while the
+    -- collective axis is actually written to the aircraft (`measured.
+    -- collective_enabled`, set from `FC_AXES_ENABLED.collective` by
+    -- `read_measured()`). While disabled, `u_c`/`c_dot` above are an
+    -- internal-only bookkeeping value with no effect on the real
+    -- aircraft; feeding that rate into the pedal instead compounded a
+    -- genuine altitude-hold tracking error (the shaper's own `h_ref`
+    -- marches toward its goal with no real coupling back from the
+    -- never-written collective) into a continuously *ramping* pedal
+    -- bias with nothing to arrest it -- confirmed with the toy-plant
+    -- harness: a steady 5 m real/goal altitude offset alone, held for
+    -- 20 s with collective disabled, drove the pedal from -0.001 to
+    -- -0.101 under the unguarded term. This never changes pitch/roll's
+    -- own feedback, only this one feedforward term.
+    local d_t_y = 0.0
+    if measured.collective_enabled then
+        d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
+    end
+    -- BL-16 sortie 2026-11-20: `break_bias` is tallied separately from
+    -- `d_t_y` so it can be unwound exactly once the break settles
+    -- (below) -- previously this bias was integrated into `t_y` and
+    -- never reversed, leaving a standing pedal offset from the break
+    -- indefinitely, including into later, unrelated flight.
+    local break_bias = 0.0
     if state.rate_override_deg_s ~= nil then
         local break_sign = state.rate_override_deg_s > 0.0 and 1.0 or -1.0
-        d_t_y = d_t_y + K_BREAK_PEDAL_BIAS * break_sign
+        break_bias = K_BREAK_PEDAL_BIAS * break_sign
     end
-    next_state.t_y = law_clamp(state.t_y + d_t_y * dt, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+    local t_y_before_break_step = state.t_y
+    next_state.t_y = law_clamp(state.t_y + (d_t_y + break_bias) * dt, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+    -- Tracks the *actually applied* change to `t_y` (post-saturation),
+    -- not the nominal `break_bias * dt` -- the pedal axis saturates
+    -- well before a sustained break settles (confirmed with the
+    -- toy-plant harness: `K_BREAK_PEDAL_BIAS` alone reaches
+    -- `PEDAL_LIMIT_POSITIVE` in 2.5 s), so a nominal tally overshoots
+    -- the unwind by whatever the clamp already absorbed. While
+    -- `d_t_y` is zero (collective disabled, today's default), this
+    -- accumulator equals exactly the break's own contribution; once
+    -- collective is enabled the two terms share one clamp and are no
+    -- longer separable post-saturation -- Flight M-A's own call, same
+    -- as every other gain in this step.
+    if state.rate_override_deg_s ~= nil then
+        next_state.break_pedal_bias_accum =
+            (state.break_pedal_bias_accum or 0.0) + (next_state.t_y - t_y_before_break_step)
+    else
+        next_state.break_pedal_bias_accum = state.break_pedal_bias_accum or 0.0
+    end
 
     next_state.measured_v_t_mps = measured.v_t_mps
 
@@ -795,6 +849,13 @@ local function law_update(state, dt, measured, limits)
     if next_state.in_band_heading and next_state.rate_override_deg_s ~= nil then
         next_state.rate_override_deg_s = nil
         next_state.break_entry_h_m = nil
+        -- BL-16 sortie 2026-11-20: unwind exactly the pedal bias this
+        -- break added (`break_pedal_bias_accum`, tallied above) now
+        -- that it has settled -- without this the bias stood forever,
+        -- carried into whatever the pilot/Petrovich did next.
+        next_state.t_y = law_clamp(
+            next_state.t_y - next_state.break_pedal_bias_accum, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+        next_state.break_pedal_bias_accum = 0.0
     end
 
     return next_state
@@ -1186,6 +1247,15 @@ local function read_measured()
         bank_valid = bank_valid,
         rotor_rpm_pct = rotor_rpm_pct,
         rotor_rpm_valid = rotor_rpm_valid,
+        -- BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) --
+        -- `law_update`'s own pedal step reads this to decide whether
+        -- the collective-coupling feedforward is meaningful: `FC_AXES_
+        -- ENABLED` is a module-level local the law's own pure
+        -- functions never read directly (module docstring, "pure
+        -- functions over a state table"), so it rides in on `measured`
+        -- instead, the same way every other config-derived fact this
+        -- loop needs reaches the law.
+        collective_enabled = FC_AXES_ENABLED.collective,
     }
 end
 
@@ -1339,11 +1409,33 @@ local function handle_flight_control_command(data, t)
     end
     if cmd == "take" then
         -- A repeated take while already taking/active is an idempotent
-        -- no-op -- body-layer's own refusals (overlay flying, on
-        -- ground, too slow, attack run) already ran before this was
-        -- ever sent (Decision 22); this handler trusts that for a voice
-        -- take and does not re-check it.
-        if fc_mode == "active" or fc_mode == "taking" then
+        -- no-op for the aircraft -- body-layer's own refusals (overlay
+        -- flying, on ground, too slow, attack run) already ran before
+        -- this was ever sent (Decision 22); this handler trusts that
+        -- for a voice take and does not re-check it, and does not
+        -- re-capture the axes or reset `fc_law` -- Petrovich keeps
+        -- flying exactly as before.
+        --
+        -- BUT `fc_take_seq`/`fc_pending_take_seq` must still move to
+        -- THIS message's own seq (BL-16 sortie 2026-11-20,
+        -- `plans/flight-control/debug.md`): the bounds check above
+        -- already set `fc_last_cmd_seq = seq` unconditionally, before
+        -- this branch ever runs, so a bare `return` here leaves `fc_
+        -- take_seq` pointing at the *previous* take forever. Belief's
+        -- own ack match (`lua_take_seq == take_seq`, `take_seq` set to
+        -- this exact wire seq when the take was sent) can then never
+        -- succeed for this take, and after `HANDOVER_ACK_TIMEOUT_S`
+        -- belief gives up -- "Unable, not ready." -- while Lua is
+        -- still actually flying mode 1, confirmed with the full-module
+        -- Lua harness: a second `take` sent while already `active`
+        -- advanced `fc_last_cmd_seq` from 1 to 2 but left `fc_take_
+        -- seq` at 1 under the old code.
+        if fc_mode == "active" then
+            fc_take_seq = seq
+            return
+        end
+        if fc_mode == "taking" then
+            fc_pending_take_seq = seq
             return
         end
         fc_mode = "taking"
