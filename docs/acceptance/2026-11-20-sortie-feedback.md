@@ -80,3 +80,19 @@ Decision (asked: on a body-layer restart mid-flight, does Petrovich let go of th
 
 So the reset clears all of Lua's command state: mode 1 releases the axes (player has the stick),
 mode 2's open goal/CBTM/HVRT is dropped (ED's AI keeps flying).
+
+## Mode 2 root cause and the "latest wins" direction
+
+Root cause (debugger, `plans/flight-control/debug.md` third report): body-layer's F-P7 rule
+dropped every heading goal for the rest of the parked activation once any break had been sent, so
+no goal was ever POSTed (`apw_goal_seq: 0`). Not a shared-seq problem: Lua checks each channel's
+seq independently. The first fix bounded the drop to "while the break runs". User, verbatim, on
+being told the rule stops a turn interrupting a running break:
+
+> Why? If player commands anything during a break, act on it. Latest player command *always* wins.
+
+Consistent with the original F-P7 answer (2026-11-18, *"yes, as proposed"*: a break supersedes any
+**outstanding** heading goal, i.e. one set before it, which would otherwise turn the aircraft back
+toward the threat). The implementation over-reached to goals commanded after the break. Settled:
+a goal older than the break is superseded by it; a goal commanded during or after a break is flown
+at once, ending any remaining break press (including break away's second press).
