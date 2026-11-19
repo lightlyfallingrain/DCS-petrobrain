@@ -3391,8 +3391,10 @@ def _apply_ai_pilot_wheel_goal(
     overlay command spoken just before an unpark is now a realistic way
     to strand one, to fire on the next park."""
     if not runner.parked_flight_state.parked_active:
-        if runner.parked_flight_state.goal is not None or (
-            runner.parked_flight_state.align_phase != "none"
+        if (
+            runner.parked_flight_state.goal is not None
+            or runner.parked_flight_state.align_phase != "none"
+            or runner.parked_flight_state.cbtm_action_sent is not None
         ):
             runner.parked_flight_state = replace(
                 runner.parked_flight_state,
@@ -3400,6 +3402,7 @@ def _apply_ai_pilot_wheel_goal(
                 align_phase="none",
                 pre_align_snapshot=None,
                 cbtm_action_sent=None,
+                cbtm_break_entry_heading_deg=None,
             )
         runner.ai_pilot_goal_last_sent_seq = None
         runner.ai_pilot_cbtm_last_sent_seq = None
@@ -3495,11 +3498,21 @@ def _apply_ai_pilot_wheel_goal(
     # align_for_launch` decide `align_phase`/`pre_align_snapshot`
     # directly here (the plan's "external (voice, ...)" writer, same
     # division of labour `ai_pilot_level_flight_transition` above has);
-    # the two breaks carry no state of their own to apply -- F-P7's own
-    # heading-drop/align-clear logic lives in `decide_ai_pilot_wheel`
-    # below, keyed off `cbtm_action_sent`, so a break's own "when" is
-    # never duplicated here.
+    # F-P7's own heading-drop/align-clear logic lives in `decide_ai_
+    # pilot_wheel` below, keyed off `cbtm_action_sent`, so a break's
+    # own "when" is never duplicated here. Mode-1 batch, Decision 32:
+    # the two breaks DO carry one piece of state captured here --
+    # `state.held_heading` at this exact instant, before anything below
+    # can move it, is "the held heading at the break press" the
+    # eventual unpark-take's own heading goal seeds from
+    # (`cbtm_break_target_heading_deg`, read by `CrewConsole.drain_
+    # flight_control`).
     cbtm_transition = crew_console.ai_pilot_cbtm_transition
+    cbtm_break_entry_heading_deg = (
+        runner.parked_flight_state.cbtm_break_entry_heading_deg
+    )
+    if cbtm_transition in ("break_left", "break_right", "break_away"):
+        cbtm_break_entry_heading_deg = state.held_heading
     if cbtm_transition is not None:
         if cbtm_transition == "align":
             new_state = cbtm_apply_align(
@@ -3536,6 +3549,7 @@ def _apply_ai_pilot_wheel_goal(
             if cbtm_transition is not None
             else runner.parked_flight_state.cbtm_action_sent
         ),
+        cbtm_break_entry_heading_deg=cbtm_break_entry_heading_deg,
     )
 
     # The rotation mechanism reads `Export.lua`'s own goal_progress

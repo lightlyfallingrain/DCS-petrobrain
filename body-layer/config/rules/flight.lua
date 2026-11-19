@@ -190,13 +190,15 @@ when.speech("level_off",
 
 -- CBTM align/align-for-launch/break/break-away -- BL-16 mode 2 Stage
 -- P3+P4 (`plans/flight-control/plan.md`, "Revised 2026-11-18 -- Stages
--- P3+P4 ready to build"). Category "flight_control": has-controls is
--- the whole precondition here, same as the HVRT rules below -- align/
--- align-for-launch answer "Unable, AI overlay." in mode 1 (permanent,
--- E-P20); break/break-away answer "Unable, not ready." in mode 1 for
--- now (temporary, until the mode-1 batch). Readbacks are the user's
--- own words (Stage P3 explore, answer 3): "Aligning.", "Aligning for
--- launch.", "Breaking left."/"Breaking right.", "Breaking away.".
+-- P3+P4 ready to build"), break/break-away's real mode-1 mechanism
+-- added by the mode-1 batch ("Revised 2026-11-19"). Category
+-- "flight_control": has-controls is the whole precondition here, same
+-- as the HVRT rules below -- align/align-for-launch answer "Unable, AI
+-- overlay." in mode 1 (permanent, E-P20, the 9K113 is gated behind the
+-- CPG view); break/break-away now fly the real mode-1 break (Decision
+-- 27) instead of refusing. Readbacks are the user's own words (Stage
+-- P3 explore, answer 3): "Aligning.", "Aligning for launch.",
+-- "Breaking left."/"Breaking right.", "Breaking away.".
 when.speech("cbtm_align",
     "align",
     "flight_control",
@@ -213,6 +215,15 @@ when.speech("cbtm_align_for_launch",
     say("Aligning for launch.")
   end)
 
+-- Mode-1 break rate -- F-M2: "it must work with the rule lua files."
+-- The number lives here, not inside a Python action, so it is visible
+-- and editable without touching rules/actions.py. Architect default,
+-- flag for retune after Flight M-A (lands ~60-80 deg bank at cruise
+-- IAS -- see plans/flight-control/plan.md Decision 27). Mode 2's own
+-- break (ED's AI-pilot wheel) does not read this -- `flight.cbtm_break`/
+-- `cbtm_break_away`'s overlay bodies ignore the extra argument.
+local BREAK_TURN_RATE_DEG_S = 40
+
 when.speech("cbtm_break",
     "break turn <direction:left|right>",
     "flight_control",
@@ -221,7 +232,7 @@ when.speech("cbtm_break",
     if s.direction == "right" then
       sign = 1
     end
-    flight.cbtm_break(sign)
+    flight.cbtm_break(sign, BREAK_TURN_RATE_DEG_S)
     if s.direction == "left" then
       say("Breaking left.")
     else
@@ -233,7 +244,7 @@ when.speech("cbtm_break_away",
     "break away",
     "flight_control",
   function(s)
-    flight.cbtm_break_away()
+    flight.cbtm_break_away(BREAK_TURN_RATE_DEG_S)
     say("Breaking away.")
   end)
 

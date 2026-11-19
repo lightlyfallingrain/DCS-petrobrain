@@ -573,12 +573,15 @@ class TestCbtmActions:
     Mode1`'s own shape -- the overlay-mode readback/transition for each
     (category `"flight_control"`, has-controls only, U1: "no refusal
     branch -- CBTM is always reachable by one left press"), plus the
-    two gated mode-1 "unable" reasons (`_axes_cbtm_align_unready`'s
-    permanent `AI_OVERLAY`, `_axes_cbtm_break_unready`'s temporary `NOT_
-    READY`). `test_shipped_rule_files_load_with_zero_failures` above
-    only confirms the four rule ids exist in the loaded set; nothing
-    else in this file previously called `handle_command` for any of
-    them."""
+    permanently-gated mode-1 "unable" for align/align-for-launch
+    (`_axes_cbtm_align_unready`'s `AI_OVERLAY`, E-P20). Mode-1 batch
+    (`plans/flight-control/plan.md`, "Revised 2026-11-19"): `cbtm_
+    break`/`cbtm_break_away`'s own mode-1 `NOT_READY` stub is gone --
+    they now fly the real mode-1 break (`_axes_break_turn`/`_axes_
+    break_away`), covered below. `test_shipped_rule_files_load_with_
+    zero_failures` above only confirms the four rule ids exist in the
+    loaded set; nothing else in this file previously called `handle_
+    command` for any of them."""
 
     def test_align_speaks_aligning_and_sets_the_cbtm_transition(self) -> None:
         console = _dispatching_console(parked_active=True)
@@ -649,10 +652,13 @@ class TestCbtmActions:
         assert lines == [render_unable("AI_OVERLAY").text]
         assert console.ai_pilot_cbtm_transition is None
 
-    def test_mode_1_break_is_unable_not_ready_until_the_next_batch(self) -> None:
-        """`_axes_cbtm_break_unready` -- withdrawn from *this* batch
-        only (mode-1 scope split), landing in the next one; `NOT_READY`
-        reads correctly either way."""
+    def test_mode_1_break_not_ready_without_a_known_heading(self) -> None:
+        """`_axes_break_turn`'s own `current is None` -> `NOT_READY`
+        guard, not an assert -- reachable because `cbtm_break`'s rule
+        category is the plain `"flight_control"` (shared with mode 2's
+        own no-refusal body), which needs no held/measured heading at
+        all, unlike `increment_heading`'s own `"flight_control_
+        heading"`."""
         console = _dispatching_console(parked_active=False)
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
@@ -661,16 +667,62 @@ class TestCbtmActions:
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
         )
         assert lines == [render_unable("NOT_READY").text]
-        assert console.ai_pilot_cbtm_transition is None
+        assert console.flight_control_goal_transition is None
 
-    def test_mode_1_break_away_is_also_unable_not_ready(self) -> None:
+    def test_mode_1_break_away_not_ready_without_a_known_heading(self) -> None:
         console = _dispatching_console(parked_active=False)
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == [render_unable("NOT_READY").text]
-        assert console.ai_pilot_cbtm_transition is None
+        assert console.flight_control_goal_transition is None
+
+    def test_mode_1_break_left_flies_the_real_break(self) -> None:
+        """Mode-1 batch, Decision 27 -- "break turn left" flies the
+        real mode-1 break: current heading - 90, with the rule's own
+        `BREAK_TURN_RATE_DEG_S` (`config/rules/flight.lua`, 40) as the
+        signed rate override. No `NOT_READY` stub left to answer."""
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
+        )
+        lines = console.handle_command(
+            "cbtm_break", now_sim=0.0, slots={"direction": "left"}
+        )
+        assert lines == ["Breaking left."]
+        request = console.flight_control_goal_transition
+        assert request is not None
+        assert request.heading_deg == pytest.approx(10.0)
+        assert request.turn_rate_deg_s == pytest.approx(-40.0)
+
+    def test_mode_1_break_right_flies_the_real_break(self) -> None:
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
+        )
+        lines = console.handle_command(
+            "cbtm_break", now_sim=0.0, slots={"direction": "right"}
+        )
+        assert lines == ["Breaking right."]
+        request = console.flight_control_goal_transition
+        assert request is not None
+        assert request.heading_deg == pytest.approx(190.0)
+        assert request.turn_rate_deg_s == pytest.approx(40.0)
+
+    def test_mode_1_break_away_flies_the_real_break(self) -> None:
+        """Always a hard 180 to the left (E13) -- the rate override is
+        negative regardless of a "direction" slot, there is none."""
+        console = _dispatching_console(parked_active=False)
+        console.flight_control_state = replace(
+            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
+        )
+        lines = console.handle_command("cbtm_break_away", now_sim=0.0)
+        assert lines == ["Breaking away."]
+        request = console.flight_control_goal_transition
+        assert request is not None
+        assert request.heading_deg == pytest.approx(280.0)
+        assert request.turn_rate_deg_s == pytest.approx(-40.0)
 
 
 class TestHvrtTranslate:

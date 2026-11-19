@@ -111,17 +111,6 @@ MAX_IAS_KMH: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: The envelope-release bank limit `Export.lua` checks every active
-#: frame (plus its own hard-coded margin) -- judgement call, A9 favours
-#: robustness over tight tracking.
-MAX_BANK_DEG: Final[float] = tuning.real(
-    "belief.flight_control.MAX_BANK_DEG",
-    30.0,
-    lo=10.0,
-    hi=60.0,
-    status="judgement",
-)
-
 #: M2's own bank for a commanded continuous turn ("turn left/right")
 #: and for the heading channel's own rate-limit while converging to a
 #: spoken heading -- `Export.lua`'s `law_turn_rate_at_bank(this, V_t)`
@@ -249,6 +238,64 @@ HANDOVER_ACK_TIMEOUT_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: Mode-1 batch (`plans/flight-control/plan.md`, "Revised 2026-11-19",
+#: Decision 30) -- below this rotor RPM, `Export.lua`'s collective-rate
+#: guard caps any further increase. The user's own number (Q-M1-1):
+#: "Rotor RPM min allowed value to configurable param, set to 85%
+#: initially."
+ROTOR_RPM_FLOOR_PCT: Final[float] = tuning.real(
+    "belief.flight_control.ROTOR_RPM_FLOOR_PCT",
+    85.0,
+    lo=50.0,
+    hi=100.0,
+    status="agreed-guess",
+)
+
+#: Decision 30 -- at or above this IAS, the same collective-rate guard
+#: caps a further increase, to stay clear of retreating blade stall.
+#: The user's own number: "near or over 250 km/h."
+RETREATING_BLADE_STALL_IAS_KMH: Final[float] = tuning.real(
+    "belief.flight_control.RETREATING_BLADE_STALL_IAS_KMH",
+    250.0,
+    lo=100.0,
+    hi=400.0,
+    status="agreed-guess",
+)
+
+#: Decision 29 -- the break's own absolute height-loss budget above the
+#: `FLOOR_AGL_M` floor it never descends below. The user's own number:
+#: "moderate altitude drop allowed (~100 m, but never below 40 m AGL)".
+BREAK_MAX_HEIGHT_LOSS_M: Final[float] = tuning.real(
+    "belief.flight_control.BREAK_MAX_HEIGHT_LOSS_M",
+    100.0,
+    lo=20.0,
+    hi=300.0,
+    status="agreed-guess",
+)
+
+#: Decision 31 -- below this IAS, vortex ring state risk caps the
+#: descent rate (every mode-1 state, not only a break). The user's own
+#: number: "helicopters are prone to Vortex Ring State at slow speeds.
+#: When speed is < 50 km/h, limit descent rate..."
+VRS_IAS_THRESHOLD_KMH: Final[float] = tuning.real(
+    "belief.flight_control.VRS_IAS_THRESHOLD_KMH",
+    50.0,
+    lo=20.0,
+    hi=100.0,
+    status="agreed-guess",
+)
+
+#: Decision 31's own descent-rate ceiling below `VRS_IAS_THRESHOLD_KMH`.
+#: The user's own number, explicitly "configurable": "limit descent
+#: rate to 4 m/s."
+VRS_MAX_DESCENT_MPS: Final[float] = tuning.real(
+    "belief.flight_control.VRS_MAX_DESCENT_MPS",
+    4.0,
+    lo=1.0,
+    hi=10.0,
+    status="agreed-guess",
+)
+
 
 @dataclass(frozen=True)
 class FlightControlGoalRequest:
@@ -257,7 +304,14 @@ class FlightControlGoalRequest:
     transition` field until `body.py`'s `_apply_flight_control` sends it
     and bumps `FlightControlState.wire_seq`. Every field `None` means
     "omit it" on the wire (`Export.lua`'s own "a null field means keep
-    yours")."""
+    yours").
+
+    `turn_rate_deg_s` (mode-1 batch, Decision 27) is the signed rate
+    override the break actions carry alongside `heading_deg` -- never
+    meaningful alone, since a rate with no heading target is nothing to
+    rate-limit. `None` means "use the ordinary `max_turn_bank_deg`-
+    derived rate," the same "omit = keep the default" convention every
+    other field here has."""
 
     heading_deg: float | None = None
     turn: Literal[-1, 0, 1] | None = None
@@ -265,6 +319,7 @@ class FlightControlGoalRequest:
     altitude_m: float | None = None
     altitude_ref: AltitudeRef | None = None
     ias_kmh: float | None = None
+    turn_rate_deg_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -627,7 +682,11 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
     re-declared (plan: "reused, through `crew_console.on_ground`, for
     the refusal"); passed in by the caller (`body.py`) rather than
     imported here, since `belief.crew_console` imports *this* module for
-    `FlightControlState` and the reverse import would cycle."""
+    `FlightControlState` and the reverse import would cycle. **No
+    `max_bank_deg` field any more** (F-M1, mode-1 batch: "remove the 30
+    degree limit. Set no limit for now") -- removed from the wire
+    entirely, not widened, so a stale consumer never finds a number
+    that no longer means anything."""
     return {
         "takeover_level_bank_deg": TAKEOVER_LEVEL_BANK_DEG,
         "floor_agl_m": FLOOR_AGL_M,
@@ -635,7 +694,6 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
         "max_ias_kmh": MAX_IAS_KMH,
         "on_ground_agl_threshold_m": on_ground_agl_threshold_m,
         "arm_lease_s": ARM_LEASE_S,
-        "max_bank_deg": MAX_BANK_DEG,
         # M2 additions -- the shaper's own rate limits and A9's bands,
         # read by `Export.lua`'s control law, never acted on here.
         "max_turn_bank_deg": MAX_TURN_BANK_DEG,
@@ -646,6 +704,15 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
         "alt_band_min_m": ALT_BAND_MIN_M,
         "turn_rate_band_frac": TURN_RATE_BAND_FRAC,
         "heading_band_deg": HEADING_BAND_DEG,
+        # Mode-1 batch additions (Decisions 29-31) -- the rotor-RPM
+        # floor, the retreating-blade-stall IAS, the break's own
+        # height-loss budget, and the VRS descent-rate cap, all read by
+        # `Export.lua`'s law, never acted on here.
+        "rotor_rpm_floor_pct": ROTOR_RPM_FLOOR_PCT,
+        "retreating_blade_stall_ias_kmh": RETREATING_BLADE_STALL_IAS_KMH,
+        "break_max_height_loss_m": BREAK_MAX_HEIGHT_LOSS_M,
+        "vrs_ias_threshold_kmh": VRS_IAS_THRESHOLD_KMH,
+        "vrs_max_descent_mps": VRS_MAX_DESCENT_MPS,
     }
 
 
@@ -667,4 +734,6 @@ def goal_request_fields(request: FlightControlGoalRequest) -> dict[str, Any]:
         fields["alt_ref"] = request.altitude_ref
     if request.ias_kmh is not None:
         fields["ias_kmh"] = request.ias_kmh
+    if request.turn_rate_deg_s is not None:
+        fields["turn_rate_deg_s"] = request.turn_rate_deg_s
     return fields

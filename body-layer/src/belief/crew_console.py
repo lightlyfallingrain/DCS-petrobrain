@@ -117,6 +117,7 @@ from belief.ai_pilot_wheel import (
     CbtmAction,
     ParkedFlightState,
     altitude_ref_from_letter,
+    cbtm_break_target_heading_deg,
     nearest_speed_step,
     resolve_altitude_reference,
     step_speed,
@@ -5549,6 +5550,56 @@ class CrewConsole:
         )
         return {"ok": True, "altitude_m": round(current)}
 
+    def axes_break_turn(
+        self, sign: Literal[-1, 1], rate_deg_s: float
+    ) -> dict[str, object]:
+        """Mode-1 batch (`plans/flight-control/plan.md`, "Revised
+        2026-11-19", Decision 27) -- the axes body for `flight.cbtm_
+        break` -- "break turn left/right". `rate_deg_s` is the rule's
+        own `BREAK_TURN_RATE_DEG_S` (`config/rules/flight.lua`, per
+        F-M2 -- the rate belongs to the command that set it, lives in
+        the rule, not a Python constant), already validated as a
+        bounded int by `ActionParam`. A break is a heading goal, current
+        heading ±90° the break's own direction, flown at this faster
+        rate -- "no new state machine, a break is a heading goal flown
+        at a steeper bank" -- never a separate law state.
+
+        **`current is None` answers `NOT_READY`, never an assert** --
+        unlike `axes_increment_heading`'s own `assert`, this action's
+        rule category is the plain `"flight_control"` (shared with
+        mode 2's no-refusal `cbtm_break`, which needs no held value at
+        all), not `"flight_control_heading"`'s own hold-until-known
+        gate -- so a break commanded in the one-poll gap right after a
+        take, before `fc_measured_heading` has ever been reported, is
+        reachable here and must degrade gracefully rather than crash."""
+        current = self._axes_current_heading()
+        if current is None:
+            return {"ok": False, "reason": "NOT_READY"}
+        target = (current + sign * 90.0) % 360.0
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=target, turn_rate_deg_s=sign * rate_deg_s
+        )
+        return {"ok": True, "reason": None}
+
+    def axes_break_away(self, rate_deg_s: float) -> dict[str, object]:
+        """Mode-1 batch Decision 27's axes body for `flight.cbtm_break_
+        away` -- "break away", always a hard 180 to the left (E13, same
+        as mode 2's own break away: "Mi-24 turn faster left," a
+        property of the aircraft, reused here rather than re-derived).
+        One continuous heading goal, never mode 2's two-presses-apart
+        mechanism -- "nothing the pilot sees should be a pause
+        halfway," and this mechanism has no pause to remove. Same
+        `current is None` -> `NOT_READY` posture as `axes_break_turn`
+        above, for the same reason."""
+        current = self._axes_current_heading()
+        if current is None:
+            return {"ok": False, "reason": "NOT_READY"}
+        target = (current - 180.0) % 360.0
+        self.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=target, turn_rate_deg_s=-rate_deg_s
+        )
+        return {"ok": True, "reason": None}
+
     def drain_flight_control(self, now_sim: float, *, parked_active: bool) -> list[str]:
         """BL-16 mode 1 -- runs `belief.flight_control.decide_flight_
         control` once per poll (the one "when" apart from `take_
@@ -5560,10 +5611,40 @@ class CrewConsole:
 
         `urgent=True` lines (the self-release/forced-handover lines)
         bypass the gate via `_print`'s own `bypass_gate`, same posture
-        D19 already gives every other urgent flight-control line."""
+        D19 already gives every other urgent flight-control line.
+
+        **Mode-1 batch, Decision 32**: an unpark-take is exactly the
+        `OVERLAY` -> `ACTIVE` transition (the only place `decide_
+        flight_control` makes it) -- checked here, right after the
+        call, rather than inside that pure function, which has no
+        access to `self.parked_flight_state`'s own `cbtm_action_sent`/
+        `cbtm_break_entry_heading_deg`. When a mode-2 break was active
+        at that instant, the heading goal is seeded with the break's
+        own target (`cbtm_break_target_heading_deg`) rather than left
+        to `law_init_at_take`'s own bank-based pick, which would
+        otherwise continue the measured turn rate forever -- "not the
+        inherited continuous turn." Only `heading_deg` is set
+        (`turn_rate_deg_s` omitted -- the plan names no rate for this
+        case, only the target); altitude/speed goals are untouched,
+        same as an ordinary take. Queued the same one-shot way every
+        other `axes_*` action sets this field -- `_apply_flight_
+        control` sends it on a later poll, once Lua has already
+        reported `active` (it just did, this poll)."""
+        old_phase = self.flight_control_state.phase
         new_state, decision = decide_flight_control(
             self.flight_control_state, now_sim, parked_active=parked_active
         )
+        if old_phase == "OVERLAY" and new_state.phase == "ACTIVE":
+            break_action = self.parked_flight_state.cbtm_action_sent
+            entry_heading = self.parked_flight_state.cbtm_break_entry_heading_deg
+            if (
+                break_action in ("break_left", "break_right", "break_away")
+                and entry_heading is not None
+            ):
+                target = cbtm_break_target_heading_deg(break_action, entry_heading)
+                self.flight_control_goal_transition = FlightControlGoalRequest(
+                    heading_deg=target
+                )
         self.flight_control_state = new_state
         if decision is None:
             return []

@@ -251,6 +251,11 @@ ALT_BAND_MIN_M = 10.0
 # source: belief/flight_control.py:ARM_LEASE_S
 ARM_LEASE_S = 3.0
 
+# Decision 29 -- the break's own absolute height-loss budget above the `FLOOR_AGL_M` floor it never descends below.
+# status: agreed-guess | range: 20.0 .. 300.0
+# source: belief/flight_control.py:BREAK_MAX_HEIGHT_LOSS_M
+BREAK_MAX_HEIGHT_LOSS_M = 100.0
+
 # The terrain floor mode 1 holds once M3 builds the climb-for-terrain logic (the user's own Q5 number, reused here -- mode 2 never declared it, see the plan's "Behaviour constants" section: "P4 is unbuilt... mode 1 declares its own constants with those defaults").
 # status: agreed-guess | range: 0.0 .. 500.0
 # source: belief/flight_control.py:FLOOR_AGL_M
@@ -270,11 +275,6 @@ HEADING_BAND_DEG = 5.0
 # status: agreed-guess | range: 0.1 .. 5.0
 # source: belief/flight_control.py:MAX_ACCEL_MPS2
 MAX_ACCEL_MPS2 = 1.0
-
-# The envelope-release bank limit `Export.lua` checks every active frame (plus its own hard-coded margin) -- judgement call, A9 favours robustness over tight tracking.
-# status: judgement | range: 10.0 .. 60.0
-# source: belief/flight_control.py:MAX_BANK_DEG
-MAX_BANK_DEG = 30.0
 
 # The altitude channel's own vertical-speed ceiling -- M0-A's reference manoeuvre flew a "5 m/s climb and descent of 100 m", reused here as the shaper's own rate limit rather than measured for this purpose.
 # status: judgement | range: 1.0 .. 15.0
@@ -296,6 +296,16 @@ MAX_TURN_BANK_DEG = 20.0
 # source: belief/flight_control.py:MIN_IAS_KMH
 MIN_IAS_KMH = 80.0
 
+# Decision 30 -- at or above this IAS, the same collective-rate guard caps a further increase, to stay clear of retreating blade stall.
+# status: agreed-guess | range: 100.0 .. 400.0
+# source: belief/flight_control.py:RETREATING_BLADE_STALL_IAS_KMH
+RETREATING_BLADE_STALL_IAS_KMH = 250.0
+
+# Mode-1 batch (`plans/flight-control/plan.md`, "Revised 2026-11-19", Decision 30) -- below this rotor RPM, `Export.lua`'s collective-rate guard caps any further increase.
+# status: agreed-guess | range: 50.0 .. 100.0
+# source: belief/flight_control.py:ROTOR_RPM_FLOOR_PCT
+ROTOR_RPM_FLOOR_PCT = 85.0
+
 # A9's tolerance band for the speed channel: what "good enough" means as a fraction of the commanded IAS, used by `Export.lua` only for the status feed's `in_band_speed` and (M4) the settle test before a Trimmer press -- never a deadband (Decision 18).
 # status: judgement
 # source: belief/flight_control.py:SPEED_BAND_FRAC
@@ -315,6 +325,16 @@ TAKEOVER_LEVEL_BANK_DEG = 5.0
 # status: judgement
 # source: belief/flight_control.py:TURN_RATE_BAND_FRAC
 TURN_RATE_BAND_FRAC = 0.1
+
+# Decision 31 -- below this IAS, vortex ring state risk caps the descent rate (every mode-1 state, not only a break).
+# status: agreed-guess | range: 20.0 .. 100.0
+# source: belief/flight_control.py:VRS_IAS_THRESHOLD_KMH
+VRS_IAS_THRESHOLD_KMH = 50.0
+
+# Decision 31's own descent-rate ceiling below `VRS_IAS_THRESHOLD_KMH`.
+# status: agreed-guess | range: 1.0 .. 10.0
+# source: belief/flight_control.py:VRS_MAX_DESCENT_MPS
+VRS_MAX_DESCENT_MPS = 4.0
 
 [belief.optic_policy]
 # `plans/expected-area-check/plan.md` Stage 1, "Priority 4" -- how much a binocular look must be expected to tighten the range of a contact the pilot asked to watch, in metres, before Petrovich raises binoculars just for its position.

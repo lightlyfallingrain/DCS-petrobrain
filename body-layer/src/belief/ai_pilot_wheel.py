@@ -330,6 +330,15 @@ class ParkedFlightState:
     lua_cbtm_status: str | None = None
     lua_cbtm_seq: int | None = None
     cbtm_action_sent: CbtmAction | None = None
+    #: Mode-1 batch, Decision 32 (`plans/flight-control/plan.md`,
+    #: main-loop amendment 2026-11-19) -- the held heading (`held_
+    #: heading`) at the instant `cbtm_action_sent` was last set to a
+    #: break kind, captured by `body._apply_ai_pilot_wheel_goal`
+    #: alongside `cbtm_action_sent` itself, for `cbtm_break_target_
+    #: heading_deg` to turn into the break's own target. `None` while
+    #: no break is active this activation (cleared on unpark, same as
+    #: `cbtm_action_sent`).
+    cbtm_break_entry_heading_deg: float | None = None
     payload_station_counts_last_seen: Mapping[int, int] | None = None
 
 
@@ -891,6 +900,25 @@ def cbtm_apply_align_for_launch(
         return replace(state, align_phase="launch_aligned")
     snapshot = capture_flight_snapshot(state, goal, agl_m)
     return replace(state, align_phase="launch_aligned", pre_align_snapshot=snapshot)
+
+
+def cbtm_break_target_heading_deg(
+    action: CbtmAction, entry_heading_deg: float
+) -> float:
+    """Mode-1 batch, Decision 32 (`plans/flight-control/plan.md`,
+    main-loop amendment 2026-11-19) -- the heading mode 1 takes up when
+    an unpark lands while this break is active: the held heading at
+    the break press, turned the same way the break itself turns. Hard
+    90 the break's own direction for `break_left`/`break_right`; hard
+    180 left for `break_away` (E13, same as mode 1's own `axes_break_
+    away`: break away is always left, a property of the aircraft).
+    `action` must be one of the three break kinds -- `align`/`align_
+    for_launch` never call this."""
+    if action == "break_left":
+        return (entry_heading_deg - 90.0) % 360.0
+    if action == "break_right":
+        return (entry_heading_deg + 90.0) % 360.0
+    return (entry_heading_deg - 180.0) % 360.0
 
 
 def seed_recovery_goal(

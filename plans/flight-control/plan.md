@@ -3815,3 +3815,497 @@ align for launch"* — so it re-enters `"launch_aligned"` and re-issues the CBTM
 `pending_order` stays `("altitude", "speed")`; heading is not restored. Decision 26's "altitude,
 heading, speed" is read as press order for whatever recovery commands, and a voice heading
 command during the climb is flown at once (F-P6).
+
+## Revised 2026-11-19 — mode-1 batch: break turn, break away, the rotor envelope, rates as goals
+
+**Scope**, per the 2026-11-18 scope split and `alignment.md`'s 2026-11-19 goal check (CONCERNS,
+settled below): mode 1's `break turn left/right` and `break away` (replacing the `NOT_READY` stub
+left by the P3+P4 amendment), the rotor-RPM/retreating-blade-stall/vortex-ring-state envelope that
+applies in *every* mode-1 state, and turn-rate-as-a-goal-a-command-sets as the mechanism break uses
+(climb-rate/acceleration get the same wire shape, no new caller this batch). Branch
+`feature/bl16-mode1-break`, on top of `a6e869f6`.
+
+**Inputs read in full**: `explore-notes.md` "Recovery heading, and the mode-1 break / rotor
+envelope" (2026-11-18) and "Mode 1: rates as settable flight parameters" (2026-11-18) through
+"Mode-1 goal check answers" (2026-11-19, verbatim — this is what settles every open question
+below); `alignment.md`'s mode-1 goal check (E11–E18, F-M1–F-M3, Q-M1-1..3); this file's "mode 1
+(unparked, raw axes) re-cut" (Decision 21–25, the control law, the Co-moving Fields table) and the
+withdrawn-and-superseded "Mode 1 — break turn… tight 90°" section plus its Amendment above.
+
+### F-M1 (bank limit) and F-M2 (rates) — both close exactly as the user answered
+
+- **F-M1, answered**: *"remove the 30 degree limit. Set no limit for now."* `check_envelope`'s
+  bank branch (`flight_control.lua`, `bank_deg > fc_limits.max_bank_deg + ENV_BANK_MARGIN_DEG`) is
+  **deleted**, not widened — F-M1's own "obvious fillings" (raise the request but keep the 40°
+  release; raise `max_bank_deg` to 80° and quietly remove ordinary-flight's bank safety) are both
+  rejected in favour of the third option the Finding names: no standing bank limit at all, the
+  rotor envelope is the real protection (E15). `law_update`'s `phi_d` clamp against
+  `limits.max_bank_deg` is deleted the same way — a kinematic bank request (`atan(V_t·r_d/g)`) is
+  self-limiting (it saturates toward ±90° only as `r_d`/`V_t` grow large; the output stage's own
+  `law_clamp(u_roll, -1, 1)` in `law_outputs` is the real physical ceiling, unaffected by this
+  removal). `max_bank_deg`/`MAX_BANK_DEG` are removed from the wire, `fc_limits`, `FC_LIMIT_BOUNDS`
+  and body-layer's `belief/flight_control.py`/`defaults.toml` — a dead, unenforced constant left
+  on the wire is its own hazard (a reviewer or a later rule assuming it still means something).
+- **F-M2, answered**: *"solution accepted, but it must work with the rule lua files"* — a rate
+  belongs to the command that set it, **and** the number itself lives in `config/rules/flight.lua`,
+  not inside a Python action (Decision 27 below is the concrete mechanism).
+- **Q-M1-1 (RPM source)**: answered — engine RPM proxy or a fixed dummy 90%, main loop to design
+  the seam (Decision 28). **Narrowed by recon landed on `main` since the goal check**
+  (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`, `fe6494e8`): rotor RPM itself
+  is a readable cockpit draw arg — 42 (pilot)/845 (operator), DCS-BIOS-sourced, raw 0..1, **not yet
+  confirmed live and calibration unknown** — not an engine-RPM stand-in at all. `BASE_SENSOR_*` (the
+  only surface Finding 3 of the 2026-09-09 probe established as reachable from `Export.lua`) has no
+  rotor RPM field; engine RPM sits at args 40/41, separately. The user's decision stands unchanged
+  (engine-proxy-or-dummy for *this* batch) — Decision 28 below designs the seam so arg 42 is a
+  **candidate drop-in**, not a dependency of this batch.
+- **Q-M1-2 (low/slow priority)**: answered — *"rotor rpm [wins]… if low and slow and rpm drops,
+  accelerate… forward speed (>50 km/h) creates lift and the rpm can recover."* This is the same
+  shape the law already has for "collective saturated → trade lift for speed via tilt" (step 3);
+  Decision 30 widens that one flag rather than adding a second priority mechanism.
+- **Q-M1-3 (spoken rate words)**: answered — *"for now, only inside commands."* No new vocabulary;
+  `break turn`/`break away` are the only two callers of the rate-override mechanism this batch.
+- **New (VRS)**: *"below 50 km/h, limit descent rate to 4 m/s (configurable)"* — Decision 31, every
+  mode-1 state.
+
+### Existing constants checked (step 4a, widened rule)
+
+Grepped `body-layer/config/defaults.toml` and `belief/flight_control.py` for every heading/
+altitude/IAS/bank/VS/collective/rotor constant before declaring anything new:
+
+- `MAX_BANK_DEG` exists and is **removed** (F-M1 above), not reused.
+- `FLOOR_AGL_M` (40, existing mode-1 constant) is **reused verbatim** as the break's absolute
+  never-below floor — the user's own 40 m number already lives here from mode 2's Q5; no second
+  40 m constant.
+- `MAX_TURN_BANK_DEG` (20°, ordinary "turn left 30" ceiling) is **untouched** — it governs ordinary
+  turns; the break's rate override bypasses it only for the break's own heading goal (Decision 27),
+  never changes what an ordinary turn flies at.
+- No existing constant governs rotor RPM, retreating blade stall, vortex ring state, or a
+  height-loss budget. All four are new, below.
+
+### Decision 27 — turn rate is a goal the command sets, and the number lives in `flight.lua`
+
+**Wire**: `FlightControlGoalRequest` (`belief/flight_control.py`) gains
+`turn_rate_deg_s: float | None = None` — signed (direction + magnitude), carried on the same
+message as `heading_deg` (never alone: a rate override with no heading target is meaningless).
+`None` means "use the ordinary `max_turn_bank_deg`-derived rate," exactly like every other
+"omit = keep the default" field on this message.
+
+**Lua** (`law_apply_goal`): when `goal.heading_deg ~= nil`, it now also sets
+`next_state.rate_override_deg_s = goal.turn_rate_deg_s` (so an ordinary heading command — which
+never carries the field — **clears** any override still standing from an earlier break, "a rate
+belongs to the command that set it," F-M2) and, only when an override is present, snapshots
+`next_state.break_entry_h_m = state.h_ref` (Decision 29's own input). The `goal.turn ~= nil`
+branch (continuous "turn left/right") clears both the same way, for the same reason — a continuous
+turn is also "a new command," never a break continuation.
+
+**`law_update`'s heading-mode branch** (the `else` of step 1, today fixed at
+`r_max`/`HEADING_ACCEL_CAP_DEG_S2`) reads the override when present:
+
+```lua
+local rate_limit = r_max > 0.0 and r_max or 30.0
+local accel_limit = HEADING_ACCEL_CAP_DEG_S2
+if state.rate_override_deg_s ~= nil then
+    rate_limit = math.abs(state.rate_override_deg_s)
+    accel_limit = rate_limit / T_ROLL  -- same roll-in formula turn_mode already uses
+end
+```
+
+This is the whole mechanism: a break is a heading goal (current ± 90°, or ± 180° for break away)
+flown with a faster rate ceiling and a proportionally faster roll-in, through the *same* shaper
+every other heading command uses — "no new state machine, a break is a heading goal flown at a
+steeper bank" (the withdrawn design's own framing, which this keeps; only the bank-override field
+is gone, replaced by the rate). Steep bank (60–80°) is the kinematic **consequence** of a fast rate
+at cruise speed, not a separately-set number: `atan(V_t·r/g)` at 150–220 km/h and ~40°/s already
+lands in that band (e.g. 150 km/h, 40°/s → ~71°; 220 km/h, 40°/s → ~76°), which is why
+`BREAK_TURN_RATE_DEG_S` below is set there rather than guessed from "60–80°" directly.
+
+**Settling clears it.** Once `next_state.in_band_heading` goes true while `rate_override_deg_s` is
+still set, both it and `break_entry_h_m` are cleared that same frame. Without this, a break that
+finished rolling out ten minutes ago would still be clamping a *later, unrelated* "descend 200" to
+the stale break-floor (Decision 29) — the clearing is not cosmetic, it closes a real cross-command
+leak the "a rate belongs to its own command" rule would otherwise miss once the command's own
+heading goal is reached rather than superseded.
+
+**`flight.lua`, the rule file (F-M2's actual requirement):**
+
+```lua
+-- Mode-1 break rate -- F-M2: "it must work with the rule lua files." The
+-- number lives here, not inside a Python action, so it is visible and
+-- editable without touching rules/actions.py. Architect default, flag
+-- for retune after Flight M-A (lands ~60-80 deg bank at cruise IAS --
+-- see plan.md Decision 27).
+local BREAK_TURN_RATE_DEG_S = 40
+
+when.speech("cbtm_break",
+    "break turn <direction:left|right>",
+    "flight_control",
+  function(s)
+    local sign = -1
+    if s.direction == "right" then sign = 1 end
+    flight.cbtm_break(sign, BREAK_TURN_RATE_DEG_S)
+    if s.direction == "left" then say("Breaking left.") else say("Breaking right.") end
+  end)
+
+when.speech("cbtm_break_away",
+    "break away",
+    "flight_control",
+  function(s)
+    flight.cbtm_break_away(BREAK_TURN_RATE_DEG_S)
+    say("Breaking away.")
+  end)
+```
+
+No wording changes (F-M3 stands unchanged from the P3+P4 amendment): same two rules, same
+readbacks, only the stub body behind them changes.
+
+**`rules/actions.py`**: `cbtm_break`'s `Action.params` gains a trailing
+`ActionParam(name="rate_deg_s", lo=1, hi=90)` (an **int** — deg/s at this grain needs no float, and
+`ActionParam` has no `kind="float"` today; extending it is unnecessary scope for one value);
+`cbtm_break_away` gains the same single param (it currently takes none). Both are **required**, not
+`optional=True` — the rule always supplies the constant, so there is no "omitted" case to support,
+and `Action.__post_init__`'s optional-must-trail rule is moot. Mode 2's own `_cbtm_break`/
+`_cbtm_break_away` bodies simply do not read the new arg (same as any unused-by-one-side action
+param already in this file). Two new axes bodies replace the two `axes=_axes_cbtm_break_unready`
+occurrences:
+
+```python
+def _axes_break_turn(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    sign = cast(Literal[-1, 1], _int_arg(args, "sign"))
+    rate = _int_arg(args, "rate_deg_s")
+    return ctx.console.axes_break_turn(sign, float(rate))
+
+
+def _axes_break_away(ctx: ActionContext, args: dict[str, object]) -> dict[str, object]:
+    rate = _int_arg(args, "rate_deg_s")
+    return ctx.console.axes_break_away(float(rate))
+```
+
+**`crew_console.py`**, new methods, same shape as `axes_increment_heading`:
+
+```python
+def axes_break_turn(self, sign: Literal[-1, 1], rate_deg_s: float) -> dict[str, object]:
+    current = self._axes_current_heading()
+    assert current is not None
+    target = (current + sign * 90.0) % 360.0
+    self.flight_control_goal_transition = FlightControlGoalRequest(
+        heading_deg=target, turn_rate_deg_s=sign * rate_deg_s
+    )
+    return {"ok": True, "reason": None}
+
+
+def axes_break_away(self, rate_deg_s: float) -> dict[str, object]:
+    current = self._axes_current_heading()
+    assert current is not None
+    target = (current - 180.0) % 360.0
+    self.flight_control_goal_transition = FlightControlGoalRequest(
+        heading_deg=target, turn_rate_deg_s=-rate_deg_s
+    )
+    return {"ok": True, "reason": None}
+```
+
+Break away is always left (E13, same reasoning as mode 2's: *"Mi-24 turn faster left"* — a property
+of the aircraft, reused, not re-derived), and is `-180` from the held-or-measured heading in one
+continuous heading goal, never mode 2's two-presses-2-s-apart mechanism (E13: "nothing the pilot
+sees should be a pause halfway" — this mechanism has no pause to remove).
+
+**Climb-rate/acceleration-as-goals**: the task names these as the same idea; this batch does not
+add a second caller. `FlightControlGoalRequest` is *not* widened with `climb_rate_mps`/
+`accel_mps2` fields yet — Q-M1-3 ("only inside commands," no new vocabulary) means there is no
+command this batch that would set one, and an unused wire field is exactly the "dead constant"
+hazard F-M1's own cleanup just removed one of. Noted here as the next natural extension of
+Decision 27's shape (same `goal.<x>_override` → `state.<x>_override_<unit>` → consumed in the
+matching shaper branch pattern), not built.
+
+### Decision 28 — the rotor RPM seam: engine-proxy-or-dummy now, arg 42 a one-place swap later
+
+**Confirmed against `aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`** (landed on
+`main` after the goal check, `fe6494e8`): rotor RPM is cockpit draw arg 42 (pilot)/845 (operator),
+DCS-BIOS-sourced, raw 0..1, **not live-confirmed and calibration unknown**. This is new information
+against the goal check's Q-M1-1, but does not change the user's own answer — only narrows what
+"the real rotor RPM reading" will turn out to be when a flight confirms it. The user's decision
+(*"we'll check the rotor RPM gauge later… for now just use the engine RPM reading… or even a fixed
+dummy reading at 90%"*) stands: this batch does not read arg 42 live, and does not block on it.
+
+**One seam, `read_rotor_rpm_pct()`, in `flight_control.lua`** — the module's own read-side
+convention (`read_measured()`'s fail-soft style) extended by one function:
+
+```lua
+-- Rotor RPM proxy (explore-notes 2026-11-18/19, Q-M1-1). "dummy": a fixed
+-- stand-in value, the user's own fallback. "arg_proxy": reads the live
+-- cockpit draw arg recon found (aircraft-layer/research/2026-11-19-
+-- mi24p-readable-args-recon.md) via the same GetDevice(0):get_argument_
+-- value already used for other draw-arg reads in this codebase (ai_
+-- pilot_wheel.lua's stick-park read) -- not a new, unverified Lua call
+-- pattern, only a new arg id with unconfirmed calibration. One flag
+-- flips the source; nothing else in the law changes.
+local ROTOR_RPM_SOURCE = "dummy"  -- "dummy" | "arg_proxy"
+local ROTOR_RPM_ARG_PILOT = 42
+local ROTOR_RPM_DUMMY_PCT = 90.0
+-- Raw-arg-to-%RPM scale (main-loop amendment 2026-11-19): user, "very
+-- likely that is value * 100 = rotor rpm per cent. Unless the dial goes
+-- to over 100%, that has to be checked in cokpit." Correct this one
+-- constant once the cockpit dial's top mark is confirmed.
+local ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0
+
+local function read_rotor_rpm_pct()
+    if ROTOR_RPM_SOURCE == "dummy" then
+        return ROTOR_RPM_DUMMY_PCT, true
+    end
+    local raw = safe_call(function() return GetDevice(0):get_argument_value(ROTOR_RPM_ARG_PILOT) end)
+    if type(raw) ~= "number" or raw ~= raw then
+        return ROTOR_RPM_DUMMY_PCT, false
+    end
+    return raw * ROTOR_RPM_ARG_SCALE_MAX_PCT, true  -- calibration unconfirmed -- owed by the next flight
+end
+```
+
+Called once per frame in `read_measured()`, adding `rotor_rpm_pct`/`rotor_rpm_valid` to `measured`.
+**This batch ships with `ROTOR_RPM_SOURCE = "dummy"`** — the swap to `"arg_proxy"` is a one-line
+flip once a flight confirms arg 42 tracks rotor RPM and resolves its calibration, exactly the
+posture `FC_AXES_ENABLED.collective = false` already has for a measured-but-unconfirmed axis.
+`rotor_rpm_valid = false` (a failed `arg_proxy` read) does not release the envelope — it fails soft
+to the dummy value, logged, same posture as every other `read_measured()` field.
+
+### Decision 29 — the break's own height budget (≤100 m loss, never below 40 m AGL)
+
+M3 (the general climb-for-terrain floor) is **not pulled forward** — it is a separate, deferred
+stage with its own lookahead/hysteresis design still to plan. What this batch needs is narrower:
+while a break's rate override is active, the altitude *shaper's* effective target is floored, the
+stored goal is not:
+
+```lua
+local alt_goal_agl = state.alt_goal_m  -- (baro-converted as today, unchanged)
+if state.rate_override_deg_s ~= nil and state.break_entry_h_m ~= nil then
+    local break_floor = math.max(limits.floor_agl_m, state.break_entry_h_m - limits.break_max_height_loss_m)
+    alt_goal_agl = math.max(alt_goal_agl, break_floor)
+end
+local err_h = alt_goal_agl - state.h_ref
+```
+
+`state.alt_goal_m` itself is never written by a break — "a break replaces only the heading goal;
+altitude/speed goals remain" (this batch's own brief, and E12/the alignment vignette). The floor
+only ever **raises** what the shaper chases this frame; it cannot force a climb above the standing
+goal, and it stops applying the instant the break settles (Decision 27's clearing). `floor_agl_m`
+is the existing mode-1 constant (40 m, Q5, reused); `break_max_height_loss_m` (100 m) is new,
+body-layer `tuning.py`, wire-carried in `limits` the same way `floor_agl_m` already is.
+
+**Priority against the rotor envelope (Q-M1-2)**: this floor asks the altitude channel for more
+climb authority (`a_z,d`) exactly like any altitude error would; Decision 30's collective ceiling
+sits *inside* that same step and caps what collective can deliver regardless of how large the
+altitude error gets. So "rotor RPM wins" falls out of the existing step order (collective ceiling
+computed before the tilt-trade, tilt-trade computed before the law ever asks "did I get the lift I
+wanted") without a second priority mechanism — the aircraft may still, worst case, lose more than
+100 m or dip under 40 m if the rotor floor is genuinely binding at that moment; E15's "the aircraft
+just does less of it… silent" is the user's own account of exactly this case, not a defect to
+engineer away.
+
+### Decision 30 — rotor-RPM-floor and retreating-blade-stall both widen the existing "collective is limited" flag, reactively
+
+**No RPM-vs-collective or stall-vs-collective model is built.** The law's own stated philosophy
+(step 3, user 2026-10-26: *"what needs to change compared to what is current state and what is
+happening now"*) is feedback, not a model — so both guards are reactive rate-caps on `c_dot`,
+the same shape the existing pedal-near-limit cap (`PEDAL_NEAR_LIMIT_MARGIN`/
+`COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT`) already uses, not a new collective-vs-speed/RPM ceiling
+curve the user never specified numerically:
+
+```lua
+-- Rotor RPM floor and retreating blade stall (explore-notes 2026-11-18/
+-- 19) -- "the rotor rpm drop below minimum and retreating blade stall
+-- are things to avoid in any Mode 1 state, whatever we are doing...
+-- high collective leads to RPM drop... high blade angle and high speed
+-- lead to retreating blade stall." Both margins are judgement (how much
+-- slack before the cap engages), same class as ENV_IAS_MARGIN_KMH/ENV_
+-- BANK_MARGIN_DEG above -- the thresholds themselves (the RPM floor,
+-- the stall IAS) are the user's own numbers, wire-carried, in `limits`.
+local ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT = 5.0
+local COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR = 0.0
+local RETREATING_BLADE_STALL_MARGIN_KMH = 20.0
+local COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL = 0.0
+```
+
+In `law_update`, moved ahead of the existing `collective_saturated` physical check (step 3):
+
+```lua
+local rotor_rpm_limited = measured.rotor_rpm_pct <= (limits.rotor_rpm_floor_pct + ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT)
+local blade_stall_limited = (measured.ias_mps * 3.6) >= (limits.retreating_blade_stall_ias_kmh - RETREATING_BLADE_STALL_MARGIN_KMH)
+local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
+local collective_limited = collective_saturated or rotor_rpm_limited or blade_stall_limited
+```
+
+`collective_limited` replaces `collective_saturated` as the condition that gates the step-3
+fore/aft-tilt "trade lift for speed" term (`K_TILT_FROM_AZ_SATURATED`) — this is **Q-M1-2's answer
+for free**: once the RPM floor or the stall margin caps collective, the disc pitches forward, speed
+rises, and (once a real rotor-RPM read exists, Decision 28) RPM recovers — the same mechanism the
+law already had for "collective pinned at the physical limit," now also triggered by the rotor and
+stall limits, not a second mechanism. Then, where `c_dot` is computed:
+
+```lua
+if c_dot > 0.0 then
+    if rotor_rpm_limited then c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR) end
+    if blade_stall_limited then c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL) end
+end
+```
+
+Only a further *increase* is ever capped — neither guard ever forces collective down; a pilot
+transiting through 250 km/h in level flight with collective already low is untouched. New
+`limits` fields: `rotor_rpm_floor_pct` (85, user, Q-M1-1's own number) and
+`retreating_blade_stall_ias_kmh` (250, user, *"near or over 250 km/h"*) — both body-layer
+`tuning.py`, wire-carried, `FC_LIMIT_BOUNDS` entries added the same way every other `limits` field
+has one.
+
+**Pedal into the turn** (the one break behaviour not already covered by an existing mechanism):
+while `state.rate_override_deg_s ~= nil`, the pedal law (step 5) adds a signed bias toward the
+break's own direction, on top of the unchanged collective-coupling feedforward:
+
+```lua
+local K_BREAK_PEDAL_BIAS = 0.2  -- judgement, owed by Flight M-A
+local d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
+if state.rate_override_deg_s ~= nil then
+    local break_sign = state.rate_override_deg_s > 0.0 and 1.0 or -1.0
+    d_t_y = d_t_y + K_BREAK_PEDAL_BIAS * break_sign
+end
+next_state.t_y = law_clamp(state.t_y + d_t_y * dt, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+```
+
+The existing asymmetric clamp (`PEDAL_LIMIT_POSITIVE = 0.5`, `PEDAL_LIMIT_NEGATIVE = -1.0`) already
+gives a right break less pedal authority than a left one — exactly the "may be weaker" the user
+already expects (2026-10-26) — with no new asymmetry logic.
+
+### Decision 31 — vortex ring state, every mode-1 state
+
+New, from the goal check's answers, not scoped to the break. In `law_update`'s altitude shaper
+(step 1), right after the existing `w_ref` rate-limit clamp:
+
+```lua
+next_state.w_ref = law_clamp(state.w_ref + a_ref_h * dt, -limits.max_climb_vs_mps, limits.max_climb_vs_mps)
+if (measured.ias_mps * 3.6) < limits.vrs_ias_threshold_kmh then
+    next_state.w_ref = math.max(next_state.w_ref, -limits.vrs_max_descent_mps)
+end
+```
+
+New `limits` fields, both the user's own numbers and both called out as configurable in the
+explore note, so both go in `tuning.py` rather than one as a judgement default:
+`vrs_ias_threshold_kmh` (50) and `vrs_max_descent_mps` (4.0). Applies regardless of break/level
+flight/climb/descend — any mode-1 descent below 50 km/h is capped, matching the explore note's
+"applies in every mode-1 state, like the rotor envelope."
+
+### Co-moving Fields (extends the mode-1 re-cut table, this batch's own rows)
+
+Construction sites found by grep, as the standing rule requires: `law_init_at_take` (one site,
+Lua's own law-state constructor — gains `rate_override_deg_s = nil`, `break_entry_h_m = nil`);
+`law_apply_goal` (the one place the two fields are ever *set*); `law_update` (the one place they
+are ever *cleared by settling*, and the one place `collective_limited`/`rotor_rpm_limited`/
+`blade_stall_limited` are computed, fresh every frame — no state of their own to construct).
+
+| # | Field(s) | Written by | Transition | Must hold true after |
+|---|---|---|---|---|
+| B1 | `rate_override_deg_s`, `break_entry_h_m` | external (voice, `cbtm_break`/`cbtm_break_away`) | break fires | heading mode; `heading_goal_deg` = current ± 90°/−180°; `rate_override_deg_s` = signed rate; `break_entry_h_m` = `h_ref` at that instant; `alt_goal_m`/`speed_goal_mps` **untouched** |
+| B2 | `rate_override_deg_s`, `break_entry_h_m` | external (voice, any ordinary heading/turn command: `set_heading`/`increment_heading`/`turn_continuous`/`level_off`) while set | a new, non-break heading/turn goal arrives | both cleared in the **same** `law_apply_goal` call that applies the new goal — never left flying at the break's rate (F-M2) |
+| B3 | `rate_override_deg_s`, `break_entry_h_m` | internal (`law_update`) | `in_band_heading` goes true while the override is still set | both cleared that frame — prevents a settled break's floor from leaking into a later, unrelated altitude command (Decision 27's own "settling clears it") |
+| B4 | `rate_override_deg_s`, `break_entry_h_m` | external (`axes_set_altitude`/`axes_step_altitude`/`axes_hold_altitude`/`axes_set_speed`/…) while a break is in progress | an altitude/speed-only command arrives mid-break | **unaffected** — only `heading_deg`/`turn` branches of `law_apply_goal` touch these fields; altitude/speed goals move independently (this batch's own brief: "a break replaces only the heading goal") |
+| B5 | `rate_override_deg_s`, `break_entry_h_m` | internal (`law_init_at_take`) | a voice take or an unpark take (fresh law state) | both `nil` — a new mode-1 activation never inherits a stale break from a previous session |
+| B6 | `collective_limited`/`rotor_rpm_limited`/`blade_stall_limited` | internal, recomputed every frame from `measured` | any frame | never stored; `collective_limited` is what gates the step-3 tilt-trade term that frame only, so a one-frame bad RPM read self-corrects next frame rather than latching |
+
+### Behaviour constants (this batch)
+
+| constant | default | status | where |
+|---|---|---|---|
+| `ROTOR_RPM_FLOOR_PCT` | 85 | user (Q-M1-1's own number) | body-layer `tuning.py`, wire-carried |
+| `RETREATING_BLADE_STALL_IAS_KMH` | 250 | user (*"near or over 250 km/h"*) | body-layer `tuning.py`, wire-carried |
+| `BREAK_MAX_HEIGHT_LOSS_M` | 100 | user (*"~100 m"*) | body-layer `tuning.py`, wire-carried |
+| `VRS_IAS_THRESHOLD_KMH` | 50 | user | body-layer `tuning.py`, wire-carried |
+| `VRS_MAX_DESCENT_MPS` | 4.0 | user, explicitly "configurable" | body-layer `tuning.py`, wire-carried |
+| `BREAK_TURN_RATE_DEG_S` | 40 | architect default (lands 60–80° bank at cruise IAS); flag for retune after Flight M-A | **`config/rules/flight.lua`**, per F-M2 — not Python, not `tuning.py` |
+| `ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT`, `RETREATING_BLADE_STALL_MARGIN_KMH`, `COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR`, `COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL`, `K_BREAK_PEDAL_BIAS` | 5.0 / 20.0 / 0.0 / 0.0 / 0.2 | judgement — smoothing/gain details, same class as `ENV_*_MARGIN`/`K_*` already in the "M2 control law constants" block | `flight_control.lua` constants block, owed by M0-E/Flight M-A |
+| `ROTOR_RPM_SOURCE`, `ROTOR_RPM_ARG_PILOT`, `ROTOR_RPM_DUMMY_PCT`, `ROTOR_RPM_ARG_SCALE_MAX_PCT` | `"dummy"` / 42 / 90.0 / 100.0 | Decision 28's seam — not user-tunable behaviour, a source-selection flag | `flight_control.lua` |
+| `MAX_BANK_DEG` | — | **removed** (F-M1) | was body-layer `tuning.py` |
+
+### F-M1's removal ripples through the test/doc surface
+
+- `tests/test_flight_control_lua.py`: the two existing "self-releases at 41° of bank"/"clamps
+  `phi_d` to `max_bank_deg`" tests are deleted, not inverted — there is no bank value left that
+  should release or clamp. A new test asserts the *opposite*: a sustained high-rate heading goal
+  at cruise IAS reaches and holds a bank well past the old 30° ceiling with `check_envelope` still
+  `true` (IAS alone governs release now).
+- `tests/test_export_lua_constants_parity.py`: drops its `max_bank_deg` parity assertion.
+- `body-layer/CLAUDE.md`'s module-map entry for `belief/flight_control.py` and
+  `aircraft-layer/CLAUDE.md`'s `flight_control` bullet are both updated to say mode 1 has no
+  standing bank limit, by design, pending retune.
+
+### Test strategy
+
+- **Offline/luajit** (extends the mode-1 re-cut's own toy-plant suite): a break request at 150,
+  220 km/h reaches a bank in [60°, 80°] and settles within a bound derived from
+  `BREAK_TURN_RATE_DEG_S`/`T_ROLL`; the IAS release still fires with no bank term; `rate_override_
+  deg_s`/`break_entry_h_m` set on `goal.heading_deg` with `turn_rate_deg_s`, cleared on an ordinary
+  heading goal and on settling (B2/B3); a break-floor test drives the toy plant through a
+  commanded sink and asserts `h_ref` never chases below `max(floor_agl_m, entry_h - break_max_
+  height_loss_m)` while the override is set, and chases the real `alt_goal_m` again afterward; a
+  low-RPM frame caps `c_dot`'s increase to the configured rate and leaves a decrease untouched; the
+  same for a high-IAS frame against the stall margin; a sub-50-km/h descent never exceeds
+  `vrs_max_descent_mps` regardless of the altitude error driving it; `read_rotor_rpm_pct` returns
+  the dummy value with `ROTOR_RPM_SOURCE = "dummy"` and falls back to it on a bad `arg_proxy` read.
+- **Pure-function (`rules/actions.py`/`crew_console.py`, no DCS)**: `axes_break_turn`/
+  `axes_break_away` compute the right target heading from a held vs. measured current heading
+  (same posture `_axes_current_heading` already has); the two actions' Lua-supplied `rate_deg_s`
+  bound is enforced by `ActionParam`; mode 2's `_cbtm_break`/`_cbtm_break_away` are unaffected
+  (differential test, axes untouched by the new param).
+- **Flight M-C** (new card, after Flight M-A): break left/right at 150 and 250 km/h, break away,
+  one break near the 40 m floor, one break at an RPM floor forced by a deliberately low
+  `ROTOR_RPM_DUMMY_PCT` test override — pass is the trace (bank reached, height loss, speed
+  fluctuation, no bank-triggered hand-back anywhere in the flight).
+
+### Risks & Unknowns
+
+- **Every new gain/threshold is unmeasured** (`BREAK_TURN_RATE_DEG_S`, both pedal-bias and
+  collective-rate-cap constants) — same posture as the rest of M2, owed to Flight M-A/M5, not a
+  gap specific to this batch.
+- **Integrator windup in `phi_i` once the roll axis saturates, now unguarded by any bank clamp.**
+  Deliberately not fixed this batch: F-M1 asks for no limit, and anti-windup (freezing `phi_i`
+  once `u_roll` is saturated) needs `law_outputs`' result fed back into `law_update`, a bigger
+  restructure than this batch's own scope. Flagged for Flight M-A/M5 rather than silently
+  engineered around the user's own "no limit for now."
+- **`ROTOR_RPM_SOURCE = "dummy"` means the RPM floor and the stall-trade mechanism cannot be
+  flight-validated against a real signal this batch** — Flight M-C's pass criteria above rely on a
+  deliberately-lowered dummy value to exercise the code path, not a genuine low-RPM event. Decision
+  28's seam is what makes the eventual swap (and the retest it needs) a one-line change, not a
+  reason to delay this batch.
+- **The break-floor mechanism (Decision 29) is scoped narrower than M3.** If M3 lands later with a
+  genuinely different terrain-floor design (lookahead, hysteresis, a standing climb-for-terrain
+  behaviour), Decision 29's break-local floor may need reconciling with it — flagged here so that
+  pass does not miss this one.
+
+### Second-order effect
+
+Decision 27's shape (`goal.<x>_override` → `state.<x>_override` → a shaper branch that reads it,
+cleared on settle or on a non-override command for the same axis) is the template `[[BL-B95]]`'s
+later manoeuvre/behaviour-scripting work would reuse for climb rate and acceleration — this batch
+exercises exactly one instance (turn rate) end to end, including the wire field, the rule-owned
+constant, and the settle-clear, rather than building the generalised mechanism speculatively.
+
+### Decisions Requiring User Input
+
+None — the 2026-11-19 goal check's F-M1/F-M2 and Q-M1-1..3 cover every open question this batch
+raised, verbatim, in `explore-notes.md`'s "Mode-1 goal check answers" section. Decisions 27–31
+above are this plan's own implementation choices within those answers (rate-as-goal mechanism,
+the RPM seam's exact shape, the break-floor's scope, which existing flag the rotor/stall guards
+widen) — local and reversible, so none is escalated as a `U<n>`.
+
+### Main-loop amendment 2026-11-19 (after the plan check) — not the Architect's text
+
+1. **Decision 32 — a take during a mode-2 break finishes the break.** Plan check Finding 1 / Q1
+   (`alignment.md`). Not a new question: the goal check's recorded assumption — *"a takeover
+   during a mode 2 break continues to that break's ±90 target"* — was put to the user on
+   2026-11-18 as "how it would behave, unless you object" and drew no objection; the user's own
+   description of ED's break is *"it set's heading +- 90 degrees and flies that"*. So: when a
+   mode-1 take happens while a mode-2 break (or break away) is the active CBTM command, the
+   take's heading goal is that break's target heading — the held heading at the break press
+   ±90° (break away: the target ED was given, per the P3+P4 build) — not the inherited
+   continuous turn. Body-layer already records the break and its direction (P3+P4); the take
+   path seeds `heading_goal` from it. Altitude and speed goals take over as an ordinary take
+   does. Test: a take with a break active seeds the break target; a take with no break active is
+   unchanged. Flight M-C card gets one row for it. **Confirmed by the user 2026-11-19:**
+   *"solution for gap accepted"*.
+2. **Rotor RPM scale is a named constant** — `ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0` in Decision
+   28's block and the constants table, per the user's 2026-11-19 mapping note
+   (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`, Finding 2).

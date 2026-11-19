@@ -35,6 +35,7 @@ from belief.ai_pilot_wheel import (
     capture_flight_snapshot,
     cbtm_apply_align,
     cbtm_apply_align_for_launch,
+    cbtm_break_target_heading_deg,
     clear_hvrt_direction,
     decide_ai_pilot_wheel,
     goal_param_for_wire,
@@ -858,6 +859,24 @@ class TestCaptureFlightSnapshot:
             held_speed=150.0,
         )
         assert capture_flight_snapshot(state, AiPilotWheelGoal(), agl_m=None) is None
+
+
+class TestCbtmBreakTargetHeadingDeg:
+    """Mode-1 batch, Decision 32 -- the heading an unpark-take seeds
+    when it lands while a mode-2 break is active."""
+
+    def test_break_left_is_entry_minus_90(self) -> None:
+        assert cbtm_break_target_heading_deg("break_left", 100.0) == 10.0
+
+    def test_break_right_is_entry_plus_90(self) -> None:
+        assert cbtm_break_target_heading_deg("break_right", 100.0) == 190.0
+
+    def test_break_away_is_entry_minus_180(self) -> None:
+        assert cbtm_break_target_heading_deg("break_away", 100.0) == 280.0
+
+    def test_wraps_through_zero(self) -> None:
+        assert cbtm_break_target_heading_deg("break_left", 30.0) == 300.0
+        assert cbtm_break_target_heading_deg("break_right", 350.0) == 80.0
 
 
 class TestCbtmApplyAlign:

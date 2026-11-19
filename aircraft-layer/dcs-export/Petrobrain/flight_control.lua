@@ -176,9 +176,11 @@ local DT_CAP = 2.0
 -- Safety margins the envelope check applies on top of the commanded
 -- limits -- not behaviour-affecting on their own (they only decide how
 -- much slack the self-release gets before firing), so kept as plain
--- Lua locals rather than wire-carried tunables.
+-- Lua locals rather than wire-carried tunables. No bank margin any
+-- more (mode-1 batch, F-M1: "remove the 30 degree limit. Set no limit
+-- for now" -- there is no standing bank to check a margin against;
+-- the rotor envelope, Decision 30, is the real protection in a break).
 local ENV_IAS_MARGIN_KMH = 10.0
-local ENV_BANK_MARGIN_DEG = 10.0
 local ENV_HOLD_S = 3.0
 
 -- Hard-coded startup defaults, overwritten by the first `flight_control`
@@ -192,12 +194,12 @@ local fc_limits = {
     max_ias_kmh = 280.0,
     on_ground_agl_threshold_m = 10.0,
     arm_lease_s = 3.0,
-    max_bank_deg = 30.0,
     -- M2 additions (plan: "Behaviour constants -- where each lives" --
     -- body-layer `tuning.py`, sent in every message's `limits`). Startup
     -- defaults only, deliberately conservative/narrow until body-layer's
     -- own first send; `belief.flight_control.flight_control_limits`
-    -- carries the real (tunable) values.
+    -- carries the real (tunable) values. No `max_bank_deg` any more
+    -- (mode-1 batch, F-M1).
     max_turn_bank_deg = 20.0,
     max_climb_vs_mps = 5.0,
     max_accel_mps2 = 1.0,
@@ -206,6 +208,15 @@ local fc_limits = {
     alt_band_min_m = 10.0,
     turn_rate_band_frac = 0.10,
     heading_band_deg = 5.0,
+    -- Mode-1 batch additions (plan, "Revised 2026-11-19", Decisions
+    -- 29-31) -- same "conservative startup default, body-layer's own
+    -- `tuning.py` carries the real value" posture as the M2 additions
+    -- above.
+    rotor_rpm_floor_pct = 85.0,
+    retreating_blade_stall_ias_kmh = 250.0,
+    break_max_height_loss_m = 100.0,
+    vrs_ias_threshold_kmh = 50.0,
+    vrs_max_descent_mps = 4.0,
 }
 
 -- `limits` fields this module actually reads, with the hard hard
@@ -229,7 +240,9 @@ local FC_LIMIT_BOUNDS = {
     -- user override there would be silently rejected whole-message at
     -- this layer instead of applied.
     arm_lease_s = { lo = 0.0, hi = 10.0 },
-    max_bank_deg = { lo = 0.0, hi = 90.0 },
+    -- No `max_bank_deg` entry any more (mode-1 batch, F-M1: "remove the
+    -- 30 degree limit") -- removed from the wire entirely, not
+    -- widened, so a stale sender's value finds nothing here to accept.
     max_turn_bank_deg = { lo = 0.0, hi = 60.0 },
     max_climb_vs_mps = { lo = 0.0, hi = 20.0 },
     max_accel_mps2 = { lo = 0.0, hi = 10.0 },
@@ -238,6 +251,13 @@ local FC_LIMIT_BOUNDS = {
     alt_band_min_m = { lo = 0.0, hi = 100.0 },
     turn_rate_band_frac = { lo = 0.0, hi = 1.0 },
     heading_band_deg = { lo = 0.0, hi = 90.0 },
+    -- Mode-1 batch additions, same hard-ceiling posture as the M2 ones
+    -- above.
+    rotor_rpm_floor_pct = { lo = 0.0, hi = 100.0 },
+    retreating_blade_stall_ias_kmh = { lo = 0.0, hi = 500.0 },
+    break_max_height_loss_m = { lo = 0.0, hi = 1000.0 },
+    vrs_ias_threshold_kmh = { lo = 0.0, hi = 200.0 },
+    vrs_max_descent_mps = { lo = 0.0, hi = 50.0 },
 }
 
 --[[ M2 control law constants (plan: "The control law, as a first
@@ -347,6 +367,56 @@ local PEDAL_LIMIT_NEGATIVE = -1.0
 local PEDAL_NEAR_LIMIT_MARGIN = 0.1
 local COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT = 0.3
 
+-- Rotor RPM floor and retreating blade stall (mode-1 batch, explore-
+-- notes 2026-11-18/19) -- "the rotor rpm drop below minimum and
+-- retreating blade stall are things to avoid in any Mode 1 state,
+-- whatever we are doing... high collective leads to RPM drop... high
+-- blade angle and high speed lead to retreating blade stall." Both
+-- margins are judgement (how much slack before the cap engages), same
+-- class as `ENV_IAS_MARGIN_KMH`/`K_*` above -- the thresholds
+-- themselves (the RPM floor, the stall IAS) are the user's own
+-- numbers, wire-carried, in `limits` (`ROTOR_RPM_FLOOR_PCT`/
+-- `RETREATING_BLADE_STALL_IAS_KMH`, body-layer's `tuning.py`).
+local ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT = 5.0
+local COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR = 0.0
+local RETREATING_BLADE_STALL_MARGIN_KMH = 20.0
+local COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL = 0.0
+
+-- Mode-1 batch, Decision 27's own pedal-into-the-turn bias while a
+-- break's rate override is active -- judgement, owed by Flight M-A.
+local K_BREAK_PEDAL_BIAS = 0.2
+
+-- Rotor RPM proxy (mode-1 batch, explore-notes 2026-11-18/19, Q-M1-1).
+-- "dummy": a fixed stand-in value, the user's own fallback. "arg_
+-- proxy": reads the live cockpit draw arg recon found (`aircraft-
+-- layer/research/2026-11-19-mi24p-readable-args-recon.md`) via the
+-- same `GetDevice(0):get_argument_value` already used for other
+-- draw-arg reads in this codebase (`ai_pilot_wheel.lua`'s stick-park
+-- read) -- not a new, unverified Lua call pattern, only a new arg id
+-- with unconfirmed calibration. One flag flips the source; nothing
+-- else in the law changes. Ships with `"dummy"` -- the swap to
+-- `"arg_proxy"` is a one-line flip once a flight confirms arg 42
+-- tracks rotor RPM and resolves its calibration.
+local ROTOR_RPM_SOURCE = "dummy" -- "dummy" | "arg_proxy"
+local ROTOR_RPM_ARG_PILOT = 42
+local ROTOR_RPM_DUMMY_PCT = 90.0
+-- Raw-arg-to-%RPM scale (main-loop amendment 2026-11-19): user, "very
+-- likely that is value * 100 = rotor rpm per cent. Unless the dial
+-- goes to over 100%, that has to be checked in cockpit." Correct this
+-- one constant once the cockpit dial's top mark is confirmed.
+local ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0
+
+local function read_rotor_rpm_pct()
+    if ROTOR_RPM_SOURCE == "dummy" then
+        return ROTOR_RPM_DUMMY_PCT, true
+    end
+    local raw = safe_call(function() return GetDevice(0):get_argument_value(ROTOR_RPM_ARG_PILOT) end)
+    if type(raw) ~= "number" or raw ~= raw then
+        return ROTOR_RPM_DUMMY_PCT, false
+    end
+    return raw * ROTOR_RPM_ARG_SCALE_MAX_PCT, true -- calibration unconfirmed -- owed by the next flight
+end
+
 -- Accelerations are not read from a dedicated sensor (M0-A: `LoGet
 -- AccelerationUnits`' own axis-to-body-frame mapping is unconfirmed) --
 -- `a_x`/`a_z` are a filtered numerical derivative of IAS/vertical speed
@@ -433,6 +503,13 @@ local function law_apply_goal(state, goal, limits)
 
     if goal.turn ~= nil then
         next_state.turn_mode = true
+        -- Decision 27/F-M2: "a rate belongs to the command that set
+        -- it" -- a continuous turn is a new command too, so any
+        -- override still standing from an earlier break is cleared
+        -- here, the same way an ordinary heading command clears it
+        -- below.
+        next_state.rate_override_deg_s = nil
+        next_state.break_entry_h_m = nil
         if goal.turn == 0 then
             next_state.turn_goal_deg_s = 0.0
         else
@@ -444,6 +521,21 @@ local function law_apply_goal(state, goal, limits)
     if goal.heading_deg ~= nil then
         next_state.turn_mode = false
         next_state.heading_goal_deg = goal.heading_deg
+        -- Decision 27 -- `goal.turn_rate_deg_s` is the break's own
+        -- signed rate override, carried on this same message (never
+        -- alone: a rate with no heading target is meaningless). `nil`
+        -- (every ordinary heading command) clears any override still
+        -- standing from an earlier break -- "a rate belongs to the
+        -- command that set it" (F-M2). Only when an override is
+        -- present does this snapshot the break's own entry height
+        -- (Decision 29's own input); an ordinary heading command needs
+        -- no height budget of its own.
+        next_state.rate_override_deg_s = goal.turn_rate_deg_s
+        if goal.turn_rate_deg_s ~= nil then
+            next_state.break_entry_h_m = state.h_ref
+        else
+            next_state.break_entry_h_m = nil
+        end
     end
     if goal.alt_m ~= nil then
         next_state.alt_goal_m = goal.alt_m
@@ -504,6 +596,10 @@ local function law_init_at_take(measured, limits, command)
         in_band_heading = false,
         in_band_altitude = false,
         in_band_speed = false,
+        -- Co-moving row B5 (mode-1 batch) -- a fresh activation never
+        -- inherits a stale break from a previous session.
+        rate_override_deg_s = nil,
+        break_entry_h_m = nil,
     }
 end
 
@@ -537,10 +633,21 @@ local function law_update(state, dt, measured, limits)
             next_state.heading_goal_deg = next_state.psi_ref
         end
     else
+        -- Decision 27 -- while a break's rate override is active, the
+        -- rate ceiling and accel-limit (roll-in time) both come from
+        -- it instead of the ordinary `max_turn_bank_deg`-derived rate;
+        -- the accel limit uses the same roll-in formula (`r_max /
+        -- T_ROLL`) `turn_mode` above already uses, just against the
+        -- override's own magnitude.
         local rate_limit = r_max > 0.0 and r_max or 30.0
+        local accel_limit = HEADING_ACCEL_CAP_DEG_S2
+        if state.rate_override_deg_s ~= nil then
+            rate_limit = math.abs(state.rate_override_deg_s)
+            accel_limit = rate_limit / T_ROLL
+        end
         local err = law_wrap180(state.heading_goal_deg - state.psi_ref)
         local a_ref = OMEGA_HEADING * OMEGA_HEADING * err - 2.0 * LAW_ZETA * OMEGA_HEADING * state.r_ref
-        a_ref = law_clamp(a_ref, -HEADING_ACCEL_CAP_DEG_S2, HEADING_ACCEL_CAP_DEG_S2)
+        a_ref = law_clamp(a_ref, -accel_limit, accel_limit)
         next_state.r_ref = law_clamp(state.r_ref + a_ref * dt, -rate_limit, rate_limit)
         next_state.psi_ref = law_wrap360(state.psi_ref + next_state.r_ref * dt)
     end
@@ -556,10 +663,28 @@ local function law_update(state, dt, measured, limits)
     if state.alt_goal_ref == "baro" then
         alt_goal_agl = state.alt_goal_m - (measured.asl_m - measured.h_m)
     end
+    -- Decision 29 -- while a break's rate override is active, the
+    -- shaper's own *effective* target is floored at the break's own
+    -- height-loss budget below its entry height (never above the
+    -- standing `alt_goal_m` itself, which a break never writes -- "a
+    -- break replaces only the heading goal"). Stops applying the
+    -- instant the break settles (the clearing below).
+    if state.rate_override_deg_s ~= nil and state.break_entry_h_m ~= nil then
+        local break_floor = math.max(
+            limits.floor_agl_m, state.break_entry_h_m - limits.break_max_height_loss_m)
+        alt_goal_agl = math.max(alt_goal_agl, break_floor)
+    end
     local err_h = alt_goal_agl - state.h_ref
     local a_ref_h = OMEGA_ALT * OMEGA_ALT * err_h - 2.0 * LAW_ZETA * OMEGA_ALT * state.w_ref
     a_ref_h = law_clamp(a_ref_h, -ALT_ACCEL_CAP_MPS2, ALT_ACCEL_CAP_MPS2)
     next_state.w_ref = law_clamp(state.w_ref + a_ref_h * dt, -limits.max_climb_vs_mps, limits.max_climb_vs_mps)
+    -- Decision 31 -- vortex ring state, every mode-1 state (not only a
+    -- break): below the VRS IAS threshold, the descent-rate reference
+    -- is capped regardless of how large the altitude error driving it
+    -- is.
+    if (measured.ias_mps * 3.6) < limits.vrs_ias_threshold_kmh then
+        next_state.w_ref = math.max(next_state.w_ref, -limits.vrs_max_descent_mps)
+    end
     next_state.h_ref = state.h_ref + next_state.w_ref * dt
 
     -- Step 1 (speed).
@@ -586,16 +711,37 @@ local function law_update(state, dt, measured, limits)
     next_state.prev_v_mps = measured.ias_mps
 
     -- Step 3: lift-vector corrections, incrementally.
+    -- Decision 30 -- the rotor-RPM floor and the retreating-blade-
+    -- stall margin widen the existing "collective is limited" flag,
+    -- reactively, the same shape the pedal-near-limit cap already
+    -- uses -- no RPM-vs-collective or stall-vs-collective model, a
+    -- feedback cap only.
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
+    local rotor_rpm_limited = measured.rotor_rpm_pct
+        <= (limits.rotor_rpm_floor_pct + ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT)
+    local blade_stall_limited = (measured.ias_mps * 3.6)
+        >= (limits.retreating_blade_stall_ias_kmh - RETREATING_BLADE_STALL_MARGIN_KMH)
+    local collective_limited = collective_saturated or rotor_rpm_limited or blade_stall_limited
     local d_theta = -K_TILT_FROM_AX * (a_x_d - next_state.a_x_f)
-    if collective_saturated then
+    if collective_limited then
         d_theta = d_theta + K_TILT_FROM_AZ_SATURATED * (a_z_d - next_state.a_z_f)
     end
     next_state.theta_d = law_clamp(state.theta_d + d_theta * dt, THETA_MIN_DEG, THETA_MAX_DEG)
 
     local c_dot = K_COLLECTIVE * (a_z_d - next_state.a_z_f)
-    if state.t_y >= (PEDAL_LIMIT_POSITIVE - PEDAL_NEAR_LIMIT_MARGIN) and c_dot > 0.0 then
-        c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT)
+    if c_dot > 0.0 then
+        if state.t_y >= (PEDAL_LIMIT_POSITIVE - PEDAL_NEAR_LIMIT_MARGIN) then
+            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT)
+        end
+        -- Only a further *increase* is ever capped by either guard --
+        -- neither forces collective down, so level flight with
+        -- collective already low is untouched.
+        if rotor_rpm_limited then
+            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR)
+        end
+        if blade_stall_limited then
+            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL)
+        end
     end
     next_state.u_c = law_clamp(state.u_c + c_dot * dt, -1.0, 1.0)
 
@@ -605,15 +751,26 @@ local function law_update(state, dt, measured, limits)
     end
     local d_phi_i = K_BANK_INCREMENT * (r_d - measured.r_deg_s)
     next_state.phi_i = state.phi_i + d_phi_i * dt
-    next_state.phi_d = law_clamp(phi_kinematic_deg + next_state.phi_i, -limits.max_bank_deg, limits.max_bank_deg)
+    -- F-M1 (mode-1 batch): "remove the 30 degree limit. Set no limit
+    -- for now" -- no clamp against `limits.max_bank_deg` any more (the
+    -- field itself is gone from the wire); a kinematic bank request is
+    -- self-limiting (it saturates toward +-90 only as `r_d`/`V_t` grow
+    -- large), and the output stage's own `law_clamp(u_roll, -1, 1)`
+    -- in `law_outputs` is the real physical ceiling.
+    next_state.phi_d = phi_kinematic_deg + next_state.phi_i
 
     -- Step 4: inner tilt-loop integrators.
     next_state.t_p = state.t_p + K_THETA_I * (next_state.theta_d - measured.pitch_deg) * dt
     next_state.t_r = state.t_r + K_PHI_I * (next_state.phi_d - measured.bank_deg) * dt
 
-    -- Step 5: pedal (collective-coupling feedforward only -- no
-    -- slip-ball feedback, module header).
+    -- Step 5: pedal (collective-coupling feedforward, plus Decision
+    -- 27's own pedal-into-the-turn bias while a break's rate override
+    -- is active -- no slip-ball feedback, module header).
     local d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
+    if state.rate_override_deg_s ~= nil then
+        local break_sign = state.rate_override_deg_s > 0.0 and 1.0 or -1.0
+        d_t_y = d_t_y + K_BREAK_PEDAL_BIAS * break_sign
+    end
     next_state.t_y = law_clamp(state.t_y + d_t_y * dt, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
 
     next_state.measured_v_t_mps = measured.v_t_mps
@@ -626,6 +783,19 @@ local function law_update(state, dt, measured, limits)
     next_state.in_band_altitude = math.abs(measured.h_m - alt_goal_agl) <= alt_band
     local speed_band = limits.speed_band_frac * state.speed_goal_mps
     next_state.in_band_speed = math.abs(measured.ias_mps - state.speed_goal_mps) <= speed_band
+
+    -- Decision 27 -- "settling clears it." Once the heading goal is
+    -- actually reached while a break's rate override is still set,
+    -- both it and `break_entry_h_m` are cleared this same frame --
+    -- without this, a break that finished rolling out long ago would
+    -- still be clamping a *later, unrelated* altitude command to the
+    -- stale break-floor (Decision 29), a cross-command leak the "a
+    -- rate belongs to its own command" rule would otherwise miss once
+    -- the command's own goal is *reached* rather than superseded.
+    if next_state.in_band_heading and next_state.rate_override_deg_s ~= nil then
+        next_state.rate_override_deg_s = nil
+        next_state.break_entry_h_m = nil
+    end
 
     return next_state
 end
@@ -890,10 +1060,10 @@ local function check_envelope(t, measured)
     else
         fc_env_low_ias_since_t = nil
     end
-    local bank_deg = math.abs(measured.bank_deg)
-    if bank_deg > (fc_limits.max_bank_deg + ENV_BANK_MARGIN_DEG) then
-        return false, "envelope"
-    end
+    -- No bank-based release any more (F-M1, mode-1 batch: "remove the
+    -- 30 degree limit. Set no limit for now") -- IAS alone governs
+    -- release now; the rotor envelope (Decision 30) is the real
+    -- protection in a break.
     return true, nil
 end
 
@@ -993,6 +1163,12 @@ local function read_measured()
         if type(ang.z) == "number" then q_deg_s = math.deg(ang.z) end
         if type(ang.y) == "number" then r_deg_s = -math.deg(ang.y) end
     end
+    -- Decision 28's rotor RPM seam. `rotor_rpm_valid = false` (a
+    -- failed `arg_proxy` read) does not release the envelope -- it
+    -- fails soft to the dummy value, same posture as every other
+    -- `read_measured()` field; `law_update`'s own guards just read
+    -- `rotor_rpm_pct` and never look at `rotor_rpm_valid` at all.
+    local rotor_rpm_pct, rotor_rpm_valid = read_rotor_rpm_pct()
     return {
         pitch_deg = pitch_deg,
         bank_deg = bank_deg,
@@ -1008,6 +1184,8 @@ local function read_measured()
         self_data_ok = self_data_ok,
         ias_valid = ias_valid,
         bank_valid = bank_valid,
+        rotor_rpm_pct = rotor_rpm_pct,
+        rotor_rpm_valid = rotor_rpm_valid,
     }
 end
 
@@ -1018,6 +1196,11 @@ local function apply_goal_fields(data)
     local alt_m = extract_json_number_field(data, "alt_m")
     local alt_ref = extract_json_string_field(data, "alt_ref")
     local ias_kmh = extract_json_number_field(data, "ias_kmh")
+    -- Decision 27 -- the break's own signed rate override, carried
+    -- alongside `heading_deg` only (never alone -- a rate with no
+    -- heading target is meaningless, and `law_apply_goal`'s own
+    -- `heading_deg ~= nil` branch is the only place this is read).
+    local turn_rate_deg_s = extract_json_number_field(data, "turn_rate_deg_s")
     local turn_value = turn
     if level_off == true then
         turn_value = 0
@@ -1063,6 +1246,7 @@ local function apply_goal_fields(data)
             alt_m = alt_m,
             alt_ref = alt_ref,
             ias_kmh = ias_kmh,
+            turn_rate_deg_s = turn_rate_deg_s,
         }, fc_limits)
     end
 end
@@ -1515,5 +1699,11 @@ M.law_apply_goal = law_apply_goal
 M.law_update = law_update
 M.law_outputs = law_outputs
 M.law_turn_rate_at_bank = law_turn_rate_at_bank
+
+-- Decision 28's rotor RPM seam, exported for the same reason -- a
+-- dedicated unit test (`tests/test_flight_control_lua.py`'s own
+-- `TestReadRotorRpmPct`) needs to call it directly rather than only
+-- indirectly through `read_measured()`/the full per-frame loop.
+M.read_rotor_rpm_pct = read_rotor_rpm_pct
 
 return M

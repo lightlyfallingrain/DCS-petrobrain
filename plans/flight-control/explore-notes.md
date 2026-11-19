@@ -914,3 +914,57 @@ acceleration goals that commands set**, so a break is "turn rate high, hold spee
 rather than its own law, and an ordinary turn, a gentle turn and a break differ only in the
 requested rates. The rotor envelope (RPM floor, retreating blade stall) then limits what any
 requested rate can actually get.
+
+### Mode-1 goal check answers (user, 2026-11-19, verbatim)
+
+Answers to `alignment.md`'s mode-1 goal check (F-M1, F-M2, Q-M1-1..3), plus one new constraint.
+
+- **F-M1 (bank limit / hand-back at 40°):** *"remove the 30 degree limit. Set no limit for now.
+  This is a thing we'll refine based on actual behavior, later."* — no bank clamp and no
+  bank-triggered hand-back in mode 1, in any state, not only during a break.
+- **F-M2 (rates belong to the command that set them):** *"solution accepted, but it must work with
+  the rule lua files."* — the rate a command asks for must be expressible from / owned by the rule
+  in `config/rules/*.lua`, not hidden as a constant inside one Python action.
+- **Q-M1-1 (RPM source):** *"We'll check the rotor RPM gauge later. For now just use the engine RPM
+  reading that the earlier investigation surfaced. Or even a fixed dummy reading at 90% RPM. We'll
+  replace it with the real rotor RPM reading once we find out what reads it."* — main-loop note: the
+  reading surfaced earlier is `BASE_SENSOR_LEFT_ENGINE_RPM` in `list_cockpit_params()`
+  (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`, Finding 3); one RPM
+  source behind one seam, so swapping it is a one-place change.
+- **Q-M1-2 (low and slow near 40 m: ground clearance or RPM):** *"rotor rpm since if it drops, we
+  lose lift and crash. If low and slow and rpm drops, accelerate. Forward speed (>50 km/h) creates
+  lift and the rpm can recover."*
+- **Q-M1-3 (spoken rate words):** *"for now, only inside commands"*.
+- **New — vortex ring state:** *"helicopters are prone to Vortex Ring State at slow speeds. When
+  speed is < 50 km/h, limit descent rate to 4 m/s (configurable value)."* — applies in every mode-1
+  state, like the rotor envelope.
+- **Not this batch (filed separately):** *"switch-reference.md lists the effecors we can *write*.
+  It'd be really good to add to that list args that we can *read*, like lamps, instrument values
+  (like the rotor rpm), etc."* — `[[BL-B132]]`.
+
+### Mode-1 hover (user, 2026-11-19, verbatim)
+
+> *"Hover in Mode 1:*
+> *- consider flight state as hover when speed (length of speed vector) is less than 25 km/h.
+>   (configurable value)*
+> *- hover state makes hover translate commands available.*
+> *- desired speed for translates is 10 km/h (configurable)*
+> *- desired vertical speed for climb/descend is 2 m/s (configurable)*
+> *- move up/down is not a 2 m step in altitude, it is constant climb/descent at desired vertical
+>   speed, until "hold" command."*
+
+Main-loop note: this reverses the mode-1 plan's Decision 3 ("mode 1 is forward flight only"),
+under which every `hvrt_*` command answers "unable, not ready" in mode 1. Arrived while the
+break/rotor-envelope batch was mid-build; recorded here, planned as the next mode-1 batch unless
+the user says otherwise. Mode 2's "move up/down" stays ED's 2 m step.
+
+Answers (user, 2026-11-19, verbatim): *"Mode 1 hover. Write it into BL-16, but leave until later.
+There are more important things first. Q1 - ground speed Q2 - "speed 0" Q3 - yes, all translate
+command keep the translate going until "hold" command Q4 - fixed spot, heading and altitude Q5 -
+this is acceptable speed range, but limittations appy like the descend rate. In hover, heading
+change is possible command and must be done with pedals to induce yaw. Bank in hover is not the
+way to change heading. The slower the flight, the more gentle inputs need to be."*
+
+(Questions were: Q1 ground speed or airspeed; Q2 how hover is entered; Q3 translate continuous
+until "hold"; Q4 what "hold" holds; Q5 whether 25–50 km/h forward flight is fine.) Deferred:
+`[[BL-16]]` "Later — mode 1 hover".
