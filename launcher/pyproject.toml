@@ -1,0 +1,23 @@
+[project]
+name = "launcher"
+version = "0.1.0"
+description = "Text UI that starts, stops and watches the Petrobrain services on one machine (X-B40)"
+requires-python = ">=3.11"
+# stdlib only at runtime (curses, subprocess, threading); dev tools below are not runtime deps.
+dependencies = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff.lint.isort]
+# Declared explicitly for the same reason as raster-chart-viewer/pyproject.toml: keeps first-party
+# classification independent of the cwd ruff is invoked from.
+known-first-party = [
+    "launcher",
+]

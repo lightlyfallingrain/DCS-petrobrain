@@ -42,6 +42,10 @@ installed terrains' DCS RasterCharts as a pan/zoom map in a browser on the LAN, 
 Windows DCS machine. A crew reference (the paper chart on a tablet); no Petrovich behaviour depends
 on it, and it imports nothing from any other subproject.
 
+And one helper, added 2026-11-19: **Launcher** (`launcher/`) — a text UI that starts, stops and
+watches the services on one machine, over the existing `run-scripts/run-*.sh`. Tracked as
+`todo/backlog/X-B40.md`, not a roadmap of its own (user direction).
+
 Planned, roadmap only (2026-11-19): **Wingbrain** (`wingbrain/`) — control of the player's DCS AI
 wingmen, commanded over a simulated radio; concept `docs/concept/wingbrain.md`. Whether it becomes
 its own service or lives inside body-layer is open (`wingbrain/ROADMAP/`, decision D1).
