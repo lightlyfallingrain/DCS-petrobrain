@@ -24,3 +24,19 @@ One defect, two consequences.
    then on every `flight_control*` rule answers "Unable, not flying", and "I have controls" from
    `PILOT` is a silent no-op — the recovery phrase that Decision 13 says must always act does
    nothing.
+
+User approved fixes a (match the ack by the take's wire seq), b (ack timeout also sends `release`)
+and c ("I have controls" releases whenever Lua reports holding the axes, whatever belief says).
+
+## Mode 2, same day
+
+> "even more important, why did handing control over not work? Just tested with mode 2, same
+> 'unable not flying'"
+
+`speech-20261119-232426.jsonl`: "altitude two zero zero radar" → `set_altitude`, `act`, then the
+`flight_control` gate refused with `NOT_FLYING`. Mode 2 has no ack, so this means body-layer's
+`parked_flight_state.parked_active` was false — `apw_parked_active` from `ai_pilot_wheel.lua`
+(stick 852 stowed AND camera in the operator seat). Cause not yet known; needs the live
+`GET /ai_pilot_wheel/latest` sample from that state. Open hypothesis: mode 1's Lua side was left
+`active` by the earlier failed take (defect 2 above; only a mission restart or a `release` clears
+it) and is interfering.
