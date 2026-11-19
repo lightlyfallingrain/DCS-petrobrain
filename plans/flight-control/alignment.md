@@ -1636,3 +1636,84 @@ then climbs back to 70 m AGL (Open assumptions, "what a break supersedes").
   floor won't give: which wins, the ground clearance or the rotor RPM?
 - **Q-M1-3** — Rates this batch: only set by the existing commands and the breaks (recommended),
   or do you want spoken words for them now, e.g. "gentle turn left" or a standing "fly gently"?
+
+## Plan check — 2026-11-19 (mode-1 batch: break turn, break away, rotor envelope, rates as goals)
+
+**Verdict:** CONCERNS — one gap. Every F-M/Q-M1 item the user actually answered is built faithfully
+and traced cleanly; the one open assumption the goal check named but never promoted to a numbered
+question — a take during a mode-2 break — is still unaddressed, by the user's answers and by this
+plan, and the plan's own "Decisions Requiring User Input: None" overstates how complete the
+coverage is.
+
+Checked `plans/flight-control/plan.md`'s "Revised 2026-11-19 — mode-1 batch" (Decisions 27–31)
+against the goal check — 2026-11-19 above (E11–E18, F-M1–F-M3, the Open assumptions, Q-M1-1..3) and
+`explore-notes.md`'s "Mode-1 goal check answers (user, 2026-11-19, verbatim)". Also checked the
+user's 2026-11-19 rotor-RPM-scale note from `main` (not on this branch) against Decision 28.
+
+| expectation | stage | status |
+|---|---|---|
+| E11 (break turn, hard 90°, steep bank, supersedes heading goal) | Decision 27, B1 | met |
+| E12 (≤100 m loss, never below 40 m AGL, speed near entry) | Decision 29 (floor); B4 (speed goal untouched) + Decision 30 (stall-margin tilt trade keeps speed up near entry rather than bleeding) | met |
+| E13 (break away, hard 180° left, one continuous turn, no pause) | `axes_break_away` (continuous `-180°` goal, single `turn_rate_deg_s`) | met |
+| E14 (Petrovich keeps controls through any break) | F-M1 (bank-triggered release and clamp both deleted) | met |
+| E15 (RPM floor / no blade stall, every mode-1 state, silent) | Decision 30 (`law_update`, unconditional on state) | met |
+| E16 (ordinary turn after a break is ordinary) | Decision 27, B2 (override cleared by any non-break heading/turn command) | met |
+| E17 (smooth take whatever the rotor state) | inherited from the mode-1 re-cut's existing take mechanism (Co-moving row 13) + F-M1 removing the one new release path this batch could have added | met, for an ordinary take — see Finding 1 for the one take scenario this doesn't cover |
+| E18 (several things change at once) | B4 (heading/altitude/speed channels independent, unchanged architecture) | met |
+| F-M1 (no bank limit at all) | answered verbatim, `check_envelope`'s bank branch and `law_update`'s `phi_d` clamp both deleted, `MAX_BANK_DEG` removed from the wire | met |
+| F-M2 (rate belongs to the command, lives in `flight.lua`) | Decision 27 (`turn_rate_deg_s` wire field, cleared per-command) + `BREAK_TURN_RATE_DEG_S` declared in `config/rules/flight.lua`, not Python | met |
+| F-M3 (no new phrases, only the stub body changes) | unchanged `cbtm_break`/`cbtm_break_away` rules and readbacks | met |
+| Open: rate is sticky to its own command | Decision 27, B2/B3 | settled |
+| Open: spoken rate words | Q-M1-3 ("only inside commands") — no vocabulary added | settled |
+| Open: what a break supersedes | B1/B4 (heading only; altitude/speed untouched) | settled |
+| Open: "keep speed near entry" at high entry speed | Decision 30 (stall-margin cap trades lift for speed via tilt, matching the user's own account of why speed fluctuates in a break) | settled |
+| Open: pedal into the turn | Decision 30 (`K_BREAK_PEDAL_BIAS`) | settled |
+| Open: rotor envelope vs. terrain floor priority | Q-M1-2, Decision 29/30 ("falls out of the existing step order... without a second priority mechanism") | settled |
+| Open: what happens when the envelope cannot hold the floor | Decision 30 — resolved differently from the goal check's own guess ("lowers collective"); the user's actual Q-M1-2 answer is "accelerate" (tilt-trade), which the mechanism implements | settled, by the user's real answer |
+| Open: the RPM source | Decision 28 (`read_rotor_rpm_pct`, `"dummy"`/`"arg_proxy"` seam); the `main`-only 2026-11-19 scale note ("value × 100 = rotor RPM per cent... has to be checked in cockpit") is matched by the seam's own comment, `raw * 100.0, true -- calibration unconfirmed -- owed by the next flight` | settled, scale left correctable |
+| **Open: a take during a mode-2 break** | — | **missing — see Finding 1** |
+
+### Findings
+
+1. **A take during a mode-2 break still inherits a continuous turn at the measured rate, with the
+   one cap that used to bound it now removed — the exact "would not" case the goal check named,
+   left open by the user's answers and unbuilt by this plan.** Lens: the non-obvious case.
+   - Assumption: the goal check's own Open assumptions list this by name — *"A take during a
+     mode-2 break... mode 1 carries the break to the heading Petrobrain asked ED for (E-P17's
+     ±90). Would not: today's take rule, which inherits the measured turn rate as a continuous
+     turn capped at the ordinary bank. The aircraft would then orbit at 20° bank instead of
+     rolling out. (The bank at take is F-M1.)"* It was never promoted to a numbered Finding or a
+     `Q-M1-<n>`, so it carried no obligation on the user to answer it in the same breath as
+     F-M1/F-M2 — and the 2026-11-19 "Mode-1 goal check answers" section does not mention it.
+   - In the plan: the mode-1 re-cut's existing take mechanism (Co-moving row 13, line 3117) sets
+     `fc_takeover_mode` to "heading" only if `|φ| < threshold`, otherwise a continuous turn at the
+     measured rate — unchanged by this batch. `grep -n "mode-2 break\|take during\|measured turn
+     rate"` across `plan.md` returns nothing: this batch's Decisions 27–31 never touch the take
+     path, only `law_apply_goal` (voice commands) and `law_update` (the envelope guards).
+   - What changed for the worse, specifically: before this batch, a bank over 40° at take would
+     have self-released to the pilot (a different problem, but a bound). After F-M1, that release
+     is gone everywhere, including here. So a take mid-break now inherits ED's break bank (which
+     could be any value, "unknown to us" per the goal check's own F-M1 text) as a **standing
+     continuous turn, uncapped, with no release** — not rolling out at the break's own ±90° target
+     the way E-P17/E11 say a break should.
+   - The pilot would see: he says "break left" parked, unparks mid-turn expecting the roll-out at
+     −90°, and instead Petrovich keeps turning — now indefinitely, since nothing bounds or stops
+     it — until he says something else.
+   - Grounded in: the goal check's own Open assumptions text (not re-derived here), the mode-1
+     re-cut's take-mechanism row, and the live grep above showing this batch's Decisions never
+     reach it.
+   - Suggests: this is a real question for the user, not a mechanism the Architect can fill in
+     silently — whether a take mid-break should roll out to the break's own target heading (if
+     that can be recovered — ED's own break has no `±90°` target this codebase set, only mode 1's
+     would), or whether the take mechanism should at least cap the inherited continuous turn at
+     mode 1's own ordinary ceiling rather than carrying over an arbitrary ED bank with no release
+     at all. See **Q1** below. Until answered, the plan's "Decisions Requiring User Input: None"
+     should not be read as covering this case.
+
+### Questions for the user
+
+- **Q1 (from Finding 1)** — If you say "break left" while parked and unpark mid-break, should
+  mode 1 try to finish the break (roll out around 90° from where it started, if that can be
+  recovered), or just cap the inherited turn at the ordinary ceiling so it doesn't orbit
+  indefinitely at whatever bank ED happened to be flying? Or is this rare enough (you'd need to
+  unpark mid-evasion) to leave for a later flight's finding?
