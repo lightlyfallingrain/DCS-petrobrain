@@ -324,13 +324,10 @@ report rather than build a shared counter if the root cause turned out to be som
 - `ruff format --check body-layer/src body-layer/tests`: 227 files already formatted.
 - `ruff check body-layer/src body-layer/tests`: all checks pass.
 - `cd body-layer && .venv/bin/mypy src`: Success, no issues found in 92 source files.
-- Full `pytest body-layer -q` (no filter): ran clean (3696 passed, 4 xfailed, 0 failed) against the
-  version of the fix with the overly-narrow `== "running"` condition, which is exactly how the one
-  regression above (`TestCbtmTransitions::
-  test_break_left_is_recorded_and_ends_an_outstanding_alignment`) was caught and then fixed to
-  `!= "done"`; re-run of the touched files after the correction (above) is clean. A second full,
-  unfiltered run against the corrected code was in flight when this report was written -- rerun
-  `pytest body-layer -q` to confirm if that matters before merge; nothing in the diff outside
-  `ai_pilot_wheel.py`/`test_ai_pilot_wheel.py` changed between the two runs.
+- Full `pytest body-layer -q` (no filter), two runs: the first, against the overly-narrow
+  `== "running"` condition, surfaced the one regression above
+  (`TestCbtmTransitions::test_break_left_is_recorded_and_ends_an_outstanding_alignment`, 1 failed,
+  3696 passed, 4 xfailed) -- exactly how it was caught. After correcting to `!= "done"`, a second
+  full run is clean: **3698 passed, 4 xfailed, 0 failed** (289.55s).
 - No Lua files touched by this fix -- `luac5.1 -p`/GETGLOBAL checks not applicable.
 - `aircraft-layer/` untouched -- this defect and fix are entirely within `body-layer/`.
