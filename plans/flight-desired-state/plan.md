@@ -776,3 +776,10 @@ Kept under their own heading so the ledger does not count them as accepted.
   course Lua read** (possibly the pre-align one), with no extra speech. Why: it is a one-second
   window the pilot opened himself by unparking, and the alternative (the measured heading) is no
   more right. Say if you would rather he says the heading he is holding.
+
+**Answered 2026-11-20** (user, verbatim): *"1 - 1 s is acceptable"* (**U5**: plain one-poll
+version; no fast re-read) and *"2 - overlay updates in a few frames. Anyhow, take whatever value
+the overlay has."* (**U6**: on an unpark, mode 1 takes the overlay course as it is at that moment,
+no extra speech). The second answer also bears on the align read delay: the overlay updates within
+a few frames, so the implementer should use a delay of a few frames rather than borrowing
+`MODE_READ_SETTLE_S` (1.0 s), and say what was chosen.
