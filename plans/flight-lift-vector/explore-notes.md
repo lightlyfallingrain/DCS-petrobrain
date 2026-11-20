@@ -31,3 +31,11 @@ Settled:
 - **Q5:** hold nose heading in crosswind (drift with the wind), not ground track.
 - **Q6:** in hard turns and breaks, a deliberate extra pedal into the turn beyond ball-centred; in
   ordinary flight the pedal centres the ball.
+
+## Staging (user, 2026-11-20, verbatim)
+
+> plan lift vector 1st stage without SAU. Go ahead with architecht.
+> 2nd stage will use SAU.
+
+So the first lift-vector stage neither uses nor depends on the SAU; using the SAU (usually on at
+handover, Q3) is a second stage, planned once the user's SAU notes arrive.
