@@ -24,6 +24,7 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    controls_to_player_edge,
     decide_carried_value_speech,
     decide_flight_speech,
     parse_acks,
@@ -202,6 +203,52 @@ class TestDecideFlightSpeech:
         assert decision is not None
         assert decision.says == "You have controls!"
         assert decision.urgent is True
+
+
+class TestControlsToPlayerEdge:
+    """`controls_to_player_edge` -- the SAU-handover trigger's own "when"
+    (`plans/flight-lift-vector/explore-notes.md`, "SAU in mode 1"): fires
+    on an `fd_mode` edge from `"m1"`/`"m2"`/`"taking"` into `"off"`, for
+    *every* cause -- unlike `decide_flight_speech`, which stays silent on
+    the causes in `_SILENT_OFF_CAUSES`."""
+
+    @pytest.mark.parametrize("prior_mode", ["m1", "m2", "taking"])
+    @pytest.mark.parametrize(
+        "cause",
+        ["release", "stop", "reset", "unpark_refused", "envelope", "nan", "dead"],
+    )
+    def test_fires_on_every_kind_of_edge_into_off(
+        self, prior_mode: str, cause: str
+    ) -> None:
+        prev = FlightAuthorityState(fd_mode=prior_mode)
+        new = FlightAuthorityState(fd_mode="off", mode_cause=cause)
+        assert controls_to_player_edge(prev, new) is True
+
+    def test_does_not_fire_on_a_take_edge(self) -> None:
+        prev = FlightAuthorityState(fd_mode="off")
+        new = FlightAuthorityState(fd_mode="taking", mode_cause="take")
+        assert controls_to_player_edge(prev, new) is False
+
+    def test_does_not_fire_on_a_park_edge(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m1")
+        new = FlightAuthorityState(fd_mode="m2", mode_cause="park")
+        assert controls_to_player_edge(prev, new) is False
+
+    def test_does_not_fire_on_a_successful_unpark_edge(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m2")
+        new = FlightAuthorityState(fd_mode="m1", mode_cause="unpark")
+        assert controls_to_player_edge(prev, new) is False
+
+    def test_does_not_fire_when_already_off(self) -> None:
+        prev = FlightAuthorityState(fd_mode="off")
+        new = FlightAuthorityState(fd_mode="off")
+        assert controls_to_player_edge(prev, new) is False
+
+    def test_does_not_fire_on_the_default_no_sample_state(self) -> None:
+        assert (
+            controls_to_player_edge(FlightAuthorityState(), FlightAuthorityState())
+            is False
+        )
 
 
 class TestDecideCarriedValueSpeech:

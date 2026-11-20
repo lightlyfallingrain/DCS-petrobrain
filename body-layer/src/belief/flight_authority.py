@@ -225,6 +225,33 @@ def decide_flight_speech(
     return None
 
 
+#: `fd_mode` values that mean Petrovich held the controls (`"taking"` is
+#: mid-capture, which already counts -- same set `CrewConsole.has_
+#: controls` uses).
+_HAS_CONTROLS_MODES: frozenset[str] = frozenset({"taking", "m1", "m2"})
+
+
+def controls_to_player_edge(
+    prev: FlightAuthorityState, new: FlightAuthorityState
+) -> bool:
+    """`True` exactly when this poll's `fd_mode` moved from one of
+    `_HAS_CONTROLS_MODES` into `"off"` -- the controls going to the
+    player, **for any cause**, not only the ones `decide_flight_speech`
+    speaks urgently about (`plans/flight-lift-vector/explore-notes.md`,
+    "SAU in mode 1" -- user, verbatim: "On handover to player (mode
+    off), set pitch, bank and heading channels ON" -- the SAU channels
+    need to be on for the player regardless of why he got the controls
+    back).
+
+    Compares `fd_mode` directly rather than gating on a `mode_n` edge
+    like `decide_flight_speech` does: the values this checks for can
+    only differ across a real Lua-side mode change in the first place
+    (the default/no-sample-yet state is `"off"`, which is never itself
+    in `_HAS_CONTROLS_MODES`), so there is no "no edge to observe" case
+    to guard against here."""
+    return prev.fd_mode in _HAS_CONTROLS_MODES and new.fd_mode == "off"
+
+
 def _digit_readback(value: int) -> str:
     """Spells a non-negative integer digit by digit, space-separated --
     `CrewConsole._digit_readback`'s own algorithm, copied rather than

@@ -201,6 +201,7 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    controls_to_player_edge,
     decide_carried_value_speech,
     decide_flight_speech,
 )
@@ -5535,6 +5536,22 @@ def _run_crew_text_poll_loop(
                         if authority_decision is not None:
                             crew_console.speak_flight_authority_decision(
                                 authority_decision, runner.last_t_sim
+                            )
+                        # `plans/flight-lift-vector/explore-notes.md`,
+                        # "SAU in mode 1" -- the controls going to the
+                        # player, for *any* cause (unlike `authority_
+                        # decision` above, which only speaks on the
+                        # causes that are not in `_SILENT_OFF_CAUSES`):
+                        # sets the SAU pitch/bank/heading channels on,
+                        # silently.
+                        if controls_to_player_edge(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        ):
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.CONTROLS_TO_PLAYER,
+                                runner.last_t_sim,
                             )
                         # U2's carried-value lines (section 3a's own
                         # speech order: mode-change lines first, then
