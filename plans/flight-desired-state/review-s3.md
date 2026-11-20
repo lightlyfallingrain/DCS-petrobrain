@@ -164,3 +164,123 @@ modules/files"; both subprojects' complete check suites (format/lint/mypy/full p
 `implementation.md`'s own report. Not independently re-run: the live-cockpit behaviour the test
 card asks the user to fly (no DCS session reachable from this environment, per this role's own
 constraints) — that remains the user's own acceptance step, not re-verified here.
+
+## Re-review, 2026-11-20
+
+Scope: the review-fix round only, `git log --oneline add3bd16..HEAD` = `b1346a18` (the four
+fixes) + `083e363b` (an implementer-memory note, no production change). Read
+`implementation.md`'s "Review-fix round" section in full, `plan.md`'s U2/Q1a text, every line the
+round's diff touched, and the module-map entries in both `aircraft-layer/CLAUDE.md` and
+`body-layer/CLAUDE.md`. Both subprojects' checks run fresh in this re-review's own worktree
+(`review2/desired-s3`, cut from `083e363b`), not taken on trust from `implementation.md`'s report.
+
+**Required Fix 1 (U2 clamp) — built correctly, and the two clamps cannot drift.** The clamp lives
+exactly where it has to: `build_take_seed`'s unpark branch (`flight_control.lua:1573-1586`)
+clamps only the `seed` fed to `law_init_at_take` against `fc_limits.min_ias_kmh`/`max_ias_kmh`/
+`floor_agl_m`; `desired` itself (and `fd_ias`/`fd_alt`, its wire mirror) is never touched —
+confirmed by reading the diff, not just the comment. **Checked the drift question directly**:
+`fc_limits` is not a Lua-local constant table independent of body-layer — it is set wholesale by
+`handle_flight_lease_command` from the `limits` dict `belief.flight_control.
+flight_control_limits()` builds (`body-layer/src/belief/flight_control.py:517-545`), and that
+dict's `min_ias_kmh`/`max_ias_kmh`/`floor_agl_m` keys are exactly `MIN_IAS_KMH`/`MAX_IAS_KMH`/
+`FLOOR_AGL_M` — the same three `tuning.real` constants `clamp_speed`/`clamp_altitude` read on the
+body side. One declaration, sent over the wire every poll (`POST /command/flight_lease`,
+`aircraft-layer/CLAUDE.md`'s own description); Lua's local `fc_limits` table (lines 209-213,
+80/280/40) is only the pre-lease fallback and happens to equal the same code defaults. So the two
+clamps are structurally the same clamp, not two maintained in parallel — confirmed by reading
+`flight_control_limits()`, not inferred from the docstring's claim. (The one narrow case this
+does not cover — an unpark in the few-hundred-ms window before the first lease poll ever lands,
+with a non-default `tuning.toml` override in effect, could see Lua's hardcoded fallback diverge
+from body-layer's constant — is a pre-existing property of the whole lease-sync mechanism from
+Stage 1-2, already reviewed and approved; not introduced by this round, not reopening it here.)
+Speech: `decide_carried_value_speech` fires only when `new.fd_mode == "m1"` and `new.mode_cause
+== "unpark"` with a genuine `mode_n` edge (`flight_authority.py:259-261`), returns one non-urgent
+`FlightAuthorityDecision` per differing part, and never writes `new.ias_kmh`/`alt_m` anywhere —
+confirmed by reading the function body. Order: `body.py` calls it immediately after `decide_
+flight_speech` each poll (lines 5531-5550), before `_apply_flight_requests`/`drain_flight_control`
+(the ack-outcome drain) — matches the plan's own speech order (mode-change, then U2's line, then
+acks in seq order) exactly. Mutation-tested: flipping the speed-clamp branch's condition to
+`False` fails 3 of the 10 `TestDecideCarriedValueSpeech` cases, so the test suite is not vacuous
+on this path either.
+
+**Required Fix 2 (voice-take-during-`taking` test) — the test genuinely exercises the stated
+window.** `TestVoiceTakeSetDuringTakingSurvivesTheSeed` drives `set_desired` with a `seq` strictly
+after `take_seq` while `fc_mode == "taking"`, before the resolving `run_flight_control` call — the
+exact gap the review named. Note for the record: the underlying `build_take_seed` voice-take logic
+this test covers is **unchanged** by this round (`git diff add3bd16 HEAD -- flight_control.lua`
+touches only the unpark branch) — this is a coverage addition for pre-existing, already-correct
+code, not a regression fix, exactly as the review itself characterized it ("the logic reads
+correct by inspection... currently has zero automated coverage"). Confirmed the test is not
+vacuous by mutation: commenting out the seed's heading assignment flips the assertion
+(`fc_in_band_heading` goes from `"false"` to `"true"`, test fails as expected) — this is a
+stronger check than "passes against `add3bd16`'s production code," which it also does, harmlessly,
+since that code never changed.
+
+**Required Fix 3 (align-read-scheduling test) — same shape, same conclusion.**
+`TestAlignReadScheduling` drives `ai_pilot_cbtm.action = "align"` through a real `update_ai_pilot_
+wheel_overlay` call and asserts nothing is written before `ALIGN_READ_DELAY_S`, then the aligned
+heading is written once it elapses. `ai_pilot_wheel.lua` has **zero diff** between `add3bd16` and
+`HEAD` — this, too, is coverage added for already-live, already-correct code, not a fix. Mutation-
+tested by commenting out the deferred `write_internal` call: the test fails
+(`writes_after_deadline` goes from `"1"` to `"0"`) — not vacuous.
+
+**Required Fix 4 (`body-layer/CLAUDE.md`) — accurate.** The `flight_control.py` module-map entry
+now correctly says `decide_flight_control` is deleted and names what replaced it (`belief.
+flight_authority`'s `decide_flight_speech`/ack-matching); `FlightControlState` is correctly called
+diagnostics-only. Re-read against the current code and found nothing else stale in the entry.
+
+**New required fix: `body-layer/docs/STRUCTURE.md` still names the deleted function as
+current, in the same way Required Fix 4 was about.** Two hits
+(`STRUCTURE.md:971` — "it lives in `belief.flight_control.decide_flight_control`" — and
+`STRUCTURE.md:1205` — "`decide_flight_control` (the one 'when' apart from those two...)").
+`body-layer/CLAUDE.md` itself says this file is "expected to [be read] for any module before
+modifying it" — a next agent who reads this entry before touching `flight_control.py` is told the
+same wrong thing Required Fix 4 existed to stop `body-layer/CLAUDE.md` from telling it. The
+implementer flagged this and left it out-of-scope (the plan's own "Affected modules/files" named
+`body-layer/CLAUDE.md` specifically, not `STRUCTURE.md`), which is a reasonable scope read for the
+round itself, but per this role's "cheap doc fixes can be listed as required": this is two
+sentences in a module-detail doc with the identical failure mode as a fix already done two
+paragraphs above it in the same file family. Requiring it now is cheaper than leaving it for
+someone to rediscover.
+
+**Not required — `flight_control.lua:1990`'s one stray comment** ("`decide_flight_control`'s own
+unpark branch never compares it against anything"), inside the unpark precondition-refusal branch,
+untouched by this round and by the Stage 3 round before it. This is a single inline comment deep
+in a branch nobody reads as a map (unlike `STRUCTURE.md`/`CLAUDE.md`, which are read deliberately
+before touching a module) — low value, low risk, correctly left alone per the "stay local to the
+block you are editing" comment-pruning rule. Flagging as optional only.
+
+**Checks, run fresh in this re-review's own worktree:**
+- aircraft-layer: `ruff format --check`/`ruff check` clean except one pre-existing, untouched
+  finding in `research/2026-10-06-unit-id-join-reduce.py` (confirmed via `git diff add3bd16 HEAD
+  --stat -- aircraft-layer/research/` — empty, not touched by this round); `mypy src` clean (29
+  files); `luac5.1 -p` passes on `Export.lua`, `flight_control.lua`, `flight_desired.lua`,
+  `ai_pilot_wheel.lua`; `pytest tests -q`: **1109 passed**.
+- body-layer: `ruff format --check` clean except two pre-existing, untouched findings in
+  `research/*.md` (same confirmation, `git diff --stat` empty for that directory); `ruff check`
+  clean; `mypy src` clean (93 files); `pytest tests -q -p xdist -n auto -m "not slow"`: **3728
+  passed, 4 xfailed**; `pytest tests -q -m slow`: **27 passed**.
+
+## Verdict (re-review)
+
+**APPROVED WITH MINOR FIXES.** All four of the original required fixes are built and verified by
+direct inspection and mutation testing, not taken on the implementer's word — U2's clamp is
+structurally tied to a single constant declaration (cannot drift), the two new test gaps are
+closed with tests proven non-vacuous, and the stale doc named in Required Fix 4 is now accurate.
+One new, small required fix: prune `body-layer/docs/STRUCTURE.md`'s two remaining `decide_flight_
+control`-as-current mentions (same defect class as the fix just done in `body-layer/CLAUDE.md`,
+same two-sentence cost). The stray Lua comment at `flight_control.lua:1990` is optional only.
+Nothing here blocks Stage 3 from flying — recommend the doc fix lands before or alongside Stage 4
+rather than gating this round further.
+
+## Re-review Confidence
+
+Full read of `implementation.md`'s review-fix section, `plan.md`'s U2/Q1a text, and the complete
+diff `add3bd16..HEAD` (both Lua files, both Python files, the card, both `CLAUDE.md` files). Both
+subprojects' full check suites (format/lint/mypy/pytest including `slow`/Lua syntax) run fresh in
+this re-review's own worktree. Went past reading the diff for the two new test-coverage fixes and
+the U2 announcement: ran each test file, then mutated the mechanism under test (the speed-clamp
+branch, the voice-take seed assignment, the deferred-write call) and re-ran to confirm each
+relevant test actually goes red — not inferred from the implementer's own stash-based claim. Not
+independently re-run: live-cockpit acceptance (no DCS session reachable here) — unchanged from the
+original review, still the user's own step.
