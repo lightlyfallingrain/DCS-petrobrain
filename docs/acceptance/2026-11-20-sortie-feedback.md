@@ -139,3 +139,15 @@ only the flown value may deviate. Same for mode 1's goal values.
 - Turns: no pedal at all. The pedal law has no slip-ball term (never probed) and no
   turn-coordination term; the only pedal inputs are the collective feedforward (now gated off,
   collective disabled) and the break bias.
+
+Decisions (asked: enable collective; pedal into the turn plus a later slip-ball probe; tune the
+pitch response via an M0-E probe or by feel), verbatim:
+
+> 1 - absolutely yes. Now.
+> 2 - yes
+> 3 - cancel, add collective control first, then I'll retest
+
+- Collective is written in mode 1 (`FC_AXES_ENABLED.collective = true`), in this batch.
+- Turns get a pedal coordination term proportional to turn rate, in this batch; a slip-ball probe
+  flight comes later so the ball can be centred properly.
+- No pitch-loop tuning now: the user retests the break with collective on first.
