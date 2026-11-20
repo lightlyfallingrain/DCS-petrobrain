@@ -29,6 +29,7 @@ from typing import Final
 import tuning
 from aircraft_client import AircraftLayerClient
 from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
+from belief.speech import render_unable
 
 #: How old a `flight` request may be when `Export.lua` applies it (BL-16
 #: Stage 3, `plans/flight-desired-state/plan.md`, section 3a) -- must
@@ -290,3 +291,117 @@ def resolve_pending_take(
     if now_sim - pending.sent_at_sim >= HANDOVER_ACK_TIMEOUT_S:
         return None, FlightAuthorityDecision(says="Unable, not ready.", urgent=False)
     return pending, None
+
+
+@dataclass(frozen=True)
+class PendingFlightReadback:
+    """BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section 3a)
+    -- one flight-category command's own readback, held unspoken from
+    the moment its numbered `set` request is sent until `fd_acks`
+    resolves that `seq`. `lines` is already the fully-rendered readback
+    text, computed by the rule at dispatch time (mode-aware, via
+    `CrewConsole.flight_mode()`/`rules.actions._by_mode`) -- 3a's ack
+    mode letter is read only to decide *whether* to speak the text,
+    never to re-render it, since U1's own "the readback is the
+    request's own absolute value in m1, or `m2_flown` of it in m2" is
+    already true of `lines` by construction (the action computed it in
+    whichever mode was live at send time, which agrees with the ack's
+    mode barring the rare mode-change-mid-flight race the suppression
+    rules below exist for)."""
+
+    seq: int
+    lines: tuple[str, ...]
+    sent_at_sim: float
+
+
+#: 3a's own refusal-wording map: "Each Lua reason maps onto an existing
+#: `render_unable` token ... No new spoken wording." `wrong_mode` is the
+#: one reason that is not simply `NOT_READY` (U9's "AI overlay" wording,
+#: `belief.speech._UNABLE_TEMPLATES["AI_OVERLAY"]`); every other closed
+#: reason `Export.lua`'s `flight` channel can answer with (section 5's
+#: own closed set, plus `bounds`) reduces to `NOT_READY` from the
+#: player's seat, the same posture `resolve_pending_take` already takes
+#: for the handover's own refusal. A reason not in this table (there is
+#: none today; defensive against a future Lua reason this map has not
+#: been extended for) falls back to `NOT_READY` too, per 3a's own "uses
+#: NOT_READY and flags it, rather than writing a new line."
+_FLIGHT_REFUSAL_UNABLE_TOKENS: dict[str, str] = {
+    "wrong_mode": "AI_OVERLAY",
+}
+
+
+def resolve_pending_flight_readbacks(
+    pending: list[PendingFlightReadback],
+    acks: str | None,
+    now_sim: float,
+    *,
+    suppress_accepted: bool = False,
+) -> tuple[list[PendingFlightReadback], list[FlightAuthorityDecision]]:
+    """3a's own ack-driven readback resolver, generalised from `resolve_
+    pending_take` to every ordinary flight-channel command -- U1's own
+    decision: *"Readback on acting on command -> wait for lua."*
+
+    **Strict FIFO by `seq`, never arrival order** (3a: "ack outcomes in
+    seq order, never arrival order"): only the *front* of `pending` is
+    ever checked against `acks`; an unresolved front entry blocks every
+    later one this poll, even if a later one's own ack already arrived
+    (a UDP re-order, or two sends landing inside one poll's push
+    window) -- the only way to guarantee seq order against a ring that
+    can resolve out of order.
+
+    Each resolved front entry yields decisions, never urgent (3a names
+    no urgent flight-channel readback -- the handover's own "You have
+    controls!"/"I have controls." stays `resolve_pending_take`'s own
+    urgent path):
+
+    - **accepted** (`"N:a:<mode>"`) -- every one of `lines`, verbatim,
+      in order.
+    - **refused** (`"N:r:<reason>"`) -- one `unable(reason)` line via
+      `_FLIGHT_REFUSAL_UNABLE_TOKENS`.
+    - **no ack within `belief.flight_control.HANDOVER_ACK_TIMEOUT_S`**
+      of `sent_at_sim` -- one "Unable, not ready." line (3a: "a timeout
+      is always the truth" -- `Export.lua` refuses anything past its
+      own `until` deadline, so this can never contradict a late Lua
+      accept; 3a's own "clock anomaly" case, a late-accepted ack for an
+      already-timed-out `seq`, is left unhandled here exactly as
+      `plans/flight-desired-state/implementation.md`'s Stage 3
+      deviation (3) already flags for the handover's own equivalent).
+
+    `suppress_accepted=True` (3a's own mode-off-edge suppression,
+    `CrewConsole.drain_flight_control`'s own caller) still resolves
+    (and removes) an accepted entry -- its `seq` is consumed from the
+    ring exactly as if it had spoken -- it just yields no decision for
+    it, since the value it would have named was already cleared with
+    the mode. A refusal or timeout is never suppressed either way (3a
+    names only the accepted case)."""
+    acks_by_seq = {seq: (status, detail) for seq, status, detail in parse_acks(acks)}
+    remaining = list(pending)
+    decisions: list[FlightAuthorityDecision] = []
+    while remaining:
+        head = remaining[0]
+        found = acks_by_seq.get(head.seq)
+        if found is not None:
+            remaining.pop(0)
+            status, detail = found
+            if status == "a":
+                if not suppress_accepted:
+                    decisions.extend(
+                        FlightAuthorityDecision(says=line, urgent=False)
+                        for line in head.lines
+                    )
+            else:
+                reason = _FLIGHT_REFUSAL_UNABLE_TOKENS.get(detail, "NOT_READY")
+                decisions.append(
+                    FlightAuthorityDecision(
+                        says=render_unable(reason).text, urgent=False
+                    )
+                )
+            continue
+        if now_sim - head.sent_at_sim >= HANDOVER_ACK_TIMEOUT_S:
+            remaining.pop(0)
+            decisions.append(
+                FlightAuthorityDecision(says="Unable, not ready.", urgent=False)
+            )
+            continue
+        break
+    return remaining, decisions

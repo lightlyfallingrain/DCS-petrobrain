@@ -45,6 +45,7 @@ from belief.ai_pilot_wheel import (
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
+from belief.flight_authority import PendingFlightReadback
 from body import ConsolePerceptionRunner, _apply_ai_pilot_wheel_goal
 from perception.source import OwnshipState
 
@@ -116,6 +117,34 @@ class TestApplyAiPilotWheelGoal:
         # requested in one poll (plan's own "interleaved" design).
         assert goal.active_param is not None
         assert len(goal.pending_order) == 2
+
+    def test_the_dual_write_s_staged_readback_is_queued_against_its_seq(
+        self,
+    ) -> None:
+        """BL-16 Stage 3b (section 3a, U1) -- the ordinary mode-2 voice
+        goal's own readback (staged by `handle_command`) is paired with
+        the exact `seq` the dual-write onto the numbered `flight`
+        channel just sent, so it waits for that `seq`'s own `fd_acks`
+        entry rather than speaking immediately."""
+        runner, client = _runner()
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=90.0
+        )
+        console.pending_flight_readback_lines = ["Heading 090."]
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert console.pending_flight_readback_lines is None
+        assert len(client.flight_calls) == 1
+        dual_write_seq = client.flight_calls[0][1]
+        assert console.pending_flight_readbacks == [
+            PendingFlightReadback(
+                seq=dual_write_seq,
+                lines=("Heading 090.",),
+                sent_at_sim=runner.last_t_sim,
+            )
+        ]
 
     def test_hvrt_transition_sets_the_direction(self) -> None:
         runner, client = _runner()

@@ -401,3 +401,137 @@ drafts that got it wrong.
   suite (`not slow`, parallel via `pytest-xdist`): **3698 passed, 4 xfailed**; the 27 `slow`-marked
   flight scenario tests also run separately (`pytest tests -q -m slow`): **27 passed**.
 - `config/defaults.toml` regenerated (`tools/generate_defaults.py --write`) and committed.
+
+### Stage 3b, 2026-11-20 — the wait-for-Lua readback, for every flight command
+
+Branch `impl/desired-state-s3b`, cut from `feature/bl16-desired-state-s34`'s own tip (`1a95043f`).
+Closes Stage 3's own deviation (1): U1's "wait for Lua" now covers every ordinary `flight_
+control*` command, not only the two handover tokens.
+
+**Side fix first, own commit**: the user's test flight the same day (`explore-notes.md`, "Heading
+reference measured: true") found `HEADING_REF = "true"` genuinely measured (not a placeholder —
+the overlay and HSI both read true) and `fd_hdg_mag_deg` mislabelled (`LoGetMagneticYaw` returns
+radians). `flight_desired.lua` gained `wrap360_deg`/`magnetic_yaw_deg` (converts via `math.deg`,
+wraps into `[0, 360)`, also fixing the same unit bug in the otherwise-dead `update_heading_
+variation` path); `belief.flight_authority._as_optional_degrees_0_360` wraps the two heading
+mirror fields again defensively at body-layer's own boundary, with a test.
+
+**Shape, matching the plan's own recommendation**: one generic deferred-readback mechanism, not
+fifteen rule edits. The rule files are completely unchanged — every `flight.lua` handler still
+computes its readback and calls `say(...)` exactly as before. What changed is what happens to
+those lines between the handler returning and the console actually speaking them:
+
+1. **`handle_command`'s own tail** (`CrewConsole`) checks, after a `flight_control*`-category
+   dispatch (never `flight_handover`, which already defers via its own `PendingTake`/`says`
+   mechanism), whether the handler actually queued a numbered-channel transition this call
+   (`_flight_control_transition_queued` — only `flight_control_goal_transition` (every mode-1
+   command) and `ai_pilot_goal_transition`/`ai_pilot_level_flight_transition` (mode 2's ordinary
+   heading/altitude/speed/level-flight voice goals) count, since those are the only one-shots
+   `body.py` actually dual-writes onto the `flight` channel this stage). If so, the computed
+   `lines` are staged onto `CrewConsole.pending_flight_readback_lines` instead of being printed —
+   a local refusal (a gate `hold`/`unable`, or an action's own `RuleUnable`, e.g. "turn left" in
+   the AI overlay, align/HVRT in mode 1) never reaches Lua at all and keeps speaking immediately,
+   unchanged.
+2. **`body.py`'s own wire-send sites** (`_apply_flight_requests`'s `goal_request` block, `_apply_
+   ai_pilot_wheel_goal`'s mode-2 dual-write block) claim the staged lines
+   (`CrewConsole.take_pending_flight_readback_lines`) right after minting the request's own `seq`,
+   and pair them into a `belief.flight_authority.PendingFlightReadback(seq, lines, sent_at_sim)`
+   appended to `CrewConsole.pending_flight_readbacks` — one shared FIFO queue for both modes, since
+   `fd_acks` is one shared ring.
+3. **`drain_flight_control`** resolves that queue every poll via the new `belief.flight_authority.
+   resolve_pending_flight_readbacks` (generalising `resolve_pending_take`'s own ack-matching):
+   strict FIFO by `seq` (an unresolved front entry blocks every later one, even if its own ack
+   already arrived — "ack outcomes in seq order, never arrival order"); accepted speaks every
+   line verbatim; refused maps the reason through a small closed table (`wrong_mode` → `AI_
+   OVERLAY`, everything else → `NOT_READY`, per 3a's own "no new spoken wording" — no reason
+   needed the fallback in practice, since `set` requests never see `wrong_mode`/`bounds` today);
+   no ack inside `HANDOVER_ACK_TIMEOUT_S` speaks "Unable, not ready." and drops the entry (3a: "a
+   timeout is always the truth" — `Export.lua`'s own `until` deadline makes a late accept
+   impossible).
+4. **The two suppression/hold rules (3a)**, both in `drain_flight_control`:
+   - A request sent while a take is still pending holds its own readback until the take resolves
+     — accepted releases the held queue right after "I have controls." (same poll, seq order);
+     refused/timed out drops the whole queue unspoken (`self.pending_flight_readbacks = []`).
+   - `suppress_accepted_readbacks=True` (passed from `body.py` exactly when `decide_flight_
+     speech`'s own forced-off-edge check fired this poll) drops only the *accepted* half of this
+     poll's own resolution, never a refusal/timeout — the mode's own urgent "You have controls!"
+     is the truth instead.
+
+**Mode 2's HVRT and CBTM are deliberately excluded**, not merely omitted: `_flight_control_
+transition_queued` does not check `ai_pilot_hvrt_transition`/`ai_pilot_hvrt_step_transition`/`ai_
+pilot_cbtm_transition` at all, because none of the three is dual-written onto the numbered
+channel this stage (the Stage 3 implementer's own flagged CBTM gap, extended here to HVRT for the
+identical reason — Stage 4 rebuilds mode 2 as a `desired`-reading consumer and is the natural
+place to wire both up). Staging a readback for either would mean speaking it never, since no
+`fd_acks` entry for it will ever arrive. `TestCbtmActions::test_align_s_readback_is_not_deferred`/
+`TestHvrtTranslate::test_the_readback_is_not_deferred` pin this boundary directly, beyond the
+pre-existing differential tests that already proved it by passing unchanged.
+
+**A dropped-unsent request's staged readback is not silently lost.** `_apply_flight_requests`'s
+own Co-moving row 11 branch (a mode-1 goal action spoken just before a park discards the
+transition unsent when `flight_mode() == "overlay"` by send time) now also claims and speaks
+"Unable, not ready." for whatever was staged, rather than leaving it to leak into a later,
+unrelated dispatch's own claim. This is the one case the generic mechanism could have silently
+broken that the Stage 3 code did not need to consider at all.
+
+**D19/U22's own bypass is unaffected by the deferral, by design decision**: when a staged
+readback finally speaks (accepted case), `drain_flight_control` still gates `bypass_gate` on
+`current_crew_state().has_controls`, the same condition `handle_command`'s own immediate-dispatch
+branch already used — the readback is still flight-category speech, it is simply heard a poll or
+two later than before. `FlightAuthorityDecision.urgent` stays `False` for every ordinary
+flight-channel readback either way (3a names no urgent one; only the handover's own "I/You have
+controls." is urgent) — `bypass_gate` and "urgent" are two different things here, and only the
+latter is fixed by 3a.
+
+### Deviations and judgment calls, Stage 3b
+
+1. **The late-accepted-ack-after-timeout gap (3a's own "clock anomaly" case, flagged on `flight_
+   pending_take` since Stage 3) is not closed here either**, and not by oversight: closing it
+   needs a small bounded "recently dropped" watch list (seq → the lines/says that would have been
+   spoken) checked against `fd_acks` on every subsequent poll until the ring itself ages the entry
+   out, plus the one-shot WARNING log 3a names. That is a second, independent piece of state and
+   bookkeeping, not a one-line fix, and the brief's own "close it if it's cheap" qualifier reads
+   as permission to skip it when it is not — judged not cheap enough to add safely in this pass
+   without risking an unbounded or leaky watch list. Left as a follow-up, same flag as Stage 3's.
+2. **The refusal-reason map has one real entry (`wrong_mode`) and a blanket fallback**, not five
+   named entries, because `stale`/`epoch`/`not_flying`/`precondition`/`bounds` all reduce to the
+   existing `NOT_READY` wording and nothing in `belief.speech._UNABLE_TEMPLATES` distinguishes
+   them anyway (3a: "no new spoken wording") — a five-entry table mapping four reasons onto the
+   same string would read as more precision than exists. If a future Lua reason needs its own
+   wording, it still degrades to `NOT_READY` here rather than crashing, per 3a's own "flags it"
+   fallback.
+3. **Two commands landing inside the same poll tick is not specially handled.** Each of the two
+   one-shot staging fields (`flight_control_goal_transition` for mode 1, the mode-2 goal fields)
+   can hold only one pending request at a time; a second `handle_command` dispatch before `body.
+   py`'s own send runs would overwrite the first's staged readback. This is not a new risk this
+   stage introduces — the pre-existing wire fields had the identical "one pending transition per
+   poll" shape before any of this — and voice dispatch is one transcript at a time in practice
+   (confirmed against the existing "two commands in one breath" card scenario, which relies on two
+   separate utterances reaching two separate polls, not one poll dispatching twice). Flagged for
+   completeness, not fixed.
+
+### Tests added, Stage 3b
+
+- `test_flight_authority.py`'s `TestResolvePendingFlightReadbacks` (eleven cases: accepted/
+  refused/timeout/still-waiting, seq-order holding a resolved-but-not-front entry, two accepted
+  entries speaking in seq order, both suppression-accepted cases) plus a negative-degree wrap test
+  under `TestAdvanceFlightAuthority` for the heading-reference side fix.
+- `test_body_flight_control.py`: a goal request's staged readback queued against its own sent
+  `seq`; no staged readback queues nothing; the overlay-flip-discard case now also speaks "Unable,
+  not ready." for a staged readback rather than leaking it.
+- `test_body_ai_pilot_wheel.py`: the mode-2 dual-write's own staged readback queued against the
+  dual-write's own `seq`.
+- `test_rules_flight_actions.py`: the `TestFlightReadbackUrgency` case rewritten for the deferred
+  flow (dispatch stages, nothing speaks, then a simulated ack drains and speaks with the same
+  bypass); a mode-1 command's readback also defers; the not-flying local refusal is never
+  deferred; CBTM's and HVRT's own readbacks are explicitly pinned as never deferred.
+
+### Checks, Stage 3b
+
+- aircraft-layer: `ruff format --check`/`ruff check` pass; `mypy src` passes; `luac5.1 -p` passes
+  on `flight_desired.lua`; the GETGLOBAL sweep is clean (only stdlib/DCS APIs and the pre-existing
+  cross-module globals); full suite `pytest tests -q`: **1101 passed**.
+- body-layer: `ruff format --check`/`ruff check` pass; `mypy src` passes (93 source files); full
+  suite (`not slow`, parallel via `pytest-xdist`): **3718 passed, 4 xfailed**; the 27 `slow`-marked
+  flight scenario tests also run separately: **27 passed**.
+- `tools/check_rules.py`'s dry-run harness: clean, no new failures.

@@ -19,10 +19,12 @@ flight_authority.resolve_pending_take`'s own timeout handling), and the
 from __future__ import annotations
 
 from dataclasses import replace
+from io import StringIO
 from typing import Any
 
 from aircraft_client import AircraftLayerError
 from belief.crew_console import CrewConsole
+from belief.flight_authority import PendingFlightReadback
 from belief.flight_control import FlightControlGoalRequest
 from body import _apply_flight_requests
 
@@ -140,6 +142,47 @@ class TestApplyFlightRequests:
         assert kind == "set"
         assert fields == {"heading_deg": 270.0}
 
+    def test_a_goal_request_s_staged_readback_is_queued_against_the_sent_seq(
+        self,
+    ) -> None:
+        """BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section
+        3a, U1) -- `handle_command` stages the rule's own readback text
+        into `pending_flight_readback_lines` rather than printing it;
+        this is the glue that pairs it with the exact `seq` just sent,
+        so `drain_flight_control` can wait for that `seq`'s own ack
+        before ever speaking it."""
+        client = _FakeAircraftClient()
+        runner = _FakeRunner()
+        console = _console()
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=270.0
+        )
+        console.pending_flight_readback_lines = ["Heading 270."]
+
+        _apply_flight_requests(runner, console, client, 1, 5.0)  # type: ignore[arg-type]
+
+        assert console.pending_flight_readback_lines is None
+        assert console.pending_flight_readbacks == [
+            PendingFlightReadback(seq=1, lines=("Heading 270.",), sent_at_sim=5.0)
+        ]
+
+    def test_no_staged_readback_queues_nothing(self) -> None:
+        """The ordinary case -- most `set` requests this function sends
+        come from a dispatch that produced no readback to defer at all
+        (there is none for a successful mode-1 command with empty
+        `lines`, e.g. none shipped today, but this is the "nothing
+        staged" no-op this function must still handle correctly)."""
+        client = _FakeAircraftClient()
+        runner = _FakeRunner()
+        console = _console()
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=270.0
+        )
+
+        _apply_flight_requests(runner, console, client, 1, 0.0)  # type: ignore[arg-type]
+
+        assert console.pending_flight_readbacks == []
+
     def test_both_a_transition_and_a_goal_in_one_poll_bump_the_sequence_twice(
         self,
     ) -> None:
@@ -190,6 +233,30 @@ class TestApplyFlightRequests:
         assert console.pending_take_says is None
         assert client.flight_calls == []
         assert runner.command_seq == 0
+
+    def test_a_staged_readback_is_dropped_with_unable_not_ready_on_the_same_edge(
+        self,
+    ) -> None:
+        """BL-16 Stage 3b -- the Co-moving row 11 mode flip above drops
+        the queued transition unsent; a readback `handle_command` had
+        already staged for that now-unsent request must not leak into a
+        later, unrelated dispatch, so it speaks "Unable, not ready."
+        right here instead."""
+        client = _FakeAircraftClient()
+        runner = _FakeRunner()
+        console = _console(overlay=True)
+        console.flight_control_goal_transition = FlightControlGoalRequest(
+            heading_deg=10.0
+        )
+        console.pending_flight_readback_lines = ["Heading 010."]
+        output = StringIO()
+        console.output = output
+
+        _apply_flight_requests(runner, console, client, 1, 0.0)  # type: ignore[arg-type]
+
+        assert console.pending_flight_readback_lines is None
+        assert console.pending_flight_readbacks == []
+        assert output.getvalue().strip() == "Unable, not ready."
 
     def test_a_send_failure_does_not_raise(self) -> None:
         client = _FakeAircraftClient(raise_on_write=True)

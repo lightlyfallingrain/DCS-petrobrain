@@ -21,10 +21,12 @@ from aircraft_client import AircraftLayerClient
 from belief.flight_authority import (
     FLIGHT_REQUEST_ACCEPT_WINDOW_S,
     FlightAuthorityState,
+    PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
     decide_flight_speech,
     parse_acks,
+    resolve_pending_flight_readbacks,
     resolve_pending_take,
 )
 from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
@@ -285,6 +287,143 @@ class TestResolvePendingTake:
         assert decision is not None
         assert decision.says == "I have controls."
         assert decision.urgent is True
+
+
+class TestResolvePendingFlightReadbacks:
+    """BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section 3a)
+    -- `resolve_pending_flight_readbacks`, generalising `resolve_pending_
+    take`'s own ack-driven wait to every ordinary flight-channel
+    command's readback (U1: "Readback on acting on command -> wait for
+    lua")."""
+
+    def test_no_pending_entries_is_a_no_op(self) -> None:
+        remaining, decisions = resolve_pending_flight_readbacks([], "1:a:m1", 10.0)
+        assert remaining == []
+        assert decisions == []
+
+    def test_accepted_speaks_every_line_non_urgently_and_clears(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(pending, "1:a:m1", 0.5)
+        assert remaining == []
+        assert [d.says for d in decisions] == ["Heading 090."]
+        assert all(d.urgent is False for d in decisions)
+
+    def test_accepted_speaks_every_line_in_order_for_one_seq(self) -> None:
+        """`level_flight`'s own handler calls `say` more than once --
+        every line a single accepted `seq` carries speaks, in order."""
+        pending = [
+            PendingFlightReadback(
+                seq=1,
+                lines=("Heading 090.", "300 meters.", "Speed 150."),
+                sent_at_sim=0.0,
+            )
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(pending, "1:a:m2", 0.5)
+        assert remaining == []
+        assert [d.says for d in decisions] == [
+            "Heading 090.",
+            "300 meters.",
+            "Speed 150.",
+        ]
+
+    def test_refused_speaks_the_mapped_unable_token(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending, "1:r:wrong_mode", 0.5
+        )
+        assert remaining == []
+        assert [d.says for d in decisions] == ["Unable, AI overlay."]
+
+    def test_an_unmapped_refusal_reason_falls_back_to_not_ready(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending, "1:r:stale", 0.5
+        )
+        assert remaining == []
+        assert [d.says for d in decisions] == ["Unable, not ready."]
+
+    def test_timeout_with_no_ack_speaks_unable_not_ready_and_clears(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending, None, HANDOVER_ACK_TIMEOUT_S
+        )
+        assert remaining == []
+        assert [d.says for d in decisions] == ["Unable, not ready."]
+
+    def test_still_waiting_leaves_the_entry_untouched(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(pending, None, 0.5)
+        assert remaining == pending
+        assert decisions == []
+
+    def test_an_unresolved_front_holds_a_resolved_later_entry(self) -> None:
+        """3a: "ack outcomes in seq order, never arrival order" -- `seq`
+        2's own accept arrives first, but `seq` 1 is still unresolved and
+        not yet timed out, so neither speaks this call."""
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0),
+            PendingFlightReadback(seq=2, lines=("Speed 200.",), sent_at_sim=0.0),
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(pending, "2:a:m1", 0.5)
+        assert remaining == pending
+        assert decisions == []
+
+    def test_two_accepted_entries_speak_in_seq_order(self) -> None:
+        """3a's own card example: "climb 50, climb 50" in one breath --
+        two readbacks, in the order spoken, not the order the acks
+        happen to arrive."""
+        pending = [
+            PendingFlightReadback(seq=1, lines=("350 meters.",), sent_at_sim=0.0),
+            PendingFlightReadback(seq=2, lines=("400 meters.",), sent_at_sim=0.0),
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending, "2:a:m1;1:a:m1", 0.5
+        )
+        assert remaining == []
+        assert [d.says for d in decisions] == ["350 meters.", "400 meters."]
+
+    def test_suppress_accepted_still_consumes_the_ack_but_speaks_nothing(self) -> None:
+        """3a: "a change into off in the same read suppresses the
+        readbacks of requests accepted in that read" -- the entry is
+        still resolved (removed from the queue), it just yields no
+        decision."""
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0)
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending, "1:a:m1", 0.5, suppress_accepted=True
+        )
+        assert remaining == []
+        assert decisions == []
+
+    def test_suppress_accepted_never_suppresses_a_refusal_or_timeout(self) -> None:
+        pending = [
+            PendingFlightReadback(seq=1, lines=("Heading 090.",), sent_at_sim=0.0),
+            PendingFlightReadback(seq=2, lines=("Speed 200.",), sent_at_sim=0.0),
+        ]
+        remaining, decisions = resolve_pending_flight_readbacks(
+            pending,
+            "1:r:precondition",
+            HANDOVER_ACK_TIMEOUT_S,
+            suppress_accepted=True,
+        )
+        # `seq` 1 refused, `seq` 2 times out -- neither is the accepted
+        # case `suppress_accepted` guards, so both still speak.
+        assert remaining == []
+        assert [d.says for d in decisions] == [
+            "Unable, not ready.",
+            "Unable, not ready.",
+        ]
 
 
 def test_handover_ack_timeout_exceeds_accept_window_with_margin() -> None:

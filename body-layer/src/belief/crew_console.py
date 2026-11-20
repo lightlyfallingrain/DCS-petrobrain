@@ -151,7 +151,9 @@ from belief.escalation import (
 from belief.flight_authority import (
     FlightAuthorityDecision,
     FlightAuthorityState,
+    PendingFlightReadback,
     PendingTake,
+    resolve_pending_flight_readbacks,
     resolve_pending_take,
 )
 from belief.flight_control import (
@@ -1378,6 +1380,17 @@ def _is_flight_bypass_category(category: str) -> bool:
     return category.startswith("flight_control") or category == "flight_handover"
 
 
+def _is_deferred_flight_readback_category(category: str) -> bool:
+    """BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section
+    3a) -- every `"flight_control*"` category, **not** `"flight_
+    handover"` (Decision 22's own `says`-based deferral, `PendingTake`,
+    already waits for Lua and must not be double-deferred by this
+    mechanism too) and never `"always"`. `handle_command`'s own tail
+    uses this to decide whether a dispatch's readback lines are a
+    flight-channel readback to stage rather than speak immediately."""
+    return category.startswith("flight_control")
+
+
 #: `[[BL-17]]` D16/U20 -- how long Petrovich holds an understood but not
 #: yet actionable rule command, such as a flight command caught by the
 #: takeover-settle window, before giving up and speaking "unable" instead
@@ -1735,6 +1748,27 @@ class CrewConsole:
     #: it drops the pending take at the timeout and never re-checks that
     #: `seq`. Flagged in `plans/flight-desired-state/implementation.md`.
     flight_pending_take: PendingTake | None = None
+    #: BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section 3a)
+    #: -- the readback lines an ordinary `flight_control*`-category
+    #: dispatch computed this call, staged here instead of being spoken
+    #: immediately. Claimed exactly once, by whichever of `body.py`'s
+    #: `_apply_flight_requests`/`_apply_ai_pilot_wheel_goal` actually
+    #: sends the numbered request this same poll (`take_pending_flight_
+    #: readback_lines`) -- `None` between a dispatch that queued one and
+    #: that claim. **Never speak this field directly** -- it has not
+    #: been accepted by Lua yet; `pending_flight_readbacks` below is
+    #: what speaks.
+    pending_flight_readback_lines: list[str] | None = None
+    #: BL-16 Stage 3b -- the FIFO of sent, not-yet-resolved flight-
+    #: channel readbacks (3a's own "ack outcomes in seq order"),
+    #: resolved against `fd_acks` by `drain_flight_control`/`belief.
+    #: flight_authority.resolve_pending_flight_readbacks` every poll.
+    #: Appended to in wire-send (`seq`) order, so the list is already in
+    #: seq order by construction -- `resolve_pending_flight_readbacks`
+    #: relies on that, not on sorting.
+    pending_flight_readbacks: list[PendingFlightReadback] = field(
+        default_factory=list, repr=False
+    )
     #: "Where is it?"'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
     #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
@@ -3663,6 +3697,11 @@ class CrewConsole:
         # enabled_rule_ids` branch below); every other dispatch keeps the
         # default `bypass_gate=False` this method has always used.
         bypass_gate = False
+        # BL-16 Stage 3b (section 3a) -- set `True` only when this
+        # dispatch's `lines` were staged into `pending_flight_readback_
+        # lines` rather than printed below (the `elif token in self.
+        # enabled_rule_ids` branch below) -- U1's "wait for Lua."
+        deferred_flight_readback = False
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(
@@ -3796,6 +3835,25 @@ class CrewConsole:
                 and self.current_crew_state().has_controls
             ):
                 bypass_gate = True
+            # BL-16 Stage 3b, section 3a (U1: "wait for Lua") -- this
+            # dispatch's `lines` are a flight-channel readback to defer,
+            # rather than speak now, exactly when its category is one of
+            # `flight_control*` (never `flight_handover`, which already
+            # defers via its own `says`/`PendingTake` mechanism, D22) and
+            # it actually queued a numbered-channel transition this call
+            # (`_flight_control_transition_queued`) -- a local refusal
+            # (a gate `hold`/`unable`, or an action's own `RuleUnable`,
+            # e.g. "turn left" in the AI overlay, or HVRT/CBTM/align in
+            # mode 1) never reaches Lua at all, so its `lines` speak
+            # immediately below exactly as before this stage. Empty
+            # `lines` (a gate `hold`) has nothing to defer either.
+            if (
+                lines
+                and _is_deferred_flight_readback_category(category)
+                and self._flight_control_transition_queued()
+            ):
+                self.pending_flight_readback_lines = list(lines)
+                deferred_flight_readback = True
         elif token in self._ever_enabled_rule_ids:
             # D4 -- a rule id the adapter matched against a rule that has
             # since been dropped (a reload race, or a push rejection) --
@@ -3806,13 +3864,14 @@ class CrewConsole:
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
-        self._print(
-            lines,
-            now_sim,
-            bypass_gate=bypass_gate,
-            correlation_id=correlation_id,
-            mentions=self._pending_mentions,
-        )
+        if not deferred_flight_readback:
+            self._print(
+                lines,
+                now_sim,
+                bypass_gate=bypass_gate,
+                correlation_id=correlation_id,
+                mentions=self._pending_mentions,
+            )
         return lines
 
     def _believed_air_defence(self, facts: dict[str, object]) -> bool:
@@ -5679,7 +5738,63 @@ class CrewConsole:
         )
         return {"ok": True, "reason": None}
 
-    def drain_flight_control(self, now_sim: float) -> list[str]:
+    def _flight_control_transition_queued(self) -> bool:
+        """BL-16 Stage 3b (section 3a) -- whether this dispatch's
+        handler queued a one-shot transition that `body.py` will
+        actually dual-write/write onto the numbered `flight` channel
+        this poll. Only the fields that reach a `write_flight` call
+        count: `flight_control_goal_transition` (every mode-1 `flight_
+        control*` command, one field for all of them) and `ai_pilot_
+        goal_transition`/`ai_pilot_level_flight_transition` (the
+        ordinary mode-2 heading/altitude/speed/level-flight voice goals,
+        `body._apply_ai_pilot_wheel_goal`'s own dual-write). **Mode-2
+        HVRT (`ai_pilot_hvrt_transition`/`ai_pilot_hvrt_step_
+        transition`) and CBTM (`ai_pilot_cbtm_transition`) are
+        deliberately excluded** -- neither is dual-written onto this
+        channel this stage (`implementation.md`'s own deviation for
+        CBTM, extended here to HVRT for the same reason: no wire send,
+        so no ack to ever claim a staged readback against). Including
+        them would stage lines that never get spoken at all."""
+        return (
+            self.ai_pilot_goal_transition is not None
+            or self.ai_pilot_level_flight_transition
+            or self.flight_control_goal_transition is not None
+        )
+
+    def take_pending_flight_readback_lines(self) -> list[str] | None:
+        """Called by `body.py`'s `_apply_flight_requests`/`_apply_ai_
+        pilot_wheel_goal`, exactly once, right after either mints the
+        wire `seq` for the request a `flight_control*`-category
+        dispatch just queued -- pops and returns `pending_flight_
+        readback_lines` (clearing it to `None`), or `None` if the
+        dispatch that ran this poll was not a `flight_control*` one (the
+        ordinary case -- most polls dispatch nothing at all), or if the
+        queued transition is instead dropped unsent (a mode flip before
+        this poll's own send runs) -- that caller speaks "Unable, not
+        ready." for whatever this returns itself, rather than queuing a
+        `PendingFlightReadback` with no request behind it."""
+        lines = self.pending_flight_readback_lines
+        self.pending_flight_readback_lines = None
+        return lines
+
+    def _resolve_flight_readback_decisions(
+        self, now_sim: float, *, suppress_accepted: bool = False
+    ) -> list[FlightAuthorityDecision]:
+        """3a's own ack-driven drain of `pending_flight_readbacks`,
+        shared by `drain_flight_control`'s two call sites below (no
+        pending take, and a take that just resolved accepted)."""
+        new_pending, decisions = resolve_pending_flight_readbacks(
+            self.pending_flight_readbacks,
+            self.flight_authority_state.acks,
+            now_sim,
+            suppress_accepted=suppress_accepted,
+        )
+        self.pending_flight_readbacks = new_pending
+        return decisions
+
+    def drain_flight_control(
+        self, now_sim: float, *, suppress_accepted_readbacks: bool = False
+    ) -> list[str]:
         """BL-16 mode 1, Stage 3 -- runs `belief.flight_authority.
         resolve_pending_take` once per poll (the one "when" apart from
         `take_controls`/`release_controls`, root `CLAUDE.md`'s
@@ -5700,15 +5815,68 @@ class CrewConsole:
         m2->m1 edge now carries `desired` (and any standing break's
         `turn_rate_deg_s`/`turn_style`) verbatim into the unpark seed
         (`flight_control.lua`'s `build_take_seed`), so body-layer has
-        nothing left to re-seed."""
+        nothing left to re-seed.
+
+        **3a's own two rules for the ordinary flight-channel readback
+        queue, generalised beyond the take itself:**
+
+        - A request sent while a take is still pending holds its own
+          readback until the take resolves (3a: "requests sent after a
+          pending take hold their readbacks until the take resolves").
+          Accepted -- the held readbacks speak, in seq order, right
+          after "I have controls.". Refused or timed out -- only the
+          take's own "Unable, not ready." speaks, and the held
+          readbacks are dropped, never spoken (Lua cleared `desired` on
+          taking->off, so nothing they set is being flown).
+        - `suppress_accepted_readbacks=True` (`body.py`'s own forced-
+          off-edge check, `decide_flight_speech`'s urgent result) drops
+          only the *accepted* half of this poll's own readback
+          resolution, never a refusal/timeout -- 3a: "a change into off
+          in the same read suppresses the readbacks of requests
+          accepted in that read ... the urgent line is the truth."
+          Ignored while a take is still pending (unreachable in
+          practice: `fd_mode` cannot be `"off"` with `decide_flight_
+          speech`'s own silent-cause exception for `"taking"`'s own
+          edge, but checked here rather than assumed)."""
+        take_was_pending = self.flight_pending_take is not None
         new_pending, decision = resolve_pending_take(
             self.flight_pending_take, self.flight_authority_state.acks, now_sim
         )
         self.flight_pending_take = new_pending
-        if decision is None:
-            return []
-        lines = [decision.says]
-        self._print(lines, now_sim, bypass_gate=decision.urgent)
+        lines: list[str] = []
+        if decision is not None:
+            lines.append(decision.says)
+            self._print([decision.says], now_sim, bypass_gate=decision.urgent)
+        if take_was_pending and self.flight_pending_take is not None:
+            # Still waiting on the take -- every readback queued behind it
+            # stays held, untouched, for a later poll.
+            return lines
+        if take_was_pending and not (decision is not None and decision.urgent):
+            # The take was refused or timed out -- drop everything that was
+            # held behind it, unspoken (3a's own "the held readbacks are
+            # dropped").
+            self.pending_flight_readbacks = []
+            return lines
+        # Either there was no pending take, or it just resolved accepted --
+        # either way, the queue may now speak (seq order, 3a).
+        readback_lines = [
+            readback_decision.says
+            for readback_decision in self._resolve_flight_readback_decisions(
+                now_sim, suppress_accepted=suppress_accepted_readbacks
+            )
+        ]
+        if readback_lines:
+            # D19/U22's own bypass -- a flight-category readback may cut
+            # off an in-flight routine callout while he actually has
+            # controls. That rule predates U1's wait-for-Lua deferral and
+            # is unchanged by it: the readback is still flight-category
+            # speech, it is simply spoken a poll or two later than before.
+            self._print(
+                readback_lines,
+                now_sim,
+                bypass_gate=self.current_crew_state().has_controls,
+            )
+        lines.extend(readback_lines)
         return lines
 
     def speak_flight_authority_decision(

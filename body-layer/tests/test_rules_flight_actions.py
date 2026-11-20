@@ -40,6 +40,7 @@ from belief.ai_pilot_wheel import (
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
+from belief.flight_authority import PendingFlightReadback
 from belief.speech import render_unable
 from rules.actions import ACTION_NAMESPACES, ActionContext
 from rules.engine import RuleSet, run_rule
@@ -386,6 +387,28 @@ class TestTurnHeadingAbsolute:
         assert lines == ["Unable, not flying."]
         assert console.ai_pilot_goal_transition is None
 
+    def test_a_mode_1_command_s_readback_is_also_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a, U1) -- the deferral is not scoped
+        to mode 2: a mode-1 `axes_*` command queues `flight_control_
+        goal_transition`, which `_flight_control_transition_queued`
+        covers, so its own readback stages exactly the same way."""
+        console = _dispatching_console(parked_active=False)
+        _set_mode1_active(console, measured_heading=10.0)
+        lines = console.handle_command(
+            "turn_heading", now_sim=0.0, slots={"heading_deg": 315}
+        )
+        assert lines == ["Heading 3 1 5."]
+        assert console.pending_flight_readback_lines == ["Heading 3 1 5."]
+
+    def test_the_not_flying_refusal_is_never_deferred(self) -> None:
+        """A local gate refusal never reaches Lua at all -- nothing is
+        staged, and `handle_command`'s own immediate `_print` still
+        speaks it (`test_an_unable_not_flying_readback_never_cuts_off_
+        the_callout` below asserts the speech side of this same case)."""
+        console = _dispatching_console(parked_active=False)
+        console.handle_command("turn_heading", now_sim=0.0, slots={"heading_deg": 315})
+        assert console.pending_flight_readback_lines is None
+
 
 class TestLevelFlight:
     """Differential pin against the deleted `TestLevelFlight`. Category
@@ -631,6 +654,18 @@ class TestCbtmActions:
         assert lines == ["Aligning."]
         assert console.ai_pilot_cbtm_transition == "align"
 
+    def test_align_s_readback_is_not_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a) -- CBTM is not dual-written onto
+        the numbered `flight` channel this stage (`implementation.md`'s
+        own deviation), so `_flight_control_transition_queued` excludes
+        `ai_pilot_cbtm_transition`: the readback above speaks
+        immediately, through the ordinary path, exactly as before this
+        stage -- nothing is left staged for a `fd_acks` entry that will
+        never arrive for it."""
+        console = _dispatching_console(parked_active=True)
+        console.handle_command("cbtm_align", now_sim=0.0)
+        assert console.pending_flight_readback_lines is None
+
     def test_align_for_launch_speaks_aligning_for_launch(self) -> None:
         console = _dispatching_console(parked_active=True)
         lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
@@ -764,6 +799,14 @@ class TestHvrtTranslate:
         lines = console.handle_command("hvrt_translate_left", now_sim=0.0)
         assert lines == ["Left."]
         assert console.ai_pilot_hvrt_transition == "left"
+
+    def test_the_readback_is_not_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a) -- same exclusion as CBTM's own:
+        HVRT is not dual-written onto the numbered `flight` channel this
+        stage, so nothing is staged for an ack that will never come."""
+        console = _dispatching_console(parked_active=True, ai_mode="HVR")
+        console.handle_command("hvrt_translate_left", now_sim=0.0)
+        assert console.pending_flight_readback_lines is None
 
     def test_dispatches_while_already_in_hvrt(self) -> None:
         console = _dispatching_console(parked_active=True, ai_mode="HVRT")
@@ -995,6 +1038,13 @@ class TestFlightReadbackUrgency:
     _FAR_FUTURE_BUSY_UNTIL = 1000.0
 
     def test_a_flight_rule_readback_cuts_off_the_callout_while_flying(self) -> None:
+        """BL-16 Stage 3b (section 3a, U1) -- the dispatch itself no
+        longer speaks the readback (it queued a numbered-channel
+        transition, so `handle_command` stages the line rather than
+        printing it); the cutoff only happens once the staged line is
+        actually spoken, on the later poll `fd_acks` accepts it
+        (`drain_flight_control`'s own `has_controls`-gated bypass,
+        D19/U22 unchanged by the deferral)."""
         speech_client = _RecordingSpeechClient()
         console = _dispatching_console(
             speech_client=speech_client, parked_active=True, held_heading=10.0
@@ -1005,6 +1055,22 @@ class TestFlightReadbackUrgency:
             now_sim=0.0,
             slots={"direction": "left", "degrees": 20},
         )
+        assert speech_client.pushed == []
+        assert console.pending_flight_readback_lines == ["20 left."]
+        assert console.scheduler.busy_until_sim == self._FAR_FUTURE_BUSY_UNTIL
+        # `body.py`'s own wire-send claims the staged line and queues it
+        # against the `seq` it just minted -- simulated here directly,
+        # since this file dispatches through the real rule engine but
+        # not through `body.py`'s poll loop.
+        readback_lines = console.take_pending_flight_readback_lines()
+        assert readback_lines is not None
+        console.pending_flight_readbacks.append(
+            PendingFlightReadback(seq=1, lines=tuple(readback_lines), sent_at_sim=0.0)
+        )
+        console.flight_authority_state = replace(
+            console.flight_authority_state, acks="1:a:m2"
+        )
+        console.drain_flight_control(now_sim=1.0)
         assert speech_client.pushed == [("20 left.", True)]
         assert console.scheduler.busy_until_sim < self._FAR_FUTURE_BUSY_UNTIL
 

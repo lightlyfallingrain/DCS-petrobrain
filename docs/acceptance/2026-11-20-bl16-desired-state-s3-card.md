@@ -13,12 +13,16 @@ still flies through the old `ai_pilot_goal`/CBTM channel exactly as before; the 
 only mirrors its exact commanded values into `desired` in parallel (for a later carry), which you
 cannot observe from the cockpit directly.
 
-**Known gap, flagged honestly:** the plan's own U1 ("wait for Lua before the readback") is **not**
-built for ordinary heading/altitude/speed/turn/break commands in this stage — the rule file still
-speaks the readback immediately, optimistically, the same timing as before this plan. Only the
-two handover tokens ("you/I have controls") wait for `fd_acks` to confirm, as they already did in
-Stage 2. If this card finds the readback latency distracting or wrong, that is `[[BL-16]]`'s own
-backlog item to pick up, not a regression to chase here.
+**Stage 3b closes the gap the Stage 3 card flagged here**: U1 ("wait for Lua before the
+readback") now covers every ordinary `flight_control*` command, in both modes, not only the two
+handover tokens. Every heading/altitude/speed/turn/break/level readback — mode 1's own `axes_*`
+commands and mode 2's ordinary voice goals (heading/altitude/speed/level flight) alike — now
+waits for `fd_acks` to accept its own `seq` before speaking, about a second after the command
+(occasionally two, same U5 latency the handover already had). A refusal speaks "Unable, <reason>."
+instead of the readback; no ack inside the deadline speaks "Unable, not ready." **Mode 2's HVRT
+and CBTM (align/align-for-launch/break) are not dual-written onto the numbered channel yet**
+(Stage 4's own work) — their readbacks still speak immediately, unchanged, exactly as before this
+plan.
 
 ## Setup
 
@@ -51,6 +55,20 @@ letter `m1`), and compare the cockpit instrument against what was commanded:
    whatever heading it stopped at (watch `fd_heading` update to the roll-out value).
 6. **"Break left."** then **"break away."** — latest-wins: the break-away target replaces the
    break's, the aircraft turns to the new target, not both.
+7. **Readback timing**: time the gap between saying "Heading 090." and hearing "Heading 0 9 0."
+   back — about one second, per U5's own answer (occasionally two, when a poll's work runs long).
+   If it feels distracting rather than merely noticeable, say so in the report; U5 already
+   declined the faster re-read for the handover, but this is the first time it is heard on every
+   ordinary command, not only a take.
+8. **Refusal check (best-effort — hard to force live)**: if a command happens to land right at a
+   mode change (e.g. "heading 090" spoken the instant you unpark), you may see "Unable, not
+   ready." instead of the heading readback — that is `wrong_mode`/`stale`/`precondition`
+   resolving to the one shared wording (3a: "no new spoken wording"), not a bug. Nothing to do
+   deliberately here beyond noting if it happens.
+9. **Mode 2, same commands**: say "heading 090"/"speed 200"/"altitude 900" while parked (mode 2).
+   Same ~1 s readback latency as mode 1. Then **"align"**/**"move left"** (CBTM/HVRT) — these two
+   still speak immediately, with no perceptible delay, since they are not on the numbered channel
+   yet (the one deliberate asymmetry this card should show).
 
 ## Steps — unpark carrying the desired state (the crash case this stage fixes)
 
@@ -65,9 +83,9 @@ letter `m1`), and compare the cockpit instrument against what was commanded:
 
 ## Report back
 
-- Step 2's own finding: which reference ("heading 090" flown to 090 on the HSI, or to 090 ± the
-  theatre's variation) — this is the one thing the card still needs to settle.
 - For each step: what was said, when (roughly), and whether the aircraft actually did it.
-- The readback latency from step 1 (and generally) — does ~1 s feel acceptable, per U5's answer,
-  or does it need the faster re-read U5 declined?
+- The readback latency (step 7, and generally) — does ~1 s feel acceptable, per U5's answer, or
+  does it need the faster re-read U5 declined?
+- Whether a refusal ("Unable, ...") was ever heard in place of a readback (step 8), and what the
+  command/situation was at that moment.
 - Anything that doesn't match this card.

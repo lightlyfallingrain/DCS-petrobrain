@@ -197,6 +197,8 @@ from belief.expected_area import (
 )
 from belief.flight_authority import (
     FLIGHT_REQUEST_ACCEPT_WINDOW_S,
+    FlightAuthorityDecision,
+    PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
     decide_flight_speech,
@@ -3820,10 +3822,11 @@ def _apply_ai_pilot_wheel_goal(
         if final_goal.speed_target_kmh is not None:
             set_fields["ias_kmh"] = final_goal.speed_target_kmh
         if set_fields and runner.last_t_sim is not None:
+            dual_write_seq = _next_flight_seq(runner)
             try:
                 aircraft_client.write_flight(
                     runner.command_reset_epoch,
-                    _next_flight_seq(runner),
+                    dual_write_seq,
                     runner.last_t_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S,
                     "set",
                     set_fields,
@@ -3832,6 +3835,25 @@ def _apply_ai_pilot_wheel_goal(
                 logger.warning(
                     "flight set (mode-2 dual-write) failed (continuing)",
                     exc_info=True,
+                )
+            # BL-16 Stage 3b (section 3a, U1) -- same deferral as mode
+            # 1's own `set` send above: the ordinary mode-2 voice goal's
+            # readback (heading/altitude/speed/level-flight, staged by
+            # `handle_command`) now speaks only once `fd_acks` accepts
+            # this exact `seq`. Mode-2 HVRT/CBTM one-shots are not
+            # dual-written onto this channel this stage (deviation,
+            # `implementation.md`), so `take_pending_flight_readback_
+            # lines` returns `None` for those and they keep speaking
+            # immediately, through `rules/engine.py`'s own ordinary
+            # `_print` path, unchanged.
+            readback_lines = crew_console.take_pending_flight_readback_lines()
+            if readback_lines:
+                crew_console.pending_flight_readbacks.append(
+                    PendingFlightReadback(
+                        seq=dual_write_seq,
+                        lines=tuple(readback_lines),
+                        sent_at_sim=runner.last_t_sim,
+                    )
                 )
 
     # `hvrt_step` (Stage P2b's own addition to the wire, not the plan's
@@ -3944,6 +3966,18 @@ def _apply_flight_requests(
         crew_console.flight_control_transition = None
         crew_console.flight_control_goal_transition = None
         crew_console.pending_take_says = None
+        # BL-16 Stage 3b (section 3a) -- a mode-1 command's own readback
+        # was staged (`handle_command`) but the mode flipped to overlay
+        # before this poll's send ran, so the request above it was just
+        # dropped unsent, never queued as a `PendingFlightReadback`:
+        # speak the one fixed "not ready" line for it now rather than
+        # leaking the staged lines into a later, unrelated dispatch.
+        dropped_lines = crew_console.take_pending_flight_readback_lines()
+        if dropped_lines is not None:
+            crew_console.speak_flight_authority_decision(
+                FlightAuthorityDecision(says="Unable, not ready.", urgent=False),
+                now_sim,
+            )
 
     transition = crew_console.flight_control_transition
     if transition is not None:
@@ -3973,6 +4007,18 @@ def _apply_flight_requests(
             aircraft_client.write_flight(epoch, seq, until, "set", fields)
         except AircraftLayerError:
             logger.warning("flight set write failed (continuing)", exc_info=True)
+        # BL-16 Stage 3b (section 3a, U1: "wait for Lua") -- the rule's
+        # own readback (`config/rules/flight.lua`'s `say(...)` calls,
+        # already computed and staged by `handle_command`) now speaks
+        # only once `fd_acks` accepts this exact `seq` --
+        # `drain_flight_control`/`resolve_pending_flight_readbacks`.
+        readback_lines = crew_console.take_pending_flight_readback_lines()
+        if readback_lines:
+            crew_console.pending_flight_readbacks.append(
+                PendingFlightReadback(
+                    seq=seq, lines=tuple(readback_lines), sent_at_sim=now_sim
+                )
+            )
 
     # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
     # 3) -- the lease, unchanged. Sent every poll this function runs.
@@ -5501,7 +5547,19 @@ def _run_crew_text_poll_loop(
                                 runner.command_reset_epoch,
                                 runner.last_t_sim,
                             )
-                            crew_console.drain_flight_control(runner.last_t_sim)
+                            # BL-16 Stage 3b (section 3a) -- "a change
+                            # into off in the same read" suppresses only
+                            # the *accepted* half of this read's own
+                            # flight-channel readbacks; the urgent line
+                            # `authority_decision` just spoke above is
+                            # the truth instead.
+                            crew_console.drain_flight_control(
+                                runner.last_t_sim,
+                                suppress_accepted_readbacks=(
+                                    authority_decision is not None
+                                    and authority_decision.urgent
+                                ),
+                            )
                         # `[[BL-17]]` D16 -- same spot, after `parked_
                         # flight_state` has been refreshed this poll
                         # (just above), so `current_crew_state()` inside
