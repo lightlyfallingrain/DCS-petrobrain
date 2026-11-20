@@ -167,3 +167,23 @@ so a flight can calibrate its sign/units, then use it for pedal (ball-centring) 
 Expected: on the unpark take, mode 1 actively flies (the control law runs from the first frame,
 corrects attitude), with its heading/speed/altitude goals seeded from mode 2's set targets (the
 overlay's set course/speed/alt), not from whatever the aircraft happened to be doing.
+
+## After the batch: pedal fact and one desired state for both modes (user, verbatim)
+
+> As collective increases, more right pedal is needed.
+>
+> Mode 2 > 1 change:
+> Mode 1 to pick what player has commanded. The AI wheel probably shows it, but if mode transition
+> is mid param adjust on AI wheel then AI wheel ha incorrect value. There should be a unified state
+> of desired params that both modes use, mode 2 just has more limitations.
+
+- Pedal: more collective → more right pedal, an aircraft fact from the user. The
+  collective→pedal feedforward and the turn pedal both assume positive pedal command = right,
+  which is still unmeasured. The M0 findings say pedal arg 1103 positive goes with positive yaw
+  rate, so the mapping can be settled from DCS's yaw-rate sign convention plus the slip-ball
+  flight, rather than guessed.
+- Unified desired state: the unpark seed built tonight reads the AI wheel's displayed set values,
+  which are wrong mid-adjustment (the wheel is still ramping toward the commanded value). Direction:
+  one body-layer-owned desired heading/altitude(+reference)/speed, set by the player's commands;
+  mode 2 drives the wheel toward it (within the wheel's limits), mode 1's law flies it directly, and
+  a mode change hands over the desired state, never the wheel's display. Recorded as BL-16 work.
