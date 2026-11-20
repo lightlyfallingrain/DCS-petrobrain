@@ -375,6 +375,29 @@ COMMAND_RESET_RESEND_INTERVAL_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: How long body-layer waits, once the aircraft layer's own flight-
+#: control/AI-wheel status feed has produced at least one sample this
+#: process, for its process-start reset to confirm before giving up on
+#: silence and speaking up (BL-16 fail-loud, 2026-11-20, `docs/
+#: acceptance/2026-11-20-sortie-feedback.md`): a mismatched deployed
+#: `Export.lua`/`Petrobrain/*.lua` (no `reset` op, so the epoch is never
+#: echoed) otherwise holds every flight goal/take/break forever with no
+#: trace but a DEBUG log line, while voice commands still sound
+#: acknowledged. The clock starts only once a sample has arrived -- an
+#: aircraft layer that is simply not up yet is not an error, and this
+#: must never fire for that case (`_resolve_command_reset`'s own
+#: docstring). 10 s is comfortably longer than an ordinary confirmation
+#: (a couple of resends once the aircraft layer is up) and short enough
+#: that a genuinely stale deployment is caught well inside the first
+#: minute of a sortie.
+COMMAND_RESET_CONFIRM_TIMEOUT_S: Final[float] = tuning.real(
+    "body.COMMAND_RESET_CONFIRM_TIMEOUT_S",
+    10.0,
+    lo=2.0,
+    hi=120.0,
+    status="judgement",
+)
+
 #: `plans/expected-area-look/plan.md` Stage 3a's own "Hold bound" --
 #: "the end of the glass step of B's sector plus one poll: <= 4 + 12 + 1
 #: ~ 17 s worst, ~ 5-8 s typical" -- `resolve_checks`'s own `deadline_s`:
@@ -612,6 +635,17 @@ class ConsolePerceptionRunner:
     #: though in practice it is never read again once `command_reset_
     #: confirmed` is `True`.
     command_reset_last_sent_wall: float | None = None
+    #: `time.monotonic()` the aircraft layer's own status feed was first
+    #: seen with a sample while the reset was still unconfirmed, or
+    #: `None` before that has happened this process -- `COMMAND_RESET_
+    #: CONFIRM_TIMEOUT_S`'s own cursor (`_resolve_command_reset`).
+    #: Preserved across a mission restart for the same reason as the
+    #: three fields above.
+    command_reset_unconfirmed_since_wall: float | None = None
+    #: Set once `_resolve_command_reset` has logged/queued the "stale
+    #: deployment" warning, so it fires at most once per process.
+    #: Preserved across a mission restart, same reasoning.
+    command_reset_warned: bool = False
 
     #: The effector-sequence engine's own run state (`belief.
     #: effector_engine.EffectorRunState`, `plans/effector-sequences/
@@ -866,6 +900,8 @@ class ConsolePerceptionRunner:
             command_reset_epoch=self.command_reset_epoch,
             command_reset_confirmed=self.command_reset_confirmed,
             command_reset_last_sent_wall=self.command_reset_last_sent_wall,
+            command_reset_unconfirmed_since_wall=self.command_reset_unconfirmed_since_wall,
+            command_reset_warned=self.command_reset_warned,
         )
         self._last_look_direction = None
         self._last_scan_command_t_sim = None
@@ -3417,17 +3453,51 @@ def _resolve_command_reset(
     flight_control_state.lua_reset_epoch` as they stand *this* call --
     the caller places this before both channels' own refresh runs each
     poll, so a confirmation landing this exact poll is only ever noticed
-    one poll later, not lost."""
+    one poll later, not lost.
+
+    **Loud when it cannot confirm (BL-16 fail-loud, 2026-11-20).** Once
+    either status feed has produced at least one sample this process --
+    the aircraft layer is up -- but the epoch still has not echoed after
+    `COMMAND_RESET_CONFIRM_TIMEOUT_S` of that, this logs one `WARNING`
+    naming the likely cause and queues one spoken system-error line
+    (`CrewConsole.command_reset_slow_pending`, drained once the SPU-8
+    intercom gate opens, same shape as `drain_config_error`) -- once per
+    process, and cancelled, unspoken, if the reset confirms before that
+    drain ever runs. Stays quiet for as long as neither feed has
+    produced a sample at all: the aircraft layer simply not being up yet
+    is not an error, and starting the clock from process start instead
+    of first-sample would fire this on every ordinary slow DCS launch."""
     if runner.command_reset_confirmed:
         return
+    now_wall = time.monotonic()
     if (
         runner.parked_flight_state.lua_reset_epoch == runner.command_reset_epoch
         and crew_console.flight_control_state.lua_reset_epoch
         == runner.command_reset_epoch
     ):
         runner.command_reset_confirmed = True
+        crew_console.command_reset_slow_pending = False
         return
-    now_wall = time.monotonic()
+    aircraft_layer_up = (
+        crew_console.flight_control_state.lua_mode is not None
+        or runner.parked_flight_state.ai_mode is not None
+    )
+    if aircraft_layer_up:
+        if runner.command_reset_unconfirmed_since_wall is None:
+            runner.command_reset_unconfirmed_since_wall = now_wall
+        elif (
+            not runner.command_reset_warned
+            and now_wall - runner.command_reset_unconfirmed_since_wall
+            >= COMMAND_RESET_CONFIRM_TIMEOUT_S
+        ):
+            logger.warning(
+                "command reset not confirmed %.0fs after the aircraft "
+                "layer came up -- aircraft-layer Lua out of date? reset "
+                "epoch not echoed; redeploy Petrobrain/*.lua",
+                COMMAND_RESET_CONFIRM_TIMEOUT_S,
+            )
+            crew_console.command_reset_slow_pending = True
+            runner.command_reset_warned = True
     if (
         runner.command_reset_last_sent_wall is not None
         and now_wall - runner.command_reset_last_sent_wall
@@ -5363,6 +5433,12 @@ def _run_crew_text_poll_loop(
                             readback_args,
                         )
                         _resolve_command_reset(runner, crew_console, aircraft_client)
+                        # BL-16 fail-loud (2026-11-20) -- `rules.gates`'
+                        # own flight-category check reads this fresh
+                        # every poll (`CrewConsole.current_crew_state`),
+                        # never cached, same shape `parked_flight_state`/
+                        # `flight_control_state` below already have.
+                        crew_console.commands_ready = runner.command_reset_confirmed
                         # `plans/flight-control/plan.md`, BL-16 mode 2,
                         # Stage P1 -- same "every poll a real ownship
                         # state exists" placement as `guidance_unit_state`
@@ -5819,6 +5895,8 @@ def _run_crew_text_poll_loop(
                         # this same fetch for `altimeter_qnh_failed_
                         # pending` -- one `GET /spu8/state` serves both
                         # one-shot flags rather than each fetching its own.
+                        # BL-16 fail-loud (2026-11-20) shares it a third
+                        # time for `command_reset_slow_pending`.
                         intercom_open = False
                         if (
                             crew_console.config_error_pending
@@ -5826,6 +5904,7 @@ def _run_crew_text_poll_loop(
                             # `[[BL-17]]` D6 -- shares this same one-shot-
                             # flag `/spu8/state` fetch, same reasoning.
                             or crew_console.action_file_error_pending
+                            or crew_console.command_reset_slow_pending
                         ):
                             spu8_latest = aircraft_client.get_spu8_state_latest()
                             intercom_open = (
@@ -5845,6 +5924,9 @@ def _run_crew_text_poll_loop(
                             ),
                         )
                         crew_console.drain_action_file_error(
+                            runner.last_t_sim, intercom_open=intercom_open
+                        )
+                        crew_console.drain_command_reset_slow(
                             runner.last_t_sim, intercom_open=intercom_open
                         )
                         runner.attack_run_state = crew_console.drain_attack_run(

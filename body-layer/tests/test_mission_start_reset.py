@@ -176,6 +176,10 @@ _RUNNER_PRESERVE = {
     "command_reset_epoch",
     "command_reset_confirmed",
     "command_reset_last_sent_wall",
+    # BL-16 fail-loud (2026-11-20) -- the stale-deployment warning's own
+    # two fields, same process-not-mission reasoning as the three above.
+    "command_reset_unconfirmed_since_wall",
+    "command_reset_warned",
 }
 
 
@@ -238,6 +242,11 @@ _CREW_CONSOLE_PRESERVE = {
     # `plans/effector-sequences/plan.md` D6 -- describes this *process's*
     # startup state, not per-mission state, same as `silenced` above.
     "config_error_pending",
+    # BL-16 fail-loud (2026-11-20) -- same reasoning as `config_error_
+    # pending` above. `commands_ready` is deliberately **not** here: it
+    # resets to its declared default (`True`) and `body.py`'s poll loop
+    # refreshes it the very next poll (that field's own docstring).
+    "command_reset_slow_pending",
     # `[[BL-17]]` (`plans/speech-rules/plan.md` D4) -- the closure itself
     # is built once by `body.py` at process start and never rebuilt per
     # mission; `_ever_enabled_rule_ids` is process history (same

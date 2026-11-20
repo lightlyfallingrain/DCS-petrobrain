@@ -22,6 +22,7 @@ from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.flight_control import FlightControlState
 from body import (
+    COMMAND_RESET_CONFIRM_TIMEOUT_S,
     COMMAND_RESET_RESEND_INTERVAL_S,
     ConsolePerceptionRunner,
     _resolve_command_reset,
@@ -51,9 +52,13 @@ def _runner(**fields: object) -> tuple[ConsolePerceptionRunner, _FakeAircraftCli
     return runner, client
 
 
-def _console(lua_reset_epoch: int | None) -> CrewConsole:
+def _console(
+    lua_reset_epoch: int | None, *, lua_mode: str | None = None
+) -> CrewConsole:
     console = CrewConsole(store=ContactStore())
-    console.flight_control_state = FlightControlState(lua_reset_epoch=lua_reset_epoch)
+    console.flight_control_state = FlightControlState(
+        lua_reset_epoch=lua_reset_epoch, lua_mode=lua_mode
+    )
     return console
 
 
@@ -158,3 +163,91 @@ class TestResolveCommandReset:
 
         assert runner.command_reset_confirmed is False
         assert runner.command_reset_last_sent_wall is not None
+
+
+class TestResolveCommandResetFailLoud:
+    """BL-16 fail-loud (2026-11-20, `docs/acceptance/
+    2026-11-20-sortie-feedback.md`): the aircraft layer up, reset still
+    unconfirmed after `COMMAND_RESET_CONFIRM_TIMEOUT_S` case -- a stale
+    deployed `Export.lua`/`Petrobrain/*.lua` that never echoes the
+    epoch."""
+
+    def test_quiet_while_no_status_sample_has_ever_arrived(self) -> None:
+        """Neither feed has a sample yet -- the aircraft layer simply is
+        not up. Must never warn, however long this runs."""
+        runner, client = _runner()
+        console = _console(None)  # lua_mode also None -- no sample yet
+
+        for _ in range(5):
+            _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+            runner.command_reset_last_sent_wall = (
+                time.monotonic() - COMMAND_RESET_RESEND_INTERVAL_S - 0.01
+            )
+
+        assert runner.command_reset_unconfirmed_since_wall is None
+        assert runner.command_reset_warned is False
+        assert console.command_reset_slow_pending is False
+
+    def test_warns_and_queues_one_spoken_line_after_the_timeout(self) -> None:
+        """A sample has arrived (aircraft layer up) but the epoch has
+        not echoed -- once `COMMAND_RESET_CONFIRM_TIMEOUT_S` has passed
+        since that first sample, warn once and queue the spoken line."""
+        runner, client = _runner()
+        console = _console(None, lua_mode="off")  # a sample, just not the echo
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+        assert runner.command_reset_unconfirmed_since_wall is not None
+        assert runner.command_reset_warned is False
+        assert console.command_reset_slow_pending is False
+
+        # Simulate the timeout having elapsed since that first sample.
+        runner.command_reset_unconfirmed_since_wall = (
+            time.monotonic() - COMMAND_RESET_CONFIRM_TIMEOUT_S - 0.01
+        )
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_warned is True
+        assert console.command_reset_slow_pending is True
+
+    def test_warns_only_once(self) -> None:
+        """Not re-queued on a later poll once already warned -- the
+        spoken line is one-shot, same as `config_error_pending`."""
+        runner, client = _runner()
+        console = _console(None, lua_mode="off")
+        runner.command_reset_unconfirmed_since_wall = (
+            time.monotonic() - COMMAND_RESET_CONFIRM_TIMEOUT_S - 0.01
+        )
+        runner.command_reset_warned = True
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        # Already warned -- draining the pending flag (as `CrewConsole.
+        # drain_command_reset_slow` would, elsewhere) and calling again
+        # must not re-set it.
+        console.command_reset_slow_pending = False
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+        assert console.command_reset_slow_pending is False
+
+    def test_confirming_clears_the_pending_line_unspoken(self) -> None:
+        """A confirmation landing after the warning was queued but
+        before `drain_command_reset_slow` ever ran cancels it -- the
+        player is never told about an error that has since resolved."""
+        runner, client = _runner()
+        console = _console(None, lua_mode="off")
+        runner.command_reset_unconfirmed_since_wall = (
+            time.monotonic() - COMMAND_RESET_CONFIRM_TIMEOUT_S - 0.01
+        )
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+        assert console.command_reset_slow_pending is True
+
+        # Now both channels echo the epoch.
+        runner.parked_flight_state = replace(
+            runner.parked_flight_state, lua_reset_epoch=42
+        )
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=42
+        )
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_confirmed is True
+        assert console.command_reset_slow_pending is False

@@ -35,6 +35,7 @@ from belief.crew_console import (
     _NOTHING_TO_STOP,
     ALTIMETER_QNH_NO_RESPONSE_LINE,
     ALTIMETER_QNH_TIMEOUT_LINE,
+    COMMAND_RESET_STALE_LINE,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -8244,6 +8245,89 @@ class TestDrainAltimeterQnhFailed:
             ALTIMETER_QNH_TIMEOUT_LINE,
             ALTIMETER_QNH_NO_RESPONSE_LINE,
         ]
+
+
+class TestDrainCommandResetSlow:
+    """`CrewConsole.drain_command_reset_slow` (BL-16 fail-loud,
+    2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`) -- same
+    gated-until-open, deferred-while-silenced, preserved-across-a-
+    mission-restart shape `drain_config_error` already has."""
+
+    def _console(self) -> tuple[CrewConsole, object]:
+        import io
+
+        output = io.StringIO()
+        return CrewConsole(store=ContactStore(), output=output), output
+
+    def test_speaks_once_gate_is_open(self) -> None:
+        console, output = self._console()
+        console.command_reset_slow_pending = True
+
+        console.drain_command_reset_slow(1.0, intercom_open=True)
+
+        assert output.getvalue() == COMMAND_RESET_STALE_LINE + "\n"
+        assert console.command_reset_slow_pending is False
+
+    def test_silent_when_not_pending(self) -> None:
+        console, output = self._console()
+
+        console.drain_command_reset_slow(1.0, intercom_open=True)
+
+        assert output.getvalue() == ""
+
+    def test_held_while_intercom_gate_is_closed(self) -> None:
+        console, output = self._console()
+        console.command_reset_slow_pending = True
+
+        console.drain_command_reset_slow(1.0, intercom_open=False)
+        assert output.getvalue() == ""
+        assert console.command_reset_slow_pending is True
+
+        console.drain_command_reset_slow(2.0, intercom_open=True)
+        assert output.getvalue() == COMMAND_RESET_STALE_LINE + "\n"
+
+    def test_held_while_silenced(self) -> None:
+        console, output = self._console()
+        console.silenced = True
+        console.command_reset_slow_pending = True
+
+        console.drain_command_reset_slow(1.0, intercom_open=True)
+        assert output.getvalue() == ""
+        assert console.command_reset_slow_pending is True
+
+        console.silenced = False
+        console.drain_command_reset_slow(2.0, intercom_open=True)
+        assert output.getvalue() == COMMAND_RESET_STALE_LINE + "\n"
+
+    def test_preserved_across_a_mission_restart_unlike_altimeter_qnh(
+        self,
+    ) -> None:
+        """Opposite of `TestDrainAltimeterQnhFailed.test_re_armable_
+        unlike_config_error_pending` -- this flag names the process's
+        own reset state, not this mission's, same as `config_error_
+        pending`."""
+        console, _ = self._console()
+        console.command_reset_slow_pending = True
+
+        console.reset_for_new_mission()
+
+        assert console.command_reset_slow_pending is True
+
+
+class TestCurrentCrewStateCommandsReady:
+    """BL-16 fail-loud (2026-11-20) -- `current_crew_state().
+    commands_ready` is `self.commands_ready` passed straight through,
+    the field `body.py`'s poll loop refreshes from `runner.command_
+    reset_confirmed` every poll."""
+
+    def test_defaults_true(self) -> None:
+        console = CrewConsole(store=ContactStore())
+        assert console.current_crew_state().commands_ready is True
+
+    def test_reflects_false(self) -> None:
+        console = CrewConsole(store=ContactStore())
+        console.commands_ready = False
+        assert console.current_crew_state().commands_ready is False
 
 
 class TestBrainCommandsAreRealDispatchTokens:

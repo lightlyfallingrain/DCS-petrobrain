@@ -46,7 +46,16 @@ class CrewState:
     narrows it yet -- naked-eye scanning stays available while flying,
     per the goal check's Q8); `hands_free` is the one real derivation
     this batch needs -- `has_controls` already means his hands are on
-    the stick, so flying implies `hands_free=False`."""
+    the stick, so flying implies `hands_free=False`.
+
+    `commands_ready` (BL-16 fail-loud, 2026-11-20) mirrors `body.
+    ConsolePerceptionRunner.command_reset_confirmed` -- `False` only for
+    the brief process-start window (or the degenerate case where it
+    never confirms at all) before `Export.lua`'s own seq-carrying
+    channels have echoed this process's reset epoch back. Defaults
+    `True` so every existing construction site (a bare `CrewState(...)`
+    with no opinion on reset state) reads as ready, same as it always
+    has."""
 
     has_controls: bool
     held_heading: float | None
@@ -55,3 +64,4 @@ class CrewState:
     seat: Literal["pilot", "copilot"]
     hands_free: bool
     eyes_free: bool
+    commands_ready: bool = True

@@ -75,9 +75,19 @@ def _require_controls(state: CrewState) -> GateOutcome | None:
     Factored out (`[[BL-17]]` Stage 4) once a single `flight_control`
     category split into several, each needing this same base check
     first (review-stage3b.md Required Fix 1 -- see `CrewState`'s own
-    docstring for why one shared `settling` proxy could not do this)."""
+    docstring for why one shared `settling` proxy could not do this).
+
+    **`commands_ready` second (BL-16 fail-loud, 2026-11-20)**: a flight
+    goal sent while body-layer's own process-start reset is still
+    unconfirmed was previously accepted and held forever, with the
+    player hearing it acknowledged and then nothing happening -- exactly
+    the live-sortie symptom this closes. `NOT_FLYING` wins when both are
+    true, since "not flying at all" is the more fundamental reason
+    regardless of reset state."""
     if not state.has_controls:
         return GateOutcome("unable", "NOT_FLYING")
+    if not state.commands_ready:
+        return GateOutcome("unable", "NOT_READY")
     return None
 
 

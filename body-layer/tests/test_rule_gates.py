@@ -113,6 +113,61 @@ def test_flight_control_any_holds_only_while_nothing_is_known() -> None:
     assert outcome.verdict == "pass"
 
 
+def test_flight_control_is_unable_not_ready_while_commands_not_ready() -> None:
+    """BL-16 fail-loud (2026-11-20, `docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `commands_ready=False` (body-
+    layer's own process-start reset still unconfirmed) answers `unable,
+    not ready` immediately rather than being accepted and held forever
+    with no feedback. Checked after `has_controls`, so this only ever
+    fires for a mid-flight body-layer restart against an already-flying
+    AI wheel -- the live-sortie case this closes."""
+    outcome = check_gate(
+        "flight_control",
+        replace(_BASE_STATE, has_controls=True, commands_ready=False),
+    )
+    assert outcome.verdict == "unable"
+    assert outcome.reason == "NOT_READY"
+
+
+def test_flight_control_not_flying_wins_over_commands_not_ready() -> None:
+    """`has_controls=False` is the more fundamental reason -- it is
+    checked first, regardless of `commands_ready`."""
+    outcome = check_gate(
+        "flight_control",
+        replace(_BASE_STATE, has_controls=False, commands_ready=False),
+    )
+    assert outcome.verdict == "unable"
+    assert outcome.reason == "NOT_FLYING"
+
+
+def test_flight_control_heading_is_unable_not_ready_while_commands_not_ready() -> None:
+    """Every `flight_control*` variant shares `_require_controls`, so
+    the same `commands_ready` check applies to each -- checked here on
+    one representative beyond the base category."""
+    outcome = check_gate(
+        "flight_control_heading",
+        replace(
+            _BASE_STATE,
+            has_controls=True,
+            held_heading=10.0,
+            commands_ready=False,
+        ),
+    )
+    assert outcome.verdict == "unable"
+    assert outcome.reason == "NOT_READY"
+
+
+def test_flight_handover_is_unchanged_by_commands_ready() -> None:
+    """Decision (BL-16 fail-loud, 2026-11-20): the handover category is
+    deliberately left ungated. "You have controls" already resolves to
+    "Unable, not ready." on its own within `HANDOVER_ACK_TIMEOUT_S` if
+    the wire `take` never lands (`belief.flight_control`'s own ack-
+    timeout), and "I have controls" must never be refused -- it is the
+    always-acts recovery phrase (Decision 13)."""
+    outcome = check_gate("flight_handover", replace(_BASE_STATE, commands_ready=False))
+    assert outcome.verdict == "pass"
+
+
 def test_an_unregistered_category_degrades_to_unable_no_such_command() -> None:
     assert "not_a_real_category" not in GATE_REGISTRY
     outcome = check_gate("not_a_real_category", _BASE_STATE)
