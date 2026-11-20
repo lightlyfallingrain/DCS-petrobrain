@@ -156,3 +156,14 @@ pitch response via an M0-E probe or by feel), verbatim:
 
 Slip ball moves from "later probe" to now: read it, report it on the flight-control status line
 so a flight can calibrate its sign/units, then use it for pedal (ball-centring) feedback.
+
+## Mode 2 → mode 1 handover crash, `main` @ `a8b21de0` (user, verbatim)
+
+> In mode 2 I commanded from speed 0 to 200, AI accelerated.
+> I changed to mode 1 -> controls fixed at what they were, no corrective movement -> crash as bank
+> kept increasing.
+> On change to mode 1, mode 1 must keep flying the set targets from mode 2 (heading, speed, alt).
+
+Expected: on the unpark take, mode 1 actively flies (the control law runs from the first frame,
+corrects attitude), with its heading/speed/altitude goals seeded from mode 2's set targets (the
+overlay's set course/speed/alt), not from whatever the aircraft happened to be doing.
