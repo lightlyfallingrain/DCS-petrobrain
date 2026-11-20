@@ -181,3 +181,58 @@ place the two former cards' steps live now.
   coordinator's "nothing else in Stages 1-2 changes" note — `_resolve_command_reset` is untouched,
   and the lease's `epoch` field is carried on the wire but not yet checked against anything. This
   is Stage 3/5 territory per the plan's own section 5.
+
+### Review-fix round, 2026-11-20 (`plans/flight-desired-state/review-s12.md`)
+
+Branch `impl/s12-review-fixes`, cut from `feature/bl16-desired-state` tip `92a06513`. Both
+required fixes addressed; both optional refinements left alone (neither was touched by this diff,
+and neither is trivial enough to fold in opportunistically — the `held_*` fallback one in
+particular touches merge semantics the review itself says is narrow but not zero-risk).
+
+**Required Fix 1 (stale `phase` after a forced self-release).** `body-layer/src/belief/
+flight_control.py`'s `decide_flight_control` gets back the pre-Stage-2 state-sync branch — `phase
+== "ACTIVE" and lua_mode == "off" and lua_release_reason in ("envelope", "nan", "dead")` →
+`phase = "PILOT"`, `pending_take_says`/`took_at_sim` cleared — **without** the speech that branch
+used to carry, since `decide_flight_speech` (`belief/flight_authority.py`) already owns the urgent
+"You have controls!" line for this exact edge (keyed off `fd_mode`/`fd_mode_cause`, not `phase`).
+Restored in the smallest place that keeps `phase` consistent until Stage 3 deletes the field
+outright, per the review's own suggested fix. Pinned by
+`test_lua_self_release_reconciles_phase_back_to_pilot` (parametrized over `envelope`/`nan`/`dead`)
+in `tests/test_flight_control.py`.
+
+**Required Fix 2 (self-arm from `off` was level-triggered, not edge-triggered).**
+`aircraft-layer/dcs-export/Petrobrain/flight_control.lua`'s `run_flight_control` gains a park-edge
+tracker: `fc_was_parked` (the raw `is_parked()` value from the previous frame, `nil`/unknown
+folded into "not parked," never reset by `on_stop`/`reset` — a reset does not change whether the
+player is physically parked) and `fc_off_armable_since_edge` (derived: set `true` only on a
+genuine rising edge — `not fc_was_parked and is_parked` — while `fc_mode == "off"`, so a lease
+that becomes fresh a few frames *after* the edge still gets to arm, which is the ordinary "every
+park gives him the overlay" case; cleared on unpark and by `on_stop`/`reset`). The off→armed
+self-arm branch now additionally requires `fc_off_armable_since_edge`, closing exactly the
+sequence the review drove through `luajit`: self-arm from a park → `reset(epoch)` while still
+parked → a fresh lease arrives with no unpark/re-park in between → `fc_mode` now correctly stays
+`off` (previously it re-armed the instant the lease caught up, "well before `'too soon'` in
+practice," per the review). Pinned by
+`test_reset_while_parked_does_not_rearm_until_the_next_park_edge` in
+`tests/test_flight_control_lua.py` — the review's own four-step reproduction, verified both ways:
+fails against the pre-fix module (`fc_mode == "armed"` at step 2, confirmed by stashing the Lua
+diff and re-running), passes with it.
+
+**Files changed, this round:**
+- `body-layer/src/belief/flight_control.py` — Required Fix 1 branch restored in
+  `decide_flight_control`.
+- `body-layer/tests/test_flight_control.py` — `test_lua_self_release_reconciles_phase_back_to_pilot`.
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — `fc_was_parked`/`fc_off_armable_
+  since_edge` locals, the edge-tracking block at the top of `run_flight_control`, the off→armed
+  branch's new `fc_off_armable_since_edge` condition, and `on_stop` clearing the armable flag
+  (never `fc_was_parked` itself).
+- `aircraft-layer/tests/test_flight_control_lua.py` —
+  `test_reset_while_parked_does_not_rearm_until_the_next_park_edge`.
+
+**Checks, this round:**
+- aircraft-layer: `ruff format --check`/`ruff check`/`mypy src` pass; `luac5.1 -p` on the touched
+  Lua file passes; GETGLOBAL sweep on it is identical before/after the diff (no new global
+  reference introduced); full suite `pytest tests -q`: 1100 passed (1099 + the new Lua test).
+- body-layer: `ruff format --check`/`ruff check`/`mypy src` pass; full suite (`not slow`):
+  3714 passed, 27 deselected, 4 xfailed (3711 + the 3 new parametrized cases); the 27 `slow`-marked
+  flight scenario tests were also run (`pytest tests -q -m slow`): 27 passed.

@@ -1468,6 +1468,54 @@ print(sent_lines[#sent_lines])
         # off (no self-arm), same as "no lease ever sent".
         assert _field(line, "fc_mode") == "off"
 
+    def test_reset_while_parked_does_not_rearm_until_the_next_park_edge(
+        self,
+    ) -> None:
+        """Required Fix 2, `plans/flight-desired-state/review-s12.md`:
+        the off->armed self-arm must be edge-triggered, not level-
+        triggered -- Q6 ("after `reset(epoch)` while parked, armed is
+        cleared and nothing re-arms it until the next park edge").
+        Real reproduction, driven frame by frame: park with a fresh
+        lease (self-arms), `reset` while still parked (back to `off`),
+        a fresh lease arrives while STILL parked -- no unpark/re-park
+        happened -- must stay `off`. Only an actual unpark then re-park
+        is allowed to self-arm again."""
+        driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+ap_parked = true
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])  -- [1] self-armed from the first park edge
+
+flight_control.reset(2)
+flight_control.push_flight_control_state(1.0)
+print(sent_lines[#sent_lines])  -- [2] off again, still parked
+
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":2,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    2.0)
+-- still parked, no unpark edge in between
+flight_control.run_flight_control(2.1)
+flight_control.push_flight_control_state(2.1)
+print(sent_lines[#sent_lines])  -- [3] must still be off (Q6)
+
+ap_parked = false
+flight_control.run_flight_control(2.2)
+ap_parked = true
+flight_control.run_flight_control(2.3)
+flight_control.push_flight_control_state(2.3)
+print(sent_lines[#sent_lines])  -- [4] a real unpark+re-park self-arms again
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "armed"
+        assert _field(lines[1], "fc_mode") == "off"
+        assert _field(lines[2], "fc_mode") == "off"
+        assert _field(lines[3], "fc_mode") == "armed"
+
     def test_unknown_cmd_arm_is_now_a_no_op(self) -> None:
         """The old `cmd == "arm"` branch is gone entirely -- sending it
         is silently ignored (an unknown `cmd` reaches no branch at

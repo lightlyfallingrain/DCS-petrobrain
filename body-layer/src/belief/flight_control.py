@@ -633,9 +633,18 @@ def decide_flight_control(
     Checked in this order, each one `return`s immediately so at most one
     fires per poll:
 
-    1. **Ack timeout while TAKING** (row 5): "Unable, not ready.",
+    1. **Lua self-released out of mode 1** (row "envelope/NaN/dead" in
+       the handover table): `phase` reconciled back to `"PILOT"` --
+       state only, never speech (`decide_flight_speech` already owns
+       the urgent "You have controls!" line for this edge, keyed off
+       `fd_mode`/`fd_mode_cause`, Stage 2 review Required Fix 1). Without
+       this, `phase` sticks at `"ACTIVE"` forever after the self-release,
+       and `release_controls`'s own `state.phase in ("TAKING", "ACTIVE")`
+       check then reports `acted=True` on a later "I have controls" that
+       never actually released anything.
+    2. **Ack timeout while TAKING** (row 5): "Unable, not ready.",
        `pending_take_says` discarded unspoken.
-    2. **Lua confirms active for a voice take while TAKING** (row 4):
+    3. **Lua confirms active for a voice take while TAKING** (row 4):
        `pending_take_says` spoken once, then cleared.
 
     A no-op (`state` unchanged, `None`) covers every other poll.
@@ -644,6 +653,16 @@ def decide_flight_control(
     do not need an unrelated signature edit in the same change; a future
     stage may drop it."""
     del parked_active
+
+    if (
+        state.phase == "ACTIVE"
+        and state.lua_mode == "off"
+        and state.lua_release_reason in ("envelope", "nan", "dead")
+    ):
+        new_state = replace(
+            state, phase="PILOT", pending_take_says=None, took_at_sim=None
+        )
+        return new_state, None
 
     if state.phase == "TAKING":
         if state.lua_mode == "active" and state.lua_take_seq == state.take_seq:

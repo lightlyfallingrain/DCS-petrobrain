@@ -1067,6 +1067,24 @@ local fc_take_origin = nil
 local fc_goal_seq = nil
 local fc_last_cmd_seq = -1
 local fc_arm_last_t = nil
+
+-- The park/unpark edge tracker for the off->armed self-arm clause
+-- (Stage 2 review-s12.md Required Fix 2) -- `fc_was_parked` is `is_
+-- parked()`'s own raw value from the previous frame, physical state
+-- only, never reset by `on_stop`/`reset` (a body-layer restart does not
+-- change whether the player is actually parked). `fc_off_armable_
+-- since_edge` is the derived "may self-arm from off" window: set true
+-- only on a genuine rising edge (`not fc_was_parked and is_parked`)
+-- while `fc_mode == "off"`, so a lease that only becomes fresh a few
+-- frames after the edge still gets to arm (the ordinary "every park
+-- gives him the overlay" case), and cleared on unpark and by `on_stop`/
+-- `reset` -- Q6: "after `reset(epoch)` while parked, armed is cleared
+-- and nothing re-arms it until the next park edge." Without this, the
+-- old level-triggered check (`is_parked == true and fc_mode == "off"`
+-- alone) re-armed the instant a fresh lease arrived, even with no
+-- unpark/re-park in between, which is exactly what Q6 forbids.
+local fc_was_parked = nil
+local fc_off_armable_since_edge = false
 local fc_release_reason = nil
 local fc_refuse_cause = nil
 local fc_takeover_mode = nil
@@ -1756,6 +1774,22 @@ local function run_flight_control(t)
         is_parked = safe_call(ai_pilot_wheel.is_parked)
     end
 
+    -- Required Fix 2 (review-s12.md) -- the off->armed self-arm edge
+    -- tracker. A rising edge (not parked last frame, parked this one)
+    -- while `fc_mode == "off"` opens the self-arm window; unparking
+    -- closes it again. `fc_was_parked` itself is never reset by `on_
+    -- stop`/`reset`, so a reset that happens while still parked is not
+    -- mistaken for a fresh edge on the very next frame. `is_parked ==
+    -- nil` (unknown) is folded into "not parked" here, same as the
+    -- module's own "unknown == off" default above.
+    local is_parked_now = is_parked == true
+    if not is_parked_now then
+        fc_off_armable_since_edge = false
+    elseif fc_was_parked ~= true and fc_mode == "off" then
+        fc_off_armable_since_edge = true
+    end
+    fc_was_parked = is_parked_now
+
     -- M0-J (flight 9): track the voice-take capture's "last steady"
     -- fallback every frame, regardless of mode -- a take can land on
     -- any frame.
@@ -1804,8 +1838,15 @@ local function run_flight_control(t)
     -- layer's lease is fresh, replacing the old `arm` message's own
     -- `off -> armed` row. Lease NOT fresh (body-layer down, or never
     -- sent one) leaves him `off` -- the player keeps the controls, same
-    -- as today when no `arm` had ever arrived.
-    if is_parked == true and fc_mode == "off" then
+    -- as today when no `arm` had ever arrived. **Edge-triggered, not
+    -- level-triggered (review-s12.md Required Fix 2, Q6):**
+    -- `fc_off_armable_since_edge` is only true from a genuine park
+    -- rising edge onward (set above) and is cleared by `on_stop`/
+    -- `reset` -- a reset while still parked leaves `fc_mode == "off"`
+    -- and `is_parked == true` indefinitely, which the bare level check
+    -- this replaces re-armed the instant a fresh lease next arrived,
+    -- with no unpark/re-park having happened.
+    if is_parked == true and fc_mode == "off" and fc_off_armable_since_edge then
         local lease_fresh = fc_arm_last_t ~= nil
             and (t - fc_arm_last_t) <= fc_limits.arm_lease_s
         if lease_fresh then
@@ -2048,6 +2089,10 @@ local function on_stop()
     fc_take_origin = nil
     fc_goal_seq = nil
     fc_arm_last_t = nil
+    -- Required Fix 2 (review-s12.md, Q6) -- the self-arm edge window
+    -- itself, not `fc_was_parked` (the raw physical state, which this
+    -- reset must NOT touch -- see its own declaration comment above).
+    fc_off_armable_since_edge = false
     fc_release_reason = nil
     fc_refuse_cause = nil
     fc_takeover_mode = nil

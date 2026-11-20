@@ -360,6 +360,32 @@ class TestDecideFlightControl:
         assert state.phase == "OVERLAY"
         assert decision is None
 
+    @pytest.mark.parametrize("reason", ["envelope", "nan", "dead"])
+    def test_lua_self_release_reconciles_phase_back_to_pilot(self, reason: str) -> None:
+        """Required Fix 1, `plans/flight-desired-state/review-s12.md`:
+        Stage 2 deleted the pre-Stage-2 state-sync branch along with its
+        speech (now `decide_flight_speech`'s own job), but dropped the
+        state side-effect too -- `phase` stuck at `"ACTIVE"` forever
+        after a forced mode-1 self-release, so a later "I have controls"
+        wrongly reported `acted=True` (`release_controls`'s own `phase
+        in ("TAKING", "ACTIVE")` check). This pins the restored
+        reconciliation: state only, no speech from here."""
+        state, decision = decide_flight_control(
+            FlightControlState(
+                phase="ACTIVE",
+                lua_mode="off",
+                lua_release_reason=reason,
+                pending_take_says="stale",
+                took_at_sim=3.0,
+            ),
+            10.0,
+            parked_active=False,
+        )
+        assert state.phase == "PILOT"
+        assert state.pending_take_says is None
+        assert state.took_at_sim is None
+        assert decision is None
+
     def test_says_spoken_exactly_once_for_the_matching_take_seq(self) -> None:
         state, decision = decide_flight_control(
             FlightControlState(
