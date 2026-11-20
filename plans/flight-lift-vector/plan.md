@@ -647,3 +647,11 @@ Open:
   clamp is honest to the player (read back as clamped by the existing path) where a silent
   Lua-only floor would make Petrovich say one speed and fly another. The alternative, floor 0 in
   LV-1, lets the player command slow flight the law is not built for until LV-3.
+
+  **Answered 2026-11-20** (user, verbatim): *"no floor"*. `MIN_IAS_KMH` and every commanded-speed
+  floor go entirely in LV-1: no hand-back, no refusal, no clamp. A slow command is flown by the LV-1
+  law as it is (gentler at low speed per the speed schedule); what doesn't work, the user brings
+  back (his own Q1 answer). The implementer applies this wherever the plan above still says
+  "floored at 50 km/h" or "until LV-3" (Affected Modules, the LV-1 build, the Co-moving table, the
+  LV-1 card's low-speed rows), and the U2 unpark clamp from desired-state Stage 3 loses its speed
+  floor too (its ceiling and the AGL floor stay).
