@@ -1,0 +1,561 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Flight Axes Probe</title>
+<style>
+/* layout: one scrolling probe card -- sticky branch banner, scope blocks, then lettered
+   segment steps (set up, A-D, restore), each do/expect/record; bring-back sheet from
+   the bottom rail. Same system as the 2026-11-17 BL-17 flight cards. */
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #1b1f26;
+  --fg: #e8e6df;
+  --fg-dim: #9aa0aa;
+  --amber: #ffb02e;
+  --amber-dim: #8a6324;
+  --record: #5fc2ba;
+  --rule: #2a2f38;
+  --danger: #ff6b5e;
+  --on-amber: #1a1200;
+  --amber-wash: rgba(255, 176, 46, 0.08);
+  --record-wash: rgba(95, 194, 186, 0.12);
+  --danger-wash: rgba(255, 107, 94, 0.12);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --panel-2: #eceae3;
+    --fg: #1c1b18;
+    --fg-dim: #5c584f;
+    --amber: #b3651a;
+    --amber-dim: #d9a35c;
+    --record: #0f7a72;
+    --rule: #ddd8cc;
+    --danger: #b3261e;
+    --on-amber: #ffffff;
+    --amber-wash: rgba(179, 101, 26, 0.08);
+    --record-wash: rgba(15, 122, 114, 0.10);
+    --danger-wash: rgba(179, 38, 30, 0.08);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --panel: #ffffff;
+  --panel-2: #eceae3;
+  --fg: #1c1b18;
+  --fg-dim: #5c584f;
+  --amber: #b3651a;
+  --amber-dim: #d9a35c;
+  --record: #0f7a72;
+  --rule: #ddd8cc;
+  --danger: #b3261e;
+  --on-amber: #ffffff;
+  --amber-wash: rgba(179, 101, 26, 0.08);
+  --record-wash: rgba(15, 122, 114, 0.10);
+  --danger-wash: rgba(179, 38, 30, 0.08);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+h1, h2, h3 {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+code, pre {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+header.banner {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 9;
+  background: var(--bg);
+  margin: 0 -16px;
+  padding-block: 14px 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.banner-inner { max-width: 680px; margin: 0 auto; }
+.eyebrow {
+  color: var(--amber);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+h1 { font-size: clamp(1.7rem, 6vw, 2.3rem); font-weight: 700; margin: 2px 0 8px; }
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.branch-row .label { color: var(--fg-dim); font-size: 0.85rem; }
+.branch-row code {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.95rem;
+  color: var(--amber);
+}
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.card, .step {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.card.scope { border-left: 3px solid var(--fg-dim); }
+.card.skip { border-left: 3px solid var(--danger); }
+.step.prize { border-color: var(--amber-dim); background: linear-gradient(135deg, var(--amber-wash), transparent), var(--panel); }
+.card h2 { font-size: 1.05rem; color: var(--fg-dim); margin: 0 0 8px; }
+.card ul, .block ul { margin: 4px 0 0; padding-left: 20px; }
+.card li, .block li { margin-bottom: 4px; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.fact { background: var(--panel-2); border-radius: 6px; padding: 8px 10px; }
+.fact b {
+  display: block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.5rem;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+.fact span { color: var(--fg-dim); font-size: 0.85rem; }
+.step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.step-head h3 { font-size: 1.15rem; margin: 0; }
+.step-head .n { color: var(--amber); margin-right: 6px; }
+.prize-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  border-radius: 20px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.step-check input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--amber); }
+.block { margin-bottom: 12px; }
+.block:last-child { margin-bottom: 0; }
+.block .tag {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.block.expect .tag { color: var(--amber); }
+.block.record .tag { color: var(--record); }
+.block p { margin: 4px 0; }
+pre.cmd {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 0.86rem;
+  margin: 6px 0;
+  white-space: pre;
+}
+pre.cmd .dir { color: var(--fg-dim); display: block; margin-bottom: 4px; font-size: 0.78rem; }
+.pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 20px;
+  padding: 2px 9px;
+}
+.pill.ok { color: var(--record); background: var(--record-wash); border: 1px solid var(--record); }
+.pill.no { color: var(--danger); background: var(--danger-wash); border: 1px solid var(--danger); }
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 6px 0;
+  align-items: baseline;
+}
+.keys kbd {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+.phrases {
+  columns: 2 220px;
+  column-gap: 20px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.92rem;
+}
+.phrases li { break-inside: avoid; padding: 2px 0; }
+.phrases .grp {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  padding-top: 8px;
+}
+.phrases .grp:first-child { padding-top: 0; }
+.rail {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  background: var(--panel-2);
+  border-top: 1px solid var(--rule);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.rail button, .sheet .close {
+  width: 100%;
+  border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 12px;
+  cursor: pointer;
+}
+.rail button { background: var(--amber); color: var(--on-amber); border: none; }
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 25;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  border-radius: 14px 14px 0 0;
+  padding: 18px max(18px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.sheet h2 { color: var(--record); margin: 0 0 10px; font-size: 1.1rem; }
+.sheet ol { padding-left: 22px; margin: 0 0 12px; }
+.sheet li { margin-bottom: 8px; }
+.sheet .surprise {
+  background: var(--panel-2);
+  border-left: 3px solid var(--record);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+.sheet .close { margin-top: 14px; background: transparent; border: 1px solid var(--rule); color: var(--fg-dim); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<header class="banner">
+  <div class="banner-inner">
+    <div class="eyebrow">BL-16 mode 1 &middot; probe M0, sortie 1 &middot; Windows, air start</div>
+    <h1>Flight Axes Probe</h1>
+    <div class="branch-row">
+      <span class="label">Branch:</span>
+      <code>probe/bl16-flight-axes</code>
+      <span class="label">(or <code>main</code> once you say merge)</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="card scope">
+    <h2>What this flight decides</h2>
+    <p>Whether Petrovich can fly on the raw controls at all, and the numbers his control loop needs. One question outranks the rest: <strong>when the probe holds the controls, does your physical stick still move the aircraft?</strong> If it does, mode 1 can't work as designed.</p>
+    <div class="facts">
+      <div class="fact"><b>19</b><span>segments, one trigger</span></div>
+      <div class="fact"><b>~25 min</b><span>flight time, both seats</span></div>
+      <div class="fact"><b>150 km/h</b><span>~200 m AGL, flat ground</span></div>
+    </div>
+  </section>
+
+  <section class="card skip">
+    <h2>Not in this flight</h2>
+    <ul>
+      <li><strong>Petrobrain doesn't run.</strong> The probe replaces Export.lua, so there's no Petrovich, no voice, no telemetry.</li>
+      <li><strong>Sortie 2</strong> (step response, release, trim, SAU, seat swap while holding) comes later.</li>
+      <li><strong>Controls stay unparked until J.</strong> Only the J rows ask you to press Request Aircraft Control.</li>
+    </ul>
+  </section>
+
+  <section class="card scope">
+    <h2>The one control: ICS half-press</h2>
+    <div class="keys">
+      <kbd>idle</kbd><span>half-press starts the next segment</span>
+      <kbd>read</kbd><span>A1–A4, B1, C1: half-press ends it</span>
+      <kbd>write</kbd><span>B2, C2, D1, D2 and J run themselves and end on their own; <strong>a half-press stops writing at once</strong></span>
+    </div>
+    <p><strong>A full radio press skips to the next phase</strong> (A → B → C → D → operator B → C → D → J) and stops anything running; your next half-press then starts that phase. Both presses act when you let go, so going through the ICS step on the way to a full press never counts as a half-press. Either stick works. C2 also stops by itself if vertical speed passes 8 m/s, or if the collective jumps or moves the wrong way.</p>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">0</span>Set up</h3>
+      <label class="step-check"><input type="checkbox" id="s0" data-k="s0" aria-label="Set up done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <pre class="cmd"><span class="dir">repo root, Mac</span>git checkout probe/bl16-flight-axes</pre>
+      <p>Copy <code>aircraft-layer/dcs-export/Export.probe-flight-axes.lua</code> over <code>Saved Games\DCS\Scripts\Export.lua</code> with your sync script. Mi-24P, air start, pilot seat, straight and level at about 150 km/h and 200 m AGL over flat ground.</p>
+      <span class="pill no">unverified in DCS</span>
+      <p>Lua 5.1 syntax checked, and every segment run against stubbed DCS calls on the Mac, including the C2 wrong-sign abort.</p>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p><code>Logs\aircraft_layer_probe_flight_axes.log</code> appears and grows. Nothing in the cockpit changes until you half-press.</p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">A</span>Read only: A1–A4</h3>
+      <label class="step-check"><input type="checkbox" id="sa" data-k="sa" aria-label="Segment A done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Four segments, half-press to start each and half-press to end it. You fly; the probe only reads.</p>
+      <ul>
+        <li><strong>A1</strong>: 60 s straight and level.</li>
+        <li><strong>A2</strong>: 20° bank turn left, then right.</li>
+        <li><strong>A3</strong>: climb 100 m at about 5 m/s, then descend 100 m.</li>
+        <li><strong>A4</strong>: accelerate 150 → 220 km/h, then back.</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>Nothing visible. The log records every heading, speed, height and rate source each frame.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>What does the HSI read each time you end A1, A2 and A4? Three numbers.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">B</span>Pedals: B1 read, B2 write</h3>
+      <label class="step-check"><input type="checkbox" id="sb" data-k="sb" aria-label="Segment B done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <ul>
+        <li><strong>B1</strong>: sweep the pedals slowly full left, full right, back to centre. Half-press to end.</li>
+        <li><strong>B2</strong>: <strong>feet off the pedals</strong>, then half-press. The probe writes the pedal command: where you left them, then +0.05, −0.05, +0.10, −0.10, back, 3 s each. 18 s, ends on its own. Hold the stick yourself.</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>The cockpit pedals move with each step, and the nose yaws one way then the other, the bigger steps more. The log's B2 result says whether D will hold the pedals too.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Did the cockpit pedals visibly move in 3 s steps?</li>
+        <li>Which way did the nose go on the first step, and how much did it yaw?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">C</span>Collective: C1 read, C2 write</h3>
+      <label class="step-check"><input type="checkbox" id="sc" data-k="sc" aria-label="Segment C done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <ul>
+        <li><strong>C1</strong>: sweep the collective slowly low → high → back to where it was. Half-press to end.</li>
+        <li><strong>C2</strong>: <strong>hand off the collective</strong>, then half-press. The probe holds it where you left it for 3 s, then +0.02, back, −0.02, back, 2 s each. 11 s, ends on its own, or stops itself if anything looks wrong. Fly the cyclic yourself.</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>No jump at the start. A small climb on one step and a small sink on the other, well under 8 m/s. If the sign guess is wrong, the probe stops writing within about a second and the log says why.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Did the collective lever jump when C2 started?</li>
+        <li>Did vertical speed go up or down on the first step?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step prize">
+    <div class="step-head">
+      <h3><span class="n">D</span>Stir the controls: D1, D2<span class="prize-pill">go / no-go</span></h3>
+      <label class="step-check"><input type="checkbox" id="sd" data-k="sd" aria-label="Segment D done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Half-press for <strong>D1</strong>. The probe holds pitch and roll where they are, plus the pedals and collective if B2 and C2 passed, for 30 s. Meanwhile, deliberately stir the stick for about 10 s, then the pedals for 10 s, then the collective for 10 s. Don't fight it hard; move them the way you would by accident. Then the same for <strong>D2</strong>, which holds with a much smaller dither.</p>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>The aircraft keeps its attitude while you stir, and the cockpit stick shows the held position, not yours. If the aircraft follows your hands, half-press to stop: that's the no-go answer.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Did the aircraft respond to your stick, pedals or collective at all while held? Which ones?</li>
+        <li>Any twitch or shimmer in D1 that D2 didn't have, or the other way round?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">O</span>B, C and D again, from the operator seat</h3>
+      <label class="step-check"><input type="checkbox" id="so" data-k="so" aria-label="Operator pass done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Move to the <strong>operator seat with the copilot controls unparked</strong>: Petrovich would be flying from the pilot seat while you sit up front. Then run the six segments B1o, B2o, C1o, C2o, D1o and D2o exactly as above, using the operator stick's ICS.</p>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>The same as from the pilot seat. This is the first time pedal, collective and the stirred-stick hold are measured from the front seat.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>Anything that behaved differently from the pilot-seat pass?</li>
+        <li>D1o/D2o: did the aircraft follow your operator stick, pedals or collective while held?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">J</span>Park and unpark while held: J1, J2, J3</h3>
+      <label class="step-check"><input type="checkbox" id="sj" data-k="sj" aria-label="Segment J done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Stay in the operator seat. Each J row starts with the probe holding the controls.</p>
+      <ul>
+        <li><strong>J1</strong>: half-press, then press <strong>Request Aircraft Control</strong> to park. The probe stops writing the moment ED's AI takes over. Let the AI fly about 20 s, then press it again to unpark. In that same frame the probe takes the controls back and holds for 10 s.</li>
+        <li><strong>J2</strong>: the same again. The probe uses a different starting position this time.</li>
+        <li><strong>J3</strong>: half-press, park, then <strong>swap to the pilot seat</strong> while parked. The probe takes the controls back at the swap and holds 10 s.</li>
+      </ul>
+    </div>
+    <div class="block expect">
+      <span class="tag">Expect</span>
+      <p>No lurch at the unpark or the swap. The aircraft carries on from what ED's AI was doing, and the cockpit stick holds still instead of following yours. If nothing happens within 2 minutes the row gives up by itself.</p>
+    </div>
+    <div class="block record">
+      <span class="tag">Record</span>
+      <ul>
+        <li>At each unpark, and at J3's swap: did the aircraft jump, and which way?</li>
+        <li>Was J1 or J2 smoother?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="step-head">
+      <h3><span class="n">E</span>Restore and bring back</h3>
+      <label class="step-check"><input type="checkbox" id="se" data-k="se" aria-label="Restore done"></label>
+    </div>
+    <div class="block">
+      <span class="tag">Do</span>
+      <p>Copy the production <code>aircraft-layer/dcs-export/Export.lua</code> back over <code>Saved Games\DCS\Scripts\Export.lua</code>. Don't restore an old backup. Drop <code>Saved Games\DCS\Logs\aircraft_layer_probe_flight_axes.log</code> into <code>win-mac-sync/from-windows/dcs-logs/</code>.</p>
+    </div>
+  </section>
+
+</main>
+
+<div class="rail"><button type="button" id="openSheet">Bring back</button></div>
+<div class="sheet" id="sheet" hidden>
+  <h2>Bring back</h2>
+  <ol>
+    <li>The log file, in <code>win-mac-sync/from-windows/dcs-logs/</code>.</li>
+    <li>D, in both seats: did the aircraft follow your stick, pedals or collective while held?</li>
+    <li>J: any jump at the unparks or the seat swap? J1 or J2 smoother?</li>
+    <li>The three HSI headings from A.</li>
+    <li>B2: did the pedals step, and which way did the nose go?</li>
+    <li>C2: any jump at the start, and which way did VS go?</li>
+  </ol>
+  <div class="surprise">Anything that surprised you is worth more than anything on this list.</div>
+  <button type="button" class="close" id="closeSheet">Close</button>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'bl16-m0-flight-axes-card';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+  var sheet = document.getElementById('sheet');
+  document.getElementById('openSheet').addEventListener('click', function () { sheet.hidden = false; });
+  document.getElementById('closeSheet').addEventListener('click', function () { sheet.hidden = true; });
+})();
+</script>

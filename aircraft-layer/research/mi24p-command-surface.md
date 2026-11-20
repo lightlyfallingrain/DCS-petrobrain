@@ -488,7 +488,8 @@ no device. Documented verbatim in `Scripts/Export.lua:857-893`.
 | 2001 | joystick pitch |
 | 2002 | joystick roll |
 | 2003 | joystick rudder |
-| 2004 | joystick thrust / **collective** (both engines) — *value is inverted, per ED's own comment* |
+| 2004 | joystick thrust (both engines). **On the Mi-24P this is the engine throttle, "Throttle (Collective)", not the collective.** *Corrected 2026-11-18:* writing it does not move the collective (`2026-11-18-bl16-m0-flight-axes-findings.md`, flight 5) |
+| **2087** | **collective**: `iCommandPlaneCollective`, "Flight Control Collective" in both seats' Input bindings. The number comes from the user's binding diff key `a2087cdnil`; no shipped Lua file defines it. **Sign −1, scale 1** (flight 6, 2026-11-18). |
 | 2005 / 2006 | left / right engine thrust |
 | 2022 / 2023 / 2024 | trim pitch / roll / rudder |
 | 2013-2018 | mouse equivalents of pitch/roll/rudder/thrust |
