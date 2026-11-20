@@ -117,16 +117,12 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
   </div>
 
   <div class="gate">
-    <h2>Redeploy and pre-flight gate &mdash; do this first</h2>
+    <h2>Pre-flight gate &mdash; do this first</h2>
     <div class="block">
-      <div class="label">Redeploy</div>
-      <div class="expect">Copy the whole <code>aircraft-layer/dcs-export/Petrobrain/</code> folder
-        <strong>and</strong> <code>Export.lua</code> to <code>Saved Games\DCS\Scripts\</code>.
-        Restart DCS (a mission restart alone does not reload <code>Export.lua</code>). Restart the
-        collector and body-layer.</div>
-      <div class="label">Check, before takeoff</div>
-      <pre class="cmd">curl -s http://192.168.1.50:7791/flight_control/latest
-curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest</pre>
+      <div class="label">After your usual redeploy and restart, before takeoff</div>
+      <pre class="cmd">source run-scripts/petrobrain.env
+curl -s http://$DCS_COLLECTOR_IP:7791/flight_control/latest
+curl -s http://$DCS_COLLECTOR_IP:7791/ai_pilot_wheel/latest</pre>
       <div class="expect">Both return a real JSON object. The collector's startup log shows
         <strong>no</strong> &ldquo;Export.lua version mismatch&rdquo; warning
         (<code>EXPECTED_EXPORT_VERSION = "2026-11-20"</code>). If either fails, stop &mdash; the
@@ -280,7 +276,7 @@ curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest</pre>
   <div class="card">
     <h2><span class="n">10</span> The stale-Lua warning <span class="tag" style="color:var(--fg-dim); font-size:.65rem;">optional</span></h2>
     <div class="block">
-      <div class="expect">Already checked above under &ldquo;Redeploy and pre-flight gate.&rdquo;
+      <div class="expect">Already checked above under &ldquo;Pre-flight gate.&rdquo;
         If you skipped it, confirm now that the collector log never showed an &ldquo;Export.lua
         version mismatch&rdquo; warning during this flight.</div>
       <div class="chk"><input type="checkbox" data-k="b10-done" id="c10"><label for="c10">Checked</label></div>
