@@ -339,6 +339,12 @@ measurement is the aircraft's **vertical acceleration** from raw velocity (A), n
   `K_L` starts deliberately below the collective a 1 g increase needs, so the integrator supplies
   the rest and a wrong `K_L` is a slower settle, never a balloon. It is what makes collective rise
   **with** the bank, the same frame, rather than after an altitude error builds (E4, E5).
+  *Main-loop note from the flight-dynamics research
+  (`aircraft-layer/research/2026-11-20-helicopter-flight-dynamics.md`, finding 9), not the
+  architect's text:* induced power grows roughly with n², not n (60° bank, n = 2: about 4× induced
+  power). The linear nudge stays right for LV-1; if LV-2's break card shows the collective lag
+  growing with bank instead of staying roughly constant, taper `K_L` with bank or `n_d` in the
+  profile. Same "nudge, not model" framing.
 - `u̇_c,i = K_c(V)·e_u`, `e_u = a_u,d − a_u` (world up). `a_u,d` already carries the altitude and
   vertical-speed errors (C), so this one integrator holds height through turns, climbs and speed
   changes.
