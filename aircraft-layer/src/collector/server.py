@@ -63,6 +63,7 @@ from collector.arg_read_broker import ArgReadBroker
 from collector.cache import (
     AiPilotWheelCache,
     FlightControlCache,
+    FlightDesiredCache,
     PayloadCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
@@ -78,6 +79,8 @@ from schema import (
     AiPilotWheelState,
     FlightControlParseError,
     FlightControlState,
+    FlightDesiredParseError,
+    FlightDesiredState,
     PayloadParseError,
     PayloadSample,
     PetrovichIndicationParseError,
@@ -175,7 +178,18 @@ logger = logging.getLogger(__name__)
 #: reset) and the matching `"fc_reset_epoch"`/`"apw_reset_epoch"` fields
 #: on the flight-control/AI-pilot-wheel status lines -- additive only,
 #: same reasoning as every other additive bump above.
-EXPECTED_EXPORT_VERSION = "2026-11-20"
+#: Bumped again, "...20b" (`plans/flight-desired-state/plan.md`, BL-16
+#: Stages 1-2) for the new per-frame flight-desired status line (wire
+#: key `"fd_mode"`), the new `flight_lease` inbound op, and the removed
+#: `flight_control` `"arm"` command -- a pre-fix collector talking to a
+#: post-fix `Export.lua` would log a version mismatch, which is the
+#: point (`Export.lua`'s own matching comment).
+#: Bumped again, "...20c" (BL-16 Stage 3, same plan) for the retired
+#: `flight_control` op (replaced by the numbered `flight` op), the new
+#: `fd_epoch`/`fd_last_seq`/`fd_acks` fields on the flight-desired
+#: status line, and the `fc_mode` line's own dropped `fc_goal_*`/`fc_
+#: take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` fields.
+EXPECTED_EXPORT_VERSION = "2026-11-20c"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -253,6 +267,10 @@ class CollectorServer:
         # FlightControlCache simply drops "fc_mode" lines (`plans/
         # flight-control/plan.md`, BL-16 mode 1, Stage M1).
         flight_control_cache: FlightControlCache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # FlightDesiredCache simply drops "fd_mode" lines (`plans/
+        # flight-desired-state/plan.md`, BL-16 Stages 1-2).
+        flight_desired_cache: FlightDesiredCache | None = None,
         # Not optional, unlike every cache above -- a collector with no
         # `ArgReadBroker` simply drops "read_id" lines (the one-shot read
         # reply has nowhere to go without it), same posture as a `None`
@@ -276,6 +294,7 @@ class CollectorServer:
         self._payload_cache = payload_cache
         self._ai_pilot_wheel_cache = ai_pilot_wheel_cache
         self._flight_control_cache = flight_control_cache
+        self._flight_desired_cache = flight_desired_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -610,6 +629,22 @@ class CollectorServer:
             logger.debug("parsed flight-control sample: %r", flight_control_sample)
             if self._flight_control_cache is not None:
                 self._flight_control_cache.push(flight_control_sample)
+            return
+
+        if "fd_mode" in data:
+            # `plans/flight-desired-state/plan.md`, BL-16 Stages 1-2 --
+            # ahead of the telemetry fallthrough for the same reason
+            # every other named kind above is.
+            try:
+                flight_desired_sample = FlightDesiredState.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except FlightDesiredParseError:
+                logger.warning("dropping malformed flight-desired line: %r", line)
+                return
+            logger.debug("parsed flight-desired sample: %r", flight_desired_sample)
+            if self._flight_desired_cache is not None:
+                self._flight_desired_cache.push(flight_desired_sample)
             return
 
         try:

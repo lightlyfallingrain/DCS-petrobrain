@@ -37,6 +37,7 @@ from typing import Any, Final
 
 from .ai_pilot_wheel import AiPilotWheelParseError, AiPilotWheelState
 from .flight_control import FlightControlParseError, FlightControlState
+from .flight_desired import FlightDesiredParseError, FlightDesiredState
 from .line_of_sight import (
     LineOfSightParseError,
     LineOfSightSnapshot,
@@ -77,6 +78,8 @@ __all__ = [
     "AiPilotWheelState",
     "FlightControlParseError",
     "FlightControlState",
+    "FlightDesiredParseError",
+    "FlightDesiredState",
     "LineOfSightParseError",
     "LineOfSightSnapshot",
     "LineOfSightVerdict",

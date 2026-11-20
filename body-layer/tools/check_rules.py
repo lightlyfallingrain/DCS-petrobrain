@@ -58,6 +58,7 @@ from belief.effector_registry import (
     aircraft_dir_name,
     load_registries_by_aircraft,
 )
+from belief.flight_authority import FlightAuthorityState
 from belief.flight_control import FlightControlState
 from rules.actions import ACTION_NAMESPACES, Action, ActionContext
 from rules.engine import (
@@ -87,26 +88,75 @@ _FLYING = ParkedFlightState(
 #: Never parked -- `console.parked_flight_state` for every scenario that
 #: is not flying through the AI overlay (the two mode-1 scenarios below).
 _NOT_PARKED = ParkedFlightState()
-#: BL-16 mode 1 Stage M1 -- `_AXES_FLYING` puts a dry run through
-#: `CrewConsole.flight_mode() == "axes"` (`phase="ACTIVE"`) with every
-#: held value known, so the `_by_mode`-wrapped actions' own axes bodies
+#: BL-16 mode 1 Stage M1/Stage 3 -- `_AXES_FLYING_DIAG` is the plain
+#: diagnostics mirror (`FlightControlState` carries nothing else since
+#: Stage 3), `_AXES_FLYING_AUTHORITY` the desired-state/authority mirror
+#: a dry run needs so the `_by_mode`-wrapped actions' own axes bodies
 #: (`axes_set_heading`/`axes_step_speed`/...) actually run, not just the
 #: unchanged overlay ones every pre-existing scenario already covered.
-_AXES_FLYING = FlightControlState(
-    phase="ACTIVE",
-    held_heading=120.0,
-    held_altitude=300.0,
-    held_altitude_ref="agl",
-    held_speed=150.0,
+_AXES_FLYING_DIAG = FlightControlState(
     measured_heading=120.0,
     measured_altitude=300.0,
     measured_speed=150.0,
 )
-_SCENARIOS: tuple[tuple[str, ParkedFlightState, FlightControlState, bool], ...] = (
-    ("flying", _FLYING, FlightControlState(), False),
-    ("hovering", replace(_FLYING, ai_mode="HVRT"), FlightControlState(), False),
-    ("axes flying", _NOT_PARKED, _AXES_FLYING, False),
-    ("every action fails", _FLYING, FlightControlState(), True),
+_AXES_FLYING_AUTHORITY = FlightAuthorityState(
+    fd_mode="m1",
+    hdg_mode="heading",
+    heading_deg=120.0,
+    alt_m=300.0,
+    alt_ref="agl",
+    ias_kmh=150.0,
+)
+
+
+def _authority_for(
+    state: ParkedFlightState, axes_authority: FlightAuthorityState | None
+) -> FlightAuthorityState:
+    """BL-16 Stage 2/3 (`plans/flight-desired-state/plan.md`): `Crew
+    Console.flight_mode()`/`current_crew_state()` read `flight_
+    authority_state` now, not `parked_flight_state`/`flight_control_
+    state` directly -- mirror the same scenario onto it so a dry run
+    still reaches the real action bodies, not just the gate. `state.
+    held_altitude_ref` is `ParkedFlightState`'s own "R"/"B" letter
+    (review-s12.md optional refinement 2) -- mapped onto `FlightAuthority
+    State.alt_ref`'s own `"agl"`/`"baro"` vocabulary, never passed
+    through verbatim."""
+    if state.parked_active:
+        return FlightAuthorityState(
+            fd_mode="m2",
+            hdg_mode="heading" if state.held_heading is not None else None,
+            heading_deg=state.held_heading,
+            alt_m=state.held_altitude,
+            alt_ref="baro" if state.held_altitude_ref == "B" else "agl",
+            ias_kmh=state.held_speed,
+        )
+    if axes_authority is not None:
+        return axes_authority
+    return FlightAuthorityState()
+
+
+_SCENARIOS: tuple[
+    tuple[
+        str, ParkedFlightState, FlightControlState, FlightAuthorityState | None, bool
+    ],
+    ...,
+] = (
+    ("flying", _FLYING, FlightControlState(), None, False),
+    (
+        "hovering",
+        replace(_FLYING, ai_mode="HVRT"),
+        FlightControlState(),
+        None,
+        False,
+    ),
+    (
+        "axes flying",
+        _NOT_PARKED,
+        _AXES_FLYING_DIAG,
+        _AXES_FLYING_AUTHORITY,
+        False,
+    ),
+    ("every action fails", _FLYING, FlightControlState(), None, True),
 )
 
 
@@ -219,7 +269,7 @@ def _dry_run(
             return {"ok": False, "reason": "UNKNOWN_EFFECTOR"}
         return {"ok": True, "reason": None}
 
-    for label, state, axes_state, all_fail in _SCENARIOS:
+    for label, state, axes_state, axes_authority, all_fail in _SCENARIOS:
         console = CrewConsole(store=ContactStore())
         sandbox = RuleSandbox()
         ctx = ActionContext(
@@ -234,6 +284,7 @@ def _dry_run(
             for utterance, slots in _slot_sets(rule, samples):
                 console.parked_flight_state = state
                 console.flight_control_state = axes_state
+                console.flight_authority_state = _authority_for(state, axes_authority)
                 sink.lines = []
                 try:
                     lua_slots = sandbox.table_from(slots) if slots else sandbox.table()

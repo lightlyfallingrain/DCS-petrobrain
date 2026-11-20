@@ -40,6 +40,7 @@ from belief.ai_pilot_wheel import (
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
+from belief.flight_authority import PendingFlightReadback
 from belief.speech import render_unable
 from rules.actions import ACTION_NAMESPACES, ActionContext
 from rules.engine import RuleSet, run_rule
@@ -50,7 +51,39 @@ from rules.sandbox import RuleSandbox
 def _console(**state_fields: object) -> CrewConsole:
     console = CrewConsole(store=ContactStore())
     console.parked_flight_state = replace(ParkedFlightState(), **state_fields)
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `flight_
+    # mode()`/`current_crew_state()` read `flight_authority_state` now,
+    # not `parked_flight_state` -- mirror `parked_active`/`held_*` onto
+    # it too, so every existing `parked_active=True` fixture here still
+    # reads as "flying through the overlay" to the gate/dispatch path.
+    if state_fields.get("parked_active"):
+        held_heading = state_fields.get("held_heading")
+        console.flight_authority_state = replace(
+            console.flight_authority_state,
+            fd_mode="m2",
+            hdg_mode="heading" if held_heading is not None else None,
+            heading_deg=held_heading,  # type: ignore[arg-type]
+            alt_m=state_fields.get("held_altitude"),  # type: ignore[arg-type]
+            alt_ref=state_fields.get("held_altitude_ref"),  # type: ignore[arg-type]
+            ias_kmh=state_fields.get("held_speed"),  # type: ignore[arg-type]
+        )
     return console
+
+
+def _set_mode1_active(
+    console: CrewConsole, *, measured_heading: float | None = None
+) -> None:
+    """Companion to `_console`'s own `parked_active` mapping, for the
+    mode-1 call sites below that need `flight_mode()` to read `"axes"` --
+    `flight_mode()`/`current_crew_state()` need `flight_authority_
+    state.fd_mode == "m1"`; `FlightControlState` carries no mode of its
+    own since BL-16 Stage 3."""
+    console.flight_authority_state = replace(
+        console.flight_authority_state,
+        fd_mode="m1",
+        hdg_mode="heading" if measured_heading is not None else None,
+        heading_deg=measured_heading,
+    )
 
 
 def _dispatching_console(
@@ -282,6 +315,11 @@ def test_gate_holds_then_flies_once_settling_resolves() -> None:
     console.parked_flight_state = replace(
         console.parked_flight_state, held_heading=10.0
     )
+    # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+    # state` now, not `parked_flight_state` -- mirror the same settle.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, hdg_mode="heading", heading_deg=10.0
+    )
     lines = console.drain_pending_rule_dispatch(now_sim=1.0)
     assert lines == ["20 left."]
     assert console.pending_rule_dispatch is None
@@ -348,6 +386,28 @@ class TestTurnHeadingAbsolute:
         )
         assert lines == ["Unable, not flying."]
         assert console.ai_pilot_goal_transition is None
+
+    def test_a_mode_1_command_s_readback_is_also_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a, U1) -- the deferral is not scoped
+        to mode 2: a mode-1 `axes_*` command queues `flight_control_
+        goal_transition`, which `_flight_control_transition_queued`
+        covers, so its own readback stages exactly the same way."""
+        console = _dispatching_console(parked_active=False)
+        _set_mode1_active(console, measured_heading=10.0)
+        lines = console.handle_command(
+            "turn_heading", now_sim=0.0, slots={"heading_deg": 315}
+        )
+        assert lines == ["Heading 3 1 5."]
+        assert console.pending_flight_readback_lines == ["Heading 3 1 5."]
+
+    def test_the_not_flying_refusal_is_never_deferred(self) -> None:
+        """A local gate refusal never reaches Lua at all -- nothing is
+        staged, and `handle_command`'s own immediate `_print` still
+        speaks it (`test_an_unable_not_flying_readback_never_cuts_off_
+        the_callout` below asserts the speech side of this same case)."""
+        console = _dispatching_console(parked_active=False)
+        console.handle_command("turn_heading", now_sim=0.0, slots={"heading_deg": 315})
+        assert console.pending_flight_readback_lines is None
 
 
 class TestLevelFlight:
@@ -441,6 +501,11 @@ class TestSpeedStep:
         assert console.pending_rule_dispatch is not None
         console.parked_flight_state = replace(
             console.parked_flight_state, held_speed=120.0
+        )
+        # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+        # state` now, not `parked_flight_state` -- mirror the same settle.
+        console.flight_authority_state = replace(
+            console.flight_authority_state, ias_kmh=120.0
         )
         lines = console.drain_pending_rule_dispatch(now_sim=1.0)
         assert lines == ["Speed 1 5 0."]
@@ -589,6 +654,18 @@ class TestCbtmActions:
         assert lines == ["Aligning."]
         assert console.ai_pilot_cbtm_transition == "align"
 
+    def test_align_s_readback_is_not_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a) -- CBTM is not dual-written onto
+        the numbered `flight` channel this stage (`implementation.md`'s
+        own deviation), so `_flight_control_transition_queued` excludes
+        `ai_pilot_cbtm_transition`: the readback above speaks
+        immediately, through the ordinary path, exactly as before this
+        stage -- nothing is left staged for a `fd_acks` entry that will
+        never arrive for it."""
+        console = _dispatching_console(parked_active=True)
+        console.handle_command("cbtm_align", now_sim=0.0)
+        assert console.pending_flight_readback_lines is None
+
     def test_align_for_launch_speaks_aligning_for_launch(self) -> None:
         console = _dispatching_console(parked_active=True)
         lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
@@ -636,18 +713,14 @@ class TestCbtmActions:
         the 9K113 is gated behind the CPG view which is gated behind
         mode 2."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_align", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
         assert console.ai_pilot_cbtm_transition is None
 
     def test_mode_1_align_for_launch_is_also_unable_ai_overlay(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
         assert console.ai_pilot_cbtm_transition is None
@@ -660,9 +733,7 @@ class TestCbtmActions:
         all, unlike `increment_heading`'s own `"flight_control_
         heading"`."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(console)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
         )
@@ -671,9 +742,7 @@ class TestCbtmActions:
 
     def test_mode_1_break_away_not_ready_without_a_known_heading(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == [render_unable("NOT_READY").text]
         assert console.flight_control_goal_transition is None
@@ -684,9 +753,7 @@ class TestCbtmActions:
         `BREAK_TURN_RATE_DEG_S` (`config/rules/flight.lua`, 40) as the
         signed rate override. No `NOT_READY` stub left to answer."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
         )
@@ -698,9 +765,7 @@ class TestCbtmActions:
 
     def test_mode_1_break_right_flies_the_real_break(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "right"}
         )
@@ -714,9 +779,7 @@ class TestCbtmActions:
         """Always a hard 180 to the left (E13) -- the rate override is
         negative regardless of a "direction" slot, there is none."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == ["Breaking away."]
         request = console.flight_control_goal_transition
@@ -736,6 +799,14 @@ class TestHvrtTranslate:
         lines = console.handle_command("hvrt_translate_left", now_sim=0.0)
         assert lines == ["Left."]
         assert console.ai_pilot_hvrt_transition == "left"
+
+    def test_the_readback_is_not_deferred(self) -> None:
+        """BL-16 Stage 3b (section 3a) -- same exclusion as CBTM's own:
+        HVRT is not dual-written onto the numbered `flight` channel this
+        stage, so nothing is staged for an ack that will never come."""
+        console = _dispatching_console(parked_active=True, ai_mode="HVR")
+        console.handle_command("hvrt_translate_left", now_sim=0.0)
+        assert console.pending_flight_readback_lines is None
 
     def test_dispatches_while_already_in_hvrt(self) -> None:
         console = _dispatching_console(parked_active=True, ai_mode="HVRT")
@@ -849,7 +920,6 @@ class TestHandoverActions:
         console = _dispatching_console(parked_active=True)
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition is None
 
     def test_you_have_controls_takes_when_clear_to_fly(self) -> None:
@@ -859,10 +929,8 @@ class TestHandoverActions:
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "TAKING"
-        assert console.flight_control_state.take_seq == 1
         assert console.flight_control_transition == "take"
-        assert console.flight_control_state.pending_take_says == "I have controls."
+        assert console.pending_take_says == "I have controls."
 
     def test_you_have_controls_refuses_on_the_ground(self) -> None:
         console = _dispatching_console(parked_active=False)
@@ -870,7 +938,6 @@ class TestHandoverActions:
         console.ias_kmh = 150.0
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == [render_unable("ON_GROUND").text]
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition is None
 
     def test_you_have_controls_refuses_too_slow(self) -> None:
@@ -889,12 +956,9 @@ class TestHandoverActions:
 
     def test_i_have_controls_releases_while_flying_on_the_axes(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(console)
         lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == ["You have controls."]
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition == "release"
 
     def test_i_have_controls_is_a_silent_no_op_with_nobody_flying(self) -> None:
@@ -916,9 +980,7 @@ class TestSeatNeverGatesMode1:
     @pytest.mark.parametrize("seat", ["pilot", "operator", None])
     def test_flight_mode_is_the_same_whichever_seat(self, seat: str | None) -> None:
         flying_console = _dispatching_console(parked_active=False, player_seat=seat)
-        flying_console.flight_control_state = replace(
-            flying_console.flight_control_state, phase="ACTIVE"
-        )
+        _set_mode1_active(flying_console)
         assert flying_console.flight_mode() == "axes"
 
         overlay_console = _dispatching_console(parked_active=True, player_seat=seat)
@@ -937,7 +999,6 @@ class TestSeatNeverGatesMode1:
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "TAKING"
         assert console.flight_control_transition == "take"
 
 
@@ -977,6 +1038,13 @@ class TestFlightReadbackUrgency:
     _FAR_FUTURE_BUSY_UNTIL = 1000.0
 
     def test_a_flight_rule_readback_cuts_off_the_callout_while_flying(self) -> None:
+        """BL-16 Stage 3b (section 3a, U1) -- the dispatch itself no
+        longer speaks the readback (it queued a numbered-channel
+        transition, so `handle_command` stages the line rather than
+        printing it); the cutoff only happens once the staged line is
+        actually spoken, on the later poll `fd_acks` accepts it
+        (`drain_flight_control`'s own `has_controls`-gated bypass,
+        D19/U22 unchanged by the deferral)."""
         speech_client = _RecordingSpeechClient()
         console = _dispatching_console(
             speech_client=speech_client, parked_active=True, held_heading=10.0
@@ -987,6 +1055,22 @@ class TestFlightReadbackUrgency:
             now_sim=0.0,
             slots={"direction": "left", "degrees": 20},
         )
+        assert speech_client.pushed == []
+        assert console.pending_flight_readback_lines == ["20 left."]
+        assert console.scheduler.busy_until_sim == self._FAR_FUTURE_BUSY_UNTIL
+        # `body.py`'s own wire-send claims the staged line and queues it
+        # against the `seq` it just minted -- simulated here directly,
+        # since this file dispatches through the real rule engine but
+        # not through `body.py`'s poll loop.
+        readback_lines = console.take_pending_flight_readback_lines()
+        assert readback_lines is not None
+        console.pending_flight_readbacks.append(
+            PendingFlightReadback(seq=1, lines=tuple(readback_lines), sent_at_sim=0.0)
+        )
+        console.flight_authority_state = replace(
+            console.flight_authority_state, acks="1:a:m2"
+        )
+        console.drain_flight_control(now_sim=1.0)
         assert speech_client.pushed == [("20 left.", True)]
         assert console.scheduler.busy_until_sim < self._FAR_FUTURE_BUSY_UNTIL
 

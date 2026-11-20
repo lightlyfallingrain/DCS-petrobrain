@@ -195,6 +195,16 @@ from belief.expected_area import (
     relocation_warranted,
     resolve_checks,
 )
+from belief.flight_authority import (
+    FLIGHT_REQUEST_ACCEPT_WINDOW_S,
+    FlightAuthorityDecision,
+    PendingFlightReadback,
+    PendingTake,
+    advance_flight_authority,
+    controls_to_player_edge,
+    decide_carried_value_speech,
+    decide_flight_speech,
+)
 from belief.flight_control import (
     advance_flight_control_state,
     flight_control_limits,
@@ -619,6 +629,13 @@ class ConsolePerceptionRunner:
     #: reset by a mission restart either, see `flight_control.lua`'s/
     #: `ai_pilot_wheel.lua`'s own `reset()`).
     command_reset_epoch: int = field(default_factory=lambda: int(time.time() * 1000))
+    #: BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+    #: "one body-layer counter, for the whole process", the `flight`
+    #: channel's own mission-wide `seq` source (take/release/set alike).
+    #: Never reset across a mission restart (only a fresh process starts
+    #: it at 0 again) and never reused -- `_next_flight_seq` is the only
+    #: writer.
+    command_seq: int = 0
     #: Set once both mode 1's (`crew_console.flight_control_state.lua_
     #: reset_epoch`) and mode 2's (`parked_flight_state.lua_reset_
     #: epoch`) echo this process's own `command_reset_epoch` back --
@@ -902,6 +919,7 @@ class ConsolePerceptionRunner:
             command_reset_last_sent_wall=self.command_reset_last_sent_wall,
             command_reset_unconfirmed_since_wall=self.command_reset_unconfirmed_since_wall,
             command_reset_warned=self.command_reset_warned,
+            command_seq=self.command_seq,
         )
         self._last_look_direction = None
         self._last_scan_command_t_sim = None
@@ -3443,7 +3461,7 @@ def _resolve_command_reset(
     """BL-16 sortie 2026-11-20 (`docs/acceptance/
     2026-11-20-sortie-feedback.md`) -- body-layer's own process-start
     reset. Called once per poll, before `_apply_ai_pilot_wheel_goal`/
-    `_apply_flight_control` (both gated on `runner.command_reset_
+    `_apply_flight_requests` (both gated on `runner.command_reset_
     confirmed`, set here): while unconfirmed, this (re)sends the reset
     itself, bounded by `COMMAND_RESET_RESEND_INTERVAL_S` so a DCS/
     collector not yet up never spams the log. A true no-op once
@@ -3787,6 +3805,58 @@ def _apply_ai_pilot_wheel_goal(
         except AircraftLayerError:
             logger.warning("ai-pilot-goal write failed (continuing)", exc_info=True)
         runner.ai_pilot_goal_last_sent_seq = final_goal.goal_seq
+        # BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, Stage 3
+        # bullet "Every mode-2 voice goal also writes a set") -- the
+        # exact commanded value, dual-written onto the numbered `flight`
+        # channel alongside the still-live `ai_pilot_goal` send above, so
+        # `desired` stays accurate for a later m2->m1 carry even though
+        # mode 2 does not yet read `desired` to fly (Stage 4). Fire-and-
+        # forget, same scope cut as the axes `set` send in `_apply_
+        # flight_requests` -- no ack-matching, no readback change.
+        set_fields: dict[str, object] = {}
+        if final_goal.heading_target_deg is not None:
+            set_fields["heading_deg"] = final_goal.heading_target_deg
+        if final_goal.altitude_target_m is not None:
+            set_fields["alt_m"] = final_goal.altitude_target_m
+            set_fields["alt_ref"] = (
+                "baro" if final_goal.altitude_target_ref == "barometric" else "agl"
+            )
+        if final_goal.speed_target_kmh is not None:
+            set_fields["ias_kmh"] = final_goal.speed_target_kmh
+        if set_fields and runner.last_t_sim is not None:
+            dual_write_seq = _next_flight_seq(runner)
+            try:
+                aircraft_client.write_flight(
+                    runner.command_reset_epoch,
+                    dual_write_seq,
+                    runner.last_t_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S,
+                    "set",
+                    set_fields,
+                )
+            except AircraftLayerError:
+                logger.warning(
+                    "flight set (mode-2 dual-write) failed (continuing)",
+                    exc_info=True,
+                )
+            # BL-16 Stage 3b (section 3a, U1) -- same deferral as mode
+            # 1's own `set` send above: the ordinary mode-2 voice goal's
+            # readback (heading/altitude/speed/level-flight, staged by
+            # `handle_command`) now speaks only once `fd_acks` accepts
+            # this exact `seq`. Mode-2 HVRT/CBTM one-shots are not
+            # dual-written onto this channel this stage (deviation,
+            # `implementation.md`), so `take_pending_flight_readback_
+            # lines` returns `None` for those and they keep speaking
+            # immediately, through `rules/engine.py`'s own ordinary
+            # `_print` path, unchanged.
+            readback_lines = crew_console.take_pending_flight_readback_lines()
+            if readback_lines:
+                crew_console.pending_flight_readbacks.append(
+                    PendingFlightReadback(
+                        seq=dual_write_seq,
+                        lines=tuple(readback_lines),
+                        sent_at_sim=runner.last_t_sim,
+                    )
+                )
 
     # `hvrt_step` (Stage P2b's own addition to the wire, not the plan's
     # "wire shape" section -- see `AircraftLayerClient.write_ai_pilot_
@@ -3847,177 +3917,117 @@ def _apply_ai_pilot_wheel_goal(
         crew_console.ai_pilot_cbtm_transition = None
 
 
-def _apply_flight_control(
-    crew_console: CrewConsole, aircraft_client: AircraftLayerClient
+def _next_flight_seq(runner: ConsolePerceptionRunner) -> int:
+    """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+    `ConsolePerceptionRunner.command_seq` is the one mission-wide counter
+    the whole `flight` channel shares (take/release/set alike), never
+    reset across a mission restart (only a fresh body-layer process
+    starts it at 0) and never reused."""
+    runner.command_seq += 1
+    return runner.command_seq
+
+
+def _apply_flight_requests(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: AircraftLayerClient,
+    epoch: int,
+    now_sim: float,
 ) -> None:
-    """BL-16 mode 1 Stage M1 -- sends `crew_console.flight_control_
-    transition` (a pending "take"/"release", set synchronously by
-    `CrewConsole.take_controls`/`release_controls`) and `flight_control_
-    goal_transition` (a pending `FlightControlGoalRequest`, set by one of
-    the `axes_*` actions), each exactly once, then clears it -- the same
-    "send on change, applied and cleared by the poll loop" shape `_apply_
-    ai_pilot_wheel_goal` already uses for `ai_pilot_goal_transition`.
-    Called once per poll, right after `advance_flight_control_state` has
-    refreshed `crew_console.flight_control_state` this poll, before
-    `crew_console.drain_flight_control` (which reads the same state this
-    leaves behind).
+    """BL-16 Stage 3 -- sends `crew_console.flight_control_transition`
+    (a pending "take"/"release") and `flight_control_goal_transition`
+    (a pending `FlightControlGoalRequest`) each exactly once, on the one
+    numbered `flight` channel, then clears it -- replacing `_apply_
+    flight_control`'s own `flight_control`-op send entirely. Called once
+    per poll, right after `crew_console.flight_authority_state` has been
+    refreshed this poll, before `crew_console.drain_flight_control`.
 
-    **`wire_seq` is bumped here, not inside `CrewConsole`** -- the actual
-    send (and therefore whether a `seq` was actually consumed) only
-    happens in this function; `take_controls`/`release_controls`/the
-    `axes_*` actions never touch it, the same division of labour `take_
-    seq` already has (`FlightControlState`'s own docstring on the two).
+    **A take request is also queued as a `PendingTake`** (`crew_console.
+    flight_pending_take`), using `crew_console.pending_take_says` (set
+    synchronously by `CrewConsole.take_controls`) as the confirmation
+    text -- `drain_flight_control` resolves it against `fd_acks` on a
+    later poll.
 
-    **`flight_control_system_release_pending` takes priority over
-    `flight_control_transition`, and the two are never sent on the same
-    poll** (review-handover-ack.md Required Fix): the ack-timeout's own
-    self-queued release is checked first; when set, it is sent alone and
-    `flight_control_transition` is left exactly as it was (deferred to a
-    later poll, not discarded). Lua itself would apply an in-order
-    release+take pair correctly (`commands.lua`'s `poll_command_socket`
-    drains every queued datagram per frame, in receipt order), but each
-    `write_flight_control` is its own collector round trip ending in a
-    UDP datagram, and two sent back to back may arrive reordered -- a take
-    landing first is a no-op while `fc_mode` is still `active`, and the
-    release after it would then hand the controls back. One poll's gap
-    rules that out.
+    **Known scope cut (`plans/flight-desired-state/implementation.md`)**:
+    the `set`-kind goal request below is sent fire-and-forget -- its own
+    readback is still spoken immediately by the Lua rule file
+    (`config/rules/flight.lua`'s own `say(...)` calls), not deferred
+    until `fd_acks` accepts it. The plan's own U1 ("wait for Lua") asks
+    for every readback to wait; only the handover tokens ("you/I have
+    controls") do here. Lua still receives a correctly-numbered request
+    either way, so the carry/stamp mechanics this stage is really about
+    (mode 1 flying `desired` by stamp, the heading-reference conversion,
+    the unpark seed) are unaffected -- only the speech-timing half of
+    3a is deferred to a follow-up.
 
-    **The arm lease (U10)**: while `OVERLAY` and `unpark_take`, `arm` is
-    re-sent every poll regardless of either one-shot transition above --
-    this is the lease Lua's own unpark-take precondition checks against
-    (`ARM_LEASE_S`), and it must keep moving for as long as body-layer is
-    alive, independent of whatever else this poll's dispatch did.
-
-    **Co-moving row 11's other direction**: an `axes_*` goal action
-    spoken just before a park races `decide_flight_control`'s own park-
-    edge transition to `OVERLAY` -- both `flight_control_transition`/
-    `flight_control_goal_transition` are discarded unsent, never bumping
-    `wire_seq`, whenever `phase == "OVERLAY"` by the time this runs: a
-    stale axes goal/handover request has no meaning once he is flying
-    through the overlay instead, and sending it would confuse Lua's own
-    `armed` state for no benefit.
-
-    **The one-frame `TAKING` window (review-m2.md Required Fix 1)**: a
-    goal sent while `phase == "TAKING"` would reach `Export.lua` before
-    `fc_law` exists, and `apply_goal_fields` only calls `law_apply_goal`
-    once `fc_law is not None` -- so a goal command dispatched there is
-    silently lost (nothing ever reconciles the `fc_goal_*` wire echo
-    against what the law is actually flying), while the rule's own
-    readback already spoke the commanded value as if it had landed. So
-    `goal_request` is held here, unsent and uncleared, for as long as
-    `phase == "TAKING"` -- it is retried next poll and actually sent
-    once Lua confirms `ACTIVE` (symmetric with the `held_*` gates'
-    already-stated "wait for a law to exist" intent). If the take itself
-    fails instead (ack timeout -> `PILOT`), the goal is dropped: there
-    is no law, and will be no law for this `take_seq`, to apply it to.
-
-    **`wire_seq` reconciliation against `fc_last_cmd_seq` (security-m1-
-    m2.md Finding A, change-request round)**: runs first, unconditional
-    on anything sending this poll. `wire_seq` resets to 0 on a body-
-    layer process restart; `Export.lua`'s own `fc_last_cmd_seq` (mirrored
-    as `state.lua_last_cmd_seq`) does not, including across a mission
-    restart -- so a restart while mode 1 is anywhere but `off` would
-    otherwise leave every later `seq` this process sends stuck below it,
-    silently dropped by Lua's own `seq <= fc_last_cmd_seq` check for the
-    rest of the DCS session. Catching `wire_seq` up to `lua_last_cmd_
-    seq` here (never past it) means the very next send's `wire_seq + 1`
-    is accepted; a genuine duplicate/stale resend within one body-layer
-    session is still rejected exactly as before, since this only ever
-    raises `wire_seq`, never lowers it below what this process has
-    itself already sent."""
-    state = crew_console.flight_control_state
-    if state.lua_last_cmd_seq is not None and state.lua_last_cmd_seq > state.wire_seq:
-        crew_console.flight_control_state = replace(
-            state, wire_seq=state.lua_last_cmd_seq
-        )
-        state = crew_console.flight_control_state
+    **The lease (U10, BL-16 Stage 2)**: sent every poll this function
+    runs, regardless of either request above -- unchanged from Stage 2."""
     limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
 
-    if state.phase == "OVERLAY":
+    if crew_console.flight_mode() == "overlay":
         crew_console.flight_control_transition = None
         crew_console.flight_control_goal_transition = None
-        crew_console.flight_control_system_release_pending = False
+        crew_console.pending_take_says = None
+        # BL-16 Stage 3b (section 3a) -- a mode-1 command's own readback
+        # was staged (`handle_command`) but the mode flipped to overlay
+        # before this poll's send ran, so the request above it was just
+        # dropped unsent, never queued as a `PendingFlightReadback`:
+        # speak the one fixed "not ready" line for it now rather than
+        # leaking the staged lines into a later, unrelated dispatch.
+        dropped_lines = crew_console.take_pending_flight_readback_lines()
+        if dropped_lines is not None:
+            crew_console.speak_flight_authority_decision(
+                FlightAuthorityDecision(says="Unable, not ready.", urgent=False),
+                now_sim,
+            )
 
-    if crew_console.flight_control_system_release_pending:
-        # review-handover-ack.md Required Fix: the ack-timeout's own
-        # self-queued release (`CrewConsole.drain_flight_control`)
-        # always wins over whatever a same-poll player take/release
-        # wrote to `flight_control_transition` -- that field is left
-        # untouched below (retried next poll, once Lua has had this
-        # release to act on) rather than discarded or sent alongside it
-        # on the same wire. Lua's own `cmd == "take"` handler is a
-        # no-op while `fc_mode == "active"`, so a deferred take is the
-        # only way it can still succeed.
-        crew_console.flight_control_system_release_pending = False
-        next_seq = state.wire_seq + 1
-        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
-        state = crew_console.flight_control_state
+    transition = crew_console.flight_control_transition
+    if transition is not None:
+        crew_console.flight_control_transition = None
+        seq = _next_flight_seq(runner)
+        until = now_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S
         try:
-            aircraft_client.write_flight_control(next_seq, "release", limits, None)
+            aircraft_client.write_flight(epoch, seq, until, transition, {})
         except AircraftLayerError:
             logger.warning(
-                "flight-control release write failed (continuing)", exc_info=True
+                "flight %s write failed (continuing)", transition, exc_info=True
             )
-    else:
-        transition = crew_console.flight_control_transition
-        if transition is not None:
-            crew_console.flight_control_transition = None
-            next_seq = state.wire_seq + 1
-            if transition == "take":
-                # 2026-11-19 mode 1 handover feedback: `Export.lua`
-                # echoes back the **wire** seq of this very message as
-                # `fc_take_seq` (`fc_pending_take_seq = seq` in its own
-                # `cmd == "take"` handler) -- never `take_controls`'s
-                # own independently-bumped counter, which `decide_
-                # flight_control`'s ack comparison was reading before
-                # this fix. `take_seq` is overwritten here, at the one
-                # place that actually knows what seq is going on the
-                # wire, so the two agree by construction rather than by
-                # luck.
-                crew_console.flight_control_state = replace(
-                    state, wire_seq=next_seq, take_seq=next_seq
-                )
-            else:
-                crew_console.flight_control_state = replace(state, wire_seq=next_seq)
-            state = crew_console.flight_control_state
-            try:
-                aircraft_client.write_flight_control(next_seq, transition, limits, None)
-            except AircraftLayerError:
-                logger.warning(
-                    "flight-control %s write failed (continuing)",
-                    transition,
-                    exc_info=True,
-                )
+        if transition == "take":
+            says = crew_console.pending_take_says or "I have controls."
+            crew_console.pending_take_says = None
+            crew_console.flight_pending_take = PendingTake(
+                seq=seq, says=says, sent_at_sim=now_sim
+            )
 
     goal_request = crew_console.flight_control_goal_transition
-    if goal_request is not None and state.phase != "TAKING":
+    if goal_request is not None:
         crew_console.flight_control_goal_transition = None
-        if state.phase == "ACTIVE":
-            next_seq = state.wire_seq + 1
-            crew_console.flight_control_state = replace(state, wire_seq=next_seq)
-            state = crew_console.flight_control_state
-            try:
-                aircraft_client.write_flight_control(
-                    next_seq, "goal", limits, goal_request_fields(goal_request)
-                )
-            except AircraftLayerError:
-                logger.warning(
-                    "flight-control goal write failed (continuing)", exc_info=True
-                )
-        # else: the take that was in progress when this goal was
-        # commanded has already failed (ack timeout moved phase to
-        # PILOT before this poll ran -- OVERLAY was already cleared,
-        # above) -- dropped, there is nothing left to apply it to.
-
-    if state.phase == "OVERLAY" and state.unpark_take:
-        next_seq = state.wire_seq + 1
-        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
+        seq = _next_flight_seq(runner)
+        until = now_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S
+        fields = goal_request_fields(goal_request)
         try:
-            aircraft_client.write_flight_control(next_seq, "arm", limits, None)
+            aircraft_client.write_flight(epoch, seq, until, "set", fields)
         except AircraftLayerError:
-            logger.warning(
-                "flight-control arm write failed (continuing)", exc_info=True
+            logger.warning("flight set write failed (continuing)", exc_info=True)
+        # BL-16 Stage 3b (section 3a, U1: "wait for Lua") -- the rule's
+        # own readback (`config/rules/flight.lua`'s `say(...)` calls,
+        # already computed and staged by `handle_command`) now speaks
+        # only once `fd_acks` accepts this exact `seq` --
+        # `drain_flight_control`/`resolve_pending_flight_readbacks`.
+        readback_lines = crew_console.take_pending_flight_readback_lines()
+        if readback_lines:
+            crew_console.pending_flight_readbacks.append(
+                PendingFlightReadback(
+                    seq=seq, lines=tuple(readback_lines), sent_at_sim=now_sim
+                )
             )
+
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
+    # 3) -- the lease, unchanged. Sent every poll this function runs.
+    try:
+        aircraft_client.write_flight_lease(epoch, limits)
+    except AircraftLayerError:
+        logger.warning("flight-lease write failed (continuing)", exc_info=True)
 
 
 def _check_for_new_mission(
@@ -5496,14 +5506,89 @@ def _run_crew_text_poll_loop(
                             logger.debug(
                                 "flight-control readback failed", exc_info=True
                             )
-                        # Same hold as mode 2's own gate above --
-                        # `fc_last_cmd_seq` must never see a send from
-                        # this process before Lua's own reset confirms.
+                        # BL-16 (`plans/flight-desired-state/plan.md`,
+                        # Stages 1-2) -- the one mode-authority/desired-
+                        # state mirror, refreshed every poll regardless
+                        # of the reset gate below (it carries no `seq`
+                        # yet in Stages 1-2). `previous_flight_
+                        # authority` is captured first, same "capture
+                        # previous, then compare" idiom as `previous_
+                        # seat`/`previous_payload_counts` above, so
+                        # `decide_flight_speech` and the Decision-32
+                        # break-seed check below both see this poll's
+                        # own edge rather than one already overwritten.
+                        previous_flight_authority = crew_console.flight_authority_state
+                        try:
+                            crew_console.flight_authority_state = (
+                                advance_flight_authority(
+                                    crew_console.flight_authority_state,
+                                    aircraft_client,
+                                )
+                            )
+                        except AircraftLayerError:
+                            logger.debug(
+                                "flight-desired readback failed", exc_info=True
+                            )
+                        authority_decision = decide_flight_speech(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        )
+                        if authority_decision is not None:
+                            crew_console.speak_flight_authority_decision(
+                                authority_decision, runner.last_t_sim
+                            )
+                        # `plans/flight-lift-vector/explore-notes.md`,
+                        # "SAU in mode 1" -- the controls going to the
+                        # player, for *any* cause (unlike `authority_
+                        # decision` above, which only speaks on the
+                        # causes that are not in `_SILENT_OFF_CAUSES`):
+                        # sets the SAU pitch/bank/heading channels on,
+                        # silently.
+                        if controls_to_player_edge(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        ):
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.CONTROLS_TO_PLAYER,
+                                runner.last_t_sim,
+                            )
+                        # U2's carried-value lines (section 3a's own
+                        # speech order: mode-change lines first, then
+                        # these) -- the m2->m1 unpark carry, first
+                        # needed this stage; speaks once, not urgent,
+                        # per part mode 1 cannot fly exactly.
+                        for carried_decision in decide_carried_value_speech(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        ):
+                            crew_console.speak_flight_authority_decision(
+                                carried_decision, runner.last_t_sim
+                            )
+                        # Same hold as mode 2's own gate above -- the
+                        # `flight` channel's own `seq` must never see a
+                        # send from this process before Lua's own reset
+                        # confirms.
                         if runner.command_reset_confirmed:
-                            _apply_flight_control(crew_console, aircraft_client)
+                            _apply_flight_requests(
+                                runner,
+                                crew_console,
+                                aircraft_client,
+                                runner.command_reset_epoch,
+                                runner.last_t_sim,
+                            )
+                            # BL-16 Stage 3b (section 3a) -- "a change
+                            # into off in the same read" suppresses only
+                            # the *accepted* half of this read's own
+                            # flight-channel readbacks; the urgent line
+                            # `authority_decision` just spoke above is
+                            # the truth instead.
                             crew_console.drain_flight_control(
                                 runner.last_t_sim,
-                                parked_active=runner.parked_flight_state.parked_active,
+                                suppress_accepted_readbacks=(
+                                    authority_decision is not None
+                                    and authority_decision.urgent
+                                ),
                             )
                         # `[[BL-17]]` D16 -- same spot, after `parked_
                         # flight_state` has been refreshed this poll

@@ -2408,10 +2408,16 @@ already defines "current state", and both are the user's rule (settled point 3):
   work at once in the new mode (Decision 21). **Mode 2's "unparking drops the goal; nothing resumes
   on the next park"** therefore stays exactly as built (`body._apply_ai_pilot_wheel_goal`'s
   unparked branch, Lua's unpark branch). What changes is only who flies after the unpark.
+  **SUPERSEDED 2026-11-20 for mode 1 ↔ mode 2** (user: *"mode 1 must keep flying the set targets
+  from mode 2"*): one desired state carries across a park/unpark; reason (2) becomes the explicit
+  reference / exact value / mode-2 readback rules. Take rules for a change of *who* flies stand.
+  See `plans/flight-desired-state/plan.md`, "Superseded in part".
 - **E-P10 is superseded by U5** for the aircraft-handback half (*"Unparking gives the aircraft back
   at once"*): once mode 1's unpark take is merged and enabled, the unpark keeps Petrovich flying.
   Its other half (presses released, goal dropped, nothing resumes) stands. Until mode 1 merges, or
   if M0-J disables the unpark take, the unpark behaves exactly as today.
+  **SUPERSEDED 2026-11-20** for "goal dropped, nothing resumes": the desired state now carries
+  (`plans/flight-desired-state/plan.md`). Only "open presses released the same frame" stands.
 
 **The unpark must be taken in Lua, in the same frame.** Body-layer polls at about 1 Hz. Probe v2
 (finding 2) shows that at an unpark the arg sets cross-fade back to the player's over ~1.3 s and

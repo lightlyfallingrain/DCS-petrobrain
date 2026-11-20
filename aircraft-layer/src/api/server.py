@@ -277,23 +277,30 @@ the body/brain process, on either Windows or Mac (compute topology note in
   Stage M1) as JSON, or JSON `null` on the same "not an error" basis as
   every other `/latest` endpoint. `Export.lua`'s own per-frame `flight_
   control` module status -- mode (`off`/`taking`/`active`/`armed`),
-  take/goal sequence numbers, the commanded goal values Lua is holding
-  on the wire, and the release/refuse reason.
-- `POST /command/flight_control` -> BL-16 mode 1's own handover/goal
-  channel. Body `{"seq": int, "cmd": "take"|"release"|"goal"|"arm",
-  "limits": {...}|null, "goal": {...}|null}`; forwards to `collector.
-  command_sender.CommandSender.send_flight_control`, which fires the
-  JSON command at `Export.lua`'s inbound UDP listener (the same listener
-  every other `/command/*` endpoint already targets), and responds
-  `200 {"ok": true}` on the same "attempted the call" contract as those.
-  `400 {"error": ...}` on a missing/out-of-range `seq`, an invalid
-  `cmd`, or an out-of-range `limits`/`goal` field -- shape validation
-  only, same division of labour as `/command/ai_pilot_goal`: `Export.
-  lua`'s own `handle_flight_control_command` checks every bound again
-  and rejects the whole message on any violation (the plan's own
-  `[[AC-B14]]` lesson). `503 {"error": "flight_control channel not
-  configured"}` if this server was built without a `command_sender`; a
-  send failure propagates as `500 {"error": ...}`.
+  measured telemetry, the handover-diagnostics fields, and the A9 bands.
+  **No goal/take-seq fields any more** (BL-16 Stage 3, `plans/
+  flight-desired-state/plan.md`) -- the commanded heading/altitude/
+  speed is `GET /flight_desired/latest`'s own job now.
+- `POST /command/flight` -> BL-16 Stage 3's one numbered channel,
+  replacing `/command/flight_control` entirely. Body `{"epoch": int,
+  "seq": int, "until": float, "kind": "set"|"take"|"release"|
+  "align"|"align_for_launch"|"recover"|"translate"|"hover_hold"|
+  "hover_step", ...fields}`; forwards to `collector.command_sender.
+  CommandSender.send_flight`, which fires the JSON command at `Export.
+  lua`'s inbound UDP listener (the same listener every other
+  `/command/*` endpoint already targets), and responds `200 {"ok":
+  true}` on the same "attempted the call" contract as those -- **this
+  is "sent", never "accepted"**: whether `Export.lua` actually applied
+  it rides the next `GET /flight_desired/latest` poll's own `fd_acks`
+  ring (plan, section 3a), not this response. `400 {"error": ...}` on a
+  missing/out-of-range `epoch`/`seq`/`until`, an invalid `kind`, or an
+  out-of-range field -- shape validation only, same division of labour
+  as `/command/ai_pilot_goal`: `Export.lua`'s own `flight_desired.
+  handle_flight_command` checks every bound again and refuses the whole
+  request on any violation (the plan's own `[[AC-B14]]` lesson, read as
+  an ack reason rather than a dropped message). `503 {"error": "flight
+  channel not configured"}` if this server was built without a
+  `command_sender`; a send failure propagates as `500 {"error": ...}`.
 - `POST /command/reset` -> body-layer's own process-start reset (BL-16
   sortie 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`,
   `plans/flight-control/debug.md`). Body `{"epoch": int}`; forwards to
@@ -349,6 +356,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     AiPilotWheelCache,
     FlightControlCache,
+    FlightDesiredCache,
     LineOfSightCache,
     MissionStartCache,
     PayloadCache,
@@ -391,7 +399,9 @@ _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PAYLOAD_LATEST_PATH = "/payload/latest"
 _AI_PILOT_WHEEL_LATEST_PATH = "/ai_pilot_wheel/latest"
 _FLIGHT_CONTROL_LATEST_PATH = "/flight_control/latest"
-_COMMAND_FLIGHT_CONTROL_PATH = "/command/flight_control"
+_FLIGHT_DESIRED_LATEST_PATH = "/flight_desired/latest"
+_COMMAND_FLIGHT_PATH = "/command/flight"
+_COMMAND_FLIGHT_LEASE_PATH = "/command/flight_lease"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
@@ -510,16 +520,30 @@ _AI_PILOT_GOAL_VALID_CBTM_ACTIONS: tuple[str, ...] = (
     "break_away",
 )
 
-#: `/command/flight_control`'s own bounds (`plans/flight-control/plan.md`,
-#: "Revised 2026-11-18", "Wire", BL-16 mode 1, Stage M1) -- shape
-#: validation only, same division of labour as `/command/ai_pilot_goal`'s
-#: own clamps: `Export.lua`'s own `handle_flight_control_command` checks
-#: every bound again and rejects the whole message if any one is
-#: violated (the plan's own `[[AC-B14]]` lesson), rather than trusting
-#: this layer's check alone.
-_FLIGHT_CONTROL_SEQ_MAX = 2**31 - 1
-_FLIGHT_CONTROL_VALID_CMDS: tuple[str, ...] = ("take", "release", "goal", "arm")
+#: `/command/flight`'s own bounds (`plans/flight-desired-state/plan.md`,
+#: BL-16 Stage 3, section 5) -- shape validation only, same division of
+#: labour as `/command/ai_pilot_goal`'s own clamps: `Export.lua`'s own
+#: `flight_desired.handle_flight_command` checks every bound again and
+#: refuses the whole request (an ack reason, not a dropped message) if
+#: any one is violated (the plan's own `[[AC-B14]]` lesson), rather than
+#: trusting this layer's check alone. Replaces `_FLIGHT_CONTROL_SEQ_MAX`/
+#: `_FLIGHT_CONTROL_VALID_CMDS`/`_FLIGHT_CONTROL_GOAL_BOUNDS` (the old
+#: `flight_control` op, retired this stage).
+_FLIGHT_SEQ_MAX = 2**31 - 1
+_FLIGHT_EPOCH_MAX = 2**31 - 1
+_FLIGHT_VALID_KINDS: tuple[str, ...] = (
+    "set",
+    "take",
+    "release",
+    "align",
+    "align_for_launch",
+    "recover",
+    "translate",
+    "hover_hold",
+    "hover_step",
+)
 _FLIGHT_CONTROL_VALID_ALT_REFS: tuple[str, ...] = ("agl", "baro")
+_FLIGHT_VALID_TURN_STYLES: tuple[str, ...] = ("normal", "break", "break_away")
 #: `limits` fields -- generous sanity bounds, same posture as every other
 #: `/command/*` endpoint's own clamps (real cockpit/behaviour limits are
 #: body-layer's `tuning.py` job, not this layer's).
@@ -560,16 +584,16 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     "vrs_ias_threshold_kmh": (0.0, 200.0),
     "vrs_max_descent_mps": (0.0, 50.0),
 }
-#: `goal` fields -- same generous-sanity-bound posture as `limits` above.
-_FLIGHT_CONTROL_GOAL_BOUNDS: dict[str, tuple[float, float]] = {
+#: `/command/flight`'s own numeric fields -- same generous-sanity-bound
+#: posture as `_FLIGHT_CONTROL_LIMITS_BOUNDS` above.
+_FLIGHT_FIELD_BOUNDS: dict[str, tuple[float, float]] = {
     "heading_deg": (0.0, 360.0),
     "alt_m": (-500.0, 20_000.0),
     "ias_kmh": (0.0, 2_000_000.0),
     # Mode-1 batch, Decision 27 -- the break's own signed rate override.
-    # Generous sanity bound (same posture as every other goal field
-    # here); `rules/actions.py`'s own `ActionParam(lo=1, hi=90)` is the
-    # tight, domain-specific bound on the magnitude the rule can ever
-    # send.
+    # Generous sanity bound (same posture as every other field here);
+    # `rules/actions.py`'s own `ActionParam(lo=1, hi=90)` is the tight,
+    # domain-specific bound on the magnitude the rule can ever send.
     "turn_rate_deg_s": (-90.0, 90.0),
 }
 
@@ -726,6 +750,16 @@ def _handle_flight_control_latest(
     return None if sample is None else sample.to_api_dict()
 
 
+def _handle_flight_desired_latest(
+    cache: FlightDesiredCache,
+) -> dict[str, Any] | None:
+    """`null` before the first flight-desired line arrives -- same "not
+    an error" posture as `/flight_control/latest` (`plans/
+    flight-desired-state/plan.md`, BL-16 Stages 1-2)."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -760,6 +794,7 @@ def _make_handler(
     payload_cache: PayloadCache,
     ai_pilot_wheel_cache: AiPilotWheelCache,
     flight_control_cache: FlightControlCache,
+    flight_desired_cache: FlightDesiredCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -815,6 +850,11 @@ def _make_handler(
                     200, _handle_flight_control_latest(flight_control_cache)
                 )
                 return
+            if path == _FLIGHT_DESIRED_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_flight_desired_latest(flight_desired_cache)
+                )
+                return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
                     200,
@@ -860,8 +900,11 @@ def _make_handler(
             if path == _COMMAND_AI_PILOT_GOAL_PATH:
                 self._handle_command_ai_pilot_goal()
                 return
-            if path == _COMMAND_FLIGHT_CONTROL_PATH:
-                self._handle_command_flight_control()
+            if path == _COMMAND_FLIGHT_PATH:
+                self._handle_command_flight()
+                return
+            if path == _COMMAND_FLIGHT_LEASE_PATH:
+                self._handle_command_flight_lease()
                 return
             if path == _COMMAND_RESET_PATH:
                 self._handle_command_reset()
@@ -1544,22 +1587,188 @@ def _make_handler(
                 return
             self._respond_json(200, {"ok": True})
 
-        def _handle_command_flight_control(self) -> None:
-            """`POST /command/flight_control` -- BL-16 mode 1's own
-            handover/goal channel (`plans/flight-control/plan.md`,
-            "Revised 2026-11-18", "Wire", Stage M1). Shape validation
-            only, mirroring `/command/ai_pilot_goal`'s own division of
-            labour: `seq`/`cmd` required, `limits` and `goal` each an
-            optional object whose own fields are checked individually
-            (every present field finite and in its own generous sanity
-            bound; a field the message omits is `null` on the wire,
-            "keep yours" to `Export.lua`, never rejected here).
-            `altitude_target_ref`'s sibling here is `goal.alt_ref`,
-            checked against its own closed vocabulary; `goal.turn` is a
-            closed three-way int and `goal.level_off` a bool."""
+        def _handle_command_flight(self) -> None:
+            """`POST /command/flight` -- BL-16 Stage 3's one numbered
+            channel (`plans/flight-desired-state/plan.md`, section 5),
+            replacing `/command/flight_control` entirely. Shape
+            validation only, mirroring `/command/ai_pilot_goal`'s own
+            division of labour: `epoch`/`seq`/`until`/`kind` required,
+            every other field optional and checked individually (every
+            present field finite and in its own generous sanity bound; a
+            field the message omits is `null` on the wire, "keep yours"
+            to `Export.lua`, never rejected here). `turn` is a closed
+            three-way int, `turn_style`/`alt_ref` closed vocabularies.
+            Fields are flat on the body (never nested under a `"goal"`
+            key) -- `Export.lua`'s own extraction helpers are nesting-
+            blind, so there is no reason to nest them here either."""
+            if command_sender is None:
+                self._respond_json(503, {"error": "flight channel not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            epoch_raw = data.get("epoch")
+            if (
+                isinstance(epoch_raw, bool)
+                or not isinstance(epoch_raw, int)
+                or not (0 <= epoch_raw <= _FLIGHT_EPOCH_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'epoch' must be a whole number in "
+                            f"[0, {_FLIGHT_EPOCH_MAX}], got {epoch_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            seq_raw = data.get("seq")
+            if (
+                isinstance(seq_raw, bool)
+                or not isinstance(seq_raw, int)
+                or not (0 <= seq_raw <= _FLIGHT_SEQ_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'seq' must be a whole number in "
+                            f"[0, {_FLIGHT_SEQ_MAX}], got {seq_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            until_raw = data.get("until")
+            if (
+                isinstance(until_raw, bool)
+                or not isinstance(until_raw, (int, float))
+                or not math.isfinite(until_raw)
+            ):
+                self._respond_json(
+                    400,
+                    {"error": f"'until' must be a finite number, got {until_raw!r}"},
+                )
+                return
+
+            kind = data.get("kind")
+            if kind not in _FLIGHT_VALID_KINDS:
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            f"'kind' must be one of {_FLIGHT_VALID_KINDS}, got {kind!r}"
+                        )
+                    },
+                )
+                return
+
+            fields: dict[str, object] = {}
+            for field, (lo, hi) in _FLIGHT_FIELD_BOUNDS.items():
+                if field not in data or data[field] is None:
+                    continue
+                value = data[field]
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < lo
+                    or value > hi
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                f"'{field}' must be a finite number in "
+                                f"[{lo}, {hi}], got {value!r}"
+                            )
+                        },
+                    )
+                    return
+                fields[field] = float(value)
+            if "turn" in data and data["turn"] is not None:
+                turn_value = data["turn"]
+                if (
+                    isinstance(turn_value, bool)
+                    or not isinstance(turn_value, int)
+                    or turn_value not in (-1, 0, 1)
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "'turn' must be one of -1, 0, 1 or null, "
+                                f"got {turn_value!r}"
+                            )
+                        },
+                    )
+                    return
+                fields["turn"] = turn_value
+            if "turn_style" in data and data["turn_style"] is not None:
+                turn_style_value = data["turn_style"]
+                if turn_style_value not in _FLIGHT_VALID_TURN_STYLES:
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "'turn_style' must be one of "
+                                f"{_FLIGHT_VALID_TURN_STYLES} or null, got "
+                                f"{turn_style_value!r}"
+                            )
+                        },
+                    )
+                    return
+                fields["turn_style"] = turn_style_value
+            if "alt_ref" in data and data["alt_ref"] is not None:
+                alt_ref_value = data["alt_ref"]
+                if alt_ref_value not in _FLIGHT_CONTROL_VALID_ALT_REFS:
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "'alt_ref' must be one of "
+                                f"{_FLIGHT_CONTROL_VALID_ALT_REFS} or null, got "
+                                f"{alt_ref_value!r}"
+                            )
+                        },
+                    )
+                    return
+                fields["alt_ref"] = alt_ref_value
+
+            try:
+                command_sender.send_flight(
+                    epoch_raw, seq_raw, float(until_raw), kind, fields
+                )
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_flight_lease(self) -> None:
+            """`POST /command/flight_lease` -- BL-16 Stage 2's own
+            unnumbered lease (`plans/flight-desired-state/plan.md`,
+            refinement 3), replacing the old `{"cmd": "arm"}` message on
+            `/command/flight_control`. Shape validation only, same
+            division of labour as `/command/flight_control`'s own
+            `limits`: `epoch` a non-negative whole number (same bound as
+            `/command/reset`), `limits` an optional object whose fields
+            are each checked individually against `_FLIGHT_CONTROL_
+            LIMITS_BOUNDS` (the same bounds the lease's sibling endpoint
+            uses, since it carries the same `limits` bundle)."""
             if command_sender is None:
                 self._respond_json(
-                    503, {"error": "flight_control channel not configured"}
+                    503, {"error": "flight_lease channel not configured"}
                 )
                 return
 
@@ -1574,31 +1783,18 @@ def _make_handler(
                 self._respond_json(400, {"error": "body must be a JSON object"})
                 return
 
-            seq_raw = data.get("seq")
+            epoch_raw = data.get("epoch")
             if (
-                isinstance(seq_raw, bool)
-                or not isinstance(seq_raw, int)
-                or not (0 <= seq_raw <= _FLIGHT_CONTROL_SEQ_MAX)
+                isinstance(epoch_raw, bool)
+                or not isinstance(epoch_raw, int)
+                or not (0 <= epoch_raw <= _RESET_EPOCH_MAX)
             ):
                 self._respond_json(
                     400,
                     {
                         "error": (
-                            "'seq' must be a whole number in "
-                            f"[0, {_FLIGHT_CONTROL_SEQ_MAX}], got {seq_raw!r}"
-                        )
-                    },
-                )
-                return
-
-            cmd = data.get("cmd")
-            if cmd not in _FLIGHT_CONTROL_VALID_CMDS:
-                self._respond_json(
-                    400,
-                    {
-                        "error": (
-                            f"'cmd' must be one of {_FLIGHT_CONTROL_VALID_CMDS}, "
-                            f"got {cmd!r}"
+                            "'epoch' must be a whole number in "
+                            f"[0, {_RESET_EPOCH_MAX}], got {epoch_raw!r}"
                         )
                     },
                 )
@@ -1638,91 +1834,9 @@ def _make_handler(
                         return
                     limits[field] = float(value)
 
-            goal_raw = data.get("goal")
-            if goal_raw is not None and not isinstance(goal_raw, dict):
-                self._respond_json(
-                    400,
-                    {"error": f"'goal' must be an object or null, got {goal_raw!r}"},
-                )
-                return
-            goal: dict[str, object] = {}
-            if goal_raw is not None:
-                for field, (lo, hi) in _FLIGHT_CONTROL_GOAL_BOUNDS.items():
-                    if field not in goal_raw or goal_raw[field] is None:
-                        continue
-                    value = goal_raw[field]
-                    if (
-                        isinstance(value, bool)
-                        or not isinstance(value, (int, float))
-                        or not math.isfinite(value)
-                        or value < lo
-                        or value > hi
-                    ):
-                        self._respond_json(
-                            400,
-                            {
-                                "error": (
-                                    f"goal.{field} must be a finite number in "
-                                    f"[{lo}, {hi}], got {value!r}"
-                                )
-                            },
-                        )
-                        return
-                    goal[field] = float(value)
-                if "turn" in goal_raw and goal_raw["turn"] is not None:
-                    turn_value = goal_raw["turn"]
-                    if (
-                        isinstance(turn_value, bool)
-                        or not isinstance(turn_value, int)
-                        or turn_value not in (-1, 0, 1)
-                    ):
-                        self._respond_json(
-                            400,
-                            {
-                                "error": (
-                                    "'goal.turn' must be one of -1, 0, 1 or null, "
-                                    f"got {turn_value!r}"
-                                )
-                            },
-                        )
-                        return
-                    goal["turn"] = turn_value
-                if "level_off" in goal_raw and goal_raw["level_off"] is not None:
-                    level_off_value = goal_raw["level_off"]
-                    if not isinstance(level_off_value, bool):
-                        self._respond_json(
-                            400,
-                            {
-                                "error": (
-                                    "'goal.level_off' must be a boolean or null, "
-                                    f"got {level_off_value!r}"
-                                )
-                            },
-                        )
-                        return
-                    goal["level_off"] = level_off_value
-                if "alt_ref" in goal_raw and goal_raw["alt_ref"] is not None:
-                    alt_ref_value = goal_raw["alt_ref"]
-                    if alt_ref_value not in _FLIGHT_CONTROL_VALID_ALT_REFS:
-                        self._respond_json(
-                            400,
-                            {
-                                "error": (
-                                    "'goal.alt_ref' must be one of "
-                                    f"{_FLIGHT_CONTROL_VALID_ALT_REFS} or null, got "
-                                    f"{alt_ref_value!r}"
-                                )
-                            },
-                        )
-                        return
-                    goal["alt_ref"] = alt_ref_value
-
             try:
-                command_sender.send_flight_control(
-                    seq_raw,
-                    cmd,
-                    limits if limits_raw is not None else None,
-                    goal if goal_raw is not None else None,
+                command_sender.send_flight_lease(
+                    epoch_raw, limits if limits_raw is not None else None
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
@@ -1887,6 +2001,7 @@ class TelemetryAPIServer:
         payload_cache: PayloadCache | None = None,
         ai_pilot_wheel_cache: AiPilotWheelCache | None = None,
         flight_control_cache: FlightControlCache | None = None,
+        flight_desired_cache: FlightDesiredCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`unit_velocity_cache`/
@@ -1954,6 +2069,11 @@ class TelemetryAPIServer:
             if flight_control_cache is not None
             else FlightControlCache()
         )
+        self._flight_desired_cache = (
+            flight_desired_cache
+            if flight_desired_cache is not None
+            else FlightDesiredCache()
+        )
         # `arg_read_broker` defaults to `None`, same posture as
         # `command_sender`/`audio_sender` above --
         # `/query/read_args` answers `503` rather than crashing when it
@@ -2017,6 +2137,7 @@ class TelemetryAPIServer:
                 self._payload_cache,
                 self._ai_pilot_wheel_cache,
                 self._flight_control_cache,
+                self._flight_desired_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

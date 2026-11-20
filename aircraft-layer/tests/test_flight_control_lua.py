@@ -228,6 +228,105 @@ client = {
         return true
     end,
 }
+
+-- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`) -- the one
+-- desired-state mirror `flight_control.lua` now reads (`apply_desired_
+-- changes_to_law`/`build_take_seed`) instead of the retired `fc_goal_*`
+-- push-at-receipt locals. `fd_heading_ref` (default "true", no
+-- conversion) is a driver-settable global so the heading-reference
+-- tests can flip it to "mag"; `desired`'s own fields are set directly
+-- by the driver (mirroring exactly what a numbered `set` request would
+-- have written into `flight_desired.lua`'s real module).
+local fd_heading_ref = "true"
+local desired = {
+    hdg_mode = nil, heading_deg = nil, turn_dir = nil, turn_rate_deg_s = nil,
+    turn_style = "normal", alt_m = nil, alt_ref = nil, ias_kmh = nil,
+    stamp_hdg = nil, stamp_alt = nil, stamp_spd = nil,
+}
+
+-- `LoGetMagneticYaw` backs the heading-reference conversion's own live
+-- variation read -- a driver-settable global, `nil` by default (no
+-- conversion exercised unless a test sets both this and `fd_heading_
+-- ref = "mag"`). Declared (and the DCS function defined) BEFORE `flight_
+-- desired`'s own closures below reference it -- Lua has no hoisting, so
+-- a `local` declared after a closure that reads the name would leave
+-- that closure reading the global instead (the project's own
+-- no-hoisting gotcha, `aircraft-layer/CLAUDE.md`).
+local fd_mag_heading_deg = nil
+function LoGetMagneticYaw()
+    return fd_mag_heading_deg
+end
+
+flight_desired = {
+    get = function()
+        local copy = {}
+        for k, v in pairs(desired) do copy[k] = v end
+        return copy
+    end,
+    heading_ref = function() return fd_heading_ref end,
+    to_true_heading = function(ref_heading_deg, measured_true_deg)
+        if ref_heading_deg == nil then return ref_heading_deg end
+        if fd_heading_ref ~= "mag" then return ref_heading_deg end
+        local variation = measured_true_deg - fd_mag_heading_deg
+        local r = (ref_heading_deg + variation) % 360.0
+        if r < 0 then r = r + 360.0 end
+        return r
+    end,
+    from_true_heading = function(true_heading_deg, measured_true_deg)
+        if true_heading_deg == nil then return true_heading_deg end
+        if fd_heading_ref ~= "mag" then return true_heading_deg end
+        local variation = measured_true_deg - fd_mag_heading_deg
+        local r = (true_heading_deg - variation) % 360.0
+        if r < 0 then r = r + 360.0 end
+        return r
+    end,
+    write_internal = function(parts)
+        parts = parts or {}
+        if parts.heading_deg ~= nil then
+            desired.hdg_mode = "heading"
+            desired.heading_deg = parts.heading_deg
+            desired.turn_dir = nil
+        end
+        if parts.clear_turn_rate then
+            desired.turn_rate_deg_s = nil
+            desired.turn_style = "normal"
+        end
+        if parts.alt_m ~= nil then desired.alt_m = parts.alt_m end
+        if parts.alt_ref ~= nil then desired.alt_ref = parts.alt_ref end
+        if parts.ias_kmh ~= nil then desired.ias_kmh = parts.ias_kmh end
+    end,
+}
+
+-- Test-driver helper: writes a `set`-shaped request straight into the
+-- mock `desired` table above, stamped with `seq` -- the same effect a
+-- real numbered `flight` request would have on `flight_desired.lua`'s
+-- own `desired`, without needing that module's own dispatch here.
+local function set_desired(seq, fields)
+    if fields.heading_deg ~= nil then
+        desired.hdg_mode = "heading"
+        desired.heading_deg = fields.heading_deg
+        desired.turn_dir = nil
+        desired.turn_rate_deg_s = fields.turn_rate_deg_s
+        desired.turn_style = fields.turn_style or "normal"
+        desired.stamp_hdg = seq
+    end
+    if fields.turn ~= nil then
+        desired.hdg_mode = "turn"
+        desired.turn_dir = fields.turn
+        desired.turn_rate_deg_s = nil
+        desired.turn_style = "normal"
+        desired.stamp_hdg = seq
+    end
+    if fields.alt_m ~= nil then
+        desired.alt_m = fields.alt_m
+        desired.stamp_alt = seq
+    end
+    if fields.alt_ref ~= nil then desired.alt_ref = fields.alt_ref end
+    if fields.ias_kmh ~= nil then
+        desired.ias_kmh = fields.ias_kmh
+        desired.stamp_spd = seq
+    end
+end
 """
 
 
@@ -312,8 +411,7 @@ pilot_args.pitch = 0.321
 pilot_args.roll = -0.154
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
@@ -342,8 +440,7 @@ print(string.format("%.6f", written[2002]))
 pilot_args.collective = 0.3
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 print(string.format("%.6f", written[2087]))
 """
@@ -357,8 +454,7 @@ print(string.format("%.6f", written[2087]))
 pilot_args.pedals = 0.4
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 print(string.format("%.6f", written[2003]))
 """
@@ -380,10 +476,11 @@ pilot_args.pitch = 0.42
 operator_args.pitch = -0.9
 ap_seat = "operator"
 ap_parked = true
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.push_flight_control_state(0.2)
@@ -409,240 +506,74 @@ class TestReleaseClearsHeldGoalsAcrossRetake:
 pilot_args.pitch = 0.1
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},'
-    .. '"heading_deg":90.0,"alt_m":500.0,"alt_ref":"baro","ias_kmh":150.0}', 0.1)
+set_desired(2, { heading_deg = 90.0, alt_m = 500.0, alt_ref = "baro", ias_kmh = 150.0 })
 flight_control.run_flight_control(0.2)
-flight_control.push_flight_control_state(0.2)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":3,"cmd":"release","limits":{}}', 0.3)
+flight_control.request_release(3)
 flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":4,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.4)
+flight_control.request_take(4, 0.4)
 flight_control.run_flight_control(0.4)
-flight_control.push_flight_control_state(0.4)
-print(sent_lines[#sent_lines - 2])
-print(sent_lines[#sent_lines - 1])
+-- BL-16 Stage 3: the SAME stamp (2) the first session already applied
+-- is still sitting in the (shared, test-only) mock `desired` after the
+-- retake -- if `request_release` left `fc_applied_stamp_hdg` un-
+-- cleared, this frame's `apply_desired_changes_to_law` would treat
+-- stamp 2 as already-applied and never seed the fresh session's law
+-- from it at all, even though it is seeded fresh from `desired`
+-- directly at the take itself (`build_take_seed`) -- so this checks
+-- the *next* frame's poll does not clobber that seed by skipping a
+-- stamp it has (wrongly) already seen.
+flight_control.run_flight_control(0.5)
+flight_control.push_flight_control_state(0.5)
 print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
-        held_line, released_line, retaken_line = lines[0], lines[1], lines[2]
-        # Before release: the goal is held.
-        assert _field(held_line, "fc_goal_heading") == "90.00000"
-        assert _field(held_line, "fc_goal_altitude") == "500.00000"
-        assert _field(held_line, "fc_goal_altitude_ref") == "baro"
-        assert _field(held_line, "fc_goal_speed") == "150.00000"
-        # After release: every goal field clears, matching `on_stop`.
-        assert _field(released_line, "fc_mode") == "off"
-        assert _field(released_line, "fc_goal_heading") is None
-        assert _field(released_line, "fc_goal_altitude") is None
-        assert _field(released_line, "fc_goal_altitude_ref") is None
-        assert _field(released_line, "fc_goal_speed") is None
-        # After the fresh re-take, with no goal commanded yet: still
-        # None, not the previous session's stale values.
+        retaken_line = lines[0]
+        # The fresh take's own law carries `desired.heading_deg` (90.0,
+        # stamped 2, from `build_take_seed`, never a stale previous-
+        # session value) all the way through, confirmed via the
+        # measured telemetry fallback being bypassed in favour of it --
+        # `fc_mode` alone over two more frames is the simplest available
+        # signal this mock can observe (the mock exposes no `fc_goal_*`
+        # wire mirror any more; that concern moved to `flight_desired.
+        # lua`'s own `clear_desired()`, covered by `test_flight_desired_
+        # lua.py`'s `TestEdgeSeeding`/`TestResetAndStop`).
         assert _field(retaken_line, "fc_mode") == "active"
-        assert _field(retaken_line, "fc_goal_heading") is None
-        assert _field(retaken_line, "fc_goal_altitude") is None
-        assert _field(retaken_line, "fc_goal_altitude_ref") is None
-        assert _field(retaken_line, "fc_goal_speed") is None
 
 
-class TestRepeatedTakeWhileAlreadyFlyingStillAcks:
-    """BL-16 sortie 2026-11-20, defect B (`plans/flight-control/debug.md`):
-    a second `take` sent while Lua's `fc_mode` is already `"active"` or
-    `"taking"` is a no-op for the aircraft (no re-capture, no law reset
-    -- the comment right above this branch says why), but must still
-    move `fc_take_seq`/`fc_pending_take_seq` to the new message's own
-    seq. Before the fix, `fc_last_cmd_seq` (bumped unconditionally by
-    the bounds check, before this branch ever runs) advanced past the
-    stale `fc_take_seq`, so belief's own ack match (`lua_take_seq ==
-    take_seq`, set to the sent wire seq by `body.py`'s `_apply_flight_
-    control`) could never succeed for that take -- "Unable, not ready,"
-    forever, while Lua kept flying regardless."""
-
-    def test_a_repeated_take_while_active_still_updates_take_seq(self) -> None:
-        driver = """
-pilot_args.pitch = 0.1
-ap_parked = false
-ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.run_flight_control(0.1)
-flight_control.push_flight_control_state(0.1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.2)
-flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
-print(sent_lines[#sent_lines - 1])
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        after_take_1, after_take_2 = lines[0], lines[1]
-        assert _field(after_take_1, "fc_mode") == "active"
-        assert _field(after_take_1, "fc_take_seq") == "1"
-        assert _field(after_take_1, "fc_last_cmd_seq") == "1"
-        # Before the fix: fc_mode stayed "active" (correct -- it is a
-        # no-op for the aircraft), fc_last_cmd_seq advanced to 2 (the
-        # bounds check bumps it unconditionally), but fc_take_seq
-        # stayed 1 -- the defect.
-        assert _field(after_take_2, "fc_mode") == "active"
-        assert _field(after_take_2, "fc_last_cmd_seq") == "2"
-        assert _field(after_take_2, "fc_take_seq") == "2"
-
-    def test_a_repeated_take_while_still_taking_also_updates_take_seq(
-        self,
-    ) -> None:
-        """Same defect, the `"taking"` half: a second `take` arrives
-        before the first one's capture has resolved into `"active"` --
-        `fc_pending_take_seq` (not `fc_take_seq` directly, which is only
-        set once `run_flight_control`'s own `"taking"` branch completes
-        the capture) must move to the new seq, or the eventual `active`
-        transition reports the *first* take's seq, not the one belief
-        is actually waiting on."""
-        driver = """
-ap_parked = false
-ap_seat = "pilot"
--- No live stick deflection on either seat and no prior steady snapshot
--- -- `resolve_capture_values` falls through to the magnitude-compare
--- fallback, which still succeeds immediately (it never returns nil
--- here), so this is only to exercise the "taking" window itself, not
--- to actually stall the capture.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.run_flight_control(0.1)
-flight_control.push_flight_control_state(0.1)
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        assert _field(lines[0], "fc_mode") == "active"
-        assert _field(lines[0], "fc_take_seq") == "2"
-        assert _field(lines[0], "fc_last_cmd_seq") == "2"
-
-
-class TestBadBoundRejectsWholeMessage:
-    def test_an_out_of_bounds_limit_rejects_the_whole_message(self) -> None:
-        driver = """
-pilot_args.pitch = 0.5
-ap_parked = false
-ap_seat = "pilot"
--- min_ias_kmh = 9999 is above FC_LIMIT_BOUNDS' own hi=500 ceiling.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":9999.0}}', 0.0)
-flight_control.run_flight_control(0.1)
-flight_control.push_flight_control_state(0.1)
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        # The whole message (including the "take" itself) is rejected --
-        # mode stays "off", not "taking"/"active".
-        assert _field(lines[0], "fc_mode") == "off"
-
-    def test_a_stale_seq_is_ignored(self) -> None:
-        driver = """
-ap_parked = false
-ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":5,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.run_flight_control(0.1)
--- A stale seq=3 "release" must be ignored -- the take must still be
--- live.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":3,"cmd":"release","limits":{}}', 0.2)
-flight_control.push_flight_control_state(0.2)
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        assert _field(lines[0], "fc_mode") == "active"
-
-
-class TestLastCmdSeqEchoSurvivesOnStop:
-    def test_fc_last_cmd_seq_echoes_and_outlives_on_stop(self) -> None:
-        """security-m1-m2.md Finding A, change-request round:
-        `fc_last_cmd_seq` is echoed on the status push (added so body-
-        layer can reconcile its own `wire_seq` against it after a
-        restart) and must survive `on_stop` exactly like the rest of
-        this module's "a stale, pre-restart command must still be seen
-        as stale" posture -- `on_stop`'s own docstring already states
-        this for the underlying counter; this is the first test that
-        checks it via the wire echo a restarted body-layer would
-        actually read."""
-        driver = """
-ap_parked = false
-ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.run_flight_control(0.1)
-flight_control.push_flight_control_state(0.1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":47,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
-flight_control.push_flight_control_state(0.1)
--- `on_stop` (mission restart / LuaExportStop) must NOT reset the
--- counter -- a fresh body-layer process's own first send, reconciled
--- above it, must still be seen as newer than anything this session
--- already accepted.
-flight_control.on_stop()
-flight_control.push_flight_control_state(0.2)
--- A simulated reconciled resend (body-layer caught `wire_seq` up to
--- 47 from this same echo, so its next send is 48) must be accepted.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":48,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.3)
-flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
-print(sent_lines[#sent_lines - 2])
-print(sent_lines[#sent_lines - 1])
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        after_goal_line, after_stop_line, after_resend_line = (
-            lines[0],
-            lines[1],
-            lines[2],
-        )
-        # `plans/flight-control/debug.md` "Common root cause, both
-        # modes": these three seq fields are now `fmt_int_or_null`, not
-        # `fmt_num_or_null` -- a bare `"47"`, never `"47.00000"`, which
-        # `json.loads` would parse as a float and every strict-`int`
-        # schema field would then reject whole.
-        assert _field(after_goal_line, "fc_last_cmd_seq") == "47"
-        # on_stop resets fc_mode but not the staleness counter.
-        assert _field(after_stop_line, "fc_mode") == "off"
-        assert _field(after_stop_line, "fc_last_cmd_seq") == "47"
-        # The reconciled seq=48 is accepted -- strictly greater than
-        # the never-reset counter -- and advances it in turn.
-        assert _field(after_resend_line, "fc_mode") == "active"
-        assert _field(after_resend_line, "fc_last_cmd_seq") == "48"
+# BL-16 Stage 3 (`plans/flight-desired-state/plan.md`): `fc_take_seq`/
+# `fc_goal_seq`/`fc_last_cmd_seq` are gone from this module's wire line
+# entirely -- the staleness floor (`fd_epoch`/`fd_last_seq`) and the ack
+# ring (`fd_acks`) live in `flight_desired.lua` now, which `request_
+# take`/`request_release` are called FROM, never duplicating that check
+# at this layer. The tests that used to pin that floor here
+# (`TestRepeatedTakeWhileAlreadyFlyingStillAcks`, `TestBadBoundRejects
+# WholeMessage`'s stale-seq case, `TestLastCmdSeqEchoSurvivesOnStop`) are
+# removed -- their own concern is now `test_flight_desired_lua.py`'s
+# `TestSetRequest` (epoch/seq/stale/bounds refusal) and `handle_flight_
+# command`'s own dedup. `TestBadBoundRejectsWholeMessage`'s `limits`-
+# bounds case moved to the lease (`TestStage2SelfArmAndLease` already
+# covers `handle_flight_lease_command`'s own `AC-B14` rejection).
 
 
 class TestBodyLayerStartReset:
     """BL-16 sortie 2026-11-20 (`docs/acceptance/
     2026-11-20-sortie-feedback.md`) -- `flight_control.reset`, the
-    body-layer process-start reset. Unlike `on_stop` (`TestLastCmdSeqEcho
-    SurvivesOnStop` above), this one DOES reset `fc_last_cmd_seq` back to
-    its startup sentinel, since body-layer's own `wire_seq` also starts
-    fresh at 0 on the process restart this op exists for."""
+    body-layer process-start reset."""
 
-    def test_reset_releases_axes_clears_seqs_and_echoes_the_epoch(self) -> None:
+    def test_reset_releases_axes_and_echoes_the_epoch(self) -> None:
         driver = """
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
 flight_control.push_flight_control_state(0.1)
-print(sent_lines[#sent_lines])
 flight_control.reset(99)
 written = {}
 flight_control.run_flight_control(0.2)
 flight_control.push_flight_control_state(0.2)
+print(sent_lines[#sent_lines - 1])
 print(sent_lines[#sent_lines])
 print(written[2001] == nil)
 """
@@ -652,45 +583,19 @@ print(written[2001] == nil)
             lines[1],
             lines[2],
         )
-        # Before the reset: mode 1 is genuinely flying, with a take/goal
-        # on record and no epoch echoed yet.
+        # Before the reset: mode 1 is genuinely flying, no epoch echoed
+        # yet.
         assert _field(before_reset_line, "fc_mode") == "active"
-        assert _field(before_reset_line, "fc_take_seq") == "1"
         assert _field(before_reset_line, "fc_reset_epoch") is None
         # After `reset(99)`: mode off (axes released -- confirmed below
-        # by `run_flight_control` writing nothing further), every seq
-        # high-water mark cleared, including `fc_last_cmd_seq` itself
-        # (unlike a mere `on_stop`), and the epoch echoed back.
+        # by `run_flight_control` writing nothing further), and the
+        # epoch echoed back.
         assert _field(after_reset_line, "fc_mode") == "off"
-        assert _field(after_reset_line, "fc_take_seq") is None
-        assert _field(after_reset_line, "fc_goal_seq") is None
-        assert _field(after_reset_line, "fc_last_cmd_seq") == "-1"
         assert _field(after_reset_line, "fc_reset_epoch") == "99"
         # `run_flight_control` after the reset writes nothing -- the
         # same "release stops writing" behaviour `TestReleaseStopsWrites
         # SameFrame` already proves for an ordinary release.
         assert nothing_written == "true"
-
-    def test_a_fresh_process_seq_1_is_accepted_after_reset(self) -> None:
-        """The reconciliation this reset exists to make unnecessary: a
-        body-layer process that sent up to `seq=47` before restarting
-        must not have its fresh `wire_seq=1` rejected as stale once the
-        reset has landed."""
-        driver = """
-ap_parked = false
-ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":47,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
-flight_control.reset(1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.1)
-flight_control.run_flight_control(0.1)
-flight_control.push_flight_control_state(0.1)
-print(sent_lines[#sent_lines])
-"""
-        lines = _run(driver)
-        assert _field(lines[0], "fc_mode") == "active"
-        assert _field(lines[0], "fc_last_cmd_seq") == "1"
 
     def test_reset_is_idempotent_and_freely_resendable(self) -> None:
         """Body-layer resends the reset while unconfirmed -- applying
@@ -714,12 +619,10 @@ class TestReleaseStopsWritesSameFrame:
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 written = {}
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"release","limits":{}}', 0.2)
+flight_control.request_release(2)
 flight_control.run_flight_control(0.2)
 flight_control.push_flight_control_state(0.2)
 print(sent_lines[#sent_lines])
@@ -738,9 +641,7 @@ class TestParkMovesActiveToArmedWithNoWrite:
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0,"arm_lease_s":3.0}}',
-    0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 written = {}
 ap_parked = true
@@ -760,10 +661,11 @@ class TestUnparkTakeRefusals:
         driver = """
 ap_parked = true
 ap_seat = "operator"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.05)
 ias_mps = 20.0 / 3.6
 ap_parked = false
 flight_control.run_flight_control(0.1)
@@ -782,10 +684,11 @@ print(sent_lines[#sent_lines])
         driver = """
 ap_parked = true
 ap_seat = "operator"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
     0.0)
+flight_control.run_flight_control(0.05)
 ap_parked = false
 flight_control.run_flight_control(5.0)  -- well past the 1 s lease
 flight_control.push_flight_control_state(5.0)
@@ -826,12 +729,17 @@ pilot_args.roll = 0.133
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
--- A frame fully stowed: tracked.
+-- Self-arms this frame (off -> armed) -- that transition itself
+-- consumes the whole frame (BL-16 Stage 2's own self-arm branch
+-- `return`s immediately), so the stowed-capture tracking below needs
+-- one more frame before it ever runs.
 flight_control.run_flight_control(0.1)
+-- A frame fully stowed: tracked.
+flight_control.run_flight_control(0.15)
 -- The fade begins: the arg set and the raw stow value both fall
 -- together, exactly as flight 9 measured (roll 0.133 -> 0.086, raw
 -- 1.0 -> 0.85) -- and the edge (`is_parked() == false`) lands here.
@@ -861,8 +769,8 @@ pilot_args.roll = 0.222
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -888,8 +796,8 @@ pilot_args.roll = 0.5
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -897,14 +805,13 @@ ap_parked = false
 flight_control.run_flight_control(0.2)
 -- Release, then re-arm without ever reaching the stowed threshold this
 -- session -- and the player has since moved the stick.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"release","limits":{}}', 0.3)
+flight_control.request_release(2)
 flight_control.run_flight_control(0.3)
 pilot_args.roll = 0.9
 ap_parked = true
 ap_stick_park_raw = 0.5
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":3,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.4)
 flight_control.run_flight_control(0.4)
@@ -925,8 +832,11 @@ class TestUnparkTakeSeedsFromMode2SetTargets:
     """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) -- the
     crash this report diagnoses: an unpark mid-break with no seed reads
     the AI-wheel's own held heading as if it were a raw-stick bank the
-    pilot had just rolled into on purpose. The fix reads `ai_pilot_
-    wheel.held_targets()` for an unpark take only, never a voice take
+    pilot had just rolled into on purpose. **BL-16 Stage 3**: the fix
+    now reads `flight_desired.get()` (the one `desired` table) for an
+    unpark take only, never a voice take -- `build_take_seed`'s own
+    verbatim-carry branch (`fc_take_origin == "unpark"`), replacing the
+    pre-Stage-3 direct `ai_pilot_wheel.held_targets()` read
     (`test_flight_control_law.py`'s own `TestUnparkTakeSeedFromMode2
     SetTargets` exercises the resulting law state directly, including
     the no-physics fallback; this covers the wiring end to end through
@@ -945,10 +855,17 @@ bank_rad = math.rad(2.0)  -- well under the 5 deg takeover threshold
 ap_seat = "operator"
 ap_parked = true
 ap_held = { heading_deg = 45.0 }
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+-- BL-16 Stage 3: the unpark-take seed now comes from `flight_desired.
+-- get()`, never `ai_pilot_wheel.held_targets()` directly -- in the real
+-- module this is populated by `flight_desired.lua`'s own `reseed_from_
+-- overlay` at the off->m2 edge; this mock stands in for that same
+-- effect directly on the shared `desired` table.
+set_desired(1, { heading_deg = 45.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 for i = 1, 50 do
@@ -977,8 +894,75 @@ bank_rad = math.rad(2.0)
 ap_seat = "pilot"
 ap_parked = false
 ap_held = { heading_deg = 45.0 }
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_in_band_heading") == "true"
+
+
+class TestVoiceTakeSetDuringTakingSurvivesTheSeed:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 2): the plan's own Stage 3 test, "a set during `taking`
+    survives the seed" (`build_take_seed`'s voice-take branch, `desired.
+    stamp_hdg/alt/spd > take_seq`) -- a command given in the same breath
+    as "you have controls." Driven by sending `set_desired` with a
+    higher `seq` *while* `fc_mode == "taking"`, i.e. after `request_
+    take` but before the `run_flight_control` call that resolves it --
+    the window no existing driver in this file exercises (every other
+    `request_take` driver either resolves in the same call or sends its
+    `set_desired` only once the take has already resolved)."""
+
+    def test_a_heading_set_during_taking_survives_the_seed(self) -> None:
+        """Measured heading stays at 123 for the whole run (the mock
+        never moves it); `law_init_at_take`'s own fallback would adopt
+        that measured value with no seed. If the seed set during
+        `taking` is adopted instead, the law's goal (45) and the
+        unmoving measured value (123) never agree, so `fc_in_band_
+        heading` stays `false` even after settling -- the same
+        differentiating assertion `TestUnparkTakeSeedsFromMode2
+        SetTargets` already uses for its own seed-adoption check."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)  -- under the 5 deg takeover threshold
+ap_seat = "pilot"
+ap_parked = false
+flight_control.request_take(1, 0.0)
+-- Sent while fc_mode == "taking" (not yet resolved) -- "you have
+-- controls, heading 045" in one breath. `seq=2 > take_seq=1`.
+set_desired(2, { heading_deg = 45.0 })
+flight_control.run_flight_control(0.1)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_in_band_heading") == "false"
+
+    def test_a_set_stamped_at_or_before_take_seq_does_not_survive(self) -> None:
+        """Control: `seq == take_seq` (not strictly after it) is the
+        pre-existing desired value at the moment of take, not a
+        same-breath command -- `build_take_seed`'s own `>` comparison
+        excludes it, so the law falls back to the measured default and
+        converges in-band."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)
+ap_seat = "pilot"
+ap_parked = false
+set_desired(1, { heading_deg = 45.0 })
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 for i = 1, 50 do
     flight_control.run_flight_control(0.1 + i * 0.05)
@@ -1007,8 +991,7 @@ pilot_args.pitch = 0.229
 operator_args.pitch = 0.0
 ap_seat = "operator"
 ap_parked = false
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
@@ -1036,8 +1019,7 @@ flight_control.run_flight_control(0.0)
 -- on this very frame.
 pilot_args.pitch = 0.15
 operator_args.pitch = 0.2
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.1)
+flight_control.request_take(1, 0.1)
 flight_control.run_flight_control(0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
@@ -1085,14 +1067,14 @@ pilot_args.pitch = 0.5
 pilot_args.roll = 0.2
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(10.0)
 -- A goal that disagrees with the captured heading: if the pause branch
 -- wrongly advanced the law instead of freezing it, this is what the
--- shaper would move against.
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{"min_ias_kmh":80.0},"goal":{"heading_deg":90.0}}', 10.0)
+-- shaper would move against -- deliberately only written into the mock
+-- `desired` here, not yet applied (`apply_desired_changes_to_law` only
+-- runs on a non-paused active frame, same as the real module).
+set_desired(2, { heading_deg = 90.0 })
 local before_pitch = written[2001]
 local before_roll = written[2002]
 written = {}
@@ -1114,11 +1096,9 @@ pilot_args.pitch = 0.5
 pilot_args.roll = 0.2
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(10.0)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{"min_ias_kmh":80.0},"goal":{"heading_deg":90.0}}', 10.0)
+set_desired(2, { heading_deg = 90.0 })
 local before_pitch = written[2001]
 local before_roll = written[2002]
 written = {}
@@ -1151,8 +1131,7 @@ class TestEnvelopeRelease:
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 ias_mps = 20.0 / 3.6
 for i = 1, 20 do
@@ -1175,8 +1154,7 @@ print(sent_lines[#sent_lines])
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 ias_mps = 150.0 / 3.6
 bank_rad = math.rad(50.0)
@@ -1195,8 +1173,7 @@ print(sent_lines[#sent_lines])
 pilot_args.pitch = 0.5
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
 ias_mps = 20.0 / 3.6
 flight_control.run_flight_control(0.2)
@@ -1352,58 +1329,361 @@ print(sent_lines[#sent_lines])
         assert state.slip_ball_lo_api == pytest.approx(0.55)
 
 
-class TestSeqFieldsSurviveTheRealSchema:
-    """`plans/flight-control/debug.md` "Common root cause, both modes"
-    (2026-11-19): `core.lua`'s `fmt_num_or_null` formatted every number
-    `%.5f`, so `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` went out as
-    e.g. `"-1.00000"` -- valid JSON, but a `float`, which `schema.
-    flight_control.FlightControlState._optional_int` rejects, dropping
-    the whole line. These tests run the real `push_flight_control_state`
-    (not a hand-built JSON string) through the real schema's `from_dict`
-    -- a weaker test built from a `%.5f`-style string by hand would not
-    have caught this, since it would never emit what Lua actually does."""
+# BL-16 Stage 3: `TestSeqFieldsSurviveTheRealSchema` is removed --
+# `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` are gone from this wire
+# line entirely (the plan's own deletions list), so the `%.5f`-vs-int
+# schema hazard it pinned no longer has a field here to apply to.
+# `test_flight_desired_api.py`'s own schema tests cover `fd_stamp_*`/
+# `fd_epoch`/`fd_last_seq` (also `fmt_int_or_null`) on the module that
+# replaced it.
 
-    def test_default_seqs_parse_as_int_through_the_real_schema(self) -> None:
-        """Before any command at all: `fc_take_seq`/`fc_goal_seq` are
-        `nil` (`null` on the wire), `fc_last_cmd_seq` is `-1` -- the one
-        value that was dropped on every single line, take or no take."""
+
+class TestStage2SelfArmAndLease:
+    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
+    3): the `"arm"` cmd is gone from `flight_control`; the lease moves
+    to its own unnumbered `flight_lease` op, and self-arm reaches both
+    `off -> armed` (new) and `active/taking -> armed` (unchanged)."""
+
+    def test_no_lease_means_no_self_arm_from_off(self) -> None:
+        """Parking with no lease ever sent leaves him `off` -- the
+        player keeps the controls, same as today when no `arm` had ever
+        arrived."""
         driver = """
+ap_parked = true
+flight_control.run_flight_control(0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
 """
         line = _run(driver)[0]
-        state = FlightControlState.from_dict(
-            json.loads(line), received_wall_clock_s=0.0
-        )
-        assert state.take_seq is None
-        assert state.goal_seq is None
-        assert state.last_cmd_seq == -1
+        assert _field(line, "fc_mode") == "off"
 
-    def test_seqs_after_a_take_and_a_goal_parse_as_int_through_the_real_schema(
+    def test_a_stale_lease_does_not_self_arm_from_off(self) -> None:
+        driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
+    0.0)
+ap_parked = true
+flight_control.run_flight_control(5.0)  -- well past the 1 s lease
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+
+    def test_lease_carries_limits_same_as_flight_control_did(self) -> None:
+        """`handle_flight_lease_command` applies `limits` through the
+        same `AC-B14` bounds-checked helper -- a value outside `FC_
+        LIMIT_BOUNDS` rejects the whole lease message, never a partial
+        apply."""
+        driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,"limits":{"min_ias_kmh":999.0}}', 0.0)
+ap_parked = true
+ias_mps = 150.0 / 3.6
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        # The out-of-bounds `min_ias_kmh` rejected the whole lease
+        # message, so `fc_arm_last_t` was never set by it -- off stays
+        # off (no self-arm), same as "no lease ever sent".
+        assert _field(line, "fc_mode") == "off"
+
+    def test_reset_while_parked_does_not_rearm_until_the_next_park_edge(
         self,
     ) -> None:
-        """A real take (`seq=1`) then a real goal (`seq=2`) -- the exact
-        shape a live sortie's handover produces, with every seq field
-        now holding a real non-sentinel integer."""
+        """Required Fix 2, `plans/flight-desired-state/review-s12.md`:
+        the off->armed self-arm must be edge-triggered, not level-
+        triggered -- Q6 ("after `reset(epoch)` while parked, armed is
+        cleared and nothing re-arms it until the next park edge").
+        Real reproduction, driven frame by frame: park with a fresh
+        lease (self-arms), `reset` while still parked (back to `off`),
+        a fresh lease arrives while STILL parked -- no unpark/re-park
+        happened -- must stay `off`. Only an actual unpark then re-park
+        is allowed to self-arm again."""
         driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+ap_parked = true
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])  -- [1] self-armed from the first park edge
+
+flight_control.reset(2)
+flight_control.push_flight_control_state(1.0)
+print(sent_lines[#sent_lines])  -- [2] off again, still parked
+
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":2,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    2.0)
+-- still parked, no unpark edge in between
+flight_control.run_flight_control(2.1)
+flight_control.push_flight_control_state(2.1)
+print(sent_lines[#sent_lines])  -- [3] must still be off (Q6)
+
+ap_parked = false
+flight_control.run_flight_control(2.2)
+ap_parked = true
+flight_control.run_flight_control(2.3)
+flight_control.push_flight_control_state(2.3)
+print(sent_lines[#sent_lines])  -- [4] a real unpark+re-park self-arms again
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "armed"
+        assert _field(lines[1], "fc_mode") == "off"
+        assert _field(lines[2], "fc_mode") == "off"
+        assert _field(lines[3], "fc_mode") == "armed"
+
+    # `test_unknown_cmd_arm_is_now_a_no_op` is removed: the `flight_
+    # control` op (and its `cmd == "arm"` branch) is gone entirely this
+    # stage, not just that one cmd -- there is nothing left at this
+    # layer to send "arm" to.
+
+
+class TestStage2VoiceTakePrecondition:
+    """BL-16 Stage 2: a voice take now re-checks IAS/AGL itself
+    (`check_unpark_preconditions`), rather than trusting body-layer's
+    own pre-send refusal alone."""
+
+    def test_a_voice_take_too_slow_is_refused_and_stays_off(self) -> None:
+        driver = """
+ias_mps = 20.0 / 3.6
 ap_parked = false
 ap_seat = "pilot"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.request_take(1, 0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+        assert _field(line, "fc_refuse_cause") == "too_slow"
+
+    def test_a_voice_take_on_the_ground_is_refused_and_stays_off(self) -> None:
+        driver = """
+agl_m = 5.0
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+        assert _field(line, "fc_refuse_cause") == "on_ground"
+
+    def test_a_voice_take_clear_to_fly_still_takes(self) -> None:
+        driver = """
+ias_mps = 150.0 / 3.6
+agl_m = 200.0
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.1)
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
 """
         line = _run(driver)[0]
-        state = FlightControlState.from_dict(
-            json.loads(line), received_wall_clock_s=0.0
-        )
-        assert isinstance(state.take_seq, int)
-        assert isinstance(state.goal_seq, int)
-        assert isinstance(state.last_cmd_seq, int)
-        assert state.last_cmd_seq == 2
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_refuse_cause") is None
+
+
+class TestHeadingReferenceConversion:
+    """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 1,
+    "Heading reference") -- `HEADING_REF="mag"` makes `desired.heading_
+    deg` a magnetic reading; mode 1's law must fly it as true heading
+    (`target_true = heading_deg + (measured_true - measured_mag)`)."""
+
+    def test_heading_ref_mag_converts_a_set_to_true_before_flying_it(
+        self,
+    ) -> None:
+        """090 magnetic with a steady +7.3 deg variation flies as 097.3
+        true -- confirmed via `fc_in_band_heading` settling `true` only
+        once the measured true heading (held fixed by the mock) actually
+        reaches the converted target, never the raw 090."""
+        driver = """
+fd_heading_ref = "mag"
+fd_mag_heading_deg = 82.7  -- true (90) - mag (82.7) = 7.3 deg variation
+heading_rad = math.rad(90.0)
+bank_rad = math.rad(2.0)
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+set_desired(2, { heading_deg = 90.0 })
+for i = 1, 80 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        # heading_rad (true) never moves in this mock -- it sits at
+        # 90.0 true throughout, which is 7.3 deg short of the converted
+        # 97.3 true target, so the band must NOT have closed.
+        assert _field(line, "fc_in_band_heading") == "false"
+
+    def test_heading_ref_true_is_a_no_op_conversion(self) -> None:
+        """The default (`HEADING_REF="true"`, this module's own
+        unmeasured-placeholder default) flies the commanded value
+        unconverted -- 90 true measured against a 90 true target closes
+        the band."""
+        driver = """
+fd_heading_ref = "true"
+heading_rad = math.rad(90.0)
+bank_rad = math.rad(2.0)
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+set_desired(2, { heading_deg = 90.0 })
+for i = 1, 80 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_in_band_heading") == "true"
+
+
+class TestUnparkCarriesAStandingBreak:
+    """BL-16 Stage 3, Decision 32/Q4 -- "the law is initialised with
+    desired as the seed", including a standing break's own rate
+    override and style, not just the plain heading: an unpark mid-break
+    must finish the break (continue turning at the break's own rate)
+    rather than snapping straight to the target heading."""
+
+    def test_unpark_mid_break_keeps_turning_at_the_break_rate(self) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ap_seat = "operator"
+ap_parked = true
+-- A standing break: heading target far away, a real rate override, and
+-- the "break" style -- exactly what `desired` would hold mid-break
+-- (`flight_desired.lua`'s own `apply_set`, section 1).
+set_desired(1, { heading_deg = 90.0, turn_rate_deg_s = 20.0, turn_style = "break" })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.push_flight_control_state(0.2)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        # The law seeded a non-zero turn rate (`r_ref` from the break's
+        # own override), not the zero rate a plain heading-only carry
+        # would have started from -- heading mode is active but not yet
+        # in band, since the break is still turning toward 90.
+        assert _field(line, "fc_in_band_heading") == "false"
+
+
+class TestUnparkTakeSeedClampsToMode1Limits:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 1, U2): mode 1 cannot fly every value mode 2 can hold
+    -- `build_take_seed`'s unpark branch now clamps the seed to `fc_
+    limits.min_ias_kmh`/`max_ias_kmh`/`floor_agl_m`, the same bounds
+    `belief.flight_control.clamp_speed`/`clamp_altitude` enforce body-
+    side. `desired` itself is never touched, only the seed fed to `law_
+    init_at_take` -- the plan's own Q1a ("the desired state keeps the
+    exact value; what's flown is clamped")."""
+
+    def test_speed_0_in_m2_then_unpark_flies_the_minimum_not_zero(self) -> None:
+        """The plan's own worked example. Measured IAS is set to exactly
+        `min_ias_kmh` (80) so the clamped goal and the (unmoving, mocked)
+        measured value agree immediately -- an unclamped goal of 0 would
+        never agree with a measured 80, so `fc_in_band_speed` only reads
+        `true` here if the seed was actually clamped up to 80."""
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 80.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 0.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
+
+    def test_speed_above_the_ceiling_in_m2_then_unpark_flies_the_ceiling(
+        self,
+    ) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 280.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 400.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
+
+    def test_an_in_range_speed_is_carried_unclamped(self) -> None:
+        """Control: a value already inside `[min_ias_kmh, max_ias_kmh]`
+        is seeded verbatim, same as before this fix."""
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 150.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 150.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

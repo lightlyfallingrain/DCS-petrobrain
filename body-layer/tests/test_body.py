@@ -617,6 +617,14 @@ class FakeConsoleAircraftClient:
         self.flight_control_writes: list[
             tuple[int, str, dict[str, float], dict[str, object] | None]
         ] = []
+        #: BL-16 (`plans/flight-desired-state/plan.md`, Stages 1-2) --
+        #: `None` (the default) means no `GET /flight_desired/latest`
+        #: sample has arrived yet, same "not an error" posture as
+        #: `flight_control_state` above. `flight_lease_writes` is every
+        #: `write_flight_lease` call this fake has recorded, oldest
+        #: first, same shape as `flight_control_writes`.
+        self.flight_desired_state: dict[str, Any] | None = None
+        self.flight_lease_writes: list[tuple[int, dict[str, float]]] = []
         #: BL-16 sortie 2026-11-20 (`docs/acceptance/
         #: 2026-11-20-sortie-feedback.md`) -- every `write_reset` call
         #: this fake has recorded, oldest first. No test here exercises
@@ -746,6 +754,14 @@ class FakeConsoleAircraftClient:
     def get_flight_control_latest(self) -> dict[str, Any] | None:
         return self.flight_control_state
 
+    def get_flight_desired_latest(self) -> dict[str, Any] | None:
+        # BL-16 (`plans/flight-desired-state/plan.md`, Stages 1-2) --
+        # `None` (the default) means no `GET /flight_desired/latest`
+        # sample has arrived yet, same "not an error" posture as
+        # `flight_control_state` above. No test in this file sets this
+        # or asserts on `flight_lease_writes`.
+        return self.flight_desired_state
+
     def get_payload_latest(self) -> dict[str, Any] | None:
         # `plans/flight-control/plan.md`, BL-16 mode 2, P3+P4 -- `None`
         # (the default) means no `GET /payload/latest` sample has
@@ -761,6 +777,9 @@ class FakeConsoleAircraftClient:
         goal: dict[str, object] | None,
     ) -> None:
         self.flight_control_writes.append((seq, cmd, limits, goal))
+
+    def write_flight_lease(self, epoch: int, limits: dict[str, float]) -> None:
+        self.flight_lease_writes.append((epoch, limits))
 
     def write_reset(self, epoch: int) -> None:
         self.reset_writes.append(epoch)
@@ -3223,6 +3242,11 @@ def test_poll_transcripts_drives_a_real_speed_two_hundred_wire_item_to_set_speed
     precedent for that in this subproject)."""
     console = CrewConsole(store=ContactStore())
     console.parked_flight_state = replace(ParkedFlightState(), parked_active=True)
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `flight_
+    # mode()`/`current_crew_state()` read `flight_authority_state` now.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, fd_mode="m2"
+    )
     sandbox = RuleSandbox()
     ctx = ActionContext(console=console)
     rule_set = RuleSet.load(DEFAULT_RULES_DIR, sandbox, ACTION_NAMESPACES, ctx)
@@ -7743,6 +7767,29 @@ def test_shipped_effector_config_loads_without_errors() -> None:
     assert had_errors is False
 
 
+def test_shipped_controls_to_player_sequence_targets_the_sau_channels() -> None:
+    """The one content check on the real shipped `controls-to-player.md`
+    (`plans/flight-lift-vector/explore-notes.md`, "SAU in mode 1") --
+    every row is an unconditional switch-on of one SAU channel, no
+    `petrovich-says` text (silent, per the user's own "needs no other
+    actions")."""
+    sequences, _registry, had_errors, _polled = body_module._load_effector_config()
+    assert had_errors is False
+
+    sequence = sequences[("Mi-24P", "copilot", "controls-to-player")]
+    assert {row.effector for row in sequence.rows if isinstance(row, SwitchRow)} == {
+        "p_sau_h_channel_on",
+        "p_sau_k_channel_on",
+        "p_sau_t_channel_on",
+        "p_sau_b_channel_on",
+    }
+    for row in sequence.rows:
+        assert isinstance(row, SwitchRow)
+        assert row.value == "on"
+        assert row.condition is None
+        assert row.petrovich_says == ""
+
+
 def test_load_effector_config_round_trips_the_fixture_files() -> None:
     sequences, registry, had_errors, _polled = body_module._load_effector_config(
         _FIXTURE_SEQUENCES_DIR
@@ -8924,6 +8971,99 @@ def test_a_seat_read_across_a_mission_restart_fires_nothing(tmp_path: Path) -> N
         poll_thread.join(timeout=5.0)
     assert not poll_thread.is_alive()
     assert aircraft_client.cockpit_switch_writes == writes_before
+
+
+# -- Controls-to-player trigger (`plans/flight-lift-vector/
+# explore-notes.md`, "SAU in mode 1") -- through the real poll loop.
+# `controls_to_player_edge` itself is a pure function, tested directly
+# in `test_flight_authority.py`; this just confirms `body.py` actually
+# fires `EffectorTrigger.CONTROLS_TO_PLAYER` off it, for a cause
+# `decide_flight_speech` would stay silent on (the urgent line is a
+# separate, independently-tested concern). Synthetic one-row sequence,
+# same pattern as the seat triggers above. --------------------------------
+
+
+def _effector_config_with_controls_to_player_sequence() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    sequences, registry = _fixture_effector_config()
+    merged = dict(sequences)
+    merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.CONTROLS_TO_PLAYER.value)] = (
+        SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=EffectorTrigger.CONTROLS_TO_PLAYER.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path("fake-controls-to-player.md"),
+            read_args=frozenset({886}),
+        )
+    )
+    return merged, registry
+
+
+_CONTROLS_TO_PLAYER_WRITE = (7, 3002, 1.0)  # observ on
+
+
+def _flight_desired_sample(
+    fd_mode: str, mode_n: int, cause: str | None
+) -> dict[str, Any]:
+    return {"fd_mode": fd_mode, "fd_mode_n": mode_n, "fd_mode_cause": cause}
+
+
+def test_a_silent_cause_release_into_off_still_fires_the_sau_handover(
+    tmp_path: Path,
+) -> None:
+    """`"release"` is in `_SILENT_OFF_CAUSES` -- `decide_flight_speech`
+    says nothing -- but the SAU channels still need to go on for the
+    player, for *any* cause."""
+    aircraft_client, _runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_controls_to_player_sequence()
+        )
+    )
+    try:
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 1, None)
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "off", 2, "release"
+        )
+        assert _wait_for(
+            lambda: _CONTROLS_TO_PLAYER_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [_CONTROLS_TO_PLAYER_WRITE]
+
+
+def test_a_take_edge_does_not_fire_the_sau_handover(tmp_path: Path) -> None:
+    """`"off"` -> `"taking"` is the opposite direction (the player taking
+    the controls, not giving them up) and must not fire it."""
+    aircraft_client, _runner, _console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_controls_to_player_sequence()
+        )
+    )
+    try:
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "taking", 1, "take"
+        )
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
 
 
 # -- Attack-run triggers (user, 2026-11-17: "add the attack-run-*

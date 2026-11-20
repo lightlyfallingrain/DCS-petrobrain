@@ -597,8 +597,14 @@ Belief — observation *consumption*:
   "Revised 2026-11-18") — Petrovich flying on the raw cyclic/collective/pedal axes.
   `FlightControlState` (single construction site, `advance_flight_control_state`) mirrors
   `Export.lua`'s own per-frame status; `take_controls`/`release_controls` are the two handover
-  actions, as pure functions; `decide_flight_control` is the one "when" apart from those two
-  (park/unpark edges, the ack timeout, Lua's own self-release, a refused unpark take). **Park and
+  actions, as pure functions. **BL-16 Stage 3** (`plans/flight-desired-state/plan.md`) deleted
+  `decide_flight_control` outright — there is no more `phase` to transition. The numbered
+  `flight` channel now carries both handover kinds, and `belief.flight_authority` owns what it
+  replaced: `decide_flight_speech` is the mode-change "when" (the urgent "You have controls!"
+  line on a forced loss of the stick), and ack-matching against `fd_acks` is the take/release
+  confirm/timeout handshake `decide_flight_control` used to run itself. `FlightControlState` is
+  now a diagnostics-only mirror; no production code reads its old `phase`/`take_seq`/`held_*`
+  fields for their old meaning. **Park and
   unpark change the *mode*, never *who has the controls*** (Decision 24, U5) — a park while
   flying mode 1 silently switches him to the overlay (mode 2), keeping the controls; an unpark
   while flying through the overlay silently switches him back, taken by Lua in the same frame so

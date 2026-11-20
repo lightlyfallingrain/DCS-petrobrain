@@ -117,7 +117,6 @@ from belief.ai_pilot_wheel import (
     CbtmAction,
     ParkedFlightState,
     altitude_ref_from_letter,
-    cbtm_break_target_heading_deg,
     nearest_speed_step,
     resolve_altitude_reference,
     step_speed,
@@ -149,6 +148,14 @@ from belief.escalation import (
     DebugPrintBrainClient,
     handle_player_utterance,
 )
+from belief.flight_authority import (
+    FlightAuthorityDecision,
+    FlightAuthorityState,
+    PendingFlightReadback,
+    PendingTake,
+    resolve_pending_flight_readbacks,
+    resolve_pending_take,
+)
 from belief.flight_control import (
     MAX_IAS_KMH,
     MIN_IAS_KMH,
@@ -158,7 +165,6 @@ from belief.flight_control import (
     FlightControlState,
     clamp_altitude,
     clamp_speed,
-    decide_flight_control,
     release_controls,
     take_controls,
 )
@@ -1374,6 +1380,17 @@ def _is_flight_bypass_category(category: str) -> bool:
     return category.startswith("flight_control") or category == "flight_handover"
 
 
+def _is_deferred_flight_readback_category(category: str) -> bool:
+    """BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section
+    3a) -- every `"flight_control*"` category, **not** `"flight_
+    handover"` (Decision 22's own `says`-based deferral, `PendingTake`,
+    already waits for Lua and must not be double-deferred by this
+    mechanism too) and never `"always"`. `handle_command`'s own tail
+    uses this to decide whether a dispatch's readback lines are a
+    flight-channel readback to stage rather than speak immediately."""
+    return category.startswith("flight_control")
+
+
 #: `[[BL-17]]` D16/U20 -- how long Petrovich holds an understood but not
 #: yet actionable rule command, such as a flight command caught by the
 #: takeover-settle window, before giving up and speaking "unable" instead
@@ -1694,42 +1711,64 @@ class CrewConsole:
     ai_pilot_cbtm_transition: CbtmAction | None = None
     #: BL-16 mode 1 Stage M1 (`plans/flight-control/plan.md`, "Revised
     #: 2026-11-18") -- `take_controls`/`release_controls`'s own one-shot
-    #: signal to `body.py`'s poll loop (`_apply_flight_control`), the
-    #: same division `ai_pilot_goal_transition`'s own docstring states:
-    #: the actual wire send lives in the poll loop, not here. `"take"`
-    #: (bump `flight_control_state.take_seq`, send `cmd="take"`) or
-    #: `"release"` (send `cmd="release"`) -- never both at once, since
-    #: each action sets this itself, synchronously, the instant it
-    #: decides to act. Reset to `None` at the top of every `handle_
-    #: command` dispatch, same convention as `ai_pilot_goal_transition`.
+    #: signal to `body.py`'s poll loop (`_apply_flight_requests`, BL-16
+    #: Stage 3), the same division `ai_pilot_goal_transition`'s own
+    #: docstring states: the actual wire send (now on the numbered
+    #: `flight` channel) lives in the poll loop, not here. `"take"` or
+    #: `"release"` -- never both at once, since each action sets this
+    #: itself, synchronously, the instant it decides to act. Reset to
+    #: `None` at the top of every `handle_command` dispatch, same
+    #: convention as `ai_pilot_goal_transition`.
     flight_control_transition: Literal["take", "release"] | None = None
     #: The mode-1 goal-channel sibling of `ai_pilot_goal_transition` --
-    #: one `FlightControlGoalRequest` per `axes_*` action call, applied
-    #: and cleared by `body.py`'s `_apply_flight_control` the same "send
-    #: on change" way. **Not** a rotation/promotion structure like mode
-    #: 2's `AiPilotWheelGoal` -- mode 1's wire carries every goal field
-    #: in one message with no shared physical button to arbitrate over
-    #: (`belief.flight_control`'s own module docstring). Reset to `None`
-    #: at the top of every `handle_command` dispatch, same convention.
+    #: one `FlightControlGoalRequest` per `axes_*` action call, sent by
+    #: `body.py`'s `_apply_flight_requests` as a `set`-kind request on
+    #: the numbered `flight` channel (BL-16 Stage 3). **Not** a
+    #: rotation/promotion structure like mode 2's `AiPilotWheelGoal` --
+    #: mode 1's wire carries every goal field in one message with no
+    #: shared physical button to arbitrate over (`belief.flight_
+    #: control`'s own module docstring). Reset to `None` at the top of
+    #: every `handle_command` dispatch, same convention.
     flight_control_goal_transition: FlightControlGoalRequest | None = None
-    #: 2026-11-19 mode 1 handover feedback, review-handover-ack.md
-    #: Required Fix -- the ack-timeout's own self-queued release
-    #: (`drain_flight_control`'s `TAKING -> PILOT` branch), kept off
-    #: `flight_control_transition` entirely so it cannot be clobbered.
-    #: Two things could otherwise lose it before `_apply_flight_control`
-    #: sends it next poll: `_reset_one_shot_command_state` clears `flight_
-    #: control_transition` at the top of *every* `handle_command`
-    #: dispatch this same poll (regardless of whether that dispatch
-    #: acts), and `take_controls`/`release_controls` write that same
-    #: field when it does act -- either one, run from `_poll_transcripts`
-    #: after `drain_flight_control`, would otherwise overwrite or erase
-    #: the queued release with no wire message ever carrying it. Same
-    #: "survives dispatch, consumed only at the next poll's top" posture
-    #: as `where_is_it_requested` above, for the same reason: its
-    #: consumer (`_apply_flight_control`) runs at the top of the *next*
-    #: poll, not later in this one. Takes priority over `flight_control_
-    #: transition` there -- see that function's own docstring.
-    flight_control_system_release_pending: bool = False
+    #: BL-16 Stage 3 -- the `says` text for a take request still waiting
+    #: to be queued as a `PendingTake` (`_apply_flight_requests` builds
+    #: the actual `PendingTake` once it knows the request's own wire
+    #: `seq`; this field only carries the *text*, set synchronously by
+    #: `CrewConsole.take_controls` alongside `flight_control_transition`
+    #: so the two travel together without a second one-shot field).
+    pending_take_says: str | None = None
+    #: BL-16 Stage 3 -- the take request's own deferred ack (`belief.
+    #: flight_authority.PendingTake`/`resolve_pending_take`), replacing
+    #: the pre-Stage-3 `FlightControlState.took_at_sim`/`pending_take_
+    #: says`/`take_seq`/`flight_control_system_release_pending`
+    #: mechanism entirely. **Known gap, not closed this stage**: the
+    #: plan's own 3a names a late-accepted ack arriving after body-
+    #: layer's own timeout as a case to still speak (not silently
+    #: swallow); `resolve_pending_take` does not implement that half --
+    #: it drops the pending take at the timeout and never re-checks that
+    #: `seq`. Flagged in `plans/flight-desired-state/implementation.md`.
+    flight_pending_take: PendingTake | None = None
+    #: BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section 3a)
+    #: -- the readback lines an ordinary `flight_control*`-category
+    #: dispatch computed this call, staged here instead of being spoken
+    #: immediately. Claimed exactly once, by whichever of `body.py`'s
+    #: `_apply_flight_requests`/`_apply_ai_pilot_wheel_goal` actually
+    #: sends the numbered request this same poll (`take_pending_flight_
+    #: readback_lines`) -- `None` between a dispatch that queued one and
+    #: that claim. **Never speak this field directly** -- it has not
+    #: been accepted by Lua yet; `pending_flight_readbacks` below is
+    #: what speaks.
+    pending_flight_readback_lines: list[str] | None = None
+    #: BL-16 Stage 3b -- the FIFO of sent, not-yet-resolved flight-
+    #: channel readbacks (3a's own "ack outcomes in seq order"),
+    #: resolved against `fd_acks` by `drain_flight_control`/`belief.
+    #: flight_authority.resolve_pending_flight_readbacks` every poll.
+    #: Appended to in wire-send (`seq`) order, so the list is already in
+    #: seq order by construction -- `resolve_pending_flight_readbacks`
+    #: relies on that, not on sorting.
+    pending_flight_readbacks: list[PendingFlightReadback] = field(
+        default_factory=list, repr=False
+    )
     #: "Where is it?"'s one-shot signal to `body.py`'s poll loop
     #: (`plans/attack-run-los/plan.md` F3) -- the same division `attack_
     #: run_transition`'s own docstring states: `AttackRunState`/`OwnshipState`/
@@ -2045,15 +2084,25 @@ class CrewConsole:
     #: BL-16 mode 1 Stage M1 -- the same "refreshed every poll, never
     #: mutated here" shape as `parked_flight_state` immediately above,
     #: from `runner.flight_control_state` (`advance_flight_control_
-    #: state`/`decide_flight_control`, both in `body.py`). `take_
-    #: controls`/`release_controls`/the `axes_*` goal actions below do
-    #: mutate it directly, unlike `parked_flight_state` -- mode 1's own
-    #: handover phase is this class's one authoritative copy, not a
-    #: read-only mirror of something `body.py` alone writes (see
-    #: `belief.flight_control`'s own module docstring on why the
-    #: handover actions are synchronous).
+    #: state`, `body.py`). **BL-16 Stage 3**: a read-only diagnostics
+    #: mirror only now (measured telemetry, handover-diagnostics fields,
+    #: A9 bands, slip-ball) -- the handover phase it used to carry has
+    #: no home on this class at all any more; `flight_authority_state`
+    #: below is the one mode authority and `flight_pending_take` the
+    #: one in-flight handover request.
     flight_control_state: FlightControlState = field(
         default_factory=FlightControlState, repr=False
+    )
+
+    #: BL-16 Stages 1-3 (`plans/flight-desired-state/plan.md`) -- the
+    #: one mode-authority/desired-state mirror, refreshed every poll by
+    #: `body.py` (`advance_flight_authority`, never mutated here).
+    #: `flight_mode()`/`current_crew_state()`'s `has_controls`/`held_*`
+    #: read this field, not `parked_flight_state.parked_active`/anything
+    #: on `flight_control_state` -- Lua is the one mode authority
+    #: (section 2 of the plan).
+    flight_authority_state: FlightAuthorityState = field(
+        default_factory=FlightAuthorityState, repr=False
     )
 
     #: `take_controls`'s own `TOO_SLOW` refusal (Decision 22) needs live
@@ -2066,17 +2115,13 @@ class CrewConsole:
     #: granting one on unknown airspeed).
     ias_kmh: float | None = field(default=None, repr=False)
 
-    #: `take_controls`'s own `took_at_sim` timestamp (`decide_flight_
-    #: control`'s ack-timeout clock) needs a sim-time reading, and no
-    #: existing path threads `now_sim` from `handle_command` down into
-    #: a rule's own action invoke (`rules.actions`' `(ctx, args) ->
-    #: dict` shape carries neither) -- unlike every other action here,
-    #: `take_controls` is the first to need one. Refreshed every poll
-    #: by `body.py`, same place `on_ground`/`ias_kmh` are, rather than
-    #: widening the rule-dispatch chain for one field: at most one poll
-    #: interval (~1 s) stale against the actual moment the command was
-    #: heard, which the `HANDOVER_ACK_TIMEOUT_S` window (2 s) easily
-    #: tolerates. `None` before the first poll.
+    #: A sim-time reading no existing path threads `now_sim` from
+    #: `handle_command` down into a rule's own action invoke (`rules.
+    #: actions`' `(ctx, args) -> dict` shape carries neither). Refreshed
+    #: every poll by `body.py`, same place `on_ground`/`ias_kmh` are,
+    #: rather than widening the rule-dispatch chain for one field: at
+    #: most one poll interval (~1 s) stale against the actual moment the
+    #: command was heard. `None` before the first poll.
     poll_now_sim: float | None = field(default=None, repr=False)
 
     #: `drain_ai_pilot_wheel_speech`'s own edge-trigger bookkeeping --
@@ -3315,6 +3360,7 @@ class CrewConsole:
         self.ai_pilot_cbtm_transition = None
         self.flight_control_transition = None
         self.flight_control_goal_transition = None
+        self.pending_take_says = None
         self._pending_mentions = None
 
     def set_enabled_rule_ids(
@@ -3335,88 +3381,65 @@ class CrewConsole:
             self.rule_categories = dict(categories)
 
     def flight_mode(self) -> Literal["overlay", "axes"] | None:
-        """BL-16 mode 1 Decision 21/25 -- the **one** place that decides
-        which mode is live, read by `rules.actions._by_mode` for every
-        one of the 16 shipped flight actions it wraps. `"overlay"`
-        whenever `parked_active` (mode 2 flying, or armed-and-waiting
-        for an unpark); `"axes"` whenever mode 1's own phase is `TAKING`
-        or `ACTIVE`; `None` otherwise (nobody flying -- the player has
-        the stick). If both were somehow true at once, overlay wins
-        (the park row, U5, keeps that overlap to a single poll).
+        """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`) -- the
+        **one** place that decides which mode is live, read by `rules.
+        actions._by_mode` for every one of the 16 shipped flight actions
+        it wraps. Reads `flight_authority_state.fd_mode` alone now --
+        `Export.lua`'s `flight_desired` module is the one mode
+        authority (section 2 of the plan: "Lua derives the mode every
+        frame; nothing sets it directly"). `"overlay"` for `fd_mode ==
+        "m2"`; `"axes"` for `fd_mode == "m1"`; `None` otherwise (`"off"`/
+        `"taking"`/no sample yet -- nobody flying through either
+        mechanism, or still mid-capture).
 
-        **Reads no seat** (Decision 25: "mode 1 is never gated on
-        seat") -- `parked_active` already encodes "ED's AI is not
-        flying" correctly from either seat (`ParkedFlightState.parked_
-        active`'s own docstring on why 852 alone would be wrong)."""
-        if self.parked_flight_state.parked_active:
+        **Never returns `"overlay"` unless the mirror says `m2`** (the
+        plan's own "The mode-2 seam": `fd_has_m2=false` on an aircraft
+        without mode 2 means `fd_mode` is never `"m2"` either, so this
+        falls through to `None`/`"axes"` with no aircraft-type check
+        needed here)."""
+        fd_mode = self.flight_authority_state.fd_mode
+        if fd_mode == "m2":
             return "overlay"
-        if self.flight_control_state.phase in ("TAKING", "ACTIVE"):
+        if fd_mode == "m1":
             return "axes"
         return None
 
     def current_crew_state(self) -> CrewState:
-        """`[[BL-17]]` D16/D17 -- built fresh from `self.parked_flight_
-        state`/`self.flight_control_state` on every call, never cached:
-        the category gate (`_handle_rule`/`drain_pending_rule_dispatch`)
-        and (Stage 3c) the decision to push `PUT /crew_state` must read
-        the same computed value within one poll (plan's "Co-moving
-        Fields" table). `seat`/`hands_free`/`eyes_free` are named stubs
-        pending `[[BL-B123]]` -- see `CrewState`'s own docstring for why.
+        """`[[BL-17]]` D16/D17 -- built fresh from `self.flight_
+        authority_state` on every call, never cached: the category gate
+        (`_handle_rule`/`drain_pending_rule_dispatch`) and (Stage 3c)
+        the decision to push `PUT /crew_state` must read the same
+        computed value within one poll (plan's "Co-moving Fields"
+        table). `seat`/`hands_free`/`eyes_free` are named stubs pending
+        `[[BL-B123]]` -- see `CrewState`'s own docstring for why.
 
-        **Widened for BL-16 mode 1 (Decision 22's Co-moving row):**
-        `has_controls = parked_active or flight_control_state.phase in
-        (TAKING, ACTIVE)` -- Petrovich flying through either mechanism
-        counts, and `has_controls` stays `True` continuously across a
-        park/unpark while he flies (Decision 24: the `OVERLAY` phase is
-        reached from `TAKING`/`ACTIVE`, never from a bare release, so
-        this disjunction is `True` through the whole park->unpark
-        window too, from whichever side is live at the instant).
-        `held_heading`/`held_altitude`/`held_speed` are mode-2's own
-        `parked_flight_state` mirrors whenever he flies through the
-        overlay, and mode 1's own `flight_control_state.held_*` --
-        falling back to `flight_control_state.measured_*` whenever the
-        commanded value is still `None` (no goal set yet this
-        activation; `measured_*` is plain telemetry, always known once
-        Lua is active) -- whenever he flies on the axes. **This fallback
-        is what keeps the gates' "HOLD until held_* is known" rule from
-        freezing the very first turn/heading/altitude/speed command
-        after a fresh take**, since mode 1 has no AI pilot reporting a
-        pre-existing held value the way mode 2's overlay readback
-        does (`belief.flight_control`'s own module docstring).
+        **BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `has_
+        controls`/`held_*` read the one `flight_authority_state` mirror
+        now, not `parked_flight_state`/`flight_control_state`** --
+        `has_controls` is true for `fd_mode` in `("taking", "m1",
+        "m2")` (mid-capture counts: Decision 13's recovery phrase must
+        always act, and a command given the instant a voice take lands
+        should not be refused for a poll it was in flight). `held_
+        heading`/`held_altitude`/`held_speed` are `flight_authority_
+        state.heading_deg`/`alt_m`/`ias_kmh` directly -- `Export.lua`'s
+        own edge handler already seeds these from the measured aircraft
+        state at a take and from the overlay's set values at a park
+        (`flight_desired.lua`'s `reseed_from_measured`/`reseed_from_
+        overlay`), so the "fall back to measured when nothing commanded
+        yet" merge this method used to do by hand is now Lua's own job.
 
         **`commands_ready` (BL-16 fail-loud, 2026-11-20)** is passed
         straight through from `self.commands_ready` -- a plain field
         `body.py`'s poll loop refreshes, not a derivation this method
         computes, since it names a fact about this process's reset
-        channel, not about `parked_flight_state`/`flight_control_
-        state`."""
-        parked = self.parked_flight_state
-        axes = self.flight_control_state
-        flying_axes = axes.phase in ("TAKING", "ACTIVE")
-        has_controls = parked.parked_active or flying_axes
-        if flying_axes:
-            held_heading = (
-                axes.held_heading
-                if axes.held_heading is not None
-                else axes.measured_heading
-            )
-            held_altitude = (
-                axes.held_altitude
-                if axes.held_altitude is not None
-                else axes.measured_altitude
-            )
-            held_speed = (
-                axes.held_speed if axes.held_speed is not None else axes.measured_speed
-            )
-        else:
-            held_heading = parked.held_heading
-            held_altitude = parked.held_altitude
-            held_speed = parked.held_speed
+        channel, not about `flight_authority_state`."""
+        authority = self.flight_authority_state
+        has_controls = authority.fd_mode in ("taking", "m1", "m2")
         return CrewState(
             has_controls=has_controls,
-            held_heading=held_heading,
-            held_altitude=held_altitude,
-            held_speed=held_speed,
+            held_heading=authority.heading_deg,
+            held_altitude=authority.alt_m,
+            held_speed=authority.ias_kmh,
             seat="copilot",
             hands_free=not has_controls,
             eyes_free=True,
@@ -3674,6 +3697,11 @@ class CrewConsole:
         # enabled_rule_ids` branch below); every other dispatch keeps the
         # default `bypass_gate=False` this method has always used.
         bypass_gate = False
+        # BL-16 Stage 3b (section 3a) -- set `True` only when this
+        # dispatch's `lines` were staged into `pending_flight_readback_
+        # lines` rather than printed below (the `elif token in self.
+        # enabled_rule_ids` branch below) -- U1's "wait for Lua."
+        deferred_flight_readback = False
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(
@@ -3807,6 +3835,25 @@ class CrewConsole:
                 and self.current_crew_state().has_controls
             ):
                 bypass_gate = True
+            # BL-16 Stage 3b, section 3a (U1: "wait for Lua") -- this
+            # dispatch's `lines` are a flight-channel readback to defer,
+            # rather than speak now, exactly when its category is one of
+            # `flight_control*` (never `flight_handover`, which already
+            # defers via its own `says`/`PendingTake` mechanism, D22) and
+            # it actually queued a numbered-channel transition this call
+            # (`_flight_control_transition_queued`) -- a local refusal
+            # (a gate `hold`/`unable`, or an action's own `RuleUnable`,
+            # e.g. "turn left" in the AI overlay, or HVRT/CBTM/align in
+            # mode 1) never reaches Lua at all, so its `lines` speak
+            # immediately below exactly as before this stage. Empty
+            # `lines` (a gate `hold`) has nothing to defer either.
+            if (
+                lines
+                and _is_deferred_flight_readback_category(category)
+                and self._flight_control_transition_queued()
+            ):
+                self.pending_flight_readback_lines = list(lines)
+                deferred_flight_readback = True
         elif token in self._ever_enabled_rule_ids:
             # D4 -- a rule id the adapter matched against a rule that has
             # since been dropped (a reload race, or a push rejection) --
@@ -3817,13 +3864,14 @@ class CrewConsole:
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
-        self._print(
-            lines,
-            now_sim,
-            bypass_gate=bypass_gate,
-            correlation_id=correlation_id,
-            mentions=self._pending_mentions,
-        )
+        if not deferred_flight_readback:
+            self._print(
+                lines,
+                now_sim,
+                bypass_gate=bypass_gate,
+                correlation_id=correlation_id,
+                mentions=self._pending_mentions,
+            )
         return lines
 
     def _believed_air_defence(self, facts: dict[str, object]) -> bool:
@@ -5423,12 +5471,16 @@ class CrewConsole:
         value Decision 21's table names for `increment_heading`/`level_
         off` -- the same merge `current_crew_state()` applies for the
         gate, computed once here so an action and the gate that just
-        let it through never disagree about what "current" means."""
-        state = self.flight_control_state
+        let it through never disagree about what "current" means.
+        **BL-16 Stage 3**: "held" now reads `flight_authority_state`'s
+        own desired-state mirror (`fd_heading`), not `flight_control_
+        state` (which no longer carries a `held_*` wire mirror at all --
+        that is `flight_desired`'s own job since the one channel)."""
+        authority = self.flight_authority_state
         return (
-            state.held_heading
-            if state.held_heading is not None
-            else state.measured_heading
+            authority.heading_deg
+            if authority.heading_deg is not None
+            else self.flight_control_state.measured_heading
         )
 
     def _axes_current_altitude(self) -> tuple[float | None, AltitudeRef | None]:
@@ -5439,9 +5491,11 @@ class CrewConsole:
         defaults to `"agl"` once a measured altitude exists with no
         reference commanded yet (Decision 9 REVISED: AGL is the default
         unless barometric is spoken)."""
+        authority = self.flight_authority_state
+        if authority.alt_m is not None:
+            ref: AltitudeRef = "baro" if authority.alt_ref == "baro" else "agl"
+            return authority.alt_m, ref
         state = self.flight_control_state
-        if state.held_altitude is not None:
-            return state.held_altitude, state.held_altitude_ref
         if state.measured_altitude is not None:
             return state.measured_altitude, "agl"
         return None, None
@@ -5449,46 +5503,47 @@ class CrewConsole:
     def _axes_current_speed(self) -> float | None:
         """Held-or-measured merge for `step_speed`, mirroring `_axes_
         current_heading`."""
-        state = self.flight_control_state
+        authority = self.flight_authority_state
         return (
-            state.held_speed if state.held_speed is not None else state.measured_speed
+            authority.ias_kmh
+            if authority.ias_kmh is not None
+            else self.flight_control_state.measured_speed
         )
 
     def take_controls(self, says: str) -> dict[str, object]:
         """BL-16 mode 1 Decision 22's `flight.take_controls` -- the
         rule-callable wrapper around `belief.flight_control.take_
-        controls`'s pure state transition, supplying the live context
-        it needs (`flight_mode() == "overlay"`, `self.on_ground`,
-        `self.ias_kmh`, `self.attack_run_engaged`).
+        controls`'s pure request builder, supplying the live context it
+        needs (`flight_mode() == "overlay"`, `self.on_ground`, `self.
+        ias_kmh`, `self.attack_run_engaged`).
 
-        **`says` is recorded, never spoken here** -- `decide_flight_
-        control`/`drain_flight_control` speak it only once `Export.lua`
-        reports `active` for this `take_seq` (the same "spoken when it
-        actually lands" contract as `effector.write`'s `says`, speech-
-        rules D20)."""
+        **`says` is recorded, never spoken here** -- BL-16 Stage 3:
+        `body.py`'s `_apply_flight_requests` queues a `PendingTake`
+        (`self.pending_take_says`) once it knows the request's own wire
+        `seq`; `belief.flight_authority.resolve_pending_take`/`drain_
+        flight_control` speak it only once `fd_acks` accepts that seq
+        (the same "spoken when it actually lands" contract as `effector.
+        write`'s `says`, speech-rules D20)."""
         too_slow = self.ias_kmh is None or self.ias_kmh < MIN_IAS_KMH
-        new_state, result = take_controls(
-            self.flight_control_state,
-            self.poll_now_sim if self.poll_now_sim is not None else 0.0,
+        result = take_controls(
             overlay_flying=self.flight_mode() == "overlay",
             on_ground=self.on_ground,
             too_slow=too_slow,
             attack_run_engaged=self.attack_run_engaged,
         )
         if result.get("acted"):
-            new_state = replace(new_state, pending_take_says=says)
+            self.pending_take_says = says
             self.flight_control_transition = "take"
-        self.flight_control_state = new_state
         return result
 
     def release_controls(self) -> dict[str, object]:
         """BL-16 mode 1 Decision 22's `flight.release_controls` -- the
         rule-callable wrapper around `belief.flight_control.release_
-        controls`'s pure state transition."""
-        new_state, result = release_controls(
-            self.flight_control_state, overlay_flying=self.flight_mode() == "overlay"
+        controls`'s pure request builder."""
+        result = release_controls(
+            overlay_flying=self.flight_mode() == "overlay",
+            flying_axes=self.flight_authority_state.fd_mode in ("taking", "m1"),
         )
-        self.flight_control_state = new_state
         if result.get("acted"):
             self.flight_control_transition = "release"
         return result
@@ -5683,70 +5738,159 @@ class CrewConsole:
         )
         return {"ok": True, "reason": None}
 
-    def drain_flight_control(self, now_sim: float, *, parked_active: bool) -> list[str]:
-        """BL-16 mode 1 -- runs `belief.flight_control.decide_flight_
-        control` once per poll (the one "when" apart from `take_
-        controls`/`release_controls`, root `CLAUDE.md`'s "Behaviour as
-        actions and params") and speaks whatever it decided. Called
-        once per poll from `body.py`, after `advance_flight_control_
-        state` has refreshed `self.flight_control_state` this poll --
+    def _flight_control_transition_queued(self) -> bool:
+        """BL-16 Stage 3b (section 3a) -- whether this dispatch's
+        handler queued a one-shot transition that `body.py` will
+        actually dual-write/write onto the numbered `flight` channel
+        this poll. Only the fields that reach a `write_flight` call
+        count: `flight_control_goal_transition` (every mode-1 `flight_
+        control*` command, one field for all of them) and `ai_pilot_
+        goal_transition`/`ai_pilot_level_flight_transition` (the
+        ordinary mode-2 heading/altitude/speed/level-flight voice goals,
+        `body._apply_ai_pilot_wheel_goal`'s own dual-write). **Mode-2
+        HVRT (`ai_pilot_hvrt_transition`/`ai_pilot_hvrt_step_
+        transition`) and CBTM (`ai_pilot_cbtm_transition`) are
+        deliberately excluded** -- neither is dual-written onto this
+        channel this stage (`implementation.md`'s own deviation for
+        CBTM, extended here to HVRT for the same reason: no wire send,
+        so no ack to ever claim a staged readback against). Including
+        them would stage lines that never get spoken at all."""
+        return (
+            self.ai_pilot_goal_transition is not None
+            or self.ai_pilot_level_flight_transition
+            or self.flight_control_goal_transition is not None
+        )
+
+    def take_pending_flight_readback_lines(self) -> list[str] | None:
+        """Called by `body.py`'s `_apply_flight_requests`/`_apply_ai_
+        pilot_wheel_goal`, exactly once, right after either mints the
+        wire `seq` for the request a `flight_control*`-category
+        dispatch just queued -- pops and returns `pending_flight_
+        readback_lines` (clearing it to `None`), or `None` if the
+        dispatch that ran this poll was not a `flight_control*` one (the
+        ordinary case -- most polls dispatch nothing at all), or if the
+        queued transition is instead dropped unsent (a mode flip before
+        this poll's own send runs) -- that caller speaks "Unable, not
+        ready." for whatever this returns itself, rather than queuing a
+        `PendingFlightReadback` with no request behind it."""
+        lines = self.pending_flight_readback_lines
+        self.pending_flight_readback_lines = None
+        return lines
+
+    def _resolve_flight_readback_decisions(
+        self, now_sim: float, *, suppress_accepted: bool = False
+    ) -> list[FlightAuthorityDecision]:
+        """3a's own ack-driven drain of `pending_flight_readbacks`,
+        shared by `drain_flight_control`'s two call sites below (no
+        pending take, and a take that just resolved accepted)."""
+        new_pending, decisions = resolve_pending_flight_readbacks(
+            self.pending_flight_readbacks,
+            self.flight_authority_state.acks,
+            now_sim,
+            suppress_accepted=suppress_accepted,
+        )
+        self.pending_flight_readbacks = new_pending
+        return decisions
+
+    def drain_flight_control(
+        self, now_sim: float, *, suppress_accepted_readbacks: bool = False
+    ) -> list[str]:
+        """BL-16 mode 1, Stage 3 -- runs `belief.flight_authority.
+        resolve_pending_take` once per poll (the one "when" apart from
+        `take_controls`/`release_controls`, root `CLAUDE.md`'s
+        "Behaviour as actions and params") against `self.flight_pending_
+        take` and `self.flight_authority_state.acks`, and speaks
+        whatever it decided. Called once per poll from `body.py`, after
+        `self.flight_authority_state` has been refreshed this poll --
         same spot `drain_ai_pilot_wheel_speech` is called from.
 
-        `urgent=True` lines (the self-release/forced-handover lines)
-        bypass the gate via `_print`'s own `bypass_gate`, same posture
-        D19 already gives every other urgent flight-control line.
+        `urgent=True` lines bypass the gate via `_print`'s own `bypass_
+        gate`, same posture D19 already gives every other urgent
+        flight-control line. **Replaces `belief.flight_control.decide_
+        flight_control` entirely** (deleted this stage) -- the voice-
+        take confirm/timeout handshake is driven by the numbered
+        channel's own `fd_acks` now, not by polling `fc_take_seq`/
+        `fc_mode`. **The Decision-32 break-seed logic this method used
+        to carry (`unparked_from_overlay`) is gone too** -- Lua's own
+        m2->m1 edge now carries `desired` (and any standing break's
+        `turn_rate_deg_s`/`turn_style`) verbatim into the unpark seed
+        (`flight_control.lua`'s `build_take_seed`), so body-layer has
+        nothing left to re-seed.
 
-        **Mode-1 batch, Decision 32**: an unpark-take is exactly the
-        `OVERLAY` -> `ACTIVE` transition (the only place `decide_
-        flight_control` makes it) -- checked here, right after the
-        call, rather than inside that pure function, which has no
-        access to `self.parked_flight_state`'s own `cbtm_action_sent`/
-        `cbtm_break_entry_heading_deg`. When a mode-2 break was active
-        at that instant, the heading goal is seeded with the break's
-        own target (`cbtm_break_target_heading_deg`) rather than left
-        to `law_init_at_take`'s own bank-based pick, which would
-        otherwise continue the measured turn rate forever -- "not the
-        inherited continuous turn." Only `heading_deg` is set
-        (`turn_rate_deg_s` omitted -- the plan names no rate for this
-        case, only the target); altitude/speed goals are untouched,
-        same as an ordinary take. Queued the same one-shot way every
-        other `axes_*` action sets this field -- `_apply_flight_
-        control` sends it on a later poll, once Lua has already
-        reported `active` (it just did, this poll)."""
-        old_phase = self.flight_control_state.phase
-        new_state, decision = decide_flight_control(
-            self.flight_control_state, now_sim, parked_active=parked_active
+        **3a's own two rules for the ordinary flight-channel readback
+        queue, generalised beyond the take itself:**
+
+        - A request sent while a take is still pending holds its own
+          readback until the take resolves (3a: "requests sent after a
+          pending take hold their readbacks until the take resolves").
+          Accepted -- the held readbacks speak, in seq order, right
+          after "I have controls.". Refused or timed out -- only the
+          take's own "Unable, not ready." speaks, and the held
+          readbacks are dropped, never spoken (Lua cleared `desired` on
+          taking->off, so nothing they set is being flown).
+        - `suppress_accepted_readbacks=True` (`body.py`'s own forced-
+          off-edge check, `decide_flight_speech`'s urgent result) drops
+          only the *accepted* half of this poll's own readback
+          resolution, never a refusal/timeout -- 3a: "a change into off
+          in the same read suppresses the readbacks of requests
+          accepted in that read ... the urgent line is the truth."
+          Ignored while a take is still pending (unreachable in
+          practice: `fd_mode` cannot be `"off"` with `decide_flight_
+          speech`'s own silent-cause exception for `"taking"`'s own
+          edge, but checked here rather than assumed)."""
+        take_was_pending = self.flight_pending_take is not None
+        new_pending, decision = resolve_pending_take(
+            self.flight_pending_take, self.flight_authority_state.acks, now_sim
         )
-        if old_phase == "TAKING" and new_state.phase == "PILOT":
-            # 2026-11-19 mode 1 handover feedback, fix b: the only way
-            # `decide_flight_control` makes this transition is the ack
-            # timeout -- belief gives up and goes back to `PILOT`, but
-            # says nothing to `Export.lua`, which by then has often
-            # already gone `active` (the take simply arrived late) and
-            # keeps flying the axes regardless of what belief now
-            # thinks. review-handover-ack.md Required Fix: queued on
-            # `flight_control_system_release_pending`, not `flight_
-            # control_transition` itself -- a same-poll player take/
-            # release recognised later this poll (`_poll_transcripts`)
-            # must not be able to clobber it. `_apply_flight_control`
-            # sends it next poll, ahead of anything in `flight_control_
-            # transition`, so belief and the aircraft never disagree
-            # about who flies for long.
-            self.flight_control_system_release_pending = True
-        if old_phase == "OVERLAY" and new_state.phase == "ACTIVE":
-            break_action = self.parked_flight_state.cbtm_action_sent
-            entry_heading = self.parked_flight_state.cbtm_break_entry_heading_deg
-            if (
-                break_action in ("break_left", "break_right", "break_away")
-                and entry_heading is not None
-            ):
-                target = cbtm_break_target_heading_deg(break_action, entry_heading)
-                self.flight_control_goal_transition = FlightControlGoalRequest(
-                    heading_deg=target
-                )
-        self.flight_control_state = new_state
-        if decision is None:
-            return []
+        self.flight_pending_take = new_pending
+        lines: list[str] = []
+        if decision is not None:
+            lines.append(decision.says)
+            self._print([decision.says], now_sim, bypass_gate=decision.urgent)
+        if take_was_pending and self.flight_pending_take is not None:
+            # Still waiting on the take -- every readback queued behind it
+            # stays held, untouched, for a later poll.
+            return lines
+        if take_was_pending and not (decision is not None and decision.urgent):
+            # The take was refused or timed out -- drop everything that was
+            # held behind it, unspoken (3a's own "the held readbacks are
+            # dropped").
+            self.pending_flight_readbacks = []
+            return lines
+        # Either there was no pending take, or it just resolved accepted --
+        # either way, the queue may now speak (seq order, 3a).
+        readback_lines = [
+            readback_decision.says
+            for readback_decision in self._resolve_flight_readback_decisions(
+                now_sim, suppress_accepted=suppress_accepted_readbacks
+            )
+        ]
+        if readback_lines:
+            # D19/U22's own bypass -- a flight-category readback may cut
+            # off an in-flight routine callout while he actually has
+            # controls. That rule predates U1's wait-for-Lua deferral and
+            # is unchanged by it: the readback is still flight-category
+            # speech, it is simply spoken a poll or two later than before.
+            self._print(
+                readback_lines,
+                now_sim,
+                bypass_gate=self.current_crew_state().has_controls,
+            )
+        lines.extend(readback_lines)
+        return lines
+
+    def speak_flight_authority_decision(
+        self, decision: FlightAuthorityDecision, now_sim: float
+    ) -> list[str]:
+        """BL-16 Stages 1-2 (`plans/flight-desired-state/plan.md`) --
+        speaks `belief.flight_authority.decide_flight_speech`'s own
+        decision. `body.py` calls `decide_flight_speech` directly
+        (comparing the authority mirror's state before/after this
+        poll's refresh, the same "capture previous, then compare" idiom
+        it already uses for `parked_flight_state.player_seat`/
+        `payload_station_counts_last_seen`) and this method is the one
+        place that actually speaks the result, same division of labour
+        as every other `drain_*` method on this class."""
         lines = [decision.says]
         self._print(lines, now_sim, bypass_gate=decision.urgent)
         return lines

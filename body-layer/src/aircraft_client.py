@@ -567,32 +567,66 @@ class AircraftLayerClient:
             )
         return result
 
-    def write_flight_control(
-        self,
-        seq: int,
-        cmd: Literal["take", "release", "goal", "arm"],
-        limits: dict[str, float],
-        goal: dict[str, object] | None,
-    ) -> None:
-        """`POST /command/flight_control` -> sends BL-16 mode 1's own
-        handover/goal channel message (`plans/flight-control/plan.md`,
-        "Revised 2026-11-18", "Wire") to `Export.lua`'s per-frame
-        `flight_control` module (`aircraft-layer/src/collector/command_
-        sender.py`'s `CommandSender.send_flight_control`). Raises
-        `AircraftLayerError` on any failure, mirroring `write_ai_pilot_
-        goal`/`write_sight_target` -- see the module docstring for why.
-        `belief.flight_control.decide_flight_control`/`body.py`'s
-        `_apply_flight_control` are what decide *when* to call this;
-        this client is a pure pass-through, same division of labour
-        every other `write_*` method here already has.
+    def get_flight_desired_latest(self) -> dict[str, Any] | None:
+        """`GET /flight_desired/latest` -> the most recent flight-
+        desired/mode-authority status (see `aircraft-layer/src/schema/
+        flight_desired.py`'s `FlightDesiredState.to_api_dict`), or
+        `None` if nothing has been received yet -- same "not an error"
+        posture as `get_flight_control_latest` (`plans/
+        flight-desired-state/plan.md`, BL-16 Stages 1-2). `belief.
+        flight_authority.advance_flight_authority` is the one caller;
+        this client does no interpretation."""
+        result = self._get_json("/flight_desired/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                "expected a JSON object or null from /flight_desired/latest, "
+                f"got {type(result).__name__}"
+            )
+        return result
 
-        `limits` travels in every message (the plan's own wire shape) --
-        the caller always passes the live bundle, never `None`, unlike
-        the aircraft-layer API's own defensive `None` allowance."""
-        self._post_json(
-            "/command/flight_control",
-            {"seq": seq, "cmd": cmd, "limits": limits, "goal": goal},
-        )
+    def write_flight_lease(self, epoch: int, limits: dict[str, float]) -> None:
+        """`POST /command/flight_lease` -> BL-16 Stage 2's own unnumbered
+        lease (`plans/flight-desired-state/plan.md`, refinement 3) --
+        replaces the old `write_flight_control(..., "arm", ...)` send.
+        Sent every poll while the aircraft layer is up (`body.py`'s own
+        `_apply_flight_control`), so `Export.lua` can self-arm on a park
+        edge without body-layer ever stating the mode. Raises
+        `AircraftLayerError` on any failure, mirroring `write_flight_
+        control` -- see the module docstring for why."""
+        self._post_json("/command/flight_lease", {"epoch": epoch, "limits": limits})
+
+    def write_flight(
+        self,
+        epoch: int,
+        seq: int,
+        until: float,
+        kind: str,
+        fields: dict[str, object],
+    ) -> None:
+        """`POST /command/flight` -> BL-16 Stage 3's one numbered
+        channel (`plans/flight-desired-state/plan.md`, section 5),
+        replacing `write_flight_control` entirely (the `flight_control`
+        op is retired). Raises `AircraftLayerError` on any failure,
+        mirroring `write_ai_pilot_goal`/`write_sight_target` -- see the
+        module docstring for why. `belief.flight_authority`'s request
+        queue/`body.py`'s `_apply_flight_requests` decide *when* to call
+        this; this client is a pure pass-through, same division of
+        labour every other `write_*` method here already has.
+
+        **This call's own success means only "sent", never "accepted"**
+        -- whether `Export.lua` actually applied the request rides the
+        next `GET /flight_desired/latest` poll's own `fd_acks` ring
+        (plan, section 3a), which the caller matches separately."""
+        body: dict[str, object] = {
+            "epoch": epoch,
+            "seq": seq,
+            "until": until,
+            "kind": kind,
+        }
+        body.update(fields)
+        self._post_json("/command/flight", body)
 
     def write_reset(self, epoch: int) -> None:
         """`POST /command/reset` -> body-layer's own process-start reset

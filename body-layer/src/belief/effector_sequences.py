@@ -109,6 +109,17 @@ class EffectorTrigger(Enum):
     ATTACK_RUN_START = "attack-run-start"
     ATTACK_RUN_START_MISSILES = "attack-run-start-missiles"
     ATTACK_RUN_STOP = "attack-run-stop"
+    #: Added 2026-11-20 (`plans/flight-lift-vector/explore-notes.md`,
+    #: "SAU in mode 1" -- user, verbatim: "Mode 1 must work without SAU,
+    #: but it can use SAU and can toggle channels on/off as needed. On
+    #: handover to player (mode off), set pitch, bank and heading
+    #: channels ON."). Fired from `body.py`'s own `belief.
+    #: flight_authority` neighbourhood, on the same `fd_mode` edge
+    #: `decide_flight_speech` watches into `"off"` from `"m1"`/`"m2"`/
+    #: `"taking"` -- but for *every* cause, not just the ones that get the
+    #: urgent line, since the SAU channels need to be on for the player
+    #: regardless of why he got the controls back.
+    CONTROLS_TO_PLAYER = "controls-to-player"
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +245,16 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
             '"disengage", drops the target or cancels, or the contact is '
             "lost. Not on a mission (re)start, which drops every running "
             "sequence anyway."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.CONTROLS_TO_PLAYER: TriggerInfo(
+        description=(
+            "The controls go to the player: fd_mode moves from m1, m2 or "
+            "taking into off, for any cause -- a voice release, a forced "
+            "release (an unpark mode 1 cannot fly, Lua's own envelope "
+            "self-release), or a reset. Not fired at mission start, since "
+            "that is not a change of who holds the controls."
         ),
         cardinality="every_time",
     ),

@@ -118,7 +118,13 @@ a non-match (the same "say again" fallthrough any unmatched command gets).
 ## The Lua API every rule file sees
 
 - `say(text)` — speaks one line. A handler may call it more than once; every call's text is
-  spoken in order.
+  spoken in order. **For a `flight_control*`-category rule, this does not mean "now."** BL-16
+  (`plans/flight-desired-state/plan.md`, section 3a) waits for `Export.lua`'s own accept/refuse
+  before any of these lines are actually spoken — a rule still just calls `say(...)` with the
+  text it wants read back, and the console (not the rule) decides when that is heard: on accept
+  verbatim, swapped for `unable(...)` on a refusal, or "Unable, not ready." on a timeout. A rule
+  author never has to know this; it only matters if you are reading a dispatch's returned lines
+  and expecting them to already have been spoken.
 - `unable(reason)` — returns the fixed wording for a closed reason key (the same catalogue
   every other command in this codebase uses), e.g. `unable("NOT_READY")` → `"Unable, not
   ready."`. An unrecognised key degrades to a plain `"Unable."`, never an error.

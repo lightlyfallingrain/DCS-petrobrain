@@ -10,9 +10,12 @@ budget.
 
 `plans/flight-control/plan.md`, "Revised 2026-11-18 -- mode 1 (unparked,
 raw axes) re-cut", Stage **M2** (the controller) on top of M1's own seam
-and handover: a spoken goal (`cmd="goal"`) is bounds-checked, stored in
-the `fc_goal_*` wire-echo locals (unchanged from M1), and now also
-drives `fc_law` -- `law_apply_goal`/`law_init_at_take`/`law_update`/
+and handover. **BL-16 Stage 3** (`plans/flight-desired-state/plan.md`)
+replaced the `fc_goal_*` wire-echo locals and the `flight_control` op's
+own `cmd="goal"` handler with `apply_desired_changes_to_law`: the goal
+now lives in `flight_desired`'s own `desired` table, applied here by
+comparing its per-part stamps against what this module last applied --
+`law_apply_goal`/`law_init_at_take`/`law_update`/
 `law_outputs`, a handful of pure functions over an explicit state
 table (never the module's own flat locals) so a toy-plant test can
 drive them with no DCS mock at all (`plans/flight-control/plan.md`:
@@ -31,16 +34,17 @@ yet. M3 (terrain floor) and M4 (SAU) are not built here.
 
 Depends on `core` (loaded first, `safe_call`/`debug_log`/the JSON
 extract helpers) and, read-only, `ai_pilot_wheel.is_parked`/`stick_park_
-raw`/`held_targets` -- never writes into that module's own state. If
-`ai_pilot_wheel` itself failed to load, `is_parked()` is unknown and
-this module never takes (named in the plan so the Implementer cannot
-pick the wrong default): a park/unpark edge can only be detected by
-comparing against a known previous state, so "unknown" is treated the
-same as "stay off", never as a licence to assume unparked.
-`held_targets()` (BL-16 sortie 2026-11-20, `plans/flight-control/
-debug.md`) is this same read-only seam's newest member -- mode 2's own
-set heading/altitude/speed, read only by the unpark-take branch below
-to seed `law_init_at_take`, never by a voice take.
+raw` -- never writes into that module's own state. If `ai_pilot_wheel`
+itself failed to load, `is_parked()` is unknown and this module never
+takes (named in the plan so the Implementer cannot pick the wrong
+default): a park/unpark edge can only be detected by comparing against
+a known previous state, so "unknown" is treated the same as "stay off",
+never as a licence to assume unparked. **`held_targets()` is no longer
+read here** (BL-16 Stage 3) -- the unpark-take seed comes from `flight_
+desired.get()` instead (`build_take_seed`), which is itself seeded from
+the overlay by `flight_desired.lua`'s own `reseed_from_overlay` at the
+earlier off->m2 edge; `ai_pilot_wheel` stays a dependency only for `is_
+parked`/`stick_park_raw`.
 
 **Capture source, corrected after M0-J (flight 9,
 `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`)**:
@@ -89,7 +93,7 @@ physically moves that control** -- arg 1102 sat 16+ s with the lever
 untouched after `release`. Confirmed for collective; pitch/roll/pedals
 are still owed. This matches Decision 4 exactly ("the release jump is
 not handled, the pilot matches his controls") and needs no code change
--- `handle_flight_control_command`'s `"release"` branch already just
+-- `request_release`'s own effect already just
 stops calling `write_outputs()`, it never writes a last value or reads
 the physical stick. M0-D (the stirred-control go/no-go) is still owed
 for the whole mode -- this module is built and tested ahead of it per
@@ -1064,10 +1068,38 @@ local fc_mode = "off"
 local fc_take_seq = nil
 local fc_pending_take_seq = nil
 local fc_take_origin = nil
-local fc_goal_seq = nil
-local fc_last_cmd_seq = -1
-local fc_last_arm_seq = nil
 local fc_arm_last_t = nil
+
+-- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 1,
+-- "who reads it") -- which `desired` stamp (the wire request `seq` that
+-- last wrote that part, or `flight_desired`'s own internal-write floor)
+-- this module has already applied into `fc_law`. `apply_desired_
+-- changes_to_law` below compares `flight_desired.get()`'s own stamps
+-- against these every active frame and applies only the parts that
+-- changed -- "mode 1 applies desired by stamp" (plan, "Affected
+-- modules"). `nil` means "nothing applied yet this activation" (cleared
+-- on every mode change away from active, same as `fc_last_command`).
+local fc_applied_stamp_hdg = nil
+local fc_applied_stamp_alt = nil
+local fc_applied_stamp_spd = nil
+
+-- The park/unpark edge tracker for the off->armed self-arm clause
+-- (Stage 2 review-s12.md Required Fix 2) -- `fc_was_parked` is `is_
+-- parked()`'s own raw value from the previous frame, physical state
+-- only, never reset by `on_stop`/`reset` (a body-layer restart does not
+-- change whether the player is actually parked). `fc_off_armable_
+-- since_edge` is the derived "may self-arm from off" window: set true
+-- only on a genuine rising edge (`not fc_was_parked and is_parked`)
+-- while `fc_mode == "off"`, so a lease that only becomes fresh a few
+-- frames after the edge still gets to arm (the ordinary "every park
+-- gives him the overlay" case), and cleared on unpark and by `on_stop`/
+-- `reset` -- Q6: "after `reset(epoch)` while parked, armed is cleared
+-- and nothing re-arms it until the next park edge." Without this, the
+-- old level-triggered check (`is_parked == true and fc_mode == "off"`
+-- alone) re-armed the instant a fresh lease arrived, even with no
+-- unpark/re-park in between, which is exactly what Q6 forbids.
+local fc_was_parked = nil
+local fc_off_armable_since_edge = false
 local fc_release_reason = nil
 local fc_refuse_cause = nil
 local fc_takeover_mode = nil
@@ -1077,14 +1109,6 @@ local fc_takeover_mode = nil
 -- echoed on every status line so body-layer can confirm this exact
 -- epoch landed. Only ever written by `reset()` below.
 local fc_reset_epoch = nil
-
--- The commanded goal, stored verbatim (never shaped -- M2's own job).
--- "A null field means keep yours": each is updated independently.
-local fc_goal_heading_deg = nil
-local fc_goal_turn = nil
-local fc_goal_alt_m = nil
-local fc_goal_alt_ref = nil
-local fc_goal_ias_kmh = nil
 
 -- The frozen, captured raw per-axis values (`fc_captured.pitch` etc).
 local fc_captured = {}
@@ -1118,16 +1142,6 @@ local fc_env_low_ias_since_t = nil
 -- row). Reset to `nil` on every mode change away from active (a stale
 -- previous session's command must not seed a later rate limit).
 local fc_last_command = nil
-
-local function extract_json_bool_field(json_text, field_name)
-    if json_text:match("\"" .. field_name .. "\"%s*:%s*true") then
-        return true
-    end
-    if json_text:match("\"" .. field_name .. "\"%s*:%s*false") then
-        return false
-    end
-    return nil
-end
 
 local function read_axis(seat, axis)
     local arg = SEAT_ARGS[seat][axis]
@@ -1434,99 +1448,185 @@ local function read_measured()
     }
 end
 
-local function apply_goal_fields(data)
-    local heading_deg = extract_json_number_field(data, "heading_deg")
-    local turn = extract_json_number_field(data, "turn")
-    local level_off = extract_json_bool_field(data, "level_off")
-    local alt_m = extract_json_number_field(data, "alt_m")
-    local alt_ref = extract_json_string_field(data, "alt_ref")
-    local ias_kmh = extract_json_number_field(data, "ias_kmh")
-    -- Decision 27 -- the break's own signed rate override, carried
-    -- alongside `heading_deg` only (never alone -- a rate with no
-    -- heading target is meaningless, and `law_apply_goal`'s own
-    -- `heading_deg ~= nil` branch is the only place this is read).
-    local turn_rate_deg_s = extract_json_number_field(data, "turn_rate_deg_s")
-    local turn_value = turn
-    if level_off == true then
-        turn_value = 0
+-- `heading_ref_to_true`/`heading_ref_from_true` -- thin call-throughs to
+-- `flight_desired.lua`'s own conversion (that module owns `HEADING_REF`,
+-- section 1: "Lua owns the choice"). A missing `flight_desired` (load
+-- failure) or a missing/non-finite input is a no-op pass-through --
+-- never a reason to crash the law.
+local function heading_ref_to_true(ref_heading_deg, measured_true_deg)
+    if flight_desired == nil or type(ref_heading_deg) ~= "number" then
+        return ref_heading_deg
     end
-    if heading_deg ~= nil then
-        fc_goal_heading_deg = heading_deg
-        fc_goal_turn = nil
+    local converted = safe_call(
+        function() return flight_desired.to_true_heading(ref_heading_deg, measured_true_deg) end)
+    if type(converted) ~= "number" then
+        return ref_heading_deg
     end
-    if turn_value ~= nil then
-        fc_goal_turn = turn_value
-        fc_goal_heading_deg = nil
-    end
-    if alt_m ~= nil then
-        fc_goal_alt_m = alt_m
-    end
-    if alt_ref ~= nil then
-        fc_goal_alt_ref = alt_ref
-    end
-    if ias_kmh ~= nil then
-        fc_goal_ias_kmh = ias_kmh
-    end
-    fc_goal_seq = fc_last_cmd_seq
+    return converted
+end
 
-    -- Decision 21's "Wire"/one-shot goal application -- never re-applied
-    -- from the persisted `fc_goal_*` echo every frame (that would
-    -- re-trigger `level_off`'s own turn-mode request every poll and
-    -- undo the law's own internal settle-to-heading transition).
-    -- `fc_law` is `nil` while "taking"/"off"/"armed"; a goal that
-    -- arrives before capture completes is still recorded in `fc_goal_*`
-    -- above (so the wire echo is correct) but is not applied here --
-    -- the law itself only ever sees it once the take completes and
-    -- starts fresh from Decision 24's own "At take" values. **A goal
-    -- commanded during the one-frame "taking" window is reachable**
-    -- (`axes_set_heading`/`axes_set_speed`/`axes_set_altitude` gate on
-    -- `has_controls` alone, already true there) -- body-layer now holds
-    -- such a goal unsent until it sees this module report `active`,
-    -- then sends it fresh (review-m2.md Required Fix 1), rather than
-    -- relying on anything here to re-apply it once `fc_law` exists.
-    if fc_law ~= nil then
-        fc_law = law_apply_goal(fc_law, {
-            heading_deg = heading_deg,
-            turn = turn_value,
-            alt_m = alt_m,
-            alt_ref = alt_ref,
-            ias_kmh = ias_kmh,
-            turn_rate_deg_s = turn_rate_deg_s,
-        }, fc_limits)
+local function heading_ref_from_true(true_heading_deg, measured_true_deg)
+    if flight_desired == nil or type(true_heading_deg) ~= "number" then
+        return true_heading_deg
+    end
+    local converted = safe_call(
+        function() return flight_desired.from_true_heading(true_heading_deg, measured_true_deg) end)
+    if type(converted) ~= "number" then
+        return true_heading_deg
+    end
+    return converted
+end
+
+-- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 1) --
+-- "mode 1 applies desired by stamp", replacing `apply_goal_fields`'s own
+-- push-at-receipt shape. Called once every active, non-paused,
+-- non-just-took frame (`run_active_frame` below): reads `flight_
+-- desired.get()` and applies, via `law_apply_goal`, only the parts whose
+-- stamp changed since this module last applied them -- "latest wins" by
+-- construction, since a newer numbered request always carries a higher
+-- stamp than whatever this module last saw. `measured_true_deg` is this
+-- frame's own measured heading (`read_measured()`'s `psi_deg`), reused
+-- rather than re-read, for the heading-reference conversion.
+local function apply_desired_changes_to_law(measured_true_deg)
+    if flight_desired == nil or fc_law == nil then
+        return
+    end
+    local desired = safe_call(flight_desired.get)
+    if type(desired) ~= "table" then
+        return
+    end
+    local goal = {}
+    local changed = false
+    if desired.stamp_hdg ~= fc_applied_stamp_hdg then
+        fc_applied_stamp_hdg = desired.stamp_hdg
+        changed = true
+        if desired.hdg_mode == "turn" then
+            goal.turn = (desired.turn_dir == nil) and 0 or desired.turn_dir
+        elseif desired.hdg_mode == "heading" and type(desired.heading_deg) == "number" then
+            goal.heading_deg = heading_ref_to_true(desired.heading_deg, measured_true_deg)
+            goal.turn_rate_deg_s = desired.turn_rate_deg_s
+        end
+    end
+    if desired.stamp_alt ~= fc_applied_stamp_alt then
+        fc_applied_stamp_alt = desired.stamp_alt
+        if type(desired.alt_m) == "number" then
+            changed = true
+            goal.alt_m = desired.alt_m
+            goal.alt_ref = desired.alt_ref
+        end
+    end
+    if desired.stamp_spd ~= fc_applied_stamp_spd then
+        fc_applied_stamp_spd = desired.stamp_spd
+        if type(desired.ias_kmh) == "number" then
+            changed = true
+            goal.ias_kmh = desired.ias_kmh
+        end
+    end
+    if changed then
+        fc_law = law_apply_goal(fc_law, goal, fc_limits)
     end
 end
 
--- `POST /command/flight_control` -> here, via `commands.lua`'s dispatch
--- table, same `(data, t)` shape every other handler in this codebase
--- uses. `{"op": "flight_control", "seq", "cmd", "limits", "goal"}`.
-local function handle_flight_control_command(data, t)
-    local seq = extract_json_number_field(data, "seq")
-    local cmd = extract_json_string_field(data, "cmd")
-    if seq == nil or cmd == nil then
-        debug_log("ignoring malformed flight_control command (missing seq/cmd)")
-        return
+-- The take seed (Decision 24/32, Q4, section 2's handover table) --
+-- built from `flight_desired.get()`, never from `ai_pilot_wheel.held_
+-- targets()` any more (that call site, and the module docstring's own
+-- "held_targets()" deletion, were specific to this function). Two
+-- shapes:
+--
+-- - **Unpark** (`fc_take_origin == "unpark"`): carries every part
+--   `desired` holds (Decision 32/Q4), converted to true heading, speed/
+--   altitude clamped to `fc_limits` (U2, below) since mode 1 cannot fly
+--   every value mode 2 can hold -- `desired` itself stays exact, only
+--   the seed is clamped. A standing break (`turn_rate_deg_s`/`turn_
+--   style ~= "normal"`) is layered on top by the caller via a second
+--   `law_apply_goal`, since `law_init_at_take` has no rate-override
+--   field of its own.
+-- - **Voice take**: the ordinary bank-based/stopping-height/measured
+--   defaults (`law_init_at_take`'s own fallback, `seed` fields left
+--   `nil`) for every part, **except** one `desired` stamped strictly
+--   after this take's own `seq` (`take_seq`) -- a command given in the
+--   same breath as "you have controls" (the Stage 3 test: "a set during
+--   taking survives the seed").
+local function build_take_seed(measured_true_deg)
+    if flight_desired == nil then
+        return nil
     end
-    -- "Lua applies a message only when its seq is greater than the last
-    -- one applied" -- a stale/duplicate/out-of-order datagram (UDP) is
-    -- silently dropped, same posture as `ai_pilot_wheel`'s own `hvrt_
-    -- step` dedup.
-    if seq <= fc_last_cmd_seq then
-        return
+    local desired = safe_call(flight_desired.get)
+    if type(desired) ~= "table" then
+        return nil
     end
+    local seed = {}
+    if fc_take_origin == "unpark" then
+        if desired.hdg_mode == "heading" and type(desired.heading_deg) == "number" then
+            seed.heading_deg = heading_ref_to_true(desired.heading_deg, measured_true_deg)
+        end
+        if type(desired.alt_m) == "number" then
+            -- U2 (`plans/flight-desired-state/plan.md`, section 3,
+            -- answered yes): a carried value mode 1 cannot fly exactly
+            -- is flown clamped, never fed to the law raw -- `desired`
+            -- itself (and `seed`/`desired`'s own return below, which
+            -- body-layer's `fd_alt`/`fd_ias` mirror) keeps the exact
+            -- commanded value; only the seed fed to `law_init_at_take`
+            -- below is clamped, mirroring `belief.flight_control.
+            -- clamp_altitude`'s own "agl floor only" rule.
+            seed.alt_m = desired.alt_m
+            seed.alt_ref = (desired.alt_ref == "baro") and "B" or "R"
+            if seed.alt_ref == "R" and seed.alt_m < fc_limits.floor_agl_m then
+                seed.alt_m = fc_limits.floor_agl_m
+            end
+        end
+        if type(desired.ias_kmh) == "number" then
+            -- Same clamp as above, mirroring `belief.flight_control.
+            -- clamp_speed`'s `[min_ias_kmh, max_ias_kmh]` range.
+            seed.speed_kmh = desired.ias_kmh
+            if seed.speed_kmh < fc_limits.min_ias_kmh then
+                seed.speed_kmh = fc_limits.min_ias_kmh
+            elseif seed.speed_kmh > fc_limits.max_ias_kmh then
+                seed.speed_kmh = fc_limits.max_ias_kmh
+            end
+        end
+        return seed, desired
+    end
+    local take_seq = fc_take_seq
+    if take_seq == nil then
+        return seed, desired
+    end
+    if desired.stamp_hdg ~= nil and desired.stamp_hdg > take_seq
+        and desired.hdg_mode == "heading" and type(desired.heading_deg) == "number"
+    then
+        seed.heading_deg = heading_ref_to_true(desired.heading_deg, measured_true_deg)
+    end
+    if desired.stamp_alt ~= nil and desired.stamp_alt > take_seq
+        and type(desired.alt_m) == "number"
+    then
+        seed.alt_m = desired.alt_m
+        seed.alt_ref = (desired.alt_ref == "baro") and "B" or "R"
+    end
+    if desired.stamp_spd ~= nil and desired.stamp_spd > take_seq
+        and type(desired.ias_kmh) == "number"
+    then
+        seed.speed_kmh = desired.ias_kmh
+    end
+    return seed, desired
+end
 
-    -- `limits` travels in every message (plan's own wire shape) --
-    -- every present field is bounds-checked against FC_LIMIT_BOUNDS; an
-    -- out-of-bounds value rejects the WHOLE message (the `AC-B14`
-    -- lesson: never a partial apply), a field the message omits keeps
-    -- its previous value rather than reverting to the startup default.
+-- `handle_flight_lease_command`'s own bounds check (BL-16 Stage 3: the
+-- numbered `flight` op carries no `limits` of its own any more --
+-- `limits` travels only on the unnumbered lease now) -- every field
+-- present in `data`'s own `limits`-shaped top level is bounds-checked
+-- against `FC_LIMIT_BOUNDS`; an out-of-bounds value rejects the WHOLE
+-- message (`AC-B14`: never a partial apply), a field the message omits
+-- keeps its previous value rather than reverting to the startup
+-- default. Returns `true` on success (and has already applied `fc_
+-- limits`), `false` on a rejected message (and has applied nothing).
+local function apply_limits_bounds_checked(data, log_label)
     local new_limits = {}
     for key, bound in pairs(FC_LIMIT_BOUNDS) do
         local v = extract_json_number_field(data, key)
         if v ~= nil then
             if v < bound.lo or v > bound.hi then
-                debug_log("rejecting flight_control message seq=" .. tostring(seq)
-                    .. ": limits." .. key .. " out of bounds")
-                return
+                debug_log("rejecting " .. log_label .. " message: limits." .. key .. " out of bounds")
+                return false
             end
             new_limits[key] = v
         end
@@ -1534,90 +1634,99 @@ local function handle_flight_control_command(data, t)
     for key, v in pairs(new_limits) do
         fc_limits[key] = v
     end
+    return true
+end
 
-    fc_last_cmd_seq = seq
+-- Stage 2 (`plans/flight-desired-state/plan.md`, refinement 3) --
+-- `{"op":"flight_lease","epoch":E,"limits":{...}}`, unnumbered (no
+-- `seq`, never rejected as stale) and sent every poll while body-layer
+-- is up -- the one thing it does is refresh `fc_arm_last_t` (the
+-- self-arm freshness clock, `run_flight_control`'s own self-arm
+-- branches above) and carry the `limits` block, the only wire message
+-- on this module that does any more (Stage 3's own numbered `flight`
+-- op carries goal/handover fields only, never `limits`). `epoch` is
+-- accepted but not yet gated on -- carried only so a future stage can
+-- add that check without a wire reshape.
+local function handle_flight_lease_command(data, t)
+    -- The `AC-B14` lesson: an out-of-bounds `limits` field rejects the
+    -- WHOLE message, including the freshness refresh below -- a
+    -- malformed lease must not be allowed to keep the self-arm window
+    -- open regardless of what it actually asked for.
+    if not apply_limits_bounds_checked(data, "flight_lease") then
+        return
+    end
+    fc_arm_last_t = t
+end
 
-    if cmd == "goal" then
-        apply_goal_fields(data)
-        return
+-- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+-- called from `flight_desired.handle_flight_command`'s own `kind ==
+-- "take"` branch, replacing the old `flight_control` op's `cmd ==
+-- "take"`. Returns one of: `"accepted_active"` (already flying mode 1,
+-- idempotent -- acked immediately), `"pending"` (off -> taking, not yet
+-- resolved -- the caller defers the ack until `flight_desired.tick`
+-- sees this module report `active`), or `{refused = <reason>}` (a
+-- closed-vocabulary reason, acked immediately, nothing changed).
+local function request_take(seq, t)
+    if fc_mode == "active" then
+        fc_take_seq = seq
+        return "accepted_active"
     end
-    if cmd == "arm" then
-        -- The lease (U10): body-layer re-sends this every poll while he
-        -- flies through the overlay with mode 1 armed. From "off", this
-        -- is also the only way "armed" is entered (Decision 24's
-        -- `off` -> `armed` row); an already-active/taking session
-        -- self-arms on the park edge instead (`run_flight_control`
-        -- below), never from this handler.
-        fc_arm_last_t = t
-        fc_last_arm_seq = seq
-        if fc_mode == "off" then
-            fc_mode = "armed"
-        end
-        return
-    end
-    if cmd == "release" then
-        fc_mode = "off"
-        fc_captured = {}
-        fc_release_reason = "stop"
-        fc_refuse_cause = nil
-        -- Clear every held goal, same as `on_stop` -- otherwise a stale
-        -- value from this session survives into the next take and the
-        -- HOLD-until-known gates (`rules/gates.py`) see a non-nil
-        -- "held" value immediately instead of waiting for a fresh one
-        -- (review-m1.md, Required Fix 1).
-        fc_goal_heading_deg = nil
-        fc_goal_turn = nil
-        fc_goal_alt_m = nil
-        fc_goal_alt_ref = nil
-        fc_goal_ias_kmh = nil
-        -- Same reasoning, for the M0-J tracked capture (above): a
-        -- release received while `armed` must not leave a stale
-        -- snapshot for a later armed session to inherit. M2 adds the
-        -- law state and the rate-limit's own last-written memory to
-        -- the same leak class -- a later take must start fresh from
-        -- `law_init_at_take`, never resume a discarded session's
-        -- shaper/integrator state.
-        fc_last_stowed_pilot_capture = nil
-        fc_law = nil
-        fc_last_command = nil
-        return
-    end
-    if cmd == "take" then
-        -- A repeated take while already taking/active is an idempotent
-        -- no-op for the aircraft -- body-layer's own refusals (overlay
-        -- flying, on ground, too slow, attack run) already ran before
-        -- this was ever sent (Decision 22); this handler trusts that
-        -- for a voice take and does not re-check it, and does not
-        -- re-capture the axes or reset `fc_law` -- Petrovich keeps
-        -- flying exactly as before.
-        --
-        -- BUT `fc_take_seq`/`fc_pending_take_seq` must still move to
-        -- THIS message's own seq (BL-16 sortie 2026-11-20,
-        -- `plans/flight-control/debug.md`): the bounds check above
-        -- already set `fc_last_cmd_seq = seq` unconditionally, before
-        -- this branch ever runs, so a bare `return` here leaves `fc_
-        -- take_seq` pointing at the *previous* take forever. Belief's
-        -- own ack match (`lua_take_seq == take_seq`, `take_seq` set to
-        -- this exact wire seq when the take was sent) can then never
-        -- succeed for this take, and after `HANDOVER_ACK_TIMEOUT_S`
-        -- belief gives up -- "Unable, not ready." -- while Lua is
-        -- still actually flying mode 1, confirmed with the full-module
-        -- Lua harness: a second `take` sent while already `active`
-        -- advanced `fc_last_cmd_seq` from 1 to 2 but left `fc_take_
-        -- seq` at 1 under the old code.
-        if fc_mode == "active" then
-            fc_take_seq = seq
-            return
-        end
-        if fc_mode == "taking" then
-            fc_pending_take_seq = seq
-            return
-        end
-        fc_mode = "taking"
+    if fc_mode == "taking" then
         fc_pending_take_seq = seq
-        fc_take_origin = "voice"
-        return
+        return "pending"
     end
+    if fc_mode ~= "off" then
+        -- `armed` (flying mode 2) -- "you have controls" said while he
+        -- already has them through the overlay does not fit this
+        -- table; body-layer's own gate is expected to catch this first
+        -- (U9's "Unable, AI overlay." posture), this is the defensive
+        -- fallback.
+        return { refused = "wrong_mode" }
+    end
+    -- Stage 2: a voice take re-checks IAS/AGL itself, reusing `check_
+    -- unpark_preconditions` (the same function the unpark-take branch
+    -- below already calls). A refusal changes nothing (`fc_mode` stays
+    -- `off`) -- "an unable never writes the desired state" (Q2). `fc_
+    -- refuse_cause` keeps the specific diagnostic (`too_slow`/`on_
+    -- ground`) on the status line even though the ack itself always
+    -- says the closed-vocabulary `"precondition"` (section 3a).
+    local ok, cause = check_unpark_preconditions()
+    if not ok then
+        fc_release_reason = "refused"
+        fc_refuse_cause = cause
+        return { refused = "precondition" }
+    end
+    fc_mode = "taking"
+    fc_pending_take_seq = seq
+    fc_take_origin = "voice"
+    return "pending"
+end
+
+-- BL-16 Stage 3, `kind == "release"`'s own call-through, replacing the
+-- old `flight_control` op's `cmd == "release"`. Returns `"accepted"` or
+-- `{refused = <reason>}`.
+local function request_release(seq)
+    if fc_mode == "armed" then
+        return { refused = "wrong_mode" }
+    end
+    if fc_mode ~= "active" and fc_mode ~= "taking" then
+        return { refused = "not_flying" }
+    end
+    fc_mode = "off"
+    fc_captured = {}
+    fc_release_reason = "stop"
+    fc_refuse_cause = nil
+    fc_pending_take_seq = nil
+    fc_take_seq = nil
+    -- Same "no stale leak across a session boundary" reasoning as
+    -- `on_stop`/the self-arm branches below.
+    fc_last_stowed_pilot_capture = nil
+    fc_law = nil
+    fc_last_command = nil
+    fc_applied_stamp_hdg = nil
+    fc_applied_stamp_alt = nil
+    fc_applied_stamp_spd = nil
+    return "accepted"
 end
 
 -- The output half of an "active" frame -- shared by the ordinary
@@ -1659,23 +1768,71 @@ local function run_active_frame(t, dt, just_took)
             pedals = axis_command(fc_captured, "pedals"),
             collective = axis_command(fc_captured, "collective"),
         }
-        -- Mode 2's own set targets, only for an unpark take (never a
-        -- voice take -- `law_init_at_take`'s own docstring on why) and
-        -- only when `ai_pilot_wheel` loaded at all (module docstring's
-        -- "never a licence to assume" default: no module, no seed,
-        -- same bank-at-capture fallback as before this existed).
-        local seed = nil
-        if fc_take_origin == "unpark" and ai_pilot_wheel ~= nil then
-            local held = safe_call(ai_pilot_wheel.held_targets)
-            if type(held) == "table" then
-                seed = held
-            end
-        end
+        -- BL-16 Stage 3 -- the seed now comes from `flight_desired`'s
+        -- own `desired` table (`build_take_seed` above), never `ai_
+        -- pilot_wheel.held_targets()` directly: an unpark carries
+        -- `desired` verbatim (Decision 32/Q4), a voice take only the
+        -- parts stamped after this take's own seq.
+        local seed, desired_at_take = build_take_seed(measured.psi_deg)
         fc_law = law_init_at_take(measured, fc_limits, command, seed)
+        -- A standing break carried into the unpark (`desired.turn_
+        -- rate_deg_s`/`turn_style`) has no field of its own on `law_
+        -- init_at_take`'s seed -- layered on top via an ordinary `law_
+        -- apply_goal` call, the same mechanism a live break command
+        -- uses, so the rate override/break-entry-height/pedal-bias
+        -- bookkeeping it sets up is identical either way.
+        if fc_take_origin == "unpark" and type(desired_at_take) == "table"
+            and desired_at_take.turn_rate_deg_s ~= nil
+            and desired_at_take.turn_style ~= "normal"
+            and seed.heading_deg ~= nil
+        then
+            fc_law = law_apply_goal(fc_law, {
+                heading_deg = seed.heading_deg,
+                turn_rate_deg_s = desired_at_take.turn_rate_deg_s,
+            }, fc_limits)
+        end
+        -- This take's own law state already reflects every part of
+        -- `desired` the seed above considered -- record those stamps
+        -- now so the very next frame's `apply_desired_changes_to_law`
+        -- does not immediately re-apply the thing it was just seeded
+        -- with (it would be a no-op in value, but would also clobber
+        -- the just-seeded rate-override/break bookkeeping above).
+        if type(desired_at_take) == "table" then
+            fc_applied_stamp_hdg = desired_at_take.stamp_hdg
+            fc_applied_stamp_alt = desired_at_take.stamp_alt
+            fc_applied_stamp_spd = desired_at_take.stamp_spd
+        end
         write_outputs(law_outputs(fc_law, measured), nil)
         return
     end
+    apply_desired_changes_to_law(measured.psi_deg)
+    local prev_turn_mode = fc_law.turn_mode
+    local prev_rate_override = fc_law.rate_override_deg_s
     fc_law = law_update(fc_law, dt, measured, fc_limits)
+    -- BL-16 Stage 3 (section 1, "Heading reference" / Co-moving table) --
+    -- the roll-out settle (turn -> heading) and the break settle (the
+    -- rate override clearing) each write the settled heading back into
+    -- `desired`, converted into `HEADING_REF`'s own reference, so a
+    -- later unpark (or the status line) reports what the law actually
+    -- settled on rather than a stale pre-settle value. Guarded on
+    -- `flight_desired` existing, same posture as every other cross-
+    -- module call in this file.
+    if flight_desired ~= nil then
+        if prev_turn_mode and not fc_law.turn_mode then
+            safe_call(function()
+                flight_desired.write_internal({
+                    heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
+                })
+            end)
+        elseif prev_rate_override ~= nil and fc_law.rate_override_deg_s == nil then
+            safe_call(function()
+                flight_desired.write_internal({
+                    heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
+                    clear_turn_rate = true,
+                })
+            end)
+        end
+    end
     write_outputs(law_outputs(fc_law, measured), dt)
 end
 
@@ -1694,6 +1851,22 @@ local function run_flight_control(t)
     if ai_pilot_wheel ~= nil then
         is_parked = safe_call(ai_pilot_wheel.is_parked)
     end
+
+    -- Required Fix 2 (review-s12.md) -- the off->armed self-arm edge
+    -- tracker. A rising edge (not parked last frame, parked this one)
+    -- while `fc_mode == "off"` opens the self-arm window; unparking
+    -- closes it again. `fc_was_parked` itself is never reset by `on_
+    -- stop`/`reset`, so a reset that happens while still parked is not
+    -- mistaken for a fresh edge on the very next frame. `is_parked ==
+    -- nil` (unknown) is folded into "not parked" here, same as the
+    -- module's own "unknown == off" default above.
+    local is_parked_now = is_parked == true
+    if not is_parked_now then
+        fc_off_armable_since_edge = false
+    elseif fc_was_parked ~= true and fc_mode == "off" then
+        fc_off_armable_since_edge = true
+    end
+    fc_was_parked = is_parked_now
 
     -- M0-J (flight 9): track the voice-take capture's "last steady"
     -- fallback every frame, regardless of mode -- a take can land on
@@ -1734,6 +1907,32 @@ local function run_flight_control(t)
         fc_last_stowed_pilot_capture = nil
         fc_law = nil
         fc_last_command = nil
+        return
+    end
+
+    -- Stage 2 (`plans/flight-desired-state/plan.md`, refinement 3) --
+    -- the second self-arm clause: he was `off` (the player flying) and
+    -- parks. Every park now gives him the overlay as long as body-
+    -- layer's lease is fresh, replacing the old `arm` message's own
+    -- `off -> armed` row. Lease NOT fresh (body-layer down, or never
+    -- sent one) leaves him `off` -- the player keeps the controls, same
+    -- as today when no `arm` had ever arrived. **Edge-triggered, not
+    -- level-triggered (review-s12.md Required Fix 2, Q6):**
+    -- `fc_off_armable_since_edge` is only true from a genuine park
+    -- rising edge onward (set above) and is cleared by `on_stop`/
+    -- `reset` -- a reset while still parked leaves `fc_mode == "off"`
+    -- and `is_parked == true` indefinitely, which the bare level check
+    -- this replaces re-armed the instant a fresh lease next arrived,
+    -- with no unpark/re-park having happened.
+    if is_parked == true and fc_mode == "off" and fc_off_armable_since_edge then
+        local lease_fresh = fc_arm_last_t ~= nil
+            and (t - fc_arm_last_t) <= fc_limits.arm_lease_s
+        if lease_fresh then
+            fc_mode = "armed"
+            fc_last_stowed_pilot_capture = nil
+            fc_law = nil
+            fc_last_command = nil
+        end
         return
     end
 
@@ -1784,7 +1983,15 @@ local function run_flight_control(t)
         fc_captured = values
         fc_mode = "active"
         fc_take_origin = "unpark"
-        fc_take_seq = fc_last_arm_seq
+        -- Stage 2 (`plans/flight-desired-state/plan.md`): the `arm`
+        -- message (and its own `seq`) is gone -- the lease that self-
+        -- arms this session is unnumbered (`handle_flight_lease_
+        -- command` below). There is no seq to echo back as `fc_take_
+        -- seq`; `decide_flight_control`'s own unpark branch never
+        -- compares it against anything (it only *adopts* it when not
+        -- nil), so `nil` here is exactly as meaningful as the arm
+        -- message's own seq was.
+        fc_take_seq = nil
         fc_takeover_mode = snapshot_takeover_mode()
         fc_release_reason = nil
         fc_refuse_cause = nil
@@ -1856,12 +2063,6 @@ local function push_flight_control_state(t)
         return "false"
     end
 
-    local goal_heading = fc_goal_heading_deg
-    if fc_goal_turn ~= nil then
-        -- "fc_goal_heading is null in turn mode" (Wire section).
-        goal_heading = nil
-    end
-
     local measured_heading = nil
     local self_data = safe_call(LoGetSelfData)
     if type(self_data) == "table" and type(self_data.Heading) == "number" then
@@ -1869,11 +2070,11 @@ local function push_flight_control_state(t)
     end
 
     -- Plain telemetry passthrough, same reasoning as `measured_heading`
-    -- above: `hold_altitude`/`level_flight`/`set_speed`'s "current"
-    -- reading needs *something* the instant mode 1 takes, before any
-    -- goal has ever been commanded (`fc_goal_altitude`/`fc_goal_speed`
-    -- both start null) -- there is no AI pilot here reporting its own
-    -- held value the way mode 2's overlay readback does.
+    -- above: body-layer's own `_axes_current_*` helpers fall back to
+    -- this when `flight_authority_state`'s own desired-state mirror
+    -- (`fd_alt`/`fd_ias`) has nothing yet -- there is no AI pilot here
+    -- reporting its own held value the way mode 2's overlay readback
+    -- does.
     local measured_agl = safe_call(LoGetAltitudeAboveGroundLevel)
     local radar_dist, radar_valid = safe_call(LoGetRadarAltimeter)
     local agl_source = nil
@@ -1908,22 +2109,15 @@ local function push_flight_control_state(t)
 
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"fc_mode":"' .. fc_mode .. '"'
-        .. ',"fc_take_seq":' .. fmt_int_or_null(fc_take_seq)
-        .. ',"fc_goal_seq":' .. fmt_int_or_null(fc_goal_seq)
-        -- security-m1-m2.md Finding A: echoes the one counter every
-        -- `handle_flight_control_command` accept bumps, across every
-        -- `cmd` kind, so body-layer can reconcile its own `wire_seq`
-        -- against it after a restart (`wire_seq` resets to 0 per
-        -- process; this does not, same as `fc_last_cmd_seq` itself
-        -- never resetting on `on_stop`) instead of being silently
-        -- stuck below it for the rest of the DCS session.
-        .. ',"fc_last_cmd_seq":' .. fmt_int_or_null(fc_last_cmd_seq)
+        -- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`) --
+        -- `fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq`/`fc_goal_*` are
+        -- gone from this line. The ack a take/release/set needs now
+        -- rides `flight_desired`'s own `fd_acks` (one numbered channel,
+        -- section 5); the commanded heading/altitude/speed Petrovich is
+        -- holding is `flight_desired`'s own `fd_*` desired-state fields
+        -- (section 1), not a second copy here.
         .. ',"fc_take_origin":' .. text_or_null(fc_take_origin)
         .. ',"fc_takeover_mode":' .. text_or_null(fc_takeover_mode)
-        .. ',"fc_goal_heading":' .. fmt_num_or_null(goal_heading)
-        .. ',"fc_goal_altitude":' .. fmt_num_or_null(fc_goal_alt_m)
-        .. ',"fc_goal_altitude_ref":' .. text_or_null(fc_goal_alt_ref)
-        .. ',"fc_goal_speed":' .. fmt_num_or_null(fc_goal_ias_kmh)
         .. ',"fc_measured_heading":' .. fmt_num_or_null(measured_heading)
         .. ',"fc_measured_altitude":' .. fmt_num_or_null(measured_altitude)
         .. ',"fc_measured_speed":' .. fmt_num_or_null(measured_speed)
@@ -1958,57 +2152,61 @@ local function on_stop()
     fc_take_seq = nil
     fc_pending_take_seq = nil
     fc_take_origin = nil
-    fc_goal_seq = nil
-    fc_last_arm_seq = nil
     fc_arm_last_t = nil
+    -- Required Fix 2 (review-s12.md, Q6) -- the self-arm edge window
+    -- itself, not `fc_was_parked` (the raw physical state, which this
+    -- reset must NOT touch -- see its own declaration comment above).
+    fc_off_armable_since_edge = false
     fc_release_reason = nil
     fc_refuse_cause = nil
     fc_takeover_mode = nil
-    fc_goal_heading_deg = nil
-    fc_goal_turn = nil
-    fc_goal_alt_m = nil
-    fc_goal_alt_ref = nil
-    fc_goal_ias_kmh = nil
     fc_last_frame_t = nil
     fc_env_low_ias_since_t = nil
     fc_last_stowed_pilot_capture = nil
     fc_last_steady_values = nil
     fc_law = nil
     fc_last_command = nil
-    -- `fc_last_cmd_seq` deliberately NOT reset -- a stale, pre-restart
-    -- command replayed after a reconnect must still be seen as stale,
-    -- same "seq never goes backwards" posture the rest of this module
-    -- relies on.
+    fc_applied_stamp_hdg = nil
+    fc_applied_stamp_alt = nil
+    fc_applied_stamp_spd = nil
 end
 
 -- Body-layer process-start reset (BL-16 sortie 2026-11-20, `docs/
 -- acceptance/2026-11-20-sortie-feedback.md` -- user: "if body layer
 -- resets, it could send a reset signal ... then body and collector
 -- would match", and on the stick: "yes let go. A service reset is
--- error situation"). Reuses `on_stop` above -- same "let go of the
--- stick, clear every held goal/law state" effect a mission restart
--- already has -- then goes one step further: `on_stop` deliberately
--- leaves `fc_last_cmd_seq` untouched (its own comment: a stale,
--- pre-restart command must still be seen as stale across a mission
--- restart), but a body-layer *process* restart is a different event --
--- body-layer's own `wire_seq` also starts fresh at 0 this process, so
--- Lua's own staleness floor must come back to its startup sentinel too,
--- or the very next `seq=1` send this process ever makes is rejected as
--- stale forever. Idempotent and safely re-sendable: body-layer resends
--- this while unconfirmed (holding every seq-carrying send until a
--- status line echoes this exact epoch back), and applying the same
--- epoch twice has no further effect.
+-- error situation"). Reuses `on_stop` above. **BL-16 Stage 3**: the
+-- staleness floor this used to reconcile (`fc_last_cmd_seq`) is gone
+-- from this module -- it is `flight_desired`'s own `fd_epoch`/`fd_
+-- last_seq` now (one channel, one floor, reset by `commands.lua`'s
+-- `handle_reset_command` calling `flight_desired.reset` directly), so
+-- this function only clears its own diagnostic echo. Idempotent and
+-- safely re-sendable, same posture as every other `reset(epoch)`.
 local function reset(epoch)
     on_stop()
-    fc_last_cmd_seq = -1
     fc_reset_epoch = epoch
 end
 
-M.handle_flight_control_command = handle_flight_control_command
+M.request_take = request_take
+M.request_release = request_release
+M.handle_flight_lease_command = handle_flight_lease_command
 M.run_flight_control = run_flight_control
 M.push_flight_control_state = push_flight_control_state
 M.on_stop = on_stop
 M.reset = reset
+
+-- `plans/flight-desired-state/plan.md`, section 2 -- the one read-only
+-- getter `flight_desired.lua` needs to derive `fd_mode`/`fd_mode_cause`
+-- without this module's own locals (`dofile`-loaded chunks share no
+-- locals, only `_G`/`M`). Same "read-only mirror" posture as `ai_pilot_
+-- wheel.lua`'s own `is_parked`/`player_seat`/`held_targets` getters.
+M.mode_info = function()
+    return {
+        mode = fc_mode,
+        release_reason = fc_release_reason,
+        refuse_cause = fc_refuse_cause,
+    }
+end
 
 -- The control law's own pure functions, exported for the toy-plant
 -- suite (`tests/test_flight_control_law.py`) to call directly -- none

@@ -19,19 +19,17 @@ control_state` (`replace()` never constructs fresh) -- same shape
 already use.
 
 `take_controls`/`release_controls` are the two handover actions, as pure
-functions over `FlightControlState` (root `CLAUDE.md`, "Behaviour as
-actions and params" -- plan's own instruction: "it also holds the
-actions as pure functions and `decide_flight_control`, which is the one
-'when'"). `belief.crew_console.CrewConsole.take_controls`/`release_
-controls` are the rule-callable wrappers that supply the live context
-(`has_controls`/`on_ground`/IAS/attack-run) these functions need and
-apply the result to `self.flight_control_state`.
-
-`decide_flight_control` is the one "when" apart from those two actions:
-park/unpark edges, the ack timeout, Lua's own self-release, and a
-refused unpark take -- everything that happens because of what *Export.
-lua or the clock* did this poll, never because of what the player said
-this dispatch (that is `take_controls`/`release_controls`'s own job).
+functions (root `CLAUDE.md`, "Behaviour as actions and params").
+**BL-16 Stage 3** (`plans/flight-desired-state/plan.md`, section 5):
+they are now request *builders* with no `FlightControlState` parameter
+at all -- there is no more `phase` to transition, and the voice-take's
+own confirm/timeout handshake (what `decide_flight_control` used to own)
+moves to `belief.flight_authority`'s ack-matching against `fd_acks`
+(one numbered channel now carries both handover kinds).
+`belief.crew_console.CrewConsole.take_controls`/`release_controls` are
+the rule-callable wrappers that supply the live context (`has_controls`/
+`on_ground`/IAS/attack-run) these functions need and queue the resulting
+wire request (`CrewConsole.flight_control_transition`).
 
 **Mode-1 goal actions (`increment_heading`/`set_heading`/... Decision
 21's table) are NOT pure functions here** -- unlike mode 2's
@@ -52,7 +50,6 @@ from typing import Any, Final, Literal
 import tuning
 from aircraft_client import AircraftLayerClient
 
-FlightControlPhase = Literal["PILOT", "TAKING", "ACTIVE", "OVERLAY"]
 AltitudeRef = Literal["agl", "baro"]
 
 #: At takeover, |bank| under this holds heading; at or above it, the
@@ -224,15 +221,21 @@ SPEED_STEP_KMH: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: How long `TAKING` waits for `Export.lua` to confirm `active` before
-#: giving up and speaking "Unable, not ready." -- judgement call, same
-#: shape as `RULE_GATE_HOLD_TIMEOUT_S`'s own role for mode 2's takeover-
-#: settle window, just a separate constant: this one bounds a network
-#: round trip (voice command -> HTTP POST -> the next `GET /flight_
-#: control/latest` poll), not a belief-state settle.
+#: How long a take request waits for `Export.lua`'s own ack (`fd_acks`)
+#: before giving up, kept at least one poll plus `Export.lua`'s own push cadence
+#: above `belief.flight_authority.FLIGHT_REQUEST_ACCEPT_WINDOW_S`, the
+#: Lua-side half of the same deadline pair
+#: (`test_handover_ack_timeout_exceeds_accept_window_with_margin` pins
+#: the inequality). Judgement call -- this one bounds a network round
+#: trip (voice command -> HTTP POST -> the next `GET /flight_desired/
+#: latest` poll). Raised 2.0 to 3.0, BL-16 Stage 3 (`plans/
+#: flight-desired-state/plan.md`, section 3a): it now bounds two
+#: body-layer polls (the request is applied within one Lua frame, but
+#: is only read back on body-layer's next ~1 Hz poll after that,
+#: occasionally two) rather than one take.
 HANDOVER_ACK_TIMEOUT_S: Final[float] = tuning.real(
     "belief.flight_control.HANDOVER_ACK_TIMEOUT_S",
-    2.0,
+    3.0,
     lo=0.5,
     hi=30.0,
     status="judgement",
@@ -299,10 +302,11 @@ VRS_MAX_DESCENT_MPS: Final[float] = tuning.real(
 
 @dataclass(frozen=True)
 class FlightControlGoalRequest:
-    """One goal-channel message's worth of fields, built by a `CrewConsole.
-    axes_*` action and carried by the one-shot `flight_control_goal_
-    transition` field until `body.py`'s `_apply_flight_control` sends it
-    and bumps `FlightControlState.wire_seq`. Every field `None` means
+    """One `set`-kind wire request's worth of fields, built by a
+    `CrewConsole.axes_*` action and carried by the one-shot `flight_
+    control_goal_transition` field until `body.py`'s `_apply_flight_
+    requests` sends it on the numbered `flight` channel (BL-16 Stage 3,
+    `plans/flight-desired-state/plan.md`). Every field `None` means
     "omit it" on the wire (`Export.lua`'s own "a null field means keep
     yours").
 
@@ -324,95 +328,37 @@ class FlightControlGoalRequest:
 
 @dataclass(frozen=True)
 class FlightControlState:
-    """Petrovich's belief about mode 1. `phase`/`take_seq`/`pending_
-    take_says`/`unpark_take`/`wire_seq` are body-layer's own authoritative
-    fields (never overwritten by `advance_flight_control_state`, which
-    only refreshes the `lua_*`/`held_*`/`measured_*` mirrors below).
-    `took_at_sim` is the sim time the current `TAKING` phase was entered,
-    `None` otherwise -- `decide_flight_control`'s own ack-timeout clock.
+    """Petrovich's belief about mode 1's own diagnostics -- a read-only
+    mirror of `Export.lua`'s per-frame `flight_control` status line.
 
-    **`wire_seq` vs. `take_seq`**: `wire_seq` is the one strictly-
-    increasing counter every message's own `"seq"` field carries
-    (`Export.lua`'s `fc_last_cmd_seq` applies it across every `cmd` kind
-    alike -- a `goal` message is dropped exactly as stale as a `take` if
-    sent out of order against it), bumped by `_apply_flight_control` on
-    every send regardless of kind. `take_seq` is the *semantic* id of
-    the current (or most recent) takeover -- what Lua echoes back on
-    `fc_take_seq` to say "this specific take is now active" -- and only
-    ever changes on an actual take, voice or unpark. The two would
-    collide (an intervening goal send bumping what a take confirmation
-    is compared against) if conflated into one field.
+    **BL-16 Stage 3** (`plans/flight-desired-state/plan.md`) removes
+    `phase`/`take_seq`/`pending_take_says`/`took_at_sim`/`unpark_take`/
+    `wire_seq`/`held_*`/`lua_take_seq`/`lua_last_cmd_seq` from this
+    dataclass entirely: there is no more handover phase to track here
+    (the mode authority is `belief.flight_authority.FlightAuthority
+    State.fd_mode`, derived in Lua since Stage 2) and no more per-field
+    `held_*` wire mirror (the commanded heading/altitude/speed is
+    `FlightAuthorityState`'s own desired-state fields now). The voice-
+    take confirm/timeout handshake these fields used to support moves to
+    `belief.flight_authority`'s own ack-matching against `fd_acks`
+    (`PendingTake`/`resolve_pending_take`), driven by the one numbered
+    channel rather than polling `fc_take_seq`/`fc_last_cmd_seq` here.
 
-    **`take_controls`'s own `take_seq + 1` bump is provisional, not the
-    value `decide_flight_control` ever compares against** (2026-11-19
-    mode 1 handover feedback/fix a) -- it is overwritten by `body.py`'s
-    `_apply_flight_control` with the *actual* wire `seq` the `take`
-    message is sent with, the one value `Export.lua` can possibly echo
-    back as `fc_take_seq` (its own `cmd == "take"` handler: `fc_pending_
-    take_seq = seq`, the wire message's own seq, not a second counter
-    of its own). Comparing the local bump directly against `fc_take_seq`
-    -- what this field held before the fix -- can only ever match by
-    coincidence, which is exactly why it went unnoticed: every existing
-    pure-function test built `take_seq`/`lua_take_seq` equal by hand.
+    What remains is genuinely mode-1-specific and has no other home:
+    measured telemetry (`measured_heading`/`measured_altitude`/
+    `measured_speed`, the fallback "current" value `_axes_current_*`
+    reads when `FlightAuthorityState` has nothing yet), the handover-
+    diagnostics fields (`lua_mode`/`lua_take_origin`/`lua_release_
+    reason`/`lua_refuse_cause`/`lua_takeover_mode`), the A9 bands
+    (`in_band_*`, no consumer yet -- M4's own settle test), and the
+    slip-ball calibration readout (sortie 2026-11-20, `aircraft-layer/
+    research/2026-11-20-slip-ball-recon.md`, not yet read by any action
+    or by `K_beta`, unmeasured sign/scale)."""
 
-    **`lua_last_cmd_seq` mirrors `Export.lua`'s own `fc_last_cmd_seq`
-    directly (security-m1-m2.md Finding A, change-request round)** --
-    unlike every other `lua_*` mirror, `_apply_flight_control` reads it
-    to *reconcile* `wire_seq`, not just to display it: `wire_seq` resets
-    to 0 on a body-layer process restart but `fc_last_cmd_seq` does not
-    (deliberately, across a mission restart too -- `on_stop`'s own
-    docstring), so a restart while mode 1 is anywhere but `off` would
-    otherwise leave `wire_seq` permanently behind it, and every later
-    `take`/`release`/`goal`/`arm` this process ever sends would be
-    silently dropped as stale for the rest of the DCS session. The
-    reconciliation (`wire_seq = max(wire_seq, lua_last_cmd_seq)`, so the
-    next send's `wire_seq + 1` clears it) happens once, lazily, right
-    before the next send -- never in `advance_flight_control_state`
-    itself, which stays a pure mirror refresh per this field's own
-    opening sentence.
-
-    `held_heading`/`held_altitude`/`held_altitude_ref`/`held_speed`
-    mirror `Export.lua`'s own `fc_goal_*` fields -- the goal mode 1 is
-    holding on the wire, `None` until a goal has ever been commanded
-    this activation (there is no AI pilot reporting its own value the
-    way mode 2's overlay readback does). `measured_heading`/`measured_
-    altitude`/`measured_speed` mirror `fc_measured_*` -- plain telemetry,
-    always known once Lua is active, used as the fallback "current"
-    value by the handful of actions that need one before any goal has
-    been commanded (`CrewConsole.current_crew_state`'s own merge of the
-    two is what the `"flight_control*"` gates actually see).
-
-    `in_band_heading`/`in_band_altitude`/`in_band_speed` mirror `fc_in_
-    band_*` (M2's own A9 computation, `None` before `fc_law` exists --
-    off/taking/armed, or an M1-only `Export.lua` that never computes
-    them at all). No action in this module reads them yet -- A9's own
-    "what the bands are used for" names only the status field and M4's
-    settle test, both still ahead -- but mirroring them here, where
-    every other wire status field is already mirrored, costs nothing
-    and saves M4 a second pass through this dataclass.
-
-    `slip_ball_pilot_raw`/`slip_ball_operator_raw`/`slip_ball_lo_api`
-    (sortie 2026-11-20, `aircraft-layer/research/2026-11-20-slip-ball-
-    recon.md`) mirror `fc_slip_ball_*` -- a read-only calibration
-    readout, not yet read by any action or by `K_beta` (unmeasured
-    sign/scale)."""
-
-    phase: FlightControlPhase = "PILOT"
-    take_seq: int = 0
-    pending_take_says: str | None = None
-    took_at_sim: float | None = None
-    unpark_take: bool = False
-    wire_seq: int = 0
-    held_heading: float | None = None
-    held_altitude: float | None = None
-    held_altitude_ref: AltitudeRef | None = None
-    held_speed: float | None = None
     measured_heading: float | None = None
     measured_altitude: float | None = None
     measured_speed: float | None = None
     lua_mode: str | None = None
-    lua_take_seq: int | None = None
-    lua_last_cmd_seq: int | None = None
     lua_take_origin: str | None = None
     lua_release_reason: str | None = None
     lua_refuse_cause: str | None = None
@@ -425,11 +371,9 @@ class FlightControlState:
     slip_ball_lo_api: float | None = None
     #: BL-16 sortie 2026-11-20 (`docs/acceptance/
     #: 2026-11-20-sortie-feedback.md`) -- mirrors `Export.lua`'s own
-    #: `fc_reset_epoch` echo. `body.py`'s poll loop compares this
-    #: against `ConsolePerceptionRunner.command_reset_epoch` to know
-    #: when it is safe to send anything that carries `wire_seq` -- not
-    #: decided here, same "mirror only" posture every other `lua_*`
-    #: field on this dataclass has.
+    #: `fc_reset_epoch` echo, a diagnostic only since Stage 3 (the
+    #: staleness floor it used to help reconcile is `flight_desired`'s
+    #: own `fd_epoch`/`fd_last_seq` now).
     lua_reset_epoch: int | None = None
 
 
@@ -451,43 +395,27 @@ def _as_optional_bool(value: object) -> bool | None:
     return value
 
 
-def _as_optional_ref(value: object) -> AltitudeRef | None:
-    if value == "agl":
-        return "agl"
-    if value == "baro":
-        return "baro"
-    return None
-
-
 def advance_flight_control_state(
     state: FlightControlState, client: AircraftLayerClient
 ) -> FlightControlState:
     """Advances `state` from the aircraft layer's `GET /flight_control/
     latest` feed, once per poll -- same "replace wholesale, never
     mutate, a `None` sample leaves `state` unchanged" shape `belief.
-    ai_pilot_wheel.advance_parked_flight_state` already uses. Only the
-    `lua_*`/`held_*`/`measured_*`/`in_band_*` mirrors move; `phase`/`take_seq`/
-    `pending_take_says`/`took_at_sim`/`unpark_take`/`wire_seq` are
-    body-layer's own fields and are carried through unchanged -- this
-    function never decides the handover phase, `decide_flight_control`
-    does, from the mirrors this function just refreshed."""
+    ai_pilot_wheel.advance_parked_flight_state` already uses. Every
+    field on `state` is a `lua_*`/`measured_*`/`in_band_*`/slip-ball
+    mirror now (Stage 3) -- nothing on this dataclass is body-layer's
+    own authoritative state any more."""
     sample = client.get_flight_control_latest()
     if sample is None:
         return state
     return replace(
         state,
-        held_heading=_as_optional_float(sample.get("fc_goal_heading")),
-        held_altitude=_as_optional_float(sample.get("fc_goal_altitude")),
-        held_altitude_ref=_as_optional_ref(sample.get("fc_goal_altitude_ref")),
-        held_speed=_as_optional_float(sample.get("fc_goal_speed")),
         measured_heading=_as_optional_float(sample.get("fc_measured_heading")),
         measured_altitude=_as_optional_float(sample.get("fc_measured_altitude")),
         measured_speed=_as_optional_float(sample.get("fc_measured_speed")),
         lua_mode=sample.get("fc_mode")
         if isinstance(sample.get("fc_mode"), str)
         else None,
-        lua_take_seq=_as_optional_int(sample.get("fc_take_seq")),
-        lua_last_cmd_seq=_as_optional_int(sample.get("fc_last_cmd_seq")),
         lua_take_origin=(
             sample.get("fc_take_origin")
             if isinstance(sample.get("fc_take_origin"), str)
@@ -521,183 +449,53 @@ def advance_flight_control_state(
 
 
 def take_controls(
-    state: FlightControlState,
-    now_sim: float,
     *,
     overlay_flying: bool,
     on_ground: bool,
     too_slow: bool,
     attack_run_engaged: bool,
-) -> tuple[FlightControlState, dict[str, object]]:
-    """Decision 22's `flight.take_controls`. `overlay_flying` wins first
+) -> dict[str, object]:
+    """Decision 22's `flight.take_controls` -- **BL-16 Stage 3**: a pure
+    request builder with no state of its own (the voice-take confirm/
+    timeout handshake moves to `belief.flight_authority.PendingTake`/
+    `resolve_pending_take`, driven by the numbered channel's own
+    `fd_acks` rather than a local `phase`). `overlay_flying` wins first
     (the 2026-11-17 no-op: "'you have controls' is no-op, say nothing" --
     not an error, `acted=False` only). The three refusals that follow
     match in the order the plan lists them; none is more authoritative
     than another, this order is simply deterministic.
 
-    On success: `TAKING`, `take_seq` bumped, `took_at_sim` set (the ack-
-    timeout clock `decide_flight_control` reads). The caller
-    (`CrewConsole.take_controls`) is responsible for recording `says`
-    and sending the wire `take` message -- this function only decides
-    the belief-state transition."""
+    On success: `{"ok": True, "acted": True}` -- the caller
+    (`CrewConsole.take_controls`) queues the wire `take` request and
+    holds the confirmation text until it is acked."""
     if overlay_flying:
-        return state, {"ok": True, "acted": False}
+        return {"ok": True, "acted": False}
     if on_ground:
-        return state, {"ok": False, "reason": "ON_GROUND"}
+        return {"ok": False, "reason": "ON_GROUND"}
     if too_slow:
-        return state, {"ok": False, "reason": "TOO_SLOW"}
+        return {"ok": False, "reason": "TOO_SLOW"}
     if attack_run_engaged:
-        return state, {"ok": False, "reason": "ATTACK_RUN_ENGAGED"}
-    new_state = replace(
-        state,
-        phase="TAKING",
-        take_seq=state.take_seq + 1,
-        took_at_sim=now_sim,
-    )
-    return new_state, {"ok": True, "acted": True}
+        return {"ok": False, "reason": "ATTACK_RUN_ENGAGED"}
+    return {"ok": True, "acted": True}
 
 
-def release_controls(
-    state: FlightControlState, *, overlay_flying: bool
-) -> tuple[FlightControlState, dict[str, object]]:
-    """Decision 22's `flight.release_controls`. `overlay_flying` (U9,
+def release_controls(*, overlay_flying: bool, flying_axes: bool) -> dict[str, object]:
+    """Decision 22's `flight.release_controls` -- **BL-16 Stage 3**: a
+    pure request builder, `flying_axes` replacing the old `state.phase
+    in ("TAKING", "ACTIVE") or state.lua_mode in ("active", "taking")`
+    check (the caller passes `flight_authority_state.fd_mode in
+    ("taking", "m1")`, the one mode authority). `overlay_flying` (U9,
     answered 2026-11-18: *"respond 'unable' when in AI overlay mode.
     Don't remember, Player will handle."*) raises unable `AI_OVERLAY` --
     nothing here is remembered; the next unpark still takes per Decision
-    24 regardless of this call. Otherwise: `acted=True` while actually
-    holding the controls (`TAKING`/`ACTIVE`) **or whenever `Export.lua`
-    itself still reports holding the axes** (`lua_mode` `"active"` or
-    `"taking"`, 2026-11-19 mode 1 handover feedback, fix c) -- belief
-    can land on `PILOT` with Lua still flying (the ack-timeout case,
-    before fix b's own release reaches it, or any other poll in
-    between), and Decision 13's recovery phrase must always act then:
-    the player's stick really was being ignored. `acted=False` (silent,
-    the player already has the controls and Lua agrees) only when
-    neither belief nor Lua is flying mode 1."""
+    24 regardless of this call. `acted=False` (silent, the player
+    already has the controls) only when `flying_axes` is already
+    `False`."""
     if overlay_flying:
-        return state, {"ok": False, "reason": "AI_OVERLAY"}
-    if state.phase in ("TAKING", "ACTIVE") or state.lua_mode in ("active", "taking"):
-        new_state = replace(
-            state,
-            phase="PILOT",
-            pending_take_says=None,
-            took_at_sim=None,
-        )
-        return new_state, {"ok": True, "acted": True}
-    return state, {"ok": True, "acted": False}
-
-
-@dataclass(frozen=True)
-class FlightControlDecision:
-    """What `decide_flight_control` found this poll, for `CrewConsole`'s
-    own drain to speak -- `None` when nothing happened. `says` carries
-    the exact text (the one-shot `pending_take_says` for a confirmed
-    voice take, or the fixed urgent lines for the other three kinds);
-    `urgent` is threaded straight to `_print`'s `bypass_gate`."""
-
-    says: str
-    urgent: bool
-
-
-def decide_flight_control(
-    state: FlightControlState, now_sim: float, *, parked_active: bool
-) -> tuple[FlightControlState, FlightControlDecision | None]:
-    """The one "when" apart from `take_controls`/`release_controls`
-    (root `CLAUDE.md`, "Behaviour as actions and params") -- everything
-    that happens because of what `Export.lua`, ED's AI, or the clock did
-    this poll, read from the mirrors `advance_flight_control_state` just
-    refreshed and `parked_active` (mode 2's own freshly-refreshed
-    `ParkedFlightState.parked_active`, read here rather than imported,
-    the same "two co-moving fields, one caller reads both" shape `body.
-    py`'s existing call sites already use).
-
-    Checked in this order, each one `return`s immediately so at most one
-    fires per poll (the events are mutually exclusive by construction --
-    a poll can only observe one of them):
-
-    1. **Park edge while flying** (Decision 24, Co-moving rows 8/8b):
-       `parked_active` just became true while `phase` was `TAKING`/
-       `ACTIVE`/`PILOT`. `TAKING`/`ACTIVE` -> `Export.lua` already self-
-       armed (its own park-edge branch); `PILOT` -> nothing to arm yet
-       (he was not flying mode 1), so this is a no-op for `PILOT` -- only
-       `TAKING`/`ACTIVE` move to `OVERLAY`. Silent either way.
-    2. **Unpark while OVERLAY/armed, Lua confirms active from the unpark
-       origin** (row 9): silent, `take_seq` adopts Lua's own.
-    3. **Unpark while OVERLAY/armed, Lua refuses** (row 9a): urgent
-       "You have controls!" -- a forced handover, not a player command.
-    4. **Lua's own self-release while ACTIVE** (row 7): urgent "You have
-       controls!".
-    5. **Ack timeout while TAKING** (row 5): "Unable, not ready.",
-       `pending_take_says` discarded unspoken.
-    6. **Lua confirms active for a voice take while TAKING** (row 4):
-       `pending_take_says` spoken once, then cleared.
-
-    A no-op (`state` unchanged, `None`) covers every other poll."""
-    if parked_active and state.phase in ("TAKING", "ACTIVE"):
-        new_state = replace(
-            state,
-            phase="OVERLAY",
-            unpark_take=True,
-            pending_take_says=None,
-            took_at_sim=None,
-        )
-        return new_state, None
-
-    if state.phase == "OVERLAY" and not parked_active:
-        if state.lua_mode == "active" and state.lua_take_origin == "unpark":
-            new_state = replace(
-                state,
-                phase="ACTIVE",
-                take_seq=(
-                    state.lua_take_seq
-                    if state.lua_take_seq is not None
-                    else state.take_seq
-                ),
-                unpark_take=True,
-            )
-            return new_state, None
-        if state.lua_mode == "off" and state.lua_release_reason == "refused":
-            new_state = replace(state, phase="PILOT", unpark_take=False)
-            return new_state, FlightControlDecision(
-                says="You have controls!", urgent=True
-            )
-        # Still waiting for Lua to report the unpark's own outcome.
-        return state, None
-
-    if (
-        state.phase == "ACTIVE"
-        and state.lua_mode == "off"
-        and state.lua_release_reason
-        in (
-            "envelope",
-            "nan",
-            "dead",
-        )
-    ):
-        new_state = replace(state, phase="PILOT", pending_take_says=None)
-        return new_state, FlightControlDecision(says="You have controls!", urgent=True)
-
-    if state.phase == "TAKING":
-        if state.lua_mode == "active" and state.lua_take_seq == state.take_seq:
-            says = state.pending_take_says
-            new_state = replace(
-                state, phase="ACTIVE", pending_take_says=None, took_at_sim=None
-            )
-            if says is not None:
-                return new_state, FlightControlDecision(says=says, urgent=True)
-            return new_state, None
-        if (
-            state.took_at_sim is not None
-            and now_sim - state.took_at_sim >= HANDOVER_ACK_TIMEOUT_S
-        ):
-            new_state = replace(
-                state, phase="PILOT", pending_take_says=None, took_at_sim=None
-            )
-            return new_state, FlightControlDecision(
-                says="Unable, not ready.", urgent=False
-            )
-
-    return state, None
+        return {"ok": False, "reason": "AI_OVERLAY"}
+    if flying_axes:
+        return {"ok": True, "acted": True}
+    return {"ok": True, "acted": False}
 
 
 def clamp_altitude(m: float, ref: AltitudeRef) -> float:

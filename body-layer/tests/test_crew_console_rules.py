@@ -42,6 +42,19 @@ def _flight_console_with_rule(
     console.rule_runner = runner  # type: ignore[assignment]
     console.set_enabled_rule_ids(frozenset({"my_rule"}), {"my_rule": category})
     console.parked_flight_state = replace(ParkedFlightState(), **state_fields)
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `flight_
+    # mode()`/`current_crew_state()` read `flight_authority_state` now,
+    # not `parked_flight_state` -- mirror `parked_active`/`held_heading`
+    # onto it too, same reasoning as `test_rules_flight_actions.py`'s
+    # own `_console` helper.
+    if state_fields.get("parked_active"):
+        held_heading = state_fields.get("held_heading")
+        console.flight_authority_state = replace(
+            console.flight_authority_state,
+            fd_mode="m2",
+            hdg_mode="heading" if held_heading is not None else None,
+            heading_deg=held_heading,  # type: ignore[arg-type]
+        )
     return console
 
 
@@ -219,6 +232,11 @@ def test_drain_resolves_to_pass_on_a_later_poll_not_at_dispatch_time() -> None:
     console.parked_flight_state = replace(
         console.parked_flight_state, held_heading=10.0
     )
+    # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+    # state` now, not `parked_flight_state` -- mirror the same settle.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, hdg_mode="heading", heading_deg=10.0
+    )
     lines = console.drain_pending_rule_dispatch(now_sim=1.0)
     assert calls == [1.0]
     assert lines == ["now flying"]
@@ -275,6 +293,11 @@ def test_a_second_held_command_replaces_the_first_with_no_line_for_it() -> None:
 
     console.parked_flight_state = replace(
         console.parked_flight_state, held_heading=10.0
+    )
+    # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+    # state` now, not `parked_flight_state` -- mirror the same settle.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, hdg_mode="heading", heading_deg=10.0
     )
     lines = console.drain_pending_rule_dispatch(now_sim=2.0)
     assert lines == ["ran other_rule"]

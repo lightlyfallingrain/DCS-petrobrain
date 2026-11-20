@@ -93,3 +93,27 @@ values = { open = 1.0, closed = 0.0 }
 source_element = "SAU-B-ON-PTR"    # arg 255
 values = { on = 1.0, off = 0.0 }
 
+[effectors.p_sau_h_channel_on]
+source_element = "SAU-H-ON-PTR"    # arg 237
+values = { on = 1.0, off = 0.0 }
+# Momentary button (shape default_square_button, not in
+# _ABSOLUTE_WRITE_SHAPES), same as p_sau_b_channel_on above -- its own
+# arg is the click pulse, not a persisted channel state, so it reads
+# 0.0 at rest and the engine's implicit self-check writes (presses) on
+# every fire regardless of whether the H channel is already on.
+# Whether a repeat press while already on is harmless in ED's own
+# systems model is unverified -- no clickable-data or flight evidence
+# either way, same open question `effectors.cplr_distr` flags above.
+
+[effectors.p_sau_k_channel_on]
+source_element = "SAU-K-ON-PTR"    # arg 243
+values = { on = 1.0, off = 0.0 }
+# Same momentary shape and same unverified repeat-press question as
+# p_sau_h_channel_on above.
+
+[effectors.p_sau_t_channel_on]
+source_element = "SAU-T-ON-PTR"    # arg 249
+values = { on = 1.0, off = 0.0 }
+# Same momentary shape and same unverified repeat-press question as
+# p_sau_h_channel_on above.
+

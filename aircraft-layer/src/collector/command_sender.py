@@ -340,68 +340,97 @@ class CommandSender:
                 f"param={param!r}: {exc}"
             ) from exc
 
-    def send_flight_control(
+    def send_flight(
         self,
+        epoch: int,
         seq: int,
-        cmd: Literal["take", "release", "goal", "arm"],
-        limits: dict[str, float] | None,
-        goal: dict[str, object] | None,
+        until: float,
+        kind: str,
+        fields: dict[str, object],
     ) -> None:
-        """Send `{"op": "flight_control", "seq": seq, "cmd": cmd, "limits":
-        limits, "goal": goal}` to `Export.lua`'s command listener --
-        BL-16 mode 1's own channel (`plans/flight-control/plan.md`,
-        "Revised 2026-11-18", "Wire"), Stage M1. Same `CommandSendError`
-        posture as `send_ai_pilot_goal`: a dropped handover/goal message
-        is a real behavioral gap, not an opaque display string to
-        swallow.
+        """Send `{"op": "flight", "epoch", "seq", "until", "kind", ...
+        fields}` to `Export.lua`'s command listener -- BL-16 Stage 3's
+        one numbered channel (`plans/flight-desired-state/plan.md`,
+        section 5), replacing `send_flight_control` entirely (the
+        `flight_control` op is retired). Same `CommandSendError` posture
+        as `send_ai_pilot_goal`: a dropped handover/goal/set message is
+        a real behavioral gap, not an opaque display string to swallow.
 
-        **`limits` travels in every message** (the plan's own wire
-        shape) -- `None` is accepted here only for a caller that has not
-        yet resolved its tunables (defensive; `body.py`'s own call site
-        always passes the live bundle). `goal` is `None` for `take`/
-        `release`/`arm` messages, which carry no goal fields.
-
-        **Only the fields `Export.lua`'s hand-rolled, nesting-blind
-        regex parser needs are unique strings** -- `goal`/`limits` are
-        plain `json.dumps`-nested objects on the wire (unlike `send_
-        cockpit_switch`/`send_sight_target`'s hand-formatted floats):
-        every value on this channel (a compass heading, a metre
-        altitude, a km/h speed, a small whole `seq`) is a real-world
-        magnitude with no near-zero-fraction case, so the exponent-
-        notation risk that forced hand-formatting on the 9K113 channel
-        does not apply here, same posture as `send_ai_pilot_goal`.
+        `kind` is one of `"set"`/`"take"`/`"release"` (the mode-2 kinds
+        -- `align`/`align_for_launch`/`recover`/`translate`/`hover_hold`/
+        `hover_step` -- are refused `wrong_mode` by `Export.lua` itself
+        until Stage 4 wires them up; this layer still accepts sending
+        them so the API layer's own closed vocabulary does not need a
+        second reshape then). `fields` carries whichever of `heading_
+        deg`/`turn`/`turn_rate_deg_s`/`turn_style`/`alt_m`/`alt_ref`/
+        `ias_kmh` this request sets -- flattened straight onto the
+        outer JSON object, not nested, since `Export.lua`'s own
+        extraction helpers are nesting-blind (every field name on this
+        wire is unique).
 
         **No validation happens here** -- same division of labour as
-        `send_ai_pilot_goal`'s own docstring: `api.server`'s `POST
-        /command/flight_control` handler validates shape before this
+        every other `send_*` method's own docstring: `api.server`'s
+        `POST /command/flight` handler validates shape before this
         method is ever called, and `Export.lua`'s own dispatch
-        (`handle_flight_control_command`) validates a third time."""
+        (`flight_desired.handle_flight_command`) validates a third
+        time."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload_dict: dict[str, object] = {
+            "op": "flight",
+            "epoch": epoch,
+            "seq": seq,
+            "until": until,
+            "kind": kind,
+        }
+        payload_dict.update(fields)
+        payload = json.dumps(payload_dict).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "flight command send failed: seq=%r kind=%r",
+                seq,
+                kind,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send flight seq={seq!r} kind={kind!r}: {exc}"
+            ) from exc
+
+    def send_flight_lease(self, epoch: int, limits: dict[str, float] | None) -> None:
+        """Send `{"op": "flight_lease", "epoch": epoch, "limits": limits}`
+        to `Export.lua`'s command listener -- BL-16 Stage 2's own
+        unnumbered lease (`plans/flight-desired-state/plan.md`,
+        refinement 3), replacing the old `send_flight_control(...,
+        "arm", ...)` send. `Export.lua`'s `flight_control.lua` self-arms
+        on a park edge while this lease is fresh; body-layer never
+        states the mode. Same `CommandSendError` posture as `send_
+        flight_control`: a dropped lease means the next park may not
+        self-arm, a real behavioural gap.
+
+        **No `seq` field, same reasoning as `send_reset`** -- this op is
+        deliberately unnumbered and sent every poll, never rejected as
+        stale.
+
+        **No validation happens here** -- same division of labour as
+        every other `send_*` method's own docstring."""
         if self._socket is None:
             self.open()
         sock = self._socket
         assert sock is not None  # `open()` above always sets it
 
         payload = json.dumps(
-            {
-                "op": "flight_control",
-                "seq": seq,
-                "cmd": cmd,
-                "limits": limits,
-                "goal": goal,
-            }
+            {"op": "flight_lease", "epoch": epoch, "limits": limits}
         ).encode("utf-8")
         try:
             sock.sendto(payload, (self._host, self._port))
         except OSError as exc:
-            logger.warning(
-                "flight-control command send failed: seq=%r cmd=%r",
-                seq,
-                cmd,
-                exc_info=True,
-            )
-            raise CommandSendError(
-                f"failed to send flight_control seq={seq!r} cmd={cmd!r}: {exc}"
-            ) from exc
+            logger.warning("flight-lease command send failed", exc_info=True)
+            raise CommandSendError(f"failed to send flight_lease: {exc}") from exc
 
     def send_reset(self, epoch: int) -> None:
         """Send `{"op": "reset", "epoch": epoch}` to `Export.lua`'s
