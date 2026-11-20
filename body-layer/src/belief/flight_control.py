@@ -389,7 +389,13 @@ class FlightControlState:
     "what the bands are used for" names only the status field and M4's
     settle test, both still ahead -- but mirroring them here, where
     every other wire status field is already mirrored, costs nothing
-    and saves M4 a second pass through this dataclass."""
+    and saves M4 a second pass through this dataclass.
+
+    `slip_ball_pilot_raw`/`slip_ball_operator_raw`/`slip_ball_lo_api`
+    (sortie 2026-11-20, `aircraft-layer/research/2026-11-20-slip-ball-
+    recon.md`) mirror `fc_slip_ball_*` -- a read-only calibration
+    readout, not yet read by any action or by `K_beta` (unmeasured
+    sign/scale)."""
 
     phase: FlightControlPhase = "PILOT"
     take_seq: int = 0
@@ -414,6 +420,9 @@ class FlightControlState:
     in_band_heading: bool | None = None
     in_band_altitude: bool | None = None
     in_band_speed: bool | None = None
+    slip_ball_pilot_raw: float | None = None
+    slip_ball_operator_raw: float | None = None
+    slip_ball_lo_api: float | None = None
 
 
 def _as_optional_float(value: object) -> float | None:
@@ -494,6 +503,11 @@ def advance_flight_control_state(
         in_band_heading=_as_optional_bool(sample.get("fc_in_band_heading")),
         in_band_altitude=_as_optional_bool(sample.get("fc_in_band_altitude")),
         in_band_speed=_as_optional_bool(sample.get("fc_in_band_speed")),
+        slip_ball_pilot_raw=_as_optional_float(sample.get("fc_slip_ball_pilot_raw")),
+        slip_ball_operator_raw=_as_optional_float(
+            sample.get("fc_slip_ball_operator_raw")
+        ),
+        slip_ball_lo_api=_as_optional_float(sample.get("fc_slip_ball_lo_api")),
     )
 
 

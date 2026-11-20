@@ -129,6 +129,23 @@ class TestFlightControlState:
         assert sample.release_reason is None
         assert sample.limit_hit is False
 
+    def test_slip_ball_fields_are_optional_and_absent_parses_as_none(self) -> None:
+        sample = FlightControlState.from_json_line(_LINE, received_wall_clock_s=99.0)
+        assert sample.slip_ball_pilot_raw is None
+        assert sample.slip_ball_operator_raw is None
+        assert sample.slip_ball_lo_api is None
+
+    def test_slip_ball_fields_parse_when_present(self) -> None:
+        line = _LINE[:-1] + (
+            ',"fc_slip_ball_pilot_raw":0.125,'
+            '"fc_slip_ball_operator_raw":-0.25,'
+            '"fc_slip_ball_lo_api":null}'
+        )
+        sample = FlightControlState.from_json_line(line, received_wall_clock_s=99.0)
+        assert sample.slip_ball_pilot_raw == pytest.approx(0.125)
+        assert sample.slip_ball_operator_raw == pytest.approx(-0.25)
+        assert sample.slip_ball_lo_api is None
+
     def test_to_api_dict_carries_every_field(self) -> None:
         sample = FlightControlState.from_json_line(_LINE, received_wall_clock_s=99.0)
         assert sample.to_api_dict() == {
@@ -158,6 +175,9 @@ class TestFlightControlState:
             "fc_axes_roll": True,
             "fc_axes_pedal": False,
             "fc_axes_collective": False,
+            "fc_slip_ball_pilot_raw": None,
+            "fc_slip_ball_operator_raw": None,
+            "fc_slip_ball_lo_api": None,
         }
 
 
