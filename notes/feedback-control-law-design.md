@@ -1,5 +1,14 @@
 # Feedback control law design
 
+- **A rate term and a position-overlay term look interchangeable until you actually run one.**
+  The turn-coordination pedal could have been written either as a second accumulator in the same
+  shape as the existing `break_pedal_bias_accum`, or as a position overlay proportional to turn
+  rate; both compile, and both "look conservative" from the gain value alone. Only running the
+  toy-plant probe over several seconds of an ordinary turn showed the accumulator shape saturating
+  almost immediately — a bug reading the code could not have caught, because nothing about the
+  formula itself looks wrong until it is actually integrated forward (BL-16 sortie-1120 batch,
+  `plans/flight-control/implementation.md`, "Sortie 2026-11-20 follow-up").
+
 - **A stopping-distance/stopping-height formula needs the channel's actual deceleration
   capability as its divisor, not the channel's velocity ceiling.** `law_init_at_take`'s altitude
   takeover goal used `h + w*|w|/(2*A_v)` with `A_v` wrongly bound to `max_climb_vs_mps` (the

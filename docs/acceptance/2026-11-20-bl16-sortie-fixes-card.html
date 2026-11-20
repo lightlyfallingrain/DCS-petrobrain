@@ -1,0 +1,333 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Sortie-1120 Fixes Card</title>
+<style>
+/* layout: a tall single-column cockpit card, one numbered block per fix in flight order,
+   a highlighted "prize" block for the crash-causing fix, pre-flight gate up top */
+:root{
+  --bg:#0c1210; --bg-panel:#141c19; --fg:#e9efe9; --fg-dim:#9fb0a8;
+  --accent:#e8a33d; --accent-dim:#7a5a23; --record:#4fa3c4; --record-dim:#1c3038;
+  --ok:#5fb87c; --warn:#d9684b; --rule:#263430;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+    --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+    --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+  --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+  --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+  color-scheme: light;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--fg); margin:0;
+  font-family:"Source Sans 3",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+  padding-block:24px;
+}
+h1,h2,.mono{font-family:"Barlow Condensed",system-ui,sans-serif;}
+.mono,code,pre{font-family:"JetBrains Mono",monospace;}
+.wrap{max-width:740px; margin:0 auto; display:flex; flex-direction:column; gap:20px;}
+header{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+header h1{font-size:clamp(1.6rem,5vw,2.2rem); margin:0 0 4px; letter-spacing:.02em; text-transform:uppercase; color:var(--accent);}
+header p{margin:0; color:var(--fg-dim); font-size:.95rem;}
+.branch{
+  display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:6px; padding:10px 14px;
+}
+.branch .tag{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-dim);}
+.branch code{color:var(--accent); font-size:.95rem;}
+.note{
+  background:var(--bg-panel); border-left:3px solid var(--accent-dim); border-radius:0 6px 6px 0;
+  padding:12px 14px; font-size:.9rem; color:var(--fg-dim); line-height:1.5;
+}
+.note a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+.note code{color:var(--fg);}
+.gate{
+  background:var(--bg-panel); border:1px solid var(--warn); border-radius:10px; padding:16px 18px;
+}
+.gate h2{margin:0 0 8px; font-size:1.1rem; color:var(--warn);}
+.card{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:18px 18px 16px;
+}
+.card.prize{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-dim) inset;}
+.card h2{
+  margin:0 0 10px; font-size:1.3rem; letter-spacing:.01em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+}
+.card h2 .n{color:var(--accent); font-variant-numeric:tabular-nums;}
+.prizetag{
+  font-size:.65rem; letter-spacing:.09em; text-transform:uppercase; color:var(--bg);
+  background:var(--accent); border-radius:4px; padding:2px 7px; font-family:"Source Sans 3",sans-serif;
+}
+.block{display:flex; flex-direction:column; gap:10px;}
+.label{font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:2px;}
+pre.cmd{
+  background:var(--bg); border:1px solid var(--rule); border-radius:6px; padding:10px 12px;
+  overflow-x:auto; font-size:.85rem; color:var(--fg); margin:0; line-height:1.5;
+}
+.expect{font-size:.95rem; line-height:1.55;}
+.record-box{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:6px; padding:10px 12px;
+  font-size:.9rem; line-height:1.5;
+}
+.record-box .label{color:var(--record); opacity:.9;}
+.chk{display:flex; align-items:flex-start; gap:10px; margin-top:4px;}
+.chk input[type=checkbox]{
+  width:20px; height:20px; margin-top:2px; accent-color:var(--accent); flex-shrink:0;
+}
+.chk label{font-size:.95rem; line-height:1.4;}
+.open-q{
+  border-left:3px solid var(--record); padding:2px 0 2px 10px; font-size:.88rem; color:var(--record);
+}
+.bringback{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:16px 18px;
+}
+.bringback h2{margin:0 0 10px; font-size:1.1rem;}
+.bringback ul{margin:0; padding-left:20px; font-size:.92rem; line-height:1.6;}
+.bringback .surprise{margin-top:10px; font-style:italic; color:var(--record);}
+.seealso{font-size:.85rem; color:var(--fg-dim); line-height:1.6;}
+.seealso a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px;}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Sortie-1120 Fixes</h1>
+    <p>BL-16 &mdash; seven fixes from the 2026-11-20 sortie feedback, 2026-11-20</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <code>main</code>
+    <span class="tag">after this DoD pass's auto-merge &mdash; <code>git checkout main &amp;&amp; git pull</code></span>
+  </div>
+
+  <div class="note">
+    Most of this batch has already been flying on <code>main</code> since it was merged ahead of
+    this gate for flight testing. This card is the first chance to check all seven fixes together
+    on one flight. Two things this card does <strong>not</strong> cover: the slip-ball probe has
+    its own card (see &ldquo;Also on this flight&rdquo; below), and the mission-wide running
+    command number is still open <code>BL-16</code> work, not built in this batch.
+  </div>
+
+  <div class="gate">
+    <h2>Redeploy and pre-flight gate &mdash; do this first</h2>
+    <div class="block">
+      <div class="label">Redeploy</div>
+      <div class="expect">Copy the whole <code>aircraft-layer/dcs-export/Petrobrain/</code> folder
+        <strong>and</strong> <code>Export.lua</code> to <code>Saved Games\DCS\Scripts\</code>.
+        Restart DCS (a mission restart alone does not reload <code>Export.lua</code>). Restart the
+        collector and body-layer.</div>
+      <div class="label">Check, before takeoff</div>
+      <pre class="cmd">curl -s http://192.168.1.50:7791/flight_control/latest
+curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest</pre>
+      <div class="expect">Both return a real JSON object. The collector's startup log shows
+        <strong>no</strong> &ldquo;Export.lua version mismatch&rdquo; warning
+        (<code>EXPECTED_EXPORT_VERSION = "2026-11-20"</code>). If either fails, stop &mdash; the
+        deploy did not take and nothing below will mean anything.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span> Mode 1 take &mdash; no pedal kick, wings level</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Unparked, straight and level, &ldquo;you have controls.&rdquo;</div>
+      <div class="label">Expect</div>
+      <div class="expect">No left-pedal kick on the take. Once settled, holding a heading means
+        wings level (bank ~0&deg;), not a standing bank held by crossed controls. Previously: left
+        pedal drifted, right bank compensated, heading held with unwanted yaw+bank.</div>
+      <div class="chk"><input type="checkbox" data-k="b1-done" id="c1"><label for="c1">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Bank angle a few seconds after the
+        take; any pedal movement you didn't command.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span> Re-take</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">&ldquo;I have controls,&rdquo; then immediately &ldquo;you have
+        controls&rdquo; again.</div>
+      <div class="label">Expect</div>
+      <div class="expect">The second take confirms and flies cleanly &mdash; not &ldquo;unable,
+        not ready&rdquo; while Petrovich is, in fact, able to take.</div>
+      <div class="chk"><input type="checkbox" data-k="b2-done" id="c2"><label for="c2">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did the re-take confirm normally, any
+        stray bank/pedal left from the first cycle?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">3</span> &ldquo;I have controls&rdquo; actually frees the stick</h2>
+    <div class="open-q">Open question from your own prior flight note &mdash; say plainly what you
+      see, not just pass/fail.</div>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">While Petrovich holds mode 1, &ldquo;I have controls,&rdquo; then move
+        the stick yourself immediately.</div>
+      <div class="label">Expect</div>
+      <div class="expect">The aircraft responds to your input right away, nothing fighting you.</div>
+      <div class="chk"><input type="checkbox" data-k="b3-done" id="c3"><label for="c3">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Was the handback clean, or did
+        anything feel like it was still being held?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">4</span> Mode 2 &mdash; turn after a break, and during a break (latest wins)</h2>
+    <div class="block">
+      <div class="label">Do &mdash; after</div>
+      <div class="expect">&ldquo;Break turn left,&rdquo; let it finish, then &ldquo;turn right 30.&rdquo;</div>
+      <div class="label">Do &mdash; during</div>
+      <div class="expect">&ldquo;Break turn right,&rdquo; and before it finishes, &ldquo;turn left 15.&rdquo;</div>
+      <div class="label">Expect</div>
+      <div class="expect">Both turns are flown &mdash; a heading goal always wins, whether it
+        arrives after a finished break or interrupts one still running. Before this fix: any goal
+        after the first break was acknowledged but never flown.</div>
+      <div class="chk"><input type="checkbox" data-k="b4-done" id="c4"><label for="c4">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did both cases actually turn, and did
+        the overlay leave CBTM for FLT each time?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">5</span> &ldquo;Altitude 100&rdquo; sets exactly 100</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">&ldquo;Altitude 100 radar.&rdquo;</div>
+      <div class="label">Expect</div>
+      <div class="expect">The wheel's <strong>set</strong> value reads exactly 100, not a nearby
+        number (previously saw 116 commanded as 100). The <strong>flown</strong> value may wander a
+        bit &mdash; that's allowed. Watch a few seconds for hunting.</div>
+      <div class="chk"><input type="checkbox" data-k="b5-done" id="c5"><label for="c5">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>The set value shown, and whether it
+        ever stopped moving/hunted.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">6</span> Collective holding altitude in a break, mode 1</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Mode 1, &ldquo;break turn left&rdquo; (or right).</div>
+      <div class="label">Expect</div>
+      <div class="expect">Collective is now written in mode 1 &mdash; altitude should hold
+        noticeably better through the break, with less speed lost, than before this batch.</div>
+      <div class="chk"><input type="checkbox" data-k="b6-done" id="c6"><label for="c6">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Rough altitude loss and speed loss
+        through the break, compared with what you remember before this batch.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">7</span> Pedal into turns, mode 1 &mdash; note direction</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Mode 1, &ldquo;turn right 30,&rdquo; then separately &ldquo;turn left 30.&rdquo;</div>
+      <div class="label">Expect</div>
+      <div class="expect">Pedal now moves into the turn (new this batch). Its sign is an
+        <strong>unmeasured guess</strong> pending the slip-ball calibration flight &mdash; this
+        block is exactly how that guess gets checked.</div>
+      <div class="chk"><input type="checkbox" data-k="b7-done" id="c7"><label for="c7">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Which pedal moved for which turn
+        direction, and whether it coordinated the turn or fought it.</div>
+    </div>
+  </div>
+
+  <div class="card prize">
+    <h2><span class="n">8</span> Unpark mid-turn carries on mode 2's set targets <span class="prizetag">The prize</span></h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Mode 2, set speed away from current (e.g. &ldquo;speed 200&rdquo; while
+        slow), let the AI start accelerating, then unpark (switch off the AI-pilot wheel) while
+        still accelerating/turning.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Mode 1 picks up flying immediately toward mode 2's <strong>set</strong>
+        heading/speed/altitude &mdash; not whatever the aircraft happened to be doing at the
+        instant of the switch. This is the fix for a real crash: an unpark mid-maneuver previously
+        left the controls fixed with no correction, and the aircraft went down as bank increased
+        unchecked.</div>
+      <div class="chk"><input type="checkbox" data-k="b8-done" id="c8"><label for="c8">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did mode 1 visibly correct toward the
+        held targets right away, with no dead interval?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">9</span> A body-layer restart lets go of the stick</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">While Petrovich holds mode 1 (or mode 2), restart body-layer (Ctrl-C and
+        relaunch). Do this somewhere safe.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Restarting body-layer makes Petrovich let go: mode 1 frees the axes back
+        to you, mode 2 drops its goal/CBTM/HVRT state back to ED's own AI. Confirm via the
+        collector log and <code>GET /ai_pilot_wheel/latest</code> &mdash;
+        <code>apw_goal_seq</code>/<code>apw_cbtm_seq</code> reset to the fresh process's values.</div>
+      <div class="chk"><input type="checkbox" data-k="b9-done" id="c9"><label for="c9">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did the stick/controls come back
+        cleanly, with nothing stuck?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">10</span> The stale-Lua warning <span class="tag" style="color:var(--fg-dim); font-size:.65rem;">optional</span></h2>
+    <div class="block">
+      <div class="expect">Already checked above under &ldquo;Redeploy and pre-flight gate.&rdquo;
+        If you skipped it, confirm now that the collector log never showed an &ldquo;Export.lua
+        version mismatch&rdquo; warning during this flight.</div>
+      <div class="chk"><input type="checkbox" data-k="b10-done" id="c10"><label for="c10">Checked</label></div>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Blocks 1&ndash;2: clean take/re-take, no pedal kick, no bank, no contradictory
+        &ldquo;unable, not ready.&rdquo;</li>
+      <li>Block 3: did &ldquo;I have controls&rdquo; genuinely free the stick &mdash; the open
+        question.</li>
+      <li>Block 4: did both after-break and during-break turns fly.</li>
+      <li>Block 5: did the set altitude land exactly on 100, no hunting.</li>
+      <li>Blocks 6&ndash;7: collective's effect on the break, and which way the turn pedal moved.</li>
+      <li>Block 8: did the unpark-mid-turn carry on mode 2's targets with no dead interval.</li>
+      <li>Block 9: did a body-layer restart cleanly release the controls.</li>
+    </ul>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <div class="seealso">
+    <strong>Also on this flight:</strong> the slip-ball probe
+    (<code>docs/acceptance/2026-11-20-slip-ball-calibration-card.md</code>) &mdash; you fly it,
+    Petrovich doesn't use the reading yet. The mission-wide running command number is recorded as
+    open <code>BL-16</code> work, not in this batch.
+  </div>
+
+  <footer>docs/acceptance/2026-11-20-bl16-sortie-fixes-card.md</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='bl16-sortie-1120-fixes-card';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
