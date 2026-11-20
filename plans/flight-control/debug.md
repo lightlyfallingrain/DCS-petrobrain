@@ -752,3 +752,156 @@ rendered first-sentence description changed for both keys.
   `test_tuning_defaults_toml.py` pass after. This is the exact trap root `CLAUDE.md`'s own
   "Behaviour-affecting constants are tunable" section warns about, caught mechanically rather than
   by a reader.
+
+### Debug Report (BL-16 sortie 2026-11-20, mode 2 → mode 1 handover crash)
+
+### Observed Issue
+
+Flown on `main` @ `a8b21de0` (collective still disabled, `FC_AXES_ENABLED.collective = false`).
+User, verbatim (`docs/acceptance/2026-11-20-sortie-feedback.md`):
+
+> In mode 2 I commanded from speed 0 to 200, AI accelerated.
+> I changed to mode 1 -> controls fixed at what they were, no corrective movement -> crash as bank
+> kept increasing.
+> On change to mode 1, mode 1 must keep flying the set targets from mode 2 (heading, speed, alt).
+
+The speech log (`body-layer/logs/speech-20261120-015236.jsonl`) shows the run ending right after a
+`"break away"` (`cbtm_break_away`, `now_sim=910.694`) followed ~11 sim seconds later by `"speed two
+zero zero"` (`now_sim=921.663`) -- the log then stops, no further utterance recognised, consistent
+with a crash shortly after. No `"i_have_controls"`/`"you_have_controls"` entry appears after that
+point: the handover was the physical **unpark** (`ap_parked` falling edge via DCS's own Request
+Control key), not a voice take -- so this is squarely `run_flight_control`'s unpark-take branch,
+not the voice-take path.
+
+### Hypothesis
+
+`law_init_at_take`'s heading-vs-turn-mode pick (Decision 1 REVISED/24: `|bank| < takeover_level_
+bank_deg` -> heading mode, else turn mode holding `measured.r_deg_s`) is the right call for a
+**voice** take, where a bank past the threshold really does mean the pilot just rolled into one on
+the raw stick. It is the wrong call for an **unpark** take: the player broke away (`cbtm_break_
+away`), was almost certainly still banked/turning from that break when they commanded speed and
+then unparked, and the captured bank/rate at that instant is a transient left over from mode 2's
+own manoeuvre, not a deliberate "hold this turn" from the player taking raw controls. `law_init_at_
+take` had no way to tell the two cases apart, and once in turn mode, nothing in `law_update` ever
+drives `turn_goal_deg_s` back toward zero on its own -- the aircraft holds (and, as the mode-2 speed
+command's effect on true airspeed continued, the kinematic bank `phi_kinematic = atan(V_t*r/g)`
+that same held rate needs grows with it) a sustained, uncommanded turn with nothing the pilot did
+visibly correcting it: "controls fixed, no corrective movement" from the cockpit, "bank kept
+increasing" as speed under momentum/trim kept climbing into that formula. Mode 2's own standing AI-
+wheel targets (the dial the AI was actually flying to/from) were available the whole time and were
+simply never consulted.
+
+### Evidence
+
+- Read `plans/flight-control/plan.md` Decision 24 ("Petrovich has the controls is one state across
+  park and unpark... `law_init_at_take`'s own 'At take' section") and confirmed `law_init_at_take`
+  (`aircraft-layer/dcs-export/Petrobrain/flight_control.lua`) seeds every goal from `measured`/
+  `command` alone -- no seam exists for mode 2's own set state at all, for either take origin.
+- Read `body-layer/src/belief/flight_control.py`'s `decide_flight_control`: body-layer only mirrors
+  Lua's own outcome on an unpark (silent `OVERLAY` -> `ACTIVE` once Lua reports `active`/`unpark`) --
+  it never sends a seed, confirming Decision 23's "no LAN message ever carries a raw axis value" (or
+  any axis-adjacent value) extends in practice to this handover too; any fix has to live in Lua,
+  reading mode 2's own state locally.
+- Read `body-layer/src/belief/ai_pilot_wheel.py`'s `ParkedFlightState.held_heading`/`held_altitude`/
+  `held_altitude_ref`/`held_speed` -- confirmed these are parsed from the exact same overlay text
+  (`apw_course_text`/`apw_alt_text`/`apw_alt_add_text`/`apw_speed_text`) that `Export.lua`'s own
+  `Petrobrain/ai_pilot_wheel.lua` already parses and holds in module-level locals
+  (`ai_pilot_course_text`/`ai_pilot_alt_text`/`ai_pilot_alt_add_text`/`ai_pilot_speed_text`) --
+  the same data is already live, in-process, on the Lua side; no new wire message is needed.
+- Confirmed `flight_control.lua` already depends read-only on `ai_pilot_wheel.is_parked`/`stick_
+  park_raw` (Decision 25's cross-module seam) -- adding `held_targets()` to that same read-only
+  surface is the existing pattern, not a new one.
+- Reproduced the mechanism in the toy-plant harness (`aircraft-layer/tests/
+  test_flight_control_law.py::TestUnparkTakeSeedFromMode2SetTargets::
+  test_without_a_seed_a_mid_break_unpark_never_levels_or_converges`): `law_init_at_take` called with
+  a captured 25 deg bank and a residual 6 deg/s rate (no seed) picks `turn_mode = true`; run through
+  2000 steps of the bank-lag+heading-integration toy plant, `in_band_heading` stays `false` for the
+  whole run (structurally -- `law_update` forces it `false` whenever `turn_mode` is set) and the
+  bank never settles back toward level (`> 5 deg` at the end) -- confirmed this is the pre-fix
+  behaviour by running it against the unmodified function signature first.
+- Reproduced the fix the same way (`test_with_a_held_heading_the_unpark_rolls_level_and_converges`):
+  the identical captured state, but with `seed = { heading_deg = 0.0 }`, picks heading mode
+  immediately and the toy plant's bank converges back under 5 deg within the same 2000 steps.
+- Reproduced end to end through the real `run_flight_control` driver (`aircraft-layer/tests/
+  test_flight_control_lua.py::TestUnparkTakeSeedsFromMode2SetTargets`): an unpark with a held
+  heading 78 deg away from the measured one never reaches `fc_in_band_heading: true` (converging to
+  the *held* value, not the measured one), while a **voice** take with the identical held value and
+  measured heading reaches `fc_in_band_heading: true` immediately -- confirming the seed is wired
+  into the unpark-take path only, never the voice-take path, as Decision 24's own voice-take
+  heuristic still requires.
+
+### Fix Applied
+
+**Seeding route chosen**: an in-process Lua read, not a new wire message. `ai_pilot_wheel.lua`
+gains one new read-only export, `held_targets()` (mirroring `is_parked`/`player_seat`/`stick_park_
+raw`'s existing shape), returning `{heading_deg, alt_m, alt_ref, speed_kmh}` parsed off the same
+locals `update_ai_pilot_wheel_overlay` already populates every poll (`ai_pilot_course_text`/`ai_
+pilot_alt_text`/`ai_pilot_alt_add_text`/`ai_pilot_speed_text`, via the existing `ai_pilot_parse_
+altitude_text` helper for the altitude field) -- no second parse site. This is the simplest correct
+route because the data already lives in the same Lua process Decision 25's seam already crosses
+read-only; sending it over the wire from body-layer would mean body-layer re-deriving (or body-layer
+sending back) exactly what Lua already has locally, for no benefit, and would need a new message
+shape body-layer has no reason to otherwise send (Decision 23's own "never a raw axis value" is
+about axis values specifically, but routing *any* of this through body-layer when Lua already holds
+it would be the same kind of indirection the project's "do not reinvent the wheel" seam table argues
+against -- this is a same-process read, not a new cross-process one).
+
+`law_init_at_take(measured, limits, command, seed)` gains a fourth, optional parameter. Every
+existing call site (the toy-plant suite, the voice-take path) passes nothing, so `seed = seed or {}`
+reproduces the exact prior behaviour unchanged. For each field independently (Decision 24's own
+"fall back to current measured state when not known"):
+- `seed.heading_deg` present (a `number`) -> heading mode is forced **unconditionally** (never turn
+  mode, regardless of bank at capture) and `heading_goal_deg` is that value. Absent/non-numeric ->
+  the original bank-at-capture heuristic, unchanged.
+- `seed.alt_m` present -> `alt_goal_m` is that value, with `seed.alt_ref == "B"` mapping to `"baro"`
+  (anything else, including `nil`, to `"agl"` -- the module's existing ref vocabulary). Absent ->
+  the original stopping-height formula, unchanged.
+- `seed.speed_kmh` present -> `speed_goal_mps = seed.speed_kmh / 3.6`. Absent -> the original
+  `measured.ias_mps`, unchanged (this is also the reason speed almost never visibly differs in
+  practice: the fallback is already "whatever speed was captured", and the seed only matters when
+  mode 2's own dial disagrees with the instantaneous reading, e.g. mid-ramp).
+
+`run_active_frame`'s `just_took` branch builds the seed **only when `fc_take_origin == "unpark"`**
+(never for a voice take) and only when `ai_pilot_wheel` loaded at all, via `safe_call(ai_pilot_
+wheel.held_targets)` -- a failed call or missing module yields `seed = nil`, falling back to the
+pre-existing behaviour exactly as if this fix did not exist (same "unknown is never a licence to
+assume" posture the module docstring already states for `is_parked`).
+
+Files touched:
+- `aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua` -- new `held_targets()` + `M.held_
+  targets` export; module-header depends-on comment in `flight_control.lua` updated to name it.
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` -- `law_init_at_take`'s new `seed`
+  parameter and per-field fallback logic; the unpark-take call site in `run_active_frame` builds the
+  seed from `ai_pilot_wheel.held_targets()`.
+- `aircraft-layer/tests/test_flight_control_law.py` -- new `TestUnparkTakeSeedFromMode2SetTargets`
+  (seed-field mapping, all-nil-seed-matches-no-seed, and the two toy-plant convergence tests above).
+- `aircraft-layer/tests/test_flight_control_lua.py` -- `ai_pilot_wheel` mock table gains `held_
+  targets`; new `TestUnparkTakeSeedsFromMode2SetTargets` (unpark adopts the held heading, voice take
+  ignores it).
+
+No conflict with any recorded decision: Decision 24's voice-take heuristic is untouched (the seed
+only ever applies to `fc_take_origin == "unpark"`), Decision 23's wire invariant is untouched (no
+new message, no axis value), and Decision 25's read-only cross-module seam is extended by one
+function in the same shape as the three it already has.
+
+### Verification
+
+- `aircraft-layer/tests/test_flight_control_law.py` + `test_flight_control_lua.py`: 66 passed (32 +
+  34, both files run together above). Full `aircraft-layer/tests`: 1010 passed.
+- `ruff format --check`/`ruff check` aircraft-layer `src`/`tests`: clean (one file, `test_flight_
+  control_law.py`, needed a `ruff format` pass after the new tests were added -- reformatted, then
+  reverified clean).
+- `cd aircraft-layer && .venv/bin/mypy src`: Success, no issues found in 28 source files.
+- `luac5.5 -p` on both touched Lua files: both pass (no `lua5.1`/`luac5.1` on this machine; `lua5.5`
+  is the closest available and this project's `luac5.1`-specific note is about catching syntax DCS
+  would reject, which neither file's edit introduces -- both are ordinary local-function/table-field
+  additions, no new syntax construct).
+- GETGLOBAL-equivalent check (`luajit -bl <file> | grep GGET`, luajit's own bytecode name for the
+  same instruction class `luac5.1 -l` calls `GETGLOBAL`) on both touched files: every name listed is
+  a genuine Lua stdlib function, a real DCS API, or this project's own established cross-module/
+  `core.lua` global (`ai_pilot_wheel`, `client`, `debug_log`, the `extract_json_*`/`fmt_*_or_null`/
+  `json_escape_string` helpers) -- no unresolved reference to either file's own newly added local
+  function (`held_targets`, or `law_init_at_take`'s new local variables), confirming the local-
+  before-use ordering is correct in both files.
+- body-layer is untouched by this fix (the task was scoped to the unpark-take path and goal seeding,
+  both of which turned out to live entirely in Lua) -- not re-run here.

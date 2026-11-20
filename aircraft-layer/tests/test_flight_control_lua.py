@@ -193,6 +193,19 @@ ai_pilot_wheel = {
     end,
     player_seat = function() return ap_seat end,
     stick_park_raw = function() return ap_stick_park_raw end,
+    -- BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) -- the
+    -- unpark-take's own seed source. `ap_held` is a driver-set Lua
+    -- table (or nil); every field defaults nil, same as a mission
+    -- where the AI-wheel overlay was never read.
+    held_targets = function()
+        local held = ap_held or {}
+        return {
+            heading_deg = held.heading_deg,
+            alt_m = held.alt_m,
+            alt_ref = held.alt_ref,
+            speed_kmh = held.speed_kmh,
+        }
+    end,
 }
 
 client = {
@@ -803,6 +816,77 @@ print(string.format("%.6f", written[2002]))
         assert _field(status_line, "fc_mode") == "active"
         # The fresh read (0.9), never the first session's tracked 0.5.
         assert abs(float(roll_written) - 0.9) <= 0.0011
+
+
+class TestUnparkTakeSeedsFromMode2SetTargets:
+    """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) -- the
+    crash this report diagnoses: an unpark mid-break with no seed reads
+    the AI-wheel's own held heading as if it were a raw-stick bank the
+    pilot had just rolled into on purpose. The fix reads `ai_pilot_
+    wheel.held_targets()` for an unpark take only, never a voice take
+    (`test_flight_control_law.py`'s own `TestUnparkTakeSeedFromMode2
+    SetTargets` exercises the resulting law state directly, including
+    the no-physics fallback; this covers the wiring end to end through
+    `run_flight_control`, using `fc_in_band_heading` as the one wire
+    field that reflects the law's internal heading mode/goal)."""
+
+    def test_unpark_take_adopts_the_held_heading_not_the_measured_one(self) -> None:
+        """`in_band_heading` starts `false` unconditionally at
+        `law_init_at_take` (it is `law_update`'s own computation) --
+        several frames at a constant measured heading let it settle
+        before either assertion, the same way the toy-plant suite runs
+        the law forward rather than reading the take frame alone."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)  -- well under the 5 deg takeover threshold
+ap_seat = "operator"
+ap_parked = true
+ap_held = { heading_deg = 45.0 }
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"arm",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.2 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        # Heading mode converges to the *held* 45, not the *measured*
+        # 123 -- a 78 deg error is nowhere near the 5 deg band, even
+        # though bank alone would have picked heading mode either way,
+        # and the mock's own `heading_rad` never moves on its own.
+        assert _field(status_line, "fc_in_band_heading") == "false"
+
+    def test_voice_take_ignores_the_held_heading(self) -> None:
+        """Same held value, same measured heading, but a voice take --
+        Decision 24's own bank-at-capture rule still governs, unaffected
+        by whatever the AI wheel happens to be set to, so the goal is
+        the measured heading and the error settles at zero."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)
+ap_seat = "pilot"
+ap_parked = false
+ap_held = { heading_deg = 45.0 }
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_in_band_heading") == "true"
 
 
 class TestVoiceTakeLiveSeatCapture:

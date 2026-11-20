@@ -1899,6 +1899,26 @@ local function stick_park_raw()
     return ai_pilot_takeover.raw_arg852
 end
 
+-- Read-only getter for `flight_control.lua`'s unpark-take (BL-16
+-- sortie 2026-11-20, `plans/flight-control/debug.md`) -- the overlay's
+-- own *set* heading/altitude/speed, the same parsed fields `Parked
+-- FlightState.held_heading`/`held_altitude`/`held_altitude_ref`/
+-- `held_speed` mirror on the body-layer side (`update_ai_pilot_wheel_
+-- overlay` above is this module's single parse site for the raw text;
+-- this getter re-reads the same locals, never a second parse). Every
+-- field may be `nil` (not yet read this mission, or not a plain
+-- number -- `speed_text` can read `"MAX"`) -- the caller's own fallback
+-- to the measured/bank-at-capture state covers that, unchanged from
+-- before this getter existed.
+local function held_targets()
+    return {
+        heading_deg = tonumber(ai_pilot_course_text),
+        alt_m = ai_pilot_parse_altitude_text(ai_pilot_alt_text),
+        alt_ref = ai_pilot_alt_add_text,
+        speed_kmh = tonumber(ai_pilot_speed_text),
+    }
+end
+
 M.run_ai_pilot_wheel = run_ai_pilot_wheel
 M.update_ai_pilot_wheel_overlay = update_ai_pilot_wheel_overlay
 M.push_ai_pilot_wheel_state = push_ai_pilot_wheel_state
@@ -1907,5 +1927,6 @@ M.on_stop = on_stop
 M.is_parked = is_parked
 M.player_seat = player_seat
 M.stick_park_raw = stick_park_raw
+M.held_targets = held_targets
 
 return M
