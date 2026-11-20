@@ -196,3 +196,9 @@ law differentiates IAS and vertical speed because `LoGetAccelerationUnits`'s bod
 never confirmed (`flight_control.lua` module header). Confirming that mapping, together with
 `LoGetVectorVelocity`'s frame (also unresolved), is a prerequisite for the lift-vector law: a short
 recon plus a probe flight.
+
+## Design diagrams approved (user, 2026-11-20)
+
+The plan's two diagrams ("The picture" data-ownership flowchart and the mode state diagram) were
+shown as a throwaway artifact under the new diagram-review step (AGENTS.md). User, verbatim:
+*"looks good, approved"*.
