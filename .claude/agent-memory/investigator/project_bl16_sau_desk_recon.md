@@ -36,7 +36,15 @@ this session:**
 - Return shapes/units for `LoGetVerticalVelocity`, `LoGetAngularVelocity`,
   `LoGetAccelerationUnits`, `LoGetVectorVelocity`, `LoGetSlipBallPosition`, `LoGetMagneticYaw`,
   `LoGetMechInfo` — `Sim_ControlAPI.md` names them with zero signature detail (confirmed by direct
-  grep, not assumed) and no community source fills the gap either.
+  grep, not assumed) and no community source fills the gap either. **Partially resolved
+  2026-11-20**, from a flight that happened after this desk session, not from further reading —
+  see [[project_motion_telemetry_frames]]: `LoGetAngularVelocity`'s x/y/z mapping is fully settled,
+  `LoGetVectorVelocity`'s y is confirmed world-frame vertical, `LoGetAccelerationUnits`'s y is
+  confirmed body-frame load factor (g, gravity included). x/z of both calls, and
+  `LoGetSlipBallPosition` (confirmed **dead**, returns `nil` on the Mi-24P — use draw args
+  943/784 instead, `2026-11-20-slip-ball-recon.md`), remain open. **The lesson stands**: this gap
+  was never going to close by more websearching or re-grepping the reference doc — only a flight
+  closed it, and only partially.
 - Any numbered draw-argument for the Mi-24P's cyclic stick or pedals (collective/throttle's two
   args, 0/0, are known but suspiciously placeholder-shaped — see the main note).
 - Mi-24P-specific radar-altimeter (RV-5) range/bank-validity envelope — other modules' numbers
