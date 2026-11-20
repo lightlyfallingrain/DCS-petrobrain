@@ -120,6 +120,14 @@ local self_data_present = true
 local written = {}
 local sent_lines = {}
 
+-- Slip-ball calibration readout mocks (`fc_slip_ball_*`, sortie
+-- 2026-11-20) -- `nil` by default (no legitimate real-world reading
+-- has a fixed default, unlike the seat axis args above which are
+-- genuinely centred at 0.0), set per-test.
+local slip_ball_pilot_raw = nil
+local slip_ball_operator_raw = nil
+local slip_ball_lo_api = nil
+
 local SEAT_ARG_NUM = {
     [1100] = "pilot.pitch", [1101] = "pilot.roll",
     [1102] = "pilot.collective", [1103] = "pilot.pedals",
@@ -128,6 +136,8 @@ local SEAT_ARG_NUM = {
 }
 
 local function arg_value(n)
+    if n == 943 then return slip_ball_pilot_raw end
+    if n == 784 then return slip_ball_operator_raw end
     local key = SEAT_ARG_NUM[n]
     if key == nil then return nil end
     local seat, axis = key:match("(%a+)%.(%a+)")
@@ -139,6 +149,10 @@ function GetDevice(id)
     return {
         get_argument_value = function(self, arg) return arg_value(arg) end,
     }
+end
+
+function LoGetSlipBallPosition()
+    return slip_ball_lo_api
 end
 
 function LoSetCommand(cmd, value)
@@ -1172,6 +1186,81 @@ print(sent_lines[#sent_lines])
         assert _field(lines[0], "fc_axes_roll") == "true"
         assert _field(lines[0], "fc_axes_pedal") == "true"
         assert _field(lines[0], "fc_axes_collective") == "true"
+
+
+class TestSlipBallStatusReadout:
+    """Sortie 2026-11-20 (`aircraft-layer/research/2026-11-20-slip-ball-
+    recon.md`): the slip-ball calibration readout is sent in every
+    `fc_mode`, including "off" -- no `take` is ever issued in these
+    drivers."""
+
+    def test_pilot_and_operator_raw_args_reach_the_status_line(self) -> None:
+        driver = """
+slip_ball_pilot_raw = 0.125
+slip_ball_operator_raw = -0.25
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert float(_field(lines[0], "fc_slip_ball_pilot_raw")) == pytest.approx(0.125)
+        assert float(_field(lines[0], "fc_slip_ball_operator_raw")) == pytest.approx(
+            -0.25
+        )
+
+    def test_a_nil_lo_api_cross_check_reports_null(self) -> None:
+        """`LoGetSlipBallPosition` has a documented history of returning
+        `nil` for at least some aircraft/version combinations (the recon
+        note's finding (a)) -- the status line must still carry the two
+        draw-arg readings, with the cross-check field reporting `null`,
+        not dropping the whole line."""
+        driver = """
+slip_ball_pilot_raw = 0.4
+slip_ball_lo_api = nil
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_slip_ball_lo_api") is None
+        assert float(_field(lines[0], "fc_slip_ball_pilot_raw")) == pytest.approx(0.4)
+
+    def test_a_present_lo_api_cross_check_reaches_the_status_line(self) -> None:
+        driver = """
+slip_ball_lo_api = -0.6
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert float(_field(lines[0], "fc_slip_ball_lo_api")) == pytest.approx(-0.6)
+
+    def test_the_readout_reaches_the_status_line_while_mode_is_off(self) -> None:
+        """No take/handover at all -- `fc_mode` stays "off", and the
+        readout is still carried (the recon note's own Reproducible
+        Test step 1: "so a pilot-flown calibration flight can read them
+        without Petrovich holding the controls")."""
+        driver = """
+slip_ball_pilot_raw = 0.2
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "off"
+        assert float(_field(lines[0], "fc_slip_ball_pilot_raw")) == pytest.approx(0.2)
+
+    def test_the_real_schema_parses_the_status_line(self) -> None:
+        driver = """
+slip_ball_pilot_raw = 0.33
+slip_ball_operator_raw = -0.44
+slip_ball_lo_api = 0.55
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        state = FlightControlState.from_dict(
+            json.loads(line), received_wall_clock_s=0.0
+        )
+        assert state.slip_ball_pilot_raw == pytest.approx(0.33)
+        assert state.slip_ball_operator_raw == pytest.approx(-0.44)
+        assert state.slip_ball_lo_api == pytest.approx(0.55)
 
 
 class TestSeqFieldsSurviveTheRealSchema:

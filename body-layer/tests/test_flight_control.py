@@ -98,6 +98,9 @@ def server_with_sample() -> Iterator[str]:
         "fc_axes_roll": True,
         "fc_axes_pedal": True,
         "fc_axes_collective": False,
+        "fc_slip_ball_pilot_raw": 0.125,
+        "fc_slip_ball_operator_raw": -0.25,
+        "fc_slip_ball_lo_api": None,
     }
     yield from _server(body)
 
@@ -126,6 +129,9 @@ class TestAdvanceFlightControlState:
         assert state.in_band_heading is True
         assert state.in_band_altitude is False
         assert state.in_band_speed is None
+        assert state.slip_ball_pilot_raw == pytest.approx(0.125)
+        assert state.slip_ball_operator_raw == pytest.approx(-0.25)
+        assert state.slip_ball_lo_api is None
 
     def test_body_layer_own_fields_are_carried_through_unchanged(
         self, server_with_sample: str

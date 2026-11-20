@@ -19,6 +19,13 @@ report yet".
 This layer carries the raw status and decides nothing, same rule every
 other schema here follows.
 
+**`fc_slip_ball_*`** (sortie 2026-11-20, `aircraft-layer/research/
+2026-11-20-slip-ball-recon.md`) are a read-only calibration readout, sent
+in every `fc_mode` -- `fc_slip_ball_pilot_raw`/`fc_slip_ball_operator_raw`
+are the ADI ball draw args (943/784), `fc_slip_ball_lo_api` is
+`LoGetSlipBallPosition()` as a cross-check. Not consulted by `Export.
+lua`'s own control law; sign/scale is unmeasured.
+
 **`fc_last_cmd_seq`** (security-m1-m2.md Finding A, change-request round)
 echoes `Export.lua`'s own strictly-increasing staleness counter, bumped
 on every accepted `flight_control` command of any `cmd` kind and never
@@ -69,6 +76,9 @@ class FlightControlState:
     refuse_cause: str | None
     limit_hit: bool
     axes_enabled: dict[str, bool]
+    slip_ball_pilot_raw: float | None
+    slip_ball_operator_raw: float | None
+    slip_ball_lo_api: float | None
 
     @staticmethod
     def from_dict(
@@ -149,6 +159,10 @@ class FlightControlState:
                 )
             axes_enabled[axis] = raw
 
+        slip_ball_pilot_raw = _optional_number("fc_slip_ball_pilot_raw")
+        slip_ball_operator_raw = _optional_number("fc_slip_ball_operator_raw")
+        slip_ball_lo_api = _optional_number("fc_slip_ball_lo_api")
+
         return FlightControlState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -173,6 +187,9 @@ class FlightControlState:
             refuse_cause=_optional_str("fc_refuse_cause"),
             limit_hit=limit_hit_raw,
             axes_enabled=axes_enabled,
+            slip_ball_pilot_raw=slip_ball_pilot_raw,
+            slip_ball_operator_raw=slip_ball_operator_raw,
+            slip_ball_lo_api=slip_ball_lo_api,
         )
 
     @staticmethod
@@ -218,4 +235,7 @@ class FlightControlState:
             "fc_axes_roll": self.axes_enabled.get("roll", False),
             "fc_axes_pedal": self.axes_enabled.get("pedal", False),
             "fc_axes_collective": self.axes_enabled.get("collective", False),
+            "fc_slip_ball_pilot_raw": self.slip_ball_pilot_raw,
+            "fc_slip_ball_operator_raw": self.slip_ball_operator_raw,
+            "fc_slip_ball_lo_api": self.slip_ball_lo_api,
         }

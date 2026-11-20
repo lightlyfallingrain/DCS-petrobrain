@@ -107,6 +107,16 @@ local SEAT_ARGS = {
     operator = { pitch = 1110, roll = 1111, collective = 1112, pedals = 1113 },
 }
 
+-- Slip-ball ADI draw args per seat (read-only, same class as `SEAT_ARGS`
+-- above -- a gauge, never written). Sourced from `DCS-Skunkworks/dcs-bios`
+-- (`aircraft-layer/research/2026-11-20-slip-ball-recon.md` finding (b)),
+-- not yet cross-checked against this project's own installed tree.
+-- Read-only readout for calibration (sortie 2026-11-20, user: "we need a
+-- to read the slip ball ... since it guides pedal adjustmens.") -- the
+-- values below feed only the status line, never `law_*`; sign/scale is
+-- unmeasured (the recon note's own Reproducible Test).
+local SLIP_BALL_ARGS = { pilot = 943, operator = 784 }
+
 -- DCS control functions (`Scripts/Export.lua`, `iCommandPlane*`) -- the
 -- actual write channel, confirmed against the user's own DCS binding
 -- file for all four axes (module header). 2004 ("Throttle (Collective)",
@@ -1875,6 +1885,21 @@ local function push_flight_control_state(t)
         measured_speed = measured_ias_mps * 3.6
     end
 
+    -- Slip-ball calibration readout (sortie 2026-11-20, `aircraft-layer/
+    -- research/2026-11-20-slip-ball-recon.md`) -- read every status push,
+    -- in every `fc_mode`, so a pilot-flown calibration flight (Petrovich
+    -- never holding the controls) can still read these. Read-only: not
+    -- consulted by `law_*` at all yet (sign/scale unmeasured).
+    local slip_ball_pilot_raw = safe_call(
+        function() return GetDevice(0):get_argument_value(SLIP_BALL_ARGS.pilot) end)
+    local slip_ball_operator_raw = safe_call(
+        function() return GetDevice(0):get_argument_value(SLIP_BALL_ARGS.operator) end)
+    -- Cross-check only (finding (a)'s own unresolved-nil-return risk) --
+    -- `LoGetSlipBallPosition` may not exist/return nil on this module;
+    -- `safe_call` reports that the same way it reports any other failed
+    -- read, as `nil`, which `fmt_num_or_null` already turns into `null`.
+    local slip_ball_lo_api = safe_call(LoGetSlipBallPosition)
+
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"fc_mode":"' .. fc_mode .. '"'
         .. ',"fc_take_seq":' .. fmt_int_or_null(fc_take_seq)
@@ -1906,7 +1931,10 @@ local function push_flight_control_state(t)
         .. ',"fc_axes_pitch":' .. tostring(FC_AXES_ENABLED.pitch)
         .. ',"fc_axes_roll":' .. tostring(FC_AXES_ENABLED.roll)
         .. ',"fc_axes_pedal":' .. tostring(FC_AXES_ENABLED.pedals)
-        .. ',"fc_axes_collective":' .. tostring(FC_AXES_ENABLED.collective) .. '}\n')
+        .. ',"fc_axes_collective":' .. tostring(FC_AXES_ENABLED.collective)
+        .. ',"fc_slip_ball_pilot_raw":' .. fmt_num_or_null(slip_ball_pilot_raw)
+        .. ',"fc_slip_ball_operator_raw":' .. fmt_num_or_null(slip_ball_operator_raw)
+        .. ',"fc_slip_ball_lo_api":' .. fmt_num_or_null(slip_ball_lo_api) .. '}\n')
     if not ok then
         debug_log("flight-control send failed: " .. tostring(err))
         client:close()
