@@ -90,11 +90,18 @@ if ai_pilot_wheel ~= nil then
     handlers.ai_pilot_goal = ai_pilot_wheel.handle_ai_pilot_goal_command
 end
 if flight_control ~= nil then
-    handlers.flight_control = flight_control.handle_flight_control_command
     -- Stage 2 (`plans/flight-desired-state/plan.md`, refinement 3) --
     -- the lease, replacing the old `cmd == "arm"` branch inside
     -- `flight_control`.
     handlers.flight_lease = flight_control.handle_flight_lease_command
+end
+if flight_desired ~= nil then
+    -- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+    -- the one numbered channel, replacing the old `flight_control` op
+    -- entirely. `flight_desired.lua` owns the epoch/seq/ack bookkeeping
+    -- and calls into `flight_control.request_take`/`request_release`
+    -- itself for the two handover kinds.
+    handlers.flight = flight_desired.handle_flight_command
 end
 
 -- BL-16 sortie 2026-11-20 (`docs/acceptance/2026-11-20-sortie-feedback.

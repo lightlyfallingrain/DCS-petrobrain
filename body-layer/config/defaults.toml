@@ -235,6 +235,12 @@ COMPOSITION_MATCH_RATIO = 2.0
 # source: belief/expected_area.py:EXPECTED_AREA_MAX_HALF_WIDTH_DEG
 EXPECTED_AREA_MAX_HALF_WIDTH_DEG = 15.0
 
+[belief.flight_authority]
+# How old a `flight` request may be when `Export.lua` applies it (BL-16 Stage 3, `plans/flight-desired-state/plan.md`, section 3a) -- must stay at least one body-layer poll plus `Export.lua`'s own push cadence below `belief.flight_control.HANDOVER_ACK_TIMEOUT_S`, which bounds the whole round trip this deadline is the Lua-side half of (`test_handover_ack_timeout_exceeds_accept_window_with_margin` pins `HANDOVER_ACK_TIMEOUT_S >= FLIGHT_REQUEST_ACCEPT_WINDOW_S + 1.0 +0.2`).
+# status: judgement | range: 0.5 .. 10.0
+# source: belief/flight_authority.py:FLIGHT_REQUEST_ACCEPT_WINDOW_S
+FLIGHT_REQUEST_ACCEPT_WINDOW_S = 1.5
+
 [belief.flight_control]
 # A9's tolerance band for the altitude channel, as a fraction of the commanded altitude -- see `ALT_BAND_MIN_M` for the floor that applies alongside it at low altitude.
 # status: judgement
@@ -261,10 +267,10 @@ BREAK_MAX_HEIGHT_LOSS_M = 100.0
 # source: belief/flight_control.py:FLOOR_AGL_M
 FLOOR_AGL_M = 40.0
 
-# How long `TAKING` waits for `Export.lua` to confirm `active` before giving up and speaking "Unable, not ready." -- judgement call, same shape as `RULE_GATE_HOLD_TIMEOUT_S`'s own role for mode 2's takeover- settle window, just a separate constant: this one bounds a network round trip (voice command -> HTTP POST -> the next `GET /flight_control/latest` poll), not a belief-state settle.
+# How long a take request waits for `Export.lua`'s own ack (`fd_acks`) before giving up, kept at least one poll plus `Export.lua`'s own push cadence above `belief.flight_authority.FLIGHT_REQUEST_ACCEPT_WINDOW_S`, the Lua-side half of the same deadline pair (`test_handover_ack_timeout_exceeds_accept_window_with_margin` pins the inequality).
 # status: judgement | range: 0.5 .. 30.0
 # source: belief/flight_control.py:HANDOVER_ACK_TIMEOUT_S
-HANDOVER_ACK_TIMEOUT_S = 2.0
+HANDOVER_ACK_TIMEOUT_S = 3.0
 
 # No natural "10%" reading for a heading (D-c) -- 5° is the plan's own recommended default.
 # status: judgement | range: 1.0 .. 30.0

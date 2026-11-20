@@ -111,6 +111,9 @@ class TestFlightDesiredState:
             "fd_measured_ias": pytest.approx(150.0),
             "fd_overlay_course": pytest.approx(71.0),
             "fd_reset_epoch": 42,
+            "fd_epoch": None,
+            "fd_last_seq": None,
+            "fd_acks": None,
         }
 
 

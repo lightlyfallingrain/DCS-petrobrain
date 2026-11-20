@@ -236,3 +236,164 @@ diff and re-running), passes with it.
 - body-layer: `ruff format --check`/`ruff check`/`mypy src` pass; full suite (`not slow`):
   3714 passed, 27 deselected, 4 xfailed (3711 + the 3 new parametrized cases); the 27 `slow`-marked
   flight scenario tests were also run (`pytest tests -q -m slow`): 27 passed.
+
+### Stage 3, 2026-11-20 — one channel; mode 1 flies the desired state
+
+Branch `impl/desired-state-s3`, cut from tip `65cbd76a` (the Stage 1-2 re-review's own `APPROVED`
+commit). Builds the plan's section 5 numbered `flight` channel, mode 1's "apply desired by stamp",
+the heading-reference conversion, and the unpark-carries-`desired` fix (Decision 32/Q4) — the
+actual defect this whole plan exists to close (a mid-ramp unpark flying the stale overlay value).
+
+**Scope delivered, matching the plan:**
+- **Lua (`flight_desired.lua`)**: `handle_flight_command` — the one op, `{"epoch","seq","until",
+  "kind",...}`. Epoch mismatch → ack `epoch`; `seq <= fd_last_seq` → silently dropped (no ack, same
+  dedup posture every other channel here already has); a request that passes both is bounds-
+  re-checked (`AC-B14`) → `bounds`; checked against `until` → `stale`; `kind=="set"` writes `desired`
+  (refused `not_flying` only when `fd_mode=="off"`) with every part it carries stamped with the
+  request's own `seq`; `kind=="take"/"release"` call into `flight_control.request_take`/
+  `request_release`; the six mode-2-only kinds are refused `wrong_mode` unconditionally (Stage 4's
+  own work). `fd_acks` (last 8, `"N:a:m1"`/`"N:r:<reason>"`), `fd_epoch`, `fd_last_seq` ride the
+  status line. `reset(epoch)` sets the acceptance epoch/floor; `on_stop` does not (same "seq never
+  goes backwards outside an explicit reset" posture `flight_control.lua`'s own `fc_last_cmd_seq`
+  used to have). **Stamps are the request's own wire `seq`** for a numbered write, or the current
+  `fd_last_seq` floor for a write this module makes on its own initiative (a reseed, a settle
+  writeback) — `write_internal`, the one function both `flight_control.lua`'s settle code and `ai_
+  pilot_wheel.lua`'s align-read call into. `Stages 1-2's `mirror_m1_goal`/`mirror_m2_goal` receipt-
+  time mirrors are deleted outright, replaced by this one path.
+  **`HEADING_REF` is an unmeasured placeholder (`"true"`, no conversion)** — the Stages 1-2 card
+  that was meant to settle it has not been flown (no live DCS session reachable from this
+  implementation pass); flagged loudly in the module's own docstring and in the Stage 3 card below,
+  flip-to-`"mag"` is a one-line change once it is.
+- **Lua (`flight_control.lua`)**: `fc_goal_*`, `fc_last_cmd_seq`, `apply_goal_fields`, and `handle_
+  flight_control_command` are deleted outright. `request_take(seq, t)`/`request_release(seq)`
+  replace the old `cmd` dispatch (called from `flight_desired.lua`), returning `"accepted_active"`/
+  `"pending"`/`{refused=<reason>}` rather than mutating a wire-visible seq. `apply_desired_changes_
+  to_law` (called every active, non-paused frame) compares `flight_desired.get()`'s own `stamp_hdg`/
+  `stamp_alt`/`stamp_spd` against what this module last applied and calls `law_apply_goal` only for
+  the parts that changed — "mode 1 applies desired by stamp". `build_take_seed` replaces the old
+  `ai_pilot_wheel.held_targets()` read at `law_init_at_take`: an **unpark** seed is `desired`
+  verbatim (converted to true heading); a **voice take**'s seed falls back to the measured-state
+  defaults for every part *except* one `desired` stamped strictly after the take's own `seq` (the
+  "a set during taking survives the seed" test). A standing break carried into an unpark (`desired.
+  turn_rate_deg_s`/`turn_style != "normal"`) is layered onto the freshly-seeded law via one more
+  `law_apply_goal` call, immediately after `law_init_at_take` — `law_init_at_take` itself has no
+  rate-override field of its own. The roll-out settle (turn→heading) and the break settle (the rate
+  override clearing) each call `flight_desired.write_internal` with the settled heading, converted
+  back into `HEADING_REF`'s own reference. `fc_goal_*`/`fc_take_seq`/`fc_last_cmd_seq` are dropped
+  from the status line entirely — body-layer reads the commanded value from `flight_desired`'s own
+  `fd_*` fields now.
+- **Lua (`ai_pilot_wheel.lua`)**: `mirror_m2_goal` call removed (body-layer's own dual-write,
+  below, replaces it). The CBTM `align` press schedules a short delayed read (`ALIGN_READ_DELAY_S`,
+  0.1 s — "a few frames" per U6's own answer, not `MODE_READ_SETTLE_S`) that writes the overlay's
+  course into `desired.heading_deg` via `flight_desired.write_internal`, so an unpark shortly after
+  an align already carries the aligned heading in this stage, even though the new channel's own
+  `align` kind is not live until Stage 4.
+- **Lua (`commands.lua`)**: `handlers.flight = flight_desired.handle_flight_command` replaces
+  `handlers.flight_control`.
+- **aircraft-layer (Python)**: `schema/flight_desired.py` gains `epoch`/`last_seq`/`acks`;
+  `schema/flight_control.py` drops `take_seq`/`goal_seq`/`last_cmd_seq`/`goal_*` entirely.
+  `CommandSender.send_flight`/`POST /command/flight` replace `send_flight_control`/`/command/
+  flight_control` (the old path now resolves as any other unknown route, confirmed with a `404`
+  test). `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` bumped to `"2026-11-20c"`.
+- **body-layer (Python)**: `ConsolePerceptionRunner.command_seq` — the one mission-wide counter
+  (preserved across a mission restart, same reasoning as `command_reset_epoch`). `_apply_flight_
+  requests` replaces `_apply_flight_control`: sends a pending take/release/set on the numbered
+  channel, queues a `PendingTake` (`belief.flight_authority.PendingTake`) for a take using the
+  `says` text `CrewConsole.take_controls` recorded; the lease is unchanged. `belief.flight_control.
+  take_controls`/`release_controls` are now pure request builders with **no `FlightControlState`
+  parameter at all** (no more `phase` to transition); `decide_flight_control`/`FlightControlDecision`
+  are deleted outright, replaced by `belief.flight_authority.resolve_pending_take` (matches a
+  `PendingTake` against `fd_acks`, same accept/refuse/timeout shape the deleted function had, keyed
+  off `fd_acks` instead of polling `fc_take_seq`/`fc_mode`). `FlightControlState` sheds `phase`/
+  `take_seq`/`pending_take_says`/`took_at_sim`/`unpark_take`/`wire_seq`/`held_*`/`lua_take_seq`/
+  `lua_last_cmd_seq` entirely — it is a read-only diagnostics mirror now (measured telemetry,
+  handover-diagnostics fields, A9 bands, slip-ball). `CrewConsole.drain_flight_control` drops the
+  Decision-32 break-seed logic (obsolete: Lua's own `build_take_seed` carries a standing break
+  through the unpark directly now) and the `flight_control_system_release_pending` ack-timeout
+  self-queued release (obsolete: `resolve_pending_take`'s own timeout path covers it, and a late-
+  accepted ack is simply not corrected — see the gap noted below). `_axes_current_heading/altitude/
+  speed` now read `flight_authority_state`'s own desired-state mirror first, falling back to
+  `flight_control_state.measured_*` only when it has nothing yet.
+  **`_apply_ai_pilot_wheel_goal`'s own send site gains the plan's own dual-write**: every ordinary
+  mode-2 voice goal (heading/altitude/speed) also sends a `set` request on the numbered channel,
+  fire-and-forget, alongside the still-live `ai_pilot_goal` send — `desired` stays accurate for a
+  later m2→m1 carry even though mode 2 itself does not read `desired` to fly yet (Stage 4). Mode-2
+  **breaks** (CBTM) are **not** dual-written this stage — flagged as a gap below.
+- `tools/check_rules.py`'s `_authority_for`/`_SCENARIOS` reworked for the split `FlightControlState`
+  (diagnostics only)/`FlightAuthorityState` (authority) shapes, and fixes review-s12.md's optional
+  refinement 2 in passing (the `"R"`/`"B"` letter is now mapped to `"agl"`/`"baro"` before building
+  `FlightAuthorityState.alt_ref`, not passed through verbatim).
+
+### Deviations and judgment calls (read before relying on this stage for anything beyond the plan's own Stage 3 scope)
+
+1. **U1's "wait for Lua" readback deferral is built for the two handover tokens only, not for
+   ordinary axes_*/mode-2 `set` commands.** The rule file (`config/rules/flight.lua`) still speaks
+   every `heading`/`altitude`/`speed`/`turn`/`break` readback immediately and optimistically, exactly
+   as before this plan — the request is sent on the new numbered channel (so the carry/stamp
+   mechanics are correct), but nothing waits for its `fd_acks` entry before speaking. Implementing
+   the full deferral would mean removing `say(...)` from roughly fifteen rules in `flight.lua` and
+   building a generic ack-driven readback renderer matching each rule's own bespoke wording — a
+   second, comparably-sized piece of work I judged too large to also get right in this pass without
+   risking silent wording regressions across all of them. **This is the single largest gap against
+   the plan's own U1/section 3a** and the main thing a follow-up stage (or a dedicated pass on this
+   one) should close.
+2. **The one consequence of (1): a `set` sent while truly `off` is refused `not_flying` by Lua and
+   nothing corrects the spoken (wrong) readback.** In practice `rules/gates.py`'s own HOLD-until-
+   known mechanism already keeps this rare (a command during the off→m1 settle window retries
+   rather than sending), so this is a narrow window, not a routine case.
+3. **A late-accepted ack after body-layer's own take timeout is not specially handled.**
+   `resolve_pending_take` drops the pending take at `HANDOVER_ACK_TIMEOUT_S` and never re-checks
+   that `seq` if an accept for it later appears in the ring (section 3a names this as a case to
+   still speak, "a clock anomaly"). Flagged in `CrewConsole.flight_pending_take`'s own docstring.
+4. **Mode-2 breaks (CBTM) are not dual-written onto the numbered channel this stage** — only
+   ordinary heading/altitude/speed voice goals are. A break started in mode 2 still works exactly as
+   before (unaffected, flies through the old CBTM path), but `desired.turn_rate_deg_s`/`turn_style`
+   will not reflect an in-progress mode-2 break the way an ordinary heading goal does, so an unpark
+   mid-mode-2-break does not yet get the Decision-32 carry this stage gives a mode-*1* break. Stage
+   4 (which rebuilds mode 2 as a `desired`-reading consumer, including the CBTM dispatch) is the
+   natural place to close this, rather than half-building a second, temporary wiring path for it now.
+5. **`TestReleaseClearsHeldGoalsAcrossRetake`'s own test (aircraft-layer) lost most of its original
+   assertive power.** `fc_goal_*` (what it checked) is gone from the wire; the replacement test
+   confirms only `fc_mode` across a release→retake, not that a stale goal failed to leak — that
+   concern now belongs entirely to `flight_desired.lua`'s own `clear_desired()`, already covered by
+   `test_flight_desired_lua.py`'s `TestEdgeSeeding`/`TestResetAndStop`. Documented in the test's own
+   updated docstring.
+6. **Several aircraft-layer tests testing mechanisms this stage deletes were removed outright**,
+   not adapted (their own premise no longer exists at the layer they tested): `TestRepeatedTake
+   WhileAlreadyFlyingStillAcks`, `TestBadBoundRejectsWholeMessage`, `TestLastCmdSeqEchoSurvivesOn
+   Stop`, `test_a_fresh_process_seq_1_is_accepted_after_reset`, `test_unknown_cmd_arm_is_now_a_no_
+   op`, `TestSeqFieldsSurviveTheRealSchema` (all `fc_take_seq`/`fc_last_cmd_seq`/`fc_goal_*`-shaped).
+   Their replacement coverage lives in `test_flight_desired_lua.py`'s own `TestSetRequest` (epoch/
+   seq/stale/bounds refusal, exercised directly against the real `handle_flight_command`).
+   Body-layer: `TestDecideFlightControl`, `TestDrainFlightControlSeedsTheBreakTarget`,
+   `TestDrainFlightControlSendsReleaseOnAckTimeout` removed the same way (`decide_flight_control`/
+   the Decision-32 seed logic/the self-queued release are all deleted production code) — replacement
+   coverage is `test_flight_authority.py`'s new `TestResolvePendingTake`/`TestParseAcks` plus the
+   `HANDOVER_ACK_TIMEOUT_S >= FLIGHT_REQUEST_ACCEPT_WINDOW_S + 1.0 + 0.2` pin.
+7. **The test-impact list the plan itself names undercounted this stage too**, same pattern the
+   Stage 1-2 implementer flagged. Not named by the plan but required: `tools/check_rules.py` (the
+   dry-run harness needed its own `FlightAuthorityState`/`FlightControlState` split), `test_body_ai_
+   pilot_wheel.py`'s `_FakeAircraftClient` (needed a `write_flight` method once the dual-write
+   landed), and `test_mission_start_reset.py`'s `_RUNNER_PRESERVE` set (needed `command_seq` added,
+   or the mission-restart differential test fails on the new field).
+
+### New behaviour constant
+
+`belief.flight_authority.FLIGHT_REQUEST_ACCEPT_WINDOW_S` (1.5, lo=0.5, hi=10.0, `judgement`) — the
+plan's own named addition (section "Existing constants checked"). `belief.flight_control.HANDOVER_
+ACK_TIMEOUT_S`'s default raised 2.0 → 3.0 per the plan. Both comments were rewritten so the cross-
+key coupling between them is stated in the rendered first sentence of each (`config/defaults.toml`
+now carries it on both sides) — `test_tuning_comment_renders.py` enforces this and caught two early
+drafts that got it wrong.
+
+### Checks, Stage 3
+
+- aircraft-layer: `ruff format --check`/`ruff check` pass; `mypy src` passes (29 source files);
+  `luac5.1 -p` passes on every touched Lua file (`flight_desired.lua`, `flight_control.lua`, `ai_
+  pilot_wheel.lua`, `commands.lua`, `Export.lua`); the GETGLOBAL sweep on every touched Lua file is
+  clean (only stdlib/DCS APIs and the legitimate cross-module globals `ai_pilot_wheel`/`flight_
+  control`/`flight_desired`/`client`/`debug_log`); full suite `pytest tests -q`: **1101 passed**.
+- body-layer: `ruff format --check`/`ruff check` pass; `mypy src` passes (93 source files); full
+  suite (`not slow`, parallel via `pytest-xdist`): **3698 passed, 4 xfailed**; the 27 `slow`-marked
+  flight scenario tests also run separately (`pytest tests -q -m slow`): **27 passed**.
+- `config/defaults.toml` regenerated (`tools/generate_defaults.py --write`) and committed.

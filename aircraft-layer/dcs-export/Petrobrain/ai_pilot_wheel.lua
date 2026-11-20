@@ -167,6 +167,20 @@ local AI_PILOT_SEAT_CHANGE_SETTLE_S = 0.5
 -- a tight bound.
 local MODE_READ_SETTLE_S = 1.0
 
+-- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 4's
+-- "align" row, U6 answered 2026-11-20: *"overlay updates in a few
+-- frames. Anyhow, take whatever value the overlay has."*) -- the delay
+-- between the align press and reading the overlay's own course back
+-- into `desired.heading_deg`, so an unpark shortly after an align
+-- already carries the aligned heading (Stage 3's own unpark-carry
+-- reads `desired` verbatim; nothing else updates it for this press).
+-- The user's own answer names "a few frames", not `MODE_READ_SETTLE_S`
+-- (that 1.0 s figure is the *menu-closed* settle, a different read);
+-- this project has no per-frame clock available outside DCS itself, so
+-- a short sim-time margin stands in -- 0.1 s is 2-6 frames at this
+-- aircraft's usual 20-60 fps range, comfortably inside "a few".
+local ALIGN_READ_DELAY_S = 0.1
+
 -- A real press/release pulse (not a same-frame tap) for a centre press
 -- issued while the command menu is open -- measured live (P0-5 re-fly):
 -- a same-frame press/release does not toggle ALT REF with the menu open,
@@ -334,6 +348,10 @@ local ai_wheel_goal_pending_cmd = nil
 -- release call releases.
 local ai_wheel_cbtm_pending_release_t = nil
 local ai_wheel_cbtm_pending_cmd = nil
+
+-- BL-16 Stage 3 -- the align press's own deferred overlay-course read
+-- (`ALIGN_READ_DELAY_S`'s own deadline, `nil` when nothing is pending).
+local ai_wheel_align_read_at_t = nil
 
 -- Takeover sub-sequence state (plan's own "Co-moving Fields" table,
 -- Stage P1 revision), grouped into **one** table rather than one local
@@ -1268,6 +1286,12 @@ local function ai_pilot_cbtm_tick(t)
         ai_pilot_tap30(AI_WHEEL_UP)
         ai_pilot_last_press = "cbtm_align"
         ai_pilot_cbtm_finish()
+        -- BL-16 Stage 3 -- schedule the delayed overlay-course read
+        -- into `desired.heading_deg` (module docstring, `ALIGN_READ_
+        -- DELAY_S`). A later align press (or anything else) simply
+        -- overwrites this deadline -- only the most recent align's own
+        -- read ever lands.
+        ai_wheel_align_read_at_t = t + ALIGN_READ_DELAY_S
         return
     end
 
@@ -1675,22 +1699,13 @@ local function handle_ai_pilot_goal_command(data, t)
     ai_pilot_goal.speed_target_kmh = speed_target_kmh
     ai_pilot_goal.hvrt_direction = hvrt_direction
 
-    -- BL-16 (`plans/flight-desired-state/plan.md`, Stage 1) -- mirror
-    -- the exact commanded values into the shadow `desired` state, at
-    -- receipt (Q1a: the exact value stays desired even though mode 2
-    -- may fly an approximation of it). Guarded on `flight_desired`
-    -- existing, same posture as every other cross-module call in this
-    -- file.
-    if flight_desired ~= nil then
-        safe_call(function()
-            flight_desired.mirror_m2_goal({
-                heading_target_deg = heading_target_deg,
-                altitude_target_m = altitude_target_m,
-                altitude_target_ref = altitude_target_ref,
-                speed_target_kmh = speed_target_kmh,
-            })
-        end)
-    end
+    -- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`) -- this
+    -- channel no longer mirrors itself into `desired` here: body-layer
+    -- now sends an explicit numbered `set` on the `flight` channel
+    -- alongside every mode-2 voice goal (plan, Stage 3 bullet "Every
+    -- mode-2 voice goal also writes a set"), which is what updates
+    -- `desired` -- that write carries its own `seq`/epoch/bounds
+    -- checking, which this receipt-time mirror never had.
     if param ~= nil then
         ai_pilot_goal.progress = "pressing"
     elseif hvrt_direction == nil then
@@ -1945,17 +1960,18 @@ local function stick_park_raw()
     return ai_pilot_takeover.raw_arg852
 end
 
--- Read-only getter for `flight_control.lua`'s unpark-take (BL-16
--- sortie 2026-11-20, `plans/flight-control/debug.md`) -- the overlay's
--- own *set* heading/altitude/speed, the same parsed fields `Parked
--- FlightState.held_heading`/`held_altitude`/`held_altitude_ref`/
--- `held_speed` mirror on the body-layer side (`update_ai_pilot_wheel_
--- overlay` above is this module's single parse site for the raw text;
--- this getter re-reads the same locals, never a second parse). Every
--- field may be `nil` (not yet read this mission, or not a plain
--- number -- `speed_text` can read `"MAX"`) -- the caller's own fallback
--- to the measured/bank-at-capture state covers that, unchanged from
--- before this getter existed.
+-- Read-only getter for the overlay's own *set* heading/altitude/speed,
+-- the same parsed fields `ParkedFlightState.held_heading`/`held_
+-- altitude`/`held_altitude_ref`/`held_speed` mirror on the body-layer
+-- side (`update_ai_pilot_wheel_overlay` above is this module's single
+-- parse site for the raw text; this getter re-reads the same locals,
+-- never a second parse). Every field may be `nil` (not yet read this
+-- mission, or not a plain number -- `speed_text` can read `"MAX"`).
+-- **BL-16 Stage 3**: no longer read by `flight_control.lua`'s own
+-- unpark-take (that seed comes from `flight_desired.get()` now) --
+-- still read by `flight_desired.lua`'s own off->m2 reseed and by this
+-- module's own align-read below, both read-only against this module's
+-- state, never the reverse.
 local function held_targets()
     return {
         heading_deg = tonumber(ai_pilot_course_text),
@@ -1965,7 +1981,30 @@ local function held_targets()
     }
 end
 
-M.run_ai_pilot_wheel = run_ai_pilot_wheel
+-- BL-16 Stage 3 (module docstring near `ALIGN_READ_DELAY_S`) -- wraps
+-- `run_ai_pilot_wheel` so the deferred align-read can call `held_
+-- targets` above, which is declared after `run_ai_pilot_wheel` itself
+-- (Lua has no hoisting: a function defined before a `local`'s own
+-- declaration sees that name as a global, not this one -- `aircraft-
+-- layer/CLAUDE.md`'s own "no-hoisting" note). Exported in `run_ai_
+-- pilot_wheel`'s place below, so `Export.lua`'s call site needs no
+-- change.
+local function run_ai_pilot_wheel_with_align_read(t)
+    if ai_wheel_align_read_at_t ~= nil and t >= ai_wheel_align_read_at_t then
+        ai_wheel_align_read_at_t = nil
+        if flight_desired ~= nil then
+            local held = safe_call(held_targets)
+            if type(held) == "table" and type(held.heading_deg) == "number" then
+                safe_call(function()
+                    flight_desired.write_internal({ heading_deg = held.heading_deg })
+                end)
+            end
+        end
+    end
+    return run_ai_pilot_wheel(t)
+end
+
+M.run_ai_pilot_wheel = run_ai_pilot_wheel_with_align_read
 M.update_ai_pilot_wheel_overlay = update_ai_pilot_wheel_overlay
 M.push_ai_pilot_wheel_state = push_ai_pilot_wheel_state
 M.handle_ai_pilot_goal_command = handle_ai_pilot_goal_command

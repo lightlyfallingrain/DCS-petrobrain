@@ -24,8 +24,29 @@ channel, not built here."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Final
 
+import tuning
 from aircraft_client import AircraftLayerClient
+from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
+
+#: How old a `flight` request may be when `Export.lua` applies it (BL-16
+#: Stage 3, `plans/flight-desired-state/plan.md`, section 3a) -- must
+#: stay at least one body-layer poll plus `Export.lua`'s own push cadence below
+#: `belief.flight_control.HANDOVER_ACK_TIMEOUT_S`, which bounds the
+#: whole round trip this deadline is the Lua-side half of
+#: (`test_handover_ack_timeout_exceeds_accept_window_with_margin` pins
+#: `HANDOVER_ACK_TIMEOUT_S >= FLIGHT_REQUEST_ACCEPT_WINDOW_S + 1.0 +
+#: 0.2`). A request is carried as `until = send time + this window`;
+#: `Export.lua` refuses it stale once its own model-time clock passes
+#: that deadline.
+FLIGHT_REQUEST_ACCEPT_WINDOW_S: Final[float] = tuning.real(
+    "belief.flight_authority.FLIGHT_REQUEST_ACCEPT_WINDOW_S",
+    1.5,
+    lo=0.5,
+    hi=10.0,
+    status="judgement",
+)
 
 #: `fd_mode_cause` values that mean the player (or a system reset) let
 #: go on purpose -- none of these get the urgent line, because nothing
@@ -93,6 +114,14 @@ class FlightAuthorityState:
     measured_ias_kmh: float | None = None
     overlay_course_deg: float | None = None
     reset_epoch: int | None = None
+    #: BL-16 Stage 3 -- the acceptance epoch/floor/ack-ring for the
+    #: numbered `flight` channel (section 5). `acks` is `Export.lua`'s
+    #: own semicolon-joined ring string ("N:a:m1;N+1:r:wrong_mode;..."),
+    #: parsed by `parse_acks` below rather than here (a pure mirror
+    #: refresh never interprets the payload it carries).
+    epoch: int | None = None
+    last_seq: int | None = None
+    acks: str | None = None
 
 
 def advance_flight_authority(
@@ -133,6 +162,9 @@ def advance_flight_authority(
         measured_ias_kmh=_as_optional_float(sample.get("fd_measured_ias")),
         overlay_course_deg=_as_optional_float(sample.get("fd_overlay_course")),
         reset_epoch=_as_optional_int(sample.get("fd_reset_epoch")),
+        epoch=_as_optional_int(sample.get("fd_epoch")),
+        last_seq=_as_optional_int(sample.get("fd_last_seq")),
+        acks=_as_optional_str(sample.get("fd_acks")),
     )
 
 
@@ -172,3 +204,71 @@ def decide_flight_speech(
     if new.fd_mode == "off" and new.mode_cause not in _SILENT_OFF_CAUSES:
         return FlightAuthorityDecision(says="You have controls!", urgent=True)
     return None
+
+
+def parse_acks(acks: str | None) -> list[tuple[int, str, str]]:
+    """Parses `Export.lua`'s own ack-ring string ("N:a:m1;N+1:r:
+    wrong_mode;...", section 5) into `(seq, status, detail)` triples.
+    `status` is `"a"`/`"r"`; `detail` the mode letter or refusal reason.
+    A malformed entry is skipped (never raises) -- the ring is a best-
+    effort diagnostic feed, not a channel `match_acks`-style callers can
+    afford to crash on."""
+    if not acks:
+        return []
+    out: list[tuple[int, str, str]] = []
+    for entry in acks.split(";"):
+        parts = entry.split(":", 2)
+        if len(parts) != 3:
+            continue
+        seq_text, status, detail = parts
+        try:
+            seq = int(seq_text)
+        except ValueError:
+            continue
+        if status not in ("a", "r"):
+            continue
+        out.append((seq, status, detail))
+    return out
+
+
+@dataclass(frozen=True)
+class PendingTake:
+    """BL-16 Stage 3 -- a voice take's own deferred ack (section 3a),
+    replacing `belief.flight_control.FlightControlState.took_at_sim`/
+    `pending_take_says`/`take_seq`. `says` is the confirmation text
+    (`"I have controls."`), held unspoken until `resolve_pending_take`
+    finds this `seq` accepted in `fd_acks`."""
+
+    seq: int
+    says: str
+    sent_at_sim: float
+
+
+def resolve_pending_take(
+    pending: PendingTake | None, acks: str | None, now_sim: float
+) -> tuple[PendingTake | None, FlightAuthorityDecision | None]:
+    """The voice-take confirm/timeout handshake (`plans/
+    flight-desired-state/plan.md`, section 3a), replacing `belief.
+    flight_control.decide_flight_control`'s own `TAKING` branch --
+    driven by `fd_acks` rather than polling `fc_take_seq`/`fc_mode`.
+
+    - **Accepted** (`"N:a:m1"` for this `seq`): speaks `pending.says`
+      urgently (Decision 13's handover contract), clears `pending`.
+    - **Refused** (`"N:r:<reason>"` for this `seq`): speaks "Unable,
+      not ready.", clears `pending` -- the refusal reason is not spoken
+      verbatim (U1/3a names no new wording for this path; every refusal
+      reason here reduces to "not ready" from the player's seat).
+    - **Timeout** (`now_sim - sent_at_sim >= HANDOVER_ACK_TIMEOUT_S`,
+      no ack either way yet): same "Unable, not ready." line, cleared.
+    - **Still waiting**: `pending` unchanged, no decision."""
+    if pending is None:
+        return None, None
+    for seq, status, _detail in parse_acks(acks):
+        if seq != pending.seq:
+            continue
+        if status == "a":
+            return None, FlightAuthorityDecision(says=pending.says, urgent=True)
+        return None, FlightAuthorityDecision(says="Unable, not ready.", urgent=False)
+    if now_sim - pending.sent_at_sim >= HANDOVER_ACK_TIMEOUT_S:
+        return None, FlightAuthorityDecision(says="Unable, not ready.", urgent=False)
+    return pending, None

@@ -1,10 +1,11 @@
 """Tests for `belief.flight_authority` -- BL-16 (`plans/
-flight-desired-state/plan.md`, Stages 1-2). `advance_flight_authority`
+flight-desired-state/plan.md`, Stages 1-3). `advance_flight_authority`
 is exercised against a real loopback `http.server` instance via a real
 `AircraftLayerClient`, same posture as `test_flight_control.py`'s own
 convention (the project's "no mocked `urllib`" rule). `decide_flight_
-speech` is pure, so it is exercised directly against `FlightAuthority
-State` values, no server needed."""
+speech`/`parse_acks`/`resolve_pending_take` are pure, so they are
+exercised directly against `FlightAuthorityState`/`PendingTake` values,
+no server needed."""
 
 from __future__ import annotations
 
@@ -18,10 +19,15 @@ import pytest
 
 from aircraft_client import AircraftLayerClient
 from belief.flight_authority import (
+    FLIGHT_REQUEST_ACCEPT_WINDOW_S,
     FlightAuthorityState,
+    PendingTake,
     advance_flight_authority,
     decide_flight_speech,
+    parse_acks,
+    resolve_pending_take,
 )
+from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -169,3 +175,102 @@ class TestDecideFlightSpeech:
         assert decision is not None
         assert decision.says == "You have controls!"
         assert decision.urgent is True
+
+
+class TestParseAcks:
+    """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+    `parse_acks` reads `Export.lua`'s own semicolon-joined `fd_acks` ring
+    string."""
+
+    def test_none_is_empty(self) -> None:
+        assert parse_acks(None) == []
+
+    def test_empty_string_is_empty(self) -> None:
+        assert parse_acks("") == []
+
+    def test_a_single_accept(self) -> None:
+        assert parse_acks("1:a:m1") == [(1, "a", "m1")]
+
+    def test_several_entries_in_order(self) -> None:
+        assert parse_acks("1:a:m1;2:r:wrong_mode;3:a:m2") == [
+            (1, "a", "m1"),
+            (2, "r", "wrong_mode"),
+            (3, "a", "m2"),
+        ]
+
+    def test_a_malformed_entry_is_skipped_not_raised(self) -> None:
+        assert parse_acks("1:a:m1;garbage;2:a:m2") == [
+            (1, "a", "m1"),
+            (2, "a", "m2"),
+        ]
+
+
+class TestResolvePendingTake:
+    """BL-16 Stage 3, section 3a -- the voice-take confirm/timeout
+    handshake, driven by `fd_acks` instead of `decide_flight_control`'s
+    own (deleted) `fc_take_seq`/`fc_mode` polling."""
+
+    def test_no_pending_take_is_a_no_op(self) -> None:
+        pending, decision = resolve_pending_take(None, "1:a:m1", 10.0)
+        assert pending is None
+        assert decision is None
+
+    def test_still_waiting_with_no_matching_ack_and_no_timeout(self) -> None:
+        pending = PendingTake(seq=1, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(pending, None, 0.5)
+        assert new_pending is pending
+        assert decision is None
+
+    def test_accepted_speaks_the_recorded_says_urgently_and_clears(self) -> None:
+        pending = PendingTake(seq=1, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(pending, "1:a:m1", 0.5)
+        assert new_pending is None
+        assert decision is not None
+        assert decision.says == "I have controls."
+        assert decision.urgent is True
+
+    def test_an_ack_for_a_different_seq_is_ignored(self) -> None:
+        pending = PendingTake(seq=2, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(pending, "1:a:m1", 0.5)
+        assert new_pending is pending
+        assert decision is None
+
+    def test_refused_speaks_unable_not_ready_non_urgently_and_clears(self) -> None:
+        pending = PendingTake(seq=1, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(pending, "1:r:precondition", 0.5)
+        assert new_pending is None
+        assert decision is not None
+        assert decision.says == "Unable, not ready."
+        assert decision.urgent is False
+
+    def test_timeout_with_no_ack_speaks_unable_not_ready_and_clears(self) -> None:
+        pending = PendingTake(seq=1, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(
+            pending, None, HANDOVER_ACK_TIMEOUT_S
+        )
+        assert new_pending is None
+        assert decision is not None
+        assert decision.says == "Unable, not ready."
+        assert decision.urgent is False
+
+    def test_an_ack_and_a_timeout_in_the_same_tick_resolve_as_the_ack(self) -> None:
+        """Section 3a: "an ack and a deadline in the same tick resolve
+        as the ack" -- `resolve_pending_take` checks `acks` before the
+        timeout, so an accept landing exactly at (or after) the timeout
+        instant still wins over it."""
+        pending = PendingTake(seq=1, says="I have controls.", sent_at_sim=0.0)
+        new_pending, decision = resolve_pending_take(
+            pending, "1:a:m1", HANDOVER_ACK_TIMEOUT_S
+        )
+        assert new_pending is None
+        assert decision is not None
+        assert decision.says == "I have controls."
+        assert decision.urgent is True
+
+
+def test_handover_ack_timeout_exceeds_accept_window_with_margin() -> None:
+    """Section 3a: `HANDOVER_ACK_TIMEOUT_S` must exceed `FLIGHT_REQUEST_
+    ACCEPT_WINDOW_S` by at least one body-layer poll (1.0 s) plus
+    `Export.lua`'s own push cadence (0.2 s) -- tuning one constant must
+    not silently break the other."""
+    assert HANDOVER_ACK_TIMEOUT_S >= FLIGHT_REQUEST_ACCEPT_WINDOW_S + 1.0 + 0.2

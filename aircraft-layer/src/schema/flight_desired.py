@@ -4,13 +4,19 @@ lua`'s `flight_desired.push_flight_desired_state` status, pushed at 5 Hz
 Wire key `"fd_mode"` doubles as the collector's route key, same pattern
 as `"fc_mode"`/`"apw_parked_active"`.
 
-**Stages 1-2 ship a shadow mirror only** -- nothing in this layer or
-body-layer flies the aircraft from this feed yet (that is Stage 3's one
-channel). `fd_stamp_hdg`/`fd_stamp_alt`/`fd_stamp_spd` are `Export.lua`'s
-own internal monotonic write counter for Stages 1-2 (not yet a request
-sequence number); a later stage may give this field a different meaning
-without a wire reshape, since it is read nowhere outside a debug readout
-today.
+**Stage 3** (`plans/flight-desired-state/plan.md`) adds the one numbered
+command channel: `fd_epoch`/`fd_last_seq` are `Export.lua`'s own
+acceptance epoch and staleness floor for the new `flight` op
+(`POST /command/flight`, replacing the retired `flight_control` op
+entirely), and `fd_acks` is the last-8 ack ring (`"N:a:m1;N+1:r:
+wrong_mode;..."`, section 5) -- a semicolon-joined string rather than a
+JSON array, since `Export.lua`'s own hand-rolled encoder has no array
+support and this layer does not interpret the string, only carries it.
+`fd_stamp_hdg`/`fd_stamp_alt`/`fd_stamp_spd` are now the wire `seq` of
+whichever numbered request (or, for an internal write such as a settle
+writeback, `Export.lua`'s own current `fd_last_seq` floor) last wrote
+that part of the desired state -- no longer Stages 1-2's own internal
+write counter.
 
 **`fd_hdg_true_deg`/`fd_hdg_mag_deg`** (main-loop amendment, 2026-11-20,
 applied on top of the architect's plan) carry the measured heading both
@@ -70,6 +76,9 @@ class FlightDesiredState:
     measured_ias_kmh: float | None
     overlay_course_deg: float | None
     reset_epoch: int | None
+    epoch: int | None = None
+    last_seq: int | None = None
+    acks: str | None = None
 
     @staticmethod
     def from_dict(
@@ -156,6 +165,9 @@ class FlightDesiredState:
             measured_ias_kmh=_optional_number("fd_measured_ias"),
             overlay_course_deg=_optional_number("fd_overlay_course"),
             reset_epoch=_optional_int("fd_reset_epoch"),
+            epoch=_optional_int("fd_epoch"),
+            last_seq=_optional_int("fd_last_seq"),
+            acks=_optional_str("fd_acks"),
         )
 
     @staticmethod
@@ -202,4 +214,7 @@ class FlightDesiredState:
             "fd_measured_ias": self.measured_ias_kmh,
             "fd_overlay_course": self.overlay_course_deg,
             "fd_reset_epoch": self.reset_epoch,
+            "fd_epoch": self.epoch,
+            "fd_last_seq": self.last_seq,
+            "fd_acks": self.acks,
         }

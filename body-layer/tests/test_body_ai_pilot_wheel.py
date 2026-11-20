@@ -52,9 +52,17 @@ from perception.source import OwnshipState
 class _FakeAircraftClient:
     def __init__(self) -> None:
         self.ai_pilot_goal_calls: list[tuple[Any, ...]] = []
+        self.flight_calls: list[tuple[Any, ...]] = []
 
     def write_ai_pilot_goal(self, *args: Any) -> None:
         self.ai_pilot_goal_calls.append(args)
+
+    def write_flight(self, *args: Any) -> None:
+        """BL-16 Stage 3's own dual-write (`plans/flight-desired-state/
+        plan.md`, "Every mode-2 voice goal also writes a set") -- a
+        `set` request alongside the `ai_pilot_goal` send above, recorded
+        but not otherwise asserted on by most tests in this file."""
+        self.flight_calls.append(args)
 
 
 def _runner(

@@ -6,15 +6,21 @@ Wire key `"fc_mode"` doubles as the collector's route key, same pattern as
 `"servo_mode"`/`"apw_parked_active"`/`"net1"`.
 
 **Stage M1 ships the seam and handover only** -- the control law (M2) is
-not built here, so `fc_goal_*`/`fc_takeover_mode` are the *commanded*
-values Lua is holding on the wire (what a goal message last set, or the
-measured value frozen at take), never a shaped/converging value: output
-is `captured + wobble` regardless of any goal (plan's own M1 text). The
-per-channel band fields (`fc_in_band_*`) and `fc_limit_hit` exist on the
-wire now (M2 will start writing real values into them once the shaper
-exists) but `Export.lua` only ever sends `false`/`null` for them in this
-stage -- that is not a defect to chase, it is M1's own honest "nothing to
-report yet".
+not built here. The per-channel band fields (`fc_in_band_*`) and `fc_
+limit_hit` exist on the wire now (M2 will start writing real values into
+them once the shaper exists) but `Export.lua` only ever sends `false`/
+`null` for them in this stage -- that is not a defect to chase, it is
+M1's own honest "nothing to report yet".
+
+**BL-16 Stage 3** (`plans/flight-desired-state/plan.md`) drops `fc_
+goal_*`/`fc_take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` from this line
+entirely -- the commanded heading/altitude/speed now lives in `flight_
+desired`'s own `fd_*` fields (`schema/flight_desired.py`, section 1 of
+the plan), and the handover/goal/set ack rides `fd_acks` on that same
+line, not a seq echoed here. This schema carries only what is genuinely
+mode-1-specific: measured telemetry, the handover-diagnostics fields
+(`fc_take_origin`/`fc_takeover_mode`/`fc_release_reason`/`fc_refuse_
+cause`), the A9 bands, and the slip-ball calibration readout.
 
 This layer carries the raw status and decides nothing, same rule every
 other schema here follows.
@@ -26,23 +32,15 @@ are the ADI ball draw args (943/784), `fc_slip_ball_lo_api` is
 `LoGetSlipBallPosition()` as a cross-check. Not consulted by `Export.
 lua`'s own control law; sign/scale is unmeasured.
 
-**`fc_last_cmd_seq`** (security-m1-m2.md Finding A, change-request round)
-echoes `Export.lua`'s own strictly-increasing staleness counter, bumped
-on every accepted `flight_control` command of any `cmd` kind and never
-reset across a mission restart -- unlike `fc_take_seq`/`fc_goal_seq`,
-which `on_stop` clears. It exists so `belief.flight_control` can
-reconcile its own `wire_seq` (which *does* reset to 0 on a body-layer
-process restart) back above it, rather than being silently and
-permanently stuck below it for the rest of the DCS session.
-
 **`fc_reset_epoch`** (BL-16 sortie 2026-11-20, `docs/acceptance/
 2026-11-20-sortie-feedback.md`) is `Export.lua`'s own echo of the last
 body-layer process-start reset it actually applied (`flight_control.
 reset`'s own `epoch` argument), `None` until the first such reset this
 DCS session. Body-layer compares this against the epoch it generated
 at its own process start to know when it is safe to send anything that
-carries a `seq`, the same echo-and-compare shape `fc_last_cmd_seq` has,
-on a different generation."""
+carries a `seq` on the (now separate) `flight` channel -- `flight_
+desired`'s own `fd_epoch`/`fd_last_seq` own that staleness floor since
+Stage 3, this field is now a diagnostic echo only."""
 
 from __future__ import annotations
 
@@ -65,15 +63,8 @@ class FlightControlState:
     dcs_model_time_s: float
     received_wall_clock_s: float
     fc_mode: str
-    take_seq: int | None
-    goal_seq: int | None
-    last_cmd_seq: int | None
     take_origin: str | None
     takeover_mode: str | None
-    goal_heading_deg: float | None
-    goal_altitude_m: float | None
-    goal_altitude_ref: str | None
-    goal_speed_kmh: float | None
     measured_heading_deg: float | None
     measured_altitude_m: float | None
     measured_speed_kmh: float | None
@@ -177,15 +168,8 @@ class FlightControlState:
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
             fc_mode=fc_mode,
-            take_seq=_optional_int("fc_take_seq"),
-            goal_seq=_optional_int("fc_goal_seq"),
-            last_cmd_seq=_optional_int("fc_last_cmd_seq"),
             take_origin=_optional_str("fc_take_origin"),
             takeover_mode=_optional_str("fc_takeover_mode"),
-            goal_heading_deg=_optional_number("fc_goal_heading"),
-            goal_altitude_m=_optional_number("fc_goal_altitude"),
-            goal_altitude_ref=_optional_str("fc_goal_altitude_ref"),
-            goal_speed_kmh=_optional_number("fc_goal_speed"),
             measured_heading_deg=_optional_number("fc_measured_heading"),
             measured_altitude_m=_optional_number("fc_measured_altitude"),
             measured_speed_kmh=_optional_number("fc_measured_speed"),
@@ -223,15 +207,8 @@ class FlightControlState:
             "t": self.dcs_model_time_s,
             "received_wall_clock_s": self.received_wall_clock_s,
             "fc_mode": self.fc_mode,
-            "fc_take_seq": self.take_seq,
-            "fc_goal_seq": self.goal_seq,
-            "fc_last_cmd_seq": self.last_cmd_seq,
             "fc_take_origin": self.take_origin,
             "fc_takeover_mode": self.takeover_mode,
-            "fc_goal_heading": self.goal_heading_deg,
-            "fc_goal_altitude": self.goal_altitude_m,
-            "fc_goal_altitude_ref": self.goal_altitude_ref,
-            "fc_goal_speed": self.goal_speed_kmh,
             "fc_measured_heading": self.measured_heading_deg,
             "fc_measured_altitude": self.measured_altitude_m,
             "fc_measured_speed": self.measured_speed_kmh,

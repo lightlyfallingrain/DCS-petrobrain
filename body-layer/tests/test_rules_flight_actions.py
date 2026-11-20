@@ -73,10 +73,10 @@ def _set_mode1_active(
     console: CrewConsole, *, measured_heading: float | None = None
 ) -> None:
     """Companion to `_console`'s own `parked_active` mapping, for the
-    mode-1 call sites below that set `console.flight_control_state =
-    replace(..., phase="ACTIVE", ...)` directly -- same reasoning,
+    mode-1 call sites below that need `flight_mode()` to read `"axes"` --
     `flight_mode()`/`current_crew_state()` need `flight_authority_
-    state.fd_mode == "m1"` now, not `flight_control_state.phase`."""
+    state.fd_mode == "m1"`; `FlightControlState` carries no mode of its
+    own since BL-16 Stage 3."""
     console.flight_authority_state = replace(
         console.flight_authority_state,
         fd_mode="m1",
@@ -678,9 +678,6 @@ class TestCbtmActions:
         the 9K113 is gated behind the CPG view which is gated behind
         mode 2."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(console)
         lines = console.handle_command("cbtm_align", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
@@ -688,9 +685,6 @@ class TestCbtmActions:
 
     def test_mode_1_align_for_launch_is_also_unable_ai_overlay(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(console)
         lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
@@ -704,9 +698,6 @@ class TestCbtmActions:
         all, unlike `increment_heading`'s own `"flight_control_
         heading"`."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(console)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
@@ -716,9 +707,6 @@ class TestCbtmActions:
 
     def test_mode_1_break_away_not_ready_without_a_known_heading(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(console)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == [render_unable("NOT_READY").text]
@@ -730,9 +718,6 @@ class TestCbtmActions:
         `BREAK_TURN_RATE_DEG_S` (`config/rules/flight.lua`, 40) as the
         signed rate override. No `NOT_READY` stub left to answer."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
         _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
@@ -745,9 +730,6 @@ class TestCbtmActions:
 
     def test_mode_1_break_right_flies_the_real_break(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
         _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "right"}
@@ -762,9 +744,6 @@ class TestCbtmActions:
         """Always a hard 180 to the left (E13) -- the rate override is
         negative regardless of a "direction" slot, there is none."""
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE", measured_heading=100.0
-        )
         _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == ["Breaking away."]
@@ -898,7 +877,6 @@ class TestHandoverActions:
         console = _dispatching_console(parked_active=True)
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition is None
 
     def test_you_have_controls_takes_when_clear_to_fly(self) -> None:
@@ -908,10 +886,8 @@ class TestHandoverActions:
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "TAKING"
-        assert console.flight_control_state.take_seq == 1
         assert console.flight_control_transition == "take"
-        assert console.flight_control_state.pending_take_says == "I have controls."
+        assert console.pending_take_says == "I have controls."
 
     def test_you_have_controls_refuses_on_the_ground(self) -> None:
         console = _dispatching_console(parked_active=False)
@@ -919,7 +895,6 @@ class TestHandoverActions:
         console.ias_kmh = 150.0
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == [render_unable("ON_GROUND").text]
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition is None
 
     def test_you_have_controls_refuses_too_slow(self) -> None:
@@ -938,13 +913,9 @@ class TestHandoverActions:
 
     def test_i_have_controls_releases_while_flying_on_the_axes(self) -> None:
         console = _dispatching_console(parked_active=False)
-        console.flight_control_state = replace(
-            console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(console)
         lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == ["You have controls."]
-        assert console.flight_control_state.phase == "PILOT"
         assert console.flight_control_transition == "release"
 
     def test_i_have_controls_is_a_silent_no_op_with_nobody_flying(self) -> None:
@@ -966,9 +937,6 @@ class TestSeatNeverGatesMode1:
     @pytest.mark.parametrize("seat", ["pilot", "operator", None])
     def test_flight_mode_is_the_same_whichever_seat(self, seat: str | None) -> None:
         flying_console = _dispatching_console(parked_active=False, player_seat=seat)
-        flying_console.flight_control_state = replace(
-            flying_console.flight_control_state, phase="ACTIVE"
-        )
         _set_mode1_active(flying_console)
         assert flying_console.flight_mode() == "axes"
 
@@ -988,7 +956,6 @@ class TestSeatNeverGatesMode1:
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
-        assert console.flight_control_state.phase == "TAKING"
         assert console.flight_control_transition == "take"
 
 

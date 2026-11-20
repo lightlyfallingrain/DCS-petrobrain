@@ -180,6 +180,11 @@ _RUNNER_PRESERVE = {
     # two fields, same process-not-mission reasoning as the three above.
     "command_reset_unconfirmed_since_wall",
     "command_reset_warned",
+    # BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
+    # the `flight` channel's own mission-wide counter: "one body-layer
+    # counter, for the whole process", never reset across a mission
+    # restart, same reasoning as `command_reset_epoch` above.
+    "command_seq",
 }
 
 

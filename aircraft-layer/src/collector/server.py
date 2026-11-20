@@ -184,7 +184,12 @@ logger = logging.getLogger(__name__)
 #: `flight_control` `"arm"` command -- a pre-fix collector talking to a
 #: post-fix `Export.lua` would log a version mismatch, which is the
 #: point (`Export.lua`'s own matching comment).
-EXPECTED_EXPORT_VERSION = "2026-11-20b"
+#: Bumped again, "...20c" (BL-16 Stage 3, same plan) for the retired
+#: `flight_control` op (replaced by the numbered `flight` op), the new
+#: `fd_epoch`/`fd_last_seq`/`fd_acks` fields on the flight-desired
+#: status line, and the `fc_mode` line's own dropped `fc_goal_*`/`fc_
+#: take_seq`/`fc_goal_seq`/`fc_last_cmd_seq` fields.
+EXPECTED_EXPORT_VERSION = "2026-11-20c"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it

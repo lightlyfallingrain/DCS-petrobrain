@@ -1,15 +1,28 @@
-"""Tests for `belief.flight_control` -- BL-16 mode 1 Stage M1 (`plans/
-flight-control/plan.md`, "Revised 2026-11-18"). `advance_flight_control_
-state` is exercised against a real loopback `http.server` instance via a
-real `AircraftLayerClient`, same posture as `test_ai_pilot_wheel.py`'s
-own convention (the project's "no mocked `urllib`" rule) -- not a mocked
-client double. `take_controls`/`release_controls`/`decide_flight_
-control`/the clamp helpers are pure, so they are exercised directly
-against `FlightControlState` values, no server needed."""
+"""Tests for `belief.flight_control` -- BL-16 mode 1 (`plans/
+flight-control/plan.md`, "Revised 2026-11-18", and `plans/
+flight-desired-state/plan.md` Stage 3). `advance_flight_control_state`
+is exercised against a real loopback `http.server` instance via a real
+`AircraftLayerClient`, same posture as `test_ai_pilot_wheel.py`'s own
+convention (the project's "no mocked `urllib`" rule) -- not a mocked
+client double. `take_controls`/`release_controls`/the clamp helpers are
+pure, so they are exercised directly, no server needed.
+
+**BL-16 Stage 3** removed `FlightControlPhase`/`phase`/`take_seq`/
+`pending_take_says`/`took_at_sim`/`unpark_take`/`wire_seq`/`held_*`/
+`lua_take_seq`/`lua_last_cmd_seq` from `FlightControlState` entirely
+(the mode authority and the voice-take confirm/timeout handshake moved
+to `belief.flight_authority`'s `FlightAuthorityState`/`PendingTake`/
+`resolve_pending_take`, tested in `test_flight_authority.py`) and
+deleted `decide_flight_control` outright -- `TestDecideFlightControl`,
+`TestDrainFlightControlSeedsTheBreakTarget` (the Decision-32 break-seed
+logic, now owned by `Export.lua`'s own `build_take_seed`, carrying
+`desired` verbatim into an unpark) and `TestDrainFlightControlSends
+ReleaseOnAckTimeout` (the `flight_control_system_release_pending`
+mechanism, superseded by `resolve_pending_take`'s own timeout handling)
+are removed along with them."""
 
 from __future__ import annotations
 
-import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -18,9 +31,6 @@ from typing import Any
 import pytest
 
 from aircraft_client import AircraftLayerClient
-from belief.ai_pilot_wheel import ParkedFlightState
-from belief.contacts import ContactStore
-from belief.crew_console import CrewConsole
 from belief.flight_control import (
     FLOOR_AGL_M,
     MAX_IAS_KMH,
@@ -30,7 +40,6 @@ from belief.flight_control import (
     advance_flight_control_state,
     clamp_altitude,
     clamp_speed,
-    decide_flight_control,
     flight_control_limits,
     goal_request_fields,
     release_controls,
@@ -47,6 +56,8 @@ def _make_handler(body: object) -> type[BaseHTTPRequestHandler]:
                 self._respond(404, {"error": "not found"})
 
         def _respond(self, status: int, payload_obj: object) -> None:
+            import json
+
             payload = json.dumps(payload_obj).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -78,14 +89,8 @@ def server_with_sample() -> Iterator[str]:
         "t": 123.5,
         "received_wall_clock_s": 1000.0,
         "fc_mode": "active",
-        "fc_take_seq": 3,
-        "fc_goal_seq": 1,
         "fc_take_origin": "voice",
         "fc_takeover_mode": "heading",
-        "fc_goal_heading": 90.0,
-        "fc_goal_altitude": None,
-        "fc_goal_altitude_ref": None,
-        "fc_goal_speed": None,
         "fc_measured_heading": 91.0,
         "fc_measured_altitude": 200.0,
         "fc_measured_speed": 150.0,
@@ -116,11 +121,8 @@ class TestAdvanceFlightControlState:
         state = advance_flight_control_state(FlightControlState(), client)
 
         assert state.lua_mode == "active"
-        assert state.lua_take_seq == 3
         assert state.lua_take_origin == "voice"
         assert state.lua_takeover_mode == "heading"
-        assert state.held_heading == pytest.approx(90.0)
-        assert state.held_altitude is None
         assert state.measured_heading == pytest.approx(91.0)
         assert state.measured_altitude == pytest.approx(200.0)
         assert state.measured_speed == pytest.approx(150.0)
@@ -133,33 +135,9 @@ class TestAdvanceFlightControlState:
         assert state.slip_ball_operator_raw == pytest.approx(-0.25)
         assert state.slip_ball_lo_api is None
 
-    def test_body_layer_own_fields_are_carried_through_unchanged(
-        self, server_with_sample: str
-    ) -> None:
-        """`phase`/`take_seq`/`pending_take_says`/`took_at_sim`/
-        `unpark_take`/`wire_seq` are body-layer's own authoritative
-        fields -- the mirror refresh must never touch them."""
-        client = AircraftLayerClient(base_url=server_with_sample)
-        previous = FlightControlState(
-            phase="TAKING",
-            take_seq=7,
-            pending_take_says="I have controls.",
-            took_at_sim=12.0,
-            unpark_take=True,
-            wire_seq=4,
-        )
-        state = advance_flight_control_state(previous, client)
-
-        assert state.phase == "TAKING"
-        assert state.take_seq == 7
-        assert state.pending_take_says == "I have controls."
-        assert state.took_at_sim == 12.0
-        assert state.unpark_take is True
-        assert state.wire_seq == 4
-
     def test_a_null_sample_leaves_state_unchanged(self, server_with_null: str) -> None:
         client = AircraftLayerClient(base_url=server_with_null)
-        previous = FlightControlState(phase="ACTIVE", take_seq=2)
+        previous = FlightControlState(lua_mode="active")
         state = advance_flight_control_state(previous, client)
         assert state is previous
 
@@ -193,22 +171,21 @@ class TestAdvanceFlightControlStateResetEpoch:
 
 
 class TestTakeControls:
+    """BL-16 Stage 3 -- `take_controls` is now a pure request builder
+    with no `FlightControlState` parameter at all (no more `phase` to
+    transition); it returns only the `{"ok", "acted"|"reason"}` result."""
+
     def test_overlay_flying_is_a_silent_no_op(self) -> None:
-        state, result = take_controls(
-            FlightControlState(),
-            0.0,
+        result = take_controls(
             overlay_flying=True,
             on_ground=False,
             too_slow=False,
             attack_run_engaged=False,
         )
         assert result == {"ok": True, "acted": False}
-        assert state.phase == "PILOT"
 
     def test_on_ground_refuses(self) -> None:
-        _, result = take_controls(
-            FlightControlState(),
-            0.0,
+        result = take_controls(
             overlay_flying=False,
             on_ground=True,
             too_slow=False,
@@ -217,9 +194,7 @@ class TestTakeControls:
         assert result == {"ok": False, "reason": "ON_GROUND"}
 
     def test_too_slow_refuses(self) -> None:
-        _, result = take_controls(
-            FlightControlState(),
-            0.0,
+        result = take_controls(
             overlay_flying=False,
             on_ground=False,
             too_slow=True,
@@ -228,9 +203,7 @@ class TestTakeControls:
         assert result == {"ok": False, "reason": "TOO_SLOW"}
 
     def test_attack_run_engaged_refuses(self) -> None:
-        _, result = take_controls(
-            FlightControlState(),
-            0.0,
+        result = take_controls(
             overlay_flying=False,
             on_ground=False,
             too_slow=False,
@@ -241,9 +214,7 @@ class TestTakeControls:
     def test_refusal_order_is_ground_then_speed_then_attack_run(self) -> None:
         """All three refusals true at once -- `ON_GROUND` wins, pinning
         the plan's own check order."""
-        _, result = take_controls(
-            FlightControlState(),
-            0.0,
+        result = take_controls(
             overlay_flying=False,
             on_ground=True,
             too_slow=True,
@@ -251,218 +222,32 @@ class TestTakeControls:
         )
         assert result == {"ok": False, "reason": "ON_GROUND"}
 
-    def test_a_clean_take_bumps_take_seq_and_enters_taking(self) -> None:
-        state, result = take_controls(
-            FlightControlState(take_seq=5),
-            42.0,
+    def test_a_clean_take_succeeds(self) -> None:
+        result = take_controls(
             overlay_flying=False,
             on_ground=False,
             too_slow=False,
             attack_run_engaged=False,
         )
         assert result == {"ok": True, "acted": True}
-        assert state.phase == "TAKING"
-        assert state.take_seq == 6
-        assert state.took_at_sim == 42.0
 
 
 class TestReleaseControls:
+    """BL-16 Stage 3 -- `release_controls` takes `flying_axes` (the
+    caller's own `flight_authority_state.fd_mode in ("taking", "m1")`)
+    in place of the deleted `state.phase`/`state.lua_mode` check."""
+
     def test_overlay_flying_is_unable(self) -> None:
-        state, result = release_controls(FlightControlState(), overlay_flying=True)
+        result = release_controls(overlay_flying=True, flying_axes=False)
         assert result == {"ok": False, "reason": "AI_OVERLAY"}
-        assert state.phase == "PILOT"
 
-    def test_releases_from_taking(self) -> None:
-        state, result = release_controls(
-            FlightControlState(phase="TAKING", pending_take_says="x", took_at_sim=1.0),
-            overlay_flying=False,
-        )
+    def test_flying_axes_acts(self) -> None:
+        result = release_controls(overlay_flying=False, flying_axes=True)
         assert result == {"ok": True, "acted": True}
-        assert state.phase == "PILOT"
-        assert state.pending_take_says is None
-        assert state.took_at_sim is None
 
-    def test_releases_from_active(self) -> None:
-        state, result = release_controls(
-            FlightControlState(phase="ACTIVE"), overlay_flying=False
-        )
-        assert result == {"ok": True, "acted": True}
-        assert state.phase == "PILOT"
-
-    def test_nobody_flying_is_a_silent_no_op(self) -> None:
-        state, result = release_controls(FlightControlState(), overlay_flying=False)
+    def test_not_flying_axes_is_a_silent_no_op(self) -> None:
+        result = release_controls(overlay_flying=False, flying_axes=False)
         assert result == {"ok": True, "acted": False}
-        assert state.phase == "PILOT"
-
-    def test_lua_still_active_while_belief_says_pilot_still_acts(self) -> None:
-        """2026-11-19 mode 1 handover feedback, fix c: the ack-timeout
-        case (or any poll before fix b's own release has reached Lua)
-        leaves belief at `PILOT` while `Export.lua` is still `active` --
-        Decision 13's recovery phrase must still act, since the player's
-        stick really was being ignored."""
-        state, result = release_controls(
-            FlightControlState(phase="PILOT", lua_mode="active"),
-            overlay_flying=False,
-        )
-        assert result == {"ok": True, "acted": True}
-        assert state.phase == "PILOT"
-
-    def test_lua_still_taking_while_belief_says_pilot_still_acts(self) -> None:
-        _state, result = release_controls(
-            FlightControlState(phase="PILOT", lua_mode="taking"),
-            overlay_flying=False,
-        )
-        assert result == {"ok": True, "acted": True}
-
-    def test_lua_off_while_belief_says_pilot_is_still_a_silent_no_op(self) -> None:
-        """The ordinary case -- belief and Lua agree nobody but the
-        player is flying -- must stay silent."""
-        _state, result = release_controls(
-            FlightControlState(phase="PILOT", lua_mode="off"),
-            overlay_flying=False,
-        )
-        assert result == {"ok": True, "acted": False}
-
-
-class TestDecideFlightControl:
-    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`) deleted
-    `decide_flight_control`'s own park/unpark/self-release branches --
-    `fd_mode` (`belief.flight_authority`) is the one mode authority now,
-    and the forced-handover urgent line moved to `decide_flight_speech`
-    (`tests/test_flight_authority.py`). The two tests below that this
-    function's remaining branches still cover verbatim (an `OVERLAY`/
-    `PILOT` phase with no take in flight is simply left alone, since
-    there is no park/unpark logic left here to touch it) are kept as
-    differential pins against that deletion; `test_unpark_refused_*`/
-    `test_park_edge_*`/`test_lua_self_release_*`/`test_unpark_
-    confirmed_*` (the branches themselves) are removed."""
-
-    def test_park_while_pilot_is_untouched(self) -> None:
-        """`parked_active` is accepted but no longer read at all --
-        `phase` is simply left alone, whatever it was."""
-        state, decision = decide_flight_control(
-            FlightControlState(phase="PILOT"), 10.0, parked_active=True
-        )
-        assert state.phase == "PILOT"
-        assert decision is None
-
-    def test_overlay_with_no_take_in_flight_is_untouched(self) -> None:
-        """`phase == "OVERLAY"` no longer means anything to this
-        function (Stage 3's own one channel replaces the unpark-
-        confirmation handshake this phase used to drive) -- it is
-        simply not `"TAKING"`, so the one remaining branch below does
-        not fire either."""
-        state, decision = decide_flight_control(
-            FlightControlState(phase="OVERLAY", unpark_take=True, lua_mode="armed"),
-            10.0,
-            parked_active=False,
-        )
-        assert state.phase == "OVERLAY"
-        assert decision is None
-
-    @pytest.mark.parametrize("reason", ["envelope", "nan", "dead"])
-    def test_lua_self_release_reconciles_phase_back_to_pilot(self, reason: str) -> None:
-        """Required Fix 1, `plans/flight-desired-state/review-s12.md`:
-        Stage 2 deleted the pre-Stage-2 state-sync branch along with its
-        speech (now `decide_flight_speech`'s own job), but dropped the
-        state side-effect too -- `phase` stuck at `"ACTIVE"` forever
-        after a forced mode-1 self-release, so a later "I have controls"
-        wrongly reported `acted=True` (`release_controls`'s own `phase
-        in ("TAKING", "ACTIVE")` check). This pins the restored
-        reconciliation: state only, no speech from here."""
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="ACTIVE",
-                lua_mode="off",
-                lua_release_reason=reason,
-                pending_take_says="stale",
-                took_at_sim=3.0,
-            ),
-            10.0,
-            parked_active=False,
-        )
-        assert state.phase == "PILOT"
-        assert state.pending_take_says is None
-        assert state.took_at_sim is None
-        assert decision is None
-
-    def test_says_spoken_exactly_once_for_the_matching_take_seq(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="TAKING",
-                take_seq=4,
-                pending_take_says="I have controls.",
-                took_at_sim=1.0,
-                lua_mode="active",
-                lua_take_seq=4,
-            ),
-            1.5,
-            parked_active=False,
-        )
-        assert state.phase == "ACTIVE"
-        assert state.pending_take_says is None
-        assert state.took_at_sim is None
-        assert decision is not None
-        assert decision.says == "I have controls."
-        assert decision.urgent is True
-
-        # A second call against the now-`ACTIVE` state (as a later poll
-        # would make) must not speak it again -- `pending_take_says` is
-        # already cleared, so there is nothing left to say.
-        _state2, decision2 = decide_flight_control(state, 2.0, parked_active=False)
-        assert decision2 is None
-
-    def test_says_not_spoken_for_a_mismatched_take_seq(self) -> None:
-        """Lua confirms `active` for a *stale* take_seq (an earlier take
-        this one superseded) -- must not speak the current pending
-        `says` against the wrong confirmation."""
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="TAKING",
-                take_seq=5,
-                pending_take_says="I have controls.",
-                took_at_sim=1.0,
-                lua_mode="active",
-                lua_take_seq=4,
-            ),
-            1.5,
-            parked_active=False,
-        )
-        assert state.phase == "TAKING"
-        assert decision is None
-
-    def test_ack_timeout_speaks_unable_not_ready_non_urgently(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="TAKING",
-                take_seq=1,
-                pending_take_says="I have controls.",
-                took_at_sim=0.0,
-            ),
-            100.0,
-            parked_active=False,
-        )
-        assert state.phase == "PILOT"
-        assert state.pending_take_says is None
-        assert decision is not None
-        assert decision.says == "Unable, not ready."
-        assert decision.urgent is False
-
-    def test_taking_before_the_timeout_is_a_no_op(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(phase="TAKING", take_seq=1, took_at_sim=0.0),
-            0.5,
-            parked_active=False,
-        )
-        assert state.phase == "TAKING"
-        assert decision is None
-
-    def test_pilot_with_nothing_happening_is_a_no_op(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(), 10.0, parked_active=False
-        )
-        assert state.phase == "PILOT"
-        assert decision is None
 
 
 class TestClampHelpers:
@@ -552,175 +337,3 @@ class TestWireHelpers:
         ):
             assert key in limits
             assert isinstance(limits[key], float)
-
-
-class TestDrainFlightControlSeedsTheBreakTarget:
-    """Mode-1 batch, Decision 32 (`plans/flight-control/plan.md`,
-    main-loop amendment 2026-11-19) -- `CrewConsole.drain_flight_
-    control`'s own seeding logic for an unpark-take that lands while a
-    mode-2 break was active. **BL-16 Stage 2**: the `OVERLAY` ->
-    `ACTIVE` transition itself is gone from `decide_flight_control`
-    (`fd_mode` is the one mode authority now) -- `drain_flight_control`'s
-    own `unparked_from_overlay` parameter is `body.py`'s report of that
-    same edge, read from `flight_authority_state` instead, so these
-    tests pass it directly rather than relying on a phase transition to
-    trigger it."""
-
-    def _console(
-        self, *, cbtm_action_sent: str | None, entry_heading: float | None
-    ) -> CrewConsole:
-        console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(phase="ACTIVE", take_seq=9)
-        console.parked_flight_state = ParkedFlightState(
-            cbtm_action_sent=cbtm_action_sent,  # type: ignore[arg-type]
-            cbtm_break_entry_heading_deg=entry_heading,
-        )
-        return console
-
-    def test_unpark_take_during_a_break_seeds_the_break_target(self) -> None:
-        console = self._console(cbtm_action_sent="break_left", entry_heading=100.0)
-
-        console.drain_flight_control(
-            10.0, parked_active=False, unparked_from_overlay=True
-        )
-
-        assert console.flight_control_state.phase == "ACTIVE"
-        request = console.flight_control_goal_transition
-        assert request is not None
-        assert request.heading_deg == pytest.approx(10.0)
-        assert request.turn_rate_deg_s is None
-
-    def test_unpark_take_with_no_break_active_is_unchanged(self) -> None:
-        console = self._console(cbtm_action_sent=None, entry_heading=None)
-
-        console.drain_flight_control(
-            10.0, parked_active=False, unparked_from_overlay=True
-        )
-
-        assert console.flight_control_state.phase == "ACTIVE"
-        assert console.flight_control_goal_transition is None
-
-    def test_unpark_take_with_a_break_action_but_no_entry_heading_is_unchanged(
-        self,
-    ) -> None:
-        """Defensive -- should not happen in practice (every break
-        capture sets both together), but a break action with no
-        captured entry heading must not seed a bogus goal."""
-        console = self._console(cbtm_action_sent="break_right", entry_heading=None)
-
-        console.drain_flight_control(
-            10.0, parked_active=False, unparked_from_overlay=True
-        )
-
-        assert console.flight_control_goal_transition is None
-
-    def test_an_ordinary_take_confirmation_does_not_seed_anything(self) -> None:
-        """An ordinary voice take (`unparked_from_overlay=False`) never
-        goes through this path at all, even with a break still recorded
-        on `parked_flight_state` from a previous session."""
-        console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(
-            phase="TAKING",
-            take_seq=1,
-            took_at_sim=5.0,
-            pending_take_says="You have controls.",
-            lua_mode="active",
-            lua_take_seq=1,
-        )
-        console.parked_flight_state = ParkedFlightState(
-            cbtm_action_sent="break_left", cbtm_break_entry_heading_deg=100.0
-        )
-
-        console.drain_flight_control(
-            10.0, parked_active=False, unparked_from_overlay=False
-        )
-
-        assert console.flight_control_state.phase == "ACTIVE"
-        assert console.flight_control_goal_transition is None
-
-
-class TestDrainFlightControlSendsReleaseOnAckTimeout:
-    """2026-11-19 mode 1 handover feedback, fix b: the ack timeout
-    (`TAKING` -> `PILOT`, the only transition `decide_flight_control`
-    itself makes into `PILOT` from `TAKING`) must queue a `release` to
-    `Export.lua` -- belief giving up must not leave Lua still flying
-    the axes with no one told."""
-
-    def test_ack_timeout_queues_a_release_transition(self) -> None:
-        console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(
-            phase="TAKING",
-            take_seq=1,
-            took_at_sim=0.0,
-            pending_take_says="I have controls.",
-        )
-
-        lines = console.drain_flight_control(100.0, parked_active=False)
-
-        assert console.flight_control_state.phase == "PILOT"
-        assert lines == ["Unable, not ready."]
-        # review-handover-ack.md Required Fix: queued on the dedicated
-        # `flight_control_system_release_pending` flag, not the shared
-        # `flight_control_transition` field -- see that field's own
-        # docstring for why (a same-poll player take/release must not
-        # be able to clobber it).
-        assert console.flight_control_system_release_pending is True
-        assert console.flight_control_transition is None
-
-    def test_a_same_poll_take_does_not_clobber_the_queued_release(self) -> None:
-        """review-handover-ack.md Required Fix -- the exact interleaving
-        the review reproduced: a same-poll player "take" recognised from
-        a transcript (`body._poll_transcripts`, which runs after the
-        flight-control block) must not clobber the ack-timeout's own
-        self-queued release. Before the fix, `take_controls` wrote
-        straight over `flight_control_transition`, losing the release;
-        now the two live on separate fields and both survive."""
-        console = CrewConsole(store=ContactStore())
-        console.on_ground = False
-        console.ias_kmh = 200.0
-        console.flight_control_state = FlightControlState(
-            phase="TAKING",
-            take_seq=1,
-            took_at_sim=0.0,
-            pending_take_says="I have controls.",
-            lua_mode="active",
-            lua_take_seq=99,
-        )
-
-        console.drain_flight_control(100.0, parked_active=False)
-        assert console.flight_control_state.phase == "PILOT"
-        assert console.flight_control_system_release_pending is True
-
-        result = console.take_controls("I have controls.")
-
-        assert result["acted"] is True
-        assert console.flight_control_state.phase == "TAKING"
-        assert console.flight_control_transition == "take"
-        # the queued release must still be there -- `_apply_flight_
-        # control` sends it ahead of this "take" next poll, deferring
-        # the take rather than losing the release.
-        assert console.flight_control_system_release_pending is True
-
-    def test_a_successful_take_queues_no_release(self) -> None:
-        console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(
-            phase="TAKING",
-            take_seq=1,
-            took_at_sim=0.0,
-            pending_take_says="I have controls.",
-            lua_mode="active",
-            lua_take_seq=1,
-        )
-
-        console.drain_flight_control(0.5, parked_active=False)
-
-        assert console.flight_control_state.phase == "ACTIVE"
-        assert console.flight_control_transition is None
-
-    def test_an_ordinary_quiet_poll_queues_no_release(self) -> None:
-        console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(phase="PILOT")
-
-        console.drain_flight_control(10.0, parked_active=False)
-
-        assert console.flight_control_transition is None

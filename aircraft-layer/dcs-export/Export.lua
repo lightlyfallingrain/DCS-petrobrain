@@ -251,7 +251,15 @@ creating/deleting the flag file.
 -- ignored (unknown `cmd`, no-op) rather than arming Lua, so this bump
 -- is load-bearing, not cosmetic. Update `aircraft-layer/src/collector/
 -- server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-11-20b"
+--
+-- `"2026-11-20c"` (BL-16 Stage 3, `plans/flight-desired-state/plan.md`):
+-- the `flight_control` op is retired, replaced by the numbered `flight`
+-- op (`flight_desired.lua`'s own `handle_flight_command`); a stale
+-- collector/body-layer pair still sending `op:"flight_control"` would
+-- have nothing drop its goal/take/release messages on the floor
+-- (unknown op, no-op), load-bearing for the same reason the prior bump
+-- was.
+local EXPORT_SCRIPT_VERSION = "2026-11-20c"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 

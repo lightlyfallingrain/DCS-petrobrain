@@ -1,35 +1,53 @@
 --[[
 Petrobrain / flight_desired -- BL-16 (`plans/flight-desired-state/
-plan.md`, Stages 1-2): one desired flight state (heading/turn,
-altitude+reference, speed) and one mode authority (`fd_mode`), both
-derived/held in Export.lua rather than body-layer, so a per-frame
-controller and a park/unpark edge (which happen inside Lua, within one
-frame) never wait on the LAN. Aircraft-generic -- mode 2 (the AI-pilot
-wheel) is Mi-24 only and is read through `ai_pilot_wheel ~= nil`-guarded
-getters alone (the mode-2 seam, plan section 6), never required here.
+plan.md`, Stage 3): one desired flight state (heading/turn, altitude+
+reference, speed), one mode authority (`fd_mode`), and (new this stage)
+the one numbered command channel every write path on this subsystem now
+shares -- `{"op":"flight","epoch","seq","until","kind",...}`. Aircraft-
+generic -- mode 2 (the AI-pilot wheel) is Mi-24 only and is read through
+`ai_pilot_wheel ~= nil`-guarded getters alone (the mode-2 seam, plan
+section 6), never required here. The mode-2 request kinds (`align`/
+`align_for_launch`/`recover`/`translate`/`hover_hold`/`hover_step`) are
+refused `wrong_mode` unconditionally in this stage -- Stage 4 wires them
+up.
 
 `AC-B12` (`plans/ac-b12-export-modules/plan.md`): one of the `dofile`-
 loaded module chunks `Export.lua` (the loader) composes, own 200-local
-budget. Loaded BEFORE `ai_pilot_wheel`/`flight_control` (plan, "Affected
-modules") -- `M.tick` is only ever called once every module has loaded
-(from `LuaExportBeforeNextFrame`, after `run_flight_control`), so
-referencing the `flight_control`/`ai_pilot_wheel` globals there is safe
-regardless of load order (dofile-loaded chunks resolve a bare global at
-call time, not at the defining chunk's own load time); `flight_control.
-lua`/`ai_pilot_wheel.lua` call INTO this module (`mirror_m1_goal`/
-`mirror_m2_goal`) at their own receipt time, which is why this module
-must already exist by then.
+budget. Loaded BEFORE `ai_pilot_wheel`/`flight_control` -- `M.tick` is
+only ever called once every module has loaded (from `LuaExportBefore
+NextFrame`, after `run_flight_control`), so referencing the `flight_
+control`/`ai_pilot_wheel` globals there is safe regardless of load order;
+`flight_control.lua` calls back into this module (`M.request_take`/`M.
+request_release` are called FROM here, the reverse direction) and `ai_
+pilot_wheel.lua` calls `M.write_internal` for its own align-read -- both
+read-only against this module's own state, never writing `fd_mode`
+itself (section 2: "nothing outside this module writes `fd_mode`
+directly").
 
-**Stages 1-2 scope** (the plan's own "where the plan leaves a choice,
-take the simplest" -- see `plans/flight-desired-state/implementation.md`
-for exactly what was simplified and why): `desired` is a shadow mirror,
-written at receipt by today's two goal handlers and reseeded/cleared at
-mode edges computed in `M.tick` itself (the plan's own "the edge handler
-is also where seeding and clearing run"). Nothing reads `desired` to fly
-the aircraft yet -- that is Stage 3's one channel. `stamp.*` here is this
-module's own internal monotonic counter (no seq-carrying wire channel
-exists before Stage 3), not yet a request sequence number; a future
-stage may replace it without changing this module's own field names.
+**Stamps are the request's own wire `seq`, not an internal counter**
+(Stage 1-2's `fd_stamp_counter` is gone) -- `desired.stamp_hdg/alt/spd`
+hold whichever numbered request (or, for a write this module makes on
+its own initiative -- a reseed, a settle writeback, an align read --
+the *current* `fd_last_seq` floor, via `write_internal`) last wrote that
+part, so "parts stamped after the take's seq" (section 2's handover
+table) is a plain integer comparison against the take's own seq, not a
+second, uncomparable numbering.
+
+**Heading reference (section 1, "Heading reference").** `HEADING_REF`
+is the one constant deciding whether `desired.heading_deg` (and every
+number on the wire derived from it) is stored in true or magnetic
+heading -- **"true" here is an unmeasured placeholder, not a confirmed
+reading.** The Stages 1-2 card (`docs/acceptance/2026-11-20-bl16-
+desired-state-s12-card.md`) that was meant to settle it has not been
+flown as of this stage's implementation (no live DCS session available
+to the implementer) -- "true" is the *no-conversion* default, which
+cannot make heading accuracy worse than today's pre-Stage-3 behaviour
+(today's unpark seed already copies the overlay course into the true-
+heading law unconverted, per the plan's own "Risks & unknowns"). **Flip
+this one constant to `"mag"` once the card is flown and shows the
+overlay/HSI reading magnetic** -- `M.to_true_heading`/`M.from_true_
+heading` below are the only two places the conversion itself happens,
+so nothing else needs to change.
 --]]
 
 local M = {}
@@ -42,25 +60,111 @@ local fd_mode = "off"
 local fd_mode_n = 0
 local fd_mode_cause = nil
 
--- Main-loop amendment, 2026-11-20 (`plan.md` amended on `feature/
--- bl16-desired-state`, applied here without merging that branch): which
--- heading reference last wrote `desired.heading_deg` -- "true" when
--- mode 1's `apply_goal_fields` mirror or the measured-state reseed
--- (this module's stand-in for the law's own take-time seed) wrote it,
--- "overlay" when mode 2's goal mirror or the overlay reseed wrote it.
--- No conversion in Stage 1 -- this is reported as-is so the card can
--- compare both logged headings against the HSI by hand.
-local fd_hdg_ref = nil
+-- Heading reference -- see module docstring. Reported as-is on `fd_hdg_
+-- ref` from this stage on (Stage 1-2's "true"/"overlay" provenance tag
+-- is gone -- the reference is a known, fixed constant now, not a thing
+-- to infer from which handler wrote it).
+local HEADING_REF = "true"
+
+local function heading_ref()
+    return HEADING_REF
+end
+
+-- The live true<->magnetic variation, held across a bad read (section
+-- 1: "the law holds its last finite variation" -- the same posture
+-- applies to every conversion this module does, not only mode 1's own
+-- per-frame one). Updated whenever both `LoGetMagneticYaw` and the
+-- caller's own measured true heading are finite; `0.0` until the first
+-- good read (an unmeasured variation is safer treated as "none" than
+-- as a stale guess).
+local fd_heading_variation_deg = 0.0
+
+local function update_heading_variation(measured_true_deg)
+    if type(measured_true_deg) ~= "number" or measured_true_deg ~= measured_true_deg then
+        return fd_heading_variation_deg
+    end
+    local mag = safe_call(LoGetMagneticYaw)
+    if type(mag) == "number" and mag == mag then
+        fd_heading_variation_deg = measured_true_deg - mag
+    end
+    return fd_heading_variation_deg
+end
+
+-- `to_true_heading(ref_heading_deg, measured_true_deg)` -- converts a
+-- `HEADING_REF`-reference heading (what `desired.heading_deg` stores)
+-- into true heading (the law's own native domain), per section 1:
+-- "Mode 1 converts ... target_true = heading_deg + (LoGetSelfData().
+-- Heading - LoGetMagneticYaw())". A no-op when `HEADING_REF == "true"`.
+local function to_true_heading(ref_heading_deg, measured_true_deg)
+    if type(ref_heading_deg) ~= "number" then
+        return ref_heading_deg
+    end
+    if HEADING_REF ~= "mag" then
+        return ref_heading_deg
+    end
+    local variation = update_heading_variation(measured_true_deg)
+    local r = (ref_heading_deg + variation) % 360.0
+    if r < 0 then r = r + 360.0 end
+    return r
+end
+
+-- The reverse conversion, for every settle/reseed/align-read write that
+-- stores a *measured* true heading into `desired.heading_deg`.
+local function from_true_heading(true_heading_deg, measured_true_deg)
+    if type(true_heading_deg) ~= "number" then
+        return true_heading_deg
+    end
+    if HEADING_REF ~= "mag" then
+        return true_heading_deg
+    end
+    local variation = update_heading_variation(measured_true_deg)
+    local r = (true_heading_deg - variation) % 360.0
+    if r < 0 then r = r + 360.0 end
+    return r
+end
 
 -- Body-layer process-start reset epoch (same shape as `flight_control.
 -- lua`'s own `fc_reset_epoch`/`ai_pilot_wheel.lua`'s `ai_pilot_reset_
--- epoch`). Only ever written by `M.reset` below.
+-- epoch`) -- reported on `fd_reset_epoch`. `fd_epoch`/`fd_last_seq`
+-- below are the *acceptance* epoch/floor for the numbered channel
+-- itself (section 5) -- the same value, but a separate field so a
+-- caller reading one does not need to know the other exists.
 local fd_reset_epoch = nil
+local fd_epoch = nil
+local fd_last_seq = 0
+
+-- The ack ring (section 5): the last `ACK_RING_SIZE` requests this
+-- module has resolved, oldest first, each `{seq, status, detail}` --
+-- `status` is `"a"` (accepted, `detail` the mode letter it was applied
+-- in) or `"r"` (refused, `detail` the closed-vocabulary reason).
+local ACK_RING_SIZE = 8
+local fd_acks = {}
+
+local function push_ack(seq, status, detail)
+    table.insert(fd_acks, { seq = seq, status = status, detail = detail })
+    while #fd_acks > ACK_RING_SIZE do
+        table.remove(fd_acks, 1)
+    end
+end
+
+local function acks_wire_string()
+    local parts = {}
+    for _, ack in ipairs(fd_acks) do
+        table.insert(parts, tostring(ack.seq) .. ":" .. ack.status .. ":" .. tostring(ack.detail))
+    end
+    return table.concat(parts, ";")
+end
+
+-- A voice take's own deferred ack (section 3a) -- `handle_flight_
+-- command`'s `kind == "take"` branch sets this when `flight_control.
+-- request_take` answers `"pending"` (off -> taking, not yet resolved to
+-- active); `M.tick` below resolves it into an ack once the mode settles.
+local fd_pending_take_seq = nil
 
 --[[ The desired state (section 1), a single table so every write site
 replaces a field rather than reassigning the whole thing (and to stay
 inside the 200-local budget). `nil` fields mean "not yet known" --
-gates downstream (not built yet, Stage 3+) HOLD on a nil `hdg_mode`. ]]--
+`rules/gates.py` HOLDs on a nil `hdg_mode`/`alt_m`/`ias_kmh` downstream. ]]--
 local desired = {
     hdg_mode = nil, -- "heading" | "turn" | nil
     heading_deg = nil,
@@ -74,18 +178,9 @@ local desired = {
     manoeuvre_seq = 0,
 }
 
--- This module's own internal write counter (Stages 1-2 only -- see
--- module docstring). Every mirrored write bumps the relevant part's
--- stamp so a later stage has something to build "latest wins" on.
-local fd_stamp_counter = 0
 local fd_stamp_hdg = nil
 local fd_stamp_alt = nil
 local fd_stamp_spd = nil
-
-local function next_stamp()
-    fd_stamp_counter = fd_stamp_counter + 1
-    return fd_stamp_counter
-end
 
 local function clear_desired()
     desired.hdg_mode = nil
@@ -101,29 +196,28 @@ local function clear_desired()
     fd_stamp_hdg = nil
     fd_stamp_alt = nil
     fd_stamp_spd = nil
-    fd_hdg_ref = nil
 end
 
 -- Reseed from the currently-measured aircraft state (C1: a change of
 -- *who* flies reseeds from the aircraft) -- the off/taking -> m1 edge.
 -- Deliberately simpler than `flight_control.lua`'s own `law_init_at_
 -- take` (no bank-based turn-mode heuristic, no stopping-height formula)
--- -- this is a shadow mirror for the Stage 1/2 card, not the law's own
--- seed; mode 1 does not read `desired` until Stage 3.
+-- -- this is the shadow mirror the status line reports; mode 1's own
+-- law seeds itself independently, from the same `desired` table, in
+-- `law_init_at_take`.
 local function reseed_from_measured()
     local self_data = safe_call(LoGetSelfData)
-    local heading_deg = nil
+    local true_heading_deg = nil
     if type(self_data) == "table" and type(self_data.Heading) == "number" then
-        heading_deg = math.deg(self_data.Heading)
+        true_heading_deg = math.deg(self_data.Heading)
     end
     local agl = safe_call(LoGetAltitudeAboveGroundLevel)
     local ias_mps = safe_call(LoGetIndicatedAirSpeed)
     desired.hdg_mode = "heading"
-    desired.heading_deg = heading_deg
+    desired.heading_deg = from_true_heading(true_heading_deg, true_heading_deg)
     desired.turn_dir = nil
     desired.turn_rate_deg_s = nil
     desired.turn_style = "normal"
-    fd_hdg_ref = "true"
     desired.alt_m = agl
     desired.alt_ref = "agl"
     if type(ias_mps) == "number" then
@@ -133,13 +227,17 @@ local function reseed_from_measured()
     end
     desired.manoeuvre = "none"
     desired.manoeuvre_seq = 0
+    fd_stamp_hdg = fd_last_seq
+    fd_stamp_alt = fd_last_seq
+    fd_stamp_spd = fd_last_seq
 end
 
 -- Reseed from the AI-pilot wheel's own set values, once readable (Q12:
 -- HOLD until then) -- the off/m1/taking -> m2 edge. A field the overlay
 -- has not read yet (fresh mission, nothing ever read) stays nil and is
--- retried on a later tick (`held_targets()` always returns a fresh read,
--- never a stale cache of its own).
+-- retried on a later tick. `held.heading_deg` is already in `HEADING_
+-- REF`'s own reference by definition (U3: "whichever the AI wheel uses
+-- should be used in both modes") -- no conversion here.
 local function reseed_from_overlay()
     if ai_pilot_wheel == nil then
         return
@@ -154,47 +252,46 @@ local function reseed_from_overlay()
         desired.turn_dir = nil
         desired.turn_rate_deg_s = nil
         desired.turn_style = "normal"
-        fd_hdg_ref = "overlay"
+        fd_stamp_hdg = fd_last_seq
     end
     if held.alt_m ~= nil then
         desired.alt_m = held.alt_m
         desired.alt_ref = (held.alt_ref == "B") and "baro" or "agl"
+        fd_stamp_alt = fd_last_seq
     end
     if held.speed_kmh ~= nil then
         desired.ias_kmh = held.speed_kmh
+        fd_stamp_spd = fd_last_seq
     end
     desired.manoeuvre = "none"
     desired.manoeuvre_seq = 0
 end
 
--- m1<->m2 carry (C1: a change of *how* he flies carries). Mode 2 cannot
+-- m1->m2 carry (C1: a change of *how* he flies carries). Mode 2 cannot
 -- fly a continuous turn (Q2) -- on the m1->m2 edge, a standing `turn`
--- converts to a `heading` at the current measured heading, the simplest
--- stand-in for the plan's own "the overlay course after takeover
--- settles" (Stage 4 builds the settled version; this keeps the turn
--- from silently reappearing at the next unpark in the meantime).
+-- converts to a `heading` at the current measured heading (the plan's
+-- own stand-in for "the overlay course after takeover settles" --
+-- Stage 4 builds the settled version; this keeps the turn from
+-- silently reappearing at the next unpark in the meantime).
 local function convert_turn_to_heading_for_m2()
     if desired.hdg_mode ~= "turn" then
         return
     end
     local self_data = safe_call(LoGetSelfData)
-    local heading_deg = desired.heading_deg
+    local true_heading_deg = desired.heading_deg
     if type(self_data) == "table" and type(self_data.Heading) == "number" then
-        heading_deg = math.deg(self_data.Heading)
+        true_heading_deg = math.deg(self_data.Heading)
     end
     desired.hdg_mode = "heading"
-    desired.heading_deg = heading_deg
+    desired.heading_deg = from_true_heading(true_heading_deg, true_heading_deg)
     desired.turn_dir = nil
     desired.turn_rate_deg_s = nil
     desired.turn_style = "normal"
-    fd_hdg_ref = "true"
+    fd_stamp_hdg = fd_last_seq
 end
 
 -- Section 2's derivation: `fd_mode = "m2" if parked_active, "m1" if
 -- fc_mode == "active", "taking" if fc_mode == "taking", else "off"`.
--- `is_parked()`/`fc_mode` unknown (module failed to load) reads as the
--- same "stay off" default every other cross-module getter in this
--- codebase uses -- never a licence to assume a mode is live.
 local function derive_mode()
     local fc_mode_value = nil
     if flight_control ~= nil then
@@ -221,9 +318,6 @@ end
 
 -- Best-effort cause vocabulary (section 2): `take`/`release`/`park`/
 -- `unpark`/`unpark_refused`/`unpark_unarmed`/`envelope`/`nan`/`dead`.
--- `reset`/`stop` are never derived here -- `M.reset`/`M.on_stop` set
--- `fd_mode`/`fd_mode_cause` directly, bypassing this function entirely
--- (Stages 1-2 simplification, see module docstring).
 local function derive_cause(prev_mode, new_mode)
     if new_mode == "off" then
         local info = nil
@@ -274,7 +368,9 @@ local function tick(t)
             clear_desired()
         elseif new_mode == "m1" then
             if prev_mode == "m2" then
-                -- carry, section 2's rule underneath (C1)
+                -- carry, section 2's rule underneath (C1) -- `desired`
+                -- is left exactly as it stood; `law_init_at_take`
+                -- (`flight_control.lua`) reads it as the unpark seed.
             else
                 reseed_from_measured()
             end
@@ -285,11 +381,6 @@ local function tick(t)
                 convert_turn_to_heading_for_m2()
             end
         end
-        -- "taking" carries whatever was there (off->taking is always
-        -- preceded by an "off" clear, so there is nothing to carry yet;
-        -- kept as its own branch for clarity, not because it does
-        -- anything -- a later stage's "stamped after the take" parts
-        -- land here).
     elseif new_mode == "m2" and ai_pilot_wheel ~= nil then
         -- Off->m2 may still be waiting on the overlay to become
         -- readable (Q12's HOLD) -- retry every tick while any part is
@@ -298,91 +389,264 @@ local function tick(t)
             reseed_from_overlay()
         end
     end
+
+    -- Resolve a voice take's own deferred ack (section 3a), now that
+    -- this frame's mode has settled -- `flight_control.lua`'s own
+    -- `fc_mode` may take one extra frame past receipt ("taking" ->
+    -- "active") to resolve, so this cannot ack synchronously at
+    -- `handle_flight_command`'s own call site.
+    if fd_pending_take_seq ~= nil then
+        if fd_mode == "m1" then
+            push_ack(fd_pending_take_seq, "a", "m1")
+            fd_pending_take_seq = nil
+        elseif fd_mode == "off" then
+            push_ack(fd_pending_take_seq, "r", "precondition")
+            fd_pending_take_seq = nil
+        end
+        -- else fd_mode == "taking": still resolving, check again next tick.
+    end
 end
 
--- Receipt-time mirror (Stage 1) from `flight_control.lua`'s `apply_
--- goal_fields` -- exact values, the same fields that function already
--- parsed off the wire. A field a mode-1 goal omits (nil) is left
--- untouched, same "a null field means keep yours" convention the wire
--- itself uses.
-local function mirror_m1_goal(fields)
-    if fields.heading_deg ~= nil then
+-- Generic internal writer (section 1's various "Lua writes/reads the
+-- overlay course" rows) -- every write this module or a sibling module
+-- makes on its own initiative, never from a numbered request: `flight_
+-- control.lua`'s roll-out/break settle writebacks, `ai_pilot_wheel.lua`'s
+-- align read. Every part is stamped with the *current* `fd_last_seq`
+-- floor (module docstring: "stamps are the request's own wire seq ...
+-- or, for a write this module makes on its own initiative, the current
+-- fd_last_seq floor"), so a later numbered request's own (necessarily
+-- higher) seq still wins "latest wins" against it. `parts.heading_deg`
+-- is in `HEADING_REF`'s own reference already (the caller's job to
+-- convert, via `M.from_true_heading`) -- this function never converts.
+local function write_internal(parts)
+    parts = parts or {}
+    if parts.heading_deg ~= nil then
         desired.hdg_mode = "heading"
-        desired.heading_deg = fields.heading_deg
+        desired.heading_deg = parts.heading_deg
         desired.turn_dir = nil
-        desired.turn_rate_deg_s = fields.turn_rate_deg_s
-        desired.turn_style = (fields.turn_rate_deg_s ~= nil) and "break" or "normal"
-        fd_hdg_ref = "true"
-        fd_stamp_hdg = next_stamp()
+        fd_stamp_hdg = fd_last_seq
     end
-    if fields.turn ~= nil then
+    if parts.clear_turn_rate then
+        desired.turn_rate_deg_s = nil
+        desired.turn_style = "normal"
+    end
+    if parts.alt_m ~= nil then
+        desired.alt_m = parts.alt_m
+        fd_stamp_alt = fd_last_seq
+    end
+    if parts.alt_ref ~= nil then
+        desired.alt_ref = parts.alt_ref
+    end
+    if parts.ias_kmh ~= nil then
+        desired.ias_kmh = parts.ias_kmh
+        fd_stamp_spd = fd_last_seq
+    end
+end
+
+-- The mode-2-only request kinds (section 4/5) -- refused `wrong_mode`
+-- unconditionally this stage (Stage 4 wires each one up).
+local M2_ONLY_KINDS = {
+    align = true,
+    align_for_launch = true,
+    recover = true,
+    translate = true,
+    hover_hold = true,
+    hover_step = true,
+}
+
+-- Shape/bounds re-check (section 5: "the API checks closed vocabularies
+-- and `math.isfinite` first; Lua checks again", the `AC-B14`
+-- posture) -- generous sanity bounds, same figures `/command/flight`'s
+-- own API-layer check uses. A field absent from `data` is never
+-- checked (omit = "keep yours", the existing wire convention).
+local function validate_flight_fields(data)
+    local heading_deg = extract_json_number_field(data, "heading_deg")
+    if heading_deg ~= nil and (heading_deg < 0.0 or heading_deg > 360.0) then
+        return false
+    end
+    local turn = extract_json_number_field(data, "turn")
+    if turn ~= nil and turn ~= -1 and turn ~= 0 and turn ~= 1 then
+        return false
+    end
+    local turn_rate_deg_s = extract_json_number_field(data, "turn_rate_deg_s")
+    if turn_rate_deg_s ~= nil and (turn_rate_deg_s < -90.0 or turn_rate_deg_s > 90.0) then
+        return false
+    end
+    local turn_style = extract_json_string_field(data, "turn_style")
+    if turn_style ~= nil
+        and turn_style ~= "normal" and turn_style ~= "break" and turn_style ~= "break_away"
+    then
+        return false
+    end
+    local alt_m = extract_json_number_field(data, "alt_m")
+    if alt_m ~= nil and (alt_m < -500.0 or alt_m > 20000.0) then
+        return false
+    end
+    local alt_ref = extract_json_string_field(data, "alt_ref")
+    if alt_ref ~= nil and alt_ref ~= "agl" and alt_ref ~= "baro" then
+        return false
+    end
+    local ias_kmh = extract_json_number_field(data, "ias_kmh")
+    if ias_kmh ~= nil and (ias_kmh < 0.0 or ias_kmh > 2000000.0) then
+        return false
+    end
+    return true
+end
+
+-- `kind == "set"` (section 1/4) -- the one write every `axes_*`/mode-2
+-- voice-goal/break action now sends. Writes verbatim (Q1a: the exact
+-- commanded value stays desired, never shaped) and stamps every part
+-- the message actually carries with this request's own `seq`.
+local function apply_set(data, seq)
+    local heading_deg = extract_json_number_field(data, "heading_deg")
+    local turn = extract_json_number_field(data, "turn")
+    local turn_rate_deg_s = extract_json_number_field(data, "turn_rate_deg_s")
+    local turn_style = extract_json_string_field(data, "turn_style")
+    local alt_m = extract_json_number_field(data, "alt_m")
+    local alt_ref = extract_json_string_field(data, "alt_ref")
+    local ias_kmh = extract_json_number_field(data, "ias_kmh")
+
+    if heading_deg ~= nil then
+        desired.hdg_mode = "heading"
+        desired.heading_deg = heading_deg
+        desired.turn_dir = nil
+        desired.turn_rate_deg_s = turn_rate_deg_s
+        if turn_style ~= nil then
+            desired.turn_style = turn_style
+        elseif turn_rate_deg_s ~= nil then
+            desired.turn_style = "break"
+        else
+            desired.turn_style = "normal"
+        end
+        fd_stamp_hdg = seq
+    end
+    if turn ~= nil then
         desired.hdg_mode = "turn"
-        if fields.turn == 0 then
+        if turn == 0 then
             desired.turn_dir = nil
         else
-            desired.turn_dir = (fields.turn > 0) and 1 or -1
+            desired.turn_dir = (turn > 0) and 1 or -1
         end
         desired.turn_rate_deg_s = nil
         desired.turn_style = "normal"
-        fd_stamp_hdg = next_stamp()
+        fd_stamp_hdg = seq
     end
-    if fields.alt_m ~= nil then
-        desired.alt_m = fields.alt_m
-        fd_stamp_alt = next_stamp()
+    if alt_m ~= nil then
+        desired.alt_m = alt_m
+        fd_stamp_alt = seq
     end
-    if fields.alt_ref ~= nil then
-        desired.alt_ref = fields.alt_ref
+    if alt_ref ~= nil then
+        desired.alt_ref = alt_ref
     end
-    if fields.ias_kmh ~= nil then
-        desired.ias_kmh = fields.ias_kmh
-        fd_stamp_spd = next_stamp()
-    end
-end
-
--- Receipt-time mirror (Stage 1) from `ai_pilot_wheel.lua`'s `handle_ai_
--- pilot_goal_command` -- exact commanded values (Q1a: the exact value
--- stays desired even though mode 2 may fly an approximation of it).
-local function mirror_m2_goal(fields)
-    if fields.heading_target_deg ~= nil then
-        desired.hdg_mode = "heading"
-        desired.heading_deg = fields.heading_target_deg
-        desired.turn_dir = nil
-        desired.turn_rate_deg_s = nil
-        desired.turn_style = "normal"
-        fd_hdg_ref = "overlay"
-        fd_stamp_hdg = next_stamp()
-    end
-    if fields.altitude_target_m ~= nil then
-        desired.alt_m = fields.altitude_target_m
-        fd_stamp_alt = next_stamp()
-    end
-    if fields.altitude_target_ref ~= nil then
-        desired.alt_ref = fields.altitude_target_ref
-    end
-    if fields.speed_target_kmh ~= nil then
-        desired.ias_kmh = fields.speed_target_kmh
-        fd_stamp_spd = next_stamp()
+    if ias_kmh ~= nil then
+        desired.ias_kmh = ias_kmh
+        fd_stamp_spd = seq
     end
 end
 
--- Read-only getter, for a later stage's Lua consumers (`flight_control.
--- lua`/`ai_pilot_wheel.lua`, section 1's "who reads it") -- not called
--- by anything yet in Stages 1-2. Returns a shallow copy so a caller can
--- never mutate this module's own state through it.
+-- `POST /command/flight` -> here, via `commands.lua`'s dispatch table.
+-- `{"op":"flight","epoch","seq","until","kind",...}` (section 5).
+local function handle_flight_command(data, t)
+    local epoch = extract_json_number_field(data, "epoch")
+    local seq = extract_json_number_field(data, "seq")
+    local until_t = extract_json_number_field(data, "until")
+    local kind = extract_json_string_field(data, "kind")
+    if epoch == nil or seq == nil or until_t == nil or kind == nil then
+        debug_log("ignoring malformed flight command (missing epoch/seq/until/kind)")
+        return
+    end
+
+    if epoch ~= fd_epoch then
+        push_ack(seq, "r", "epoch")
+        return
+    end
+    -- "Lua applies a request only if ... seq > fd_last_seq" -- a stale/
+    -- duplicate/out-of-order datagram (UDP) is silently dropped with no
+    -- ack, same dedup posture the old `flight_control` channel had.
+    if seq <= fd_last_seq then
+        return
+    end
+    fd_last_seq = seq
+
+    if not validate_flight_fields(data) then
+        push_ack(seq, "r", "bounds")
+        return
+    end
+
+    if t > until_t then
+        push_ack(seq, "r", "stale")
+        return
+    end
+
+    if kind == "set" then
+        if fd_mode == "off" then
+            push_ack(seq, "r", "not_flying")
+            return
+        end
+        apply_set(data, seq)
+        push_ack(seq, "a", fd_mode)
+        return
+    end
+
+    if kind == "take" then
+        if flight_control == nil then
+            push_ack(seq, "r", "wrong_mode")
+            return
+        end
+        local result = flight_control.request_take(seq, t)
+        if result == "accepted_active" then
+            push_ack(seq, "a", "m1")
+        elseif result == "pending" then
+            fd_pending_take_seq = seq
+        elseif type(result) == "table" and result.refused ~= nil then
+            push_ack(seq, "r", result.refused)
+        end
+        return
+    end
+
+    if kind == "release" then
+        if flight_control == nil then
+            push_ack(seq, "r", "wrong_mode")
+            return
+        end
+        -- The mode this release was applied *in* -- read before the
+        -- call below changes it (`request_release`'s own side effect),
+        -- same "mode at apply time" posture `apply_set` above has.
+        local applied_in = fd_mode
+        local result = flight_control.request_release(seq)
+        if result == "accepted" then
+            push_ack(seq, "a", applied_in)
+        elseif type(result) == "table" and result.refused ~= nil then
+            push_ack(seq, "r", result.refused)
+        end
+        return
+    end
+
+    if M2_ONLY_KINDS[kind] then
+        push_ack(seq, "r", "wrong_mode")
+        return
+    end
+
+    debug_log("ignoring flight command with unknown kind: " .. tostring(kind))
+end
+
+-- Read-only getter, for `flight_control.lua`/`ai_pilot_wheel.lua`
+-- (section 1's "who reads it"). Returns a shallow copy plus the three
+-- stamps, so a caller can never mutate this module's own state through
+-- it and needs no second getter for "which request wrote this part".
 local function get()
     local copy = {}
     for k, v in pairs(desired) do
         copy[k] = v
     end
+    copy.stamp_hdg = fd_stamp_hdg
+    copy.stamp_alt = fd_stamp_alt
+    copy.stamp_spd = fd_stamp_spd
     return copy
 end
 
 -- 5 Hz status push (route key `fd_mode`), same cadence as every other
--- per-frame feed. Carries the measured heading **both** ways (true,
--- `LoGetSelfData().Heading`, and magnetic, `LoGetMagneticYaw`) plus the
--- AI wheel's own overlay course -- the Stage 1 card's own owed HSI
--- check (U3: "whichever the AI wheel uses should be used in both
--- modes").
+-- per-frame feed.
 local function push_flight_desired_state(t)
     if client == nil then
         return
@@ -424,7 +688,7 @@ local function push_flight_desired_state(t)
         .. ',"fd_has_m2":' .. tostring(has_m2)
         .. ',"fd_hdg_mode":' .. text_or_null(desired.hdg_mode)
         .. ',"fd_heading":' .. fmt_num_or_null(desired.heading_deg)
-        .. ',"fd_hdg_ref":' .. text_or_null(fd_hdg_ref)
+        .. ',"fd_hdg_ref":' .. text_or_null(HEADING_REF)
         .. ',"fd_turn_dir":' .. fmt_int_or_null(desired.turn_dir)
         .. ',"fd_turn_rate":' .. fmt_num_or_null(desired.turn_rate_deg_s)
         .. ',"fd_turn_style":' .. text_or_null(desired.turn_style)
@@ -442,7 +706,10 @@ local function push_flight_desired_state(t)
         .. ',"fd_measured_msl":' .. fmt_num_or_null(measured_msl)
         .. ',"fd_measured_ias":' .. fmt_num_or_null(measured_ias_kmh)
         .. ',"fd_overlay_course":' .. fmt_num_or_null(overlay_course)
-        .. ',"fd_reset_epoch":' .. fmt_int_or_null(fd_reset_epoch) .. '}\n')
+        .. ',"fd_reset_epoch":' .. fmt_int_or_null(fd_reset_epoch)
+        .. ',"fd_epoch":' .. fmt_int_or_null(fd_epoch)
+        .. ',"fd_last_seq":' .. fmt_int_or_null(fd_last_seq)
+        .. ',"fd_acks":' .. json_escape_string(acks_wire_string()) .. '}\n')
     if not ok then
         debug_log("flight-desired send failed: " .. tostring(err))
         client:close()
@@ -450,10 +717,7 @@ local function push_flight_desired_state(t)
     end
 end
 
--- Mission restart / `LuaExportStop` -- same "let go, clear every held
--- value" effect every other module's `on_stop` has. Bypasses the usual
--- edge-derived cause: there is no poll to observe this as a `fd_mode`
--- transition from, it simply is one.
+-- Mission restart / `LuaExportStop`.
 local function on_stop()
     if fd_mode ~= "off" then
         fd_mode_n = fd_mode_n + 1
@@ -461,20 +725,31 @@ local function on_stop()
     fd_mode = "off"
     fd_mode_cause = "stop"
     clear_desired()
+    fd_acks = {}
+    fd_pending_take_seq = nil
 end
 
--- Body-layer process-start reset (same shape as `flight_control.lua`/
--- `ai_pilot_wheel.lua`'s own `reset`). Idempotent and safely re-sendable.
+-- Body-layer process-start reset (section 5: "sets `fd_epoch`, sets
+-- `fd_last_seq = 0`"). `fd_epoch`/`fd_last_seq` are deliberately NOT
+-- touched by `on_stop` above (a mission restart alone must not reopen
+-- the acceptance window -- same "seq never goes backwards outside an
+-- explicit reset" posture `flight_control.lua`'s own `fc_last_cmd_seq`
+-- has), only by this function, which `on_stop` is a strict subset of.
 local function reset(epoch)
     on_stop()
     fd_mode_cause = "reset"
     fd_reset_epoch = epoch
+    fd_epoch = epoch
+    fd_last_seq = 0
 end
 
 M.tick = tick
-M.mirror_m1_goal = mirror_m1_goal
-M.mirror_m2_goal = mirror_m2_goal
 M.get = get
+M.write_internal = write_internal
+M.heading_ref = heading_ref
+M.to_true_heading = to_true_heading
+M.from_true_heading = from_true_heading
+M.handle_flight_command = handle_flight_command
 M.push_flight_desired_state = push_flight_desired_state
 M.on_stop = on_stop
 M.reset = reset

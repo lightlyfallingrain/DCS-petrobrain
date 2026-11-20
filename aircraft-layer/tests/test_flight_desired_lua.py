@@ -67,6 +67,8 @@ _CORE_HELPERS: tuple[str, ...] = (
     "fmt_num_or_null",
     "fmt_int_or_null",
     "json_escape_string",
+    "extract_json_string_field",
+    "extract_json_number_field",
 )
 
 #: Mock DCS surface + cross-module globals. `fc_mode_value`/`fc_release_
@@ -290,7 +292,10 @@ print(sent_lines[#sent_lines])
         # Once the overlay is readable, a later tick (same mode, no
         # edge) still seeds it.
         assert _field(second, "fd_heading") == "71.00000"
-        assert _field(second, "fd_hdg_ref") == "overlay"
+        # fd_hdg_ref reports the fixed `HEADING_REF` constant now (Stage
+        # 3), not which handler wrote the value (Stages 1-2's own
+        # provenance tag, gone).
+        assert _field(second, "fd_hdg_ref") == "true"
         assert _field(second, "fd_alt") == "300.00000"
         assert _field(second, "fd_alt_ref") == "baro"
         assert _field(second, "fd_ias") == "150.00000"
@@ -384,12 +389,19 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_alt") == "300.00000"
 
 
-class TestMirrorAtReceipt:
-    def test_mirror_m1_goal_heading(self) -> None:
+class TestSetRequest:
+    """BL-16 Stage 3 -- `handle_flight_command`'s `kind == "set"`
+    replaces Stages 1-2's `mirror_m1_goal`/`mirror_m2_goal` receipt-time
+    mirrors entirely: every write into `desired` now arrives as a
+    numbered request on the one channel, stamped with its own `seq`."""
+
+    def test_set_heading_while_m1(self) -> None:
         driver = """
+flight_desired.reset(5)
 fc_mode_value = "active"
 flight_desired.tick(0.0)
-flight_desired.mirror_m1_goal({ heading_deg = 270.0 })
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","heading_deg":270.0}', 0.1)
 flight_desired.push_flight_desired_state(0.1)
 print(sent_lines[#sent_lines])
 """
@@ -398,12 +410,15 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_heading") == "270.00000"
         assert _field(line, "fd_hdg_ref") == "true"
         assert _field(line, "fd_stamp_hdg") == "1"
+        assert _field(line, "fd_acks") == "1:a:m1"
 
-    def test_mirror_m1_goal_turn(self) -> None:
+    def test_set_turn_while_m1(self) -> None:
         driver = """
+flight_desired.reset(5)
 fc_mode_value = "active"
 flight_desired.tick(0.0)
-flight_desired.mirror_m1_goal({ turn = 1 })
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","turn":1}', 0.1)
 flight_desired.push_flight_desired_state(0.1)
 print(sent_lines[#sent_lines])
 """
@@ -412,12 +427,14 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_hdg_mode") == "turn"
         assert _field(line, "fd_turn_dir") == "1"
 
-    def test_mirror_m2_goal_altitude(self) -> None:
+    def test_set_altitude_while_m2(self) -> None:
         driver = """
+flight_desired.reset(5)
 ap_parked = true
 fc_mode_value = "armed"
 flight_desired.tick(0.0)
-flight_desired.mirror_m2_goal({ altitude_target_m = 900.0, altitude_target_ref = "baro" })
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","alt_m":900.0,"alt_ref":"baro"}', 0.1)
 flight_desired.push_flight_desired_state(0.1)
 print(sent_lines[#sent_lines])
 """
@@ -426,6 +443,101 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_alt") == "900.00000"
         assert _field(line, "fd_alt_ref") == "baro"
         assert _field(line, "fd_stamp_alt") == "1"
+        assert _field(line, "fd_acks") == "1:a:m2"
+
+    def test_set_while_off_is_refused_not_flying_and_writes_nothing(self) -> None:
+        driver = """
+flight_desired.reset(5)
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","heading_deg":270.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_heading") is None
+        assert _field(line, "fd_acks") == "1:r:not_flying"
+
+    def test_wrong_epoch_is_refused(self) -> None:
+        driver = """
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":9,"seq":1,"until":10.0,"kind":"set","heading_deg":270.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        # heading_deg=270.0 never lands -- the off->m1 edge already
+        # reseeded from measured (0.0 deg) before the refused request.
+        assert _field(line, "fd_heading") == "0.00000"
+        assert _field(line, "fd_acks") == "1:r:epoch"
+
+    def test_stale_until_is_refused(self) -> None:
+        driver = """
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":0.05,"kind":"set","heading_deg":270.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_heading") == "0.00000"
+        assert _field(line, "fd_acks") == "1:r:stale"
+
+    def test_out_of_order_seq_is_silently_dropped_with_no_ack(self) -> None:
+        driver = """
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":3,"until":10.0,"kind":"set","heading_deg":270.0}', 0.1)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":2,"until":10.0,"kind":"set","heading_deg":90.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        # The stale (lower) seq never overwrote the newer heading, and
+        # no second ack entry was added for it.
+        assert _field(line, "fd_heading") == "270.00000"
+        assert _field(line, "fd_acks") == "3:a:m1"
+
+    def test_out_of_bounds_heading_is_refused_bounds(self) -> None:
+        driver = """
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","heading_deg":999.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_heading") == "0.00000"
+        assert _field(line, "fd_acks") == "1:r:bounds"
+
+    def test_a_mode_2_only_kind_is_refused_wrong_mode(self) -> None:
+        driver = """
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"align"}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_acks") == "1:r:wrong_mode"
 
 
 class TestResetAndStop:
