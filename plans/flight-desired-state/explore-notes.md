@@ -202,3 +202,18 @@ recon plus a probe flight.
 The plan's two diagrams ("The picture" data-ownership flowchart and the mode state diagram) were
 shown as a throwaway artifact under the new diagram-review step (AGENTS.md). User, verbatim:
 *"looks good, approved"*.
+
+## Heading reference measured: true (user's test flight, 2026-11-20, verbatim)
+
+> Mode 2, desired heading 000, log line
+> '143.314 m2 park 1 heading 0.0 overlay 1792.0 baro 120.0 0.84345 -0.06788 0.0'
+> DCS status bar info: "HDG: 356 deg magnetic, 001 deg true"
+> HSI shows about 001 deg.
+>
+> --> AI overlay and HSI shwo _true_ heading. Use true heading internally.
+
+Fields (Stage 1–2 card readout order): desired heading 0.0, `fd_hdg_ref` overlay, alt 1792 baro,
+IAS 120, `fd_hdg_true_deg` 0.84 (= 001° true), `fd_hdg_mag_deg` −0.068, overlay course 0.0.
+Settled: **true heading everywhere** (U3: the overlay's reference is true, and so is the HSI);
+`HEADING_REF = "true"`, no conversion. Side finding: `fd_hdg_mag_deg` carries
+`LoGetMagneticYaw` in **radians** (−0.068 rad ≈ 356°), so the field is mislabelled; fix the unit.
