@@ -102,3 +102,44 @@ Main-loop reading:
   release trim: trim held during an attitude or heading change, released once stable, so the SAU
   holds the new value. The heading channel can drop out on a large turn; Petrovich may switch it
   back on. Detecting and recovering from a generator drop is deferred.
+
+SAU effectors (user, verbatim): *"In @body-layer/config/sequences/mi-24p/switch-reference.md there
+are SAU-H-* SAU-K-* SAU-T-* and SAU-B-* , those are the effectors."*
+
+## Answers to the plan's U1–U7 (user, 2026-11-20, verbatim)
+
+> "filtered felt load" -> consider just using raw velocity and acceleration. No need to model how
+> pilot would feel it. For flight control, code is allowed to know and act on raw telemetry data.
+> Deltas probably need to be a running average to filter out vibration.
+>
+> Q1 - LV-1
+> Q2 - yes. Minimun value on pitot based airspeed indicator is 50 km/h. Doppler based speed
+> indicator has up to 45 km/h forward, up to 25 km/h back, left, right. Doppler speed is ground
+> speed. There is also doppler vertical speed -10..+10 m/s. These are pilot instruments. Copilot
+> does not have the doppler instrument, but does have pitot based airpeed and VSI. Regardless,
+> Petrobarin is to use raw telemetry data to calculate speeds and accelerations and control inputs
+> from that.
+> Q3 - yes
+> Q4 - yes, SAU after all this works without SAU
+> Q5 - revert my idea about extra pedal. Just fly the slip ball.
+> Q6 - yes
+> Q7 - yes. I just tested DCS velocity is 3D, so sideways movement is reported as velocity. In all
+> likelihood it is the 3D velocity vector length.
+
+Settled:
+- **No felt-load modelling.** The law steers on raw velocity and acceleration from telemetry,
+  with deltas as running averages to filter vibration. `LoGetAccelerationUnits` is not needed as
+  a "felt" channel. (This supersedes the plan's felt-load collective loop.)
+- **U1:** remove the 80 km/h hand-back in **LV-1**, not LV-3.
+- **U2:** yes: below 25 km/h "speed" is ground speed along the nose, blended to IAS above 50 km/h.
+  Instruments for context: pitot IAS reads down to 50 km/h; the pilot's Doppler shows ground speed
+  up to 45 km/h forward, 25 km/h back, left and right, plus Doppler vertical speed −10..+10 m/s (the
+  copilot has only pitot IAS and VSI). The law uses raw telemetry regardless.
+- **U3:** yes (ordinary turn: speed, then turn rate, then height; break: height, then speed, then
+  turn rate).
+- **U4:** SAU off on all LV cards; the SAU stage comes after the law works without it.
+- **U5 reverted:** no deliberate extra pedal in hard turns or breaks. Pedals fly the slip ball,
+  always. (Supersedes the goal-check Q6 answer.)
+- **U6:** yes: a slow break turns more gently.
+- **U7:** yes: use `LoGetVectorVelocity` if LV-0 confirms it matches the position deltas. User
+  test: DCS's velocity is 3D (sideways movement shows), most likely the 3D vector's length.
