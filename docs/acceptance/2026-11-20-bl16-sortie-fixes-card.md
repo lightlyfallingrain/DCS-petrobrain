@@ -21,8 +21,8 @@ Restart the collector and body-layer.
 **Pre-flight check**, before takeoff:
 
 ```sh
-curl -s http://<collector-host>:7791/flight_control/latest
-curl -s http://<collector-host>:7791/ai_pilot_wheel/latest
+curl -s http://192.168.1.50:7791/flight_control/latest
+curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest
 ```
 
 Expect both to return a real JSON object, and the collector's startup log to show **no**

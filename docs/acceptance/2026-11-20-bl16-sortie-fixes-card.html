@@ -125,8 +125,8 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
         Restart DCS (a mission restart alone does not reload <code>Export.lua</code>). Restart the
         collector and body-layer.</div>
       <div class="label">Check, before takeoff</div>
-      <pre class="cmd">curl -s http://&lt;collector-host&gt;:7791/flight_control/latest
-curl -s http://&lt;collector-host&gt;:7791/ai_pilot_wheel/latest</pre>
+      <pre class="cmd">curl -s http://192.168.1.50:7791/flight_control/latest
+curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest</pre>
       <div class="expect">Both return a real JSON object. The collector's startup log shows
         <strong>no</strong> &ldquo;Export.lua version mismatch&rdquo; warning
         (<code>EXPECTED_EXPORT_VERSION = "2026-11-20"</code>). If either fails, stop &mdash; the
