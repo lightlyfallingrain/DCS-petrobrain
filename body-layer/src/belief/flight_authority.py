@@ -79,6 +79,24 @@ def _as_optional_bool(value: object) -> bool | None:
     return value
 
 
+def _as_optional_degrees_0_360(value: object) -> float | None:
+    """Same parse as `_as_optional_float`, wrapped into `[0, 360)` --
+    `fd_hdg_true_deg`/`fd_hdg_mag_deg` are degree fields (`Export.lua`'s
+    `flight_desired.lua` module docstring: `LoGetMagneticYaw` itself
+    returns radians, converted and wrapped on that side), and this
+    mirror wraps again defensively at the one boundary body-layer
+    actually reads the wire at -- so a value arriving at exactly 360 or
+    a hair negative (float rounding across the `math.deg`/`%` pair on
+    the Lua side) still reads as this project's own canonical compass
+    range, the same posture every other wrap in this subsystem takes at
+    its own boundary rather than trusting the sender's own rounding."""
+    degrees = _as_optional_float(value)
+    if degrees is None:
+        return None
+    wrapped = degrees % 360.0
+    return wrapped
+
+
 @dataclass(frozen=True)
 class FlightAuthorityState:
     """Petrovich's belief about the one desired flight state and the one
@@ -155,8 +173,8 @@ def advance_flight_authority(
         stamp_hdg=_as_optional_int(sample.get("fd_stamp_hdg")),
         stamp_alt=_as_optional_int(sample.get("fd_stamp_alt")),
         stamp_spd=_as_optional_int(sample.get("fd_stamp_spd")),
-        hdg_true_deg=_as_optional_float(sample.get("fd_hdg_true_deg")),
-        hdg_mag_deg=_as_optional_float(sample.get("fd_hdg_mag_deg")),
+        hdg_true_deg=_as_optional_degrees_0_360(sample.get("fd_hdg_true_deg")),
+        hdg_mag_deg=_as_optional_degrees_0_360(sample.get("fd_hdg_mag_deg")),
         measured_agl_m=_as_optional_float(sample.get("fd_measured_agl")),
         measured_msl_m=_as_optional_float(sample.get("fd_measured_msl")),
         measured_ias_kmh=_as_optional_float(sample.get("fd_measured_ias")),

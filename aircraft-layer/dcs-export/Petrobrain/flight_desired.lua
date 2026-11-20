@@ -36,18 +36,15 @@ second, uncomparable numbering.
 **Heading reference (section 1, "Heading reference").** `HEADING_REF`
 is the one constant deciding whether `desired.heading_deg` (and every
 number on the wire derived from it) is stored in true or magnetic
-heading -- **"true" here is an unmeasured placeholder, not a confirmed
-reading.** The Stages 1-2 card (`docs/acceptance/2026-11-20-bl16-
-desired-state-s12-card.md`) that was meant to settle it has not been
-flown as of this stage's implementation (no live DCS session available
-to the implementer) -- "true" is the *no-conversion* default, which
-cannot make heading accuracy worse than today's pre-Stage-3 behaviour
-(today's unpark seed already copies the overlay course into the true-
-heading law unconverted, per the plan's own "Risks & unknowns"). **Flip
-this one constant to `"mag"` once the card is flown and shows the
-overlay/HSI reading magnetic** -- `M.to_true_heading`/`M.from_true_
-heading` below are the only two places the conversion itself happens,
-so nothing else needs to change.
+heading -- **measured, not a placeholder**: the user's own test flight
+(`plans/flight-desired-state/explore-notes.md`, "Heading reference
+measured: true", 2026-11-20) found the AI overlay's held course and the
+HSI both read true heading (DCS status bar "356 deg magnetic, 001 deg
+true"; overlay course and HSI both ~001). `"true"` is therefore the
+correct, confirmed value, not the no-conversion default it started as.
+`M.to_true_heading`/`M.from_true_heading` below are the only two places
+the true/magnetic conversion itself would happen if a future theatre or
+aircraft ever measured differently -- nothing else would need to change.
 --]]
 
 local M = {}
@@ -70,6 +67,26 @@ local function heading_ref()
     return HEADING_REF
 end
 
+-- `LoGetMagneticYaw` returns radians, not degrees (confirmed live,
+-- 2026-11-20: the raw status-line value -0.06788 for a true 356 deg/mag
+-- heading is -0.06788 rad, not deg). `wrap360_deg` converts and
+-- normalises into [0, 360) the same way `to_true_heading`/`from_true_
+-- heading` below already wrap their own result, so every reader of
+-- this module's degree fields can assume the same range.
+local function wrap360_deg(radians)
+    local r = math.deg(radians) % 360.0
+    if r < 0 then r = r + 360.0 end
+    return r
+end
+
+local function magnetic_yaw_deg()
+    local mag_rad = safe_call(LoGetMagneticYaw)
+    if type(mag_rad) ~= "number" or mag_rad ~= mag_rad then
+        return nil
+    end
+    return wrap360_deg(mag_rad)
+end
+
 -- The live true<->magnetic variation, held across a bad read (section
 -- 1: "the law holds its last finite variation" -- the same posture
 -- applies to every conversion this module does, not only mode 1's own
@@ -83,9 +100,9 @@ local function update_heading_variation(measured_true_deg)
     if type(measured_true_deg) ~= "number" or measured_true_deg ~= measured_true_deg then
         return fd_heading_variation_deg
     end
-    local mag = safe_call(LoGetMagneticYaw)
-    if type(mag) == "number" and mag == mag then
-        fd_heading_variation_deg = measured_true_deg - mag
+    local mag_deg = magnetic_yaw_deg()
+    if mag_deg ~= nil then
+        fd_heading_variation_deg = measured_true_deg - mag_deg
     end
     return fd_heading_variation_deg
 end
@@ -663,7 +680,7 @@ local function push_flight_desired_state(t)
     if type(self_data) == "table" and type(self_data.Heading) == "number" then
         hdg_true_deg = math.deg(self_data.Heading)
     end
-    local hdg_mag_deg = safe_call(LoGetMagneticYaw)
+    local hdg_mag_deg = magnetic_yaw_deg()
     local measured_agl = safe_call(LoGetAltitudeAboveGroundLevel)
     local measured_msl = safe_call(LoGetAltitudeAboveSeaLevel)
     local measured_ias_mps = safe_call(LoGetIndicatedAirSpeed)

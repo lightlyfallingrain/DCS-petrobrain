@@ -123,6 +123,25 @@ class TestAdvanceFlightAuthority:
         state = advance_flight_authority(original, client)
         assert state == original
 
+    def test_a_negative_heading_degree_wraps_into_0_360(
+        self, server_with_sample: str
+    ) -> None:
+        """`Export.lua`'s `flight_desired.lua` now converts
+        `LoGetMagneticYaw`'s own radians via `math.deg` and wraps before
+        the wire -- this mirror wraps again defensively at its own
+        boundary (`_as_optional_degrees_0_360`'s own docstring), so a
+        value that arrives negative (a hair of float rounding, or an
+        older/un-fixed `Export.lua`) still reads as this project's
+        canonical `[0, 360)` compass range rather than a bare negative
+        degree."""
+        _Handler.sample = dict(_Handler.sample or {})
+        _Handler.sample["fd_hdg_true_deg"] = -5.0
+        _Handler.sample["fd_hdg_mag_deg"] = -0.06788
+        client = AircraftLayerClient(base_url=server_with_sample)
+        state = advance_flight_authority(FlightAuthorityState(), client)
+        assert state.hdg_true_deg == pytest.approx(355.0)
+        assert state.hdg_mag_deg == pytest.approx(359.93212)
+
 
 class TestDecideFlightSpeech:
     def test_no_mode_n_on_either_side_is_a_no_op(self) -> None:

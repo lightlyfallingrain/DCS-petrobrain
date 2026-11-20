@@ -260,10 +260,14 @@ actual defect this whole plan exists to close (a mid-ramp unpark flying the stal
   writeback) — `write_internal`, the one function both `flight_control.lua`'s settle code and `ai_
   pilot_wheel.lua`'s align-read call into. `Stages 1-2's `mirror_m1_goal`/`mirror_m2_goal` receipt-
   time mirrors are deleted outright, replaced by this one path.
-  **`HEADING_REF` is an unmeasured placeholder (`"true"`, no conversion)** — the Stages 1-2 card
-  that was meant to settle it has not been flown (no live DCS session reachable from this
-  implementation pass); flagged loudly in the module's own docstring and in the Stage 3 card below,
-  flip-to-`"mag"` is a one-line change once it is.
+  **`HEADING_REF = "true"` is now measured, not a placeholder** — the user's own test flight
+  (`explore-notes.md`, "Heading reference measured: true", 2026-11-20) found the AI overlay's held
+  course and the HSI both read true heading (DCS status bar "356 deg magnetic, 001 deg true";
+  overlay and HSI both ~001). The same flight found `fd_hdg_mag_deg` mislabelled —
+  `LoGetMagneticYaw` returns radians, not degrees — fixed in Stage 3b (`flight_desired.lua`'s new
+  `wrap360_deg`/`magnetic_yaw_deg`, converting via `math.deg` and wrapping into `[0, 360)` before
+  the wire; `belief.flight_authority._as_optional_degrees_0_360` wraps again defensively at
+  body-layer's own mirror boundary).
 - **Lua (`flight_control.lua`)**: `fc_goal_*`, `fc_last_cmd_seq`, `apply_goal_fields`, and `handle_
   flight_control_command` are deleted outright. `request_take(seq, t)`/`request_release(seq)`
   replace the old `cmd` dispatch (called from `flight_desired.lua`), returning `"accepted_active"`/

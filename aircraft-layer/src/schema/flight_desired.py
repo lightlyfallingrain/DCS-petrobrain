@@ -20,13 +20,15 @@ write counter.
 
 **`fd_hdg_true_deg`/`fd_hdg_mag_deg`** (main-loop amendment, 2026-11-20,
 applied on top of the architect's plan) carry the measured heading both
-ways -- `LoGetSelfData().Heading` and `LoGetMagneticYaw()` -- so the
-Stage 1/2 acceptance card can read both against the cockpit HSI without
-flying twice. **`fd_hdg_ref`** tags which reference last wrote the
-shadow desired heading itself: `"true"` when mode 1's own goal mirror or
-the measured-state reseed wrote it, `"overlay"` when mode 2's own goal
-mirror or the overlay reseed wrote it. No conversion happens in Stage 1
--- both are reported as-is.
+ways, both in degrees -- `LoGetSelfData().Heading` and
+`LoGetMagneticYaw()` -- so the Stage 1/2 acceptance card can read both
+against the cockpit HSI without flying twice. **`LoGetMagneticYaw`
+itself returns radians, not degrees** (confirmed live, 2026-11-20 --
+`Export.lua`'s own `flight_desired.lua` converts via `math.deg` and
+wraps into `[0, 360)` before this field ever reaches the wire). The
+user's test flight the same day settled **`fd_hdg_ref`**'s own open
+question: the AI overlay's held course and the HSI both read true
+heading, so `HEADING_REF = "true"` is measured, not a placeholder.
 
 This layer carries the raw status and decides nothing, same rule every
 other schema here follows."""

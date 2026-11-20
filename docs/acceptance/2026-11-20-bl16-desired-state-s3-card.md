@@ -41,9 +41,9 @@ letter `m1`), and compare the cockpit instrument against what was commanded:
 
 1. **"You have controls."** `fd_mode` off → taking → m1; "I have controls." spoken only once the
    ack lands (about a second after the command, occasionally two — U5's own accepted latency).
-2. **"Heading 090."** Flown to 090 on the HSI. If the HSI and the overlay turn out to read
-   different references (the owed Stages 1-2 check), say what the aircraft actually flew the
-   heading command *as* — this settles the one open risk the plan still carries on `HEADING_REF`.
+2. **"Heading 090."** Flown to 090 on the HSI — both the AI overlay and the HSI read true heading
+   (measured, 2026-11-20: `HEADING_REF = "true"` is confirmed, not a placeholder), so no
+   conversion applies here.
 3. **"Climb 50."** then immediately **"climb 50."** again, in one breath. Expect two readbacks in
    the order spoken (+100 total), not the order the acks happen to arrive.
 4. **"Speed 200."** Flown smoothly to 200 km/h.
