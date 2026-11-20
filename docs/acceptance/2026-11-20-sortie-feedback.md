@@ -106,3 +106,19 @@ at once, ending any remaining break press (including break away's second press).
   the decision above).
 - One mission-wide running number for every command channel: BL-16 work, recorded on
   `body-layer/ROADMAP/BL-16.md`, not this batch.
+
+## Desired value must be exact; flying may be imprecise (user, verbatim)
+
+> desired values: I've said that a certain band is acceptable, holding a value need not be exact.
+> However, the value *set* as desired must still be what player commanded. Actual flight is then
+> allowed to deviate from it a bit, but the desired value must be correct.
+>
+> Now oberver "altitude 100 radar" -> alt set to 116 R. should set to 100. This was mode 2, but
+> just as well the desired value must be correctly set in mode 1. Flying itself is allowed to be a
+> bit imprecice.
+
+Main-loop reading: `ai_pilot_wheel.lua` stops pressing once the overlay's *set* value is within
+`AI_PILOT_ALT_TOLERANCE_M` (20 m) of the target, and within `AI_PILOT_HEADING_TOLERANCE_DEG` (5°)
+for heading. The "acceptable band" is applied to setting the value, not to flying it. Expected:
+the set value lands exactly on what was commanded (or the nearest value the wheel can show), and
+only the flown value may deviate. Same for mode 1's goal values.
