@@ -103,3 +103,30 @@ Settled:
 So the desired state, the mode authority and mode 1 are aircraft-generic; mode 2 (ED's AI-pilot
 wheel) is one aircraft-specific consumer of the desired state, behind a seam that another module can
 simply not have. Not a request to build other aircraft now.
+
+## Heading reference, align and align-for-launch (user, 2026-11-20, verbatim)
+
+Asked the plan's U1–U4 (`plan.md`); this answers U3 and refines the manoeuvre table.
+
+> True vs magnetic - which ever the AI wheel uses should be used in both modes.
+>
+> Mode 2 Align is also a heading set, but a special case because it's heading set to align with
+> 9K113 vector and AI overlay does that. In AI overlay align command sets heading to 9K113 azimuth,
+> that is the align. It is single time heading set on command press. Read that into desired value
+> heading (after a small delay so AI overlay updates first).
+> Align for launch differs in two ways: it stays on and keeps aligning to current 9k113 azimuth
+> constantly so 9K113 slew makes the AI fly the helicopter to keep it aligned. Also it tries to
+> align pitch so that the missile launch parameters are met.
+> In both of these, read the value from AI wheel that the AI is flying and update our desired
+> heading value to match that so that that heading is kept when recovering from align.
+
+Settled:
+- **U3:** the desired heading uses the AI wheel's own reference (true or magnetic, whichever the
+  overlay course is), in both modes; mode 1 converts if its own heading source differs. The
+  Stage 1 card measures which reference the overlay uses.
+- **Mode 2 align:** one-shot. ED's overlay sets its course to the 9K113 azimuth on the press; after
+  a short delay (overlay updated), Lua reads that course into the desired heading.
+- **Mode 2 align-for-launch:** continuous. The overlay keeps re-aligning to the current 9K113
+  azimuth (slewing the 9K113 steers the helicopter) and also aligns pitch for launch parameters.
+  While it is on, the desired heading keeps following the overlay course the AI is flying, so
+  recovery and any later mode change hold the last aligned heading.
