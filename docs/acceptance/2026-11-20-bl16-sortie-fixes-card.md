@@ -11,18 +11,14 @@ all seven together, plus the two items this card doesn't cover: the slip-ball pr
 card (`docs/acceptance/2026-11-20-slip-ball-calibration-card.md`) and the mission-wide running
 command number is still open work on `[[BL-16]]`, not built in this batch.
 
-## Redeploy first
+## Pre-flight check
 
-Copy the whole `aircraft-layer/dcs-export/Petrobrain/` folder **and** `Export.lua` to
-`Saved Games\DCS\Scripts\` (`Petrobrain/` and `Export.lua` respectively) — standard practice here,
-`aircraft-layer/WORKFLOW.md`. Restart DCS (a mission restart alone does not reload `Export.lua`).
-Restart the collector and body-layer.
-
-**Pre-flight check**, before takeoff:
+After your usual redeploy and restart, before takeoff:
 
 ```sh
-curl -s http://192.168.1.50:7791/flight_control/latest
-curl -s http://192.168.1.50:7791/ai_pilot_wheel/latest
+source run-scripts/petrobrain.env
+curl -s http://$DCS_COLLECTOR_IP:7791/flight_control/latest
+curl -s http://$DCS_COLLECTOR_IP:7791/ai_pilot_wheel/latest
 ```
 
 Expect both to return a real JSON object, and the collector's startup log to show **no**
