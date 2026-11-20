@@ -8,6 +8,18 @@ tip `f0a3540f`, approved), and this plan reads that code as it will be: `flight_
 
 ### Amended (2026-11-20, user's answers)
 
+- **Consistency pass (2026-11-20, architect, arch3/lift-vector).** U8's final answer ("no floor")
+  was carried through every remaining place the plan still described a 50 km/h commanded-speed
+  floor or deferred its removal to LV-3 (`alignment.md` Finding 1): the summary above, Affected
+  Modules, diagrams 5 and 6, the "Removed and kept" table, the LV-1 build, the LV-3 build, and the
+  Tests section. The Risks entry is rewritten to say plainly that nothing protects LV-1 below
+  50 km/h except the gain schedule and the envelope guards, by the user's own informed choice (Q1).
+  The LV-1 card gains a deliberate slow-flight row (speed 40, then speed 20) so the gap is observed
+  on a card rather than discovered in a flight. The 25/50 km/h λ-blend breakpoints, the
+  pitot-gauge instrument context (U2) and the RPM-guard regime below 50 km/h are unchanged — those
+  are not the commanded-speed floor. Plan check Finding 2 (SAU-on-at-handover rule had no stage or
+  ID to carry it) is resolved: built and reviewed on `feature/bl16-sau-handover`, already merged
+  into this branch (`review-sau-handover.md`).
 - **No felt load.** *"Consider just using raw velocity and acceleration. No need to model how pilot
   would feel it… Deltas probably need to be a running average to filter out vibration."* The
   felt-load collective cascade (old section E, `n_target`, `n_i`, `LIFT_LENGTH_SOURCE`) is gone.
@@ -16,8 +28,8 @@ tip `f0a3540f`, approved), and this plan reads that code as it will be: `flight_
   (A). `LoGetAccelerationUnits` is logged in the trace only, for diagnosis; no loop reads it.
   Goal-check finding 1 still holds, more strongly: nothing the law reads rises with load in a bank.
 - **U1 → LV-1.** The 80 km/h hand-back (Lua release and take refusal, body-layer `TOO_SLOW`) goes in
-  **LV-1**. What protects low speed in LV-1 is a gentler law and a commanded-speed floor, not a
-  hand-back (LV-1, and new **U8**).
+  **LV-1**. What protects low speed in LV-1 is a gentler law alone, not a floor and not a
+  hand-back (LV-1; U8 settled with no floor).
 - **U2, U3, U6, U7: yes.** Recorded as answered; the instrument context is noted, but the law uses
   raw telemetry. U7 is now a profile switch, `VELOCITY_SOURCE`, set by LV-0's comparison.
 - **U4:** SAU off on every LV card; the SAU stage follows once the law works without it.
@@ -85,7 +97,7 @@ else changes.
 derivative), `K_COLLECTIVE`, `K_TILT_FROM_AX`, `K_TILT_FROM_AZ_SATURATED`, `K_BANK_INCREMENT`,
 `K_TURN_COORD_PEDAL`, `K_BREAK_PEDAL_BIAS` (see "Removed and kept"). **Removed in LV-1:**
 `ENV_IAS_MARGIN_KMH`, `ENV_HOLD_S` and `fc_env_low_ias_since_t` (only the IAS release uses them);
-`MIN_IAS_KMH` loses its hand-back meaning and keeps only the commanded-speed floor until LV-3 (U8).
+`MIN_IAS_KMH` is removed outright in LV-1, along with its hand-back meaning (U8, no floor).
 **No existing constant governs** the hover/forward blend speeds, the running-average windows, the
 velocity source switch, the lift-length feed-forward gain or the gain schedule; all are new and live
 in the profile. The user's hover threshold (25 km/h, "configurable") exists only in the explore
@@ -116,22 +128,22 @@ not on a recon note.
   function takes `profile` as an explicit parameter beside `limits`, so the toy plant can pass a
   test profile. **LV-1:** `check_envelope` loses the IAS release, `check_unpark_preconditions` loses
   `too_slow` (an unreadable IAS is no longer a refusal cause; NaN handling stays in
-  `check_envelope`'s `"nan"`). `build_take_seed`'s unpark clamp (added at `f0a3540f`) keeps reading
-  `fc_limits.min_ias_kmh`, now the commanded floor. Status push gains the estimator fields; a
+  `check_envelope`'s `"nan"`). `build_take_seed`'s unpark clamp (added at `f0a3540f`) loses its
+  speed floor (U8; keeps its ceiling and the AGL floor). Status push gains the estimator fields; a
   flag-gated per-frame trace (`aircraft_layer_flight_debug.flag` →
   `aircraft_layer_flight_trace.log`, owed since Decision 23) lands in LV-0.
 - `aircraft-layer/dcs-export/Export.lua` — load `flight_profile` before `flight_control`.
 - `aircraft-layer/dcs-export/Petrobrain/flight_desired.lua` — **unchanged.** The law reads desired
   by stamp as Stage 3 built it; break vs ordinary is derived from `turn_rate_deg_s` being set.
 - **body-layer, LV-1** — `belief/flight_control.py`: `take_controls` loses `too_slow` and the
-  `TOO_SLOW` reason; `MIN_IAS_KMH`'s docstring narrows to "lowest commandable speed" and its value
-  drops to 50 (U8); `belief/crew_console.py` and `body.py` lose the `too_slow` plumbing;
+  `TOO_SLOW` reason; `MIN_IAS_KMH` and every commanded-speed floor go entirely (U8, no floor):
+  `clamp_speed`'s lower bound becomes 0, `min_ias_kmh` leaves the lease `limits` and
+  `FC_LIMIT_BOUNDS`; `belief/crew_console.py` and `body.py` lose the `too_slow` plumbing;
   `belief/speech.py` loses the `TOO_SLOW` line; `config/rules/README.md`'s `take_controls` row loses
   `"TOO_SLOW"`; `config/defaults.toml` regenerated. `belief/flight_authority.py` (carried-value
-  announcement) follows `clamp_speed` and needs no edit. **LV-3:** `MIN_IAS_KMH` removed,
-  `clamp_speed`'s lower bound becomes 0, `min_ias_kmh` leaves the lease `limits` and
-  `FC_LIMIT_BOUNDS`. Wherever `fc_*` status fields are parsed (`collector/*`): new estimator fields,
-  passed through for the cards.
+  announcement) follows `clamp_speed` and needs no edit. **LV-3:** nothing left to remove here —
+  `MIN_IAS_KMH` and the floor are already gone, removed in LV-1. Wherever `fc_*` status fields are
+  parsed (`collector/*`): new estimator fields, passed through for the cards.
 - `aircraft-layer/tests/test_flight_control_law.py` — toy plant rebuilt as a 3D point mass (below);
   `test_flight_control_lua.py`, `test_export_lua_constants_parity.py`,
   `test_dcs_export_lua_local_order.py` — extraction tuples and parity for the new module and fields.
@@ -149,7 +161,7 @@ not on a recon note.
 flowchart LR
   subgraph BL["body-layer (guidance)"]
     CMD["player commands<br/>rules, latest wins"] --> REQ["numbered 'flight' requests<br/>set / take / release"]
-    TUN["tuning.py limits<br/>what he does: bank, VS, accel,<br/>floor, RPM floor, stall IAS, VRS,<br/>commanded speed floor (until LV-3)"] --> LEASE["flight_lease<br/>every poll"]
+    TUN["tuning.py limits<br/>what he does: bank, VS, accel,<br/>floor, RPM floor, stall IAS, VRS"] --> LEASE["flight_lease<br/>every poll"]
   end
   subgraph LUA["Export.lua, per frame (~140 Hz)"]
     FD["flight_desired.lua<br/>desired heading/turn, alt+ref, IAS<br/>stamps, rate override"]
@@ -226,7 +238,7 @@ flowchart TB
 
 **5. Speed regimes: one law, blended.** `λ` goes from 0 (hover) to 1 (forward flight) on measured
 horizontal ground speed. Nothing switches; every term is weighted. LV-1 and LV-2 fly with `λ = 1`
-throughout and the commanded speed floored at 50 km/h; LV-3 adds the blend and lowers the floor to 0.
+throughout and no commanded-speed floor (U8, no floor); LV-3 adds the blend below 50 km/h.
 
 ```mermaid
 stateDiagram-v2
@@ -257,9 +269,9 @@ SAU off on every card (U4).
 ```mermaid
 flowchart LR
   S3["desired-state Stage 3<br/>(approved, f0a3540f)"] --> LV0["LV-0 instruments + shadow<br/>no behaviour change<br/>card: take retest, frames,<br/>velocity source, vibration"]
-  LV0 --> LV1["LV-1 forward-flight law<br/>80 km/h hand-back removed,<br/>commanded floor 50 km/h<br/>card: take, hold, turns,<br/>speed/alt changes, slow take"]
+  LV0 --> LV1["LV-1 forward-flight law<br/>80 km/h hand-back removed,<br/>no commanded-speed floor<br/>card: take, hold, turns,<br/>speed/alt changes, slow take"]
   LV1 --> LV2["LV-2 break and priorities<br/>card: breaks, floor, RPM dummy"]
-  LV2 --> LV3["LV-3 low speed and hover<br/>commanded floor to 0<br/>card: slow down to 0 and back"]
+  LV2 --> LV3["LV-3 low speed and hover<br/>blend to hover regime<br/>card: slow down to 0 and back"]
   LV3 --> S4["desired-state Stage 4<br/>(user's order)"]
   LV3 --> SAU["stage 2: SAU<br/>(after the law works without it)"]
 ```
@@ -431,7 +443,7 @@ by mode 1. Desired-state Stage 4 (mode 2 manoeuvres) is not touched.
 | damping on body `q`, `p`; turn rate `= −ang.y` | **replaced**: Euler rates (gated on LV-0) |
 | `K_TURN_COORD_PEDAL` overlay, `K_BREAK_PEDAL_BIAS` + `break_pedal_bias_accum` unwind | **replaced**: ball loop, target always centre (F) |
 | low-IAS release (`ENV_IAS_MARGIN_KMH`, `ENV_HOLD_S`), unpark `too_slow`, body-layer `TOO_SLOW` | **removed in LV-1** (U1) |
-| `MIN_IAS_KMH` as commanded-speed floor | **50 km/h in LV-1, removed in LV-3** (U8) |
+| `MIN_IAS_KMH` as commanded-speed floor | **removed entirely in LV-1** (U8, no floor) |
 | shapers, `K_HEADING_TRACK`, altitude/speed feedback gains, baro conversion | kept |
 | break floor (D29), VRS cap (D31), RPM seam (D28), collective-limited flags (D30) | kept; the flags feed the chain |
 | inner loop form, bit-exact take, capture, `armed`/unpark take, envelope dead/NaN | kept |
@@ -443,9 +455,11 @@ by mode 1. Desired-state Stage 4 (mode 2 manoeuvres) is not touched.
 Each stage flies a card from **the feature branch** (`feature/bl16-lift-vector-law`, checked out in
 the repo root by the user), with no deploy steps and the readout through `$DCS_COLLECTOR_IP`
 (`source run-scripts/petrobrain.env`). **All LV cards: SAU H, K and T off before every take** (U4;
-stage 1 is without the SAU, and the SAU stage follows once the law works without it). If the
-separate "SAU on at hand-back to the player" rule (`explore-notes.md`, SAU section) is built before
-a card is flown, the card says to switch them off again before each new take.
+stage 1 is without the SAU, and the SAU stage follows once the law works without it). The separate
+"SAU on at hand-back to the player" rule (`explore-notes.md`, SAU section) is now built and
+reviewed on `feature/bl16-sau-handover`, already merged into this branch
+(`review-sau-handover.md`): it fires on hand-back, not on take, so every LV card still switches
+SAU H, K and T off itself before each new take.
 
 1. **LV-0 — instruments and shadow (no behaviour change).**
    - Estimator (A) running every frame; status fields `fc_est_*` (`a_f/a_r/a_u`, `V_g`, `V_g,f`,
@@ -466,21 +480,26 @@ a card is flown, the card says to switch them off again before each new take.
    ordinary chain in G, the gain schedule `G(V)` **defined down to 0** with its gentlest value at the
    low end. The removed pieces in the table go, **including the 80 km/h hand-back** (U1): Lua's IAS
    release and `too_slow` take refusal, body-layer `TOO_SLOW` with its speech line and rules-README
-   entry. **What protects low speed in LV-1, with no hover regime yet:** (i) the commanded speed is
-   floored at 50 km/h (`MIN_IAS_KMH` lowered and narrowed to that one meaning, U8), so the law is
-   never asked to fly slower, and a lower command is clamped and read back as clamped through the
-   existing path; (ii) the speed schedule makes everything gentler as speed falls (bank, turn-rate
-   and acceleration caps, gains), so a take or a sag below 50 km/h is flown as a gentle return to the
-   floor, never a hand-back; (iii) the RPM, blade-stall and VRS guards stay as they are. Card: take
-   into a held heading (E1, E2: wings within a few degrees, ball near +0.03), turns of 30° and 90°
-   both ways at 120 and 220 km/h (E3, E4: ball centred, pedal with the turn, collective in with the
-   bank, no sag or balloon), speed 150→220→150 (E6), climb and descent 100 m (E6), heading hold in a
-   crosswind (Q5: nose on the heading, drift accepted), one row with `K_L = 0` to compare, one voice
-   take at about 70 km/h (accepted, no "too slow", gentle acceleration to the desired speed).
-   **The LV-1 card avoids** flying below about 60 km/h on purpose: no hover, no slow turns, no take
-   below 60 km/h, no "speed" command below 50; LV-1 has no ground-speed reference, no pedal yaw
-   loop and no drift hold, so a slow regime would be flown by a law not designed for it, and a bad
-   result there would say nothing about the forward-flight law.
+   entry, and **every commanded-speed floor** (U8, no floor): `MIN_IAS_KMH` is removed outright,
+   `clamp_speed`'s lower bound becomes 0, and the desired-state unpark clamp loses its speed floor
+   too (keeps its ceiling and the AGL floor). **What protects low speed in LV-1, with no hover
+   regime yet:** (i) the speed schedule makes everything gentler as speed falls (bank, turn-rate and
+   acceleration caps, gains), so a slow command or a sag is flown gently, never a hand-back; (ii) the
+   RPM, blade-stall and VRS guards stay as they are. Nothing else: a commanded speed below 50 km/h
+   is flown by the forward law as it is, with no ground-speed reference and no pedal yaw loop — the
+   user's own informed choice (Q1, verbatim: *"remove the limit. Any speed. What does not work, I
+   will bring back and we fix"*). Card: take into a held heading (E1, E2: wings within a few
+   degrees, ball near +0.03), turns of 30° and 90° both ways at 120 and 220 km/h (E3, E4: ball
+   centred, pedal with the turn, collective in with the bank, no sag or balloon), speed 150→220→150
+   (E6), climb and descent 100 m (E6), heading hold in a crosswind (Q5: nose on the heading, drift
+   accepted), one row with `K_L = 0` to compare, one voice take at about 70 km/h (accepted, no "too
+   slow", gentle acceleration to the desired speed). **Deliberate slow-flight row, so the gap is
+   observed rather than untested:** at safe height (at least 300 m AGL) in steady wings-level
+   flight, a "speed 40" command; then, only if that settles cleanly, a "speed 20" command. Watch for
+   drift off heading, a sag in altitude the collective loop cannot arrest, or hunting in bank or
+   pedal as the forward law runs with no ground-speed reference and no pedal yaw loop. Take the
+   stick back (or call a return to the 70 km/h row) the moment any of those appears, rather than
+   letting it develop — this row is expected to find the edge of LV-1's scope, not to pass cleanly.
 3. **LV-2 — break and priorities.** The break and low-slow-RPM chains (G), recovery (J), and
    vignette 5: a break entered slow is gentler because its rate is capped by the speed schedule
    (U6), never released. Pedals fly the ball throughout (no extra pedal). Card: break left and right
@@ -490,8 +509,8 @@ a card is flown, the card says to switch them off again before each new take.
    `ROTOR_RPM_DUMMY_PCT` (the aircraft does less, silently, E8), one break entered at about 100 km/h
    (gentler, no hand-back).
 4. **LV-3 — low speed and hover regime.** `λ` blend (C, F), ground-speed reference (U2), gentlest
-   schedule, the pedal yaw loop, the drift hold. `MIN_IAS_KMH` removed: `clamp_speed`'s lower bound
-   becomes 0 and `min_ias_kmh` leaves the lease and `build_take_seed`'s clamp. Hover hold and
+   schedule, the pedal yaw loop, the drift hold. (`MIN_IAS_KMH` and the commanded-speed floor are
+   already gone — removed in LV-1, U8 — so there is nothing left to remove here.) Hover hold and
    translate commands stay in BL-16 "Later". Card: speed 150→60→0 (no jerk, settles over the
    ground), heading change of 90° at speed 0 (pedal, bank stays within a few degrees), speed 0→150
    (smooth through 25–50 km/h), a voice take at 20 km/h (accepted), low-slow with the lowered RPM
@@ -514,7 +533,7 @@ running-average chain is tested, not bypassed.
   gains at ×0.5 and ×2 of nominal, and with an unknown fuselage pitch trim; the law must converge
   without retuning (the user's principle that the vector is steered, not computed).
 - Take: bit-exact first frame; a take 50 km/h off the desired speed reaches it monotonically; a take
-  at 40 km/h is accepted and flown to the 50 km/h floor without a jerk (LV-1).
+  at 40 km/h is accepted and flown toward the desired speed without a jerk, with no floor (LV-1).
 - Heading hold: bank settles within 2° of level with the ball centred; no standing crossed controls
   (a constant pedal disturbance is absorbed by the pedal integrator, not by bank).
 - Coordinated turn: ball within band through entry, steady state and roll-out; altitude in band;
@@ -536,7 +555,8 @@ running-average chain is tested, not bypassed.
   nothing left wound up afterwards.
 - Pedal sign: a ball right of centre drives the pedal command positive.
 - No hand-back (LV-1): IAS held at 40 km/h for 10 s produces no release; `check_unpark_preconditions`
-  accepts any IAS; body-layer `take_controls` has no `TOO_SLOW` path; `clamp_speed(30)` returns 50.
+  accepts any IAS; body-layer `take_controls` has no `TOO_SLOW` path; `clamp_speed(30)` returns 30
+  (no floor, U8).
 - Regimes (LV-3): `λ` crosses 25 and 50 km/h with no output step; speed 0 holds ground speed near 0
   in wind; a 90° heading change at hover moves the pedal, bank stays under a few degrees;
   `clamp_speed(0)` returns 0.
@@ -574,7 +594,8 @@ pattern the user described (trim held through an attitude or heading change, rel
 effectors `SAU-H/K/T/B-*` in `body-layer/config/sequences/mi-24p/switch-reference.md`) can be added
 without touching the outer loops; the trace logs whatever SAU state is readable for free. M0-H (does
 the SAU fight commanded changes) is still unflown and is stage 2's first question. The "SAU on at
-hand-back to the player" rule is independent of this law and not part of this plan.
+hand-back to the player" rule, independent of this law, is now built and reviewed on
+`feature/bl16-sau-handover`, already merged into this branch (`review-sau-handover.md`).
 
 ### Risks & Unknowns
 
@@ -590,9 +611,13 @@ hand-back to the player" rule is independent of this law and not part of this pl
   ×0.5/×2 tests bracket it.
 - **`LoGetVectorVelocity`'s axes are unconfirmed** (3D is confirmed). `"position"` is the default
   until LV-0's row (e) says otherwise.
-- **LV-1 below 50 km/h** is flown by the forward law with gentle gains, no ground-speed reference
-  and no pedal yaw loop. The commanded floor keeps the law from being asked to go there; a sag below
-  it is a gentle return, watched on the 70 km/h take row. The card avoids deliberate slow flight.
+- **LV-1 below 50 km/h** is flown by the forward law with gentle gains only — no floor, no
+  ground-speed reference, no pedal yaw loop. This is the user's own informed choice (Q1, verbatim:
+  *"remove the limit. Any speed. What does not work, I will bring back and we fix"*); nothing in
+  LV-1 protects this range beyond the gain schedule and the RPM/blade-stall/VRS guards. The LV-1
+  card's deliberate slow-flight row (speed 40, then speed 20) is where this is first observed, on a
+  card rather than discovered in a flight; whatever fails there is brought back to the architect per
+  the user's own rule rather than being treated as a defect in this plan.
 - **Hover with no position hold drifts.** LV-3 holds ground velocity near zero, not a spot; the user
   gets slow drift until BL-16's hover item adds the fixed spot.
 - **Strong wind at low speed.** `λ` runs on ground speed while the aerodynamics follow airspeed; at
