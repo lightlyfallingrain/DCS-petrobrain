@@ -217,6 +217,142 @@ print(tostring(state.turn_mode))
         assert lines[0] == "true"
 
 
+class TestUnparkTakeSeedFromMode2SetTargets:
+    """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) -- the
+    crash this report diagnoses. Without a seed, an unpark mid-break
+    (still banked past `takeover_level_bank_deg`) reads that transient
+    bank as the pilot deliberately holding a turn (the same heuristic
+    `TestTakeoverModeSelection` above pins for a voice take, where that
+    reading is correct) and `turn_goal_deg_s` then never changes on its
+    own -- nothing in `law_update` ever drives it back toward zero. A
+    held heading from mode 2's own AI-wheel overlay forces heading mode
+    instead, giving the law something real to fly back to."""
+
+    def test_seed_overrides_heading_altitude_and_speed(self) -> None:
+        driver = f"""
+local measured = {
+            _measured(bank_deg=10.0, psi_deg=270.0, h_m=500.0, w_mps=3.0, ias_mps=50.0)
+        }
+local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command,
+    {{ heading_deg = 45.0, alt_m = 700.0, alt_ref = "B", speed_kmh = 180.0 }})
+print(tostring(state.turn_mode))
+print(string.format("%.6f", state.heading_goal_deg))
+print(string.format("%.6f", state.alt_goal_m))
+print(state.alt_goal_ref)
+print(string.format("%.6f", state.speed_goal_mps))
+"""
+        lines = _run(driver)
+        turn_mode, heading_goal, alt_goal, alt_ref, speed_goal = lines
+        # A known heading forces heading mode even though bank alone
+        # (10 deg, past the 5 deg threshold) would have picked turn
+        # mode -- the dial is the deliberate state to resume, not the
+        # bank the AI wheel happened to be at.
+        assert turn_mode == "false"
+        assert abs(float(heading_goal) - 45.0) < 1e-6
+        assert abs(float(alt_goal) - 700.0) < 1e-6
+        assert alt_ref == "baro"
+        assert abs(float(speed_goal) - (180.0 / 3.6)) < 1e-6
+
+    def test_a_seed_with_no_usable_fields_falls_back_exactly_as_before(self) -> None:
+        """`held_targets()` returns every field even when the AI-wheel
+        overlay text was never parsed (every value `nil`) -- an all-nil
+        seed must behave identically to no seed at all."""
+        driver = f"""
+local measured = {
+            _measured(bank_deg=2.0, psi_deg=123.0, h_m=400.0, w_mps=0.0, ias_mps=60.0)
+        }
+local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
+local with_seed = flight_control.law_init_at_take(measured, LIMITS, command,
+    {{ heading_deg = nil, alt_m = nil, alt_ref = nil, speed_kmh = nil }})
+local without_seed = flight_control.law_init_at_take(measured, LIMITS, command)
+print(tostring(with_seed.turn_mode == without_seed.turn_mode))
+print(tostring(with_seed.heading_goal_deg == without_seed.heading_goal_deg))
+print(tostring(with_seed.alt_goal_m == without_seed.alt_goal_m))
+print(tostring(with_seed.alt_goal_ref == without_seed.alt_goal_ref))
+print(tostring(with_seed.speed_goal_mps == without_seed.speed_goal_mps))
+"""
+        lines = _run(driver)
+        assert all(line == "true" for line in lines)
+
+    def test_without_a_seed_a_mid_break_unpark_never_levels_or_converges(self) -> None:
+        driver = f"""
+local measured = {
+            _measured(
+                bank_deg=25.0,
+                psi_deg=0.0,
+                r_deg_s=6.0,
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6,
+            )
+        }
+local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command)
+print(tostring(state.turn_mode))
+local dt = 0.05
+local tau = 1.0
+for i = 1, 2000 do
+    state = flight_control.law_update(state, dt, measured, LIMITS)
+    local outputs = flight_control.law_outputs(state, measured)
+    measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
+    local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
+    measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
+    measured.r_deg_s = r
+end
+print(tostring(state.in_band_heading))
+print(string.format("%.6f", measured.bank_deg))
+"""
+        lines = _run(driver)
+        was_turn_mode, in_band, final_bank = lines
+        assert was_turn_mode == "true"
+        # Never a heading to be "in band" of -- `law_update` forces
+        # `in_band_heading` false for the whole run while `turn_mode`
+        # holds.
+        assert in_band == "false"
+        # Settles into a steady turn at (close to) the captured rate,
+        # never back toward level flight -- nothing in this mechanism
+        # ever commands it to roll out.
+        assert abs(float(final_bank)) > 5.0
+
+    def test_with_a_held_heading_the_unpark_rolls_level_and_converges(self) -> None:
+        driver = f"""
+local measured = {
+            _measured(
+                bank_deg=25.0,
+                psi_deg=0.0,
+                r_deg_s=6.0,
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6,
+            )
+        }
+local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command,
+    {{ heading_deg = 0.0 }})
+print(tostring(state.turn_mode))
+local dt = 0.05
+local tau = 1.0
+for i = 1, 2000 do
+    state = flight_control.law_update(state, dt, measured, LIMITS)
+    local outputs = flight_control.law_outputs(state, measured)
+    measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
+    local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
+    measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
+    measured.r_deg_s = r
+end
+print(tostring(state.in_band_heading))
+print(string.format("%.6f", measured.bank_deg))
+"""
+        lines = _run(driver)
+        was_turn_mode, in_band, final_bank = lines
+        assert was_turn_mode == "false"
+        assert in_band == "true"
+        # Rolled back toward level chasing heading 0, rather than
+        # holding the captured 25 deg bank.
+        assert abs(float(final_bank)) < 5.0
+
+
 #: Shared toy-plant driver body for the heading channel: bank is a
 #: first-order lag toward `phi_d` (`tau` s), heading integrates the
 #: coordinated-turn rate at the current bank (`law_turn_rate_at_bank`,

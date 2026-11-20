@@ -31,12 +31,16 @@ yet. M3 (terrain floor) and M4 (SAU) are not built here.
 
 Depends on `core` (loaded first, `safe_call`/`debug_log`/the JSON
 extract helpers) and, read-only, `ai_pilot_wheel.is_parked`/`stick_park_
-raw` -- never writes into that module's own state. If `ai_pilot_wheel`
-itself failed to load, `is_parked()` is unknown and this module never
-takes (named in the plan so the Implementer cannot pick the wrong
-default): a park/unpark edge can only be detected by comparing against a
-known previous state, so "unknown" is treated the same as "stay off",
-never as a licence to assume unparked.
+raw`/`held_targets` -- never writes into that module's own state. If
+`ai_pilot_wheel` itself failed to load, `is_parked()` is unknown and
+this module never takes (named in the plan so the Implementer cannot
+pick the wrong default): a park/unpark edge can only be detected by
+comparing against a known previous state, so "unknown" is treated the
+same as "stay off", never as a licence to assume unparked.
+`held_targets()` (BL-16 sortie 2026-11-20, `plans/flight-control/
+debug.md`) is this same read-only seam's newest member -- mode 2's own
+set heading/altitude/speed, read only by the unpark-take branch below
+to seed `law_init_at_take`, never by a voice take.
 
 **Capture source, corrected after M0-J (flight 9,
 `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`)**:
@@ -590,36 +594,79 @@ local function law_apply_goal(state, goal, limits)
     return next_state
 end
 
--- `law_init_at_take(measured, limits, command)` -- Decision 24's "At
--- take" section. `command` is the already SIGN-mapped (per `SIGN.*`)
--- captured axis value for every axis, in the same domain the output
--- stage writes (so `law_outputs` on this very state, with zero
+-- `law_init_at_take(measured, limits, command, seed)` -- Decision 24's
+-- "At take" section. `command` is the already SIGN-mapped (per
+-- `SIGN.*`) captured axis value for every axis, in the same domain the
+-- output stage writes (so `law_outputs` on this very state, with zero
 -- attitude/rate error, reproduces `command` exactly -- "the output is
--- continuous at take, bit-exact"). Decision 1 REVISED/24 picks heading
--- vs. turn mode from the bank at capture; the altitude goal is the
--- stopping height, never the height at capture (so a climb levels off
--- where it naturally stops); the speed goal is the measured IAS.
-local function law_init_at_take(measured, limits, command)
+-- continuous at take, bit-exact").
+--
+-- `seed` (BL-16 sortie 2026-11-20, `plans/flight-control/debug.md`) is
+-- an optional table -- `{heading_deg, alt_m, alt_ref, speed_kmh}`, any
+-- subset present -- carrying mode 2's own *set* targets (the AI-wheel
+-- overlay's held course/altitude/speed, read live off `ai_pilot_wheel`
+-- by the unpark-take call site below; `nil` for every other take,
+-- voice included). Decision 24's own "fall back to current measured
+-- state when not known" governs every field independently: a field
+-- `seed` omits (or that fails `tonumber`) falls back to the bank-at-
+-- capture heading/turn-mode heuristic, the stopping-height formula, or
+-- the measured IAS, exactly as before `seed` existed.
+--
+-- The debug report's own finding: without this, an unpark mid-break
+-- (still banked, still turning) read that transient bank as "the pilot
+-- is deliberately holding a turn" (the bank-at-capture heuristic below,
+-- still the right call for a *voice* take, where the player really did
+-- just roll into a bank on the raw stick) and held its momentary rate
+-- forever, with nothing to roll it back out -- compounding as the
+-- mode-2 speed command already in flight kept raising the kinematic
+-- bank `phi_kinematic = atan(V_t*r/g)` needs for that same rate, with
+-- no corrective pressure the pilot could see. A known mode-2 heading
+-- target takes heading mode unconditionally (never turn mode), since
+-- the dial is the deliberate state to resume, not the bank the AI
+-- wheel happened to be at the instant of the unpark.
+local function law_init_at_take(measured, limits, command, seed)
+    seed = seed or {}
     local heading_mode = math.abs(measured.bank_deg) < limits.takeover_level_bank_deg
+    local heading_goal_deg = measured.psi_deg
+    if type(seed.heading_deg) == "number" then
+        heading_mode = true
+        heading_goal_deg = seed.heading_deg
+    end
+    -- `A_v` in the plan's own "h + w*|w|/(2*A_v)" is the channel's
+    -- deceleration capability (`ALT_ACCEL_CAP_MPS2`), not the
+    -- velocity ceiling `max_climb_vs_mps` -- confirmed a real bug
+    -- here by the toy-plant suite, which drove an actual climb
+    -- through this formula and found the shaper overshoot-then-
+    -- reverse the velocity-ceiling version produces (the wrong
+    -- stopping height asks for more deceleration than the channel
+    -- can deliver).
+    local alt_goal_m = law_stopping_height(measured.h_m, measured.w_mps, ALT_ACCEL_CAP_MPS2)
+    local alt_goal_ref = "agl"
+    if type(seed.alt_m) == "number" then
+        alt_goal_m = seed.alt_m
+        -- `ai_pilot_wheel`'s own "R"/"B" letters (radar/AGL,
+        -- barometric/MSL) map onto this module's own "agl"/"baro" --
+        -- any other value (including nil) is read as "agl", the same
+        -- default as no seed at all.
+        if seed.alt_ref == "B" then
+            alt_goal_ref = "baro"
+        end
+    end
+    local speed_goal_mps = measured.ias_mps
+    if type(seed.speed_kmh) == "number" then
+        speed_goal_mps = seed.speed_kmh / 3.6
+    end
     return {
         turn_mode = not heading_mode,
-        heading_goal_deg = measured.psi_deg,
+        heading_goal_deg = heading_goal_deg,
         turn_goal_deg_s = measured.r_deg_s,
         psi_ref = measured.psi_deg,
         r_ref = measured.r_deg_s,
-        -- `A_v` in the plan's own "h + w*|w|/(2*A_v)" is the channel's
-        -- deceleration capability (`ALT_ACCEL_CAP_MPS2`), not the
-        -- velocity ceiling `max_climb_vs_mps` -- confirmed a real bug
-        -- here by the toy-plant suite, which drove an actual climb
-        -- through this formula and found the shaper overshoot-then-
-        -- reverse the velocity-ceiling version produces (the wrong
-        -- stopping height asks for more deceleration than the channel
-        -- can deliver).
-        alt_goal_m = law_stopping_height(measured.h_m, measured.w_mps, ALT_ACCEL_CAP_MPS2),
-        alt_goal_ref = "agl",
+        alt_goal_m = alt_goal_m,
+        alt_goal_ref = alt_goal_ref,
         h_ref = measured.h_m,
         w_ref = measured.w_mps,
-        speed_goal_mps = measured.ias_mps,
+        speed_goal_mps = speed_goal_mps,
         v_ref = measured.ias_mps,
         dv_ref = 0.0,
         theta_d = measured.pitch_deg,
@@ -1596,7 +1643,19 @@ local function run_active_frame(t, dt, just_took)
             pedals = axis_command(fc_captured, "pedals"),
             collective = axis_command(fc_captured, "collective"),
         }
-        fc_law = law_init_at_take(measured, fc_limits, command)
+        -- Mode 2's own set targets, only for an unpark take (never a
+        -- voice take -- `law_init_at_take`'s own docstring on why) and
+        -- only when `ai_pilot_wheel` loaded at all (module docstring's
+        -- "never a licence to assume" default: no module, no seed,
+        -- same bank-at-capture fallback as before this existed).
+        local seed = nil
+        if fc_take_origin == "unpark" and ai_pilot_wheel ~= nil then
+            local held = safe_call(ai_pilot_wheel.held_targets)
+            if type(held) == "table" then
+                seed = held
+            end
+        end
+        fc_law = law_init_at_take(measured, fc_limits, command, seed)
         write_outputs(law_outputs(fc_law, measured), nil)
         return
     end
