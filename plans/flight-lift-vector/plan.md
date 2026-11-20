@@ -318,7 +318,12 @@ be a running average to filter out vibration"*).
   (`LuaExportBeforeNextFrame`). Confirmed by the user (2026-11-20, verbatim): *"the axis write itself
   may have to stay every frame -> this is true."* So the write stays every frame; no LV-0 check
   needed. Every `dt` in the law becomes the time since that
-  calculation last ran, never a frame `dt`.
+  calculation last ran, never a frame `dt`. **All timing is DCS mission (model) time
+  (`LoGetModelTime`), never wall-clock** (user, 2026-11-20, verbatim: *"Timing must use mission
+  time, not wall clock time. Reason: DCS may be paused by user."*): the law-rate scheduler, the
+  ring-buffer timestamps and windows, and every `dt`. While paused, model time stops, `dt` is 0,
+  no new samples or law steps happen, and the existing pause row (rewrite the last outputs, freeze
+  shapers and integrators) still applies on the every-frame write.
 - **Acceleration**, including **vertical acceleration**: `a = dv/dt` as the least-squares slope of
   `v` over `W_A` (first cut 0.2 s), then one more running mean over `W_A2` (first cut 0.1 s). The
   vertical component `a_u` is simply the slope of `v_u`, the world-up velocity: no gravity in it, no
