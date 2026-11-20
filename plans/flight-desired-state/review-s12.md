@@ -141,3 +141,89 @@ unmodified module), not inferred from reading alone. The body-layer full suite a
 aircraft-layer's full suite were both run to completion in this review (not just re-stated from
 `implementation.md`), and both passed clean — which is expected, since neither required fix has
 a pinning test yet (that is itself part of each fix).
+
+---
+
+## Re-review, 2026-11-20 (`review2/desired-s12`, tip `aeabd60a2416c6962fb8e2111eed916e22be7e75`)
+
+Scope: `aeabd60a` only (`plans/flight-desired-state/implementation.md`'s "Review-fix round,
+2026-11-20" entry), against this review's own two Required Fixes and the plan's Q6
+(section 2). `git rev-parse HEAD` confirmed `aeabd60a` before anything else. Full read of
+`git show aeabd60a` (both production diffs and both new tests) plus the surrounding code each
+fix touches (`belief/flight_authority.py`'s `decide_flight_speech`, `crew_console.py`'s own
+`flight_control_transition` caller, `ai_pilot_wheel.lua`'s seat-settle window).
+
+**Required Fix 1 (phase reconciliation) — restored correctly, state-only, no duplicate speech.**
+The restored branch in `decide_flight_control` (`flight_control.py` lines 657-665) sets
+`phase="PILOT"`, clears `pending_take_says`/`took_at_sim`, and returns `(new_state, None)` — no
+`says` text. `decide_flight_speech` (`flight_authority.py`) is confirmed the sole owner of the
+urgent "You have controls!" line for this edge: it fires on an `fd_mode_n` edge into `"off"`
+whose cause is not `release`/`stop`/`reset` — a disjoint trigger (Lua's own
+`fd_mode`/`fd_mode_cause`) from the restored branch's trigger (`phase`/`lua_mode`/
+`lua_release_reason`), so the two cannot double-speak the same event; the new pinning test
+(`test_lua_self_release_reconciles_phase_back_to_pilot`) asserts `decision is None` directly.
+Checked the one other `phase`-reading call site this could interact with —
+`crew_console.py`'s `old_phase == "TAKING" and new_state.phase == "PILOT"` branch
+(`flight_control_system_release_pending`, the ack-timeout feedback fix) — and confirmed it is
+unreachable from the restored branch: that branch only fires when `old_phase == "ACTIVE"`, never
+`"TAKING"`, so the two transitions cannot collide. Verified the test fails against the pre-fix
+`flight_control.py` (reverted to `92a06513`'s copy, test re-run, confirmed `phase == "ACTIVE"`
+assertion failure) and passes against `aeabd60a`'s.
+
+**Required Fix 2 (edge-triggered self-arm) — correctly edge-triggered, and every named
+co-moving-state scenario checked, not just the review's own repro.** Re-ran the review's own
+four-step `luajit` reproduction independently (own driver script, not copied verbatim) against
+the fixed module: self-arm from park → `reset(epoch)` while still parked → fresh lease while
+still parked (no unpark/re-park) → `fc_mode` stays `"off"` (previously re-armed instantly) → a
+real unpark+re-park then self-arms again. All four steps matched the fix's claim exactly.
+Additionally drove, independently:
+
+- **Ordinary park from `off` with a fresh lease still arms, and the unpark-take still works** —
+  not broken by the new edge gate for the ordinary case: park → self-arm (`"armed"`) → unpark →
+  `fc_mode` → `"active"` (`fc_take_origin == "unpark"`).
+- **`fc_was_parked` at mission start / DCS starting parked** — `fc_was_parked` begins `nil`
+  (never `true`), so the very first frame with `is_parked == true` reads as `fc_was_parked ~=
+  true` and is treated as a genuine rising edge (`fc_off_armable_since_edge = true`), matching
+  the module's own "every park gives him the overlay" rule rather than silently requiring a
+  spurious prior unpark that never happened. Confirmed by execution: self-arms on the very first
+  tick when parked from the start.
+- **A seat swap does not fake a park edge (M0 flight 8's false 3-frame edge).** `flight_control.lua`'s
+  new edge tracker consumes `ai_pilot_wheel.is_parked()`, which already returns the debounced
+  `ai_pilot_parked_active` — not the raw camera/arg-852 reading — behind
+  `AI_PILOT_SEAT_CHANGE_SETTLE_S`'s existing 0.5 s settle window (`ai_pilot_wheel.lua`, untouched
+  by this commit). `test_seat_swap_settle_absorbs_flight8_unstow_animation`
+  (`test_ai_pilot_wheel_lua.py`, pre-existing, unchanged) already pins exactly the flight-8
+  sequence this task named, upstream of where the new tracker reads. The new tracker inherits
+  that protection by construction rather than needing to reimplement it — nothing in `aeabd60a`
+  touches `ai_pilot_wheel.lua`.
+
+Confirmed the new Lua test fails against the pre-fix module (reverted to `92a06513`'s copy, same
+technique, `fc_mode == "armed"` at the point the fix claims it should read `"off"`) and passes
+against `aeabd60a`'s.
+
+**Checks (this re-review, both subprojects, run from inside each per their own `CLAUDE.md`):**
+aircraft-layer `ruff format --check`/`ruff check`/`mypy src` pass (29 source files); `luac5.1 -p`
+on the touched Lua file passes; full suite `pytest tests -q`: 1100 passed. body-layer
+`ruff format --check`/`ruff check`/`mypy src` pass (93 source files); full suite (`not slow`,
+parallel): 3714 passed, 4 xfailed.
+
+### Re-review Verdict
+
+APPROVED
+
+Both required fixes are correctly and narrowly implemented, each with a pinning test confirmed
+(independently, in this re-review) to fail against the pre-fix code and pass against the fix.
+No duplicate speech, no regression to the ordinary self-arm/unpark-take case, mission-start-parked
+and seat-swap behave correctly (the latter by inheriting an existing, untouched protection one
+layer up, not by anything new in this commit). Both optional refinements from the first pass
+remain untouched and still optional — neither blocks.
+
+### Re-review Confidence
+
+Full read, plus independent execution verification of both fixes (not a re-statement of the
+implementer's own runs) — two fresh `luajit` driver scripts of my own covering the four scenarios
+this task named (ordinary park/unpark, mission-start-parked, the review's own reset repro, and a
+read-level check of the seat-swap protection), each cross-checked against the pre-fix code to
+confirm the tests are real. Both subprojects' full mechanical check sequences (format/lint/
+mypy/tests/Lua syntax) run to completion in this re-review, not re-stated from
+`implementation.md`.
