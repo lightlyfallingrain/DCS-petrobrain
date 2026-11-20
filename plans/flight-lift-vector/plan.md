@@ -306,6 +306,18 @@ be a running average to filter out vibration"*).
   incrementally as samples enter and leave, so each frame is O(1) work and allocates nothing.
   The trace flag is checked before any trace string or extra `LoGet*` read is built (item 4).
   The estimator runs in every mode by design; LV-0's card watches for a frame-time symptom (item 3).
+- **Update rate, not every frame** (user, 2026-11-20, verbatim): *"many of the flight control
+  calculations (including estimator) don't really need to run *every* frame. Nothing ever changes
+  that fast. I'd say 30Hz would be plenty, even 10 Hz might do. Maybe interleave calculations so
+  that not everything is calculated in single frame, but spread accross a couple of frames."* So:
+  the estimator and the law run at a profile rate (`LAW_HZ`, first cut 30 Hz), on model time, not
+  frame count; the work is interleaved across frames (e.g. sample and estimator on one frame, the
+  law's outer loops on the next, inner loops and output target on the third), so no single frame
+  carries all of it. The **output stage still writes every frame**, repeating the latest target
+  (with the existing rate limit and wobble), because the axis override is per-frame
+  (`LuaExportBeforeNextFrame`); LV-0 confirms whether a skipped write releases the axis, and if not,
+  the write can drop to the law rate too. Every `dt` in the law becomes the time since that
+  calculation last ran, never a frame `dt`.
 - **Acceleration**, including **vertical acceleration**: `a = dv/dt` as the least-squares slope of
   `v` over `W_A` (first cut 0.2 s), then one more running mean over `W_A2` (first cut 0.1 s). The
   vertical component `a_u` is simply the slope of `v_u`, the world-up velocity: no gravity in it, no
