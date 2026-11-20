@@ -151,3 +151,8 @@ pitch response via an M0-E probe or by feel), verbatim:
 - Turns get a pedal coordination term proportional to turn rate, in this batch; a slip-ball probe
   flight comes later so the ball can be centred properly.
 - No pitch-loop tuning now: the user retests the break with collective on first.
+
+> we need a to read the slip ball as one of the important values since it guides pedal adjustmens.
+
+Slip ball moves from "later probe" to now: read it, report it on the flight-control status line
+so a flight can calibrate its sign/units, then use it for pedal (ball-centring) feedback.
