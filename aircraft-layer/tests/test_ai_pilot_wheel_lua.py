@@ -103,6 +103,7 @@ _AI_PILOT_WHEEL_CONSTANTS = (
     "SEAT_CAMERA_MAX_FWD_M",
     "SEAT_CAMERA_MAX_OFFAXIS_M",
     "AI_PILOT_ALT_TOLERANCE_M",
+    "AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M",
     "AI_PILOT_PARK_THRESHOLD",
     "AI_PILOT_QUICK_PATH_MAX_AGL_M",
     "AI_WHEEL_UP",
@@ -316,6 +317,24 @@ class TestAiPilotCorrectionDirection:
         assert self._direction("nil", "196.0") is None
         assert self._direction("196", "nil") is None
 
+    def _direction_with_tolerance(
+        self, held: str, target: str, tolerance: str
+    ) -> str | None:
+        tail = f"""
+        local dir = ai_pilot_correction_direction({held}, {target}, {tolerance})
+        print(tostring(dir))
+        """
+        out = _run_lua(["ai_pilot_correction_direction"], tail).strip()
+        return None if out == "nil" else out
+
+    def test_explicit_tolerance_overrides_the_default_band(self) -> None:
+        # 2026-11-20 fix: the altitude goal tick passes its own tight
+        # tolerance instead of relying on the default (takeover-
+        # correction) band -- an omitted third argument keeps the old
+        # default-band behaviour (covered above), an explicit one wins.
+        assert self._direction_with_tolerance("196", "200.0", "0.5") == "3004"
+        assert self._direction_with_tolerance("200", "200.0", "0.5") is None
+
 
 class TestAiPilotQuickPathEligible:
     def _eligible(self, agl: str) -> bool:
@@ -384,7 +403,16 @@ class TestAiPilotGoalHeadingDirection:
         return None if out == "nil" else out
 
     def test_within_tolerance_needs_no_correction(self) -> None:
-        assert self._direction("90.0", "92.0") is None
+        # Tightened to 0.5 deg (fix, 2026-11-20, "Desired value must be
+        # exact; flying may be imprecise") -- 0.3 deg is within it, 2.0
+        # deg (the old 5 deg band's own example) is not.
+        assert self._direction("90.0", "90.3") is None
+
+    def test_outside_the_tightened_tolerance_still_corrects(self) -> None:
+        # Regression case for the 2026-11-20 sortie bug: a 2 deg error
+        # used to read as "close enough" under the old 5 deg band and
+        # stop pressing with the overlay still wrong.
+        assert self._direction("90.0", "92.0") == "3002"  # AI_WHEEL_RIGHT
 
     def test_shortest_path_turns_right(self) -> None:
         assert self._direction("10.0", "20.0") == "3002"  # AI_WHEEL_RIGHT
@@ -503,6 +531,7 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "AI_WHEEL_LEFT",
     "AI_WHEEL_RIGHT",
     "AI_PILOT_HEADING_TOLERANCE_DEG",
+    "AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M",
     "AI_PILOT_SPEED_TOP_STEP_KMH",
     "MODE_CYCLE_MAX_ATTEMPTS",
     "MODE_BLOCKED_RETRY_S",
@@ -1733,6 +1762,7 @@ class TestOnStop:
 #: already-parsed overlay text locals.
 _GOAL_INTEGRATION_CONSTANTS = (
     "AI_PILOT_ALT_TOLERANCE_M",
+    "AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M",
     "AI_PILOT_HEADING_TOLERANCE_DEG",
     "AI_PILOT_SPEED_TOP_STEP_KMH",
     "AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S",
@@ -1888,9 +1918,19 @@ class TestAiPilotGoalTick:
         print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
         print("progress=" .. tostring(ai_pilot_goal.progress))
 
-        -- Readback crosses into tolerance -- the hold releases.
-        ai_pilot_course_text = "91"
+        -- 2026-11-20 regression case: 1 deg short of target used to
+        -- read as "close enough" under the old 5 deg band (this is what
+        -- left a commanded heading short in the field) -- the tightened
+        -- 0.5 deg band keeps pressing instead.
+        ai_pilot_course_text = "89"
         ai_pilot_goal_tick(0.2)
+        print("hold_cmd_89=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_89=" .. tostring(ai_pilot_goal.progress))
+
+        -- Readback crosses into the tightened tolerance -- the hold
+        -- releases on an exact (to the nearest whole degree) match.
+        ai_pilot_course_text = "90"
+        ai_pilot_goal_tick(0.4)
         print("hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
         print("progress_after=" .. tostring(ai_pilot_goal.progress))
         """
@@ -1898,6 +1938,8 @@ class TestAiPilotGoalTick:
         values = dict(line.split("=", 1) for line in out.strip().splitlines())
         assert values["hold_cmd"] == "3002"  # AI_WHEEL_RIGHT (10 -> 90)
         assert values["progress"] == "pressing"
+        assert values["hold_cmd_89"] == "3002"  # still correcting, 1 deg short
+        assert values["progress_89"] == "pressing"
         assert values["hold_cmd_after"] == "nil"
         assert values["progress_after"] == "settled"
 
@@ -1992,6 +2034,49 @@ class TestAiPilotGoalTick:
         assert values["press_1"] == "3015:1"  # WHEEL_CENTER_BUTTON pressed
         assert values["toggling_after"] == "false"
         assert values["hold_cmd"] == "3004"  # AI_WHEEL_UP (500 -> 900)
+
+    def test_altitude_goal_does_not_settle_short_of_the_exact_target(
+        self,
+    ) -> None:
+        """Regression case for the exact sortie observation (`docs/
+        acceptance/2026-11-20-sortie-feedback.md`, "Desired value must be
+        exact; flying may be imprecise"): "altitude 100 radar" left the
+        overlay reading 116 -- a 16 m error that used to read as "close
+        enough" under the old 20 m band and stop pressing with the
+        overlay still wrong."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "150"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 100.0, '
+            .. '"altitude_target_ref": "radar", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+
+        -- 16 m short of the 100 m target -- inside the old 20 m band,
+        -- outside the new 0.5 m one. Must keep pressing, not settle.
+        ai_pilot_alt_text = "116"
+        ai_pilot_goal_tick(0.2)
+        print("hold_cmd_116=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_116=" .. tostring(ai_pilot_goal.progress))
+
+        -- Exact (to the nearest whole metre) match -- the hold releases.
+        ai_pilot_alt_text = "100"
+        ai_pilot_goal_tick(0.4)
+        print("hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN (150 -> 100)
+        assert values["progress"] == "pressing"
+        assert values["hold_cmd_116"] == "3005"  # still 16 m short
+        assert values["progress_116"] == "pressing"
+        assert values["hold_cmd_after"] == "nil"
+        assert values["progress_after"] == "settled"
 
     def test_speed_goal_taps_once_per_tick_until_settled(self) -> None:
         script = """

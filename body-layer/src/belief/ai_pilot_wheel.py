@@ -42,21 +42,28 @@ from typing import Final, Literal
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 
-#: "Good enough" tolerance for the hold-up/down nudge loop Stage P2's
-#: `set_parked_altitude` goal will use (user, `aircraft-layer/research/
-#: 2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5: "within 20m is
-#: good enough"). Declared now, per the plan's own Stage P1 instruction,
-#: even though no goal-message channel exists yet to carry it to
-#: `Export.lua` -- the takeover/correction loop's own closed-loop
-#: release point ("the read current altitude equals the AI's held
-#: altitude") uses the same number as a plain Lua local
+#: "Good enough" tolerance this module declares to mirror the
+#: *takeover-correction* loop's own closed-loop release point ("the read
+#: current altitude equals the AI's held altitude") -- a plain Lua local
 #: (`AI_PILOT_ALT_TOLERANCE_M`, `Export.lua`, renamed from
 #: `AI_PILOT_NUDGE_EPSILON_M` by the "Revised 2026-11-16" takeover
-#: revision), not this tunable, because the Architecture decision keeps
-#: all per-frame press timing in Lua until Stage P2 wires a goal channel
-#: through -- the two are duplicated, not read from one source, until
-#: that channel exists. Revisit then so there is one source of truth for
-#: this number.
+#: revision) -- because the Architecture decision keeps all per-frame
+#: press timing in Lua. **Has no code consumer on this side** (confirmed
+#: by grep: nothing in `body-layer/src/` reads this tunable); it exists
+#: only so the number is documented and bounded here too, duplicated
+#: rather than read from one source. **Not** the altitude *goal*'s own
+#: stop condition, despite this docstring's own earlier claim that Stage
+#: P2's `set_parked_altitude` would use it: fix, 2026-11-20 (`docs/
+#: acceptance/2026-11-20-sortie-feedback.md`, "Desired value must be
+#: exact; flying may be imprecise") -- a voice-commanded "altitude 100
+#: radar" left the overlay reading 116 (a 16 m error, inside this 20 m
+#: band) because the goal tick was using this same wide band as its own
+#: stop condition. `Export.lua`'s `ai_pilot_wheel.lua` now gives the
+#: goal tick its own, much tighter `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M`
+#: (no body-layer equivalent -- this subproject's tuning mechanism
+#: governs numbers body-layer code actually reads, which this new
+#: Lua-only constant is not; root `CLAUDE.md`, "Outside body-layer the
+#: loader does not exist").
 AI_PILOT_ALTITUDE_TOLERANCE_M: Final[float] = tuning.real(
     "belief.ai_pilot_wheel.AI_PILOT_ALTITUDE_TOLERANCE_M",
     20.0,
@@ -85,10 +92,15 @@ AI_PILOT_GOAL_SLICE_S: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: How close a spoken heading goal must read before Lua's hold-and-poll
-#: loop releases it -- same judgement call as mode 1's own D-c default
-#: (`plans/flight-control/plan.md`, "Series -- unparked mode"), not
-#: re-litigated here, same default.
+#: Declared to mirror the same judgement call as mode 1's own D-c
+#: default (`plans/flight-control/plan.md`, "Series -- unparked mode"),
+#: not re-litigated here. **Has no code consumer on this side**
+#: (confirmed by grep) -- the heading goal's actual stop condition lives
+#: entirely in `Export.lua`'s own `AI_PILOT_HEADING_TOLERANCE_DEG` Lua
+#: local, and that one was tightened from 5.0 to 0.5 by a fix (2026-11-20,
+#: "Desired value must be exact; flying may be imprecise") that this
+#: tunable's own default does not follow, since nothing here reads it;
+#: it no longer describes what the Lua side actually does.
 AI_PILOT_HEADING_TOLERANCE_DEG: Final[float] = tuning.real(
     "belief.ai_pilot_wheel.AI_PILOT_HEADING_TOLERANCE_DEG",
     5.0,
