@@ -299,7 +299,13 @@ be a running average to filter out vibration"*).
   - `"vector"`: `LoGetVectorVelocity` (U7, answered yes), averaged over the same `W_V`. The user's
     test shows it is 3D (sideways movement shows). LV-0 compares it against `dP/dt` for axes and
     sign; if they match, the profile selects `"vector"` (one less differentiation) and the other
-    source stays in the trace as the cross-check.
+    source stays in the trace as the cross-check, **computed only while the per-frame trace flag is
+    on**, never every frame for nothing (`perf-plan-review.md` item 1).
+- **Data structure** (`perf-plan-review.md` item 2): every window is a fixed-size ring buffer
+  preallocated once at module load, with the least-squares sums (Σt, Σt², Σx, Σtx) updated
+  incrementally as samples enter and leave, so each frame is O(1) work and allocates nothing.
+  The trace flag is checked before any trace string or extra `LoGet*` read is built (item 4).
+  The estimator runs in every mode by design; LV-0's card watches for a frame-time symptom (item 3).
 - **Acceleration**, including **vertical acceleration**: `a = dv/dt` as the least-squares slope of
   `v` over `W_A` (first cut 0.2 s), then one more running mean over `W_A2` (first cut 0.1 s). The
   vertical component `a_u` is simply the slope of `v_u`, the world-up velocity: no gravity in it, no
