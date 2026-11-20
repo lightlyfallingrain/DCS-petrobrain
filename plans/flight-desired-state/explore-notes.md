@@ -171,3 +171,14 @@ solves for one 3D lift vector, length and direction together. Gaps against the p
 - no lateral/3D acceleration demand, only longitudinal and vertical;
 - pedals are feedforward only (torque from collective rate, a turn-rate term); no tail-rotor yaw
   force loop on yaw rate / sideslip (the slip-ball readout exists, uncalibrated).
+
+User, 2026-11-20, after "Ok for lift vector law proposal", verbatim:
+
+> Note that we cannot know the exact lift vector, direction or lenght. But we can observe aircraft
+> behaviour and manipulate lift vector to move in certain direction by cyclic and its lenght with
+> collective. None of those cause deterministic values since (simulated) airflow affects actual
+> vector a lot.
+
+So the law steers by observation: measured 3D acceleration against desired, cyclic moved in the
+direction and collective by the amount that reduces the error. No model of the lift vector is
+trusted for values; any feed-forward is only a starting nudge.
