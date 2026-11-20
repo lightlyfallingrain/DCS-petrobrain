@@ -968,8 +968,8 @@ The entries are in the order they were written, which is roughly perception → 
   IAS below `MIN_IAS_KMH`) and `"AI_OVERLAY"` (reached from two places — `turn_continuous` with no
   degrees heard while flying through the overlay, and `release_controls`/"I have controls" said
   there, U9). The forced-handover/self-release line ("You have controls!") is **not** a
-  `_UNABLE_TEMPLATES` entry — it lives in `belief.flight_control.decide_flight_control`, the one
-  place both of its triggers (Co-moving rows 7 and 9a) meet; named here so the exception to
+  `_UNABLE_TEMPLATES` entry — it lives in `belief.flight_authority.decide_flight_speech`, the one
+  place every forced edge into off (Lua's mode report) meets; named here so the exception to
   "wording lives in this module" is not mistaken for an omission.
 - `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-7) — BL-14's alignment
   derivation. This module and `percept.py` are the only two files under `belief/` allowed to
@@ -1197,36 +1197,21 @@ The entries are in the order they were written, which is roughly perception → 
   `crew_console.py`'s need to trigger a write without importing `mission_memory` (Decision 6's
   tension with Decision 1) is resolved by **closure injection in `body.py`** — the same pattern
   `speech_log_sink` already uses — rather than carving a second exception.
-- `src/belief/flight_control.py` (new, BL-16 mode 1 Stage M1, `plans/flight-control/plan.md`,
-  "Revised 2026-11-18 -- mode 1 (unparked, raw axes) re-cut") — `FlightControlState` (single
-  construction site `advance_flight_control_state`, same "replace wholesale, never mutate"
-  shape `belief.ai_pilot_wheel.ParkedFlightState` already uses), `take_controls`/`release_
-  controls` (the two handover actions, as pure functions over that state — root `CLAUDE.md`,
-  "Behaviour as actions and params"), and `decide_flight_control` (the one "when" apart from
-  those two: park/unpark edges, the ack timeout, Lua's own self-release, and a refused unpark
-  take). **`wire_seq` vs. `take_seq`** is this module's own trap to get right: `wire_seq` is the
-  one strictly-increasing counter every message's `"seq"` field carries (`Export.lua`'s `fc_
-  last_cmd_seq` applies it across every `cmd` kind alike, so a `goal` message sent between a
-  `take` and its confirmation must not reuse or fall behind that `take`'s own `seq`); `take_seq`
-  is the *semantic* id of the current takeover, echoed back on `fc_take_seq` to say "this
-  specific take is now active" — conflating the two would make an intervening goal send change
-  what a pending take's own confirmation is compared against. `held_heading`/`held_altitude`/
-  `held_speed` mirror `Export.lua`'s own `fc_goal_*` fields (the commanded goal, `None` until one
-  has ever been set this activation — mode 1 has no AI pilot reporting a pre-existing value the
-  way mode 2's overlay readback does); `measured_heading`/`measured_altitude`/`measured_speed`
-  mirror `fc_measured_*`, plain telemetry, always known once Lua is active — `CrewConsole.
-  current_crew_state()`'s own held-or-measured merge (and the `_axes_current_*` helpers the
-  `axes_*` actions share with it) is what keeps the "HOLD until held_* is known" gates from
-  freezing the very first command after a fresh take. Mode-1's goal-channel actions
-  (`increment_heading`/`set_heading`/.../`level_off`, Decision 21's table) are deliberately
-  **not** pure functions here, unlike mode 2's `AiPilotWheelGoal`/rotation mechanism: mode 1's
-  wire carries every goal field in one message with no shared physical button to arbitrate over,
-  so there is no rotation to encapsulate — each `CrewConsole.axes_*` method builds its own
-  `FlightControlGoalRequest` directly, and `clamp_altitude`/`clamp_speed` are the one piece of
-  that logic worth sharing (the floor/ceiling every altitude/speed action needs identically).
-  `body._apply_flight_control` is the poll-loop glue this module does not own: it sends the two
-  one-shot transitions, bumps `wire_seq`, and re-sends `arm` every poll while `OVERLAY`/`unpark_
-  take` (U10's lease) — see `body.py`'s own Structure entry.
+- `src/belief/flight_control.py` (BL-16 mode 1, `plans/flight-control/plan.md`; reshaped by
+  `plans/flight-desired-state/plan.md` Stages 2–3) — mode 1's tunables (envelope, limits, bands,
+  `HANDOVER_ACK_TIMEOUT_S`), `FlightControlGoalRequest`, `take_controls`/`release_controls` (the
+  two handover actions, pure functions — root `CLAUDE.md`, "Behaviour as actions and params"),
+  `clamp_altitude`/`clamp_speed`, and `flight_control_limits` (the limits bundle sent on every
+  `flight_lease`, the same constants Lua clamps against). `FlightControlState`
+  (`advance_flight_control_state`) is a **diagnostics-only mirror** of `Export.lua`'s `fc_*`
+  status now: it holds no phase, no `take_seq`, no goals. **Who flies, and the handover "when",
+  are not here any more**: the mode comes from Lua's `fd_*` status line
+  (`belief.flight_authority.FlightAuthorityState`), and `decide_flight_speech` (forced edges into
+  off), `decide_carried_value_speech` (U2), `resolve_pending_take` and
+  `resolve_pending_flight_readbacks` (the wait-for-Lua readbacks over the numbered `flight` channel)
+  live in `belief/flight_authority.py`. `decide_flight_control`, `wire_seq` and `fc_goal_*` were
+  deleted in Stage 3; `body._apply_flight_requests` is the poll-loop glue that sends the numbered
+  requests.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
   session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
   developer debug tool; `CrewConsole` runs typed sentences through `parse_utterance`'s grammar and
