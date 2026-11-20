@@ -53,3 +53,11 @@ this entry already describes. Grepped count as of this pass: 9 occurrences of th
 the earlier counts undercounted handlers already present before this feature (`/audio/stop`,
 `/query/read_args`, etc. share the pattern via the same helper shape). Still not blocking —
 same reasoning as above, unchanged by the new count.
+
+**Correction, 2026-11-20 (BL-16 sortie-1120 deep security analysis,
+`plans/flight-control/security-sortie-1120.md`):** `POST /command/reset`'s own
+`_handle_command_reset` (new this batch) reproduces the identical shape again — `int(self.headers.
+get("Content-Length", "0") or "0")` followed by an unbounded `self.rfile.read(length)`. Count as
+of this pass: 11 occurrences at this batch's base (`98174b54`), 12 after. Still not blocking —
+same low/low reasoning as every prior correction on this entry; filed here rather than opened as a
+fresh item, since it is the same gap, not a new one.
