@@ -192,3 +192,41 @@ frame):
    open status as the rotor-RPM args from the same third-party source
    (`2026-11-19-mi24p-readable-args-recon.md`); the calibration flight above is also that
    cross-check.
+
+## Calibration flight, 2026-11-20 (user-flown, `main`, card `docs/acceptance/2026-11-20-slip-ball-calibration-card.md`)
+
+User's report, verbatim (columns: sim time, arg 943 pilot, arg 784 operator, `LoGetSlipBallPosition`):
+
+> about centered
+> 46.186 0.02674 0.02674 None
+>
+> some left pedal while maintaining about zero bank, slip ball moves to right
+> 65.076 0.30279 0.30279 None
+>
+> some right pedal while maintaining about zero bank, slip ball moves to left
+> 83.148 -0.32696 -0.32696 None
+>
+> full right pedal
+> 101.201 -0.38382 -0.38382 None
+>
+> full left pedal
+> 116.881 0.51377 0.51377 None
+>
+> Aircraft speed affects how much slip there is, it's not straightworfard function of pedal
+> deflection.
+
+**Settled (resolves Unresolved items 1, 2 and 5 above):**
+- **Args 943/784 are the slip ball**, confirmed live; both seats read the same value.
+- **Sign:** ball right of centre = positive raw value; left = negative. Centred reads about +0.03.
+- **Scale:** full pedal moved the ball to about −0.38 (right pedal) and +0.51 (left pedal); the
+  usable range is roughly ±0.5, not ±1.
+- **`LoGetSlipBallPosition` returns nil on the Mi-24P**, so it is dead here; use the draw arg.
+- **Centring direction:** left pedal moved the ball right and right pedal moved it left, so a ball
+  right of centre is centred with more right pedal ("step on the ball"). With positive pedal
+  command = right (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`, via
+  `SIGN.pedals = -1` and arg 1103 vs yaw rate), the ball-centring term is
+  `pedal_dot = +K_beta * (ball - ball_centre)`.
+- **Not a fixed mapping:** the slip per unit of pedal depends on airspeed (user). The pedal law must
+  centre the ball by feedback (integrating until centred, possibly gain-scheduled by IAS), not by a
+  pedal-from-ball map. That matches the lift-vector law's "steer by observation" direction
+  (`body-layer/ROADMAP/BL-16.md`).
