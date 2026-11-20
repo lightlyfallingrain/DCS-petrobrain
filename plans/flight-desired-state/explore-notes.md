@@ -234,3 +234,12 @@ Open, deliberately not fixed now (user direction):
   Suspects for later: the Stage 2 lease / self-arm gate (edge-triggered since the review fix), or
   the unpark-take path. Retest after Stage 3–4 before debugging.
 Working: collective writes; off → mode 2 engages.
+
+## Order change (user, 2026-11-20, verbatim)
+
+> let's delay stage 4 until velocity vector law is done
+
+("velocity vector law" = the lift-vector control law, `body-layer/ROADMAP/BL-16.md`.) New order:
+Stage 3 (+ the wait-for-Lua readbacks) → review → lift-vector law (its own plan,
+`plans/flight-lift-vector/`) → Stage 4. Performance, security and DoD stay held until Stage 4 is done
+(earlier direction: "Hold perf, sec and DoD until stages 3 and 4 finish").
