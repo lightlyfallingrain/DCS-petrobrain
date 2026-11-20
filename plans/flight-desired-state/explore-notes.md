@@ -130,3 +130,17 @@ Settled:
   azimuth (slewing the 9K113 steers the helicopter) and also aligns pitch for launch parameters.
   While it is on, the desired heading keeps following the overlay course the AI is flying, so
   recovery and any later mode change hold the last aligned heading.
+
+## U1, U2 and align in mode 1 (user, 2026-11-20, verbatim)
+
+> 1 - Readback on acting on command -> wait for lua
+> 2 - yes
+> 4 - as I've said before, align is possible only in mode 2 -> unable
+
+- **U1:** the readback waits for Lua's accept/refuse; Petrovich speaks only what Lua accepted (or
+  "Unable, <reason>"). Not the plan's recommendation; the user's decision.
+- **U2:** yes, when a carried value can't be flown exactly in the new mode, Petrovich says once,
+  not urgent, the value now flown.
+- **Align / align for launch in mode 1:** "unable" (align exists only in mode 2, as decided
+  earlier in BL-16).
+- **U4** (fly Stage 1 alone): asked what Stages 1 and 2 are; pending.
