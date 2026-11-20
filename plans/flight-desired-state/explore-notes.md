@@ -217,3 +217,20 @@ IAS 120, `fd_hdg_true_deg` 0.84 (= 001° true), `fd_hdg_mag_deg` −0.068, overl
 Settled: **true heading everywhere** (U3: the overlay's reference is true, and so is the HSI);
 `HEADING_REF = "true"`, no conversion. Side finding: `fd_hdg_mag_deg` carries
 `LoGetMagneticYaw` in **radians** (−0.068 rad ≈ 356°), so the field is mislabelled; fix the unit.
+
+## Stage 1–2 card, rest of the flight (user, 2026-11-20, verbatim)
+
+> - writing collective works now
+> - off to mode 1 -> weird control writes that cause stupid attitude changes. Leave it now,
+>   implement the later stages, then we test again.
+> - off to AI overlay -> mode 2 engages, ok
+> - mode 2, unpark so AI overlay closes -> off. Should transition to mode 1. Don't fix now, mode 1
+>   sane flight is more important.
+
+Open, deliberately not fixed now (user direction):
+- **Voice take, off → mode 1: erratic control writes and attitude changes.** Retest after Stages
+  3–4; the lift-vector law is the planned answer to mode 1's flying quality.
+- **Unpark from mode 2 goes to off, not mode 1.** Expected m2 → m1 with the desired state carried.
+  Suspects for later: the Stage 2 lease / self-arm gate (edge-triggered since the review fix), or
+  the unpark-take path. Retest after Stage 3–4 before debugging.
+Working: collective writes; off → mode 2 engages.
