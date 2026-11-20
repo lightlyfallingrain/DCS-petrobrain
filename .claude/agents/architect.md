@@ -160,6 +160,12 @@ Use this structure in the file:
 - `module/file` — what changes and why
 - ...
 
+### Design Overview (diagrams) — complex features only
+[Mermaid (or SVG) diagrams of how the planned logic flows and which service owns which data and
+behaviour: where state lives, how it moves between services, who decides what. An overview the
+user can review, not code. Precedent: the mode 1 axis-control design and its data flow
+(`plans/flight-control/plan.md`). Skip for small or straightforward features.]
+
 ### Implementation Plan
 1. [Stage 1 — minimal working version]
 2. [Stage 2 — validate correctness]
