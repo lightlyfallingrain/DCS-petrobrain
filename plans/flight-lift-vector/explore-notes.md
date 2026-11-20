@@ -153,3 +153,10 @@ Settled:
 So every deceleration (the "speed gives" step under limits, and any ordinary speed reduction) is
 pitch back plus less collective, never pitch back alone. Blade load drives both rotor-RPM droop
 and retreating-blade stall. Plan diagram 4 and "speed gives" amended.
+
+## Diagrams approved (user, 2026-11-20)
+
+Amended diagrams (after U1–U8 and the slowing-down note) shown as a throwaway artifact. User,
+verbatim: *"diagrams ok, proceed"*. U8 answered *"no floor"* (plan.md). On the SAU: *"The DCS mi-24
+PDF is the only source on the SAU we have. Not likely anything new there."* The user's own SAU
+description above is the reference.
