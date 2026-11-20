@@ -94,3 +94,12 @@ Settled:
 - **Q5:** the overlay switches off whenever the player moves to the pilot seat; in the copilot seat
   it does not switch off by itself.
 - **Q6:** after a body-layer restart while parked, an unpark gives the player the stick.
+
+## Mode 2 is Mi-24 only (user, 2026-11-20, verbatim)
+
+> Note: mode 2 is mi-24 specific. When, eventually, we add other helicopters, they have no mode 2,
+> only mode 1. Just build this so that it's easy to isolate mode 2 to the mi-24 only.
+
+So the desired state, the mode authority and mode 1 are aircraft-generic; mode 2 (ED's AI-pilot
+wheel) is one aircraft-specific consumer of the desired state, behind a seam that another module can
+simply not have. Not a request to build other aircraft now.
