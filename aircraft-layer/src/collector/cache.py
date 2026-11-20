@@ -61,6 +61,7 @@ from typing import NamedTuple
 from schema import (
     AiPilotWheelState,
     FlightControlState,
+    FlightDesiredState,
     LineOfSightSnapshot,
     MissionStartEvent,
     PayloadSample,
@@ -373,6 +374,26 @@ class FlightControlCache:
     def latest(self) -> FlightControlState | None:
         """Return the most recently pushed sample, or `None` if no
         flight-control line has arrived yet this session."""
+        return self._latest
+
+
+class FlightDesiredCache:
+    """Holds the latest `FlightDesiredState` sample (`plans/
+    flight-desired-state/plan.md`, BL-16 Stages 1-2) --
+    `flight_desired.push_flight_desired_state`'s own per-frame status.
+    Same "latest of one" shape as `FlightControlCache`."""
+
+    def __init__(self) -> None:
+        self._latest: FlightDesiredState | None = None
+
+    def push(self, sample: FlightDesiredState) -> None:
+        """Record a newly-received sample as the current flight-desired
+        state."""
+        self._latest = sample
+
+    def latest(self) -> FlightDesiredState | None:
+        """Return the most recently pushed sample, or `None` if no
+        flight-desired line has arrived yet this session."""
         return self._latest
 
 

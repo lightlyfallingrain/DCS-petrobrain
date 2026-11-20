@@ -361,10 +361,52 @@ class TestSendFlightControl:
             sender.send_flight_control(1, "release", None, None)
 
 
+class TestSendFlightLease:
+    """`CommandSender.send_flight_lease` -- BL-16 Stage 2 (`plans/
+    flight-desired-state/plan.md`, refinement 3), mirrors `TestSend
+    FlightControl` above."""
+
+    def test_delivers_well_formed_datagram(self) -> None:
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(2.0)
+        port = receiver.getsockname()[1]
+
+        try:
+            with CommandSender(host="127.0.0.1", port=port) as sender:
+                sender.send_flight_lease(42, {"arm_lease_s": 3.0})
+
+            data, _addr = receiver.recvfrom(4096)
+            decoded = json.loads(data.decode("utf-8"))
+            assert decoded == {
+                "op": "flight_lease",
+                "epoch": 42,
+                "limits": {"arm_lease_s": 3.0},
+            }
+        finally:
+            receiver.close()
+
+    def test_raises_command_send_error_on_a_failed_send(self) -> None:
+        class _FailingSocket:
+            def sendto(self, payload: bytes, address: tuple[str, int]) -> int:
+                raise OSError("simulated send failure")
+
+            def close(self) -> None:
+                pass
+
+        sender = CommandSender(host="127.0.0.1", port=1)
+        sender.open()
+        sender._socket = _FailingSocket()  # type: ignore[assignment]
+
+        with pytest.raises(CommandSendError):
+            sender.send_flight_lease(1, None)
+
+
 class _RecordingCommandSender:
     def __init__(self, *, raise_on_send: bool = False) -> None:
         self.sent: list[tuple[int, str, object, object]] = []
         self.reset_sent: list[int] = []
+        self.lease_sent: list[tuple[int, object]] = []
         self.raise_on_send = raise_on_send
 
     def send_flight_control(
@@ -385,6 +427,15 @@ class _RecordingCommandSender:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
         self.reset_sent.append(epoch)
+
+    def send_flight_lease(self, epoch: int, limits: dict[str, float] | None) -> None:
+        """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`,
+        refinement 3) -- `POST /command/flight_lease`'s own forwarding
+        target, replacing the old `send_flight_control(..., "arm", ...)`
+        call."""
+        if self.raise_on_send:
+            raise CommandSendError("simulated failure")
+        self.lease_sent.append((epoch, limits))
 
 
 @pytest.fixture
@@ -493,6 +544,20 @@ class TestFlightControlCommandEndpoint:
     ) -> None:
         server, sender = running_server_with_sender
         body = {"seq": 1, "cmd": "bogus", "limits": None, "goal": None}
+        status, _body = _post(server, "/command/flight_control", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_arm_is_no_longer_a_valid_cmd(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`,
+        refinement 3) -- `"arm"` moved to its own `/command/
+        flight_lease` endpoint; sending it here is now shape-invalid,
+        same as any other unknown `cmd`."""
+        server, sender = running_server_with_sender
+        body = {"seq": 1, "cmd": "arm", "limits": None, "goal": None}
         status, _body = _post(server, "/command/flight_control", body)
         assert status == 400
         assert sender.sent == []
@@ -611,6 +676,80 @@ class TestFlightControlCommandEndpoint:
         try:
             body = {"seq": 1, "cmd": "take", "limits": None, "goal": None}
             status, _body = _post(server, "/command/flight_control", body)
+            assert status == 500
+        finally:
+            server.close()
+            thread.join(timeout=5)
+
+
+class TestFlightLeaseCommandEndpoint:
+    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
+    3) -- `POST /command/flight_lease`, replacing the old `{"cmd":
+    "arm"}` message on `/command/flight_control`."""
+
+    def test_a_lease_message_forwards_to_sender(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {"epoch": 7, "limits": {"min_ias_kmh": 80.0}}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(7, {"min_ias_kmh": 80.0})]
+
+    def test_missing_epoch_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(server, "/command/flight_lease", {"limits": None})
+        assert status == 400
+        assert sender.lease_sent == []
+
+    def test_a_limits_field_beyond_its_bound_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {"epoch": 1, "limits": {"min_ias_kmh": 10_000.0}}
+        status, _body = _post(server, "/command/flight_lease", body)
+        assert status == 400
+        assert sender.lease_sent == []
+
+    def test_no_limits_is_accepted(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(server, "/command/flight_lease", {"epoch": 1})
+        assert status == 200
+        assert sender.lease_sent == [(1, None)]
+
+    def test_unconfigured_sender_returns_503(self) -> None:
+        cache = TelemetryCache()
+        server = TelemetryAPIServer(cache, host="127.0.0.1", port=0)
+        server.open()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _body = _post(server, "/command/flight_lease", {"epoch": 1})
+            assert status == 503
+        finally:
+            server.close()
+            thread.join(timeout=5)
+
+    def test_send_failure_returns_500(self) -> None:
+        cache = TelemetryCache()
+        sender = _RecordingCommandSender(raise_on_send=True)
+        server = TelemetryAPIServer(
+            cache, host="127.0.0.1", port=0, command_sender=sender
+        )
+        server.open()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _body = _post(server, "/command/flight_lease", {"epoch": 1})
             assert status == 500
         finally:
             server.close()

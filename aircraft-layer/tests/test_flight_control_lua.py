@@ -380,10 +380,11 @@ pilot_args.pitch = 0.42
 operator_args.pitch = -0.9
 ap_seat = "operator"
 ap_parked = true
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.push_flight_control_state(0.2)
@@ -760,10 +761,11 @@ class TestUnparkTakeRefusals:
         driver = """
 ap_parked = true
 ap_seat = "operator"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.05)
 ias_mps = 20.0 / 3.6
 ap_parked = false
 flight_control.run_flight_control(0.1)
@@ -782,10 +784,11 @@ print(sent_lines[#sent_lines])
         driver = """
 ap_parked = true
 ap_seat = "operator"
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
     0.0)
+flight_control.run_flight_control(0.05)
 ap_parked = false
 flight_control.run_flight_control(5.0)  -- well past the 1 s lease
 flight_control.push_flight_control_state(5.0)
@@ -826,12 +829,17 @@ pilot_args.roll = 0.133
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
--- A frame fully stowed: tracked.
+-- Self-arms this frame (off -> armed) -- that transition itself
+-- consumes the whole frame (BL-16 Stage 2's own self-arm branch
+-- `return`s immediately), so the stowed-capture tracking below needs
+-- one more frame before it ever runs.
 flight_control.run_flight_control(0.1)
+-- A frame fully stowed: tracked.
+flight_control.run_flight_control(0.15)
 -- The fade begins: the arg set and the raw stow value both fall
 -- together, exactly as flight 9 measured (roll 0.133 -> 0.086, raw
 -- 1.0 -> 0.85) -- and the edge (`is_parked() == false`) lands here.
@@ -861,8 +869,8 @@ pilot_args.roll = 0.222
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -888,8 +896,8 @@ pilot_args.roll = 0.5
 ap_seat = "pilot"
 ap_parked = true
 ap_stick_park_raw = 1.0
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -903,8 +911,8 @@ flight_control.run_flight_control(0.3)
 pilot_args.roll = 0.9
 ap_parked = true
 ap_stick_park_raw = 0.5
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":3,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.4)
 flight_control.run_flight_control(0.4)
@@ -945,10 +953,11 @@ bank_rad = math.rad(2.0)  -- well under the 5 deg takeover threshold
 ap_seat = "operator"
 ap_parked = true
 ap_held = { heading_deg = 45.0 }
-flight_control.handle_flight_control_command(
-    '{"op":"flight_control","seq":1,"cmd":"arm",'
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
     .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
+flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 for i = 1, 50 do
@@ -1404,6 +1413,131 @@ print(sent_lines[#sent_lines])
         assert isinstance(state.goal_seq, int)
         assert isinstance(state.last_cmd_seq, int)
         assert state.last_cmd_seq == 2
+
+
+class TestStage2SelfArmAndLease:
+    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
+    3): the `"arm"` cmd is gone from `flight_control`; the lease moves
+    to its own unnumbered `flight_lease` op, and self-arm reaches both
+    `off -> armed` (new) and `active/taking -> armed` (unchanged)."""
+
+    def test_no_lease_means_no_self_arm_from_off(self) -> None:
+        """Parking with no lease ever sent leaves him `off` -- the
+        player keeps the controls, same as today when no `arm` had ever
+        arrived."""
+        driver = """
+ap_parked = true
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+
+    def test_a_stale_lease_does_not_self_arm_from_off(self) -> None:
+        driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
+    0.0)
+ap_parked = true
+flight_control.run_flight_control(5.0)  -- well past the 1 s lease
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+
+    def test_lease_carries_limits_same_as_flight_control_did(self) -> None:
+        """`handle_flight_lease_command` applies `limits` through the
+        same bounds-checked helper `handle_flight_control_command` uses
+        -- a value outside `FC_LIMIT_BOUNDS` rejects the whole lease
+        message, never a partial apply."""
+        driver = """
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,"limits":{"min_ias_kmh":999.0}}', 0.0)
+ap_parked = true
+ias_mps = 150.0 / 3.6
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        # The out-of-bounds `min_ias_kmh` rejected the whole lease
+        # message, so `fc_arm_last_t` was never set by it -- off stays
+        # off (no self-arm), same as "no lease ever sent".
+        assert _field(line, "fc_mode") == "off"
+
+    def test_unknown_cmd_arm_is_now_a_no_op(self) -> None:
+        """The old `cmd == "arm"` branch is gone entirely -- sending it
+        is silently ignored (an unknown `cmd` reaches no branch at
+        all), never arming anything."""
+        driver = """
+ap_parked = true
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"arm","limits":{}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+
+
+class TestStage2VoiceTakePrecondition:
+    """BL-16 Stage 2: a voice take now re-checks IAS/AGL itself
+    (`check_unpark_preconditions`), rather than trusting body-layer's
+    own pre-send refusal alone."""
+
+    def test_a_voice_take_too_slow_is_refused_and_stays_off(self) -> None:
+        driver = """
+ias_mps = 20.0 / 3.6
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0}}',
+    0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+        assert _field(line, "fc_refuse_cause") == "too_slow"
+
+    def test_a_voice_take_on_the_ground_is_refused_and_stays_off(self) -> None:
+        driver = """
+agl_m = 5.0
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0}}',
+    0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "off"
+        assert _field(line, "fc_refuse_cause") == "on_ground"
+
+    def test_a_voice_take_clear_to_fly_still_takes(self) -> None:
+        driver = """
+ias_mps = 150.0 / 3.6
+agl_m = 200.0
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take",'
+    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_refuse_cause") is None
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

@@ -349,6 +349,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     AiPilotWheelCache,
     FlightControlCache,
+    FlightDesiredCache,
     LineOfSightCache,
     MissionStartCache,
     PayloadCache,
@@ -391,7 +392,9 @@ _SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PAYLOAD_LATEST_PATH = "/payload/latest"
 _AI_PILOT_WHEEL_LATEST_PATH = "/ai_pilot_wheel/latest"
 _FLIGHT_CONTROL_LATEST_PATH = "/flight_control/latest"
+_FLIGHT_DESIRED_LATEST_PATH = "/flight_desired/latest"
 _COMMAND_FLIGHT_CONTROL_PATH = "/command/flight_control"
+_COMMAND_FLIGHT_LEASE_PATH = "/command/flight_lease"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
@@ -518,7 +521,10 @@ _AI_PILOT_GOAL_VALID_CBTM_ACTIONS: tuple[str, ...] = (
 #: violated (the plan's own `[[AC-B14]]` lesson), rather than trusting
 #: this layer's check alone.
 _FLIGHT_CONTROL_SEQ_MAX = 2**31 - 1
-_FLIGHT_CONTROL_VALID_CMDS: tuple[str, ...] = ("take", "release", "goal", "arm")
+#: `"arm"` is removed (`plans/flight-desired-state/plan.md`, BL-16
+#: Stage 2) -- the lease moved to its own unnumbered
+#: `/command/flight_lease` endpoint below.
+_FLIGHT_CONTROL_VALID_CMDS: tuple[str, ...] = ("take", "release", "goal")
 _FLIGHT_CONTROL_VALID_ALT_REFS: tuple[str, ...] = ("agl", "baro")
 #: `limits` fields -- generous sanity bounds, same posture as every other
 #: `/command/*` endpoint's own clamps (real cockpit/behaviour limits are
@@ -726,6 +732,16 @@ def _handle_flight_control_latest(
     return None if sample is None else sample.to_api_dict()
 
 
+def _handle_flight_desired_latest(
+    cache: FlightDesiredCache,
+) -> dict[str, Any] | None:
+    """`null` before the first flight-desired line arrives -- same "not
+    an error" posture as `/flight_control/latest` (`plans/
+    flight-desired-state/plan.md`, BL-16 Stages 1-2)."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -760,6 +776,7 @@ def _make_handler(
     payload_cache: PayloadCache,
     ai_pilot_wheel_cache: AiPilotWheelCache,
     flight_control_cache: FlightControlCache,
+    flight_desired_cache: FlightDesiredCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -815,6 +832,11 @@ def _make_handler(
                     200, _handle_flight_control_latest(flight_control_cache)
                 )
                 return
+            if path == _FLIGHT_DESIRED_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_flight_desired_latest(flight_desired_cache)
+                )
+                return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
                     200,
@@ -862,6 +884,9 @@ def _make_handler(
                 return
             if path == _COMMAND_FLIGHT_CONTROL_PATH:
                 self._handle_command_flight_control()
+                return
+            if path == _COMMAND_FLIGHT_LEASE_PATH:
+                self._handle_command_flight_lease()
                 return
             if path == _COMMAND_RESET_PATH:
                 self._handle_command_reset()
@@ -1729,6 +1754,94 @@ def _make_handler(
                 return
             self._respond_json(200, {"ok": True})
 
+        def _handle_command_flight_lease(self) -> None:
+            """`POST /command/flight_lease` -- BL-16 Stage 2's own
+            unnumbered lease (`plans/flight-desired-state/plan.md`,
+            refinement 3), replacing the old `{"cmd": "arm"}` message on
+            `/command/flight_control`. Shape validation only, same
+            division of labour as `/command/flight_control`'s own
+            `limits`: `epoch` a non-negative whole number (same bound as
+            `/command/reset`), `limits` an optional object whose fields
+            are each checked individually against `_FLIGHT_CONTROL_
+            LIMITS_BOUNDS` (the same bounds the lease's sibling endpoint
+            uses, since it carries the same `limits` bundle)."""
+            if command_sender is None:
+                self._respond_json(
+                    503, {"error": "flight_lease channel not configured"}
+                )
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            epoch_raw = data.get("epoch")
+            if (
+                isinstance(epoch_raw, bool)
+                or not isinstance(epoch_raw, int)
+                or not (0 <= epoch_raw <= _RESET_EPOCH_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'epoch' must be a whole number in "
+                            f"[0, {_RESET_EPOCH_MAX}], got {epoch_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            limits_raw = data.get("limits")
+            if limits_raw is not None and not isinstance(limits_raw, dict):
+                self._respond_json(
+                    400,
+                    {
+                        "error": f"'limits' must be an object or null, got {limits_raw!r}"
+                    },
+                )
+                return
+            limits: dict[str, float] = {}
+            if limits_raw is not None:
+                for field, (lo, hi) in _FLIGHT_CONTROL_LIMITS_BOUNDS.items():
+                    if field not in limits_raw:
+                        continue
+                    value = limits_raw[field]
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value)
+                        or value < lo
+                        or value > hi
+                    ):
+                        self._respond_json(
+                            400,
+                            {
+                                "error": (
+                                    f"limits.{field} must be a finite number in "
+                                    f"[{lo}, {hi}], got {value!r}"
+                                )
+                            },
+                        )
+                        return
+                    limits[field] = float(value)
+
+            try:
+                command_sender.send_flight_lease(
+                    epoch_raw, limits if limits_raw is not None else None
+                )
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
         def _handle_command_reset(self) -> None:
             """`POST /command/reset` -- body-layer's own process-start
             reset (BL-16 sortie 2026-11-20, `docs/acceptance/
@@ -1887,6 +2000,7 @@ class TelemetryAPIServer:
         payload_cache: PayloadCache | None = None,
         ai_pilot_wheel_cache: AiPilotWheelCache | None = None,
         flight_control_cache: FlightControlCache | None = None,
+        flight_desired_cache: FlightDesiredCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`unit_velocity_cache`/
@@ -1954,6 +2068,11 @@ class TelemetryAPIServer:
             if flight_control_cache is not None
             else FlightControlCache()
         )
+        self._flight_desired_cache = (
+            flight_desired_cache
+            if flight_desired_cache is not None
+            else FlightDesiredCache()
+        )
         # `arg_read_broker` defaults to `None`, same posture as
         # `command_sender`/`audio_sender` above --
         # `/query/read_args` answers `503` rather than crashing when it
@@ -2017,6 +2136,7 @@ class TelemetryAPIServer:
                 self._payload_cache,
                 self._ai_pilot_wheel_cache,
                 self._flight_control_cache,
+                self._flight_desired_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

@@ -343,7 +343,7 @@ class CommandSender:
     def send_flight_control(
         self,
         seq: int,
-        cmd: Literal["take", "release", "goal", "arm"],
+        cmd: Literal["take", "release", "goal"],
         limits: dict[str, float] | None,
         goal: dict[str, object] | None,
     ) -> None:
@@ -355,11 +355,15 @@ class CommandSender:
         is a real behavioral gap, not an opaque display string to
         swallow.
 
+        **`"arm"` is no longer a `cmd` here** (`plans/
+        flight-desired-state/plan.md`, BL-16 Stage 2) -- the lease moved
+        to its own unnumbered op, `send_flight_lease` below.
+
         **`limits` travels in every message** (the plan's own wire
         shape) -- `None` is accepted here only for a caller that has not
         yet resolved its tunables (defensive; `body.py`'s own call site
         always passes the live bundle). `goal` is `None` for `take`/
-        `release`/`arm` messages, which carry no goal fields.
+        `release` messages, which carry no goal fields.
 
         **Only the fields `Export.lua`'s hand-rolled, nesting-blind
         regex parser needs are unique strings** -- `goal`/`limits` are
@@ -402,6 +406,37 @@ class CommandSender:
             raise CommandSendError(
                 f"failed to send flight_control seq={seq!r} cmd={cmd!r}: {exc}"
             ) from exc
+
+    def send_flight_lease(self, epoch: int, limits: dict[str, float] | None) -> None:
+        """Send `{"op": "flight_lease", "epoch": epoch, "limits": limits}`
+        to `Export.lua`'s command listener -- BL-16 Stage 2's own
+        unnumbered lease (`plans/flight-desired-state/plan.md`,
+        refinement 3), replacing the old `send_flight_control(...,
+        "arm", ...)` send. `Export.lua`'s `flight_control.lua` self-arms
+        on a park edge while this lease is fresh; body-layer never
+        states the mode. Same `CommandSendError` posture as `send_
+        flight_control`: a dropped lease means the next park may not
+        self-arm, a real behavioural gap.
+
+        **No `seq` field, same reasoning as `send_reset`** -- this op is
+        deliberately unnumbered and sent every poll, never rejected as
+        stale.
+
+        **No validation happens here** -- same division of labour as
+        every other `send_*` method's own docstring."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "flight_lease", "epoch": epoch, "limits": limits}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning("flight-lease command send failed", exc_info=True)
+            raise CommandSendError(f"failed to send flight_lease: {exc}") from exc
 
     def send_reset(self, epoch: int) -> None:
         """Send `{"op": "reset", "epoch": epoch}` to `Export.lua`'s

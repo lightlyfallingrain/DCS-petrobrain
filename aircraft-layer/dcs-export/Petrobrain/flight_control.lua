@@ -1066,7 +1066,6 @@ local fc_pending_take_seq = nil
 local fc_take_origin = nil
 local fc_goal_seq = nil
 local fc_last_cmd_seq = -1
-local fc_last_arm_seq = nil
 local fc_arm_last_t = nil
 local fc_release_reason = nil
 local fc_refuse_cause = nil
@@ -1469,6 +1468,26 @@ local function apply_goal_fields(data)
     end
     fc_goal_seq = fc_last_cmd_seq
 
+    -- BL-16 (`plans/flight-desired-state/plan.md`, Stage 1) -- mirror
+    -- the exact fields this handler just parsed into the shadow
+    -- `desired` state, at receipt, same as every other write this
+    -- function already does. Guarded on `flight_desired` existing (the
+    -- loader's own "one module failing to load never takes another
+    -- down" posture) -- its own module docstring explains why calling
+    -- into it here is safe regardless of `Export.lua`'s load order.
+    if flight_desired ~= nil then
+        safe_call(function()
+            flight_desired.mirror_m1_goal({
+                heading_deg = heading_deg,
+                turn = turn_value,
+                alt_m = alt_m,
+                alt_ref = alt_ref,
+                ias_kmh = ias_kmh,
+                turn_rate_deg_s = turn_rate_deg_s,
+            })
+        end)
+    end
+
     -- Decision 21's "Wire"/one-shot goal application -- never re-applied
     -- from the persisted `fc_goal_*` echo every frame (that would
     -- re-trigger `level_off`'s own turn-mode request every poll and
@@ -1496,6 +1515,57 @@ local function apply_goal_fields(data)
     end
 end
 
+-- Shared by `handle_flight_control_command` and (Stage 2, `plans/
+-- flight-desired-state/plan.md`) the unnumbered `handle_flight_lease_
+-- command` -- every field present in `data`'s own `limits`-shaped
+-- top level is bounds-checked against `FC_LIMIT_BOUNDS`; an out-of-
+-- bounds value rejects the WHOLE message (`AC-B14`: never a partial
+-- apply), a field the message omits keeps its previous value rather
+-- than reverting to the startup default. Returns `true` on success
+-- (and has already applied `fc_limits`), `false` on a rejected message
+-- (and has applied nothing).
+local function apply_limits_bounds_checked(data, log_label)
+    local new_limits = {}
+    for key, bound in pairs(FC_LIMIT_BOUNDS) do
+        local v = extract_json_number_field(data, key)
+        if v ~= nil then
+            if v < bound.lo or v > bound.hi then
+                debug_log("rejecting " .. log_label .. " message: limits." .. key .. " out of bounds")
+                return false
+            end
+            new_limits[key] = v
+        end
+    end
+    for key, v in pairs(new_limits) do
+        fc_limits[key] = v
+    end
+    return true
+end
+
+-- Stage 2 (`plans/flight-desired-state/plan.md`, refinement 3) --
+-- `{"op":"flight_lease","epoch":E,"limits":{...}}`, unnumbered (no
+-- `seq`, never rejected as stale against `fc_last_cmd_seq`) and sent
+-- every poll while body-layer is up -- the one thing it does is refresh
+-- `fc_arm_last_t` (the self-arm freshness clock, `run_flight_control`'s
+-- own self-arm branches above) and carry the same `limits` block every
+-- `flight_control` message used to. Replaces the old `cmd == "arm"`
+-- branch entirely -- Lua never arms itself from this handler, only
+-- from a park edge (section 2: "body-layer never states the mode").
+-- `epoch` is accepted but not yet gated on (Stage 3/5's own epoch
+-- channel is not built here) -- carried only so a future stage can add
+-- that check without a wire reshape.
+local function handle_flight_lease_command(data, t)
+    -- The `AC-B14` lesson, same as `handle_flight_control_command`:
+    -- an out-of-bounds `limits` field rejects the WHOLE message,
+    -- including the freshness refresh below -- a malformed lease must
+    -- not be allowed to keep the self-arm window open regardless of
+    -- what it actually asked for.
+    if not apply_limits_bounds_checked(data, "flight_lease") then
+        return
+    end
+    fc_arm_last_t = t
+end
+
 -- `POST /command/flight_control` -> here, via `commands.lua`'s dispatch
 -- table, same `(data, t)` shape every other handler in this codebase
 -- uses. `{"op": "flight_control", "seq", "cmd", "limits", "goal"}`.
@@ -1514,25 +1584,8 @@ local function handle_flight_control_command(data, t)
         return
     end
 
-    -- `limits` travels in every message (plan's own wire shape) --
-    -- every present field is bounds-checked against FC_LIMIT_BOUNDS; an
-    -- out-of-bounds value rejects the WHOLE message (the `AC-B14`
-    -- lesson: never a partial apply), a field the message omits keeps
-    -- its previous value rather than reverting to the startup default.
-    local new_limits = {}
-    for key, bound in pairs(FC_LIMIT_BOUNDS) do
-        local v = extract_json_number_field(data, key)
-        if v ~= nil then
-            if v < bound.lo or v > bound.hi then
-                debug_log("rejecting flight_control message seq=" .. tostring(seq)
-                    .. ": limits." .. key .. " out of bounds")
-                return
-            end
-            new_limits[key] = v
-        end
-    end
-    for key, v in pairs(new_limits) do
-        fc_limits[key] = v
+    if not apply_limits_bounds_checked(data, "flight_control seq=" .. tostring(seq)) then
+        return
     end
 
     fc_last_cmd_seq = seq
@@ -1541,20 +1594,13 @@ local function handle_flight_control_command(data, t)
         apply_goal_fields(data)
         return
     end
-    if cmd == "arm" then
-        -- The lease (U10): body-layer re-sends this every poll while he
-        -- flies through the overlay with mode 1 armed. From "off", this
-        -- is also the only way "armed" is entered (Decision 24's
-        -- `off` -> `armed` row); an already-active/taking session
-        -- self-arms on the park edge instead (`run_flight_control`
-        -- below), never from this handler.
-        fc_arm_last_t = t
-        fc_last_arm_seq = seq
-        if fc_mode == "off" then
-            fc_mode = "armed"
-        end
-        return
-    end
+    -- `cmd == "arm"` is removed (`plans/flight-desired-state/plan.md`
+    -- Stage 2, refinement 3): Lua now self-arms itself on every park
+    -- rising edge while the lease is fresh (`run_flight_control`
+    -- below); body-layer never states the mode. The lease itself moves
+    -- to its own unnumbered `flight_lease` op (`handle_flight_lease_
+    -- command` below), since it carries no `seq` of its own and must
+    -- never be rejected as stale against this op's `fc_last_cmd_seq`.
     if cmd == "release" then
         fc_mode = "off"
         fc_captured = {}
@@ -1611,6 +1657,21 @@ local function handle_flight_control_command(data, t)
         end
         if fc_mode == "taking" then
             fc_pending_take_seq = seq
+            return
+        end
+        -- Stage 2 (`plans/flight-desired-state/plan.md`): a voice take
+        -- now re-checks IAS/AGL itself, reusing `check_unpark_
+        -- preconditions` (the same function the unpark-take branch
+        -- below already calls) -- previously this handler trusted
+        -- body-layer's own pre-send refusal alone (Decision 22), which
+        -- is a LAN round trip behind the aircraft's actual state. A
+        -- refusal here changes nothing: `fc_mode` stays whatever it
+        -- was (`off` or `armed`), same "an unable never writes the
+        -- desired state" posture the plan's own Q2 settles for mode 2.
+        local ok, cause = check_unpark_preconditions()
+        if not ok then
+            fc_release_reason = "refused"
+            fc_refuse_cause = cause
             return
         end
         fc_mode = "taking"
@@ -1737,6 +1798,25 @@ local function run_flight_control(t)
         return
     end
 
+    -- Stage 2 (`plans/flight-desired-state/plan.md`, refinement 3) --
+    -- the second self-arm clause: he was `off` (the player flying) and
+    -- parks. Every park now gives him the overlay as long as body-
+    -- layer's lease is fresh, replacing the old `arm` message's own
+    -- `off -> armed` row. Lease NOT fresh (body-layer down, or never
+    -- sent one) leaves him `off` -- the player keeps the controls, same
+    -- as today when no `arm` had ever arrived.
+    if is_parked == true and fc_mode == "off" then
+        local lease_fresh = fc_arm_last_t ~= nil
+            and (t - fc_arm_last_t) <= fc_limits.arm_lease_s
+        if lease_fresh then
+            fc_mode = "armed"
+            fc_last_stowed_pilot_capture = nil
+            fc_law = nil
+            fc_last_command = nil
+        end
+        return
+    end
+
     -- Unpark-take, while armed and the park signal has fallen.
     if is_parked == false and fc_mode == "armed" then
         local lease_fresh = fc_arm_last_t ~= nil
@@ -1784,7 +1864,15 @@ local function run_flight_control(t)
         fc_captured = values
         fc_mode = "active"
         fc_take_origin = "unpark"
-        fc_take_seq = fc_last_arm_seq
+        -- Stage 2 (`plans/flight-desired-state/plan.md`): the `arm`
+        -- message (and its own `seq`) is gone -- the lease that self-
+        -- arms this session is unnumbered (`handle_flight_lease_
+        -- command` below). There is no seq to echo back as `fc_take_
+        -- seq`; `decide_flight_control`'s own unpark branch never
+        -- compares it against anything (it only *adopts* it when not
+        -- nil), so `nil` here is exactly as meaningful as the arm
+        -- message's own seq was.
+        fc_take_seq = nil
         fc_takeover_mode = snapshot_takeover_mode()
         fc_release_reason = nil
         fc_refuse_cause = nil
@@ -1959,7 +2047,6 @@ local function on_stop()
     fc_pending_take_seq = nil
     fc_take_origin = nil
     fc_goal_seq = nil
-    fc_last_arm_seq = nil
     fc_arm_last_t = nil
     fc_release_reason = nil
     fc_refuse_cause = nil
@@ -2005,10 +2092,24 @@ local function reset(epoch)
 end
 
 M.handle_flight_control_command = handle_flight_control_command
+M.handle_flight_lease_command = handle_flight_lease_command
 M.run_flight_control = run_flight_control
 M.push_flight_control_state = push_flight_control_state
 M.on_stop = on_stop
 M.reset = reset
+
+-- `plans/flight-desired-state/plan.md`, section 2 -- the one read-only
+-- getter `flight_desired.lua` needs to derive `fd_mode`/`fd_mode_cause`
+-- without this module's own locals (`dofile`-loaded chunks share no
+-- locals, only `_G`/`M`). Same "read-only mirror" posture as `ai_pilot_
+-- wheel.lua`'s own `is_parked`/`player_seat`/`held_targets` getters.
+M.mode_info = function()
+    return {
+        mode = fc_mode,
+        release_reason = fc_release_reason,
+        refuse_cause = fc_refuse_cause,
+    }
+end
 
 -- The control law's own pure functions, exported for the toy-plant
 -- suite (`tests/test_flight_control_law.py`) to call directly -- none

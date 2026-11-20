@@ -1674,6 +1674,23 @@ local function handle_ai_pilot_goal_command(data, t)
     ai_pilot_goal.altitude_target_ref = altitude_target_ref
     ai_pilot_goal.speed_target_kmh = speed_target_kmh
     ai_pilot_goal.hvrt_direction = hvrt_direction
+
+    -- BL-16 (`plans/flight-desired-state/plan.md`, Stage 1) -- mirror
+    -- the exact commanded values into the shadow `desired` state, at
+    -- receipt (Q1a: the exact value stays desired even though mode 2
+    -- may fly an approximation of it). Guarded on `flight_desired`
+    -- existing, same posture as every other cross-module call in this
+    -- file.
+    if flight_desired ~= nil then
+        safe_call(function()
+            flight_desired.mirror_m2_goal({
+                heading_target_deg = heading_target_deg,
+                altitude_target_m = altitude_target_m,
+                altitude_target_ref = altitude_target_ref,
+                speed_target_kmh = speed_target_kmh,
+            })
+        end)
+    end
     if param ~= nil then
         ai_pilot_goal.progress = "pressing"
     elseif hvrt_direction == nil then

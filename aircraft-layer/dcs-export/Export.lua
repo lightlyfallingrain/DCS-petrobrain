@@ -239,7 +239,19 @@ creating/deleting the flag file.
 -- their own status lines -- additive only, same reasoning as every
 -- other additive bump above. Update `aircraft-layer/src/collector/
 -- server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-11-20"
+--
+-- Bumped again, "...20b" (`plans/flight-desired-state/plan.md`,
+-- BL-16, Stages 1-2) for the new `flight_desired.lua` module: the new
+-- per-frame `fd_*` status line (route key `fd_mode`), the new
+-- `flight_lease` inbound op replacing `flight_control`'s own `"arm"`
+-- command, and a non-additive behavioural change to the `"take"`
+-- command (a voice take now re-checks IAS/AGL itself rather than
+-- trusting body-layer's own pre-send refusal alone) -- a pre-fix
+-- collector/body-layer pair sending `cmd:"arm"` would be silently
+-- ignored (unknown `cmd`, no-op) rather than arming Lua, so this bump
+-- is load-bearing, not cosmetic. Update `aircraft-layer/src/collector/
+-- server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-11-20b"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 
@@ -288,13 +300,22 @@ core.init(EXPORT_SCRIPT_VERSION)
 
 -- Dependency order: every feature module needs `core`, already loaded
 -- above; `commands` needs every handler-owning module (`petrovich`,
--- `effectors`, `sight`), so it loads LAST. `flight_control` (BL-16 mode
--- 1, Stage M1) loads after `ai_pilot_wheel` -- it reads that module's
--- `is_parked`/`player_seat` getters (Decision 25), read-only, and must
--- itself exist before `commands` registers its handler.
+-- `effectors`, `sight`), so it loads LAST. `flight_desired` (`plans/
+-- flight-desired-state/plan.md`, BL-16 Stages 1-2) loads BEFORE
+-- `ai_pilot_wheel`/`flight_control` -- it is only ever *called*
+-- (`M.tick`) once every module has loaded, so referencing their own
+-- globals from inside `flight_desired.lua` is safe regardless of this
+-- order (see that module's own docstring), but `flight_control.lua`/
+-- `ai_pilot_wheel.lua` call INTO it (`mirror_m1_goal`/`mirror_m2_goal`)
+-- at their own receipt time, which is why it must exist first.
+-- `flight_control` (BL-16 mode 1, Stage M1) loads after `ai_pilot_wheel`
+-- -- it reads that module's `is_parked`/`player_seat` getters
+-- (Decision 25), read-only, and must itself exist before `commands`
+-- registers its handler.
 local telemetry = load_module("telemetry")
 local petrovich = load_module("petrovich")
 local sight = load_module("sight")
+local flight_desired = load_module("flight_desired")
 local ai_pilot_wheel = load_module("ai_pilot_wheel")
 local flight_control = load_module("flight_control")
 local effectors = load_module("effectors")
@@ -331,6 +352,7 @@ function LuaExportStop()
     call_if(sight, "on_stop")
     call_if(flight_control, "on_stop")
     call_if(ai_pilot_wheel, "on_stop")
+    call_if(flight_desired, "on_stop")
     call_if(petrovich, "on_stop")
     call_if(ptt_ics, "on_stop")
     call_if(effectors, "on_stop")
@@ -352,6 +374,11 @@ function LuaExportBeforeNextFrame()
         return
     end
     call_if(flight_control, "run_flight_control", t)
+    -- `plans/flight-desired-state/plan.md`, section 2: `flight_desired.
+    -- tick` runs right after `run_flight_control`, every frame, so the
+    -- mode-authority derivation and the edge seed/clear/carry handler
+    -- see this frame's `fc_mode` the same frame it changed.
+    call_if(flight_desired, "tick", t)
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -453,6 +480,9 @@ function LuaExportAfterNextFrame()
     -- `plans/flight-control/plan.md` Decision 23 (Stage M1): same 5 Hz
     -- cadence as every other per-frame status line above.
     call_if(flight_control, "push_flight_control_state", t)
+    -- `plans/flight-desired-state/plan.md` Stage 1: same 5 Hz cadence
+    -- as every other per-frame status line above.
+    call_if(flight_desired, "push_flight_desired_state", t)
 
     local connected, fresh = core.ensure_connected(t)
     if not connected then
