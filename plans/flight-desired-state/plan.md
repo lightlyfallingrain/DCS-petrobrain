@@ -18,6 +18,13 @@ Architect pass, 2026-11-20. Branch `feature/bl16-desired-state`, base `e4792254`
 - **U4 answered, Stages 1 and 2 ship together on one card.** Their content is unchanged except the
   heading-reference reporting above.
 - New open questions: U5 (readback latency), U6 (unpark in the second after an align press).
+  Both answered since; see the end of "Open Decisions".
+- **Constraint added by the main loop from the user's direction (2026-11-20), not the architect's
+  text:** mode 1's control logic is common to all helicopters, its values are not. Any mode 1 code
+  these stages touch keeps gains, limits, axis signs/args and curve shapes in one per-aircraft
+  profile table (only the Mi-24P's for now), selected once at mission start by aircraft type, not as
+  scattered module constants. No profile mechanism is built in this plan; the code is just shaped so
+  adding one later is a table swap. User's words: `body-layer/ROADMAP/BL-16.md`, lift-vector item.
 
 Inputs read in full: `explore-notes.md` and `alignment.md` (this directory), `docs/acceptance/
 2026-11-20-sortie-feedback.md`, `body-layer/ROADMAP/BL-16.md` (open items), `plans/flight-control/
