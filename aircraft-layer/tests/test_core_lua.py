@@ -137,6 +137,13 @@ class TestFmtIntOrNull:
         control line, take or no take."""
         assert _run("print(fmt_int_or_null(-1))") == ["-1"]
 
+    def test_value_past_2_pow_31_is_exact(self) -> None:
+        """The millisecond reset epoch (~1.8e12). Lua 5.1's `%d` goes
+        through C `long`, 32-bit on Windows, and would wrap it; `%.0f`
+        does not. This interpreter's `long` is 64-bit, so the test pins
+        the output rather than reproducing the Windows wrap."""
+        assert _run("print(fmt_int_or_null(1795129850123))") == ["1795129850123"]
+
     def test_nil_is_null(self) -> None:
         assert _run("print(fmt_int_or_null(nil))") == ["null"]
 

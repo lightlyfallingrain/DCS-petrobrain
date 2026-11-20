@@ -228,6 +228,121 @@ class TestMissingHandlerOwningModule:
         assert "nil" in result.stderr
 
 
+def _run_reset_dispatch(
+    *,
+    flight_control_present: bool,
+    ai_pilot_wheel_present: bool,
+    command: str,
+) -> tuple[list[str], list[str]]:
+    """Same technique as `_run_commands_lua` above, specialised to the
+    `reset` op (BL-16 sortie 2026-11-20, `docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- the one op dispatched to more
+    than one owning module directly, so the fakes here record
+    `(module, epoch)` pairs rather than bare op names. Returns
+    `(reset_calls, debug_log_messages)`."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    preamble_parts = ["local reset_calls = {}", "local debug_log_messages = {}"]
+    preamble_parts.append(
+        "local function debug_log(msg) table.insert(debug_log_messages, msg) end"
+    )
+    if flight_control_present:
+        preamble_parts.append(
+            "flight_control = {\n"
+            "    reset = function(epoch) table.insert(reset_calls, "
+            '"flight_control:" .. tostring(epoch)) end,\n'
+            "}"
+        )
+    if ai_pilot_wheel_present:
+        preamble_parts.append(
+            "ai_pilot_wheel = {\n"
+            "    reset = function(epoch) table.insert(reset_calls, "
+            '"ai_pilot_wheel:" .. tostring(epoch)) end,\n'
+            "}"
+        )
+    preamble_parts.append(
+        "local _queue = {[[" + command + "]]}\n"
+        "local _idx = 0\n"
+        "command_socket = {\n"
+        "    receivefrom = function(self)\n"
+        "        _idx = _idx + 1\n"
+        "        return _queue[_idx]\n"
+        "    end,\n"
+        "}"
+    )
+
+    lines = ["\n".join(preamble_parts)]
+    lines.append(_extract_lua_function(_CORE_LUA, "extract_json_string_field"))
+    lines.append(_extract_lua_function(_CORE_LUA, "extract_json_number_field"))
+    lines.append(_extract_handlers_block())
+    lines.append(_extract_lua_function(_COMMANDS_LUA, "poll_command_socket"))
+    lines.append("poll_command_socket(0.0)")
+    lines.append('io.write(table.concat(reset_calls, ","))')
+    lines.append('io.write("|")')
+    lines.append('io.write(table.concat(debug_log_messages, ","))')
+    script = "\n".join(lines)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+
+    assert result.returncode == 0, (
+        f"Lua harness failed (exe={exe}): {result.stderr}\nscript:\n{script}"
+    )
+    reset_part, _, debug_part = result.stdout.partition("|")
+    reset_calls = reset_part.split(",") if reset_part else []
+    debug_messages = debug_part.split(",") if debug_part else []
+    return reset_calls, debug_messages
+
+
+class TestResetDispatch:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `commands.lua`'s own `reset` op,
+    the one op dispatched to more than one owning module."""
+
+    def test_reset_calls_both_owning_modules_with_the_epoch(self) -> None:
+        reset_calls, _ = _run_reset_dispatch(
+            flight_control_present=True,
+            ai_pilot_wheel_present=True,
+            command='{"op":"reset","epoch":42}',
+        )
+        assert sorted(reset_calls) == ["ai_pilot_wheel:42", "flight_control:42"]
+
+    def test_missing_epoch_is_ignored_not_fatal(self) -> None:
+        reset_calls, debug_messages = _run_reset_dispatch(
+            flight_control_present=True,
+            ai_pilot_wheel_present=True,
+            command='{"op":"reset"}',
+        )
+        assert reset_calls == []
+        assert any("malformed reset" in m for m in debug_messages)
+
+    def test_one_missing_owning_module_still_resets_the_other(self) -> None:
+        """Same "a module that failed to load does not take the rest
+        down" posture `TestMissingHandlerOwningModule` already proves
+        for the single-owner ops above, extended to this one op's two
+        owners: `ai_pilot_wheel` absent (simulating a failed load)
+        still lets `flight_control.reset` run, and does not crash the
+        poll (already proved by `_run_reset_dispatch`'s own
+        `returncode == 0` assertion)."""
+        reset_calls, _ = _run_reset_dispatch(
+            flight_control_present=True,
+            ai_pilot_wheel_present=False,
+            command='{"op":"reset","epoch":7}',
+        )
+        assert reset_calls == ["flight_control:7"]
+
+
 class TestAllModulesPresent:
     """Regression check on the modified `elseif op == "read_args"` guard
     line itself: with `effectors` present, dispatch through the real

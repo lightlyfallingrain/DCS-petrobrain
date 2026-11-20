@@ -22,6 +22,7 @@ import pytest
 
 from api.server import (
     _FLIGHT_CONTROL_SEQ_MAX,
+    _RESET_EPOCH_MAX,
     TelemetryAPIServer,
 )
 from collector.cache import (
@@ -170,6 +171,11 @@ class TestFlightControlState:
             "fc_agl_source": "radar",
             "fc_release_reason": None,
             "fc_refuse_cause": None,
+            # `_LINE` predates the BL-16 sortie 2026-11-20 reset-epoch
+            # field -- absent on the wire, not an error, same
+            # "missing is None" posture every other optional field here
+            # already has.
+            "fc_reset_epoch": None,
             "fc_limit_hit": False,
             "fc_axes_pitch": True,
             "fc_axes_roll": True,
@@ -358,6 +364,7 @@ class TestSendFlightControl:
 class _RecordingCommandSender:
     def __init__(self, *, raise_on_send: bool = False) -> None:
         self.sent: list[tuple[int, str, object, object]] = []
+        self.reset_sent: list[int] = []
         self.raise_on_send = raise_on_send
 
     def send_flight_control(
@@ -370,6 +377,14 @@ class _RecordingCommandSender:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
         self.sent.append((seq, cmd, limits, goal))
+
+    def send_reset(self, epoch: int) -> None:
+        """BL-16 sortie 2026-11-20 (`docs/acceptance/
+        2026-11-20-sortie-feedback.md`) -- `POST /command/reset`'s own
+        forwarding target."""
+        if self.raise_on_send:
+            raise CommandSendError("simulated failure")
+        self.reset_sent.append(epoch)
 
 
 @pytest.fixture
@@ -596,6 +611,87 @@ class TestFlightControlCommandEndpoint:
         try:
             body = {"seq": 1, "cmd": "take", "limits": None, "goal": None}
             status, _body = _post(server, "/command/flight_control", body)
+            assert status == 500
+        finally:
+            server.close()
+            thread.join(timeout=5)
+
+
+class TestResetCommandEndpoint:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `POST /command/reset`, same
+    shape-validation-only/raise-on-failure posture as `/command/
+    flight_control` above."""
+
+    def test_a_reset_message_forwards_to_sender(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, resp_body = _post(server, "/command/reset", {"epoch": 1234})
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.reset_sent == [1234]
+
+    def test_missing_epoch_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(server, "/command/reset", {})
+        assert status == 400
+        assert sender.reset_sent == []
+
+    def test_negative_epoch_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(server, "/command/reset", {"epoch": -1})
+        assert status == 400
+        assert sender.reset_sent == []
+
+    def test_epoch_beyond_the_bound_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(server, "/command/reset", {"epoch": _RESET_EPOCH_MAX + 1})
+        assert status == 400
+        assert sender.reset_sent == []
+
+    def test_a_non_json_body_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, _sender = running_server_with_sender
+        status, _body = _post(server, "/command/reset", b"not json")
+        assert status == 400
+
+    def test_unconfigured_sender_returns_503(self) -> None:
+        cache = TelemetryCache()
+        server = TelemetryAPIServer(cache, host="127.0.0.1", port=0)
+        server.open()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _body = _post(server, "/command/reset", {"epoch": 1})
+            assert status == 503
+        finally:
+            server.close()
+            thread.join(timeout=5)
+
+    def test_send_failure_returns_500(self) -> None:
+        cache = TelemetryCache()
+        sender = _RecordingCommandSender(raise_on_send=True)
+        server = TelemetryAPIServer(
+            cache, host="127.0.0.1", port=0, command_sender=sender
+        )
+        server.open()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _body = _post(server, "/command/reset", {"epoch": 1})
             assert status == 500
         finally:
             server.close()

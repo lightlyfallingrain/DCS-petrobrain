@@ -619,6 +619,95 @@ print(sent_lines[#sent_lines])
         assert _field(after_resend_line, "fc_last_cmd_seq") == "48"
 
 
+class TestBodyLayerStartReset:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `flight_control.reset`, the
+    body-layer process-start reset. Unlike `on_stop` (`TestLastCmdSeqEcho
+    SurvivesOnStop` above), this one DOES reset `fc_last_cmd_seq` back to
+    its startup sentinel, since body-layer's own `wire_seq` also starts
+    fresh at 0 on the process restart this op exists for."""
+
+    def test_reset_releases_axes_clears_seqs_and_echoes_the_epoch(self) -> None:
+        driver = """
+pilot_args.pitch = 0.5
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":2,"cmd":"goal","limits":{},"heading_deg":90.0}', 0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+flight_control.reset(99)
+written = {}
+flight_control.run_flight_control(0.2)
+flight_control.push_flight_control_state(0.2)
+print(sent_lines[#sent_lines])
+print(written[2001] == nil)
+"""
+        lines = _run(driver)
+        before_reset_line, after_reset_line, nothing_written = (
+            lines[0],
+            lines[1],
+            lines[2],
+        )
+        # Before the reset: mode 1 is genuinely flying, with a take/goal
+        # on record and no epoch echoed yet.
+        assert _field(before_reset_line, "fc_mode") == "active"
+        assert _field(before_reset_line, "fc_take_seq") == "1"
+        assert _field(before_reset_line, "fc_reset_epoch") is None
+        # After `reset(99)`: mode off (axes released -- confirmed below
+        # by `run_flight_control` writing nothing further), every seq
+        # high-water mark cleared, including `fc_last_cmd_seq` itself
+        # (unlike a mere `on_stop`), and the epoch echoed back.
+        assert _field(after_reset_line, "fc_mode") == "off"
+        assert _field(after_reset_line, "fc_take_seq") is None
+        assert _field(after_reset_line, "fc_goal_seq") is None
+        assert _field(after_reset_line, "fc_last_cmd_seq") == "-1"
+        assert _field(after_reset_line, "fc_reset_epoch") == "99"
+        # `run_flight_control` after the reset writes nothing -- the
+        # same "release stops writing" behaviour `TestReleaseStopsWrites
+        # SameFrame` already proves for an ordinary release.
+        assert nothing_written == "true"
+
+    def test_a_fresh_process_seq_1_is_accepted_after_reset(self) -> None:
+        """The reconciliation this reset exists to make unnecessary: a
+        body-layer process that sent up to `seq=47` before restarting
+        must not have its fresh `wire_seq=1` rejected as stale once the
+        reset has landed."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":47,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.reset(1)
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.1)
+flight_control.run_flight_control(0.1)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "active"
+        assert _field(lines[0], "fc_last_cmd_seq") == "1"
+
+    def test_reset_is_idempotent_and_freely_resendable(self) -> None:
+        """Body-layer resends the reset while unconfirmed -- applying
+        the same epoch twice must have no further effect."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+flight_control.reset(5)
+flight_control.reset(5)
+flight_control.push_flight_control_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        assert _field(lines[0], "fc_mode") == "off"
+        assert _field(lines[0], "fc_reset_epoch") == "5"
+
+
 class TestReleaseStopsWritesSameFrame:
     def test_release_stops_writing_in_the_same_frame(self) -> None:
         driver = """

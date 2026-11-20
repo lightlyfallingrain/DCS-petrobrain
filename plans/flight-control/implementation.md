@@ -2449,3 +2449,318 @@ wire-parsing test value, not an assertion about the Lua module's current default
   enabled. The only way to see that this was already correct (rather than assume it from reading
   the `if`) was to run the toy-plant comparison and confirm `max_theta == 0.0` on the collective-
   effective side.
+
+## Body-layer process-start reset, 2026-11-20 (`docs/acceptance/2026-11-20-sortie-feedback.md`,
+`plans/flight-control/debug.md`)
+
+User's own words: *"if body layer resets, it could send a reset signal. that would then reset the
+counters and reset state at aircraft layer too. then body and collector would match"*, and on
+whether Petrovich lets go: *"yes let go. A service reset is error situation, that should not
+happen. If player manually restarts, he knows it then."*
+
+### Design
+
+A new `reset` op, `{"op":"reset","epoch":N}`, dispatched by `commands.lua` (the one op this file
+sends to more than one owning module directly) to `flight_control.reset(epoch)`/`ai_pilot_wheel.
+reset(epoch)`. Each reuses its own module's existing `on_stop` (lets go of the stick/releases every
+open AI-wheel press, clears goal/CBTM/takeover state -- the same effect a mission restart already
+has) and additionally resets the one high-water-mark counter `on_stop` deliberately leaves alone
+across a mission restart: `fc_last_cmd_seq` back to `-1`, `ai_pilot_goal.goal_seq`/`ai_pilot_cbtm.
+seq` back to `0` -- a body-layer *process* restart is a different event from a mission restart, and
+body-layer's own `wire_seq`/goal/CBTM cursors also start fresh at `0` this process, so Lua's own
+floor must come back to its startup sentinel too. Each module echoes the epoch back on its own
+5 Hz status line (`fc_reset_epoch`/`apw_reset_epoch`).
+
+Transport: `POST /command/reset` (collector) -> `CommandSender.send_reset` (UDP, no `seq` field --
+deliberately idempotent/freely re-sendable) -> `commands.lua`'s `handle_reset_command`.
+`body.AircraftLayerClient.write_reset` is the body-layer-side pass-through.
+
+Body-layer: `ConsolePerceptionRunner` gains `command_reset_epoch` (a fresh `int(time.time() *
+1000)` every process start, `default_factory`), `command_reset_confirmed`, `command_reset_last_
+sent_wall` -- all three **preserved** across a mission restart (`reset_for_new_mission`'s own
+pass-through list), since they name a fact about the process, not the mission; regenerating the
+epoch on every mission restart would force a pointless re-confirmation round trip, and Lua's own
+echoed epoch is not reset by a mission restart either. `FlightControlState`/`ParkedFlightState`
+each gain a `lua_reset_epoch` mirror. `body._resolve_command_reset` (called once per poll, before
+`_apply_ai_pilot_wheel_goal`/`_apply_flight_control`) checks both mirrors against `command_reset_
+epoch`; while either has not confirmed, it (re)sends the reset, bounded by the new tunable
+`COMMAND_RESET_RESEND_INTERVAL_S` (2 s default), and sets `command_reset_confirmed = True` once
+both match. `_apply_ai_pilot_wheel_goal`/`_apply_flight_control` (and their own speech drains) are
+each gated on `runner.command_reset_confirmed` -- held, not discarded: a one-shot transition queued
+while unconfirmed is retried the next poll once confirmed, same "retry, never drop" posture
+`_apply_flight_control`'s own `TAKING`-window hold already has. No spoken line on reset (per the
+brief) -- the gate is silent, the eventual held send (once confirmed) speaks exactly as it always
+would.
+
+**Channels checked, only two needed resetting**: `sight_target`/`cockpit_switch`/`watch_args`/
+`read_args`/`petrovich_search` carry no seq and nothing that can go permanently stale (sight/
+cockpit-switch are "latest wins" with no staleness check at all; watch_args/read_args install/
+answer whole, no high-water mark; petrovich_search is a one-shot press) -- left alone, noted in
+`commands.lua`'s own `handle_reset_command` comment so a future reader does not wonder why they
+were not swept in too.
+
+**Existing `wire_seq`/`fc_last_cmd_seq` reconciliation (`_apply_flight_control`'s own `wire_seq =
+max(wire_seq, lua_last_cmd_seq)`) is NOT dead and was deliberately left untouched** -- checked, not
+assumed: `belief.crew_console.CrewConsole.reset_for_new_mission`'s own pass-through list does not
+name `flight_control_state`, so `wire_seq` already resets to `0` on *every* DCS mission (re)start,
+not only a body-layer process restart (confirmed by reading that list and `FlightControlState`'s
+own field declaration -- no `init=False`/separate preservation path exists for it). `Export.lua`'s
+own `fc_last_cmd_seq` is never reset by a mission restart (`on_stop`'s own long-standing comment).
+The reconciliation this round's own brief flagged as a candidate for dead code is therefore the
+*ordinary mid-session mission-restart* fix-up, a scenario this reset mechanism does not touch at
+all (it only runs once, at body-layer process start) -- still load-bearing, left exactly as it was.
+
+### Files Changed
+
+**aircraft-layer**
+- `dcs-export/Petrobrain/flight_control.lua` -- new `fc_reset_epoch` local, `reset(epoch)`
+  (calls `on_stop()` then `fc_last_cmd_seq = -1`; `fc_reset_epoch = epoch`), new `fc_reset_epoch`
+  status-line field, `M.reset` export.
+- `dcs-export/Petrobrain/ai_pilot_wheel.lua` -- new `ai_pilot_reset_epoch` local, `reset(epoch)`
+  (calls `on_stop()` then `ai_pilot_goal.goal_seq = 0`/`ai_pilot_cbtm.seq = 0`;
+  `ai_pilot_reset_epoch = epoch`), new `apw_reset_epoch` status-line field, `M.reset` export.
+- `dcs-export/Petrobrain/commands.lua` -- new `reset` op/`handle_reset_command`, dispatching to
+  both owning modules (guarded non-`nil`, same posture every other entry in this file's `handlers`
+  table already has).
+- `dcs-export/Export.lua` -- `EXPORT_SCRIPT_VERSION` bumped to `2026-11-20` (additive wire change:
+  new op, two new status fields); matching comment added.
+- `src/schema/flight_control.py` -- `FlightControlState.reset_epoch` (parsed from `fc_reset_epoch`,
+  surfaced on `to_api_dict`).
+- `src/schema/ai_pilot_wheel.py` -- `AiPilotWheelState.reset_epoch` (parsed from `apw_reset_epoch`,
+  surfaced on `to_api_dict`).
+- `src/collector/command_sender.py` -- `CommandSender.send_reset(epoch)`.
+- `src/collector/server.py` -- `EXPECTED_EXPORT_VERSION` bumped to `2026-11-20`, matching comment.
+- `src/api/server.py` -- `POST /command/reset` (`_handle_command_reset`), `_COMMAND_RESET_PATH`,
+  `_RESET_EPOCH_MAX`, routing registration, module docstring entry.
+
+**body-layer**
+- `src/aircraft_client.py` -- `AircraftLayerClient.write_reset(epoch)`.
+- `src/belief/flight_control.py` -- `FlightControlState.lua_reset_epoch`, mirrored in `advance_
+  flight_control_state`.
+- `src/belief/ai_pilot_wheel.py` -- `ParkedFlightState.lua_reset_epoch`, mirrored in `advance_
+  parked_flight_state`'s explicit reconstruction (the hazard that function's own docstring already
+  warns about -- left out here, it would have silently reset to `None` every poll instead of
+  mirroring).
+- `src/body.py` -- `COMMAND_RESET_RESEND_INTERVAL_S` (new tunable); `ConsolePerceptionRunner.
+  command_reset_epoch`/`command_reset_confirmed`/`command_reset_last_sent_wall` (all three
+  preserved across `reset_for_new_mission`); new `_resolve_command_reset` function; the poll
+  loop's own call site plus the two `if runner.command_reset_confirmed:` gates around `_apply_ai_
+  pilot_wheel_goal`/`_apply_flight_control` and their speech drains.
+- `config/defaults.toml` -- regenerated (`tools/generate_defaults.py --write`) for the new tunable.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_lua.py::TestBodyLayerStartReset` -- axes released
+  (mode off, nothing written by `run_flight_control` afterward), every seq cleared including `fc_
+  last_cmd_seq` (unlike `on_stop`), epoch echoed; a fresh process's `seq=1` accepted after reset;
+  idempotent double-call.
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py::TestReset` -- open press released, goal/CBTM/
+  takeover state cleared (reusing `on_stop`, proven again here), `goal_seq`/`cbtm_seq` back to `0`,
+  epoch echoed; idempotent double-call.
+- `aircraft-layer/tests/test_commands_lua.py::TestResetDispatch` -- calls both owning modules with
+  the epoch; missing `epoch` ignored, not fatal; one owning module missing still resets the other.
+- `aircraft-layer/tests/test_command_sender.py` -- `send_reset` delivers `{"op":"reset","epoch":N}`
+  with no `seq` field; raises `CommandSendError` on a failed send.
+- `aircraft-layer/tests/test_flight_control_api.py::TestResetCommandEndpoint` -- forwards to the
+  sender; missing/negative/out-of-bound `epoch` -> 400; non-JSON body -> 400; unconfigured sender
+  -> 503; send failure -> 500.
+- `aircraft-layer/tests/test_flight_control_api.py`/`test_ai_pilot_wheel_api.py` -- exhaustive
+  `to_api_dict`/endpoint-shape tests updated for the new `fc_reset_epoch`/`apw_reset_epoch` keys.
+- `body-layer/tests/test_flight_control.py::TestAdvanceFlightControlStateResetEpoch` -- mirrors the
+  echoed epoch; absent field mirrors as `None`.
+- `body-layer/tests/test_ai_pilot_wheel.py::test_the_reset_epoch_is_parsed_through` -- same, for
+  `ParkedFlightState`, explicitly pinning the explicit-reconstruction hazard.
+- `body-layer/tests/test_aircraft_client.py` -- `write_reset` posts to `/command/reset`; raises on
+  an unreachable host.
+- `body-layer/tests/test_body_command_reset.py` (new) -- `_resolve_command_reset`: sends while
+  neither channel has confirmed; confirms once both echo the epoch; one channel confirmed, the
+  other not, still holds; a different (stale) epoch does not confirm; already-confirmed is a true
+  no-op; resend bounded by `COMMAND_RESET_RESEND_INTERVAL_S`; a failed send does not raise and
+  still advances the resend clock.
+
+### Checks
+
+**aircraft-layer**: `ruff format --check src tests` -- pass (86 files). `ruff check src tests` --
+pass. `mypy src` -- pass, 28 files. `luac5.1 -p` on `Export.lua`/`core.lua`/`commands.lua`/
+`flight_control.lua`/`ai_pilot_wheel.lua` -- all pass. `luac5.1 -l -p | grep GETGLOBAL` on the four
+touched Lua files -- every name a genuine stdlib/DCS API or an already-intentional cross-module
+table (`flight_control`/`ai_pilot_wheel` read by `commands.lua`, same pattern `ai_pilot_wheel`'s
+own `is_parked`/`player_seat` getters already use), no stray global introduced. Full suite,
+`pytest tests -q` -- **1021 passed**.
+
+**body-layer**: `ruff format --check src tests` -- pass (228 files). `ruff check src tests` --
+pass. `mypy src` -- pass, 92 files. Targeted run (`test_body_command_reset.py`, `test_body_flight_
+control.py`, `test_body_ai_pilot_wheel.py`, `test_flight_control.py`, `test_ai_pilot_wheel.py`,
+`test_aircraft_client.py`, `test_body.py`, `test_crew_console_ai_pilot_wheel.py`, `test_mock_
+flight_chain.py`) -- **483 passed**, after the three fixes under Notable Discoveries below. Full
+suite, `pytest tests -q` (no xdist in this worktree's venv) -- **3714 passed, 4 xfailed
+(pre-existing, unrelated), 0 failed** (289.75s).
+
+### Notable Discoveries
+
+- The task's own flagged candidate for dead/simplifiable reconciliation (`_apply_flight_control`'s
+  `wire_seq = max(wire_seq, lua_last_cmd_seq)`) turned out NOT to be dead -- see "Existing
+  `wire_seq`/`fc_last_cmd_seq` reconciliation" under Design above. Left untouched; this is the one
+  place this round's own investigation changed the plan rather than the code.
+- `advance_parked_flight_state` reconstructs `ParkedFlightState` from scratch (not `replace()`),
+  the one hazard its own docstring already names -- confirmed again here: the new `lua_reset_
+  epoch` field had to be added to that explicit constructor call, and a dedicated test
+  (`test_the_reset_epoch_is_parsed_through`) pins it so a future field addition that misses this
+  call fails loudly rather than silently resetting every poll.
+- **`tests/test_body.py`'s own `FakeConsoleAircraftClient` (duck-typed, not the real
+  `AircraftLayerClient`) had no `write_reset` method.** `_resolve_command_reset`'s own call to
+  `aircraft_client.write_reset(...)` is unconditional once per poll (it has to be, to notice an
+  aircraft layer that only just came up), so every one of the dozens of `test_body.py` tests that
+  drive the real `_run_crew_text_poll_loop` on a thread hit an uncaught `AttributeError` on that
+  fake, silently killing the poll thread partway through its very first poll -- not a crash the
+  test harness surfaced directly, but a ~40x slowdown (`test_body.py` alone: several minutes
+  instead of ~8s) as every affected test's own `join(timeout=...)` burned its full wait for a
+  thread that had already died. Found by watching the stuck run's own CPU time keep climbing
+  rather than assuming a hang, then grepping for which fake lacked the method. Fixed by adding a
+  recording `write_reset` to that fake (`reset_writes: list[int]`) -- no test asserts on it, since
+  no existing `test_body.py` test checks `flight_control_writes`/an AI-pilot-goal send having
+  actually occurred through the real poll loop either, so leaving `command_reset_confirmed` at its
+  real default (`False`, since this fake's `flight_control_state`/`ai_pilot_wheel_state` are
+  `None` by default) is harmless for every test in this file.
+- `test_body.py::test_no_stale_five_hertz_claims_remain_in_src` (`BL-11` Stage 1/6's own guard
+  against body-layer's poll loop being confused for `Export.lua`'s 5 Hz producer rate) caught a
+  genuinely confusing phrase in `_resolve_command_reset`'s own docstring ("one 5 Hz tick") --
+  reworded to "one poll later, not lost" with no rate claim at all. The guard did its job on the
+  first try.
+- `test_mission_start_reset.py::test_console_perception_runner_reset_preserves_declared_fields_
+  and_resets_rest` -- a second fence over the exact same preserve-set `reset_for_new_mission`'s own
+  pass-through list encodes, found only by running the full suite (not in the targeted set this
+  round first ran): it poisons every `ConsolePerceptionRunner` field not in its own `_RUNNER_
+  PRESERVE` constant and asserts the rest reset to a fresh default. The three new fields were
+  correctly preserved in `body.py` but not added to this test's own separately-maintained
+  `_RUNNER_PRESERVE` set -- fixed by adding them there, with the same reasoning comment `theatre`/
+  `world_model_store` already carry.
+
+## Fail-loud on a stale deployment, 2026-11-20 (`branch impl/reset-fail-loud`, off
+`fix/bl16-sortie-1120` tip `1658d451`)
+
+Follow-up to the process-start reset above: if the Windows side runs an older `Export.lua`/
+`Petrobrain/*.lua` with no `reset` op, `fc_reset_epoch`/`apw_reset_epoch` never echo,
+`command_reset_confirmed` stays `False` for the rest of the flight, and every flight goal/take/
+break is held forever while voice commands still sound acknowledged -- the only trace was one
+DEBUG log line. Two changes, both scoped to `body-layer` only (the symptom and its fix are entirely
+on this side of the wire; nothing in `aircraft-layer`'s `Export.lua` needed to change).
+
+### Design
+
+**1. Loud once, not spammy.** `body._resolve_command_reset` now starts a clock
+(`ConsolePerceptionRunner.command_reset_unconfirmed_since_wall`) the first poll either status feed
+(`crew_console.flight_control_state.lua_mode`/`runner.parked_flight_state.ai_mode`, both `None`
+until their first real sample) shows the aircraft layer is up. If the reset is still unconfirmed
+`COMMAND_RESET_CONFIRM_TIMEOUT_S` (new tunable, 10 s default, `lo=2.0`/`hi=120.0`) after that, it
+logs one `WARNING` naming the likely cause and sets `CrewConsole.command_reset_slow_pending`,
+drained by the new `drain_command_reset_slow` (same shape as `drain_config_error`: held until the
+SPU-8 intercom gate opens, speaks `COMMAND_RESET_STALE_LINE` ("System error, aircraft scripts out
+of date.") exactly once, preserved across a mission restart since it names this process's own
+reset state). **No status sample at all -> no clock, no warning** -- an aircraft layer that simply
+is not up yet is not an error, same posture the reset mechanism itself already has. A confirmation
+landing after the warning was queued but before the SPU-8 gate opens cancels it unspoken
+(`crew_console.command_reset_slow_pending = False` in the confirm branch) -- the pilot is never
+told about an error that has since resolved.
+
+**2. Flight-category commands refuse "unable, not ready" instead of being held silently.**
+`CrewState` gains `commands_ready: bool = True` (default `True` so every existing bare
+`CrewState(...)`/`_BASE_STATE` construction site is unaffected); `CrewConsole.commands_ready`
+mirrors `runner.command_reset_confirmed`, refreshed once per poll right after
+`_resolve_command_reset` runs, and `current_crew_state()` passes it straight through.
+`rules.gates._require_controls` -- the one check every `flight_control*` category shares -- checks
+it second, after `has_controls`: `NOT_FLYING` wins when both are true, since "not flying at all" is
+the more fundamental reason regardless of reset state; otherwise an unconfirmed reset answers
+`unable, not ready` (reusing the existing `NOT_READY` token, already used for the HOLD-timeout case)
+immediately, rather than being accepted and held with no feedback until the reset eventually
+confirms (if it ever does).
+
+### Handover-pair decision (the one open question in the brief)
+
+**Chose not to gate `flight_handover` ("you/i have controls") on `commands_ready` at all.** Reasons,
+checked rather than assumed:
+
+- `CrewConsole.take_controls`/`release_controls` only ever mutate belief state
+  (`flight_control_transition`); the actual wire send (and, for `take_controls`, the ack-timeout
+  evaluation) happens in `_apply_flight_control`/`crew_console.drain_flight_control`, and **both are
+  already gated behind the same `if runner.command_reset_confirmed:` the poll loop uses for mode
+  2's goal channel** -- confirmed by reading that call site (`body.py`'s poll block), not assumed.
+  So a `take_controls` issued while unconfirmed is held exactly like a goal, and once the reset
+  confirms, `drain_flight_control` runs with `took_at_sim` already stale, so `decide_flight_control`'s
+  own `HANDOVER_ACK_TIMEOUT_S` (2 s default) check fires on the very next poll and speaks "Unable,
+  not ready." on its own -- the existing mechanism already gives this command feedback, just
+  deferred to confirmation (or forever, while genuinely unconfirmed, same as everything else this
+  batch's warning already covers at the system level).
+- `release_controls` ("I have controls") must never be refused -- it is Decision 13's own
+  always-acts recovery phrase, and gating it would mean the one case the project explicitly wants
+  never to ask "confirm?"/never to refuse could now say "unable."
+- Splitting the shared `"flight_handover"` category into a take-only and release-only variant (the
+  only way to gate one token and not the other) would have touched `config/rules/flight.lua`,
+  `config/rules/README.md`, and two already-passing test files
+  (`tests/test_rule_gates.py`/`tests/test_rules_flight_actions.py`) for a case the existing
+  ack-timeout already resolves correctly -- not worth the surface for no behaviour change.
+
+### Files Changed (body-layer only)
+
+- `src/body.py` -- `COMMAND_RESET_CONFIRM_TIMEOUT_S` (new tunable); `ConsolePerceptionRunner.
+  command_reset_unconfirmed_since_wall`/`command_reset_warned` (both preserved across
+  `reset_for_new_mission`, same reasoning as the three existing `command_reset_*` fields);
+  `_resolve_command_reset`'s warning/pending logic; the poll loop's own
+  `crew_console.commands_ready = runner.command_reset_confirmed` line (same spot as
+  `crew_console.parked_flight_state = runner.parked_flight_state`); the shared `/spu8/state` fetch
+  condition and `drain_command_reset_slow` call site, alongside `drain_config_error`/`drain_
+  altimeter_qnh_failed`/`drain_action_file_error`.
+- `src/belief/crew_console.py` -- `COMMAND_RESET_STALE_LINE`; `CrewConsole.commands_ready` (default
+  `True`, **not** preserved across a mission restart -- refreshed the very next poll, same posture
+  `enrichment`/`sight_ready` already have) and `command_reset_slow_pending` (default `False`,
+  **preserved**, same reasoning as `config_error_pending`); `drain_command_reset_slow`;
+  `current_crew_state()` passes `commands_ready=self.commands_ready` through.
+- `src/belief/crew_state.py` -- `CrewState.commands_ready: bool = True`.
+- `src/rules/gates.py` -- `_require_controls` checks `state.commands_ready` second, after
+  `has_controls`, reusing the `NOT_READY` token.
+- `config/defaults.toml` -- regenerated (`tools/generate_defaults.py --write`).
+
+### Tests Added
+
+- `tests/test_body_command_reset.py::TestResolveCommandResetFailLoud` -- quiet with no status
+  sample ever; warns and queues the spoken line once `COMMAND_RESET_CONFIRM_TIMEOUT_S` has elapsed
+  since the first sample; warns only once; a confirmation landing before the drain cancels the
+  pending line unspoken.
+- `tests/test_rule_gates.py` -- `flight_control`/`flight_control_heading` answer `unable, not
+  ready` while `commands_ready=False`; `NOT_FLYING` still wins when both `has_controls=False` and
+  `commands_ready=False`; `flight_handover` is unchanged by `commands_ready` (pins the handover
+  decision above).
+- `tests/test_crew_console.py::TestDrainCommandResetSlow` -- speaks once gate is open; silent when
+  not pending; held while the intercom gate is closed; held while silenced; preserved (not
+  re-armed) across a mission restart, the mirror image of `TestDrainAltimeterQnhFailed`'s own
+  re-armable case.
+- `tests/test_crew_console.py::TestCurrentCrewStateCommandsReady` -- defaults `True`; reflects a
+  `False` `self.commands_ready`.
+
+### Checks
+
+`ruff format --check src tests` -- pass (228 files). `ruff check src tests` -- pass. `mypy src`
+(`cd body-layer && mypy src`) -- pass, 92 files. Targeted run (`test_body_command_reset.py`,
+`test_rule_gates.py`, `test_crew_console.py`, `test_mission_start_reset.py`, `test_rules_flight_
+actions.py`, `test_flight_control.py`, `test_ai_pilot_wheel.py`, `test_tuning_defaults_toml.py`,
+`test_crew_console_rules.py`, `test_body.py`, `test_voice_commands.py`) -- **860 passed**. Full
+suite, `pytest tests -q -n auto` -- **3729 passed, 4 xfailed (pre-existing, unrelated), 0 failed**
+(~148s), after fixing the one real finding below.
+
+### Notable Discoveries
+
+- **`tests/test_mission_start_reset.py` has its own separately-maintained preserve-set fence for
+  `CrewConsole` too** (`_CREW_CONSOLE_PRESERVE`), a sibling of the `ConsolePerceptionRunner` one the
+  previous round's own Notable Discoveries flagged -- found the same way, by running the full
+  suite rather than the targeted set first. `command_reset_slow_pending` had to be added there;
+  `commands_ready` deliberately was not (it resets to its declared default and is refreshed the
+  very next poll, so it belongs in neither preserve-set).
+- **A real cross-key-constraint test caught a genuine mistake in this round's own tuning comment**:
+  `test_tuning_comment_renders.py::test_no_cross_key_constraint_hides_after_the_first_sentence`
+  failed because `COMMAND_RESET_CONFIRM_TIMEOUT_S`'s own comment named
+  `COMMAND_RESET_RESEND_INTERVAL_S` by identifier in its second sentence -- exactly the "read the
+  rendered `config/defaults.toml`, not your source comment" trap this project's own tuning
+  convention warns about. Not a true cross-key invariant needing `tuning._check_*`-style
+  enforcement (nothing breaks if the two values disagree; it was descriptive justification only),
+  so the fix was to drop the identifier from the prose ("a couple of resends" instead of naming the
+  constant) rather than restate the coupling in the first sentence.

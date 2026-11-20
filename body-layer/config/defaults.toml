@@ -477,6 +477,16 @@ ACT_FLOOR_CANCEL = 0.6
 CONFIRM_FLOOR = 0.3
 
 [body]
+# How long body-layer waits, once the aircraft layer's own flight- control/AI-wheel status feed has produced at least one sample this process, for its process-start reset to confirm before giving up on silence and speaking up (BL-16 fail-loud, 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`): a mismatched deployed `Export.lua`/`Petrobrain/*.lua` (no `reset` op, so the epoch is never echoed) otherwise holds every flight goal/take/break forever with no trace but a DEBUG log line, while voice commands still sound acknowledged.
+# status: judgement | range: 2.0 .. 120.0
+# source: body.py:COMMAND_RESET_CONFIRM_TIMEOUT_S
+COMMAND_RESET_CONFIRM_TIMEOUT_S = 10.0
+
+# How often body-layer re-sends its own process-start reset while unconfirmed (BL-16 sortie 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`) -- every seq-carrying send (mode 1's handover/goal channel, mode 2's goal/CBTM channel) is held until `Export.lua`'s own status lines echo back the epoch this process sent, so a longer interval only ever delays how soon those channels can be used after a body-layer (re)start, never changes what gets sent.
+# status: judgement | range: 0.5 .. 30.0
+# source: body.py:COMMAND_RESET_RESEND_INTERVAL_S
+COMMAND_RESET_RESEND_INTERVAL_S = 2.0
+
 # Bounded fallback for the mission-start resolving window: how many seconds of **wall clock** (not sim time, not a poll count -- see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own docstring for why) `_run_crew_text_poll_loop` may wait for a fresh ownship sample before giving up on `t_sim`-based freshness and firing `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23: the fallback cannot tell a `t_sim` coincidence apart from no fresh sample at all, and only the former is safe to classify airborne from).
 # status: judgement | range: 5.0 .. 120.0
 # source: body.py:MISSION_START_RESOLVE_FALLBACK_S

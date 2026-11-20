@@ -294,6 +294,23 @@ the body/brain process, on either Windows or Mac (compute topology note in
   `[[AC-B14]]` lesson). `503 {"error": "flight_control channel not
   configured"}` if this server was built without a `command_sender`; a
   send failure propagates as `500 {"error": ...}`.
+- `POST /command/reset` -> body-layer's own process-start reset (BL-16
+  sortie 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`,
+  `plans/flight-control/debug.md`). Body `{"epoch": int}`; forwards to
+  `collector.command_sender.CommandSender.send_reset`, which fires
+  `{"op": "reset", "epoch": epoch}` at `Export.lua`'s inbound UDP
+  listener, the same one every other `/command/*` endpoint already
+  targets. `commands.lua`'s own `handle_reset_command` dispatches it to
+  every seq-carrying channel's own `reset(epoch)` (today: `flight_
+  control`/`ai_pilot_wheel`), each of which echoes the epoch back on its
+  own status line (`fc_reset_epoch`/`apw_reset_epoch`) so body-layer can
+  confirm it landed before sending anything that carries a `seq`.
+  `400 {"error": ...}` on a missing/out-of-range `epoch` or a non-JSON
+  body. `503 {"error": "reset channel not configured"}` if this server
+  was built without a `command_sender`; a send failure propagates as
+  `500 {"error": ...}` -- same posture as every other write here, since
+  a dropped reset is exactly the "keep retrying" signal body-layer's own
+  bounded resend loop needs.
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -385,6 +402,7 @@ _COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
 _QUERY_READ_ARGS_PATH = "/query/read_args"
 _COMMAND_SIGHT_TARGET_PATH = "/command/sight_target"
 _COMMAND_AI_PILOT_GOAL_PATH = "/command/ai_pilot_goal"
+_COMMAND_RESET_PATH = "/command/reset"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
 
@@ -554,6 +572,16 @@ _FLIGHT_CONTROL_GOAL_BOUNDS: dict[str, tuple[float, float]] = {
     # send.
     "turn_rate_deg_s": (-90.0, 90.0),
 }
+
+#: `/command/reset`'s own bound (BL-16 sortie 2026-11-20, `docs/
+#: acceptance/2026-11-20-sortie-feedback.md`) -- shape validation only,
+#: same posture as every other `/command/*` endpoint's own clamp.
+#: Body-layer mints `epoch` from a wall-clock millisecond timestamp
+#: (`int(time.time() * 1000)`), well under the JSON/JS safe-integer
+#: ceiling; a non-negative whole number is all this layer needs to
+#: check -- `Export.lua`'s own `handle_reset_command` does not interpret
+#: the value at all, only echoes it back verbatim.
+_RESET_EPOCH_MAX = 2**53 - 1
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -834,6 +862,9 @@ def _make_handler(
                 return
             if path == _COMMAND_FLIGHT_CONTROL_PATH:
                 self._handle_command_flight_control()
+                return
+            if path == _COMMAND_RESET_PATH:
+                self._handle_command_reset()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -1693,6 +1724,53 @@ def _make_handler(
                     limits if limits_raw is not None else None,
                     goal if goal_raw is not None else None,
                 )
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_reset(self) -> None:
+            """`POST /command/reset` -- body-layer's own process-start
+            reset (BL-16 sortie 2026-11-20, `docs/acceptance/
+            2026-11-20-sortie-feedback.md`). Shape validation only:
+            `epoch` a non-negative whole number, same division of
+            labour as every other `/command/*` endpoint -- `Export.
+            lua`'s own `handle_reset_command` does not interpret the
+            value, only dispatches and echoes it back."""
+            if command_sender is None:
+                self._respond_json(503, {"error": "reset channel not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            epoch_raw = data.get("epoch")
+            if (
+                isinstance(epoch_raw, bool)
+                or not isinstance(epoch_raw, int)
+                or not (0 <= epoch_raw <= _RESET_EPOCH_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'epoch' must be a whole number in "
+                            f"[0, {_RESET_EPOCH_MAX}], got {epoch_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            try:
+                command_sender.send_reset(epoch_raw)
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return

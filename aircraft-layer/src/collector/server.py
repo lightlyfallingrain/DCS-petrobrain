@@ -169,7 +169,13 @@ logger = logging.getLogger(__name__)
 #: new per-frame flight-control status line (wire key `"fc_mode"`) and
 #: the new `flight_control` inbound command op -- additive only, same
 #: reasoning as the AI-pilot-wheel bumps above.
-EXPECTED_EXPORT_VERSION = "2026-11-18"
+#: Bumped again 2026-11-20 (BL-16 sortie, `docs/acceptance/
+#: 2026-11-20-sortie-feedback.md`, `plans/flight-control/debug.md`) for
+#: the new `commands.lua` "reset" op (body-layer's own process-start
+#: reset) and the matching `"fc_reset_epoch"`/`"apw_reset_epoch"` fields
+#: on the flight-control/AI-pilot-wheel status lines -- additive only,
+#: same reasoning as every other additive bump above.
+EXPECTED_EXPORT_VERSION = "2026-11-20"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it

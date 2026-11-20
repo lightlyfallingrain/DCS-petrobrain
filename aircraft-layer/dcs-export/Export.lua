@@ -230,7 +230,16 @@ creating/deleting the flag file.
 -- `flight_control` inbound command op -- additive only, same reasoning
 -- as the AI-pilot-wheel module bumps above. Update `aircraft-layer/src/
 -- collector/server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-11-18"
+--
+-- Bumped again 2026-11-20 (BL-16 sortie, `docs/acceptance/
+-- 2026-11-20-sortie-feedback.md`, `plans/flight-control/debug.md`) for
+-- the new `commands.lua` "reset" op (body-layer's own process-start
+-- reset, dispatched to both `flight_control.reset`/`ai_pilot_wheel.
+-- reset`) and the matching `fc_reset_epoch`/`apw_reset_epoch` fields on
+-- their own status lines -- additive only, same reasoning as every
+-- other additive bump above. Update `aircraft-layer/src/collector/
+-- server.py`'s `EXPECTED_EXPORT_VERSION` in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-11-20"
 
 local MOD_DIR = lfs.writedir() .. "Scripts\\Petrobrain\\"
 

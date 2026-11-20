@@ -1344,6 +1344,16 @@ ALTIMETER_QNH_TIMEOUT_LINE: Final[str] = "Unable, altimeter pressure not set."
 #: split `CONFIG_ERROR_LINE`'s own docstring describes for sequence files.
 ACTION_FILE_ERROR_LINE: Final[str] = "Action file error."
 
+#: BL-16 fail-loud (2026-11-20, `docs/acceptance/
+#: 2026-11-20-sortie-feedback.md`) -- `body._resolve_command_reset`'s own
+#: one-shot spoken line for "the aircraft layer is up but has not echoed
+#: this process's reset epoch after `body.COMMAND_RESET_CONFIRM_
+#: TIMEOUT_S`," held until the SPU-8 intercom gate reads open, same
+#: deferral `CONFIG_ERROR_LINE` already uses. The likely cause (a stale
+#: deployed `Export.lua`/`Petrobrain/*.lua`) goes in the `WARNING` log
+#: line, not here -- this is only the pilot-facing heads-up.
+COMMAND_RESET_STALE_LINE: Final[str] = "System error, aircraft scripts out of date."
+
 #: BL-16 mode 1 Decision 22's own forced-handover/self-release wording
 #: ("You have controls!", reused for both Co-moving row 9a's unpark-take
 #: refusal and row 7's Lua envelope self-release) lives in `belief.
@@ -2128,6 +2138,27 @@ class CrewConsole:
     #: this class resets on a mission (re)start.
     config_error_pending: bool = field(default=False, repr=False)
 
+    #: BL-16 fail-loud (2026-11-20) -- mirrors `body.ConsolePerception
+    #: Runner.command_reset_confirmed`, refreshed every poll by `body.py`
+    #: right after `_resolve_command_reset` runs (never cached beyond
+    #: that one call site). Read by `current_crew_state()` and, through
+    #: it, every `flight_control*` gate (`rules.gates._require_
+    #: controls`): while `False`, a flight goal is refused `"unable, not
+    #: ready"` immediately rather than accepted and held forever with no
+    #: feedback. Defaults `True` -- a `CrewConsole` built without a poll
+    #: loop driving it (the overwhelming majority of tests) is never
+    #: gated by a reset it never runs.
+    commands_ready: bool = field(default=True, repr=False)
+
+    #: BL-16 fail-loud (2026-11-20) -- set by `body._resolve_command_
+    #: reset` once the aircraft layer is up but the reset has not
+    #: confirmed after `body.COMMAND_RESET_CONFIRM_TIMEOUT_S`; drained
+    #: by `drain_command_reset_slow` the first poll the SPU-8 intercom
+    #: gate reads open. **Preserved across a mission restart**, same
+    #: reasoning as `config_error_pending` above -- it describes this
+    #: process's own reset state, not per-mission state.
+    command_reset_slow_pending: bool = field(default=False, repr=False)
+
     #: `[[BL-B118]]` -- set by `body._run_crew_text_poll_loop`'s poll
     #: block on a `running -> failed_*` phase transition of `runner.
     #: altimeter_qnh_sync`; drained by `drain_altimeter_qnh_failed` the
@@ -2226,7 +2257,14 @@ class CrewConsole:
         explicitly asked for). **`config_error_pending` is also preserved**
         (`plans/effector-sequences/plan.md` D6: "a mission restart does not
         clear it") -- it describes this process's own startup state, not
-        per-mission state. Everything else (`scheduler`, `_pending_
+        per-mission state. **`command_reset_slow_pending` is preserved for
+        the same reason** -- it names this process's own reset-confirmation
+        state, not this mission's. `commands_ready` is deliberately **not**
+        in this list: it resets to its declared default (`True`) and is
+        refreshed by `body.py`'s poll loop the very next poll, same
+        "resets to default, refreshed by the very next thing that runs"
+        shape `enrichment`/`sight_ready` already have below. Everything
+        else (`scheduler`, `_pending_
         confirmation`, `_confirmation_expired_sim`, `_brain_turns`,
         `commands_handled`, `last_command_target_contact_id`,
         `attack_run_transition`, `observ_transition`,
@@ -2291,6 +2329,7 @@ class CrewConsole:
             audio_adapter_reporter=self.audio_adapter_reporter,
             silenced=self.silenced,
             config_error_pending=self.config_error_pending,
+            command_reset_slow_pending=self.command_reset_slow_pending,
             rule_runner=self.rule_runner,
             _ever_enabled_rule_ids=self._ever_enabled_rule_ids,
         )
@@ -2501,6 +2540,24 @@ class CrewConsole:
             return
         self._print([CONFIG_ERROR_LINE], now_sim)
         self.config_error_pending = False
+
+    def drain_command_reset_slow(self, now_sim: float, *, intercom_open: bool) -> None:
+        """Speaks `COMMAND_RESET_STALE_LINE` exactly once per process, the
+        first poll `self.command_reset_slow_pending and intercom_open and
+        not self.silenced` -- same shape as `drain_config_error` above,
+        including "silenced defers, never drops." `body._resolve_command_
+        reset` clears the flag again, unspoken, if the reset confirms
+        before this ever runs -- so a confirmation landing between the
+        warning being queued and the SPU-8 gate opening is never spoken
+        as an error that has since resolved itself."""
+        if not self.command_reset_slow_pending:
+            return
+        if not intercom_open:
+            return
+        if self.silenced:
+            return
+        self._print([COMMAND_RESET_STALE_LINE], now_sim)
+        self.command_reset_slow_pending = False
 
     def drain_action_file_error(self, now_sim: float, *, intercom_open: bool) -> None:
         """Speaks `ACTION_FILE_ERROR_LINE` the first poll `self.
@@ -3325,7 +3382,14 @@ class CrewConsole:
         freezing the very first turn/heading/altitude/speed command
         after a fresh take**, since mode 1 has no AI pilot reporting a
         pre-existing held value the way mode 2's overlay readback
-        does (`belief.flight_control`'s own module docstring)."""
+        does (`belief.flight_control`'s own module docstring).
+
+        **`commands_ready` (BL-16 fail-loud, 2026-11-20)** is passed
+        straight through from `self.commands_ready` -- a plain field
+        `body.py`'s poll loop refreshes, not a derivation this method
+        computes, since it names a fact about this process's reset
+        channel, not about `parked_flight_state`/`flight_control_
+        state`."""
         parked = self.parked_flight_state
         axes = self.flight_control_state
         flying_axes = axes.phase in ("TAKING", "ACTIVE")
@@ -3356,6 +3420,7 @@ class CrewConsole:
             seat="copilot",
             hands_free=not has_controls,
             eyes_free=True,
+            commands_ready=self.commands_ready,
         )
 
     def queue_effector_write(

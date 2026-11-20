@@ -351,7 +351,10 @@ class ParkedFlightState:
     or after it" by command order, not by whether `Export.lua` has
     reported the break `"done"` yet -- the user's own rule is "latest
     player command always wins," not "wins once the break finishes."
-    Both reset on unpark, same posture as `cbtm_action_sent`."""
+    Both reset on unpark, same posture as `cbtm_action_sent`.
+
+    `lua_reset_epoch` (same sortie's own reset-on-start work) mirrors
+    `Export.lua`'s `apw_reset_epoch` echo -- see its own field docstring."""
 
     parked_active: bool = False
     ai_mode: str | None = None
@@ -388,6 +391,12 @@ class ParkedFlightState:
     payload_station_counts_last_seen: Mapping[int, int] | None = None
     command_order_seq: int = 0
     cbtm_action_order: int | None = None
+    #: BL-16 sortie 2026-11-20 (`docs/acceptance/
+    #: 2026-11-20-sortie-feedback.md`) -- mirrors `Export.lua`'s own
+    #: `apw_reset_epoch` echo, same shape and purpose as `belief.
+    #: flight_control.FlightControlState.lua_reset_epoch`. Read-only
+    #: mirror; `body.py`'s poll loop decides from it, nothing here does.
+    lua_reset_epoch: int | None = None
 
 
 def _parse_float(value: object) -> float | None:
@@ -534,6 +543,7 @@ def advance_parked_flight_state(
         ),
         command_order_seq=state.command_order_seq,
         cbtm_action_order=state.cbtm_action_order,
+        lua_reset_epoch=_as_optional_int(sample.get("apw_reset_epoch")),
     )
 
 

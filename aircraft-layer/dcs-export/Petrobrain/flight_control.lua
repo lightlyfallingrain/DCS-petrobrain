@@ -1072,6 +1072,12 @@ local fc_release_reason = nil
 local fc_refuse_cause = nil
 local fc_takeover_mode = nil
 
+-- BL-16 sortie 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.
+-- md` -- the body-layer process-start reset's own generation counter,
+-- echoed on every status line so body-layer can confirm this exact
+-- epoch landed. Only ever written by `reset()` below.
+local fc_reset_epoch = nil
+
 -- The commanded goal, stored verbatim (never shaped -- M2's own job).
 -- "A null field means keep yours": each is updated independently.
 local fc_goal_heading_deg = nil
@@ -1927,6 +1933,7 @@ local function push_flight_control_state(t)
         .. ',"fc_agl_source":' .. text_or_null(agl_source)
         .. ',"fc_release_reason":' .. text_or_null(fc_release_reason)
         .. ',"fc_refuse_cause":' .. text_or_null(fc_refuse_cause)
+        .. ',"fc_reset_epoch":' .. fmt_int_or_null(fc_reset_epoch)
         .. ',"fc_limit_hit":false'
         .. ',"fc_axes_pitch":' .. tostring(FC_AXES_ENABLED.pitch)
         .. ',"fc_axes_roll":' .. tostring(FC_AXES_ENABLED.roll)
@@ -1974,10 +1981,34 @@ local function on_stop()
     -- relies on.
 end
 
+-- Body-layer process-start reset (BL-16 sortie 2026-11-20, `docs/
+-- acceptance/2026-11-20-sortie-feedback.md` -- user: "if body layer
+-- resets, it could send a reset signal ... then body and collector
+-- would match", and on the stick: "yes let go. A service reset is
+-- error situation"). Reuses `on_stop` above -- same "let go of the
+-- stick, clear every held goal/law state" effect a mission restart
+-- already has -- then goes one step further: `on_stop` deliberately
+-- leaves `fc_last_cmd_seq` untouched (its own comment: a stale,
+-- pre-restart command must still be seen as stale across a mission
+-- restart), but a body-layer *process* restart is a different event --
+-- body-layer's own `wire_seq` also starts fresh at 0 this process, so
+-- Lua's own staleness floor must come back to its startup sentinel too,
+-- or the very next `seq=1` send this process ever makes is rejected as
+-- stale forever. Idempotent and safely re-sendable: body-layer resends
+-- this while unconfirmed (holding every seq-carrying send until a
+-- status line echoes this exact epoch back), and applying the same
+-- epoch twice has no further effect.
+local function reset(epoch)
+    on_stop()
+    fc_last_cmd_seq = -1
+    fc_reset_epoch = epoch
+end
+
 M.handle_flight_control_command = handle_flight_control_command
 M.run_flight_control = run_flight_control
 M.push_flight_control_state = push_flight_control_state
 M.on_stop = on_stop
+M.reset = reset
 
 -- The control law's own pure functions, exported for the toy-plant
 -- suite (`tests/test_flight_control_law.py`) to call directly -- none

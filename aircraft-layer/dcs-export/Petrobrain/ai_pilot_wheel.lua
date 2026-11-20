@@ -288,6 +288,13 @@ local ai_pilot_cam_fwd_m = nil
 -- by `ai_pilot_update_seat` the frame the camera crosses into the
 -- operator seat, consumed by `run_ai_pilot_wheel`'s own seat gate.
 local ai_pilot_seat_settle_until_t = nil
+
+-- BL-16 sortie 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.
+-- md` -- the body-layer process-start reset's own generation counter,
+-- same shape as `flight_control.lua`'s own `fc_reset_epoch`. Only ever
+-- written by `reset()` below, echoed on every status line.
+local ai_pilot_reset_epoch = nil
+
 local ai_pilot_mode_text = nil
 local ai_pilot_course_text = nil
 local ai_pilot_alt_text = nil
@@ -1773,7 +1780,8 @@ local function push_ai_pilot_wheel_state(t)
         .. ',"apw_seat":' .. text_or_null(ai_pilot_player_seat)
         .. ',"apw_cam_fwd_m":' .. fmt_num_or_null(ai_pilot_cam_fwd_m)
         .. ',"apw_cbtm_status":' .. text_or_null(ai_pilot_cbtm.status)
-        .. ',"apw_cbtm_seq":' .. fmt_int_or_null(ai_pilot_cbtm.seq) .. '}\n')
+        .. ',"apw_cbtm_seq":' .. fmt_int_or_null(ai_pilot_cbtm.seq)
+        .. ',"apw_reset_epoch":' .. fmt_int_or_null(ai_pilot_reset_epoch) .. '}\n')
     if not ok then
         debug_log("ai-pilot-wheel send failed: " .. tostring(err))
         client:close()
@@ -1867,6 +1875,27 @@ local function on_stop()
     ai_pilot_seat_settle_until_t = nil
 end
 
+-- Body-layer process-start reset (BL-16 sortie 2026-11-20, `docs/
+-- acceptance/2026-11-20-sortie-feedback.md`) -- same reasoning as
+-- `flight_control.lua`'s own `reset()`: reuses `on_stop` above (lets go
+-- of every open press, clears the goal/CBTM/takeover state, same
+-- effect a mission restart already has -- ED's AI keeps flying), then
+-- goes one step further for the two seq fields `on_stop` deliberately
+-- leaves alone (they are not reset across a mission restart, same
+-- "mirror the last value sent" posture `flight_control.lua`'s own `fc_
+-- last_cmd_seq` has): `ai_pilot_goal.goal_seq`/`ai_pilot_cbtm.seq` go
+-- back to their startup default (`0`), so body-layer's own fresh goal/
+-- CBTM cursors (which also start this process at their own defaults)
+-- are never seen as "nothing new" against a stale pre-restart value.
+-- Idempotent and safely re-sendable, same posture as `flight_control.
+-- lua`'s `reset()`.
+local function reset(epoch)
+    on_stop()
+    ai_pilot_goal.goal_seq = 0
+    ai_pilot_cbtm.seq = 0
+    ai_pilot_reset_epoch = epoch
+end
+
 -- `plans/flight-control/plan.md`, "Revised 2026-11-18", Decision 25 --
 -- read-only getters for `flight_control.lua`, the mode-1 module. **Must
 -- return `ai_pilot_parked_active`, never 852 alone**: 852 alone would
@@ -1924,6 +1953,7 @@ M.update_ai_pilot_wheel_overlay = update_ai_pilot_wheel_overlay
 M.push_ai_pilot_wheel_state = push_ai_pilot_wheel_state
 M.handle_ai_pilot_goal_command = handle_ai_pilot_goal_command
 M.on_stop = on_stop
+M.reset = reset
 M.is_parked = is_parked
 M.player_seat = player_seat
 M.stick_park_raw = stick_park_raw
