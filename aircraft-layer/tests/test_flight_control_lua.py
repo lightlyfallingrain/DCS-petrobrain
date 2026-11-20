@@ -305,6 +305,24 @@ print(string.format("%.6f", written[2002]))
         assert abs(float(pitch_written) - 0.321) <= 0.0011
         assert abs(float(roll_written) - (-0.154)) <= 0.0011
 
+    def test_collective_capture_writes_with_the_measured_sign(self) -> None:
+        """Sortie 2026-11-20: `FC_AXES_ENABLED.collective` now defaults
+        `true`, so a take actually writes the collective axis (2087),
+        not just the internal law state -- same bit-exact-at-capture
+        contract as pitch/roll/pedal above. `SIGN.collective = -1.0`
+        (M0-C, flight 6): the written command is `-captured_arg`."""
+        driver = """
+pilot_args.collective = 0.3
+ap_parked = false
+ap_seat = "pilot"
+flight_control.handle_flight_control_command(
+    '{"op":"flight_control","seq":1,"cmd":"take","limits":{"min_ias_kmh":80.0}}', 0.0)
+flight_control.run_flight_control(0.1)
+print(string.format("%.6f", written[2087]))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - (-0.3)) <= 0.0011
+
     def test_pedal_capture_writes_with_the_measured_sign(self) -> None:
         """M0-B (2026-11-18): `SIGN.pedals = -1.0` -- the written command
         is `-captured_arg` (plus wobble), not the raw arg value."""
@@ -1054,10 +1072,13 @@ print(tostring(valid))
 
 
 class TestAxesEnabledOnTheWire:
-    def test_pedal_enabled_collective_disabled(self) -> None:
+    def test_all_four_axes_enabled(self) -> None:
         """M0-B (flown 2026-11-18) measured the pedal write (`SIGN.
-        pedals = -1.0`), so it is enabled; M0-C (collective) is still
-        unmeasured, so it stays disabled."""
+        pedals = -1.0`), so it is enabled; M0-C (collective) had its
+        sign/scale measured the same flight but was kept off pending its
+        own lag/VS measurement -- enabled from sortie 2026-11-20 by user
+        direction instead (`docs/acceptance/2026-11-20-sortie-
+        feedback.md`, "absolutely yes. Now.")."""
         driver = """
 flight_control.push_flight_control_state(0.0)
 print(sent_lines[#sent_lines])
@@ -1066,7 +1087,7 @@ print(sent_lines[#sent_lines])
         assert _field(lines[0], "fc_axes_pitch") == "true"
         assert _field(lines[0], "fc_axes_roll") == "true"
         assert _field(lines[0], "fc_axes_pedal") == "true"
-        assert _field(lines[0], "fc_axes_collective") == "false"
+        assert _field(lines[0], "fc_axes_collective") == "true"
 
 
 class TestSeqFieldsSurviveTheRealSchema:

@@ -874,6 +874,204 @@ print(tostring(state.rate_override_deg_s))
         assert abs(t_y_after_settle - t_y_before_break) < 1e-6
 
 
+class TestCollectiveHoldsAltitudeInABankedTurn:
+    """Sortie 2026-11-20 (`docs/acceptance/2026-11-20-sortie-feedback.md`,
+    "Mode 1 flight, `main` @ `a8b21de0`"), user: "Use pedals. All the
+    axis are interdependent... Use then all to maintain desired state."
+    -- and the decision to enable collective at all. Step 3's own split
+    (`d_theta` only ever picks up the altitude channel's `a_z_d` term
+    while `collective_limited`) already favours collective 100% while
+    it has room; this is the toy-plant proof that the split actually
+    holds altitude once collective has a real effect on the plant, and
+    that pitch picks up the slack when it does not (collective written
+    but never actually moving the aircraft -- the pre-this-batch
+    reality for every flight so far)."""
+
+    @staticmethod
+    def _run_banked_scenario(collective_effective: bool) -> tuple[float, float, float]:
+        driver = f"""
+local measured_take = {_measured()}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local measured = {_measured(bank_deg=40.0)}
+local dt = 0.1
+local max_theta = 0.0
+-- Lift lost to the bank's own tilt (`1 - cos(bank)`), a standing drain
+-- on vertical lift the toy plant applies regardless of scenario --
+-- the thing collective (or, lacking that, pitch) has to counter.
+local lift_loss = 1.0 - math.cos(math.rad(40.0))
+for i = 1, 600 do
+    state = flight_control.law_update(state, dt, measured, LIMITS)
+    local target_w
+    if {"true" if collective_effective else "false"} then
+        -- Collective actually reaches the plant: vertical speed chases
+        -- a target set by how far `u_c` sits above its level-flight
+        -- trim (0.2 at take), net of the bank's own lift loss.
+        target_w = (state.u_c - 0.2) * 10.0 - lift_loss * 5.0
+    else
+        -- Collective has no real effect (today's reality before this
+        -- batch): only the bank's lift loss acts on vertical speed.
+        target_w = -lift_loss * 5.0
+    end
+    measured.w_mps = measured.w_mps + (target_w - measured.w_mps) * (dt / 1.0)
+    measured.h_m = measured.h_m + measured.w_mps * dt
+    if math.abs(state.theta_d) > max_theta then max_theta = math.abs(state.theta_d) end
+end
+print(string.format("%.6f", max_theta))
+print(string.format("%.6f", state.u_c))
+print(string.format("%.6f", measured.h_m))
+"""
+        lines = _run(driver)
+        max_theta, u_c, final_h_m = (float(v) for v in lines)
+        return max_theta, u_c, final_h_m
+
+    def test_collective_alone_holds_altitude_pitch_never_moves(self) -> None:
+        max_theta, u_c, final_h_m = self._run_banked_scenario(collective_effective=True)
+        # Pitch (`theta_d`) never picks up the altitude term at all --
+        # collective alone carries the whole correction, never saturating.
+        assert max_theta == 0.0
+        assert u_c < 0.999
+        # Altitude barely moves from the 200 m take height (collective
+        # closes the loop before any real drift accumulates).
+        assert abs(final_h_m - 200.0) < 1.0
+
+    def test_pitch_only_picks_up_the_job_once_collective_cannot_act(self) -> None:
+        """Negative control, same scenario: with collective's real
+        effect removed, `u_c` saturates (no feedback ever resolves the
+        altitude error), `collective_limited` goes true, and pitch
+        picks up the slack -- a materially larger pitch demand than the
+        collective-effective run, and real altitude loss collective
+        would otherwise have prevented."""
+        max_theta, u_c, final_h_m = self._run_banked_scenario(
+            collective_effective=False
+        )
+        assert max_theta > 1.0
+        assert u_c >= 0.999
+        assert final_h_m < 150.0
+
+    def test_pitch_demand_is_smaller_with_collective_effective(self) -> None:
+        theta_on, _, _ = self._run_banked_scenario(collective_effective=True)
+        theta_off, _, _ = self._run_banked_scenario(collective_effective=False)
+        assert theta_on < theta_off
+
+
+#: Shared toy-plant driver for the turn-coordination pedal (sortie
+#: 2026-11-20, step 5's `turn_coord_pedal`) -- the idealised "measured
+#: heading tracks the law's own reference" plant `TestBreakPedalBias
+#: Unwinds` already uses, since isolating the pedal mechanism from
+#: heading-tracking physics is exactly what that technique is for.
+_TURN_PEDAL_DRIVER = """
+local measured_take = {measured_take}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local outputs_before = flight_control.law_outputs(state, measured_take)
+{goal_apply}
+local min_pedal, max_pedal = 0.0, 0.0
+local m
+for i = 1, {steps} do
+    m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
+           v_t_mps = 42.0, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
+           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
+    state = flight_control.law_update(state, 0.1, m, LIMITS)
+    local out = flight_control.law_outputs(state, m)
+    if out.pedals < min_pedal then min_pedal = out.pedals end
+    if out.pedals > max_pedal then max_pedal = out.pedals end
+end
+local outputs_after = flight_control.law_outputs(state, m)
+print(string.format("%.6f", outputs_before.pedals))
+print(string.format("%.6f", min_pedal))
+print(string.format("%.6f", max_pedal))
+print(string.format("%.6f", outputs_after.pedals))
+print(tostring(state.in_band_heading))
+"""
+
+
+class TestTurnCoordinationPedal:
+    """Sortie 2026-11-20, user: "turn right 50 -> turns but does not use
+    pedals at all. Use pedals." -- `next_state.turn_coord_pedal`, a
+    position overlay added only at `law_outputs` (see that function's
+    own comment for why it is not folded into the `t_y` integrator)."""
+
+    def test_zero_throughout_straight_and_level_flight(self) -> None:
+        """No goal at all -- same heading held throughout, same as a
+        take with no command given. Covers the take-time no-drift
+        requirement too: `outputs_before` (the take state itself,
+        before any `law_update`) is included in the same zero check."""
+        driver = _TURN_PEDAL_DRIVER.format(
+            measured_take=_measured(collective_enabled=False),
+            goal_apply="-- no goal applied",
+            steps=100,
+        )
+        lines = _run(driver)
+        pedal_before, min_pedal, max_pedal, pedal_after, _ = lines
+        assert float(pedal_before) == 0.0
+        assert float(min_pedal) == 0.0
+        assert float(max_pedal) == 0.0
+        assert float(pedal_after) == 0.0
+
+    def test_right_turn_pulls_positive_pedal_while_turning(self) -> None:
+        driver = _TURN_PEDAL_DRIVER.format(
+            measured_take=_measured(collective_enabled=False),
+            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 90.0 }, LIMITS)",
+            steps=400,
+        )
+        lines = _run(driver)
+        pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
+        assert float(pedal_before) == 0.0
+        # Sign assumption (module header, `K_TURN_COORD_PEDAL`'s own
+        # comment): a right turn (`r_d > 0`) pulls positive ("right")
+        # pedal.
+        assert float(max_pedal) > 0.05
+        assert float(min_pedal) == 0.0  # never crosses the other way
+        # Unwinds: once settled, back to exactly the pre-turn value.
+        assert in_band == "true"
+        assert float(pedal_after) == 0.0
+
+    def test_left_turn_pulls_negative_pedal_while_turning(self) -> None:
+        driver = _TURN_PEDAL_DRIVER.format(
+            measured_take=_measured(collective_enabled=False),
+            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 270.0 }, LIMITS)",
+            steps=400,
+        )
+        lines = _run(driver)
+        pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
+        assert float(pedal_before) == 0.0
+        assert float(min_pedal) < -0.05
+        assert float(max_pedal) == 0.0
+        assert in_band == "true"
+        assert float(pedal_after) == 0.0
+
+    def test_suppressed_during_a_break_which_keeps_its_own_bias_unchanged(
+        self,
+    ) -> None:
+        """A break's own `K_BREAK_PEDAL_BIAS` reaches `PEDAL_LIMIT_
+        POSITIVE` (0.5) within ~2.5 s regardless of this batch
+        (`TestBreakPedalBiasUnwinds`'s own fixture) -- this just checks
+        the turn-coordination overlay stays exactly zero throughout a
+        break, so the two terms never stack."""
+        driver = f"""
+local measured_take = {_measured(collective_enabled=False)}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+state = flight_control.law_apply_goal(
+    state, {{ heading_deg = 90.0, turn_rate_deg_s = 40.0 }}, LIMITS)
+local max_t_y = 0.0
+for i = 1, 100 do
+    local m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 150.0 / 3.6,
+           v_t_mps = 150.0 / 3.6, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
+           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
+    state = flight_control.law_update(state, 0.1, m, LIMITS)
+    if state.t_y > max_t_y then max_t_y = state.t_y end
+end
+print(string.format("%.6f", max_t_y))
+print(string.format("%.6f", state.turn_coord_pedal))
+"""
+        lines = _run(driver)
+        max_t_y, turn_coord_pedal = (float(v) for v in lines)
+        assert abs(max_t_y - 0.5) < 1e-6  # the break bias alone, unchanged
+        assert turn_coord_pedal == 0.0
+
+
 def test_file_parses_without_a_lua_interpreter_too() -> None:
     """`luac5.1` sanity, independent of whether a runtime interpreter is
     on `PATH` -- mirrors `test_flight_control_lua.py`'s own copy of
