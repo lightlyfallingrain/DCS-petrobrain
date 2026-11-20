@@ -65,3 +65,32 @@ Open for the plan: what is a "desired value" versus a manoeuvre (break, align, H
 not plain heading/alt/speed targets); what mode 2 refuses and how the refusal reaches the player;
 what "off" means for desired state (kept or cleared); the transition rules (Decision 24) restated
 over one state; migration of today's two goal channels and the body-layer mirrors.
+
+## Answers to the goal check (`alignment.md` C1–C3, Q1–Q6), user, 2026-11-20, verbatim
+
+Asked: C1 (a player take/hand-back reseeds from the aircraft, no stale target) and C3 (a break
+replaces the older heading; align sets it to where it ends) as defaults unless objected; Q1–Q6 as
+numbered in `alignment.md`.
+
+> Break heading is a heading set just as any other heading set. The difference is that a break is
+> a rapid turn away from threat, not a gentle one.
+>
+> 1 - a
+> 2 - drop anything that is unable
+> 3 - default to radar in both modes. Barometric if player says so.
+> 4 - yes, finish break
+> 5 - on move to pilot seat always. In copilot seat, no.
+> 6 - I get stick
+
+Settled:
+- **C1, C3:** not objected; they stand. A break is an ordinary desired-heading write with a fast
+  turn rate (mode 1's Decision 27 shape: heading target plus rate override), so it replaces the
+  older heading like any later heading command does.
+- **Q1 (a):** mode 2 reads back what it will actually fly; the exact commanded value stays the
+  desired value, for mode 1 to fly after an unpark.
+- **Q2:** anything answered "unable" is dropped; "unable" means nothing changed.
+- **Q3:** altitude defaults to radar (AGL) in both modes; barometric only when the player says so.
+- **Q4:** an unpark mid-break finishes the break (mode 1 flies to the break's heading), then holds.
+- **Q5:** the overlay switches off whenever the player moves to the pilot seat; in the copilot seat
+  it does not switch off by itself.
+- **Q6:** after a body-layer restart while parked, an unpark gives the player the stick.
